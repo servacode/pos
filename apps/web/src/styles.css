@@ -1,0 +1,144 @@
+@import '@fontsource/ibm-plex-sans-arabic/400.css';
+@import '@fontsource/ibm-plex-sans-arabic/500.css';
+@import '@fontsource/ibm-plex-sans-arabic/600.css';
+@import '@fontsource/ibm-plex-sans-arabic/700.css';
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, 'Segoe UI', Tahoma, sans-serif;
+
+  --text-sm--line-height: 1.6;
+  --text-base--line-height: 1.7;
+  --text-lg--line-height: 1.6;
+  --text-xl--line-height: 1.5;
+  --text-2xl--line-height: 1.45;
+  --text-3xl--line-height: 1.35;
+
+  --radius-control: 0.875rem;
+  --radius-card: 1.25rem;
+
+  --animate-rise: rise 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+}
+
+@theme static {
+  --color-*: initial;
+
+  --color-white: oklch(1 0 0);
+
+  --color-brand-50: oklch(0.975 0.022 165);
+  --color-brand-100: oklch(0.945 0.045 164);
+  --color-brand-200: oklch(0.895 0.08 164);
+  --color-brand-300: oklch(0.83 0.115 164);
+  --color-brand-400: oklch(0.74 0.135 163);
+  --color-brand-500: oklch(0.65 0.135 163);
+  --color-brand-600: oklch(0.56 0.12 163);
+  --color-brand-700: oklch(0.48 0.1 165);
+  --color-brand-800: oklch(0.4 0.08 166);
+  --color-brand-900: oklch(0.33 0.062 168);
+  --color-brand-950: oklch(0.24 0.045 170);
+
+  --color-canvas: oklch(0.982 0.005 165);
+  --color-surface: oklch(1 0 0);
+  --color-surface-muted: oklch(0.962 0.008 165);
+  --color-line: oklch(0.915 0.01 165);
+  --color-line-strong: oklch(0.845 0.012 165);
+  --color-ink: oklch(0.255 0.02 170);
+  --color-ink-muted: oklch(0.47 0.02 170);
+  --color-ink-subtle: oklch(0.6 0.015 170);
+
+  --color-brand: oklch(0.56 0.12 163);
+  --color-brand-hover: oklch(0.5 0.11 164);
+  --color-on-brand: oklch(0.99 0.01 165);
+  --color-brand-soft: oklch(0.958 0.033 165);
+  --color-brand-ink: oklch(0.42 0.095 165);
+  --color-ring: oklch(0.62 0.13 163);
+
+  --color-danger: oklch(0.56 0.19 25);
+  --color-danger-soft: oklch(0.966 0.018 25);
+  --color-danger-ink: oklch(0.47 0.16 25);
+  --color-info-soft: oklch(0.962 0.022 240);
+  --color-info-ink: oklch(0.43 0.1 245);
+  --color-warning-soft: oklch(0.966 0.045 88);
+  --color-warning-ink: oklch(0.46 0.1 65);
+
+  --shadow-card: 0 1px 2px 0 oklch(0.25 0.02 170 / 0.05), 0 10px 30px -14px oklch(0.25 0.02 170 / 0.14);
+  --shadow-raised: 0 2px 6px 0 oklch(0.25 0.02 170 / 0.06), 0 20px 44px -18px oklch(0.25 0.02 170 / 0.24);
+}
+
+@layer base {
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-canvas: oklch(0.175 0.012 170);
+      --color-surface: oklch(0.215 0.014 170);
+      --color-surface-muted: oklch(0.255 0.015 170);
+      --color-line: oklch(0.3 0.015 170);
+      --color-line-strong: oklch(0.38 0.016 170);
+      --color-ink: oklch(0.955 0.006 165);
+      --color-ink-muted: oklch(0.76 0.014 165);
+      --color-ink-subtle: oklch(0.6 0.014 165);
+
+      --color-brand: oklch(0.72 0.14 163);
+      --color-brand-hover: oklch(0.78 0.13 163);
+      --color-on-brand: oklch(0.2 0.04 168);
+      --color-brand-soft: oklch(0.29 0.05 165);
+      --color-brand-ink: oklch(0.85 0.1 163);
+      --color-ring: oklch(0.74 0.14 163);
+
+      --color-danger: oklch(0.7 0.17 25);
+      --color-danger-soft: oklch(0.28 0.06 25);
+      --color-danger-ink: oklch(0.85 0.09 25);
+      --color-info-soft: oklch(0.28 0.05 245);
+      --color-info-ink: oklch(0.85 0.07 240);
+      --color-warning-soft: oklch(0.3 0.06 75);
+      --color-warning-ink: oklch(0.88 0.1 85);
+
+      --shadow-card: 0 1px 2px 0 oklch(0 0 0 / 0.3), 0 10px 30px -14px oklch(0 0 0 / 0.5);
+      --shadow-raised: 0 2px 6px 0 oklch(0 0 0 / 0.35), 0 20px 44px -18px oklch(0 0 0 / 0.6);
+    }
+  }
+
+  :root {
+    color-scheme: light dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-line);
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-feature-settings: 'kern';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-soft);
+    color: var(--color-brand-ink);
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
