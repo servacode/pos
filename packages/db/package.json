@@ -1,0 +1,24 @@
+{
+  "name": "@serva/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Database schema, migrations and row-level security for Serva POS",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate-cli.ts",
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.11",
+    "tsx": "^4.20.0"
+  }
+}

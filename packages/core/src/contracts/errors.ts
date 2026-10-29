@@ -1,0 +1,22 @@
+/** Stable error codes returned by the API. Messages are Arabic and safe to show to the user. */
+export const ERROR_CODES = [
+  'validation_failed',
+  'phone_taken',
+  'invalid_credentials',
+  'unauthorized',
+  'forbidden',
+  'not_found',
+  'rate_limited',
+  'internal',
+] as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+export interface ApiErrorBody {
+  error: {
+    code: ErrorCode;
+    message: string;
+    /** Field name → Arabic message, for form validation errors */
+    fields?: Record<string, string>;
+  };
+}

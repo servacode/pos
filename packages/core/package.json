@@ -1,0 +1,18 @@
+{
+  "name": "@serva/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared domain logic: money, pricing engine, permissions, sectors and API contracts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}
