@@ -1,0 +1,36 @@
+{
+  "name": "serva-pos",
+  "private": true,
+  "description": "Serva POS — منصة كاشير سحابية باشتراكات، عربية أولاً، تعمل دون إنترنت",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:bootstrap": "bash scripts/db-bootstrap.sh",
+    "db:migrate": "pnpm --filter @serva/db migrate",
+    "db:generate": "pnpm --filter @serva/db generate",
+    "db:seed": "pnpm --filter @serva/db seed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.5",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.10",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^3.2.7"
+  }
+}
