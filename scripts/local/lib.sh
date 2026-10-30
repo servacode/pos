@@ -32,6 +32,9 @@ banner() {
 
 # docker compose for this stack; SERVA_COMPOSE_OVERRIDE adds a file of your own (e.g. other ports)
 dc() {
+  # Every compose call must see the LAN addresses: when "certs" re-runs (any "up"), it reissues the
+  # server certificate for exactly these addresses, and a call without them drops the LAN address.
+  [[ -n "${SERVA_LAN_IPS+set}" ]] || export_lan_ips
   local files=(-f "$COMPOSE_FILE_PATH")
   if [[ -n "${SERVA_COMPOSE_OVERRIDE:-}" ]]; then files+=(-f "$SERVA_COMPOSE_OVERRIDE"); fi
   docker compose --project-directory "$DEPLOY_DIR" "${files[@]}" --env-file "$ENV_FILE" "$@"
