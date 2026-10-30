@@ -14,7 +14,7 @@ SELECT id, 'SYP', ARRAY['SYP', 'USD'], 'شكراً لزيارتكم «' || name 
 FROM tenants WHERE name LIKE 'متجر الاختبار %';
 
 INSERT INTO branches (tenant_id, code, name, address, phone)
-SELECT t.id, 'B' || b, 'فرع ' || b, CASE WHEN b = 2 THEN NULL ELSE 'الرقة، شارع ' || b END, '+9639' || lpad((b * 1000)::text, 8, '0')
+SELECT t.id, lpad(b::text, 3, '0'), 'فرع ' || b, CASE WHEN b = 2 THEN NULL ELSE 'الرقة، شارع ' || b END, '+9639' || lpad((b * 1000)::text, 8, '0')
 FROM tenants t CROSS JOIN generate_series(1, 4) AS b
 WHERE t.name LIKE 'متجر الاختبار %';
 COMMIT;
