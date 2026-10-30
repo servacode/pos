@@ -4,8 +4,17 @@
   "private": true,
   "type": "module",
   "description": "Shared domain logic: money, pricing engine, permissions, sectors and API contracts",
+  "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./money": "./src/money.ts",
+    "./pricing": "./src/pricing.ts",
+    "./currencies": "./src/currencies.ts",
+    "./text": "./src/text.ts",
+    "./phone": "./src/phone.ts",
+    "./sectors": "./src/sectors.ts",
+    "./permissions": "./src/permissions.ts",
+    "./contracts/*": "./src/contracts/*.ts"
   },
   "scripts": {
     "lint": "eslint src vitest.config.ts vitest.setup.ts stryker.config.mjs",
