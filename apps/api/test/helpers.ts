@@ -8,6 +8,7 @@ import type { OtpMessage, OtpSender } from '../src/auth/otp';
 import { ManualClock, type Clock } from '../src/clock';
 import { loadEnv } from '../src/env';
 import { REFRESH_COOKIE } from '../src/routes/auth';
+import type { SyncProcessors } from '../src/services/sync-push';
 import { TEST_APP_URL, TEST_OWNER_URL } from './urls';
 
 export function testEnv(overrides: Record<string, string> = {}) {
@@ -22,6 +23,8 @@ export function testEnv(overrides: Record<string, string> = {}) {
     LOGIN_PHONE_LIMIT_PER_HOUR: '1000',
     SESSION_RATE_LIMIT_PER_MINUTE: '100000',
     STORE_RATE_LIMIT_PER_MINUTE: '100000',
+    DEVICE_RATE_LIMIT_PER_MINUTE: '100000',
+    SYNC_PUSH_RATE_LIMIT_PER_MINUTE: '100000',
     ...overrides,
   });
 }
@@ -61,18 +64,19 @@ export const codes = new CapturedCodes();
  */
 export function makeApp(
   overrides: Record<string, string> = {},
-  options: { clock?: Clock; otpSender?: OtpSender | null } = {},
+  options: { clock?: Clock; otpSender?: OtpSender | null; syncProcessors?: SyncProcessors } = {},
 ): Promise<FastifyInstance> {
   return buildApp({
     env: testEnv(overrides),
     database: appDb(),
     clock: options.clock ?? new ManualClock(),
     otpSender: options.otpSender === undefined ? codes : options.otpSender,
+    syncProcessors: options.syncProcessors,
   });
 }
 
 /** Reference tables filled by migrations; every other table is emptied between tests. */
-const SEEDED_TABLES = new Set(['plans']);
+const SEEDED_TABLES = new Set(['plans', 'server_state']);
 
 let owner: postgres.Sql | undefined;
 /** Connection as the owner role (not subject to row-level security). Closed by closeOwnerDb(). */
@@ -103,6 +107,8 @@ export async function resetDatabase(): Promise<void> {
     if (names.length > 0) {
       await sql.unsafe(`truncate table ${names.map((n) => `"${n}"`).join(', ')} restart identity cascade`);
     }
+    // The one row about the server goes back to a fresh install.
+    await sql`update server_state set server_epoch = 1, tombstone_horizon = '0'::xid8`;
   } finally {
     await sql.end();
   }

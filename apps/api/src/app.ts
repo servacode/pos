@@ -16,6 +16,8 @@ import { installSecurityHeaders } from './http/security-headers';
 import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
+import { syncRoutes } from './routes/sync';
+import type { SyncProcessors } from './services/sync-push';
 import './types';
 
 export interface BuildAppOptions {
@@ -28,6 +30,8 @@ export interface BuildAppOptions {
   logStream?: NodeJS.WritableStream;
   /** Delivers sign-up codes; by default from OTP_DELIVERY */
   otpSender?: OtpSender | null;
+  /** What the server does with each synced document type (phase 1 registers sale posting here) */
+  syncProcessors?: SyncProcessors;
 }
 
 export async function buildApp({
@@ -36,6 +40,7 @@ export async function buildApp({
   clock = systemClock,
   logStream,
   otpSender,
+  syncProcessors,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const addressing = clientAddressing(env.TRUST_PROXY);
   const app = Fastify({
@@ -64,6 +69,7 @@ export async function buildApp({
   );
   app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
   app.decorateRequest('auth', null);
+  app.decorateRequest('device', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());
 
   // JSON only. Fastify also parses text/plain by default, which browsers send cross-site without a
@@ -96,5 +102,6 @@ export async function buildApp({
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(meRoutes);
+  await app.register(syncRoutes(syncProcessors));
   return app;
 }

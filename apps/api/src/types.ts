@@ -2,6 +2,7 @@ import type { Database } from '@serva/db';
 import type { OtpSender } from './auth/otp';
 import type { PasswordHasher } from './auth/passwords';
 import type { SessionGate } from './auth/session-gate';
+import type { DeviceClaims } from './auth/device-guard';
 import type { AccessClaims, TokenKeys } from './auth/tokens';
 import type { Clock } from './clock';
 import type { Env } from './env';
@@ -24,6 +25,8 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** Set by requireAuth for authenticated routes */
     auth: AccessClaims | null;
+    /** Set by requireDevice for device routes */
+    device: DeviceClaims | null;
   }
 }
 

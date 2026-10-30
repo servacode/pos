@@ -36,7 +36,7 @@ describe('GET /v1/me', () => {
       numberFormat: 'latn',
     });
     expect(me.subscription).toMatchObject({ status: 'trialing', planName: 'الباقة المجانية', daysLeft: 30 });
-    expect(me.branches).toEqual([{ id: expect.any(String), code: '01', name: 'الفرع الرئيسي' }]);
+    expect(me.branches).toEqual([{ id: expect.any(String), code: '001', name: 'الفرع الرئيسي' }]);
     expect(me.user.roles).toEqual([{ key: 'owner', name: 'المالك', branchId: null }]);
     expect(me.user.permissions).toEqual(ALL_PERMISSIONS);
   });

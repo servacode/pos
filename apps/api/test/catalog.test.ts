@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { eq, sql, type SQL } from 'drizzle-orm';
 import { branches, withTenant } from '@serva/db';
 import { appDb, closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
 
@@ -167,5 +167,90 @@ describe('schema conventions', () => {
     );
     expect(after!.version).toBe(2);
     expect(after!.updatedAt.getTime()).toBeGreaterThan(new Date('2020-01-01T00:00:00Z').getTime());
+  });
+});
+
+describe('sync tables', () => {
+  it('every pulled table keeps change_xid by trigger, leaves tombstones, and is indexed for the pull', async () => {
+    const tables = await ownerDb()<{ table: string; touch: boolean; tombstone: boolean; indexed: boolean }[]>`
+      select c.relname as table,
+             exists (select 1 from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+                     where t.tgrelid = c.oid and p.proname = 'sync_touch_change_xid') as touch,
+             exists (select 1 from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+                     where t.tgrelid = c.oid and p.proname = 'sync_record_tombstone') as tombstone,
+             exists (select 1 from pg_index i
+                     join pg_attribute k0 on k0.attrelid = c.oid and k0.attnum = i.indkey[0]
+                     join pg_attribute k1 on k1.attrelid = c.oid and k1.attnum = i.indkey[1]
+                     where i.indrelid = c.oid and k0.attname = 'tenant_id' and k1.attname = 'change_xid') as indexed
+      from pg_class c
+      join pg_attribute a on a.attrelid = c.oid and a.attname = 'change_xid' and not a.attisdropped
+      where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and not c.relispartition
+        and c.relname <> 'sync_tombstones'
+      order by 1`;
+    expect(tables.map((t) => t.table)).toEqual([
+      'branches',
+      'roles',
+      'tenant_settings',
+      'user_roles',
+      'users',
+    ]);
+    expect(tables.filter((t) => !t.touch || !t.tombstone || !t.indexed)).toEqual([]);
+  });
+
+  it('change_xid is the writing transaction’s id whatever the caller sends, and a delete leaves a tombstone', async () => {
+    const { body } = await registerStore(app);
+    const tenantId: string = body.tenant.id;
+    const [row] = await ownerDb()<{ xid: string; current: string }[]>`
+      update branches set name = 'x', change_xid = '1'::xid8 where tenant_id = ${tenantId}
+      returning change_xid::text as xid, pg_current_xact_id()::text as current`;
+    expect(row!.xid).toBe(row!.current);
+    expect(row!.xid).not.toBe('1');
+
+    await ownerDb()`delete from user_roles where tenant_id = ${tenantId}`;
+    const tombstones = await ownerDb()<{ collection: string }[]>`
+      select collection from sync_tombstones where tenant_id = ${tenantId}`;
+    expect(tombstones).toEqual([{ collection: 'user_roles' }]);
+  });
+
+  it('sync_inbox and sync_tombstones are partitioned by month, with this month and a default', async () => {
+    const month = new Date().toISOString().slice(0, 7).replace('-', '_');
+    for (const parent of ['sync_inbox', 'sync_tombstones']) {
+      const partitions = await ownerDb()<{ name: string }[]>`
+        select c.relname as name from pg_inherits i join pg_class c on c.oid = i.inhrelid
+        where i.inhparent = ${parent}::regclass`;
+      const names = partitions.map((p) => p.name);
+      expect(names).toContain(`${parent}_default`);
+      expect(names).toContain(`${parent}_${month}`);
+    }
+    // A new document id falls in this month's inbox partition, by its UUIDv7 time.
+    const [bound] = await ownerDb()<{ inside: boolean }[]>`
+      select uuid_generate_v7() >= uuid_v7_floor(date_trunc('month', now() at time zone 'utc') at time zone 'utc')
+         and uuid_generate_v7() < uuid_v7_floor((date_trunc('month', now() at time zone 'utc') + interval '1 month') at time zone 'utc')
+         as inside`;
+    expect(bound!.inside).toBe(true);
+  });
+
+  it('the store role reads the server epoch but cannot change it, write tombstones, devices or arrived documents', async () => {
+    const { body } = await registerStore(app);
+    const tenantId: string = body.tenant.id;
+    const inStore = (statement: SQL) =>
+      withTenant(appDb().db, tenantId, (tx) => tx.execute(statement)).then(
+        () => 'ok',
+        (e: { cause?: { code?: string }; code?: string }) => e.cause?.code ?? e.code,
+      );
+    const [state] = await withTenant(appDb().db, tenantId, (tx) =>
+      tx.execute<{ server_epoch: number }>(sql`select server_epoch from server_state`),
+    );
+    expect(state!.server_epoch).toBe(1);
+    expect(await inStore(sql`update server_state set server_epoch = 9`)).toBe('42501');
+    expect(await inStore(sql`select server_epoch_bump()`)).toBe('42501');
+    expect(
+      await inStore(
+        sql`insert into sync_tombstones (tenant_id, collection, record_id) values (${tenantId}, 'users', ${tenantId})`,
+      ),
+    ).toBe('42501');
+    expect(await inStore(sql`update devices set revoked_at = null`)).toBe('42501');
+    expect(await inStore(sql`update sync_inbox set payload_hash = 'x'`)).toBe('42501');
+    expect(await inStore(sql`delete from sync_inbox`)).toBe('42501');
   });
 });

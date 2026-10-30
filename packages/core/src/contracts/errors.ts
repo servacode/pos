@@ -10,6 +10,8 @@ export const ERROR_CODES = [
   'invalid_credentials',
   'unauthorized',
   'forbidden',
+  /** The device was revoked by the owner: it stops selling and syncing (17) */
+  'device_revoked',
   'not_found',
   'method_not_allowed',
   /** The request repeats one that just happened (e.g. two tabs refreshing at once): retry */

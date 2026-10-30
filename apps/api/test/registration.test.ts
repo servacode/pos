@@ -73,7 +73,7 @@ describe('opening an account: three fields, then the code', () => {
 
   it('creates no device at sign-up and records the accepted terms', async () => {
     const { body } = await registerStore(app);
-    expect(await count('registers')).toBe(0);
+    expect(await count('devices')).toBe(0);
     const [settings] = await ownerDb()<{ steps: Record<string, number> }[]>`
       select cash_rounding_steps as steps from tenant_settings`;
     expect(settings?.steps).toEqual({ SYP: 1000, USD: 25 }); // cash step per currency (09/10)
