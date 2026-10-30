@@ -1,11 +1,31 @@
 #!/usr/bin/env bash
 # Creates the database roles and databases for local development and CI.
 # Uses SUPERUSER_URL when set (e.g. in CI); otherwise connects as the local `postgres` OS user.
+#
+# Outside development (NODE_ENV=production or SERVA_ENV=production) the role passwords must be
+# given in SERVA_OWNER_PASSWORD and SERVA_APP_PASSWORD; the development defaults are refused.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ "${NODE_ENV:-}" == "production" || "${SERVA_ENV:-}" == "production" ]]; then
+  for name in SERVA_OWNER_PASSWORD SERVA_APP_PASSWORD; do
+    value="${!name:-}"
+    case "$value" in
+      "" | serva_owner | serva_app | postgres)
+        echo "Refusing to bootstrap: set $name to a real password outside development." >&2
+        exit 1
+        ;;
+    esac
+    if [[ ${#value} -lt 16 ]]; then
+      echo "Refusing to bootstrap: $name must be at least 16 characters." >&2
+      exit 1
+    fi
+  done
+fi
 
 OWNER_PASSWORD="${SERVA_OWNER_PASSWORD:-serva_owner}"
 APP_PASSWORD="${SERVA_APP_PASSWORD:-serva_app}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ -n "${SUPERUSER_URL:-}" ]]; then
   PSQL=(psql "$SUPERUSER_URL")

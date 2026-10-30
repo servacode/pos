@@ -13,14 +13,19 @@ export class AppError extends Error {
     this.name = 'AppError';
   }
 
-  toBody(): ApiErrorBody {
+  toBody(ref?: string): ApiErrorBody {
     return {
-      error: { code: this.code, message: this.message, ...(this.fields ? { fields: this.fields } : {}) },
+      error: {
+        code: this.code,
+        message: this.message,
+        ...(this.fields ? { fields: this.fields } : {}),
+        ...(ref ? { ref } : {}),
+      },
     };
   }
 }
 
-export const unauthorized = () => new AppError(401, 'unauthorized', 'انتهت الجلسة. سجّل الدخول من جديد.');
+export const unauthorized = () => new AppError(401, 'unauthorized', 'انتهى دخولك. سجّل الدخول مرة أخرى.');
 
 /** Turns a zod error into per-field Arabic messages (first message per top-level field). */
 export function validationError(error: ZodError): AppError {

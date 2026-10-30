@@ -1,31 +1,39 @@
 import { cn } from '../lib/cn';
 
+// The emerald logo from docs/design/kit/logo.md, drawn with colour tokens so it follows the theme:
+// the mark is brand with an on-brand «S»; the dot is brand-soft in light mode and on-brand in dark.
+
 export function LogoMark({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 40 40"
+      viewBox="0 0 64 64"
       aria-hidden="true"
       focusable="false"
-      className={cn('size-10 shrink-0', className)}
+      className={cn('size-8 shrink-0', className)}
     >
-      <rect width="40" height="40" rx="11" className="fill-brand-600" />
+      <rect width="64" height="64" rx="16" className="fill-brand" />
       <path
-        d="M26 14.6c-1.2-2-3.4-3.1-6.2-3.1-3.6 0-6 1.8-6 4.4 0 2.6 2.2 3.6 6.2 4.4 4 .8 6.3 1.9 6.3 4.6 0 2.7-2.5 4.6-6.3 4.6-3 0-5.4-1.1-6.6-3.2"
+        d="M42 22 A10 10 0 1 0 32 32 A10 10 0 1 1 22 42"
         fill="none"
-        strokeWidth="3.2"
+        strokeWidth="7"
         strokeLinecap="round"
-        className="stroke-white"
+        className="stroke-on-brand"
       />
+      <circle cx="46" cy="46" r="3.5" className="fill-brand-soft dark:fill-on-brand" />
     </svg>
   );
 }
 
+/** The small horizontal lockup for headers: mark, «Serva» and «سيرفا» under it. */
 export function Logo({ className, markClassName }: { className?: string; markClassName?: string }) {
   return (
-    <span dir="ltr" className={cn('inline-flex items-center gap-2.5', className)}>
+    <span className={cn('inline-flex items-center gap-2.5', className)}>
       <LogoMark className={markClassName} />
-      <span className="text-xl font-bold tracking-tight text-ink">
-        Serva <span className="text-brand">POS</span>
+      <span className="flex flex-col">
+        <span lang="en" dir="ltr" className="text-xl/[22px] font-bold tracking-[-0.3px] text-ink">
+          Serva
+        </span>
+        <span className="text-xs/4 font-semibold text-brand-ink">سيرفا</span>
       </span>
     </span>
   );

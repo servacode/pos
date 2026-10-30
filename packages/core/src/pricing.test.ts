@@ -1,13 +1,16 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { CURRENCIES } from './currencies';
 import { applyBasisPoints, lineGross } from './money';
 import {
   computeChange,
   priceInvoice,
+  roundCashDue,
   type Discount,
+  type PricedLine,
   type PricingInput,
   type PricingLineInput,
 } from './pricing';
-import { seededRandom } from './test-random';
 
 describe('priceInvoice — approved worked example', () => {
   // Prices exclusive of tax, tax 15%. Invoice discount = 1.00 (amount).
@@ -21,76 +24,84 @@ describe('priceInvoice — approved worked example', () => {
     taxInclusive: false,
     invoiceDiscount: { type: 'amount', minor: 100 },
     lines: [
-      { unitPriceMinor: 125, qty: 2000, taxRateBp: 1500 }, // milk
-      { unitPriceMinor: 75, qty: 3000, taxRateBp: 1500 }, // bread
-      { unitPriceMinor: 890, qty: 1000, taxRateBp: 1500, discount: { type: 'amount', minor: 40 } }, // rice
+      { lineNo: 1, unitPriceMinor: 125, qty: 2000, taxRateBp: 1500 }, // milk
+      { lineNo: 2, unitPriceMinor: 75, qty: 3000, taxRateBp: 1500 }, // bread
+      { lineNo: 3, unitPriceMinor: 890, qty: 1000, taxRateBp: 1500, discount: { type: 'amount', minor: 40 } }, // rice
     ],
   };
-  const invoice = priceInvoice(input);
-  const [milk, bread, rice] = invoice.lines;
+  // Priced inside each test, so an engine that throws fails the tests rather than the file's collection.
+  const price = () => priceInvoice(input);
 
   it('prices milk', () => {
-    expect(milk).toEqual({
+    expect(price().lines[0]).toEqual({
+      lineNo: 1,
       grossMinor: 250,
       lineDiscountMinor: 0,
       invoiceDiscountShareMinor: 19,
       netMinor: 231,
       taxMinor: 35,
+      grossExTaxMinor: 250,
+      discountExTaxMinor: 19,
       netExTaxMinor: 231,
       totalMinor: 266,
     });
   });
 
   it('prices bread', () => {
-    expect(bread).toEqual({
+    expect(price().lines[1]).toEqual({
+      lineNo: 2,
       grossMinor: 225,
       lineDiscountMinor: 0,
       invoiceDiscountShareMinor: 17,
       netMinor: 208,
       taxMinor: 31,
+      grossExTaxMinor: 225,
+      discountExTaxMinor: 17,
       netExTaxMinor: 208,
       totalMinor: 239,
     });
   });
 
   it('prices rice', () => {
-    expect(rice).toEqual({
+    expect(price().lines[2]).toEqual({
+      lineNo: 3,
       grossMinor: 890,
       lineDiscountMinor: 40,
       invoiceDiscountShareMinor: 64,
       netMinor: 786,
       taxMinor: 118,
+      grossExTaxMinor: 890,
+      discountExTaxMinor: 104,
       netExTaxMinor: 786,
       totalMinor: 904,
     });
   });
 
-  it('totals the lines', () => {
-    expect(invoice.totals).toEqual({
+  it('totals the lines exactly, without cash rounding', () => {
+    expect(price().totals).toEqual({
       grossMinor: 1365,
       lineDiscountMinor: 40,
       invoiceDiscountMinor: 100,
       discountMinor: 140,
       netMinor: 1225,
+      grossExTaxMinor: 1365,
+      discountExTaxMinor: 140,
       netExTaxMinor: 1225,
       taxMinor: 184,
       totalMinor: 1409,
-      roundingMinor: 0,
-      payableMinor: 1409,
     });
   });
 
   it('gives change from 20.00', () => {
-    expect(computeChange(invoice.totals.payableMinor, 2000)).toBe(591);
+    expect(computeChange(price().totals.totalMinor, 2000)).toBe(591);
   });
 
-  it('applies cash rounding to 0.05 on top', () => {
-    const rounded = priceInvoice({ ...input, cashRoundingMinor: 5 });
-    expect(rounded.lines).toEqual(invoice.lines);
-    expect(rounded.totals.totalMinor).toBe(1409);
-    expect(rounded.totals.payableMinor).toBe(1410);
-    expect(rounded.totals.roundingMinor).toBe(1);
-    expect(computeChange(rounded.totals.payableMinor, 2000)).toBe(590);
+  it('rounds only the cash payment to 0.05, leaving the invoice at 14.09', () => {
+    const invoice = price();
+    const cash = roundCashDue(invoice.totals.totalMinor, 5);
+    expect(cash).toEqual({ exactMinor: 1409, dueMinor: 1410, roundingMinor: 1 });
+    expect(computeChange(cash.dueMinor, 2000)).toBe(590);
+    expect(invoice.totals.totalMinor).toBe(1409);
   });
 });
 
@@ -99,29 +110,34 @@ describe('priceInvoice — tax-inclusive prices', () => {
     const invoice = priceInvoice({
       taxInclusive: true,
       lines: [
-        { unitPriceMinor: 11500, qty: 1000, taxRateBp: 1500 },
-        { unitPriceMinor: 1050, qty: 2000, taxRateBp: 0 },
-        { unitPriceMinor: 5250, qty: 1000, taxRateBp: 500 },
+        { lineNo: 1, unitPriceMinor: 11500, qty: 1000, taxRateBp: 1500 },
+        { lineNo: 2, unitPriceMinor: 1050, qty: 2000, taxRateBp: 0 },
+        { lineNo: 3, unitPriceMinor: 5250, qty: 1000, taxRateBp: 500 },
       ],
     });
     expect(invoice.lines[0]).toEqual({
+      lineNo: 1,
       grossMinor: 11500,
       lineDiscountMinor: 0,
       invoiceDiscountShareMinor: 0,
       netMinor: 11500,
       taxMinor: 1500,
+      grossExTaxMinor: 10000,
+      discountExTaxMinor: 0,
       netExTaxMinor: 10000,
       totalMinor: 11500,
     });
     expect(invoice.lines[1]).toMatchObject({
       netMinor: 2100,
       taxMinor: 0,
+      grossExTaxMinor: 2100,
       netExTaxMinor: 2100,
       totalMinor: 2100,
     });
     expect(invoice.lines[2]).toMatchObject({
       netMinor: 5250,
       taxMinor: 250,
+      grossExTaxMinor: 5000,
       netExTaxMinor: 5000,
       totalMinor: 5250,
     });
@@ -129,25 +145,62 @@ describe('priceInvoice — tax-inclusive prices', () => {
       grossMinor: 18850,
       netMinor: 18850,
       taxMinor: 1750,
+      grossExTaxMinor: 17100,
+      discountExTaxMinor: 0,
       netExTaxMinor: 17100,
       totalMinor: 18850,
-      payableMinor: 18850,
     });
   });
 
   it('extracts tax after discounts, rounding half away from zero', () => {
     // 100.00 − 10% = 90.00 inclusive of 15% → tax = 9000 × 1500 / 11500 = 1173.9 → 1174
+    // Gross before tax = 10000 − round(1304.3) = 8696, so the discount before tax = 8696 − 7826 = 870.
     const invoice = priceInvoice({
       taxInclusive: true,
       invoiceDiscount: { type: 'percent', bp: 1000 },
-      lines: [{ unitPriceMinor: 10000, qty: 1000, taxRateBp: 1500 }],
+      lines: [{ lineNo: 1, unitPriceMinor: 10000, qty: 1000, taxRateBp: 1500 }],
     });
     expect(invoice.lines[0]).toMatchObject({
       netMinor: 9000,
       taxMinor: 1174,
+      grossExTaxMinor: 8696,
+      discountExTaxMinor: 870,
       netExTaxMinor: 7826,
       totalMinor: 9000,
     });
+  });
+
+  it('returns gross and discount before tax so the sale entry balances (spec 10, accountant E1)', () => {
+    // 1,150 inclusive of 15% with a 150 inclusive discount: sales 1,000, discount 130, net 870, tax 130.
+    const invoice = priceInvoice({
+      taxInclusive: true,
+      lines: [
+        {
+          lineNo: 1,
+          unitPriceMinor: 1150,
+          qty: 1000,
+          taxRateBp: 1500,
+          discount: { type: 'amount', minor: 150 },
+        },
+      ],
+    });
+    expect(invoice.lines[0]).toEqual({
+      lineNo: 1,
+      grossMinor: 1150,
+      lineDiscountMinor: 150,
+      invoiceDiscountShareMinor: 0,
+      netMinor: 1000,
+      taxMinor: 130,
+      grossExTaxMinor: 1000,
+      discountExTaxMinor: 130,
+      netExTaxMinor: 870,
+      totalMinor: 1000,
+    });
+    const { totals } = invoice;
+    // Dr 1110 cash 1,000 + Dr 4200 discounts 130 = Cr 4100 sales 1,000 + Cr output tax 130.
+    const debit = totals.totalMinor + totals.discountExTaxMinor;
+    const credit = totals.grossExTaxMinor + totals.taxMinor;
+    expect([debit, credit]).toEqual([1130, 1130]);
   });
 });
 
@@ -157,26 +210,38 @@ describe('priceInvoice — percent discounts', () => {
       taxInclusive: false,
       invoiceDiscount: { type: 'percent', bp: 500 }, // 5% of 18.99 = 0.9495 → 0.95
       lines: [
-        { unitPriceMinor: 1000, qty: 1000, taxRateBp: 1500, discount: { type: 'percent', bp: 1000 } },
-        { unitPriceMinor: 333, qty: 3000, taxRateBp: 1500 },
+        {
+          lineNo: 1,
+          unitPriceMinor: 1000,
+          qty: 1000,
+          taxRateBp: 1500,
+          discount: { type: 'percent', bp: 1000 },
+        },
+        { lineNo: 2, unitPriceMinor: 333, qty: 3000, taxRateBp: 1500 },
       ],
     });
     expect(invoice.lines).toEqual([
       {
+        lineNo: 1,
         grossMinor: 1000,
         lineDiscountMinor: 100,
         invoiceDiscountShareMinor: 45, // 45.02
         netMinor: 855,
         taxMinor: 128, // 128.25
+        grossExTaxMinor: 1000,
+        discountExTaxMinor: 145,
         netExTaxMinor: 855,
         totalMinor: 983,
       },
       {
+        lineNo: 2,
         grossMinor: 999,
         lineDiscountMinor: 0,
         invoiceDiscountShareMinor: 50, // 49.98
         netMinor: 949,
         taxMinor: 142, // 142.35
+        grossExTaxMinor: 999,
+        discountExTaxMinor: 50,
         netExTaxMinor: 949,
         totalMinor: 1091,
       },
@@ -187,18 +252,26 @@ describe('priceInvoice — percent discounts', () => {
       invoiceDiscountMinor: 95,
       discountMinor: 195,
       netMinor: 1804,
+      grossExTaxMinor: 1999,
+      discountExTaxMinor: 195,
       netExTaxMinor: 1804,
       taxMinor: 270,
       totalMinor: 2074,
-      roundingMinor: 0,
-      payableMinor: 2074,
     });
   });
 
   it('allows 0% and 100% discounts', () => {
     const free = priceInvoice({
       taxInclusive: false,
-      lines: [{ unitPriceMinor: 500, qty: 1000, taxRateBp: 1500, discount: { type: 'percent', bp: 10000 } }],
+      lines: [
+        {
+          lineNo: 1,
+          unitPriceMinor: 500,
+          qty: 1000,
+          taxRateBp: 1500,
+          discount: { type: 'percent', bp: 10000 },
+        },
+      ],
       invoiceDiscount: { type: 'percent', bp: 0 },
     });
     expect(free.totals).toMatchObject({
@@ -215,9 +288,15 @@ describe('priceInvoice — percent discounts', () => {
       taxInclusive: false,
       invoiceDiscount: { type: 'amount', minor: 1325 },
       lines: [
-        { unitPriceMinor: 125, qty: 2000, taxRateBp: 1500 },
-        { unitPriceMinor: 75, qty: 3000, taxRateBp: 1500 },
-        { unitPriceMinor: 890, qty: 1000, taxRateBp: 1500, discount: { type: 'amount', minor: 40 } },
+        { lineNo: 1, unitPriceMinor: 125, qty: 2000, taxRateBp: 1500 },
+        { lineNo: 2, unitPriceMinor: 75, qty: 3000, taxRateBp: 1500 },
+        {
+          lineNo: 3,
+          unitPriceMinor: 890,
+          qty: 1000,
+          taxRateBp: 1500,
+          discount: { type: 'amount', minor: 40 },
+        },
       ],
     });
     expect(invoice.lines.map((l) => l.invoiceDiscountShareMinor)).toEqual([250, 225, 850]);
@@ -229,7 +308,7 @@ describe('priceInvoice — weighed quantities', () => {
   it('prices 0.250 kg × 12.00 as 3.00', () => {
     const invoice = priceInvoice({
       taxInclusive: false,
-      lines: [{ unitPriceMinor: 1200, qty: 250, taxRateBp: 0 }],
+      lines: [{ lineNo: 1, unitPriceMinor: 1200, qty: 250, taxRateBp: 0 }],
     });
     expect(invoice.lines[0]).toMatchObject({ grossMinor: 300, netMinor: 300, totalMinor: 300 });
   });
@@ -239,8 +318,8 @@ describe('priceInvoice — weighed quantities', () => {
     const invoice = priceInvoice({
       taxInclusive: false,
       lines: [
-        { unitPriceMinor: 999, qty: 333, taxRateBp: 0 },
-        { unitPriceMinor: 10, qty: 1005, taxRateBp: 0 },
+        { lineNo: 1, unitPriceMinor: 999, qty: 333, taxRateBp: 0 },
+        { lineNo: 2, unitPriceMinor: 10, qty: 1005, taxRateBp: 0 },
       ],
     });
     expect(invoice.lines.map((l) => l.grossMinor)).toEqual([333, 10]);
@@ -248,84 +327,150 @@ describe('priceInvoice — weighed quantities', () => {
   });
 });
 
-describe('priceInvoice — cash rounding', () => {
-  const syp = (totalMinor: number, cashRoundingMinor: number) =>
-    priceInvoice({
-      taxInclusive: true,
-      cashRoundingMinor,
-      lines: [{ unitPriceMinor: totalMinor, qty: 1000, taxRateBp: 0 }],
-    }).totals;
+describe('priceInvoice — line order', () => {
+  // QA review: a 0.01 invoice discount over two 0.10 lines, one taxed 15%, totalled 0.21 or 0.20 by order.
+  const untaxed: PricingLineInput = { lineNo: 1, unitPriceMinor: 10, qty: 1000, taxRateBp: 0 };
+  const taxed: PricingLineInput = { lineNo: 2, unitPriceMinor: 10, qty: 1000, taxRateBp: 1500 };
+  const price = (lines: PricingLineInput[]) =>
+    priceInvoice({ taxInclusive: false, invoiceDiscount: { type: 'amount', minor: 1 }, lines });
 
-  it('rounds to 0.05', () => {
-    expect(syp(1407, 5)).toMatchObject({ totalMinor: 1407, payableMinor: 1405, roundingMinor: -2 });
-    expect(syp(1408, 5)).toMatchObject({ totalMinor: 1408, payableMinor: 1410, roundingMinor: 2 });
-    expect(syp(1410, 5)).toMatchObject({ totalMinor: 1410, payableMinor: 1410, roundingMinor: 0 });
+  it('gives the tied unit to the smaller line number in any order', () => {
+    const forward = price([untaxed, taxed]);
+    const backward = price([taxed, untaxed]);
+    expect(forward.totals.totalMinor).toBe(21);
+    expect(backward.totals).toEqual(forward.totals);
+    expect(backward.lines).toEqual([forward.lines[1], forward.lines[0]]);
+    expect(forward.lines.map((l) => l.invoiceDiscountShareMinor)).toEqual([1, 0]);
+  });
+});
+
+describe('roundCashDue — cash rounding at payment (spec 10, step 6)', () => {
+  it('rounds the cash part with the step of its currency (12,347.50 → 12,350, +2.50 to 6400)', () => {
+    expect(roundCashDue(1_234_750, 1000)).toEqual({
+      exactMinor: 1_234_750,
+      dueMinor: 1_235_000,
+      roundingMinor: 250,
+    });
   });
 
-  it('rounds to 50.00, half away from zero', () => {
-    expect(syp(1_234_567, 5000)).toMatchObject({ payableMinor: 1_235_000, roundingMinor: 433 });
-    expect(syp(1_232_499, 5000)).toMatchObject({ payableMinor: 1_230_000, roundingMinor: -2499 });
-    expect(syp(1_232_500, 5000)).toMatchObject({ payableMinor: 1_235_000, roundingMinor: 2500 });
+  it('rounds only what is paid in cash after card or wallet payments', () => {
+    // 12,347.50: 10,000.00 by Sham Cash (exact), the remaining 2,347.50 in cash → 2,350.00.
+    const cash = roundCashDue(1_234_750 - 1_000_000, CURRENCIES.SYP.cashStepMinor);
+    expect(cash).toEqual({ exactMinor: 234_750, dueMinor: 235_000, roundingMinor: 250 });
+    expect(computeChange(cash.dueMinor, 250_000)).toBe(15_000);
   });
 
-  it('treats 0 or undefined as no rounding', () => {
-    expect(syp(1407, 0)).toMatchObject({ payableMinor: 1407, roundingMinor: 0 });
+  it('uses a quarter-dollar step for dollars', () => {
+    expect(roundCashDue(1409, CURRENCIES.USD.cashStepMinor)).toMatchObject({
+      dueMinor: 1400,
+      roundingMinor: -9,
+    });
+    expect(roundCashDue(1413, 25)).toMatchObject({ dueMinor: 1425, roundingMinor: 12 });
+    expect(roundCashDue(1_232_500, 5000)).toMatchObject({ dueMinor: 1_235_000, roundingMinor: 2500 });
+  });
+
+  it('treats step 0 as no rounding and mirrors refunds', () => {
+    expect(roundCashDue(1407, 0)).toEqual({ exactMinor: 1407, dueMinor: 1407, roundingMinor: 0 });
+    expect(roundCashDue(-1_234_750, 1000)).toEqual({
+      exactMinor: -1_234_750,
+      dueMinor: -1_235_000,
+      roundingMinor: -250,
+    });
+  });
+
+  it('rejects an invalid step or amount', () => {
+    expect(() => roundCashDue(100, -5)).toThrow(/cashStepMinor must be/);
+    expect(() => roundCashDue(100, 0.5)).toThrow(/cashStepMinor must be/);
+    expect(() => roundCashDue(100.5, 5)).toThrow(/exactMinor must be a safe integer/);
+    expect(() => roundCashDue(Number.NaN, 0)).toThrow(/exactMinor/);
+  });
+
+  it('keeps the rounding within half a step (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -1e12, max: 1e12 }),
+        fc.constantFrom(0, 5, 10, 25, 100, 500, 1000, 5000),
+        (exact, step) => {
+          const { dueMinor, roundingMinor } = roundCashDue(exact, step);
+          expect(dueMinor - exact).toBe(roundingMinor);
+          if (step === 0) {
+            expect(roundingMinor).toBe(0);
+          } else {
+            expect(Math.abs(dueMinor % step)).toBe(0);
+            expect(Math.abs(roundingMinor) * 2).toBeLessThanOrEqual(step);
+          }
+          expect(roundCashDue(-exact, step).roundingMinor).toBe(-roundingMinor || 0);
+        },
+      ),
+    );
   });
 });
 
 describe('priceInvoice — validation', () => {
-  const line: PricingLineInput = { unitPriceMinor: 100, qty: 1000, taxRateBp: 1500 };
+  const line: PricingLineInput = { lineNo: 1, unitPriceMinor: 100, qty: 1000, taxRateBp: 1500 };
   const price = (overrides: Partial<PricingInput>) =>
     priceInvoice({ taxInclusive: false, lines: [line], ...overrides });
 
   it('requires at least one line', () => {
-    expect(() => price({ lines: [] })).toThrow(RangeError);
-    expect(() => price({ lines: undefined as unknown as PricingLineInput[] })).toThrow(RangeError);
+    expect(() => price({ lines: [] })).toThrow(/at least one line/);
+    expect(() => price({ lines: undefined as unknown as PricingLineInput[] })).toThrow(/at least one line/);
+  });
+
+  it('requires a unique positive line number on every line', () => {
+    expect(() => price({ lines: [line, { ...line }] })).toThrow(/lines\[1\]\.lineNo 1 is used twice/);
+    expect(() => price({ lines: [{ ...line, lineNo: 0 }] })).toThrow(/lines\[0\]\.lineNo must be a positive/);
+    expect(() => price({ lines: [{ ...line, lineNo: 1.5 }] })).toThrow(/lines\[0\]\.lineNo/);
+    expect(() => price({ lines: [{ ...line, lineNo: undefined as unknown as number }] })).toThrow(
+      /lines\[0\]\.lineNo/,
+    );
   });
 
   it('requires non-negative safe integers for price, quantity and tax', () => {
-    expect(() => price({ lines: [{ ...line, unitPriceMinor: -1 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, unitPriceMinor: 1.25 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, qty: 0.5 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, qty: -1000 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, taxRateBp: Number.NaN }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, taxRateBp: -1500 }] })).toThrow(RangeError);
+    expect(() => price({ lines: [{ ...line, unitPriceMinor: -1 }] })).toThrow(/lines\[0\]\.unitPriceMinor/);
+    expect(() => price({ lines: [{ ...line, unitPriceMinor: 1.25 }] })).toThrow(/lines\[0\]\.unitPriceMinor/);
+    expect(() => price({ lines: [{ ...line, qty: 0.5 }] })).toThrow(/lines\[0\]\.qty/);
+    expect(() => price({ lines: [{ ...line, qty: -1000 }] })).toThrow(/lines\[0\]\.qty/);
+    expect(() => price({ lines: [{ ...line, taxRateBp: Number.NaN }] })).toThrow(/lines\[0\]\.taxRateBp/);
+    expect(() => price({ lines: [{ ...line, taxRateBp: -1500 }] })).toThrow(/lines\[0\]\.taxRateBp/);
     expect(() => price({ lines: [{ ...line, unitPriceMinor: Number.MAX_SAFE_INTEGER, qty: 2000 }] })).toThrow(
       RangeError,
     );
   });
 
   it('names the offending line in the message', () => {
-    expect(() => price({ lines: [line, { ...line, qty: 1.5 }] })).toThrow(/lines\[1\]\.qty/);
+    expect(() => price({ lines: [line, { ...line, lineNo: 2, qty: 1.5 }] })).toThrow(/lines\[1\]\.qty/);
   });
 
   it('rejects out-of-range line discounts', () => {
     const withDiscount = (discount: Discount) => price({ lines: [{ ...line, discount }] });
-    expect(() => withDiscount({ type: 'amount', minor: 101 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'amount', minor: -1 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'percent', bp: 10001 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'percent', bp: -1 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'percent', bp: 12.5 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'fixed' } as unknown as Discount)).toThrow(RangeError);
+    expect(() => withDiscount({ type: 'amount', minor: 101 })).toThrow(
+      /lines\[0\]\.discount \(101\) exceeds the amount it applies to \(100\)/,
+    );
+    expect(() => withDiscount({ type: 'amount', minor: -1 })).toThrow(/lines\[0\]\.discount\.minor/);
+    expect(() => withDiscount({ type: 'percent', bp: 10001 })).toThrow(
+      /lines\[0\]\.discount\.bp must be an integer between 0 and 10000, got 10001/,
+    );
+    expect(() => withDiscount({ type: 'percent', bp: -1 })).toThrow(/discount\.bp/);
+    expect(() => withDiscount({ type: 'percent', bp: 12.5 })).toThrow(/discount\.bp/);
+    expect(() => withDiscount({ type: 'fixed' } as unknown as Discount)).toThrow(
+      /lines\[0\]\.discount has an unknown discount type/,
+    );
     expect(withDiscount({ type: 'amount', minor: 100 }).totals.netMinor).toBe(0);
   });
 
   it('rejects an invoice discount larger than the discounted lines', () => {
     const lines: PricingLineInput[] = [
-      { unitPriceMinor: 125, qty: 2000, taxRateBp: 1500 },
-      { unitPriceMinor: 890, qty: 1000, taxRateBp: 1500, discount: { type: 'amount', minor: 40 } },
+      { lineNo: 1, unitPriceMinor: 125, qty: 2000, taxRateBp: 1500 },
+      { lineNo: 2, unitPriceMinor: 890, qty: 1000, taxRateBp: 1500, discount: { type: 'amount', minor: 40 } },
     ];
-    expect(() => price({ lines, invoiceDiscount: { type: 'amount', minor: 1101 } })).toThrow(RangeError);
+    expect(() => price({ lines, invoiceDiscount: { type: 'amount', minor: 1101 } })).toThrow(
+      /invoiceDiscount \(1101\) exceeds/,
+    );
     expect(price({ lines, invoiceDiscount: { type: 'amount', minor: 1100 } }).totals.netMinor).toBe(0);
-    expect(() => price({ invoiceDiscount: { type: 'percent', bp: 10001 } })).toThrow(RangeError);
+    expect(() => price({ invoiceDiscount: { type: 'percent', bp: 10001 } })).toThrow(/invoiceDiscount\.bp/);
     expect(() =>
       price({ lines: [{ ...line, unitPriceMinor: 0 }], invoiceDiscount: { type: 'amount', minor: 1 } }),
     ).toThrow(RangeError);
-  });
-
-  it('rejects an invalid cash rounding step', () => {
-    expect(() => price({ cashRoundingMinor: -5 })).toThrow(RangeError);
-    expect(() => price({ cashRoundingMinor: 0.5 })).toThrow(RangeError);
   });
 });
 
@@ -336,86 +481,123 @@ describe('computeChange', () => {
   });
 
   it('throws when the customer has not paid enough', () => {
-    expect(() => computeChange(1409, 1408)).toThrow(RangeError);
-    expect(() => computeChange(-1, 0)).toThrow(RangeError);
-    expect(() => computeChange(100, 150.5)).toThrow(RangeError);
+    expect(() => computeChange(1409, 1408)).toThrow(
+      /tendered amount \(1408\) is less than the payable amount \(1409\)/,
+    );
+    expect(() => computeChange(-1, 0)).toThrow(/payableMinor must be/);
+    expect(() => computeChange(100, 150.5)).toThrow(/tenderedMinor must be/);
   });
 });
 
-describe('priceInvoice — invariants (seeded property test)', () => {
-  it('always sums lines exactly and allocates the whole invoice discount', () => {
-    const rand = seededRandom(1503);
-    const steps = [0, 5, 10, 25, 100, 5000];
-    for (let run = 0; run < 1000; run++) {
-      const taxInclusive = rand.next() < 0.5;
-      const lines: PricingLineInput[] = Array.from({ length: rand.int(1, 8) }, () => {
-        const unitPriceMinor = rand.int(0, rand.next() < 0.5 ? 2_000 : 50_000_000);
-        const qty = rand.next() < 0.5 ? rand.int(1, 20) * 1000 : rand.int(0, 5_000);
-        const taxRateBp = [0, 500, 1000, 1500][rand.int(0, 3)] ?? 0;
-        const gross = lineGross(unitPriceMinor, qty);
-        const roll = rand.next();
-        const discount: Discount | undefined =
-          roll < 0.33
-            ? { type: 'amount', minor: rand.int(0, gross) }
-            : roll < 0.66
-              ? { type: 'percent', bp: rand.int(0, 10_000) }
-              : undefined;
-        return { unitPriceMinor, qty, taxRateBp, discount };
-      });
-      const netBefore = lines.map((l) => {
-        const gross = lineGross(l.unitPriceMinor, l.qty);
-        const d = l.discount;
-        return gross - (!d ? 0 : d.type === 'amount' ? d.minor : applyBasisPoints(gross, d.bp));
-      });
-      const netBeforeSum = netBefore.reduce((a, b) => a + b, 0);
-      const invoiceDiscount: Discount =
-        rand.next() < 0.5
-          ? { type: 'amount', minor: rand.int(0, netBeforeSum) }
-          : { type: 'percent', bp: rand.int(0, 10_000) };
-      const expectedInvoiceDiscount =
-        invoiceDiscount.type === 'amount'
-          ? invoiceDiscount.minor
-          : applyBasisPoints(netBeforeSum, invoiceDiscount.bp);
-      const cashRoundingMinor = steps[rand.int(0, steps.length - 1)] ?? 0;
+describe('priceInvoice — invariants (property tests)', () => {
+  const netBefore = (line: PricingLineInput) => {
+    const gross = lineGross(line.unitPriceMinor, line.qty);
+    const d = line.discount;
+    return gross - (!d ? 0 : d.type === 'amount' ? d.minor : applyBasisPoints(gross, d.bp));
+  };
 
-      const { lines: priced, totals } = priceInvoice({
-        lines,
-        invoiceDiscount,
-        taxInclusive,
-        cashRoundingMinor,
-      });
+  const discountArb = (base: number): fc.Arbitrary<Discount> =>
+    fc.oneof(
+      fc.integer({ min: 0, max: base }).map((minor): Discount => ({ type: 'amount', minor })),
+      fc.integer({ min: 0, max: 10_000 }).map((bp): Discount => ({ type: 'percent', bp })),
+    );
 
-      const sum = (pick: (l: (typeof priced)[number]) => number) => priced.reduce((a, l) => a + pick(l), 0);
-      priced.forEach((l, i) => {
-        expect(l.grossMinor - l.lineDiscountMinor).toBe(netBefore[i]);
-        expect(l.invoiceDiscountShareMinor).toBeGreaterThanOrEqual(0);
-        expect(l.netMinor).toBe(l.grossMinor - l.lineDiscountMinor - l.invoiceDiscountShareMinor);
-        expect(l.netMinor).toBeGreaterThanOrEqual(0);
-        expect(l.taxMinor).toBeGreaterThanOrEqual(0);
-        if (taxInclusive) {
-          expect(l.totalMinor).toBe(l.netMinor);
-          expect(l.netExTaxMinor + l.taxMinor).toBe(l.netMinor);
-        } else {
-          expect(l.netExTaxMinor).toBe(l.netMinor);
-          expect(l.totalMinor).toBe(l.netMinor + l.taxMinor);
-        }
-      });
-      expect(totals.invoiceDiscountMinor).toBe(expectedInvoiceDiscount);
-      expect(sum((l) => l.invoiceDiscountShareMinor)).toBe(expectedInvoiceDiscount);
-      expect(totals.grossMinor).toBe(sum((l) => l.grossMinor));
-      expect(totals.lineDiscountMinor).toBe(sum((l) => l.lineDiscountMinor));
-      expect(totals.discountMinor).toBe(totals.lineDiscountMinor + totals.invoiceDiscountMinor);
-      expect(totals.netMinor).toBe(totals.grossMinor - totals.discountMinor);
-      expect(totals.netExTaxMinor).toBe(sum((l) => l.netExTaxMinor));
-      expect(totals.taxMinor).toBe(sum((l) => l.taxMinor));
-      expect(totals.totalMinor).toBe(sum((l) => l.totalMinor));
-      expect(totals.payableMinor - totals.totalMinor).toBe(totals.roundingMinor);
-      if (cashRoundingMinor > 0) {
-        expect(totals.payableMinor % cashRoundingMinor).toBe(0);
-        expect(Math.abs(totals.roundingMinor) * 2).toBeLessThanOrEqual(cashRoundingMinor);
-      } else {
-        expect(totals.roundingMinor).toBe(0);
-      }
-    }
+  // Tiny prices make equal nets (and so allocation ties) common; large ones exercise the BigInt range.
+  const lineArb = fc
+    .record({
+      unitPriceMinor: fc.oneof(
+        fc.integer({ min: 0, max: 20 }),
+        fc.integer({ min: 0, max: 2_000 }),
+        fc.integer({ min: 0, max: 50_000_000 }),
+      ),
+      qty: fc.oneof(
+        fc.integer({ min: 1, max: 20 }).map((pieces) => pieces * 1000),
+        fc.integer({ min: 0, max: 5_000 }),
+      ),
+      taxRateBp: fc.constantFrom(0, 500, 1000, 1500),
+    })
+    .chain((line) =>
+      fc
+        .option(discountArb(lineGross(line.unitPriceMinor, line.qty)), { nil: undefined })
+        .map((discount) => ({ ...line, discount })),
+    );
+
+  const invoiceArb: fc.Arbitrary<PricingInput> = fc
+    .array(lineArb, { minLength: 1, maxLength: 8 })
+    .chain((lines) =>
+      fc
+        .uniqueArray(fc.integer({ min: 1, max: 999 }), { minLength: lines.length, maxLength: lines.length })
+        .map((lineNos): PricingLineInput[] =>
+          lines.map((line, i) => ({ ...line, lineNo: lineNos[i] ?? i + 1 })),
+        ),
+    )
+    .chain((lines) =>
+      fc.record({
+        lines: fc.constant(lines),
+        taxInclusive: fc.boolean(),
+        invoiceDiscount: discountArb(lines.map(netBefore).reduce((a, b) => a + b, 0)),
+      }),
+    );
+
+  it('sums lines exactly, allocates the whole invoice discount and balances the journal', () => {
+    fc.assert(
+      fc.property(invoiceArb, (input) => {
+        const { lines: priced, totals } = priceInvoice(input);
+        const netBeforeSum = input.lines.map(netBefore).reduce((a, b) => a + b, 0);
+        const discount = input.invoiceDiscount as Discount;
+        const expectedInvoiceDiscount =
+          discount.type === 'amount' ? discount.minor : applyBasisPoints(netBeforeSum, discount.bp);
+
+        const sum = (pick: (l: PricedLine) => number) => priced.reduce((a, l) => a + pick(l), 0);
+        priced.forEach((l, i) => {
+          const line = input.lines[i] as PricingLineInput;
+          expect(l.lineNo).toBe(line.lineNo);
+          expect(l.grossMinor - l.lineDiscountMinor).toBe(netBefore(line));
+          expect(l.invoiceDiscountShareMinor).toBeGreaterThanOrEqual(0);
+          expect(l.netMinor).toBe(l.grossMinor - l.lineDiscountMinor - l.invoiceDiscountShareMinor);
+          expect(l.netMinor).toBeGreaterThanOrEqual(0);
+          expect(l.taxMinor).toBeGreaterThanOrEqual(0);
+          expect(l.grossExTaxMinor - l.discountExTaxMinor).toBe(l.netExTaxMinor);
+          expect(l.discountExTaxMinor).toBeGreaterThanOrEqual(0);
+          expect(l.grossExTaxMinor).toBeLessThanOrEqual(l.grossMinor);
+          if (input.taxInclusive) {
+            expect(l.totalMinor).toBe(l.netMinor);
+            expect(l.netExTaxMinor + l.taxMinor).toBe(l.netMinor);
+          } else {
+            expect(l.netExTaxMinor).toBe(l.netMinor);
+            expect(l.grossExTaxMinor).toBe(l.grossMinor);
+            expect(l.totalMinor).toBe(l.netMinor + l.taxMinor);
+          }
+        });
+        expect(totals.invoiceDiscountMinor).toBe(expectedInvoiceDiscount);
+        expect(sum((l) => l.invoiceDiscountShareMinor)).toBe(expectedInvoiceDiscount);
+        expect(totals.grossMinor).toBe(sum((l) => l.grossMinor));
+        expect(totals.lineDiscountMinor).toBe(sum((l) => l.lineDiscountMinor));
+        expect(totals.discountMinor).toBe(totals.lineDiscountMinor + totals.invoiceDiscountMinor);
+        expect(totals.netMinor).toBe(totals.grossMinor - totals.discountMinor);
+        expect(totals.grossExTaxMinor).toBe(sum((l) => l.grossExTaxMinor));
+        expect(totals.discountExTaxMinor).toBe(sum((l) => l.discountExTaxMinor));
+        expect(totals.netExTaxMinor).toBe(sum((l) => l.netExTaxMinor));
+        expect(totals.taxMinor).toBe(sum((l) => l.taxMinor));
+        expect(totals.totalMinor).toBe(sum((l) => l.totalMinor));
+        // Sale entry: Dr cash + Dr discounts (before tax) = Cr sales (before tax) + Cr tax.
+        expect(totals.totalMinor + totals.discountExTaxMinor).toBe(totals.grossExTaxMinor + totals.taxMinor);
+      }),
+    );
+  });
+
+  it('prices every line the same whatever the order of the lines', () => {
+    const orderingsArb = invoiceArb.chain((input) =>
+      fc.tuple(fc.constant(input), fc.shuffledSubarray(input.lines, { minLength: input.lines.length })),
+    );
+    fc.assert(
+      fc.property(orderingsArb, ([input, shuffled]) => {
+        const original = priceInvoice(input);
+        const reordered = priceInvoice({ ...input, lines: shuffled });
+        const byLineNo = (lines: PricedLine[]) => new Map(lines.map((l) => [l.lineNo, l]));
+        expect(reordered.totals).toEqual(original.totals);
+        expect(byLineNo(reordered.lines)).toEqual(byLineNo(original.lines));
+      }),
+    );
   });
 });

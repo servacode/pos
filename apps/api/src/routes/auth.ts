@@ -1,13 +1,26 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { eq, sql } from 'drizzle-orm';
-import { loginInput, registerStoreInput, type AuthResponse, type RefreshResponse } from '@serva/core';
+import {
+  loginInput,
+  registerStoreInput,
+  verifyRegistrationInput,
+  type AuthResponse,
+  type RefreshResponse,
+} from '@serva/core';
 import { tenants, users, withTenant } from '@serva/db';
-import { hashSecret, verifyAgainstDummy, verifySecret } from '../auth/passwords';
 import { signAccessToken } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
+import { clientIp } from '../http/client-ip';
+import { enforceLimits } from '../http/rate-limit';
 import { audit } from '../services/audit';
-import { createSession, revokeSession, rotateSession, type IssuedSession } from '../services/sessions';
-import { registerStore } from '../services/stores';
+import {
+  createSession,
+  revokeSession,
+  rotateSession,
+  type IssuedSession,
+  type SessionPolicy,
+} from '../services/sessions';
+import { completeRegistration, startRegistration } from '../services/registration';
 import type { RequestMeta } from '../types';
 import { parseBody } from './validation';
 
@@ -15,18 +28,22 @@ export const REFRESH_COOKIE = 'serva_rt';
 const COOKIE_PATH = '/v1/auth';
 
 const metaOf = (request: FastifyRequest): RequestMeta => ({
-  ip: request.ip,
+  ip: clientIp(request),
   userAgent: request.headers['user-agent']?.slice(0, 300) ?? null,
 });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
-  const { env, db } = app;
-  const authLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE, timeWindow: '1 minute' } };
+  const { env, db, clock } = app;
+  const sessionPolicy: SessionPolicy = {
+    ttlDays: env.REFRESH_TOKEN_TTL_DAYS,
+    absoluteDays: env.SESSION_ABSOLUTE_DAYS,
+  };
+  const authLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE, timeWindow: 60_000 } };
 
   const setRefreshCookie = (reply: FastifyReply, session: IssuedSession) =>
     reply.setCookie(REFRESH_COOKIE, session.refreshToken, {
       httpOnly: true,
-      secure: env.NODE_ENV === 'production',
+      secure: env.COOKIE_SECURE,
       sameSite: 'strict',
       path: COOKIE_PATH,
       expires: session.expiresAt,
@@ -34,27 +51,31 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   const clearRefreshCookie = (reply: FastifyReply) =>
     reply.clearCookie(REFRESH_COOKIE, {
       httpOnly: true,
-      secure: env.NODE_ENV === 'production',
+      secure: env.COOKIE_SECURE,
       sameSite: 'strict',
       path: COOKIE_PATH,
     });
   const accessTokenFor = (session: IssuedSession) =>
     signAccessToken(
       { userId: session.userId, tenantId: session.tenantId, sessionId: session.sessionId },
-      env.JWT_SECRET,
+      app.tokenKeys,
       env.ACCESS_TOKEN_TTL_SECONDS,
+      clock.now(),
     );
 
+  // Opening an account, step 1: always "we sent a code to this number" (202), store not created yet.
   app.post('/v1/auth/register', { config: authLimit }, async (request, reply) => {
     const data = parseBody(registerStoreInput, request.body);
-    const passwordHash = await hashSecret(data.password);
-    const result = await registerStore(
-      db,
-      data,
-      passwordHash,
-      { refreshTtlDays: env.REFRESH_TOKEN_TTL_DAYS },
-      metaOf(request),
-    );
+    await enforceLimits(request, reply, 3_600_000, [
+      { key: `register:phone:${data.phone}`, max: env.REGISTER_PHONE_LIMIT_PER_HOUR },
+    ]);
+    return reply.status(202).send(await startRegistration(app, data, metaOf(request)));
+  });
+
+  // Step 2: the code proves the phone; the store, the owner and a signed-in session are created.
+  app.post('/v1/auth/register/verify', { config: authLimit }, async (request, reply) => {
+    const data = parseBody(verifyRegistrationInput, request.body);
+    const result = await completeRegistration(app, data, sessionPolicy, metaOf(request));
     setRefreshCookie(reply, result.session);
     const body: AuthResponse = {
       accessToken: await accessTokenFor(result.session),
@@ -67,7 +88,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/auth/login', { config: authLimit }, async (request, reply) => {
     const data = parseBody(loginInput, request.body);
-    const invalid = new AppError(401, 'invalid_credentials', 'رقم الجوال أو كلمة المرور غير صحيحة.');
+    // Per number, whatever address the attempts come from (the per-address limit is above).
+    await enforceLimits(request, reply, 3_600_000, [
+      { key: `login:phone:${data.phone}`, max: env.LOGIN_PHONE_LIMIT_PER_HOUR },
+    ]);
+    const invalid = new AppError(401, 'invalid_credentials', 'رقم الجوال أو كلمة السر غير صحيحة.');
 
     const rows = await db.execute<{
       user_id: string;
@@ -75,22 +100,28 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       password_hash: string;
       status: 'active' | 'disabled';
       full_name: string;
+      tenant_status: 'active' | 'suspended';
     }>(sql`select * from auth_find_login(${data.phone})`);
     const account = rows[0];
     if (!account) {
-      await verifyAgainstDummy(data.password);
+      await app.passwords.verifyAgainstDummy(data.password);
       throw invalid;
     }
-    const passwordOk = await verifySecret(account.password_hash, data.password);
+    const passwordOk = await app.passwords.verify(account.password_hash, data.password);
     if (!passwordOk || account.status !== 'active') throw invalid;
+    if (account.tenant_status !== 'active') {
+      // Only said once the password is proven, so it reveals nothing to a stranger.
+      throw new AppError(403, 'forbidden', 'هذا المتجر موقوف. تواصل مع الدعم.');
+    }
 
     const meta = metaOf(request);
+    const now = clock.now();
     const { session, tenantName } = await withTenant(db, account.tenant_id, async (tx) => {
-      await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, account.user_id));
+      await tx.update(users).set({ lastLoginAt: now }).where(eq(users.id, account.user_id));
       const [tenant] = await tx.select({ name: tenants.name }).from(tenants).limit(1);
       const session = await createSession(
         tx,
-        { tenantId: account.tenant_id, userId: account.user_id, ttlDays: env.REFRESH_TOKEN_TTL_DAYS },
+        { tenantId: account.tenant_id, userId: account.user_id, now, policy: sessionPolicy },
         meta,
       );
       await audit(tx, { tenantId: account.tenant_id, userId: account.user_id, action: 'user.login' }, meta);
@@ -109,18 +140,23 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     '/v1/auth/refresh',
-    { config: { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE * 6, timeWindow: '1 minute' } } },
+    { config: { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE * 6, timeWindow: 60_000 } } },
     async (request, reply) => {
       const token = request.cookies[REFRESH_COOKIE];
       if (!token) throw unauthorized();
-      const session = await rotateSession(db, token, env.REFRESH_TOKEN_TTL_DAYS, metaOf(request));
-      if (!session) {
+      const result = await rotateSession(db, token, sessionPolicy, clock.now(), metaOf(request));
+      if (result.status === 'race') {
+        // Another tab refreshed with this cookie a moment ago and already holds the new one.
+        // No Set-Cookie here, or this answer could arrive last and erase the new cookie.
+        throw new AppError(409, 'conflict', 'جُدّد دخولك للتو من نافذة أخرى. أعد المحاولة.');
+      }
+      if (result.status === 'invalid') {
         clearRefreshCookie(reply);
         throw unauthorized();
       }
-      setRefreshCookie(reply, session);
+      setRefreshCookie(reply, result.session);
       const body: RefreshResponse = {
-        accessToken: await accessTokenFor(session),
+        accessToken: await accessTokenFor(result.session),
         expiresIn: env.ACCESS_TOKEN_TTL_SECONDS,
       };
       return reply.send(body);
@@ -129,7 +165,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/auth/logout', async (request, reply) => {
     const token = request.cookies[REFRESH_COOKIE];
-    if (token) await revokeSession(db, token);
+    const sessionId = token ? await revokeSession(db, token, clock.now()) : null;
+    if (sessionId) app.sessionGate.forget(sessionId);
     clearRefreshCookie(reply);
     return reply.status(204).send();
   });

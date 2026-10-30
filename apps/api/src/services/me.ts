@@ -19,16 +19,15 @@ import {
   type Database,
 } from '@serva/db';
 import type { AccessClaims } from '../auth/tokens';
+import { DAY_MS } from '../clock';
 import { unauthorized } from '../errors';
 
-const DAY_MS = 86_400_000;
-
-export function daysLeft(end: Date | null, now = new Date()): number | null {
+export function daysLeft(end: Date | null, now: Date): number | null {
   if (!end) return null;
   return Math.max(0, Math.ceil((end.getTime() - now.getTime()) / DAY_MS));
 }
 
-export async function loadMe(db: Database, auth: AccessClaims): Promise<MeResponse> {
+export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promise<MeResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const [user] = await tx.select().from(users).where(eq(users.id, auth.userId)).limit(1);
     if (!user || user.status !== 'active') throw unauthorized();
@@ -89,7 +88,7 @@ export async function loadMe(db: Database, auth: AccessClaims): Promise<MeRespon
         planName: sub.planName,
         trialEndsAt: s.trialEndsAt?.toISOString() ?? null,
         currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
-        daysLeft: daysLeft(periodEnd),
+        daysLeft: daysLeft(periodEnd, now),
       },
       branches: branchRows,
     };

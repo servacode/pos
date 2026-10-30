@@ -7,7 +7,9 @@ import {
   integer,
   jsonb,
   pgEnum,
+  pgPolicy,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -15,8 +17,31 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+// ─── Common fields ────────────────────────────────────────────────────────────
+// Ids are UUIDv7 (time-ordered, so inserts do not scatter indexes). Store tables are keyed by
+// (tenant_id, id). `version` and `updated_at` are maintained by the bump_row_version trigger.
+
+const id = () =>
+  uuid('id')
+    .notNull()
+    .default(sql`uuid_generate_v7()`);
+const platformId = () =>
+  uuid('id')
+    .primaryKey()
+    .default(sql`uuid_generate_v7()`);
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
+const version = () => integer('version').notNull().default(1);
+
+/** A store sees and writes only rows of the store set by withTenant(). */
+const tenantIsolation = (column = sql`tenant_id`) =>
+  pgPolicy('tenant_isolation', {
+    as: 'permissive',
+    for: 'all',
+    to: 'public',
+    using: sql`${column} = app_current_tenant()`,
+    withCheck: sql`${column} = app_current_tenant()`,
+  });
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +55,10 @@ export const subscriptionStatus = pgEnum('subscription_status', [
 export const billingCycle = pgEnum('billing_cycle', ['monthly', 'yearly']);
 export const platformRole = pgEnum('platform_role', ['super_admin', 'support', 'accountant']);
 export const userStatus = pgEnum('user_status', ['active', 'disabled']);
+/** Administrative state of a store, set by the platform team (e.g. suspended for abuse). */
+export const tenantStatus = pgEnum('tenant_status', ['active', 'suspended']);
+export const agentStatus = pgEnum('agent_status', ['active', 'suspended']);
+export const otpPurpose = pgEnum('otp_purpose', ['registration']);
 
 // ─── Platform (no tenant_id) ──────────────────────────────────────────────────
 
@@ -43,7 +72,7 @@ export interface PlanLimits {
 
 /** Subscription plans. Everything here is editable from the platform admin panel. */
 export const plans = pgTable('plans', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id: platformId(),
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
   isFree: boolean('is_free').notNull().default(false),
@@ -62,41 +91,89 @@ export const plans = pgTable('plans', {
     .default(sql`'{}'::text[]`),
   isActive: boolean('is_active').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
+  version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
 export const platformUsers = pgTable('platform_users', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id: platformId(),
   fullName: text('full_name').notNull(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   role: platformRole('role').notNull(),
   status: userStatus('status').notNull().default('active'),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
-/** A store (tenant). Row-level security limits each store to its own row. */
-export const tenants = pgTable('tenants', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  legalName: text('legal_name'),
-  taxNumber: text('tax_number'),
-  country: text('country').notNull().default('SY'),
-  timezone: text('timezone').notNull().default('Asia/Damascus'),
-  sectors: text('sectors').array().notNull(),
-  /** Referral code typed at sign-up; linked to an agent once the agents module exists */
-  referralCode: text('referral_code'),
+/**
+ * Sales agents who bring stores. A store typing an agent's code at sign-up is attributed to that
+ * agent (pending until the owner confirms and pays, 07). Not readable by the store role; codes
+ * are checked through agent_find_by_code().
+ */
+export const agents = pgTable('agents', {
+  id: platformId(),
+  /** Referral code, upper case, e.g. AG-42 */
+  code: text('code').notNull().unique(),
+  fullName: text('full_name').notNull(),
+  phone: text('phone'),
+  status: agentStatus('status').notNull().default('active'),
+  version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * One-time codes sent to a phone (09 otp_challenges). For sign-up, the pending registration waits
+ * here (payload) and the store is created only once the code is confirmed; unconfirmed rows are
+ * deleted after 24 hours and never reserve the number. Reached only through otp_* functions.
+ */
+export const otpChallenges = pgTable(
+  'otp_challenges',
+  {
+    id: platformId(),
+    purpose: otpPurpose('purpose').notNull(),
+    phone: text('phone').notNull(),
+    /** HMAC of the code; the code itself is never stored */
+    codeHash: text('code_hash').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    payload: jsonb('payload').notNull().default({}),
+    ip: text('ip'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('otp_challenges_phone_idx').on(t.phone, t.createdAt)],
+);
+
+/** A store (tenant). Row-level security limits each store to its own row. */
+export const tenants = pgTable(
+  'tenants',
+  {
+    id: platformId(),
+    name: text('name').notNull(),
+    legalName: text('legal_name'),
+    taxNumber: text('tax_number'),
+    country: text('country').notNull().default('SY'),
+    timezone: text('timezone').notNull().default('Asia/Damascus'),
+    sectors: text('sectors').array().notNull(),
+    /** Agent whose code was given at sign-up (verified); attribution is final after the first payment */
+    agentId: uuid('agent_id').references(() => agents.id),
+    /** Checked at login, refresh and on every authenticated request */
+    status: tenantStatus('status').notNull().default('active'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  () => [tenantIsolation(sql`id`)],
+);
 
 export const subscriptions = pgTable(
   'subscriptions',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -109,35 +186,51 @@ export const subscriptions = pgTable(
     currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
     currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
     graceEndsAt: timestamp('grace_ends_at', { withTimezone: true }),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [unique('subscriptions_tenant_unique').on(t.tenantId)],
+  (t) => [
+    primaryKey({ name: 'subscriptions_pkey', columns: [t.tenantId, t.id] }),
+    unique('subscriptions_tenant_unique').on(t.tenantId),
+    tenantIsolation(),
+  ],
 );
 
 // ─── Store (every table carries tenant_id and is protected by RLS) ─────────────
 
-export const tenantSettings = pgTable('tenant_settings', {
-  tenantId: uuid('tenant_id')
-    .primaryKey()
-    .references(() => tenants.id),
-  baseCurrency: text('base_currency').notNull(),
-  enabledCurrencies: text('enabled_currencies').array().notNull(),
-  /** Shelf prices include tax (common for consumer prices in Syria) */
-  taxInclusive: boolean('tax_inclusive').notNull().default(true),
-  defaultTaxRateBp: integer('default_tax_rate_bp').notNull().default(0),
-  /** 0 = no cash rounding; e.g. 5 = round cash totals to 0.05 */
-  cashRoundingMinor: integer('cash_rounding_minor').notNull().default(0),
-  numberFormat: text('number_format').notNull().default('latn'),
-  receiptFooter: text('receipt_footer'),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const tenantSettings = pgTable(
+  'tenant_settings',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references(() => tenants.id),
+    baseCurrency: text('base_currency').notNull(),
+    enabledCurrencies: text('enabled_currencies').array().notNull(),
+    /** Shelf prices include tax (common for consumer prices in Syria) */
+    taxInclusive: boolean('tax_inclusive').notNull().default(true),
+    defaultTaxRateBp: integer('default_tax_rate_bp').notNull().default(0),
+    /**
+     * Cash rounding step per currency, in minor units (09/10): only the cash part of a payment is
+     * rounded, never the invoice. 0 = no rounding for that currency.
+     */
+    cashRoundingSteps: jsonb('cash_rounding_steps')
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({ SYP: 1000, USD: 25 }),
+    numberFormat: text('number_format').notNull().default('latn'),
+    receiptFooter: text('receipt_footer'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  () => [tenantIsolation()],
+);
 
 export const branches = pgTable(
   'branches',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -146,19 +239,21 @@ export const branches = pgTable(
     address: text('address'),
     phone: text('phone'),
     isActive: boolean('is_active').notNull().default(true),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'branches_pkey', columns: [t.tenantId, t.id] }),
     unique('branches_tenant_code_unique').on(t.tenantId, t.code),
-    unique('branches_tenant_id_unique').on(t.tenantId, t.id),
+    tenantIsolation(),
   ],
 );
 
 export const registers = pgTable(
   'registers',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id').notNull(),
     branchId: uuid('branch_id').notNull(),
     code: text('code').notNull(),
@@ -166,20 +261,23 @@ export const registers = pgTable(
     deviceId: text('device_id'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     isActive: boolean('is_active').notNull().default(true),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'registers_pkey', columns: [t.tenantId, t.id] }),
     // Composite key: a register can only point at a branch of the same store
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     unique('registers_branch_code_unique').on(t.branchId, t.code),
+    tenantIsolation(),
   ],
 );
 
 export const roles = pgTable(
   'roles',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -188,19 +286,21 @@ export const roles = pgTable(
     permissions: text('permissions').array().notNull(),
     maxDiscountBp: integer('max_discount_bp').notNull().default(0),
     isSystem: boolean('is_system').notNull().default(false),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'roles_pkey', columns: [t.tenantId, t.id] }),
     unique('roles_tenant_key_unique').on(t.tenantId, t.key),
-    unique('roles_tenant_id_unique').on(t.tenantId, t.id),
+    tenantIsolation(),
   ],
 );
 
 export const users = pgTable(
   'users',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -211,87 +311,150 @@ export const users = pgTable(
     pinHash: text('pin_hash'),
     status: userStatus('status').notNull().default('active'),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'users_pkey', columns: [t.tenantId, t.id] }),
     uniqueIndex('users_phone_unique')
       .on(t.phone)
       .where(sql`${t.phone} is not null`),
-    unique('users_tenant_id_unique').on(t.tenantId, t.id),
+    tenantIsolation(),
   ],
 );
 
 export const userRoles = pgTable(
   'user_roles',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id').notNull(),
     userId: uuid('user_id').notNull(),
     roleId: uuid('role_id').notNull(),
     /** null = the role applies to every branch */
     branchId: uuid('branch_id'),
+    version: version(),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'user_roles_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
     foreignKey({ columns: [t.tenantId, t.roleId], foreignColumns: [roles.tenantId, roles.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     unique('user_roles_unique').on(t.userId, t.roleId, t.branchId).nullsNotDistinct(),
+    tenantIsolation(),
   ],
 );
 
+/**
+ * Who did what, append-only (09): the actor and their kind, the grant used (support or accountant),
+ * the field-by-field changes, the reason, the device and both clocks. Partitioned by month
+ * (created_at), so old months are dropped as partitions; see 0008_audit_logs.sql.
+ */
 export const auditLogs = pgTable(
   'audit_logs',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
     userId: uuid('user_id'),
+    /** user, accountant, platform_support, device, system */
+    actorType: text('actor_type').notNull().default('user'),
+    /** Support grant or accountant link the action was made under */
+    grantId: uuid('grant_id'),
     action: text('action').notNull(),
     entity: text('entity'),
     entityId: text('entity_id'),
+    /** Field-by-field changes: { field: [before, after] } */
+    changes: jsonb('changes'),
+    /** Other context of the action */
     data: jsonb('data'),
+    reason: text('reason'),
+    deviceId: uuid('device_id'),
+    deviceTime: timestamp('device_time', { withTimezone: true }),
     ip: text('ip'),
     userAgent: text('user_agent'),
     createdAt: createdAt(),
   },
-  (t) => [index('audit_logs_tenant_created_idx').on(t.tenantId, t.createdAt)],
+  (t) => [
+    primaryKey({ name: 'audit_logs_pkey', columns: [t.tenantId, t.id, t.createdAt] }),
+    index('audit_logs_tenant_created_idx').on(t.tenantId, t.createdAt),
+    tenantIsolation(),
+  ],
 );
 
 /**
- * Refresh-token sessions. Looked up by token hash before the tenant is known,
- * so this table is not under RLS; it never stores the raw token.
+ * Which version of which legal document a user (or agent) accepted, when, from where, and in what
+ * context (09). Append-only: the store role may only insert, and a trigger refuses any change.
+ */
+export const legalAcceptances = pgTable(
+  'legal_acceptances',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    userId: uuid('user_id'),
+    agentId: uuid('agent_id'),
+    /** terms, privacy, agent_agreement… */
+    document: text('document').notNull(),
+    documentVersion: text('document_version').notNull(),
+    /** registration, migration_tool… */
+    context: text('context').notNull(),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'legal_acceptances_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Refresh-token sessions, under RLS like every store table. Before the store is known, a session
+ * is found by its token hash through session_find_by_hash(); the raw token is never stored.
+ *
+ * Each refresh rotates the token into a new row of the same family. The family id is the
+ * session id carried by access tokens, and the family ends at absolute_expires_at whatever
+ * happens, so a session cannot live forever by refreshing.
  */
 export const sessions = pgTable(
   'sessions',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id').notNull(),
     userId: uuid('user_id').notNull(),
+    familyId: uuid('family_id').notNull(),
     tokenHash: text('token_hash').notNull().unique(),
     userAgent: text('user_agent'),
     ip: text('ip'),
     createdAt: createdAt(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     replacedBy: uuid('replaced_by'),
   },
   (t) => [
+    primaryKey({ name: 'sessions_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
     index('sessions_user_idx').on(t.userId),
+    index('sessions_family_idx').on(t.tenantId, t.familyId),
+    tenantIsolation(),
   ],
 );
 
-/** Tables that carry tenant_id and are protected by the tenant_isolation policy. */
-export const TENANT_TABLES = [
-  'subscriptions',
-  'tenant_settings',
-  'branches',
-  'registers',
-  'roles',
-  'users',
-  'user_roles',
-  'audit_logs',
-] as const;
+// ─── Shared counters (no tenant_id) ───────────────────────────────────────────
+
+/**
+ * Rate-limit counters shared by every server instance (17: an UNLOGGED table on the single
+ * server now, Valkey when scaling). Written only through rate_limit_hit().
+ */
+export const rateLimits = pgTable('rate_limits', {
+  key: text('key').primaryKey(),
+  count: integer('count').notNull(),
+  resetAt: timestamp('reset_at', { withTimezone: true }).notNull(),
+});

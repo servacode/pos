@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { mockFetch, type MockReply } from './test/fetchMock';
 import { makeMe, signedInRefresh, signedOutRefresh } from './test/fixtures';
@@ -7,7 +7,7 @@ import { renderApp } from './test/renderApp';
 describe('routing', () => {
   it('shows a loader while the session is being restored', async () => {
     let finishRefresh: (reply: MockReply) => void = () => {};
-    mockFetch({
+    const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': () =>
         new Promise<MockReply>((resolve) => {
           finishRefresh = resolve;
@@ -15,6 +15,7 @@ describe('routing', () => {
     });
     renderApp('/');
 
+    await waitFor(() => expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(1));
     expect(screen.getByRole('status')).toHaveTextContent('جارٍ التحميل…');
     finishRefresh(signedOutRefresh);
     expect(await screen.findByRole('heading', { name: 'أهلاً بعودتك' })).toBeInTheDocument();

@@ -6,8 +6,8 @@ type Tone = 'error' | 'info' | 'success';
 
 const TONES: Record<Tone, { className: string; icon: Icon }> = {
   error: { className: 'border-danger/25 bg-danger-soft text-danger-ink', icon: AlertCircleIcon },
-  info: { className: 'border-info-ink/15 bg-info-soft text-info-ink', icon: InfoIcon },
-  success: { className: 'border-brand/25 bg-brand-soft text-brand-ink', icon: CheckCircleIcon },
+  info: { className: 'border-info/25 bg-info-soft text-info-ink', icon: InfoIcon },
+  success: { className: 'border-success/25 bg-success-soft text-success-ink', icon: CheckCircleIcon },
 };
 
 interface AlertProps {

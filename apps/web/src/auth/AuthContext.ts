@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { LoginInput, MeResponse, RegisterStoreInput } from '@serva/core';
+import type { LoginInput, MeResponse } from '@serva/core';
 
 export type AuthState =
   | { status: 'loading' }
@@ -9,7 +9,6 @@ export type AuthState =
 export interface AuthContextValue {
   state: AuthState;
   login: (input: LoginInput) => Promise<void>;
-  register: (input: RegisterStoreInput) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
 }
