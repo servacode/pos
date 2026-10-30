@@ -1,0 +1,7 @@
+# Shell scripts and container files keep LF endings even when the repository is cloned on Windows
+# (bash in WSL and inside containers fails on CRLF). See docs/local-server.md.
+*.sh text eol=lf
+*.sql text eol=lf
+*.template text eol=lf
+*.conf text eol=lf
+Dockerfile text eol=lf
