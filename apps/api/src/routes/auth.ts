@@ -5,6 +5,8 @@ import { tenants, users, withTenant } from '@serva/db';
 import { hashSecret, verifyAgainstDummy, verifySecret } from '../auth/passwords';
 import { signAccessToken } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
+import { clientIp } from '../http/client-ip';
+import { enforceLimits } from '../http/rate-limit';
 import { audit } from '../services/audit';
 import {
   createSession,
@@ -21,7 +23,7 @@ export const REFRESH_COOKIE = 'serva_rt';
 const COOKIE_PATH = '/v1/auth';
 
 const metaOf = (request: FastifyRequest): RequestMeta => ({
-  ip: request.ip,
+  ip: clientIp(request),
   userAgent: request.headers['user-agent']?.slice(0, 300) ?? null,
 });
 
@@ -31,7 +33,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     ttlDays: env.REFRESH_TOKEN_TTL_DAYS,
     absoluteDays: env.SESSION_ABSOLUTE_DAYS,
   };
-  const authLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE, timeWindow: '1 minute' } };
+  const authLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE, timeWindow: 60_000 } };
 
   const setRefreshCookie = (reply: FastifyReply, session: IssuedSession) =>
     reply.setCookie(REFRESH_COOKIE, session.refreshToken, {
@@ -78,6 +80,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/auth/login', { config: authLimit }, async (request, reply) => {
     const data = parseBody(loginInput, request.body);
+    // Per number, whatever address the attempts come from (the per-address limit is above).
+    await enforceLimits(request, reply, 3_600_000, [
+      { key: `login:phone:${data.phone}`, max: env.LOGIN_PHONE_LIMIT_PER_HOUR },
+    ]);
     const invalid = new AppError(401, 'invalid_credentials', 'رقم الجوال أو كلمة المرور غير صحيحة.');
 
     const rows = await db.execute<{
@@ -126,7 +132,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post(
     '/v1/auth/refresh',
-    { config: { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE * 6, timeWindow: '1 minute' } } },
+    { config: { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE * 6, timeWindow: 60_000 } } },
     async (request, reply) => {
       const token = request.cookies[REFRESH_COOKIE];
       if (!token) throw unauthorized();

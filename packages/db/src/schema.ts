@@ -355,3 +355,15 @@ export const sessions = pgTable(
     tenantIsolation(),
   ],
 );
+
+// ─── Shared counters (no tenant_id) ───────────────────────────────────────────
+
+/**
+ * Rate-limit counters shared by every server instance (17: an UNLOGGED table on the single
+ * server now, Valkey when scaling). Written only through rate_limit_hit().
+ */
+export const rateLimits = pgTable('rate_limits', {
+  key: text('key').primaryKey(),
+  count: integer('count').notNull(),
+  resetAt: timestamp('reset_at', { withTimezone: true }).notNull(),
+});

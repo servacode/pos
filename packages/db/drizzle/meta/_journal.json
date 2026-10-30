@@ -36,6 +36,13 @@
       "when": 1793392603853,
       "tag": "0004_billing_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793392782162,
+      "tag": "0005_rate_limits",
+      "breakpoints": true
     }
   ]
 }

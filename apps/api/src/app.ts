@@ -7,6 +7,8 @@ import { SessionGate } from './auth/session-gate';
 import { systemClock, type Clock } from './clock';
 import type { Env } from './env';
 import { AppError } from './errors';
+import { clientAddressing, clientIp } from './http/client-ip';
+import { postgresRateLimitStore, RATE_LIMITED_MESSAGE } from './http/rate-limit';
 import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
@@ -29,9 +31,10 @@ export async function buildApp({
   database,
   clock = systemClock,
 }: BuildAppOptions): Promise<FastifyInstance> {
+  const addressing = clientAddressing(env.TRUST_PROXY);
   const app = Fastify({
     logger: env.LOG_LEVEL === 'silent' ? false : { level: env.LOG_LEVEL },
-    trustProxy: env.TRUST_PROXY,
+    trustProxy: addressing.trustProxy,
     bodyLimit: 1024 * 1024,
   });
 
@@ -39,13 +42,20 @@ export async function buildApp({
   app.decorate('db', handle.db);
   app.decorate('env', env);
   app.decorate('clock', clock);
+  app.decorate('addressing', addressing);
   app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
   app.decorateRequest('auth', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());
 
   await app.register(cookie);
+  // Every route is limited per client address; routes can set stricter limits (sign-in) or opt out
+  // (health). Counters live in Postgres, shared by all instances and kept across restarts.
   await app.register(rateLimit, {
-    global: false,
+    global: true,
+    max: env.RATE_LIMIT_PER_MINUTE,
+    timeWindow: 60_000,
+    keyGenerator: clientIp,
+    store: postgresRateLimitStore(handle.db, clock),
     errorResponseBuilder: () => ({ statusCode: 429, code: 'rate_limited' }),
   });
 
@@ -53,7 +63,7 @@ export async function buildApp({
     if (error instanceof AppError) return reply.status(error.statusCode).send(error.toBody());
     const status = error.statusCode ?? 500;
     if (status === 429) {
-      return reply.status(429).send(errorBody('rate_limited', 'محاولات كثيرة. انتظر دقيقة ثم حاول مجدداً.'));
+      return reply.status(429).send(errorBody('rate_limited', RATE_LIMITED_MESSAGE));
     }
     if (status >= 400 && status < 500) {
       return reply.status(400).send(errorBody('validation_failed', 'الطلب غير صالح.'));

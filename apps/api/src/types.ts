@@ -3,6 +3,7 @@ import type { SessionGate } from './auth/session-gate';
 import type { AccessClaims } from './auth/tokens';
 import type { Clock } from './clock';
 import type { Env } from './env';
+import type { ClientAddressing } from './http/client-ip';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -10,6 +11,7 @@ declare module 'fastify' {
     env: Env;
     clock: Clock;
     sessionGate: SessionGate;
+    addressing: ClientAddressing;
   }
   interface FastifyRequest {
     /** Set by requireAuth for authenticated routes */
