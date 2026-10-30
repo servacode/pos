@@ -9,9 +9,11 @@
   },
   "scripts": {
     "generate": "drizzle-kit generate",
+    "check:migrations": "drizzle-kit check",
     "migrate": "tsx src/migrate-cli.ts",
-    "lint": "eslint src",
-    "typecheck": "tsc -p tsconfig.json"
+    "lint": "eslint src test",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",

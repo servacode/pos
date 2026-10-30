@@ -12,8 +12,31 @@ export interface DbHandle {
   client: postgres.Sql;
 }
 
-export function createDb(url: string, options: { max?: number } = {}): DbHandle {
-  const client = postgres(url, { max: options.max ?? 10, onnotice: () => {} });
+/**
+ * Session limits for request-serving connections (09: 15s per statement, 5s waiting for a lock,
+ * 30s idle inside a transaction). The roles carry the same defaults (scripts/db-bootstrap.sql);
+ * setting them here too keeps them even on a database bootstrapped without them.
+ */
+export const REQUEST_TIMEOUTS: Partial<postgres.ConnectionParameters> = {
+  statement_timeout: 15_000,
+  lock_timeout: 5_000,
+  idle_in_transaction_session_timeout: 30_000,
+};
+
+export function createDb(
+  url: string,
+  options: {
+    max?: number;
+    timeouts?: Partial<postgres.ConnectionParameters> | false;
+    applicationName?: string;
+  } = {},
+): DbHandle {
+  const timeouts = options.timeouts === undefined ? REQUEST_TIMEOUTS : options.timeouts || {};
+  const client = postgres(url, {
+    max: options.max ?? 10,
+    onnotice: () => {},
+    connection: { application_name: options.applicationName ?? 'serva-api', ...timeouts },
+  });
   return { db: drizzle(client, { schema }), client };
 }
 

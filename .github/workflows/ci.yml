@@ -2,13 +2,76 @@ name: CI
 
 on:
   push:
+  pull_request:
+  # Nightly: new advisories and leaked secrets show up even when nobody pushes.
+  schedule:
+    - cron: '23 1 * * *'
   workflow_dispatch:
+
+# Least privilege: every job only reads the repository unless it asks for more.
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Actions are pinned to a full commit SHA (tag in the comment) so a moved tag cannot change what runs.
 jobs:
+  security:
+    name: Dependency audit, secret scan, static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # gitleaks lists the commits of a pull request
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Audit runtime dependencies (high and critical fail the build)
+        run: pnpm audit --prod --audit-level=high
+      - name: Audit all dependencies, dev tools included (report only)
+        # Dev tooling (vitest 3 → tinypool) has known advisories that need a major upgrade.
+        continue-on-error: true
+        run: pnpm audit --audit-level=high
+      - name: Scan for secrets (gitleaks, rules and allowlist in .gitleaks.toml)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.29.1
+          GITLEAKS_ENABLE_COMMENTS: 'false'
+      - name: Static analysis (Semgrep, free registry rules, no account)
+        # Express-only XSS rules do not apply to this JSON-only Fastify API.
+        run: |
+          pipx install semgrep==1.180.0
+          semgrep scan --error --metrics=off --disable-version-check \
+            --config p/javascript --config p/typescript --config p/nodejsscan --config p/secrets \
+            --exclude-rule javascript.express.security.audit.xss.direct-response-write.direct-response-write \
+            --exclude-rule ajinabraham.njsscan.xss.xss_node.express_xss \
+            --exclude docs \
+            apps packages scripts
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+
   check:
     name: Format, lint, typecheck, test, build
     runs-on: ubuntu-latest
@@ -30,18 +93,26 @@ jobs:
       TEST_DATABASE_URL: postgres://serva_app:serva_app@localhost:5432/serva_test
       TEST_DATABASE_MIGRATION_URL: postgres://serva_owner:serva_owner@localhost:5432/serva_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Migration snapshots are consistent (drizzle-kit check)
+        run: pnpm --filter @serva/db check:migrations
       - name: Create database roles and databases
         run: bash scripts/db-bootstrap.sh
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Test in Asia/Damascus time (the main run below is in UTC)
+        run: pnpm -r test
+        env:
+          TZ: Asia/Damascus
       - run: pnpm test
       - run: pnpm build
       - name: Size budget (sale screen JS + CSS under 300 KB gzip, fonts separate)

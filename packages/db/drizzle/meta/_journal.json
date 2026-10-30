@@ -15,6 +15,55 @@
       "when": 1793301128186,
       "tag": "0001_security",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793392120799,
+      "tag": "0002_conventions",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793392318409,
+      "tag": "0003_sessions_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793392603853,
+      "tag": "0004_billing_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793392782162,
+      "tag": "0005_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793393919830,
+      "tag": "0006_registration",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793393927965,
+      "tag": "0007_drop_replaced_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793394354475,
+      "tag": "0008_audit_logs",
+      "breakpoints": true
     }
   ]
 }

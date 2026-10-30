@@ -2,8 +2,10 @@ import postgres from 'postgres';
 import type { FastifyInstance } from 'fastify';
 import type { LightMyRequestResponse } from 'fastify';
 import { createDb, type DbHandle } from '@serva/db';
-import type { RegisterStoreInput } from '@serva/core';
+import { TERMS_VERSION, type RegisterStoreInput } from '@serva/core';
 import { buildApp } from '../src/app';
+import type { OtpMessage, OtpSender } from '../src/auth/otp';
+import { ManualClock, type Clock } from '../src/clock';
 import { loadEnv } from '../src/env';
 import { REFRESH_COOKIE } from '../src/routes/auth';
 import { TEST_APP_URL, TEST_OWNER_URL } from './urls';
@@ -14,7 +16,12 @@ export function testEnv(overrides: Record<string, string> = {}) {
     DATABASE_URL: TEST_APP_URL,
     JWT_SECRET: 'test-secret-that-is-definitely-long-enough-123',
     LOG_LEVEL: 'silent',
+    // Every test request comes from 127.0.0.1; limits get their own tests.
+    RATE_LIMIT_PER_MINUTE: '100000',
     AUTH_RATE_LIMIT_PER_MINUTE: '1000',
+    LOGIN_PHONE_LIMIT_PER_HOUR: '1000',
+    SESSION_RATE_LIMIT_PER_MINUTE: '100000',
+    STORE_RATE_LIMIT_PER_MINUTE: '100000',
     ...overrides,
   });
 }
@@ -31,29 +38,82 @@ export async function closeAppDb(): Promise<void> {
   handle = undefined;
 }
 
-export function makeApp(overrides: Record<string, string> = {}): Promise<FastifyInstance> {
-  return buildApp({ env: testEnv(overrides), database: appDb() });
+/** Collects the codes the app would send by SMS, so tests can type them. */
+export class CapturedCodes implements OtpSender {
+  readonly sent: OtpMessage[] = [];
+
+  async send(message: OtpMessage): Promise<void> {
+    this.sent.push(message);
+  }
+
+  /** The latest code sent to this phone (E.164) */
+  last(phone: string): string | undefined {
+    return this.sent.filter((m) => m.phone === phone).at(-1)?.code;
+  }
 }
 
-/** Empties every table except plans, as the owner role. */
+/** Codes sent by every app built with makeApp() unless a test passes its own sender. */
+export const codes = new CapturedCodes();
+
+/**
+ * Builds the app against the test database. Time is a ManualClock fixed at a known instant
+ * unless a clock is passed, so expiry and trial rules are deterministic.
+ */
+export function makeApp(
+  overrides: Record<string, string> = {},
+  options: { clock?: Clock; otpSender?: OtpSender | null } = {},
+): Promise<FastifyInstance> {
+  return buildApp({
+    env: testEnv(overrides),
+    database: appDb(),
+    clock: options.clock ?? new ManualClock(),
+    otpSender: options.otpSender === undefined ? codes : options.otpSender,
+  });
+}
+
+/** Reference tables filled by migrations; every other table is emptied between tests. */
+const SEEDED_TABLES = new Set(['plans']);
+
+let owner: postgres.Sql | undefined;
+/** Connection as the owner role (not subject to row-level security). Closed by closeOwnerDb(). */
+export function ownerDb(): postgres.Sql {
+  owner ??= postgres(TEST_OWNER_URL, { max: 1, onnotice: () => {} });
+  return owner;
+}
+
+export async function closeOwnerDb(): Promise<void> {
+  await owner?.end();
+  owner = undefined;
+}
+
+/**
+ * Empties every table in the public schema except seeded reference tables. The list comes from
+ * the catalog, so a new table can never leak state between tests by being forgotten here.
+ */
 export async function resetDatabase(): Promise<void> {
-  const owner = postgres(TEST_OWNER_URL, { max: 1, onnotice: () => {} });
+  const sql = postgres(TEST_OWNER_URL, { max: 1, onnotice: () => {} });
   try {
-    await owner`truncate table sessions, audit_logs, user_roles, users, roles, registers, branches,
-      subscriptions, tenant_settings, tenants, platform_users restart identity cascade`;
+    const tables = await sql<{ name: string }[]>`
+      select c.relname as name
+      from pg_class c
+      where c.relnamespace = 'public'::regnamespace
+        and c.relkind in ('r', 'p')
+        and not c.relispartition`;
+    const names = tables.map((t) => t.name).filter((name) => !SEEDED_TABLES.has(name));
+    if (names.length > 0) {
+      await sql.unsafe(`truncate table ${names.map((n) => `"${n}"`).join(', ')} restart identity cascade`);
+    }
   } finally {
-    await owner.end();
+    await sql.end();
   }
 }
 
 export function storeInput(overrides: Partial<RegisterStoreInput> = {}): RegisterStoreInput {
   return {
-    storeName: 'متجر الأمل',
-    ownerName: 'أحمد الخطيب',
     phone: '0912345678',
+    fullName: 'أحمد الخطيب',
     password: 'secret-pass-1',
-    sectors: ['clothing'],
-    baseCurrency: 'SYP',
+    termsVersion: TERMS_VERSION,
     ...overrides,
   };
 }
@@ -62,8 +122,17 @@ export function refreshCookie(res: LightMyRequestResponse): string | undefined {
   return res.cookies.find((c) => c.name === REFRESH_COOKIE)?.value;
 }
 
+/** Opens an account the way a person does: sign-up, then the code that reached the phone. */
 export async function registerStore(app: FastifyInstance, overrides: Partial<RegisterStoreInput> = {}) {
-  const res = await app.inject({ method: 'POST', url: '/v1/auth/register', payload: storeInput(overrides) });
-  if (res.statusCode !== 201) throw new Error(`register failed: ${res.statusCode} ${res.body}`);
+  const input = storeInput(overrides);
+  const start = await app.inject({ method: 'POST', url: '/v1/auth/register', payload: input });
+  if (start.statusCode !== 202) throw new Error(`register failed: ${start.statusCode} ${start.body}`);
+  const code = codes.sent.at(-1)?.code;
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/auth/register/verify',
+    payload: { registrationId: start.json().registrationId, code, password: input.password },
+  });
+  if (res.statusCode !== 201) throw new Error(`register/verify failed: ${res.statusCode} ${res.body}`);
   return { res, body: res.json(), cookie: refreshCookie(res)! };
 }
