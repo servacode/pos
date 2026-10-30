@@ -17,7 +17,9 @@ load_env
 flip_byte() {
   local file="$1" offset="$2" byte
   byte="$(dd if="$file" bs=1 skip="$offset" count=1 status=none | od -An -tu1 | tr -d ' ')"
-  printf "\\x$(printf '%02x' $((byte ^ 255)))" | dd of="$file" bs=1 seek="$offset" conv=notrunc status=none
+  local octal
+  octal="$(printf '%03o' $((byte ^ 255)))"
+  printf '%b' "\\0$octal" | dd of="$file" bs=1 seek="$offset" conv=notrunc status=none
 }
 
 psql_live() { dc exec -T -u postgres postgres psql --no-psqlrc -X -tA -v ON_ERROR_STOP=1 -d serva "$@"; }
