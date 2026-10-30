@@ -5,5 +5,5 @@ if (!url) {
   console.error('DATABASE_MIGRATION_URL is not set');
   process.exit(1);
 }
-await runMigrations(url);
-console.log('Migrations applied.');
+const applied = await runMigrations(url);
+console.log(applied.length > 0 ? `Applied: ${applied.join(', ')}` : 'Database is up to date.');
