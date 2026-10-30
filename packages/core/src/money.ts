@@ -77,16 +77,25 @@ export function sumMinor(values: readonly number[]): number {
 
 /**
  * Splits `total` across `weights` with the largest-remainder method; the shares always sum exactly to
- * `total`. Leftover units go to the largest fractional remainder, then the larger weight, then the lower
- * index. All-zero weights split as evenly as possible (earlier indexes get the extra units).
+ * `total`. Leftover units go to the largest fractional remainder, then the larger weight, then the smaller
+ * key. `keys` are stable unique ids such as invoice line numbers (spec 10: «الترتيب برقم السطر الثابت»): with
+ * them each weight gets the same share whatever the order of the arrays. Without keys the index is the key.
+ * All-zero weights split as evenly as possible (the smallest keys get the extra units).
  * A negative total is allocated as the mirror image of the positive one.
  */
-export function allocate(total: number, weights: readonly number[]): number[] {
+export function allocate(total: number, weights: readonly number[], keys?: readonly number[]): number[] {
   assertSafeInteger(total, 'total');
   for (const [i, weight] of weights.entries()) {
     if (!Number.isSafeInteger(weight) || weight < 0) {
       throw new RangeError(`weights[${i}] must be a non-negative safe integer, got ${String(weight)}`);
     }
+  }
+  if (keys !== undefined) {
+    if (keys.length !== weights.length) {
+      throw new RangeError(`allocate: expected one key per weight (${weights.length}), got ${keys.length}`);
+    }
+    for (const [i, key] of keys.entries()) assertSafeInteger(key, `keys[${i}]`);
+    if (new Set(keys).size !== keys.length) throw new RangeError('allocate: keys must be unique');
   }
   if (total === 0) return weights.map(() => 0);
   if (weights.length === 0) throw new RangeError('allocate: cannot split a non-zero total across no weights');
@@ -94,34 +103,36 @@ export function allocate(total: number, weights: readonly number[]): number[] {
   const sign = total < 0 ? -1n : 1n;
   const amount = BigInt(Math.abs(total));
   const weightSum = weights.reduce((acc, weight) => acc + BigInt(weight), 0n);
+  const keyOf = (index: number) => keys?.[index] ?? index;
 
   let shares: bigint[];
+  let remainders: bigint[];
   if (weightSum === 0n) {
+    // Equal weights: every remainder ties, so the keys alone decide who gets the extra units.
     const count = BigInt(weights.length);
-    const base = amount / count;
-    const extra = amount % count;
-    shares = weights.map((_, i) => base + (BigInt(i) < extra ? 1n : 0n));
+    shares = weights.map(() => amount / count);
+    remainders = weights.map(() => 0n);
   } else {
-    const remainders: bigint[] = [];
+    remainders = [];
     shares = weights.map((weight) => {
       const product = amount * BigInt(weight);
       remainders.push(product % weightSum);
       return product / weightSum;
     });
-    // Remainders share the denominator weightSum, so they compare directly.
-    const order = weights
-      .map((weight, index) => ({ index, weight, remainder: remainders[index] ?? 0n }))
-      .sort((a, b) => {
-        if (a.remainder !== b.remainder) return a.remainder > b.remainder ? -1 : 1;
-        if (a.weight !== b.weight) return b.weight - a.weight;
-        return a.index - b.index;
-      });
-    let leftover = amount - shares.reduce((acc, share) => acc + share, 0n);
-    for (const { index } of order) {
-      if (leftover === 0n) break;
-      shares[index] = (shares[index] ?? 0n) + 1n;
-      leftover -= 1n;
-    }
+  }
+  // Remainders share the denominator weightSum, so they compare directly.
+  const order = weights
+    .map((weight, index) => ({ index, weight, remainder: remainders[index] ?? 0n, key: keyOf(index) }))
+    .sort((a, b) => {
+      if (a.remainder !== b.remainder) return a.remainder > b.remainder ? -1 : 1;
+      if (a.weight !== b.weight) return b.weight - a.weight;
+      return a.key < b.key ? -1 : 1; // keys are unique, so never equal
+    });
+  let leftover = amount - shares.reduce((acc, share) => acc + share, 0n);
+  for (const { index } of order) {
+    if (leftover === 0n) break;
+    shares[index] = (shares[index] ?? 0n) + 1n;
+    leftover -= 1n;
   }
   return shares.map((share) => Number(share * sign));
 }

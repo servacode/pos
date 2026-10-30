@@ -109,7 +109,7 @@ describe('allocate', () => {
     expect(allocate(100, [250, 225, 850])).toEqual([19, 17, 64]);
   });
 
-  it('breaks remainder ties by larger weight, then lower index', () => {
+  it('breaks remainder ties by larger weight, then lower index when no keys are given', () => {
     expect(allocate(1, [1, 1, 1])).toEqual([1, 0, 0]);
     expect(allocate(2, [1, 1, 1])).toEqual([1, 1, 0]);
     expect(allocate(1, [3, 3, 6])).toEqual([0, 0, 1]); // largest remainder
@@ -118,6 +118,15 @@ describe('allocate', () => {
     expect(allocate(2, [3, 1])).toEqual([2, 0]);
     // Exact shares 0.5 / 1 / 1 / 0.5: equal remainders and weights, so the lower index wins.
     expect(allocate(3, [2, 4, 4, 2])).toEqual([1, 1, 1, 0]);
+  });
+
+  it('breaks the last ties by the smaller stable key (line_no), not by position', () => {
+    expect(allocate(1, [1, 1, 1], [30, 10, 20])).toEqual([0, 1, 0]);
+    expect(allocate(2, [1, 1, 1], [30, 10, 20])).toEqual([0, 1, 1]);
+    expect(allocate(3, [2, 4, 4, 2], [4, 3, 2, 1])).toEqual([0, 1, 1, 1]);
+    expect(allocate(2, [1, 3], [2, 1])).toEqual([0, 2]); // the larger weight still comes first
+    expect(allocate(10, [0, 0, 0], [3, 1, 2])).toEqual([3, 4, 3]);
+    expect(allocate(-10, [0, 0, 0], [3, 1, 2])).toEqual([-3, -4, -3]);
   });
 
   it('handles zero totals and zero weights', () => {
@@ -137,28 +146,68 @@ describe('allocate', () => {
     expect(() => allocate(10, [1.5])).toThrow(RangeError);
     expect(() => allocate(1.5, [1])).toThrow(RangeError);
     expect(() => allocate(10, [])).toThrow(RangeError);
+    expect(() => allocate(10, [1, 1], [1])).toThrow(/one key per weight/);
+    expect(() => allocate(10, [1, 1], [1, 1])).toThrow(/unique/);
+    expect(() => allocate(10, [1, 1], [1, 1.5])).toThrow(RangeError);
   });
 
-  it('always sums exactly and stays within one unit of the exact share (seeded property test)', () => {
-    const rand = seededRandom(20261029);
-    for (let run = 0; run < 2000; run++) {
-      const total = rand.int(-1_000_000, 1_000_000);
-      const weights = Array.from({ length: rand.int(1, 12) }, () =>
-        rand.next() < 0.2 ? 0 : rand.int(0, rand.next() < 0.5 ? 100 : 10_000_000),
-      );
-      const shares = allocate(total, weights);
-      expect(shares).toHaveLength(weights.length);
-      expect(shares.reduce((a, b) => a + b, 0)).toBe(total);
-      expect(allocate(-total, weights)).toEqual(shares.map((s) => (s === 0 ? 0 : -s)));
-      const weightSum = BigInt(weights.reduce((a, b) => a + b, 0));
-      if (weightSum > 0n) {
-        shares.forEach((share, i) => {
-          // |share × W − total × w| < W
-          const diff = BigInt(share) * weightSum - BigInt(total) * BigInt(weights[i] ?? 0);
-          expect(diff < 0n ? -diff : diff).toBeLessThan(weightSum);
-        });
-      }
-    }
+  // Small weights and totals make remainder ties common; large ones exercise the BigInt range.
+  const weightsArb = fc.array(
+    fc.oneof(
+      { arbitrary: fc.integer({ min: 0, max: 4 }), weight: 3 },
+      { arbitrary: fc.integer({ min: 0, max: 10_000_000 }), weight: 1 },
+    ),
+    { minLength: 1, maxLength: 12 },
+  );
+  const totalArb = fc.oneof(
+    fc.integer({ min: -12, max: 12 }),
+    fc.integer({ min: -1_000_000, max: 1_000_000 }),
+  );
+
+  it('always sums exactly, mirrors negatives and stays within one unit of the exact share (property)', () => {
+    fc.assert(
+      fc.property(totalArb, weightsArb, (total, weights) => {
+        const shares = allocate(total, weights);
+        expect(shares).toHaveLength(weights.length);
+        expect(shares.reduce((a, b) => a + b, 0)).toBe(total);
+        expect(allocate(-total, weights)).toEqual(shares.map((s) => (s === 0 ? 0 : -s)));
+        const weightSum = BigInt(weights.reduce((a, b) => a + b, 0));
+        if (weightSum > 0n) {
+          shares.forEach((share, i) => {
+            // |share × W − total × w| < W
+            const diff = BigInt(share) * weightSum - BigInt(total) * BigInt(weights[i] ?? 0);
+            expect(diff < 0n ? -diff : diff).toBeLessThan(weightSum);
+          });
+        }
+      }),
+    );
+  });
+
+  it('gives every keyed weight the same share whatever the order (property)', () => {
+    const entriesArb = weightsArb.chain((weights) =>
+      fc
+        .uniqueArray(fc.integer({ min: 1, max: 10_000 }), {
+          minLength: weights.length,
+          maxLength: weights.length,
+        })
+        .map((keys) => weights.map((weight, i) => ({ weight, key: keys[i] ?? 0 }))),
+    );
+    const orderingsArb = entriesArb.chain((entries) =>
+      fc.tuple(fc.constant(entries), fc.shuffledSubarray(entries, { minLength: entries.length })),
+    );
+    fc.assert(
+      fc.property(totalArb, orderingsArb, (total, [entries, shuffled]) => {
+        const sharesByKey = (list: typeof entries) => {
+          const shares = allocate(
+            total,
+            list.map((e) => e.weight),
+            list.map((e) => e.key),
+          );
+          return new Map(list.map((e, i) => [e.key, shares[i]]));
+        };
+        expect(sharesByKey(shuffled)).toEqual(sharesByKey(entries));
+      }),
+    );
   });
 });
 
