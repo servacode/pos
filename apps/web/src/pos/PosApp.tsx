@@ -1,7 +1,7 @@
-import { useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { CashierShell, CashierStatusBar, ConnectionPill, DeviceIcon, Logo } from '@serva/ui';
-import { readLocalDevice, type LocalDevice } from './localDevice';
+import type { LocalDevice } from '../offline/device';
+import { useDevice } from '../offline/useDevice';
 import { PinScreen } from './PinScreen';
 import { useOnline } from './useOnline';
 
@@ -10,7 +10,7 @@ function OnlinePill() {
 }
 
 /** The cashier status bar: the store, the branch and device, the connection. */
-function StatusBar({ device }: { device: LocalDevice | null }) {
+function StatusBar({ device, persisted }: { device: LocalDevice | null; persisted: boolean | null }) {
   return (
     <CashierStatusBar>
       <Logo />
@@ -26,6 +26,12 @@ function StatusBar({ device }: { device: LocalDevice | null }) {
         </>
       ) : null}
       <span className="flex-1" />
+      {persisted === false ? (
+        // Tab 15 › ما يراه الكاشير: the browser may wipe this device's data.
+        <span role="alert" className="truncate text-sm font-semibold text-danger-ink">
+          هذا المتصفح قد يمسح البيانات، ثبّت التطبيق
+        </span>
+      ) : null}
       <OnlinePill />
     </CashierStatusBar>
   );
@@ -51,17 +57,21 @@ function NotLinked() {
 }
 
 /**
- * The cashier app. It boots only from what this device keeps locally and asks for the login code:
- * no session refresh and no request of any kind, so it opens the same with or without internet.
+ * The cashier app. It boots only from what this device keeps locally (the device database) and
+ * asks for the login code: no session refresh and no request before that, so it opens the same
+ * with or without internet. An activated device then syncs in the background.
  */
 export function PosApp() {
-  const [device] = useState(readLocalDevice);
+  const { loading, device, persisted } = useDevice();
 
   return (
-    <CashierShell statusBar={<StatusBar device={device} />} mainClassName="grid place-items-center p-6">
+    <CashierShell
+      statusBar={<StatusBar device={device} persisted={persisted} />}
+      mainClassName="grid place-items-center p-6"
+    >
       <title>الكاشير · Serva POS</title>
       <Routes>
-        <Route index element={device ? <PinScreen /> : <NotLinked />} />
+        <Route index element={loading ? null : device ? <PinScreen /> : <NotLinked />} />
         <Route path="*" element={<Navigate to="/pos" replace />} />
       </Routes>
     </CashierShell>

@@ -63,6 +63,10 @@ const envSchema = z
     SESSION_RATE_LIMIT_PER_MINUTE: perMinute(300),
     /** Requests per minute per store, all its users and devices together */
     STORE_RATE_LIMIT_PER_MINUTE: perMinute(3000),
+    /** Requests per minute per device on the sync routes */
+    DEVICE_RATE_LIMIT_PER_MINUTE: perMinute(240),
+    /** Push batches per minute per device (17 › الحدود: a separate limit for the push) */
+    SYNC_PUSH_RATE_LIMIT_PER_MINUTE: perMinute(60),
     /**
      * Proxies in front of the server that may report the client address in X-Forwarded-For:
      * "false" (none, default) or their addresses/CIDR ranges, comma-separated. Never "true".

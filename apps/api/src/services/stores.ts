@@ -62,7 +62,8 @@ export async function registerStore(
       // Billing rows are not writable by the store role; this starts the default plan's trial.
       await tx.execute(sql`select subscription_start_trial(${now.toISOString()}::timestamptz)`);
 
-      await tx.insert(branches).values({ tenantId, code: '01', name: 'الفرع الرئيسي' });
+      // Branch codes are 3 digits: they go into every document number (INV-001-002-0000154).
+      await tx.insert(branches).values({ tenantId, code: '001', name: 'الفرع الرئيسي' });
 
       const createdRoles = await tx
         .insert(roles)

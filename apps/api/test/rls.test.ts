@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { eq, sql, type SQL } from 'drizzle-orm';
-import { branches, plans, registers, tenants, users, withTenant } from '@serva/db';
+import { branches, legalAcceptances, plans, tenants, users, withTenant } from '@serva/db';
 import { appDb, closeAppDb, makeApp, registerStore, resetDatabase } from './helpers';
 
 let app: FastifyInstance;
@@ -60,7 +60,7 @@ describe('row-level security between stores', () => {
   it('cannot write rows that belong to another store', async () => {
     const code = await pgErrorCode(
       withTenant(appDb().db, storeA.tenantId, (tx) =>
-        tx.insert(branches).values({ tenantId: storeB.tenantId, code: '99', name: 'فرع مزروع' }),
+        tx.insert(branches).values({ tenantId: storeB.tenantId, code: '099', name: 'فرع مزروع' }),
       ),
     );
     expect(code).toBe('42501'); // row-level security violation
@@ -80,12 +80,16 @@ describe('row-level security between stores', () => {
   it("cannot link its records to another store's records, even knowing their ids", async () => {
     const code = await pgErrorCode(
       withTenant(appDb().db, storeA.tenantId, (tx) =>
-        tx
-          .insert(registers)
-          .values({ tenantId: storeA.tenantId, branchId: storeB.branchId, code: '09', name: 'x' }),
+        tx.insert(legalAcceptances).values({
+          tenantId: storeA.tenantId,
+          userId: storeB.userId,
+          document: 'terms',
+          documentVersion: '1',
+          context: 'probe',
+        }),
       ),
     );
-    expect(code).toBe('23503'); // composite foreign key (tenant_id, branch_id)
+    expect(code).toBe('23503'); // composite foreign key (tenant_id, user_id)
   });
 
   it('cannot read platform admin accounts', async () => {
