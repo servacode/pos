@@ -12,6 +12,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 load_env
 
+# Invert one byte in place. Writing a fixed value could leave the file unchanged
+# when that byte already had the value (about 1 run in 256 for a random file).
+flip_byte() {
+  local file="$1" offset="$2" byte
+  byte="$(dd if="$file" bs=1 skip="$offset" count=1 status=none | od -An -tu1 | tr -d ' ')"
+  printf "\\x$(printf '%02x' $((byte ^ 255)))" | dd of="$file" bs=1 seek="$offset" conv=notrunc status=none
+}
+
 psql_live() { dc exec -T -u postgres postgres psql --no-psqlrc -X -tA -v ON_ERROR_STOP=1 -d serva "$@"; }
 
 hardening() {
@@ -73,13 +81,13 @@ negative() {
   # A damaged file (one byte changed in the middle)
   mkdir "$work/damaged"
   cp "$source".* "$work/damaged/"
-  printf '\xff' | dd of="$work/damaged/$name.dump.enc" bs=1 seek=4096 conv=notrunc status=none
+  flip_byte "$work/damaged/$name.dump.enc" 4096
   expect_drill_failure "a damaged file" "$work/damaged/$name.dump.enc"
 
   # A damaged file whose checksum files were updated to match: decryption or the dump checksum stops it
   mkdir "$work/rehashed"
   cp "$source".* "$work/rehashed/"
-  printf '\xff' | dd of="$work/rehashed/$name.dump.enc" bs=1 seek=4096 conv=notrunc status=none
+  flip_byte "$work/rehashed/$name.dump.enc" 4096
   local new_sha
   new_sha="$(sha256sum < "$work/rehashed/$name.dump.enc" | cut -d' ' -f1)"
   printf '%s  %s\n' "$new_sha" "$name.dump.enc" > "$work/rehashed/$name.dump.enc.sha256"
