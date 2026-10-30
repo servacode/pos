@@ -21,6 +21,28 @@ export default tseslint.config(
     },
   },
   {
+    // The store context of row-level security is set only by withTenant() in packages/db. Raw SQL
+    // or a set_config call elsewhere could switch stores, so both are refused outside packages/db.
+    files: ['apps/api/**/*.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        { object: 'sql', property: 'raw', message: 'sql.raw is only allowed inside packages/db.' },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'TemplateElement[value.raw=/set_config|app\\.tenant_id/i]',
+          message: 'The store context is set only by withTenant() in packages/db.',
+        },
+        {
+          selector: 'Literal[value=/set_config|app\\.tenant_id/i]',
+          message: 'The store context is set only by withTenant() in packages/db.',
+        },
+      ],
+    },
+  },
+  {
     files: ['apps/web/**/*.{ts,tsx}'],
     languageOptions: {
       globals: { ...globals.browser },
