@@ -13,9 +13,14 @@ export class AppError extends Error {
     this.name = 'AppError';
   }
 
-  toBody(): ApiErrorBody {
+  toBody(ref?: string): ApiErrorBody {
     return {
-      error: { code: this.code, message: this.message, ...(this.fields ? { fields: this.fields } : {}) },
+      error: {
+        code: this.code,
+        message: this.message,
+        ...(this.fields ? { fields: this.fields } : {}),
+        ...(ref ? { ref } : {}),
+      },
     };
   }
 }

@@ -107,6 +107,7 @@ describe('POST /v1/auth/login', () => {
       expect(res.json().error).toEqual({
         code: 'invalid_credentials',
         message: 'رقم الجوال أو كلمة المرور غير صحيحة.',
+        ref: expect.any(String),
       });
     }
   });

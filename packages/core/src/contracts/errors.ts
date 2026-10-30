@@ -1,13 +1,18 @@
 /** Stable error codes returned by the API. Messages are Arabic and safe to show to the user. */
 export const ERROR_CODES = [
   'validation_failed',
+  'bad_request',
   'phone_taken',
   'invalid_credentials',
   'unauthorized',
   'forbidden',
   'not_found',
+  'method_not_allowed',
   /** The request repeats one that just happened (e.g. two tabs refreshing at once): retry */
   'conflict',
+  /** 413: split the request (e.g. a sync batch) into smaller ones */
+  'payload_too_large',
+  'unsupported_media_type',
   'rate_limited',
   /** The server is too busy to take this request now (503): retry shortly */
   'unavailable',
@@ -22,5 +27,7 @@ export interface ApiErrorBody {
     message: string;
     /** Field name → Arabic message, for form validation errors */
     fields?: Record<string, string>;
+    /** Short reference shown to the user; the same id as the request in the server logs */
+    ref?: string;
   };
 }

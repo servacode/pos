@@ -1,15 +1,15 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { createDb, type DbHandle } from '@serva/db';
-import type { ApiErrorBody } from '@serva/core';
 import { PasswordHasher } from './auth/passwords';
 import { SessionGate } from './auth/session-gate';
 import { systemClock, type Clock } from './clock';
 import type { Env } from './env';
-import { AppError } from './errors';
 import { clientAddressing, clientIp } from './http/client-ip';
-import { postgresRateLimitStore, RATE_LIMITED_MESSAGE } from './http/rate-limit';
+import { installErrorHandling } from './http/error-handler';
+import { loggerOptions, newRequestRef } from './http/logging';
+import { postgresRateLimitStore } from './http/rate-limit';
 import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
@@ -21,21 +21,23 @@ export interface BuildAppOptions {
   database?: DbHandle;
   /** Source of time; tests pass a ManualClock */
   clock?: Clock;
+  /** Where logs go (tests capture them); stdout by default */
+  logStream?: NodeJS.WritableStream;
 }
-
-const errorBody = (code: ApiErrorBody['error']['code'], message: string): ApiErrorBody => ({
-  error: { code, message },
-});
 
 export async function buildApp({
   env,
   database,
   clock = systemClock,
+  logStream,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const addressing = clientAddressing(env.TRUST_PROXY);
   const app = Fastify({
-    logger: env.LOG_LEVEL === 'silent' ? false : { level: env.LOG_LEVEL },
+    logger: loggerOptions(env.LOG_LEVEL, logStream),
     trustProxy: addressing.trustProxy,
+    // Our own short id (the `ref` users see); a client-sent request id is never trusted.
+    genReqId: newRequestRef,
+    requestIdHeader: false,
     bodyLimit: 1024 * 1024,
   });
 
@@ -52,6 +54,10 @@ export async function buildApp({
   app.decorateRequest('auth', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());
 
+  // JSON only. Fastify also parses text/plain by default, which browsers send cross-site without a
+  // CORS preflight; refusing it (415) closes that route to cookie-carrying requests.
+  app.removeContentTypeParser('text/plain');
+
   await app.register(cookie);
   // Every route is limited per client address; routes can set stricter limits (sign-in) or opt out
   // (health). Counters live in Postgres, shared by all instances and kept across restarts.
@@ -64,19 +70,7 @@ export async function buildApp({
     errorResponseBuilder: () => ({ statusCode: 429, code: 'rate_limited' }),
   });
 
-  app.setErrorHandler((error: FastifyError | AppError, request, reply) => {
-    if (error instanceof AppError) return reply.status(error.statusCode).send(error.toBody());
-    const status = error.statusCode ?? 500;
-    if (status === 429) {
-      return reply.status(429).send(errorBody('rate_limited', RATE_LIMITED_MESSAGE));
-    }
-    if (status >= 400 && status < 500) {
-      return reply.status(400).send(errorBody('validation_failed', 'الطلب غير صالح.'));
-    }
-    request.log.error(error);
-    return reply.status(500).send(errorBody('internal', 'حدث خطأ غير متوقع. حاول مجدداً بعد قليل.'));
-  });
-  app.setNotFoundHandler((_request, reply) => reply.status(404).send(errorBody('not_found', 'غير موجود.')));
+  installErrorHandling(app);
 
   await app.register(healthRoutes);
   await app.register(authRoutes);
