@@ -1,0 +1,2 @@
+# Stryker sandbox, removed after each run (the mutation report goes to coverage/mutation)
+.stryker-tmp

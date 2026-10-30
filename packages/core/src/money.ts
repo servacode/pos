@@ -1,18 +1,20 @@
-import { CURRENCIES, type CurrencyCode } from './currencies';
-import { toLatinDigits } from './text';
+import { getCurrency, type CurrencyId } from './currencies';
+import { stripBidiControls, toLatinDigits } from './text';
 
 /**
  * Money is always an integer number of minor units (12.50 USD = 1250).
  * Quantities are integers in thousandths (0.250 kg = 250), percentages are basis points (15% = 1500),
- * and exchange rates are decimal strings with up to RATE_SCALE decimals. All arithmetic is integer
+ * and exchange rates are direct decimal strings (≥ 1, up to RATE_SCALE decimals). All arithmetic is integer
  * (BigInt where products can grow) and every rounding goes through roundDiv (half away from zero).
  */
 
 /** Quantities are stored in thousandths: 1 piece = 1000. */
 export const QTY_SCALE = 1000;
 
-/** Exchange rates carry at most this many decimal places ("0.000077"). */
+/** Exchange rates carry at most this many decimal places ("13000.125"). */
 export const RATE_SCALE = 6;
+
+const RATE_ONE = 10n ** BigInt(RATE_SCALE);
 
 const BP_SCALE = 10_000n;
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
@@ -34,13 +36,6 @@ function toSafeNumber(value: bigint, name: string): number {
 
 function pow10(exponent: number): bigint {
   return 10n ** BigInt(exponent);
-}
-
-function currencyInfo(currency: CurrencyCode) {
-  if (!Object.hasOwn(CURRENCIES, currency)) {
-    throw new RangeError(`unknown currency ${JSON.stringify(currency)}`);
-  }
-  return CURRENCIES[currency];
 }
 
 /** Integer division rounding half away from zero. The single rounding rule for all money math. */
@@ -82,16 +77,25 @@ export function sumMinor(values: readonly number[]): number {
 
 /**
  * Splits `total` across `weights` with the largest-remainder method; the shares always sum exactly to
- * `total`. Leftover units go to the largest fractional remainder, then the larger weight, then the lower
- * index. All-zero weights split as evenly as possible (earlier indexes get the extra units).
+ * `total`. Leftover units go to the largest fractional remainder, then the larger weight, then the smaller
+ * key. `keys` are stable unique ids such as invoice line numbers (spec 10: «الترتيب برقم السطر الثابت»): with
+ * them each weight gets the same share whatever the order of the arrays. Without keys the index is the key.
+ * All-zero weights split as evenly as possible (the smallest keys get the extra units).
  * A negative total is allocated as the mirror image of the positive one.
  */
-export function allocate(total: number, weights: readonly number[]): number[] {
+export function allocate(total: number, weights: readonly number[], keys?: readonly number[]): number[] {
   assertSafeInteger(total, 'total');
   for (const [i, weight] of weights.entries()) {
     if (!Number.isSafeInteger(weight) || weight < 0) {
       throw new RangeError(`weights[${i}] must be a non-negative safe integer, got ${String(weight)}`);
     }
+  }
+  if (keys !== undefined) {
+    if (keys.length !== weights.length) {
+      throw new RangeError(`allocate: expected one key per weight (${weights.length}), got ${keys.length}`);
+    }
+    for (const [i, key] of keys.entries()) assertSafeInteger(key, `keys[${i}]`);
+    if (new Set(keys).size !== keys.length) throw new RangeError('allocate: keys must be unique');
   }
   if (total === 0) return weights.map(() => 0);
   if (weights.length === 0) throw new RangeError('allocate: cannot split a non-zero total across no weights');
@@ -99,39 +103,33 @@ export function allocate(total: number, weights: readonly number[]): number[] {
   const sign = total < 0 ? -1n : 1n;
   const amount = BigInt(Math.abs(total));
   const weightSum = weights.reduce((acc, weight) => acc + BigInt(weight), 0n);
-
-  let shares: bigint[];
-  if (weightSum === 0n) {
-    const count = BigInt(weights.length);
-    const base = amount / count;
-    const extra = amount % count;
-    shares = weights.map((_, i) => base + (BigInt(i) < extra ? 1n : 0n));
-  } else {
-    const remainders: bigint[] = [];
-    shares = weights.map((weight) => {
-      const product = amount * BigInt(weight);
-      remainders.push(product % weightSum);
-      return product / weightSum;
-    });
-    // Remainders share the denominator weightSum, so they compare directly.
-    const order = weights
-      .map((weight, index) => ({ index, weight, remainder: remainders[index] ?? 0n }))
-      .sort((a, b) => {
-        if (a.remainder !== b.remainder) return a.remainder > b.remainder ? -1 : 1;
-        if (a.weight !== b.weight) return b.weight - a.weight;
-        return a.index - b.index;
-      });
-    let leftover = amount - shares.reduce((acc, share) => acc + share, 0n);
-    for (const { index } of order) {
-      if (leftover === 0n) break;
-      shares[index] = (shares[index] ?? 0n) + 1n;
-      leftover -= 1n;
-    }
+  // All-zero weights count as equal weights: every remainder ties and the keys decide the extra units.
+  const evenSplit = weightSum === 0n;
+  const entries = weights.map((weight, index) => {
+    const numerator = evenSplit ? amount : amount * BigInt(weight);
+    const denominator = evenSplit ? BigInt(weights.length) : weightSum;
+    return {
+      weight,
+      key: keys?.[index] ?? index,
+      share: numerator / denominator,
+      // Remainders share one denominator, so they compare directly.
+      remainder: numerator % denominator,
+    };
+  });
+  let leftover = amount - entries.reduce((acc, entry) => acc + entry.share, 0n);
+  const byPriority = [...entries].sort((a, b) => {
+    if (a.remainder !== b.remainder) return a.remainder > b.remainder ? -1 : 1;
+    if (a.weight !== b.weight) return b.weight - a.weight;
+    return a.key < b.key ? -1 : 1; // keys are unique, so never equal
+  });
+  for (const entry of byPriority) {
+    if (leftover === 0n) break;
+    entry.share += 1n;
+    leftover -= 1n;
   }
-  return shares.map((share) => Number(share * sign));
+  return entries.map((entry) => Number(entry.share * sign));
 }
 
-const BIDI_MARKS = /[‎‏؜‪-‮⁦-⁩]/g;
 const DECIMAL_PATTERN = /^([+-]?)(\d{1,3}(?:,\d{3})+|\d*)(?:\.(\d*))?$/;
 
 interface DecimalParts {
@@ -140,14 +138,10 @@ interface DecimalParts {
   fracDigits: string;
 }
 
-/** Normalizes Arabic digits and separators (٫ decimal, ٬ thousands) and splits a decimal string. */
+/** Normalizes Arabic digits, separators (٫ decimal, ٬ thousands) and «−», then splits a decimal string. */
 function splitDecimal(input: string): DecimalParts {
   if (typeof input !== 'string') throw new RangeError('decimal input must be a string');
-  const normalized = toLatinDigits(input)
-    .replace(BIDI_MARKS, '')
-    .trim()
-    .replaceAll('٫', '.')
-    .replaceAll('٬', ',');
+  const normalized = stripBidiControls(toLatinDigits(input)).trim();
   const match = DECIMAL_PATTERN.exec(normalized);
   const intPart = match?.[2] ?? '';
   const fracPart = match?.[3] ?? '';
@@ -175,7 +169,11 @@ export function parseDecimal(input: string, scale: number): bigint {
   return negative ? -magnitude : magnitude;
 }
 
-/** Parses an exchange rate into an integer scaled by 10^RATE_SCALE. It must be > 0 with ≤ 6 decimals. */
+/**
+ * Parses a direct exchange rate into an integer scaled by 10^RATE_SCALE. It must have ≤ 6 decimals and be
+ * ≥ 1: a rate is always entered as units of the weaker currency per one unit of the stronger (pounds per
+ * dollar), never inverted, because an inverse rounded to six places is off by up to 0.1%.
+ */
 export function parseRate(rate: string): bigint {
   const { fracDigits } = splitDecimal(rate);
   if (fracDigits.replace(/0+$/, '').length > RATE_SCALE) {
@@ -184,66 +182,149 @@ export function parseRate(rate: string): bigint {
   const scaled = parseDecimal(rate, RATE_SCALE);
   if (scaled <= 0n)
     throw new RangeError(`exchange rate must be greater than zero, got ${JSON.stringify(rate)}`);
+  if (scaled < RATE_ONE) {
+    throw new RangeError(
+      `exchange rate ${JSON.stringify(rate)} is inverted: enter how many units of the weaker currency ` +
+        'one unit of the stronger buys (e.g. pounds per dollar)',
+    );
+  }
   return scaled;
 }
 
 /** Parses a user-entered amount ("12.50", "١٬٢٥٠") into minor units of `currency`. */
-export function toMinor(amount: string, currency: CurrencyCode): number {
-  const { decimals } = currencyInfo(currency);
+export function toMinor(amount: string, currency: CurrencyId): number {
+  const { decimals } = getCurrency(currency);
   return toSafeNumber(parseDecimal(amount, decimals), 'amount');
 }
 
 export interface FormatMoneyOptions {
   /** 'latn' (default): 1,250.00 — 'arab': ١٬٢٥٠٫٠٠ */
   digits?: 'latn' | 'arab';
-  /** Append the currency symbol after a space (default true). */
+  /** Append the currency symbol after the number (default true). */
   symbol?: boolean;
+  /**
+   * Fraction digits to show, 0–6. Defaults to the currency's displayDecimals (new pound 0, dollar 2); a
+   * store setting may override it. Display only: hidden fractions round half away from zero.
+   */
+  decimals?: number;
   /** Drop the fraction when it is all zeros (1,250 instead of 1,250.00). */
   trimZeros?: boolean;
+  /**
+   * 'auto' (default): «−» before a negative amount. 'never': the magnitude only, for balances that show
+   * «له» / «عليه» with a direction icon instead of a sign (spec 14).
+   */
+  signDisplay?: 'auto' | 'never';
+  /**
+   * Plain text for CSV export, ESC/POS receipts and pole displays: no bidi controls and an ASCII "-",
+   * because thermal-printer code pages have neither. Screens use the default isolated form.
+   */
+  plain?: boolean;
 }
 
-const ARABIC_CHARS: Record<string, string> = {
-  '0': '٠',
-  '1': '١',
-  '2': '٢',
-  '3': '٣',
-  '4': '٤',
-  '5': '٥',
-  '6': '٦',
-  '7': '٧',
-  '8': '٨',
-  '9': '٩',
-  ',': '٬',
-  '.': '٫',
-};
+const MAX_DISPLAY_DECIMALS = 6;
+const LRI = '\u2066'; // LEFT-TO-RIGHT ISOLATE
+const RLI = '\u2067'; // RIGHT-TO-LEFT ISOLATE
+const PDI = '\u2069'; // POP DIRECTIONAL ISOLATE
+const MINUS_SIGN = '\u2212';
 
-/** Formats minor units for display, e.g. formatMoney(125000, 'SYP') → "1,250.00 ل.س". Locale-independent. */
-export function formatMoney(minor: number, currency: CurrencyCode, opts: FormatMoneyOptions = {}): string {
-  assertSafeInteger(minor, 'minor');
-  const { decimals, symbolAr } = currencyInfo(currency);
-  const digits = String(Math.abs(minor)).padStart(decimals + 1, '0');
-  const intPart = digits.slice(0, digits.length - decimals);
-  const fracPart = digits.slice(digits.length - decimals);
+const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
-  let text = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  if (fracPart !== '' && !(opts.trimZeros && /^0+$/.test(fracPart))) text += `.${fracPart}`;
-  if (minor < 0) text = `-${text}`;
-  if (opts.digits === 'arab') text = text.replace(/[\d,.]/g, (ch) => ARABIC_CHARS[ch] ?? ch);
-  if (opts.symbol ?? true) text += ` ${symbolAr}`;
-  return text;
+/** "1,250.50" → "١٬٢٥٠٫٥٠": Arabic-Indic digits with the Arabic thousands and decimal separators. */
+function toArabicNumerals(latin: string): string {
+  return latin.replace(/[\d,.]/g, (ch) =>
+    ch === ',' ? '٬' : ch === '.' ? '٫' : ARABIC_DIGITS.charAt(Number(ch)),
+  );
 }
 
 /**
- * Converts minor units of `from` into minor units of `to`. `rate` is how many units of `to` one unit of
- * `from` buys (USD→SYP "13000", SYP→USD "0.000077"). Same currency returns the amount unchanged.
+ * Formats minor units for display, locale-independent: formatMoney(125000, 'SYP') shows "1,250 ل.س".
+ * Spec 14 bidi rules: the signed number sits in a left-to-right isolate, so «−» stays on the left of the
+ * digits inside Arabic text, and the number with its symbol sits in a right-to-left isolate, so the symbol
+ * follows the number and nothing around the amount can reorder it. The minus is U+2212, never a hyphen.
+ * toMinor and parseDecimal accept the result back.
  */
-export function convert(minor: number, from: CurrencyCode, to: CurrencyCode, rate: string): number {
+export function formatMoney(minor: number, currency: CurrencyId, opts: FormatMoneyOptions = {}): string {
   assertSafeInteger(minor, 'minor');
-  const source = currencyInfo(from);
-  const target = currencyInfo(to);
+  const { decimals: stored, displayDecimals, symbolAr } = getCurrency(currency);
+  const shown = opts.decimals ?? displayDecimals;
+  if (!Number.isInteger(shown) || shown < 0 || shown > MAX_DISPLAY_DECIMALS) {
+    throw new RangeError(`decimals must be an integer between 0 and ${MAX_DISPLAY_DECIMALS}, got ${shown}`);
+  }
+  const signDisplay = opts.signDisplay ?? 'auto';
+  if (signDisplay !== 'auto' && signDisplay !== 'never') {
+    throw new RangeError(`signDisplay must be 'auto' or 'never', got ${JSON.stringify(signDisplay)}`);
+  }
+
+  const exact = BigInt(Math.abs(minor));
+  const magnitude = shown < stored ? roundDiv(exact, pow10(stored - shown)) : exact * pow10(shown - stored);
+  const digits = magnitude.toString().padStart(shown + 1, '0');
+  const intPart = digits.slice(0, digits.length - shown);
+  const fracPart = digits.slice(digits.length - shown);
+
+  let text = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  if (fracPart !== '' && !(opts.trimZeros && /^0+$/.test(fracPart))) text += `.${fracPart}`;
+  if (opts.digits === 'arab') text = toArabicNumerals(text);
+  // An amount that displays as zero gets no sign.
+  const negative = minor < 0 && magnitude > 0n && signDisplay === 'auto';
+  const withSymbol = opts.symbol ?? true;
+
+  if (opts.plain) return `${negative ? '-' : ''}${text}${withSymbol ? ` ${symbolAr}` : ''}`;
+  const number = `${LRI}${negative ? MINUS_SIGN : ''}${text}${PDI}`;
+  return withSymbol ? `${RLI}${number} ${symbolAr}${PDI}` : number;
+}
+
+/**
+ * The one direct rate stored per currency pair: one `unit` is worth `rate` units of `quote`, quoted so the
+ * rate is ≥ 1 (pounds per dollar: { unit: 'USD', quote: 'SYP', rate: '130' }). The reverse direction
+ * divides by the same rate; there is no inverted rate.
+ */
+export interface ExchangeRate {
+  unit: CurrencyId;
+  quote: CurrencyId;
+  rate: string;
+}
+
+/** The fixed rate between two currencies (1 new pound = 100 old), or undefined when their rate floats. */
+export function fixedRate(a: CurrencyId, b: CurrencyId): ExchangeRate | undefined {
+  const ofA = getCurrency(a).fixedRate;
+  if (ofA?.unit === b) return { unit: b, quote: a, rate: ofA.rate };
+  const ofB = getCurrency(b).fixedRate;
+  if (ofB?.unit === a) return { unit: a, quote: b, rate: ofB.rate };
+  return undefined;
+}
+
+function resolveRate(from: CurrencyId, to: CurrencyId, rate: ExchangeRate | undefined): ExchangeRate {
+  const fixed = fixedRate(from, to);
+  if (rate === undefined) {
+    if (fixed) return fixed;
+    throw new RangeError(`an exchange rate is needed to convert ${from} to ${to}`);
+  }
+  const samePair = (rate.unit === from && rate.quote === to) || (rate.unit === to && rate.quote === from);
+  if (!samePair) {
+    throw new RangeError(`a ${rate.unit}/${rate.quote} rate cannot convert ${from} to ${to}`);
+  }
+  if (fixed && (rate.unit !== fixed.unit || parseRate(rate.rate) !== parseRate(fixed.rate))) {
+    throw new RangeError(`${fixed.quote} is fixed at ${fixed.rate} per ${fixed.unit}`);
+  }
+  return rate;
+}
+
+/**
+ * Converts minor units of `from` into minor units of `to` with the pair's direct rate: unit → quote
+ * multiplies (12.50 $ at 130 = 1,625.00 ل.س), quote → unit divides (162,500.00 ل.س at 13,000 = 12.50 $
+ * exactly). Pairs with a fixed ratio (old ↔ new pound) need no rate, and a rate given for them must match.
+ * The same currency returns the amount unchanged.
+ */
+export function convert(minor: number, from: CurrencyId, to: CurrencyId, rate?: ExchangeRate): number {
+  assertSafeInteger(minor, 'minor');
+  const source = getCurrency(from);
+  const target = getCurrency(to);
   if (from === to) return minor;
-  const numerator = BigInt(minor) * parseRate(rate) * pow10(target.decimals);
-  const denominator = pow10(source.decimals) * pow10(RATE_SCALE);
+  const pair = resolveRate(from, to, rate);
+  const scaled = parseRate(pair.rate);
+  const toQuote = pair.unit === from;
+  const numerator = BigInt(minor) * (toQuote ? scaled : RATE_ONE) * pow10(target.decimals);
+  const denominator = pow10(source.decimals) * (toQuote ? RATE_ONE : scaled);
   return toSafeNumber(roundDiv(numerator, denominator), 'converted amount');
 }
 

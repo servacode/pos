@@ -1,8 +1,10 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   allocate,
   applyBasisPoints,
   convert,
+  fixedRate,
   formatMoney,
   lineGross,
   parseDecimal,
@@ -11,9 +13,10 @@ import {
   roundToStep,
   sumMinor,
   toMinor,
+  type ExchangeRate,
 } from './money';
-import type { CurrencyCode } from './currencies';
-import { seededRandom } from './test-random';
+import type { CurrencyId } from './currencies';
+import { stripBidiControls, toLatinDigits } from './text';
 
 describe('roundDiv', () => {
   it('rounds half away from zero', () => {
@@ -31,8 +34,8 @@ describe('roundDiv', () => {
   });
 
   it('rejects a non-positive denominator', () => {
-    expect(() => roundDiv(1n, 0n)).toThrow(RangeError);
-    expect(() => roundDiv(1n, -2n)).toThrow(RangeError);
+    expect(() => roundDiv(1n, 0n)).toThrow(/denominator must be positive/);
+    expect(() => roundDiv(1n, -2n)).toThrow(/denominator must be positive/);
   });
 });
 
@@ -52,9 +55,11 @@ describe('applyBasisPoints', () => {
   });
 
   it('rejects non-integers and overflow', () => {
-    expect(() => applyBasisPoints(1.5, 100)).toThrow(RangeError);
-    expect(() => applyBasisPoints(100, 0.5)).toThrow(RangeError);
-    expect(() => applyBasisPoints(Number.MAX_SAFE_INTEGER, 20000)).toThrow(RangeError);
+    expect(() => applyBasisPoints(1.5, 100)).toThrow(/minor must be a safe integer, got 1.5/);
+    expect(() => applyBasisPoints(100, 0.5)).toThrow(/bp must be a safe integer/);
+    expect(() => applyBasisPoints(Number.MAX_SAFE_INTEGER, 20000)).toThrow(
+      /applyBasisPoints result is outside the safe integer range/,
+    );
   });
 });
 
@@ -68,9 +73,9 @@ describe('lineGross', () => {
   });
 
   it('rejects non-integer inputs', () => {
-    expect(() => lineGross(1.25, 2000)).toThrow(RangeError);
-    expect(() => lineGross(125, 0.25)).toThrow(RangeError);
-    expect(() => lineGross(Number.MAX_SAFE_INTEGER, 2000)).toThrow(RangeError);
+    expect(() => lineGross(1.25, 2000)).toThrow(/unitPriceMinor/);
+    expect(() => lineGross(125, 0.25)).toThrow(/qtyThousandths/);
+    expect(() => lineGross(Number.MAX_SAFE_INTEGER, 2000)).toThrow(/line gross is outside/);
   });
 });
 
@@ -86,17 +91,23 @@ describe('roundToStep', () => {
   });
 
   it('rejects a non-positive step', () => {
-    expect(() => roundToStep(100, 0)).toThrow(RangeError);
-    expect(() => roundToStep(100, -5)).toThrow(RangeError);
+    for (const step of [0, -5, 2.5, Number.NaN]) {
+      expect(() => roundToStep(100, step), String(step)).toThrow(/step must be a positive safe integer/);
+    }
+    expect(() => roundToStep(1.5, 5)).toThrow(/minor must be a safe integer/);
+    expect(() => roundToStep(Number.MAX_SAFE_INTEGER, 4)).toThrow(/roundToStep result is outside/);
   });
 });
 
 describe('sumMinor', () => {
-  it('sums exactly and refuses overflow', () => {
+  it('sums exactly and refuses overflow in both directions', () => {
     expect(sumMinor([])).toBe(0);
     expect(sumMinor([266, 239, 904])).toBe(1409);
-    expect(() => sumMinor([Number.MAX_SAFE_INTEGER, 1])).toThrow(RangeError);
-    expect(() => sumMinor([1.5])).toThrow(RangeError);
+    expect(sumMinor([Number.MAX_SAFE_INTEGER])).toBe(Number.MAX_SAFE_INTEGER);
+    expect(sumMinor([-Number.MAX_SAFE_INTEGER])).toBe(-Number.MAX_SAFE_INTEGER);
+    expect(() => sumMinor([Number.MAX_SAFE_INTEGER, 1])).toThrow(/sum is outside the safe integer range/);
+    expect(() => sumMinor([-Number.MAX_SAFE_INTEGER, -1])).toThrow(/sum is outside the safe integer range/);
+    expect(() => sumMinor([1, 1.5])).toThrow(/values\[1\] must be a safe integer/);
   });
 });
 
@@ -106,7 +117,7 @@ describe('allocate', () => {
     expect(allocate(100, [250, 225, 850])).toEqual([19, 17, 64]);
   });
 
-  it('breaks remainder ties by larger weight, then lower index', () => {
+  it('breaks remainder ties by larger weight, then lower index when no keys are given', () => {
     expect(allocate(1, [1, 1, 1])).toEqual([1, 0, 0]);
     expect(allocate(2, [1, 1, 1])).toEqual([1, 1, 0]);
     expect(allocate(1, [3, 3, 6])).toEqual([0, 0, 1]); // largest remainder
@@ -115,6 +126,15 @@ describe('allocate', () => {
     expect(allocate(2, [3, 1])).toEqual([2, 0]);
     // Exact shares 0.5 / 1 / 1 / 0.5: equal remainders and weights, so the lower index wins.
     expect(allocate(3, [2, 4, 4, 2])).toEqual([1, 1, 1, 0]);
+  });
+
+  it('breaks the last ties by the smaller stable key (line_no), not by position', () => {
+    expect(allocate(1, [1, 1, 1], [30, 10, 20])).toEqual([0, 1, 0]);
+    expect(allocate(2, [1, 1, 1], [30, 10, 20])).toEqual([0, 1, 1]);
+    expect(allocate(3, [2, 4, 4, 2], [4, 3, 2, 1])).toEqual([0, 1, 1, 1]);
+    expect(allocate(2, [1, 3], [2, 1])).toEqual([0, 2]); // the larger weight still comes first
+    expect(allocate(10, [0, 0, 0], [3, 1, 2])).toEqual([3, 4, 3]);
+    expect(allocate(-10, [0, 0, 0], [3, 1, 2])).toEqual([-3, -4, -3]);
   });
 
   it('handles zero totals and zero weights', () => {
@@ -130,32 +150,72 @@ describe('allocate', () => {
   });
 
   it('rejects invalid input', () => {
-    expect(() => allocate(10, [1, -1])).toThrow(RangeError);
-    expect(() => allocate(10, [1.5])).toThrow(RangeError);
-    expect(() => allocate(1.5, [1])).toThrow(RangeError);
-    expect(() => allocate(10, [])).toThrow(RangeError);
+    expect(() => allocate(10, [1, -1])).toThrow(/weights\[1\] must be a non-negative safe integer, got -1/);
+    expect(() => allocate(10, [1.5])).toThrow(/weights\[0\]/);
+    expect(() => allocate(1.5, [1])).toThrow(/total must be a safe integer/);
+    expect(() => allocate(10, [])).toThrow(/cannot split a non-zero total across no weights/);
+    expect(() => allocate(10, [1, 1], [1])).toThrow(/one key per weight \(2\), got 1/);
+    expect(() => allocate(10, [1, 1], [1, 1])).toThrow(/keys must be unique/);
+    expect(() => allocate(10, [1, 1], [1, 1.5])).toThrow(/keys\[1\] must be a safe integer/);
   });
 
-  it('always sums exactly and stays within one unit of the exact share (seeded property test)', () => {
-    const rand = seededRandom(20261029);
-    for (let run = 0; run < 2000; run++) {
-      const total = rand.int(-1_000_000, 1_000_000);
-      const weights = Array.from({ length: rand.int(1, 12) }, () =>
-        rand.next() < 0.2 ? 0 : rand.int(0, rand.next() < 0.5 ? 100 : 10_000_000),
-      );
-      const shares = allocate(total, weights);
-      expect(shares).toHaveLength(weights.length);
-      expect(shares.reduce((a, b) => a + b, 0)).toBe(total);
-      expect(allocate(-total, weights)).toEqual(shares.map((s) => (s === 0 ? 0 : -s)));
-      const weightSum = BigInt(weights.reduce((a, b) => a + b, 0));
-      if (weightSum > 0n) {
-        shares.forEach((share, i) => {
-          // |share × W − total × w| < W
-          const diff = BigInt(share) * weightSum - BigInt(total) * BigInt(weights[i] ?? 0);
-          expect(diff < 0n ? -diff : diff).toBeLessThan(weightSum);
-        });
-      }
-    }
+  // Small weights and totals make remainder ties common; large ones exercise the BigInt range.
+  const weightsArb = fc.array(
+    fc.oneof(
+      { arbitrary: fc.integer({ min: 0, max: 4 }), weight: 3 },
+      { arbitrary: fc.integer({ min: 0, max: 10_000_000 }), weight: 1 },
+    ),
+    { minLength: 1, maxLength: 12 },
+  );
+  const totalArb = fc.oneof(
+    fc.integer({ min: -12, max: 12 }),
+    fc.integer({ min: -1_000_000, max: 1_000_000 }),
+  );
+
+  it('always sums exactly, mirrors negatives and stays within one unit of the exact share (property)', () => {
+    fc.assert(
+      fc.property(totalArb, weightsArb, (total, weights) => {
+        const shares = allocate(total, weights);
+        expect(shares).toHaveLength(weights.length);
+        expect(shares.reduce((a, b) => a + b, 0)).toBe(total);
+        expect(allocate(-total, weights)).toEqual(shares.map((s) => (s === 0 ? 0 : -s)));
+        const weightSum = BigInt(weights.reduce((a, b) => a + b, 0));
+        if (weightSum > 0n) {
+          shares.forEach((share, i) => {
+            // |share × W − total × w| < W
+            const diff = BigInt(share) * weightSum - BigInt(total) * BigInt(weights[i] ?? 0);
+            expect(diff < 0n ? -diff : diff).toBeLessThan(weightSum);
+          });
+        }
+      }),
+    );
+  });
+
+  it('gives every keyed weight the same share whatever the order (property)', () => {
+    const entriesArb = weightsArb.chain((weights) =>
+      fc
+        .uniqueArray(fc.integer({ min: 1, max: 10_000 }), {
+          minLength: weights.length,
+          maxLength: weights.length,
+        })
+        .map((keys) => weights.map((weight, i) => ({ weight, key: keys[i] ?? 0 }))),
+    );
+    const orderingsArb = entriesArb.chain((entries) =>
+      fc.tuple(fc.constant(entries), fc.shuffledSubarray(entries, { minLength: entries.length })),
+    );
+    fc.assert(
+      fc.property(totalArb, orderingsArb, (total, [entries, shuffled]) => {
+        const sharesByKey = (list: typeof entries) => {
+          const shares = allocate(
+            total,
+            list.map((e) => e.weight),
+            list.map((e) => e.key),
+          );
+          return new Map(list.map((e, i) => [e.key, shares[i]]));
+        };
+        expect(sharesByKey(shuffled)).toEqual(sharesByKey(entries));
+      }),
+    );
   });
 });
 
@@ -178,7 +238,9 @@ describe('parseDecimal', () => {
     expect(parseDecimal('١٬٢٣٤٫٥', 2)).toBe(123450n);
     expect(parseDecimal('١٬٢٣٤٬٥٦٧', 0)).toBe(1234567n);
     expect(parseDecimal('۱۲۳٫۴۵', 2)).toBe(12345n); // Persian digits
-    expect(parseDecimal('‏١٢٫٥٠‏', 2)).toBe(1250n); // RTL marks from copied text
+    expect(parseDecimal('\u200f١٢٫٥٠\u200f', 2)).toBe(1250n); // RTL marks from copied text
+    expect(parseDecimal('−١٢٫٥', 2)).toBe(-1250n); // minus sign U+2212
+    expect(parseDecimal('\u2066−1,250.00\u2069', 2)).toBe(-125000n); // isolated, as formatMoney writes it
   });
 
   it('rounds half away from zero beyond the scale', () => {
@@ -207,8 +269,14 @@ describe('parseDecimal', () => {
     ]) {
       expect(() => parseDecimal(bad, 2), bad).toThrow(RangeError);
     }
-    expect(() => parseDecimal('1', -1)).toThrow(RangeError);
-    expect(() => parseDecimal('1', 1.5)).toThrow(RangeError);
+    expect(() => parseDecimal('1.2.3', 2)).toThrow(/invalid decimal number "1.2.3"/);
+    expect(parseDecimal('1', 18)).toBe(10n ** 18n);
+    for (const scale of [-1, 1.5, 19]) {
+      expect(() => parseDecimal('1', scale), String(scale)).toThrow(
+        /scale must be an integer between 0 and 18/,
+      );
+    }
+    expect(() => parseDecimal(12 as unknown as string, 2)).toThrow(/must be a string/);
   });
 });
 
@@ -221,111 +289,261 @@ describe('toMinor', () => {
   });
 
   it('rejects overflow and unknown currencies', () => {
-    expect(() => toMinor('99999999999999999999', 'SYP')).toThrow(RangeError);
-    expect(() => toMinor('1', 'EUR' as CurrencyCode)).toThrow(RangeError);
+    expect(() => toMinor('99999999999999999999', 'SYP')).toThrow(/amount is outside the safe integer range/);
+    expect(() => toMinor('1', 'EUR' as CurrencyId)).toThrow(/unknown currency "EUR"/);
   });
 });
 
 describe('formatMoney', () => {
-  it('formats with Latin digits and the symbol after a space', () => {
-    expect(formatMoney(125000, 'SYP')).toBe('1,250.00 ل.س');
-    expect(formatMoney(1250, 'USD')).toBe('12.50 $');
-    expect(formatMoney(5, 'USD')).toBe('0.05 $');
-    expect(formatMoney(0, 'USD')).toBe('0.00 $');
-    expect(formatMoney(123456789, 'SYP', { symbol: false })).toBe('1,234,567.89');
-    expect(formatMoney(100000, 'SYP', { symbol: false })).toBe('1,000.00');
+  /** The isolated form formatMoney writes: RLI ⟨LRI number PDI⟩ symbol PDI, or LRI number PDI alone. */
+  const iso = (number: string, symbol?: string) =>
+    symbol === undefined ? `\u2066${number}\u2069` : `\u2067\u2066${number}\u2069 ${symbol}\u2069`;
+
+  it('isolates the number (LTR) and the amount with its symbol (RTL), symbol after the number', () => {
+    expect(formatMoney(1250, 'USD')).toBe(iso('12.50', '$'));
+    expect(formatMoney(5, 'USD')).toBe(iso('0.05', '$'));
+    expect(formatMoney(0, 'USD')).toBe(iso('0.00', '$'));
+    expect(formatMoney(123456789, 'USD', { symbol: false })).toBe(iso('1,234,567.89'));
   });
 
-  it('formats negative values with a leading minus', () => {
-    expect(formatMoney(-1250, 'USD')).toBe('-12.50 $');
-    expect(formatMoney(-125000, 'SYP', { trimZeros: true })).toBe('-1,250 ل.س');
+  it('shows the display decimals of the currency, not its stored decimals', () => {
+    // Spec 14: the new pound is stored in qirsh and shown without fractions by default.
+    expect(formatMoney(125000, 'SYP')).toBe(iso('1,250', 'ل.س'));
+    expect(formatMoney(125000, 'SYP', { decimals: 2 })).toBe(iso('1,250.00', 'ل.س'));
+    expect(formatMoney(125050, 'SYP', { decimals: 2, symbol: false })).toBe(iso('1,250.50'));
+    expect(formatMoney(1250, 'USD', { decimals: 4, symbol: false })).toBe(iso('12.5000'));
+    expect(formatMoney(125_000_000, 'SYP_OLD')).toBe(iso('1,250,000', 'ل.س قديمة'));
+  });
+
+  it('rounds hidden fractions half away from zero, for display only', () => {
+    expect(formatMoney(125050, 'SYP', { symbol: false })).toBe(iso('1,251'));
+    expect(formatMoney(125049, 'SYP', { symbol: false })).toBe(iso('1,250'));
+    expect(formatMoney(-125050, 'SYP', { symbol: false })).toBe(iso('−1,251'));
+    expect(formatMoney(1255, 'USD', { decimals: 1, symbol: false })).toBe(iso('12.6'));
+  });
+
+  it('writes negatives with the minus sign U+2212 inside the LTR isolate, never «−0»', () => {
+    expect(formatMoney(-1250, 'USD')).toBe(iso('−12.50', '$'));
+    expect(formatMoney(-125000, 'SYP')).toBe(iso('−1,250', 'ل.س'));
+    expect(formatMoney(-50, 'SYP', { symbol: false })).toBe(iso('−1'));
+    expect(formatMoney(-49, 'SYP', { symbol: false })).toBe(iso('0'));
+    expect(formatMoney(-1250, 'USD')).not.toContain('-');
+  });
+
+  it('drops the sign for balances shown as «له» / «عليه» (signDisplay: never)', () => {
+    expect(formatMoney(-500000, 'SYP', { signDisplay: 'never' })).toBe(iso('5,000', 'ل.س'));
+    expect(formatMoney(500000, 'SYP', { signDisplay: 'never' })).toBe(iso('5,000', 'ل.س'));
+    expect(formatMoney(-500000, 'SYP', { signDisplay: 'auto' })).toBe(iso('−5,000', 'ل.س'));
+  });
+
+  it('writes plain text for export, ESC/POS and pole displays: no controls, ASCII minus', () => {
+    expect(formatMoney(-125000, 'SYP', { plain: true })).toBe('-1,250 ل.س');
+    expect(formatMoney(-1250, 'USD', { plain: true, symbol: false })).toBe('-12.50');
+    expect(formatMoney(-125000, 'SYP', { plain: true, digits: 'arab' })).toBe('-١٬٢٥٠ ل.س');
+    expect(formatMoney(1250, 'USD', { plain: true })).toBe('12.50 $');
   });
 
   it('trims a zero fraction only', () => {
-    expect(formatMoney(125000, 'SYP', { trimZeros: true })).toBe('1,250 ل.س');
-    expect(formatMoney(125050, 'SYP', { trimZeros: true })).toBe('1,250.50 ل.س');
+    expect(formatMoney(125000, 'SYP', { decimals: 2, trimZeros: true })).toBe(iso('1,250', 'ل.س'));
+    expect(formatMoney(125050, 'SYP', { decimals: 2, trimZeros: true })).toBe(iso('1,250.50', 'ل.س'));
+    expect(formatMoney(125005, 'SYP', { decimals: 2, trimZeros: true })).toBe(iso('1,250.05', 'ل.س'));
   });
 
   it('formats with Arabic-Indic digits and separators', () => {
-    expect(formatMoney(123456789, 'SYP', { digits: 'arab' })).toBe('١٬٢٣٤٬٥٦٧٫٨٩ ل.س');
-    expect(formatMoney(1250, 'USD', { digits: 'arab' })).toBe('١٢٫٥٠ $');
-    expect(formatMoney(125000, 'SYP', { digits: 'arab', trimZeros: true, symbol: false })).toBe('١٬٢٥٠');
-    expect(formatMoney(-5, 'USD', { digits: 'arab' })).toBe('-٠٫٠٥ $');
+    expect(formatMoney(123456789, 'SYP', { digits: 'arab', decimals: 2 })).toBe(iso('١٬٢٣٤٬٥٦٧٫٨٩', 'ل.س'));
+    expect(formatMoney(1250, 'USD', { digits: 'arab' })).toBe(iso('١٢٫٥٠', '$'));
+    expect(formatMoney(125000, 'SYP', { digits: 'arab', symbol: false })).toBe(iso('١٬٢٥٠'));
+    expect(formatMoney(-5, 'USD', { digits: 'arab' })).toBe(iso('−٠٫٠٥', '$'));
   });
 
-  it('round-trips through toMinor in both digit sets', () => {
-    const rand = seededRandom(7);
-    for (let run = 0; run < 500; run++) {
-      const minor = rand.int(-1e12, 1e12);
-      for (const digits of ['latn', 'arab'] as const) {
-        expect(toMinor(formatMoney(minor, 'SYP', { digits, symbol: false }), 'SYP')).toBe(minor);
-      }
+  it('round-trips through toMinor in both digit sets at the stored decimals (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -1e12, max: 1e12 }),
+        fc.constantFrom<CurrencyId>('SYP', 'USD', 'SYP_OLD'),
+        fc.constantFrom('latn' as const, 'arab' as const),
+        fc.boolean(),
+        (minor, currency, digits, plain) => {
+          const text = formatMoney(minor, currency, { digits, plain, symbol: false, decimals: 2 });
+          expect(toMinor(text, currency)).toBe(minor);
+        },
+      ),
+    );
+  });
+
+  it('isolated and plain forms carry the same characters (property)', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: -1e12, max: 1e12 }), fc.boolean(), (minor, arab) => {
+        const digits = arab ? 'arab' : 'latn';
+        const isolated = formatMoney(minor, 'SYP', { digits });
+        expect(toLatinDigits(stripBidiControls(isolated))).toBe(
+          toLatinDigits(formatMoney(minor, 'SYP', { digits, plain: true })),
+        );
+      }),
+    );
+  });
+
+  it('rejects non-integer amounts, bad display decimals and unknown options', () => {
+    expect(() => formatMoney(12.5, 'USD')).toThrow(/minor must be a safe integer/);
+    expect(() => formatMoney(Number.NaN, 'USD')).toThrow(/minor must be a safe integer/);
+    expect(formatMoney(1, 'USD', { decimals: 6, symbol: false })).toBe(iso('0.010000'));
+    for (const decimals of [-1, 1.5, 7]) {
+      expect(() => formatMoney(1, 'USD', { decimals }), String(decimals)).toThrow(
+        /decimals must be an integer between 0 and 6/,
+      );
     }
-  });
-
-  it('rejects non-integer amounts', () => {
-    expect(() => formatMoney(12.5, 'USD')).toThrow(RangeError);
-    expect(() => formatMoney(Number.NaN, 'USD')).toThrow(RangeError);
+    expect(() => formatMoney(1, 'USD', { signDisplay: 'always' as 'auto' })).toThrow(
+      /signDisplay must be 'auto' or 'never', got "always"/,
+    );
+    expect(() => formatMoney(1, 'EUR' as CurrencyId)).toThrow(/unknown currency/);
   });
 });
 
 describe('parseRate', () => {
-  it('scales rates by 1e6 exactly', () => {
+  it('scales direct rates by 1e6 exactly', () => {
     expect(parseRate('13000')).toBe(13_000_000_000n);
+    expect(parseRate('130')).toBe(130_000_000n);
     expect(parseRate('3.75')).toBe(3_750_000n);
-    expect(parseRate('0.000077')).toBe(77n);
-    expect(parseRate('0.0000770')).toBe(77n); // trailing zeros are fine
+    expect(parseRate('1')).toBe(1_000_000n);
+    expect(parseRate('130.1234560')).toBe(130_123_456n); // trailing zeros are fine
+    expect(parseRate('130.12345600')).toBe(130_123_456n);
+    expect(parseRate('1.000000')).toBe(1_000_000n);
     expect(parseRate('١٣٬٠٠٠')).toBe(13_000_000_000n);
   });
 
+  it('rejects inverted rates (below 1)', () => {
+    // 1 / 13000 rounded to six places is 0.000077: 0.1% off, so it may never be entered.
+    for (const inverted of ['0.000077', '0.007692', '0.999999']) {
+      expect(() => parseRate(inverted), inverted).toThrow(
+        /is inverted: enter how many units of the weaker currency one unit of the stronger buys \(e\.g\. pounds per dollar\)/,
+      );
+    }
+  });
+
   it('rejects zero, negative, too precise and malformed rates', () => {
-    for (const bad of ['0', '0.000000', '-1', '0.0000001', '1.2345678', 'abc', '']) {
-      expect(() => parseRate(bad), bad).toThrow(RangeError);
+    for (const bad of ['0', '0.000000', '-1', '-13000']) {
+      expect(() => parseRate(bad), bad).toThrow(/must be greater than zero/);
+    }
+    for (const bad of ['1.2345678', '1.0000001', '130.00000010']) {
+      expect(() => parseRate(bad), bad).toThrow(/more than 6 decimal places/);
+    }
+    for (const bad of ['abc', '']) {
+      expect(() => parseRate(bad), bad).toThrow(/invalid decimal number/);
     }
   });
 });
 
 describe('convert', () => {
-  it('converts USD → SYP', () => {
-    expect(convert(1250, 'USD', 'SYP', '13000')).toBe(16_250_000); // 12.50 $ → 162,500.00 ل.س
-    expect(convert(1, 'USD', 'SYP', '13000')).toBe(13_000);
-    expect(convert(1250, 'USD', 'SYP', '13000.5')).toBe(16_250_625);
+  const usdSyp = (rate: string): ExchangeRate => ({ unit: 'USD', quote: 'SYP', rate });
+
+  it('multiplies from the unit currency to the quote currency', () => {
+    expect(convert(1250, 'USD', 'SYP', usdSyp('130'))).toBe(162_500); // 12.50 $ → 1,625.00 ل.س
+    expect(convert(1250, 'USD', 'SYP', usdSyp('13000'))).toBe(16_250_000);
+    expect(convert(1, 'USD', 'SYP', usdSyp('13000'))).toBe(13_000);
+    expect(convert(1250, 'USD', 'SYP', usdSyp('13000.5'))).toBe(16_250_625);
   });
 
-  it('converts SYP → USD with a small rate, rounding half away from zero', () => {
-    expect(convert(16_250_000, 'SYP', 'USD', '0.000077')).toBe(1251); // 12.5125 → 12.51
-    expect(convert(5000, 'SYP', 'USD', '0.0001')).toBe(1); // 0.5 cent → 1
-    expect(convert(4999, 'SYP', 'USD', '0.0001')).toBe(0);
-    expect(convert(-5000, 'SYP', 'USD', '0.0001')).toBe(-1);
+  it('divides by the same direct rate in the reverse direction (spec 10: 12.50 $, not 12.51)', () => {
+    expect(convert(16_250_000, 'SYP', 'USD', usdSyp('13000'))).toBe(1250); // 162,500.00 ل.س → 12.50 $
+    // 13,000,000.00 new pounds at 130 = 100,000.00 $ (the inverse 0.007692 gave 99,996.00).
+    expect(convert(1_300_000_000, 'SYP', 'USD', usdSyp('130'))).toBe(10_000_000);
+    expect(convert(6500, 'SYP', 'USD', usdSyp('13000'))).toBe(1); // 0.5 cent → 1
+    expect(convert(6499, 'SYP', 'USD', usdSyp('13000'))).toBe(0);
+    expect(convert(-6500, 'SYP', 'USD', usdSyp('13000'))).toBe(-1);
+  });
+
+  it('converts old pounds to dollars exactly (1,300,000.00 old → 100.00 $)', () => {
+    const usdOld: ExchangeRate = { unit: 'USD', quote: 'SYP_OLD', rate: '13000' };
+    expect(convert(130_000_000, 'SYP_OLD', 'USD', usdOld)).toBe(10_000);
+    // 1,300,000,000 old pounds of stock read 100,000.00 $ through the dollar lens, not 100,100.00 $.
+    expect(convert(130_000_000_000, 'SYP_OLD', 'USD', usdOld)).toBe(10_000_000);
+    expect(convert(10_000, 'USD', 'SYP_OLD', usdOld)).toBe(130_000_000);
+  });
+
+  it('converts old ↔ new pounds at the fixed 100 : 1 without a rate', () => {
+    expect(fixedRate('SYP_OLD', 'SYP')).toEqual({ unit: 'SYP', quote: 'SYP_OLD', rate: '100' });
+    expect(fixedRate('SYP', 'SYP_OLD')).toEqual({ unit: 'SYP', quote: 'SYP_OLD', rate: '100' });
+    expect(fixedRate('USD', 'SYP')).toBeUndefined();
+    expect(convert(125_000_000, 'SYP_OLD', 'SYP')).toBe(1_250_000); // 1,250,000 old → 12,500 new
+    expect(convert(1_250_000, 'SYP', 'SYP_OLD')).toBe(125_000_000);
+    expect(convert(123_456, 'SYP_OLD', 'SYP')).toBe(1235); // 1,234.56 old → 12.3456 → 12.35 new
+    expect(convert(500, 'SYP_OLD', 'SYP', { unit: 'SYP', quote: 'SYP_OLD', rate: '100.000' })).toBe(5);
+  });
+
+  it('converts to the weaker currency and back without losing a cent (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -1e11, max: 1e11 }),
+        fc.integer({ min: 1_000_000, max: 50_000_000_000 }), // 1.000000 … 50,000.000000
+        (minor, scaledRate) => {
+          const rate = usdSyp((scaledRate / 1e6).toFixed(6));
+          const pounds = convert(minor, 'USD', 'SYP', rate);
+          expect(convert(pounds, 'SYP', 'USD', rate)).toBe(minor);
+        },
+      ),
+    );
   });
 
   it('returns the amount unchanged for the same currency', () => {
-    expect(convert(1234, 'USD', 'USD', 'not a rate')).toBe(1234);
+    expect(convert(1234, 'USD', 'USD')).toBe(1234);
+    expect(convert(1234, 'SYP', 'SYP', usdSyp('not a rate'))).toBe(1234);
   });
 
-  it('rejects bad rates and overflow', () => {
-    expect(() => convert(100, 'USD', 'SYP', '0')).toThrow(RangeError);
-    expect(() => convert(100, 'USD', 'SYP', '-13000')).toThrow(RangeError);
-    expect(() => convert(100, 'SYP', 'USD', '0.0000001')).toThrow(RangeError);
-    expect(() => convert(Number.MAX_SAFE_INTEGER, 'USD', 'SYP', '13000')).toThrow(RangeError);
-    expect(() => convert(1.5, 'USD', 'SYP', '13000')).toThrow(RangeError);
+  it('rejects inverted, missing, mismatched and bad rates, and overflow', () => {
+    expect(() => convert(100, 'SYP', 'USD', { unit: 'SYP', quote: 'USD', rate: '0.000077' })).toThrow(
+      /inverted/,
+    );
+    expect(() => convert(100, 'USD', 'SYP')).toThrow(/an exchange rate is needed to convert USD to SYP/);
+    // A rate must name exactly the two currencies being converted, in either direction.
+    for (const rate of [
+      usdSyp('130'),
+      { unit: 'SYP', quote: 'USD', rate: '130' },
+      { unit: 'SYP_OLD', quote: 'SYP', rate: '100' },
+      { unit: 'SYP', quote: 'SYP_OLD', rate: '100' },
+      { unit: 'USD', quote: 'USD', rate: '1' },
+    ] satisfies ExchangeRate[]) {
+      expect(() => convert(100, 'USD', 'SYP_OLD', rate), JSON.stringify(rate)).toThrow(
+        /cannot convert USD to SYP_OLD/,
+      );
+    }
+    expect(() => convert(100, 'USD', 'SYP', { unit: 'SYP_OLD', quote: 'USD', rate: '100' })).toThrow(
+      /a SYP_OLD\/USD rate cannot convert/,
+    );
+    expect(() => convert(100, 'SYP_OLD', 'SYP', { unit: 'SYP', quote: 'SYP_OLD', rate: '99' })).toThrow(
+      /SYP_OLD is fixed at 100 per SYP/,
+    );
+    expect(() => convert(100, 'SYP_OLD', 'SYP', { unit: 'SYP_OLD', quote: 'SYP', rate: '100' })).toThrow(
+      /fixed/,
+    );
+    expect(() => convert(100, 'USD', 'SYP', usdSyp('0'))).toThrow(/greater than zero/);
+    expect(() => convert(100, 'USD', 'SYP', usdSyp('-13000'))).toThrow(/greater than zero/);
+    expect(() => convert(Number.MAX_SAFE_INTEGER, 'USD', 'SYP', usdSyp('13000'))).toThrow(
+      /converted amount is outside/,
+    );
+    expect(() => convert(1.5, 'USD', 'SYP', usdSyp('13000'))).toThrow(/minor must be a safe integer/);
+    expect(() => convert(100, 'EUR' as CurrencyId, 'SYP', usdSyp('130'))).toThrow(/unknown currency/);
   });
 });
 
 describe('refunds mirror sales (negative amounts)', () => {
-  it('every rounding helper is symmetric around zero (seeded property test)', () => {
-    const rand = seededRandom(42);
-    for (let run = 0; run < 2000; run++) {
-      const amount = rand.int(1, 50_000_000);
-      const qty = rand.int(1, 100_000);
-      const bp = rand.int(0, 10_000);
-      const step = rand.int(1, 5000);
-      expect(lineGross(-amount, qty) + lineGross(amount, qty)).toBe(0);
-      expect(applyBasisPoints(-amount, bp) + applyBasisPoints(amount, bp)).toBe(0);
-      expect(roundToStep(-amount, step) + roundToStep(amount, step)).toBe(0);
-      expect(convert(-amount, 'SYP', 'USD', '0.000077') + convert(amount, 'SYP', 'USD', '0.000077')).toBe(0);
-      expect(convert(-amount, 'USD', 'SYP', '13000') + convert(amount, 'USD', 'SYP', '13000')).toBe(0);
-      expect(roundDiv(BigInt(-amount), BigInt(qty))).toBe(-roundDiv(BigInt(amount), BigInt(qty)));
-    }
+  it('every rounding helper is symmetric around zero (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 50_000_000 }),
+        fc.integer({ min: 1, max: 100_000 }),
+        fc.integer({ min: 0, max: 10_000 }),
+        fc.integer({ min: 1, max: 5000 }),
+        fc.integer({ min: 1_000_000, max: 20_000_000_000 }),
+        (amount, qty, bp, step, scaledRate) => {
+          expect(lineGross(-amount, qty) + lineGross(amount, qty)).toBe(0);
+          expect(applyBasisPoints(-amount, bp) + applyBasisPoints(amount, bp)).toBe(0);
+          expect(roundToStep(-amount, step) + roundToStep(amount, step)).toBe(0);
+          const rate: ExchangeRate = { unit: 'USD', quote: 'SYP', rate: (scaledRate / 1e6).toFixed(6) };
+          expect(convert(-amount, 'SYP', 'USD', rate) + convert(amount, 'SYP', 'USD', rate)).toBe(0);
+          expect(convert(-amount, 'USD', 'SYP', rate) + convert(amount, 'USD', 'SYP', rate)).toBe(0);
+          expect(roundDiv(BigInt(-amount), BigInt(qty))).toBe(-roundDiv(BigInt(amount), BigInt(qty)));
+        },
+      ),
+    );
   });
 });
