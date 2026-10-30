@@ -179,6 +179,8 @@ describe('parseDecimal', () => {
     expect(parseDecimal('١٬٢٣٤٬٥٦٧', 0)).toBe(1234567n);
     expect(parseDecimal('۱۲۳٫۴۵', 2)).toBe(12345n); // Persian digits
     expect(parseDecimal('‏١٢٫٥٠‏', 2)).toBe(1250n); // RTL marks from copied text
+    expect(parseDecimal('−١٢٫٥', 2)).toBe(-1250n); // minus sign U+2212
+    expect(parseDecimal('⁦−1,250.00⁩', 2)).toBe(-125000n); // isolated, as formatMoney writes it
   });
 
   it('rounds half away from zero beyond the scale', () => {

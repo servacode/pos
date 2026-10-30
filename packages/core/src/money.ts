@@ -1,5 +1,5 @@
 import { CURRENCIES, type CurrencyCode } from './currencies';
-import { toLatinDigits } from './text';
+import { stripBidiControls, toLatinDigits } from './text';
 
 /**
  * Money is always an integer number of minor units (12.50 USD = 1250).
@@ -131,7 +131,6 @@ export function allocate(total: number, weights: readonly number[]): number[] {
   return shares.map((share) => Number(share * sign));
 }
 
-const BIDI_MARKS = /[‎‏؜‪-‮⁦-⁩]/g;
 const DECIMAL_PATTERN = /^([+-]?)(\d{1,3}(?:,\d{3})+|\d*)(?:\.(\d*))?$/;
 
 interface DecimalParts {
@@ -140,14 +139,10 @@ interface DecimalParts {
   fracDigits: string;
 }
 
-/** Normalizes Arabic digits and separators (٫ decimal, ٬ thousands) and splits a decimal string. */
+/** Normalizes Arabic digits, separators (٫ decimal, ٬ thousands) and «−», then splits a decimal string. */
 function splitDecimal(input: string): DecimalParts {
   if (typeof input !== 'string') throw new RangeError('decimal input must be a string');
-  const normalized = toLatinDigits(input)
-    .replace(BIDI_MARKS, '')
-    .trim()
-    .replaceAll('٫', '.')
-    .replaceAll('٬', ',');
+  const normalized = stripBidiControls(toLatinDigits(input)).trim();
   const match = DECIMAL_PATTERN.exec(normalized);
   const intPart = match?.[2] ?? '';
   const fracPart = match?.[3] ?? '';
