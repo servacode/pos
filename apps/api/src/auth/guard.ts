@@ -12,8 +12,8 @@ import { verifyAccessToken } from './tokens';
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ')) throw unauthorized();
-  const { env, clock, sessionGate } = request.server;
-  const claims = await verifyAccessToken(header.slice('Bearer '.length), env.JWT_SECRET, clock.now());
+  const { env, clock, sessionGate, tokenKeys } = request.server;
+  const claims = await verifyAccessToken(header.slice('Bearer '.length), tokenKeys, clock.now());
   if (!claims || !(await sessionGate.isLive(claims))) throw unauthorized();
   await enforceLimits(request, reply, 60_000, [
     { key: `session:${claims.sessionId}`, max: env.SESSION_RATE_LIMIT_PER_MINUTE },

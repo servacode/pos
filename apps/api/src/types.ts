@@ -1,7 +1,7 @@
 import type { Database } from '@serva/db';
 import type { PasswordHasher } from './auth/passwords';
 import type { SessionGate } from './auth/session-gate';
-import type { AccessClaims } from './auth/tokens';
+import type { AccessClaims, TokenKeys } from './auth/tokens';
 import type { Clock } from './clock';
 import type { Env } from './env';
 import type { ClientAddressing } from './http/client-ip';
@@ -14,6 +14,7 @@ declare module 'fastify' {
     sessionGate: SessionGate;
     addressing: ClientAddressing;
     passwords: PasswordHasher;
+    tokenKeys: TokenKeys;
   }
   interface FastifyRequest {
     /** Set by requireAuth for authenticated routes */

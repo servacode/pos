@@ -52,7 +52,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   const accessTokenFor = (session: IssuedSession) =>
     signAccessToken(
       { userId: session.userId, tenantId: session.tenantId, sessionId: session.sessionId },
-      env.JWT_SECRET,
+      app.tokenKeys,
       env.ACCESS_TOKEN_TTL_SECONDS,
       clock.now(),
     );

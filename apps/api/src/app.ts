@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import { createDb, type DbHandle } from '@serva/db';
 import { PasswordHasher } from './auth/passwords';
 import { SessionGate } from './auth/session-gate';
+import { TokenKeys } from './auth/tokens';
 import { systemClock, type Clock } from './clock';
 import type { Env } from './env';
 import { clientAddressing, clientIp } from './http/client-ip';
@@ -50,6 +51,7 @@ export async function buildApp({
     'passwords',
     new PasswordHasher({ concurrency: env.PASSWORD_HASH_CONCURRENCY, queue: env.PASSWORD_HASH_QUEUE }),
   );
+  app.decorate('tokenKeys', new TokenKeys(env.JWT_SECRET, env.JWT_PREVIOUS_SECRETS));
   app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
   app.decorateRequest('auth', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());

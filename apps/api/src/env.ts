@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { weakSecretReason } from './auth/tokens';
 import { parseProxyTrust, type ProxyTrust } from './http/client-ip';
 
 const perMinute = (fallback: number) => z.coerce.number().int().positive().default(fallback);
@@ -9,7 +10,18 @@ const envSchema = z
     HOST: z.string().default('0.0.0.0'),
     PORT: z.coerce.number().int().positive().default(3000),
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-    JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+    /** Signs access tokens (one key per gate is derived from it). Generate: openssl rand -base64 48 */
+    JWT_SECRET: z.string(),
+    /** Former JWT_SECRET values, comma-separated: still accepted for tokens issued before a rotation */
+    JWT_PREVIOUS_SECRETS: z
+      .string()
+      .optional()
+      .transform((v) =>
+        (v ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s !== ''),
+      ),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce
       .number()
       .int()
@@ -62,6 +74,18 @@ const envSchema = z
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   })
   .superRefine((env, ctx) => {
+    const production = env.NODE_ENV === 'production';
+    const weak = weakSecretReason(env.JWT_SECRET, production);
+    if (weak) ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: `JWT_SECRET ${weak}` });
+    for (const old of env.JWT_PREVIOUS_SECRETS) {
+      if (old.length < 32) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['JWT_PREVIOUS_SECRETS'],
+          message: 'each previous secret must be at least 32 characters',
+        });
+      }
+    }
     if (env.CLIENT_IP_HEADER && env.TRUST_PROXY.kind !== 'list') {
       ctx.addIssue({
         code: 'custom',
