@@ -32,5 +32,8 @@ export function newOtpCode(): string {
 
 /** HMAC of the code bound to its challenge; the code itself is never stored. */
 export function hashOtp(secret: string, challengeId: string, code: string): string {
-  return createHmac('sha256', deriveKey(secret, 'otp').key).update(`${challengeId}:${code}`).digest('hex');
+  // The key is derived from JWT_SECRET; 'otp' is only the derivation label.
+  // nosemgrep: ajinabraham.njsscan.generic.hardcoded_secrets.node_secret
+  const key = deriveKey(secret, 'otp').key;
+  return createHmac('sha256', key).update(`${challengeId}:${code}`).digest('hex');
 }

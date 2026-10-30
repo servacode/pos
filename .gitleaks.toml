@@ -1,0 +1,13 @@
+# Secret scanning (CI): gitleaks' default rules, minus made-up values used only as test fixtures.
+# Add a value here only if it has never been, and never will be, a real secret.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures that look like secrets"
+regexTarget = "match"
+regexes = [
+  '''test-secret-that-is-definitely-long-enough-123''',
+  '''Zr4x9Qw2Lp8Vt6Nb3Hc7Jd1Kf5Gm0Sa''',
+  '''Kq8vX2mPz7Lw4Rt9''',
+]

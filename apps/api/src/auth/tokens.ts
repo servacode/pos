@@ -122,6 +122,8 @@ const KNOWN_SECRETS = new Set(['change-me-to-a-long-random-secret-of-32-chars-or
 export function weakSecretReason(secret: string, production: boolean): string | null {
   if (secret.length < 32) return 'must be at least 32 characters';
   if (KNOWN_SECRETS.has(secret)) return 'is a published example value; generate your own';
+  // A plain alternation on a bounded config value: no backtracking risk.
+  // nosemgrep: ajinabraham.njsscan.dos.regex_dos.regex_dos
   if (production && /change.?me|example|placeholder|secret|password|test/i.test(secret)) {
     return 'looks like a placeholder; generate a random value';
   }
