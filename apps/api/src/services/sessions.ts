@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
-import { sessions, users, withTenant, type Database, type Transaction } from '@serva/db';
+import { sessions, users, uuidv7, withTenant, type Database, type Transaction } from '@serva/db';
 import { hashRefreshToken, newRefreshToken } from '../auth/tokens';
 import { DAY_MS } from '../clock';
 import type { RequestMeta } from '../types';
@@ -21,7 +20,7 @@ export async function createSession(
   input: { tenantId: string; userId: string; ttlDays: number; now: Date },
   meta: RequestMeta,
 ): Promise<IssuedSession> {
-  const sessionId = randomUUID();
+  const sessionId = uuidv7();
   const { token, hash } = newRefreshToken();
   const expiresAt = new Date(input.now.getTime() + input.ttlDays * DAY_MS);
   await tx.insert(sessions).values({

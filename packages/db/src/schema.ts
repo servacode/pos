@@ -7,7 +7,9 @@ import {
   integer,
   jsonb,
   pgEnum,
+  pgPolicy,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -15,8 +17,31 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+// ─── Common fields ────────────────────────────────────────────────────────────
+// Ids are UUIDv7 (time-ordered, so inserts do not scatter indexes). Store tables are keyed by
+// (tenant_id, id). `version` and `updated_at` are maintained by the bump_row_version trigger.
+
+const id = () =>
+  uuid('id')
+    .notNull()
+    .default(sql`uuid_generate_v7()`);
+const platformId = () =>
+  uuid('id')
+    .primaryKey()
+    .default(sql`uuid_generate_v7()`);
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp('updated_at', { withTimezone: true }).notNull().defaultNow();
+const version = () => integer('version').notNull().default(1);
+
+/** A store sees and writes only rows of the store set by withTenant(). */
+const tenantIsolation = (column = sql`tenant_id`) =>
+  pgPolicy('tenant_isolation', {
+    as: 'permissive',
+    for: 'all',
+    to: 'public',
+    using: sql`${column} = app_current_tenant()`,
+    withCheck: sql`${column} = app_current_tenant()`,
+  });
 
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
@@ -43,7 +68,7 @@ export interface PlanLimits {
 
 /** Subscription plans. Everything here is editable from the platform admin panel. */
 export const plans = pgTable('plans', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id: platformId(),
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
   isFree: boolean('is_free').notNull().default(false),
@@ -62,41 +87,48 @@ export const plans = pgTable('plans', {
     .default(sql`'{}'::text[]`),
   isActive: boolean('is_active').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
+  version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
 export const platformUsers = pgTable('platform_users', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id: platformId(),
   fullName: text('full_name').notNull(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   role: platformRole('role').notNull(),
   status: userStatus('status').notNull().default('active'),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
 /** A store (tenant). Row-level security limits each store to its own row. */
-export const tenants = pgTable('tenants', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  legalName: text('legal_name'),
-  taxNumber: text('tax_number'),
-  country: text('country').notNull().default('SY'),
-  timezone: text('timezone').notNull().default('Asia/Damascus'),
-  sectors: text('sectors').array().notNull(),
-  /** Referral code typed at sign-up; linked to an agent once the agents module exists */
-  referralCode: text('referral_code'),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const tenants = pgTable(
+  'tenants',
+  {
+    id: platformId(),
+    name: text('name').notNull(),
+    legalName: text('legal_name'),
+    taxNumber: text('tax_number'),
+    country: text('country').notNull().default('SY'),
+    timezone: text('timezone').notNull().default('Asia/Damascus'),
+    sectors: text('sectors').array().notNull(),
+    /** Referral code typed at sign-up; linked to an agent once the agents module exists */
+    referralCode: text('referral_code'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  () => [tenantIsolation(sql`id`)],
+);
 
 export const subscriptions = pgTable(
   'subscriptions',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -109,35 +141,45 @@ export const subscriptions = pgTable(
     currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
     currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
     graceEndsAt: timestamp('grace_ends_at', { withTimezone: true }),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [unique('subscriptions_tenant_unique').on(t.tenantId)],
+  (t) => [
+    primaryKey({ name: 'subscriptions_pkey', columns: [t.tenantId, t.id] }),
+    unique('subscriptions_tenant_unique').on(t.tenantId),
+    tenantIsolation(),
+  ],
 );
 
 // ─── Store (every table carries tenant_id and is protected by RLS) ─────────────
 
-export const tenantSettings = pgTable('tenant_settings', {
-  tenantId: uuid('tenant_id')
-    .primaryKey()
-    .references(() => tenants.id),
-  baseCurrency: text('base_currency').notNull(),
-  enabledCurrencies: text('enabled_currencies').array().notNull(),
-  /** Shelf prices include tax (common for consumer prices in Syria) */
-  taxInclusive: boolean('tax_inclusive').notNull().default(true),
-  defaultTaxRateBp: integer('default_tax_rate_bp').notNull().default(0),
-  /** 0 = no cash rounding; e.g. 5 = round cash totals to 0.05 */
-  cashRoundingMinor: integer('cash_rounding_minor').notNull().default(0),
-  numberFormat: text('number_format').notNull().default('latn'),
-  receiptFooter: text('receipt_footer'),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const tenantSettings = pgTable(
+  'tenant_settings',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references(() => tenants.id),
+    baseCurrency: text('base_currency').notNull(),
+    enabledCurrencies: text('enabled_currencies').array().notNull(),
+    /** Shelf prices include tax (common for consumer prices in Syria) */
+    taxInclusive: boolean('tax_inclusive').notNull().default(true),
+    defaultTaxRateBp: integer('default_tax_rate_bp').notNull().default(0),
+    /** 0 = no cash rounding; e.g. 5 = round cash totals to 0.05 */
+    cashRoundingMinor: integer('cash_rounding_minor').notNull().default(0),
+    numberFormat: text('number_format').notNull().default('latn'),
+    receiptFooter: text('receipt_footer'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  () => [tenantIsolation()],
+);
 
 export const branches = pgTable(
   'branches',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -146,19 +188,21 @@ export const branches = pgTable(
     address: text('address'),
     phone: text('phone'),
     isActive: boolean('is_active').notNull().default(true),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'branches_pkey', columns: [t.tenantId, t.id] }),
     unique('branches_tenant_code_unique').on(t.tenantId, t.code),
-    unique('branches_tenant_id_unique').on(t.tenantId, t.id),
+    tenantIsolation(),
   ],
 );
 
 export const registers = pgTable(
   'registers',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id').notNull(),
     branchId: uuid('branch_id').notNull(),
     code: text('code').notNull(),
@@ -166,20 +210,23 @@ export const registers = pgTable(
     deviceId: text('device_id'),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     isActive: boolean('is_active').notNull().default(true),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'registers_pkey', columns: [t.tenantId, t.id] }),
     // Composite key: a register can only point at a branch of the same store
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     unique('registers_branch_code_unique').on(t.branchId, t.code),
+    tenantIsolation(),
   ],
 );
 
 export const roles = pgTable(
   'roles',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -188,19 +235,21 @@ export const roles = pgTable(
     permissions: text('permissions').array().notNull(),
     maxDiscountBp: integer('max_discount_bp').notNull().default(0),
     isSystem: boolean('is_system').notNull().default(false),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'roles_pkey', columns: [t.tenantId, t.id] }),
     unique('roles_tenant_key_unique').on(t.tenantId, t.key),
-    unique('roles_tenant_id_unique').on(t.tenantId, t.id),
+    tenantIsolation(),
   ],
 );
 
 export const users = pgTable(
   'users',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -211,40 +260,46 @@ export const users = pgTable(
     pinHash: text('pin_hash'),
     status: userStatus('status').notNull().default('active'),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'users_pkey', columns: [t.tenantId, t.id] }),
     uniqueIndex('users_phone_unique')
       .on(t.phone)
       .where(sql`${t.phone} is not null`),
-    unique('users_tenant_id_unique').on(t.tenantId, t.id),
+    tenantIsolation(),
   ],
 );
 
 export const userRoles = pgTable(
   'user_roles',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id').notNull(),
     userId: uuid('user_id').notNull(),
     roleId: uuid('role_id').notNull(),
     /** null = the role applies to every branch */
     branchId: uuid('branch_id'),
+    version: version(),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
+    primaryKey({ name: 'user_roles_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
     foreignKey({ columns: [t.tenantId, t.roleId], foreignColumns: [roles.tenantId, roles.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     unique('user_roles_unique').on(t.userId, t.roleId, t.branchId).nullsNotDistinct(),
+    tenantIsolation(),
   ],
 );
 
 export const auditLogs = pgTable(
   'audit_logs',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
@@ -257,7 +312,11 @@ export const auditLogs = pgTable(
     userAgent: text('user_agent'),
     createdAt: createdAt(),
   },
-  (t) => [index('audit_logs_tenant_created_idx').on(t.tenantId, t.createdAt)],
+  (t) => [
+    primaryKey({ name: 'audit_logs_pkey', columns: [t.tenantId, t.id] }),
+    index('audit_logs_tenant_created_idx').on(t.tenantId, t.createdAt),
+    tenantIsolation(),
+  ],
 );
 
 /**
@@ -267,7 +326,7 @@ export const auditLogs = pgTable(
 export const sessions = pgTable(
   'sessions',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: id(),
     tenantId: uuid('tenant_id').notNull(),
     userId: uuid('user_id').notNull(),
     tokenHash: text('token_hash').notNull().unique(),
@@ -279,19 +338,8 @@ export const sessions = pgTable(
     replacedBy: uuid('replaced_by'),
   },
   (t) => [
+    primaryKey({ name: 'sessions_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
     index('sessions_user_idx').on(t.userId),
   ],
 );
-
-/** Tables that carry tenant_id and are protected by the tenant_isolation policy. */
-export const TENANT_TABLES = [
-  'subscriptions',
-  'tenant_settings',
-  'branches',
-  'registers',
-  'roles',
-  'users',
-  'user_roles',
-  'audit_logs',
-] as const;

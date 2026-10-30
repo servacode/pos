@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
 import { DEFAULT_ROLES, type RegisterStoreData } from '@serva/core';
 import {
@@ -11,6 +10,7 @@ import {
   tenants,
   userRoles,
   users,
+  uuidv7,
   withTenant,
   type Database,
 } from '@serva/db';
@@ -37,7 +37,7 @@ export async function registerStore(
   options: { refreshTtlDays: number; now: Date },
   meta: RequestMeta,
 ): Promise<RegisteredStore> {
-  const tenantId = randomUUID();
+  const tenantId = uuidv7();
   try {
     return await withTenant(db, tenantId, async (tx) => {
       const [plan] = await tx
