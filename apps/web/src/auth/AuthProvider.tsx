@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { AuthResponse, LoginInput, MeResponse, RegisterStoreInput } from '@serva/core';
+import type { AuthResponse, LoginInput, MeResponse } from '@serva/core';
 import { apiFetch, onSessionExpired, refreshAccessToken, setAccessToken } from '../lib/api';
 import { AuthContext, type AuthContextValue, type AuthState } from './AuthContext';
 
@@ -55,13 +55,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [startSession],
   );
 
-  const register = useCallback(
-    async (input: RegisterStoreInput) => {
-      await startSession(await apiFetch<AuthResponse>('/v1/auth/register', { method: 'POST', body: input }));
-    },
-    [startSession],
-  );
-
   const logout = useCallback(async () => {
     await apiFetch<void>('/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     setAccessToken(null);
@@ -69,8 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ state, login, register, logout, refreshMe }),
-    [state, login, register, logout, refreshMe],
+    () => ({ state, login, logout, refreshMe }),
+    [state, login, logout, refreshMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
