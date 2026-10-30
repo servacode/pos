@@ -2,7 +2,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { eq, sql } from 'drizzle-orm';
 import { loginInput, registerStoreInput, type AuthResponse, type RefreshResponse } from '@serva/core';
 import { tenants, users, withTenant } from '@serva/db';
-import { hashSecret, verifyAgainstDummy, verifySecret } from '../auth/passwords';
 import { signAccessToken } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
@@ -60,7 +59,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/auth/register', { config: authLimit }, async (request, reply) => {
     const data = parseBody(registerStoreInput, request.body);
-    const passwordHash = await hashSecret(data.password);
+    const passwordHash = await app.passwords.hash(data.password);
     const result = await registerStore(
       db,
       data,
@@ -96,10 +95,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }>(sql`select * from auth_find_login(${data.phone})`);
     const account = rows[0];
     if (!account) {
-      await verifyAgainstDummy(data.password);
+      await app.passwords.verifyAgainstDummy(data.password);
       throw invalid;
     }
-    const passwordOk = await verifySecret(account.password_hash, data.password);
+    const passwordOk = await app.passwords.verify(account.password_hash, data.password);
     if (!passwordOk || account.status !== 'active') throw invalid;
     if (account.tenant_status !== 'active') {
       // Only said once the password is proven, so it reveals nothing to a stranger.

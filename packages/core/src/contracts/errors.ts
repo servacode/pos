@@ -9,6 +9,8 @@ export const ERROR_CODES = [
   /** The request repeats one that just happened (e.g. two tabs refreshing at once): retry */
   'conflict',
   'rate_limited',
+  /** The server is too busy to take this request now (503): retry shortly */
+  'unavailable',
   'internal',
 ] as const;
 

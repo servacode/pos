@@ -55,6 +55,10 @@ const envSchema = z
       .toLowerCase()
       .optional()
       .transform((v) => v || undefined),
+    /** Password hashes computed at once (each takes 19 MiB and a libuv thread) */
+    PASSWORD_HASH_CONCURRENCY: z.coerce.number().int().positive().default(2),
+    /** Password checks allowed to wait; beyond this, sign-in answers 503 at once */
+    PASSWORD_HASH_QUEUE: z.coerce.number().int().min(0).default(32),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   })
   .superRefine((env, ctx) => {
