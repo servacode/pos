@@ -29,16 +29,14 @@ export function LoginPage() {
       subtitle="سجّل دخولك وتابع البيع من حيث توقفت."
       footer={
         <>
-          ما عندك حساب؟ <TextLink to="/register">افتح متجرك الآن</TextLink>
+          ليس لديك حساب؟ <TextLink to="/register">افتح متجرك الآن</TextLink>
         </>
       }
     >
       <title>تسجيل الدخول · Serva POS</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
-        {sessionExpired && !formError ? (
-          <Alert tone="info">انتهت جلستك. سجّل الدخول مجدداً للمتابعة.</Alert>
-        ) : null}
+        {sessionExpired && !formError ? <Alert tone="info">انتهى دخولك. سجّل الدخول مرة أخرى.</Alert> : null}
         <TextField
           name="phone"
           label="رقم الجوال"
@@ -53,7 +51,7 @@ export function LoginPage() {
         />
         <PasswordField
           name="password"
-          label="كلمة المرور"
+          label="كلمة السر"
           autoComplete="current-password"
           value={values.password}
           onChange={(e) => setValue('password', e.target.value)}

@@ -11,7 +11,7 @@ export function ChoiceCard({ title, description, leading, className, ...inputPro
   return (
     <label
       className={cn(
-        'group flex min-h-16 cursor-pointer items-center gap-3 rounded-control border border-line-strong bg-surface p-3 transition-colors duration-150 select-none hover:border-ink-subtle',
+        'group flex min-h-16 cursor-pointer items-center gap-3 rounded-control border border-line-control bg-surface p-3 transition-colors duration-150 select-none',
         'has-checked:border-brand has-checked:bg-brand-soft has-checked:ring-1 has-checked:ring-brand',
         'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring',
         className,
@@ -27,7 +27,7 @@ export function ChoiceCard({ title, description, leading, className, ...inputPro
         <span className="font-semibold text-ink">{title}</span>
         {description ? <span className="text-sm text-ink-muted">{description}</span> : null}
       </span>
-      <span className="grid size-5 shrink-0 place-items-center rounded-full border-2 border-line-strong transition-colors group-has-checked:border-brand">
+      <span className="grid size-5 shrink-0 place-items-center rounded-full border-2 border-line-control transition-colors group-has-checked:border-brand">
         <span className="size-2.5 scale-0 rounded-full bg-brand transition-transform group-has-checked:scale-100" />
       </span>
     </label>

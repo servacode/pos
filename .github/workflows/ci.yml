@@ -44,3 +44,5 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Size budget (sale screen JS + CSS under 300 KB gzip, fonts separate)
+        run: pnpm --filter @serva/web size

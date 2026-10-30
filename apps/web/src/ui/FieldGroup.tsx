@@ -15,7 +15,7 @@ export function FieldGroup({ legend, hint, error, children }: FieldGroupProps) {
 
   return (
     <fieldset aria-describedby={[errorId, hintId].filter(Boolean).join(' ') || undefined}>
-      <legend className="text-sm font-medium text-ink">{legend}</legend>
+      <legend className="text-sm font-semibold text-ink">{legend}</legend>
       {hint ? (
         <p id={hintId} className="mt-1 text-sm text-ink-muted">
           {hint}
