@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   branches,
@@ -26,6 +27,13 @@ import type { DeviceClaims } from '../auth/device-guard';
 import { audit } from './audit';
 import type { RequestMeta } from '../types';
 import { readServerState } from './sync-state';
+
+/** Payload hashes are not secrets, but compare them in constant time so no comparison leaks timing. */
+function sameHash(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 type PushRequest = z.output<typeof pushRequestSchema>;
 
@@ -183,7 +191,8 @@ async function processDocument(
 ): Promise<PushResult> {
   const { hash, ...body } = doc;
   // The hash is the document's identity: recomputed here, never taken on trust.
-  if (payloadHash(body) !== hash) return { id: doc.id, status: 'rejected', code: 'hash_mismatch', flags: [] };
+  if (!sameHash(payloadHash(body), hash))
+    return { id: doc.id, status: 'rejected', code: 'hash_mismatch', flags: [] };
 
   const [existing] = await tx
     .select({
@@ -196,7 +205,7 @@ async function processDocument(
     .from(syncInbox)
     .where(and(eq(syncInbox.tenantId, device.tenantId), eq(syncInbox.docId, doc.id)));
   if (existing) {
-    if (existing.payloadHash !== hash) return { id: doc.id, status: 'id_conflict', flags: [] };
+    if (!sameHash(existing.payloadHash, hash)) return { id: doc.id, status: 'id_conflict', flags: [] };
     return {
       id: doc.id,
       status: 'duplicate',
