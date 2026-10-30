@@ -135,7 +135,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               variant="ghost"
               onClick={handleLogout}
               loading={signingOut}
-              icon={<LogoutIcon className="-scale-x-100" />}
+              icon={<LogoutIcon />}
               className="shrink-0 px-3 sm:px-4"
             >
               <span className="sm:hidden">خروج</span>
