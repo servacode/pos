@@ -5,7 +5,7 @@ const EXTENDED_ARABIC_INDIC = '۰۱۲۳۴۵۶۷۸۹';
 const NUMBER_PUNCTUATION: Readonly<Record<string, string>> = {
   '٫': '.', // U+066B ARABIC DECIMAL SEPARATOR
   '٬': ',', // U+066C ARABIC THOUSANDS SEPARATOR (kept as a separator so parsers can still check grouping)
-  '−': '-', // U+2212 MINUS SIGN, the sign formatMoney writes
+  '\u2212': '-', // U+2212 MINUS SIGN, the sign formatMoney writes
 };
 
 /**
@@ -32,7 +32,7 @@ export function toLatinDigits(input: string): string {
 }
 
 /** LRM, RLM, ALM, the embeddings and overrides (U+202A–U+202E) and the isolates (U+2066–U+2069). */
-const BIDI_CONTROLS = /[‎‏؜‪-‮⁦-⁩]/g;
+const BIDI_CONTROLS = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/g;
 
 /**
  * Removes invisible direction controls, e.g. before parsing pasted text, exporting to CSV or printing plain

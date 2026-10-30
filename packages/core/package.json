@@ -8,9 +8,10 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "lint": "eslint src",
+    "lint": "eslint src vitest.config.ts vitest.setup.ts stryker.config.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run --coverage",
+    "test:mutation": "stryker run"
   },
   "dependencies": {
     "zod": "^4.1.0"

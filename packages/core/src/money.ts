@@ -103,38 +103,31 @@ export function allocate(total: number, weights: readonly number[], keys?: reado
   const sign = total < 0 ? -1n : 1n;
   const amount = BigInt(Math.abs(total));
   const weightSum = weights.reduce((acc, weight) => acc + BigInt(weight), 0n);
-  const keyOf = (index: number) => keys?.[index] ?? index;
-
-  let shares: bigint[];
-  let remainders: bigint[];
-  if (weightSum === 0n) {
-    // Equal weights: every remainder ties, so the keys alone decide who gets the extra units.
-    const count = BigInt(weights.length);
-    shares = weights.map(() => amount / count);
-    remainders = weights.map(() => 0n);
-  } else {
-    remainders = [];
-    shares = weights.map((weight) => {
-      const product = amount * BigInt(weight);
-      remainders.push(product % weightSum);
-      return product / weightSum;
-    });
-  }
-  // Remainders share the denominator weightSum, so they compare directly.
-  const order = weights
-    .map((weight, index) => ({ index, weight, remainder: remainders[index] ?? 0n, key: keyOf(index) }))
-    .sort((a, b) => {
-      if (a.remainder !== b.remainder) return a.remainder > b.remainder ? -1 : 1;
-      if (a.weight !== b.weight) return b.weight - a.weight;
-      return a.key < b.key ? -1 : 1; // keys are unique, so never equal
-    });
-  let leftover = amount - shares.reduce((acc, share) => acc + share, 0n);
-  for (const { index } of order) {
+  // All-zero weights count as equal weights: every remainder ties and the keys decide the extra units.
+  const evenSplit = weightSum === 0n;
+  const entries = weights.map((weight, index) => {
+    const numerator = evenSplit ? amount : amount * BigInt(weight);
+    const denominator = evenSplit ? BigInt(weights.length) : weightSum;
+    return {
+      weight,
+      key: keys?.[index] ?? index,
+      share: numerator / denominator,
+      // Remainders share one denominator, so they compare directly.
+      remainder: numerator % denominator,
+    };
+  });
+  let leftover = amount - entries.reduce((acc, entry) => acc + entry.share, 0n);
+  const byPriority = [...entries].sort((a, b) => {
+    if (a.remainder !== b.remainder) return a.remainder > b.remainder ? -1 : 1;
+    if (a.weight !== b.weight) return b.weight - a.weight;
+    return a.key < b.key ? -1 : 1; // keys are unique, so never equal
+  });
+  for (const entry of byPriority) {
     if (leftover === 0n) break;
-    shares[index] = (shares[index] ?? 0n) + 1n;
+    entry.share += 1n;
     leftover -= 1n;
   }
-  return shares.map((share) => Number(share * sign));
+  return entries.map((entry) => Number(entry.share * sign));
 }
 
 const DECIMAL_PATTERN = /^([+-]?)(\d{1,3}(?:,\d{3})+|\d*)(?:\.(\d*))?$/;
@@ -229,25 +222,19 @@ export interface FormatMoneyOptions {
 }
 
 const MAX_DISPLAY_DECIMALS = 6;
-const LRI = '⁦'; // LEFT-TO-RIGHT ISOLATE
-const RLI = '⁧'; // RIGHT-TO-LEFT ISOLATE
-const PDI = '⁩'; // POP DIRECTIONAL ISOLATE
-const MINUS_SIGN = '−';
+const LRI = '\u2066'; // LEFT-TO-RIGHT ISOLATE
+const RLI = '\u2067'; // RIGHT-TO-LEFT ISOLATE
+const PDI = '\u2069'; // POP DIRECTIONAL ISOLATE
+const MINUS_SIGN = '\u2212';
 
-const ARABIC_CHARS: Record<string, string> = {
-  '0': '٠',
-  '1': '١',
-  '2': '٢',
-  '3': '٣',
-  '4': '٤',
-  '5': '٥',
-  '6': '٦',
-  '7': '٧',
-  '8': '٨',
-  '9': '٩',
-  ',': '٬',
-  '.': '٫',
-};
+const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+
+/** "1,250.50" → "١٬٢٥٠٫٥٠": Arabic-Indic digits with the Arabic thousands and decimal separators. */
+function toArabicNumerals(latin: string): string {
+  return latin.replace(/[\d,.]/g, (ch) =>
+    ch === ',' ? '٬' : ch === '.' ? '٫' : ARABIC_DIGITS.charAt(Number(ch)),
+  );
+}
 
 /**
  * Formats minor units for display, locale-independent: formatMoney(125000, 'SYP') shows "1,250 ل.س".
@@ -276,7 +263,7 @@ export function formatMoney(minor: number, currency: CurrencyId, opts: FormatMon
 
   let text = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (fracPart !== '' && !(opts.trimZeros && /^0+$/.test(fracPart))) text += `.${fracPart}`;
-  if (opts.digits === 'arab') text = text.replace(/[\d,.]/g, (ch) => ARABIC_CHARS[ch] ?? ch);
+  if (opts.digits === 'arab') text = toArabicNumerals(text);
   // An amount that displays as zero gets no sign.
   const negative = minor < 0 && magnitude > 0n && signDisplay === 'auto';
   const withSymbol = opts.symbol ?? true;

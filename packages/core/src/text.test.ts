@@ -27,9 +27,9 @@ describe('toLatinDigits', () => {
 
 describe('stripBidiControls', () => {
   it('removes direction marks, embeddings and isolates', () => {
-    const controls = '‎‏؜‪‫‬‭‮⁦⁧⁨⁩';
+    const controls = '\u200e\u200f\u061c\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069';
     expect(stripBidiControls(`${controls}١٢٫٥${controls}`)).toBe('١٢٫٥');
-    expect(stripBidiControls('⁧⁦−1,250⁩ ل.س⁩')).toBe('−1,250 ل.س');
+    expect(stripBidiControls('\u2067\u2066−1,250\u2069 ل.س\u2069')).toBe('−1,250 ل.س');
     expect(stripBidiControls('بلا علامات')).toBe('بلا علامات');
   });
 });

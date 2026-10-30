@@ -16,7 +16,6 @@ import {
   type ExchangeRate,
 } from './money';
 import type { CurrencyId } from './currencies';
-import { seededRandom } from './test-random';
 import { stripBidiControls, toLatinDigits } from './text';
 
 describe('roundDiv', () => {
@@ -231,9 +230,9 @@ describe('parseDecimal', () => {
     expect(parseDecimal('١٬٢٣٤٫٥', 2)).toBe(123450n);
     expect(parseDecimal('١٬٢٣٤٬٥٦٧', 0)).toBe(1234567n);
     expect(parseDecimal('۱۲۳٫۴۵', 2)).toBe(12345n); // Persian digits
-    expect(parseDecimal('‏١٢٫٥٠‏', 2)).toBe(1250n); // RTL marks from copied text
+    expect(parseDecimal('\u200f١٢٫٥٠\u200f', 2)).toBe(1250n); // RTL marks from copied text
     expect(parseDecimal('−١٢٫٥', 2)).toBe(-1250n); // minus sign U+2212
-    expect(parseDecimal('⁦−1,250.00⁩', 2)).toBe(-125000n); // isolated, as formatMoney writes it
+    expect(parseDecimal('\u2066−1,250.00\u2069', 2)).toBe(-125000n); // isolated, as formatMoney writes it
   });
 
   it('rounds half away from zero beyond the scale', () => {
@@ -264,6 +263,7 @@ describe('parseDecimal', () => {
     }
     expect(() => parseDecimal('1', -1)).toThrow(RangeError);
     expect(() => parseDecimal('1', 1.5)).toThrow(RangeError);
+    expect(() => parseDecimal(12 as unknown as string, 2)).toThrow(/must be a string/);
   });
 });
 
@@ -284,7 +284,7 @@ describe('toMinor', () => {
 describe('formatMoney', () => {
   /** The isolated form formatMoney writes: RLI ⟨LRI number PDI⟩ symbol PDI, or LRI number PDI alone. */
   const iso = (number: string, symbol?: string) =>
-    symbol === undefined ? `⁦${number}⁩` : `⁧⁦${number}⁩ ${symbol}⁩`;
+    symbol === undefined ? `\u2066${number}\u2069` : `\u2067\u2066${number}\u2069 ${symbol}\u2069`;
 
   it('isolates the number (LTR) and the amount with its symbol (RTL), symbol after the number', () => {
     expect(formatMoney(1250, 'USD')).toBe(iso('12.50', '$'));
@@ -481,20 +481,24 @@ describe('convert', () => {
 });
 
 describe('refunds mirror sales (negative amounts)', () => {
-  it('every rounding helper is symmetric around zero (seeded property test)', () => {
-    const rand = seededRandom(42);
-    for (let run = 0; run < 2000; run++) {
-      const amount = rand.int(1, 50_000_000);
-      const qty = rand.int(1, 100_000);
-      const bp = rand.int(0, 10_000);
-      const step = rand.int(1, 5000);
-      expect(lineGross(-amount, qty) + lineGross(amount, qty)).toBe(0);
-      expect(applyBasisPoints(-amount, bp) + applyBasisPoints(amount, bp)).toBe(0);
-      expect(roundToStep(-amount, step) + roundToStep(amount, step)).toBe(0);
-      const rate: ExchangeRate = { unit: 'USD', quote: 'SYP', rate: '13000' };
-      expect(convert(-amount, 'SYP', 'USD', rate) + convert(amount, 'SYP', 'USD', rate)).toBe(0);
-      expect(convert(-amount, 'USD', 'SYP', rate) + convert(amount, 'USD', 'SYP', rate)).toBe(0);
-      expect(roundDiv(BigInt(-amount), BigInt(qty))).toBe(-roundDiv(BigInt(amount), BigInt(qty)));
-    }
+  it('every rounding helper is symmetric around zero (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 50_000_000 }),
+        fc.integer({ min: 1, max: 100_000 }),
+        fc.integer({ min: 0, max: 10_000 }),
+        fc.integer({ min: 1, max: 5000 }),
+        fc.integer({ min: 1_000_000, max: 20_000_000_000 }),
+        (amount, qty, bp, step, scaledRate) => {
+          expect(lineGross(-amount, qty) + lineGross(amount, qty)).toBe(0);
+          expect(applyBasisPoints(-amount, bp) + applyBasisPoints(amount, bp)).toBe(0);
+          expect(roundToStep(-amount, step) + roundToStep(amount, step)).toBe(0);
+          const rate: ExchangeRate = { unit: 'USD', quote: 'SYP', rate: (scaledRate / 1e6).toFixed(6) };
+          expect(convert(-amount, 'SYP', 'USD', rate) + convert(amount, 'SYP', 'USD', rate)).toBe(0);
+          expect(convert(-amount, 'USD', 'SYP', rate) + convert(amount, 'USD', 'SYP', rate)).toBe(0);
+          expect(roundDiv(BigInt(-amount), BigInt(qty))).toBe(-roundDiv(BigInt(amount), BigInt(qty)));
+        },
+      ),
+    );
   });
 });
