@@ -243,6 +243,12 @@ psql_live \
     die "The database swap failed; the server was restarted on the previous data."
   }
 check pass "Live database replaced; the previous one is kept as $old_db"
+# Tab 15/16: a restored server starts a new epoch, so every device resends its recent documents
+# (duplicates are ignored) and downloads everything again. Older backups predate the function.
+if psql_live -d serva -tA -c "SELECT to_regprocedure('server_epoch_bump()') IS NOT NULL" | grep -q t; then
+  psql_live -d serva -c "SELECT server_epoch_bump()" > /dev/null || finish_fail "could not start a new sync epoch"
+  check pass "New sync epoch started: devices will resend and download again"
+fi
 dc up -d --wait --wait-timeout "${SERVA_WAIT_TIMEOUT:-300}" || finish_fail "the server did not start on the restored data"
 after_up
 bash "$SCRIPT_DIR/smoke.sh" || finish_fail "the smoke test failed after the restore"
