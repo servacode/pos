@@ -19,7 +19,14 @@
     "db:bootstrap": "bash scripts/db-bootstrap.sh",
     "db:migrate": "pnpm --filter @serva/db migrate",
     "db:generate": "pnpm --filter @serva/db generate",
-    "db:seed": "pnpm --filter @serva/db seed"
+    "db:seed": "pnpm --filter @serva/db seed",
+    "local:up": "bash scripts/local/up.sh",
+    "local:down": "bash scripts/local/down.sh",
+    "local:deploy": "bash scripts/local/deploy.sh",
+    "local:smoke": "bash scripts/local/smoke.sh",
+    "local:logs": "bash scripts/local/logs.sh",
+    "local:backup": "bash scripts/local/backup.sh",
+    "local:restore": "bash scripts/local/restore.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

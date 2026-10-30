@@ -1,0 +1,93 @@
+name: Local server
+
+# Phase 0 gate (tab 00): «أول شاشة تُنشر آلياً على الخادم المحلي» and «تمرين استعادة نسخة احتياطية
+# ينجح». On a clean machine this job does exactly what the owner's computer does with
+# `pnpm local:deploy`, then backs up, restores into a fresh container and verifies, and proves the
+# drill catches bad backups. Weekly as well (tab 16: the restore test runs every week).
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '41 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-server-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned to a full commit SHA (tag in the comment), as in ci.yml.
+jobs:
+  deploy-and-restore-drill:
+    name: Deploy, smoke test, backup and restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The runner's own network address must answer over HTTPS with the local CA, like a cashier
+      # device on the shop Wi-Fi would.
+      SERVA_SMOKE_LAN: require
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Tools
+        run: |
+          docker version --format 'Docker {{.Server.Version}}'
+          docker compose version
+          shellcheck --version | head -n 2
+
+      - name: Lint the scripts (shellcheck)
+        run: shellcheck -x scripts/local/*.sh deploy/local/pg/*.sh deploy/local/certs/*.sh scripts/db-bootstrap.sh
+
+      - name: The compose file is valid
+        run: |
+          POSTGRES_PASSWORD=x SERVA_OWNER_PASSWORD=x SERVA_APP_PASSWORD=x JWT_SECRET=x \
+            docker compose -f deploy/local/compose.yml --env-file /dev/null config --quiet
+
+      - name: Deploy from scratch (secrets, build, migrate, start, smoke test)
+        run: pnpm local:deploy
+
+      - name: Hardening (database on 127.0.0.1 only, non-root, read-only, secrets out of git)
+        run: bash scripts/local/ci-checks.sh hardening
+
+      - name: Seed test data
+        run: bash scripts/local/ci-checks.sh seed
+
+      - name: Back up (encrypted, checksummed, with manifest)
+        run: pnpm local:backup --label ci
+
+      - name: Restore drill into a fresh container
+        run: pnpm local:restore latest
+
+      - name: The drill fails on a damaged file, a wrong passphrase and mismatched data
+        run: bash scripts/local/ci-checks.sh negative "$(ls deploy/local/backups/*-ci.dump.enc | tail -n 1)"
+
+      - name: Redeploy on the running server (pre-deploy backup, migrations already applied)
+        run: pnpm local:deploy
+
+      - name: Lose data, then restore the backup on the live server
+        run: |
+          docker compose -f deploy/local/compose.yml exec -T -u postgres postgres psql -v ON_ERROR_STOP=1 -d serva \
+            -c "delete from branches" -c "delete from tenant_settings" -c "delete from tenants where name like 'متجر الاختبار %'"
+          pnpm local:restore "$(ls deploy/local/backups/*-ci.dump.enc | tail -n 1)" --replace-live --yes
+          bash scripts/local/ci-checks.sh fixture-present
+
+      - name: Drill reports
+        if: always()
+        run: cat deploy/local/backups/drills/*.txt 2> /dev/null || echo "No drill report."
+
+      - name: Server logs
+        if: failure()
+        run: docker compose -f deploy/local/compose.yml logs --tail 200 || true
+
+      - name: Stop
+        if: always()
+        run: pnpm local:down || true

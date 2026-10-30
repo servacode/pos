@@ -1,0 +1,102 @@
+# Serva web server and reverse proxy. The image's entrypoint turns this template into
+# /etc/nginx/conf.d/default.conf, filling in the SERVA_* environment variables only.
+
+server_tokens off;
+charset utf-8;
+# The API accepts bodies up to 1 MiB
+client_max_body_size 2m;
+
+gzip on;
+gzip_vary on;
+gzip_types text/css application/javascript application/json image/svg+xml text/plain;
+
+# Docker's DNS, so a recreated API container is found at its new address
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+# Plain HTTP: the health check, the local CA certificate for devices, and a redirect to HTTPS.
+server {
+  listen 8080 default_server;
+  server_name _;
+
+  location = /healthz {
+    access_log off;
+    default_type text/plain;
+    return 200 "ok\n";
+  }
+
+  # Public certificate of this server's own CA (not its key): installed once on each device so the
+  # browser trusts https:// on the shop network. See docs/local-server.md.
+  location = /serva-local-ca.crt {
+    alias /etc/nginx/certs/ca.crt;
+    default_type application/x-x509-ca-cert;
+    add_header Content-Disposition 'attachment; filename="serva-local-ca.crt"' always;
+    add_header Cache-Control "no-cache" always;
+  }
+
+  location / {
+    return 301 https://$host:${SERVA_HTTPS_PORT}$request_uri;
+  }
+}
+
+server {
+  listen 8443 ssl default_server;
+  http2 on;
+  server_name _;
+
+  ssl_certificate /etc/nginx/certs/server.crt;
+  ssl_certificate_key /etc/nginx/certs/server.key;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_prefer_server_ciphers off;
+  ssl_session_cache shared:SSL:5m;
+  ssl_session_tickets off;
+
+  root /usr/share/nginx/html;
+
+  # ─── API: same origin, so the refresh cookie and CSP connect-src 'self' just work ──────────────
+  # The API answers with its own security headers; none are added here. X-Forwarded-For is
+  # replaced (never appended), so a client cannot pass a fake address through; the API trusts it
+  # only from this container (TRUST_PROXY in deploy/local/compose.yml).
+  location /v1/ {
+    set $api_upstream http://${SERVA_API_UPSTREAM};
+    proxy_pass $api_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 60s;
+  }
+
+  location = /health {
+    set $api_upstream http://${SERVA_API_UPSTREAM};
+    proxy_pass $api_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  # ─── Static app ────────────────────────────────────────────────────────────────────────────────
+  location ~ /\. {
+    return 404;
+  }
+
+  # Hashed file names: cache for a year
+  location /assets/ {
+    include /etc/nginx/snippets/security-headers.conf;
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    try_files $uri =404;
+  }
+
+  # index.html for every app route; always revalidated so a new release shows on the next load.
+  # Each <script> and <style> gets this request's CSP nonce.
+  location / {
+    include /etc/nginx/snippets/security-headers.conf;
+    add_header Cache-Control "no-cache" always;
+    try_files $uri /index.html;
+    sub_filter_once off;
+    sub_filter '<script' '<script nonce="$request_id"';
+    sub_filter '<style' '<style nonce="$request_id"';
+  }
+}
