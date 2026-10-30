@@ -6,7 +6,7 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 // Tab 14 › مصدر واحد: web screens name colours by token (bg-surface, text-ink-muted,
 // border-line-control…), never by palette shade (bg-brand-900, text-white), arbitrary value
-// (bg-[#0b8a62]) or raw colour string ('#fff', 'oklch(…)'). Tokens live in apps/web/src/styles.css.
+// (bg-[#0b8a62]) or raw colour string ('#fff', 'oklch(…)'). Tokens live in packages/ui/src/theme.css.
 const RAW_COLOUR = [
   String.raw`\b(?:bg|text|border|ring|outline|fill|stroke|divide|decoration|accent|caret|shadow|from|via|to|placeholder)(?:-[a-z]{1,6})?-(?:white|black|(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|brand)-\d{2,3})\b`,
   String.raw`-\[(?:#|(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb|color)\()`,
@@ -56,7 +56,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/web/**/*.{ts,tsx}'],
+    files: ['apps/web/**/*.{ts,tsx}', 'packages/ui/**/*.{ts,tsx}'],
     languageOptions: {
       globals: { ...globals.browser },
     },
@@ -69,13 +69,29 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/web/src/**/*.{ts,tsx}'],
-    ignores: ['**/*.test.{ts,tsx}', 'apps/web/src/test/**'],
+    files: ['apps/web/src/**/*.{ts,tsx}', 'packages/ui/src/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}', 'apps/web/src/test/**', 'packages/ui/src/test/**'],
     rules: {
       'no-restricted-syntax': [
         'error',
         { selector: `Literal[value=/${RAW_COLOUR}/]`, message: RAW_COLOUR_MESSAGE },
         { selector: `TemplateElement[value.raw=/${RAW_COLOUR}/]`, message: RAW_COLOUR_MESSAGE },
+      ],
+    },
+  },
+  {
+    // Tab 14 › الأيقونات: screens take icons from the one wrapper in @serva/ui (functional names,
+    // size, stroke and RTL mirroring), never from lucide-react directly.
+    files: ['apps/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [{ name: 'lucide-react', message: 'Import icons from @serva/ui (tab 14 › الأيقونات).' }],
+          patterns: [
+            { group: ['lucide-react/*'], message: 'Import icons from @serva/ui (tab 14 › الأيقونات).' },
+          ],
+        },
       ],
     },
   },

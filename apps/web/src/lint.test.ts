@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const eslint = new ESLint({ cwd: repoRoot });
 
-async function ruleIds(code: string): Promise<(string | null)[]> {
-  const [result] = await eslint.lintText(code, { filePath: `${repoRoot}apps/web/src/Snippet.tsx` });
+async function ruleIds(code: string, file = 'apps/web/src/Snippet.tsx'): Promise<(string | null)[]> {
+  const [result] = await eslint.lintText(code, { filePath: `${repoRoot}${file}` });
   return result?.messages.map((message) => message.ruleId) ?? [];
 }
 
@@ -56,5 +56,22 @@ describe('ESLint config for the web app', () => {
       'text-2xl size-8 rounded-control',
     ].join(' ');
     expect(await ruleIds(`export const A = () => <div className="${tokens}" />;\n`)).toEqual([]);
+  });
+
+  it('refuses icons straight from lucide-react: they come from the @serva/ui wrapper (tab 14)', async () => {
+    expect(await ruleIds("import { House } from 'lucide-react';\nexport const A = House;\n")).toContain(
+      'no-restricted-imports',
+    );
+    expect(await ruleIds("import { HomeIcon } from '@serva/ui';\nexport const A = HomeIcon;\n")).toEqual([]);
+  });
+
+  it('holds @serva/ui to the same colour and accessibility rules', async () => {
+    const file = 'packages/ui/src/Snippet.tsx';
+    expect(await ruleIds('export const A = () => <div className="bg-emerald-600" />;\n', file)).toContain(
+      'no-restricted-syntax',
+    );
+    expect(await ruleIds('export const A = () => <img src="/logo.png" />;\n', file)).toContain(
+      'jsx-a11y/alt-text',
+    );
   });
 });

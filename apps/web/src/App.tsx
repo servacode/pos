@@ -1,7 +1,7 @@
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router';
-import { FullScreenLoader } from './ui/FullScreenLoader';
+import { FullScreenLoader } from '@serva/ui';
 
 // Two apps, two code-split entries. The cashier (/pos) boots from what the device keeps locally
 // and asks for the login code, with no network request; the store admin restores its session

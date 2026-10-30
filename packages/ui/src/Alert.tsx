@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cn } from '../lib/cn';
+import { cn } from './cn';
 import { AlertCircleIcon, CheckCircleIcon, InfoIcon, type Icon } from './icons';
 
 type Tone = 'error' | 'info' | 'success';

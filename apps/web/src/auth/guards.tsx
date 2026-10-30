@@ -1,5 +1,5 @@
 import { Navigate, Outlet } from 'react-router';
-import { FullScreenLoader } from '../ui/FullScreenLoader';
+import { FullScreenLoader } from '@serva/ui';
 import { useAuth } from './useAuth';
 
 export function RequireAuth() {

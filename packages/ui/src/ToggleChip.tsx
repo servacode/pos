@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { cn } from '../lib/cn';
+import { cn } from './cn';
 import { CheckIcon } from './icons';
 
 interface ToggleChipProps extends Omit<ComponentProps<'input'>, 'type' | 'size'> {

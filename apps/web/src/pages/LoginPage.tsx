@@ -1,13 +1,9 @@
 import { loginInput } from '@serva/core';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
+import { Alert, Button, PasswordField, TextField, TextLink } from '@serva/ui';
 import { useAuth } from '../auth/useAuth';
 import { AuthLayout } from '../layout/AuthLayout';
 import { useForm } from '../lib/useForm';
-import { Alert } from '../ui/Alert';
-import { Button } from '../ui/Button';
-import { PasswordField } from '../ui/PasswordField';
-import { TextField } from '../ui/TextField';
-import { TextLink } from '../ui/TextLink';
 
 export function LoginPage() {
   const { state, login } = useAuth();
@@ -29,7 +25,10 @@ export function LoginPage() {
       subtitle="سجّل دخولك وتابع البيع من حيث توقفت."
       footer={
         <>
-          ليس لديك حساب؟ <TextLink to="/register">افتح متجرك الآن</TextLink>
+          ليس لديك حساب؟{' '}
+          <TextLink as={Link} to="/register">
+            افتح متجرك الآن
+          </TextLink>
         </>
       }
     >
