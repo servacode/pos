@@ -1,0 +1,15 @@
+/* addon: cashier (sale screen, payment, keypad). Paste after serva-ui.css. */
+.shell-cashier{width:1280px;height:800px;display:grid;grid-template-rows:44px minmax(0,1fr);overflow:hidden}
+.cash-status{display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--line);position:relative;z-index:60}
+.cash-body{display:grid;grid-template-columns:420px minmax(0,1fr);min-height:0}
+.cash-cart{display:flex;flex-direction:column;min-height:0;background:var(--surface);border-inline-end:1px solid var(--line)}
+.cash-items{display:flex;flex-direction:column;gap:12px;min-height:0;padding:16px}
+.item-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.item{min-height:104px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:14px;border:1px solid var(--line);border-radius:20px;background:var(--surface);box-shadow:var(--e1);text-align:start;color:var(--ink)}
+.item .nm{font-size:16px;line-height:22px;font-weight:600}.item .pr{font-size:15px;font-weight:600;color:var(--brand-ink);font-variant-numeric:tabular-nums}
+.item.is-sel{border:2px solid var(--brand);background:var(--brand-soft)}.item.is-out{opacity:.5}
+.cart-line{min-height:56px;display:flex;align-items:center;gap:12px;padding:8px 16px;border-bottom:1px solid var(--line)}
+.cart-line.is-sel{background:var(--brand-soft)}.cart-line .meta{font-size:13px;line-height:20px;color:var(--ink-muted)}
+.cart-total{display:flex;flex-direction:column;gap:12px;padding:16px;background:var(--surface-total);border-top:1px solid var(--line)}
+.keypad{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;direction:ltr}
+.key{height:64px;border:1px solid var(--line);border-radius:14px;background:var(--surface);font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}.key:active{background:var(--surface-muted)}
