@@ -61,7 +61,7 @@ const paidPlans: { code: string; name: string; sortOrder: number; limits: PlanLi
     },
   ];
 
-const { db, client } = createDb(url, { max: 1 });
+const { db, client } = createDb(url, { max: 1, timeouts: false, applicationName: 'serva-seed' });
 try {
   for (const plan of paidPlans) {
     await db

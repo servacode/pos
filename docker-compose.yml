@@ -1,11 +1,15 @@
-# Local PostgreSQL for development: `docker compose up -d`, then `pnpm db:migrate`.
+# Local PostgreSQL for DEVELOPMENT ONLY: `docker compose up -d`, then `pnpm db:migrate`.
+# The port is published on 127.0.0.1 only (Docker bypasses host firewalls such as ufw, so
+# '5432:5432' would expose the database to the network with these passwords).
+# Never reuse this file on a server: there the database publishes no port and every role has its
+# own password (scripts/db-bootstrap.sh refuses the defaults when NODE_ENV=production).
 services:
   postgres:
     image: postgres:16
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/db-bootstrap.sql:/docker-entrypoint-initdb.d/bootstrap.sql:ro
