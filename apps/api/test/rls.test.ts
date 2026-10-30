@@ -17,8 +17,8 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await resetDatabase();
-  const a = await registerStore(app, { phone: '0911111111', storeName: 'متجر أ' });
-  const b = await registerStore(app, { phone: '0922222222', storeName: 'متجر ب' });
+  const a = await registerStore(app, { phone: '0911111111', fullName: 'صاحب أ' });
+  const b = await registerStore(app, { phone: '0922222222', fullName: 'صاحب ب' });
   storeA = { tenantId: a.body.tenant.id, userId: a.body.user.id };
   const [branchB] = await withTenant(appDb().db, b.body.tenant.id, (tx) => tx.select().from(branches));
   storeB = { tenantId: b.body.tenant.id, userId: b.body.user.id, branchId: branchB!.id };
@@ -129,7 +129,7 @@ describe('billing and store status are not writable by the store role', () => {
 
   it("cannot change its store's status or agent attribution, but can rename it", async () => {
     expect(await inStoreA(sql`update tenants set status = 'active'`)).toBe('42501');
-    expect(await inStoreA(sql`update tenants set referral_code = 'AG-1'`)).toBe('42501');
+    expect(await inStoreA(sql`update tenants set agent_id = gen_random_uuid()`)).toBe('42501');
 
     const renamed = await withTenant(appDb().db, storeA.tenantId, (tx) =>
       tx.update(tenants).set({ name: 'متجر أ الجديد' }).returning({ name: tenants.name }),

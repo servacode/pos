@@ -2,8 +2,9 @@ import postgres from 'postgres';
 import type { FastifyInstance } from 'fastify';
 import type { LightMyRequestResponse } from 'fastify';
 import { createDb, type DbHandle } from '@serva/db';
-import type { RegisterStoreInput } from '@serva/core';
+import { TERMS_VERSION, type RegisterStoreInput } from '@serva/core';
 import { buildApp } from '../src/app';
+import type { OtpMessage, OtpSender } from '../src/auth/otp';
 import { ManualClock, type Clock } from '../src/clock';
 import { loadEnv } from '../src/env';
 import { REFRESH_COOKIE } from '../src/routes/auth';
@@ -37,15 +38,37 @@ export async function closeAppDb(): Promise<void> {
   handle = undefined;
 }
 
+/** Collects the codes the app would send by SMS, so tests can type them. */
+export class CapturedCodes implements OtpSender {
+  readonly sent: OtpMessage[] = [];
+
+  async send(message: OtpMessage): Promise<void> {
+    this.sent.push(message);
+  }
+
+  /** The latest code sent to this phone (E.164) */
+  last(phone: string): string | undefined {
+    return this.sent.filter((m) => m.phone === phone).at(-1)?.code;
+  }
+}
+
+/** Codes sent by every app built with makeApp() unless a test passes its own sender. */
+export const codes = new CapturedCodes();
+
 /**
  * Builds the app against the test database. Time is a ManualClock fixed at a known instant
  * unless a clock is passed, so expiry and trial rules are deterministic.
  */
 export function makeApp(
   overrides: Record<string, string> = {},
-  options: { clock?: Clock } = {},
+  options: { clock?: Clock; otpSender?: OtpSender | null } = {},
 ): Promise<FastifyInstance> {
-  return buildApp({ env: testEnv(overrides), database: appDb(), clock: options.clock ?? new ManualClock() });
+  return buildApp({
+    env: testEnv(overrides),
+    database: appDb(),
+    clock: options.clock ?? new ManualClock(),
+    otpSender: options.otpSender === undefined ? codes : options.otpSender,
+  });
 }
 
 /** Reference tables filled by migrations; every other table is emptied between tests. */
@@ -87,12 +110,10 @@ export async function resetDatabase(): Promise<void> {
 
 export function storeInput(overrides: Partial<RegisterStoreInput> = {}): RegisterStoreInput {
   return {
-    storeName: 'متجر الأمل',
-    ownerName: 'أحمد الخطيب',
     phone: '0912345678',
+    fullName: 'أحمد الخطيب',
     password: 'secret-pass-1',
-    sectors: ['clothing'],
-    baseCurrency: 'SYP',
+    termsVersion: TERMS_VERSION,
     ...overrides,
   };
 }
@@ -101,8 +122,17 @@ export function refreshCookie(res: LightMyRequestResponse): string | undefined {
   return res.cookies.find((c) => c.name === REFRESH_COOKIE)?.value;
 }
 
+/** Opens an account the way a person does: sign-up, then the code that reached the phone. */
 export async function registerStore(app: FastifyInstance, overrides: Partial<RegisterStoreInput> = {}) {
-  const res = await app.inject({ method: 'POST', url: '/v1/auth/register', payload: storeInput(overrides) });
-  if (res.statusCode !== 201) throw new Error(`register failed: ${res.statusCode} ${res.body}`);
+  const input = storeInput(overrides);
+  const start = await app.inject({ method: 'POST', url: '/v1/auth/register', payload: input });
+  if (start.statusCode !== 202) throw new Error(`register failed: ${start.statusCode} ${start.body}`);
+  const code = codes.sent.at(-1)?.code;
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/auth/register/verify',
+    payload: { registrationId: start.json().registrationId, code, password: input.password },
+  });
+  if (res.statusCode !== 201) throw new Error(`register/verify failed: ${res.statusCode} ${res.body}`);
   return { res, body: res.json(), cookie: refreshCookie(res)! };
 }

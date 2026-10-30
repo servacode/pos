@@ -3,6 +3,10 @@ export const ERROR_CODES = [
   'validation_failed',
   'bad_request',
   'phone_taken',
+  /** A one-time code is wrong or has expired */
+  'otp_invalid',
+  /** Too many wrong attempts: ask for a new code */
+  'locked',
   'invalid_credentials',
   'unauthorized',
   'forbidden',

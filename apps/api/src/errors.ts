@@ -25,7 +25,7 @@ export class AppError extends Error {
   }
 }
 
-export const unauthorized = () => new AppError(401, 'unauthorized', 'انتهت الجلسة. سجّل الدخول من جديد.');
+export const unauthorized = () => new AppError(401, 'unauthorized', 'انتهى دخولك. سجّل الدخول مرة أخرى.');
 
 /** Turns a zod error into per-field Arabic messages (first message per top-level field). */
 export function validationError(error: ZodError): AppError {

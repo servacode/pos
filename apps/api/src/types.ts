@@ -1,4 +1,5 @@
 import type { Database } from '@serva/db';
+import type { OtpSender } from './auth/otp';
 import type { PasswordHasher } from './auth/passwords';
 import type { SessionGate } from './auth/session-gate';
 import type { AccessClaims, TokenKeys } from './auth/tokens';
@@ -15,6 +16,8 @@ declare module 'fastify' {
     addressing: ClientAddressing;
     passwords: PasswordHasher;
     tokenKeys: TokenKeys;
+    /** null when no channel is configured: sign-up answers 503 */
+    otpSender: OtpSender | null;
   }
   interface FastifyRequest {
     /** Set by requireAuth for authenticated routes */

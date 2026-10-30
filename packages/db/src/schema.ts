@@ -57,6 +57,8 @@ export const platformRole = pgEnum('platform_role', ['super_admin', 'support', '
 export const userStatus = pgEnum('user_status', ['active', 'disabled']);
 /** Administrative state of a store, set by the platform team (e.g. suspended for abuse). */
 export const tenantStatus = pgEnum('tenant_status', ['active', 'suspended']);
+export const agentStatus = pgEnum('agent_status', ['active', 'suspended']);
+export const otpPurpose = pgEnum('otp_purpose', ['registration']);
 
 // ─── Platform (no tenant_id) ──────────────────────────────────────────────────
 
@@ -107,6 +109,45 @@ export const platformUsers = pgTable('platform_users', {
   updatedAt: updatedAt(),
 });
 
+/**
+ * Sales agents who bring stores. A store typing an agent's code at sign-up is attributed to that
+ * agent (pending until the owner confirms and pays, 07). Not readable by the store role; codes
+ * are checked through agent_find_by_code().
+ */
+export const agents = pgTable('agents', {
+  id: platformId(),
+  /** Referral code, upper case, e.g. AG-42 */
+  code: text('code').notNull().unique(),
+  fullName: text('full_name').notNull(),
+  phone: text('phone'),
+  status: agentStatus('status').notNull().default('active'),
+  version: version(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * One-time codes sent to a phone (09 otp_challenges). For sign-up, the pending registration waits
+ * here (payload) and the store is created only once the code is confirmed; unconfirmed rows are
+ * deleted after 24 hours and never reserve the number. Reached only through otp_* functions.
+ */
+export const otpChallenges = pgTable(
+  'otp_challenges',
+  {
+    id: platformId(),
+    purpose: otpPurpose('purpose').notNull(),
+    phone: text('phone').notNull(),
+    /** HMAC of the code; the code itself is never stored */
+    codeHash: text('code_hash').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    payload: jsonb('payload').notNull().default({}),
+    ip: text('ip'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('otp_challenges_phone_idx').on(t.phone, t.createdAt)],
+);
+
 /** A store (tenant). Row-level security limits each store to its own row. */
 export const tenants = pgTable(
   'tenants',
@@ -118,8 +159,8 @@ export const tenants = pgTable(
     country: text('country').notNull().default('SY'),
     timezone: text('timezone').notNull().default('Asia/Damascus'),
     sectors: text('sectors').array().notNull(),
-    /** Referral code typed at sign-up; linked to an agent once the agents module exists */
-    referralCode: text('referral_code'),
+    /** Agent whose code was given at sign-up (verified); attribution is final after the first payment */
+    agentId: uuid('agent_id').references(() => agents.id),
     /** Checked at login, refresh and on every authenticated request */
     status: tenantStatus('status').notNull().default('active'),
     version: version(),
@@ -169,8 +210,14 @@ export const tenantSettings = pgTable(
     /** Shelf prices include tax (common for consumer prices in Syria) */
     taxInclusive: boolean('tax_inclusive').notNull().default(true),
     defaultTaxRateBp: integer('default_tax_rate_bp').notNull().default(0),
-    /** 0 = no cash rounding; e.g. 5 = round cash totals to 0.05 */
-    cashRoundingMinor: integer('cash_rounding_minor').notNull().default(0),
+    /**
+     * Cash rounding step per currency, in minor units (09/10): only the cash part of a payment is
+     * rounded, never the invoice. 0 = no rounding for that currency.
+     */
+    cashRoundingSteps: jsonb('cash_rounding_steps')
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({ SYP: 1000, USD: 25 }),
     numberFormat: text('number_format').notNull().default('latn'),
     receiptFooter: text('receipt_footer'),
     version: version(),
@@ -319,6 +366,35 @@ export const auditLogs = pgTable(
   (t) => [
     primaryKey({ name: 'audit_logs_pkey', columns: [t.tenantId, t.id] }),
     index('audit_logs_tenant_created_idx').on(t.tenantId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Which version of which legal document a user (or agent) accepted, when, from where, and in what
+ * context (09). Append-only: the store role may only insert, and a trigger refuses any change.
+ */
+export const legalAcceptances = pgTable(
+  'legal_acceptances',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    userId: uuid('user_id'),
+    agentId: uuid('agent_id'),
+    /** terms, privacy, agent_agreement… */
+    document: text('document').notNull(),
+    documentVersion: text('document_version').notNull(),
+    /** registration, migration_tool… */
+    context: text('context').notNull(),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'legal_acceptances_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
     tenantIsolation(),
   ],
 );

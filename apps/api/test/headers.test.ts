@@ -61,6 +61,10 @@ describe('startup refuses unsafe configuration', () => {
     expect(testEnv({ NODE_ENV: 'development', HOST: '127.0.0.1' }).NODE_ENV).toBe('development');
   });
 
+  it('refuses writing sign-up codes to the log in production', () => {
+    expect(() => production({ OTP_DELIVERY: 'log' })).toThrow(/OTP_DELIVERY=log/);
+  });
+
   it('refuses the development database passwords in production', () => {
     for (const password of ['serva_app', 'serva_owner', 'postgres']) {
       expect(() => production({ DATABASE_URL: `postgres://serva_app:${password}@db:5432/serva` })).toThrow(

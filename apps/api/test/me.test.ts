@@ -16,8 +16,8 @@ afterAll(async () => {
 beforeEach(resetDatabase);
 
 describe('GET /v1/me', () => {
-  it('returns the new store with its free period, branch, settings and owner permissions', async () => {
-    const { body } = await registerStore(app, { sectors: ['supermarket', 'cafe'], baseCurrency: 'USD' });
+  it('returns the new store with its trial, branch, default settings and owner permissions', async () => {
+    const { body } = await registerStore(app);
 
     const res = await app.inject({
       method: 'GET',
@@ -27,14 +27,15 @@ describe('GET /v1/me', () => {
 
     expect(res.statusCode).toBe(200);
     const me = res.json();
-    expect(me.tenant).toMatchObject({ name: 'متجر الأمل', sectors: ['supermarket', 'cafe'], country: 'SY' });
+    // Business type and currency are chosen in the setup wizard, after sign-up (04).
+    expect(me.tenant).toMatchObject({ name: 'متجر أحمد الخطيب', sectors: [], country: 'SY' });
     expect(me.settings).toEqual({
-      baseCurrency: 'USD',
-      enabledCurrencies: ['USD', 'SYP'],
+      baseCurrency: 'SYP',
+      enabledCurrencies: ['SYP', 'USD'],
       taxInclusive: true,
       numberFormat: 'latn',
     });
-    expect(me.subscription).toMatchObject({ status: 'trialing', planName: 'الباقة المجانية', daysLeft: 14 });
+    expect(me.subscription).toMatchObject({ status: 'trialing', planName: 'الباقة المجانية', daysLeft: 30 });
     expect(me.branches).toEqual([{ id: expect.any(String), code: '01', name: 'الفرع الرئيسي' }]);
     expect(me.user.roles).toEqual([{ key: 'owner', name: 'المالك', branchId: null }]);
     expect(me.user.permissions).toEqual(ALL_PERMISSIONS);

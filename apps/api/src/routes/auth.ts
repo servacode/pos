@@ -1,6 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { eq, sql } from 'drizzle-orm';
-import { loginInput, registerStoreInput, type AuthResponse, type RefreshResponse } from '@serva/core';
+import {
+  loginInput,
+  registerStoreInput,
+  verifyRegistrationInput,
+  type AuthResponse,
+  type RefreshResponse,
+} from '@serva/core';
 import { tenants, users, withTenant } from '@serva/db';
 import { signAccessToken } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
@@ -14,7 +20,7 @@ import {
   type IssuedSession,
   type SessionPolicy,
 } from '../services/sessions';
-import { registerStore } from '../services/stores';
+import { completeRegistration, startRegistration } from '../services/registration';
 import type { RequestMeta } from '../types';
 import { parseBody } from './validation';
 
@@ -57,16 +63,19 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       clock.now(),
     );
 
+  // Opening an account, step 1: always "we sent a code to this number" (202), store not created yet.
   app.post('/v1/auth/register', { config: authLimit }, async (request, reply) => {
     const data = parseBody(registerStoreInput, request.body);
-    const passwordHash = await app.passwords.hash(data.password);
-    const result = await registerStore(
-      db,
-      data,
-      passwordHash,
-      { sessionPolicy, now: clock.now() },
-      metaOf(request),
-    );
+    await enforceLimits(request, reply, 3_600_000, [
+      { key: `register:phone:${data.phone}`, max: env.REGISTER_PHONE_LIMIT_PER_HOUR },
+    ]);
+    return reply.status(202).send(await startRegistration(app, data, metaOf(request)));
+  });
+
+  // Step 2: the code proves the phone; the store, the owner and a signed-in session are created.
+  app.post('/v1/auth/register/verify', { config: authLimit }, async (request, reply) => {
+    const data = parseBody(verifyRegistrationInput, request.body);
+    const result = await completeRegistration(app, data, sessionPolicy, metaOf(request));
     setRefreshCookie(reply, result.session);
     const body: AuthResponse = {
       accessToken: await accessTokenFor(result.session),
@@ -83,7 +92,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     await enforceLimits(request, reply, 3_600_000, [
       { key: `login:phone:${data.phone}`, max: env.LOGIN_PHONE_LIMIT_PER_HOUR },
     ]);
-    const invalid = new AppError(401, 'invalid_credentials', 'رقم الجوال أو كلمة المرور غير صحيحة.');
+    const invalid = new AppError(401, 'invalid_credentials', 'رقم الجوال أو كلمة السر غير صحيحة.');
 
     const rows = await db.execute<{
       user_id: string;
@@ -139,7 +148,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (result.status === 'race') {
         // Another tab refreshed with this cookie a moment ago and already holds the new one.
         // No Set-Cookie here, or this answer could arrive last and erase the new cookie.
-        throw new AppError(409, 'conflict', 'تم تجديد الجلسة للتو من نافذة أخرى. أعد المحاولة.');
+        throw new AppError(409, 'conflict', 'جُدّد دخولك للتو من نافذة أخرى. أعد المحاولة.');
       }
       if (result.status === 'invalid') {
         clearRefreshCookie(reply);

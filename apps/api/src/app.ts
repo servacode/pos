@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { createDb, type DbHandle } from '@serva/db';
+import { logOtpSender, type OtpSender } from './auth/otp';
 import { PasswordHasher } from './auth/passwords';
 import { SessionGate } from './auth/session-gate';
 import { TokenKeys } from './auth/tokens';
@@ -25,6 +26,8 @@ export interface BuildAppOptions {
   clock?: Clock;
   /** Where logs go (tests capture them); stdout by default */
   logStream?: NodeJS.WritableStream;
+  /** Delivers sign-up codes; by default from OTP_DELIVERY */
+  otpSender?: OtpSender | null;
 }
 
 export async function buildApp({
@@ -32,6 +35,7 @@ export async function buildApp({
   database,
   clock = systemClock,
   logStream,
+  otpSender,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const addressing = clientAddressing(env.TRUST_PROXY);
   const app = Fastify({
@@ -53,6 +57,11 @@ export async function buildApp({
     new PasswordHasher({ concurrency: env.PASSWORD_HASH_CONCURRENCY, queue: env.PASSWORD_HASH_QUEUE }),
   );
   app.decorate('tokenKeys', new TokenKeys(env.JWT_SECRET, env.JWT_PREVIOUS_SECRETS));
+  const delivery = env.OTP_DELIVERY ?? (env.NODE_ENV === 'production' ? 'none' : 'log');
+  app.decorate(
+    'otpSender',
+    otpSender !== undefined ? otpSender : delivery === 'log' ? logOtpSender(app.log) : null,
+  );
   app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
   app.decorateRequest('auth', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());

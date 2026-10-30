@@ -51,6 +51,14 @@ const envSchema = z
     AUTH_RATE_LIMIT_PER_MINUTE: perMinute(10),
     /** Sign-in attempts per hour for one phone number, from any address */
     LOGIN_PHONE_LIMIT_PER_HOUR: perMinute(20),
+    /** Sign-up codes per hour sent to one phone number */
+    REGISTER_PHONE_LIMIT_PER_HOUR: perMinute(5),
+    /**
+     * How sign-up codes are delivered: "log" writes them to the server log (development only);
+     * "none" turns sign-up off until an SMS/Telegram channel is connected. Default: log outside
+     * production, none in production.
+     */
+    OTP_DELIVERY: z.enum(['log', 'none']).optional(),
     /** Requests per minute per signed-in session (17: 300 per token) */
     SESSION_RATE_LIMIT_PER_MINUTE: perMinute(300),
     /** Requests per minute per store, all its users and devices together */
@@ -101,6 +109,13 @@ const envSchema = z
         code: 'custom',
         path: ['NODE_ENV'],
         message: `NODE_ENV is "development" (the default) but HOST is ${env.HOST}. Set NODE_ENV=production on a server, or listen on 127.0.0.1 for local development.`,
+      });
+    }
+    if (production && env.OTP_DELIVERY === 'log') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OTP_DELIVERY'],
+        message: 'OTP_DELIVERY=log writes codes to the log; not allowed in production',
       });
     }
     if (production && !env.COOKIE_SECURE) {

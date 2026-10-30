@@ -10,7 +10,7 @@ import { RATE_LIMITED_MESSAGE } from './rate-limit';
  */
 const TRANSPORT_ERRORS: Record<number, { code: ErrorCode; message: string }> = {
   400: { code: 'validation_failed', message: 'الطلب غير صالح.' },
-  401: { code: 'unauthorized', message: 'انتهت الجلسة. سجّل الدخول من جديد.' },
+  401: { code: 'unauthorized', message: 'انتهى دخولك. سجّل الدخول مرة أخرى.' },
   403: { code: 'forbidden', message: 'لا تملك صلاحية هذا الإجراء.' },
   404: { code: 'not_found', message: 'غير موجود.' },
   405: { code: 'method_not_allowed', message: 'هذا الإجراء غير مسموح على هذا العنوان.' },
