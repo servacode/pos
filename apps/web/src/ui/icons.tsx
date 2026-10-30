@@ -3,12 +3,17 @@ import {
   Check,
   CircleAlert,
   CircleCheck,
+  Delete,
   Eye,
   EyeOff,
   Gift,
   House,
   Info,
+  LockKeyhole,
   LogOut,
+  MonitorSmartphone,
+  Wifi,
+  WifiOff,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react';
@@ -60,3 +65,9 @@ export const AlertCircleIcon = defineIcon(CircleAlert);
 export const InfoIcon = defineIcon(Info);
 export const CheckCircleIcon = defineIcon(CircleCheck);
 export const GiftIcon = defineIcon(Gift);
+export const ConnectedIcon = defineIcon(Wifi);
+export const OfflineIcon = defineIcon(WifiOff);
+export const LockIcon = defineIcon(LockKeyhole);
+export const DeviceIcon = defineIcon(MonitorSmartphone);
+// Lives on the keypad, which stays LTR (7 8 9 on top), so it always points left: not mirrored.
+export const BackspaceIcon = defineIcon(Delete);

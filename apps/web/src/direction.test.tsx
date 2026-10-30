@@ -29,4 +29,11 @@ describe('Radix direction', () => {
     expect(provider).toHaveAttribute('data-dir', 'rtl');
     expect(provider).toContainElement(heading);
   });
+
+  it('wraps the cashier app too', async () => {
+    renderApp('/pos');
+
+    const heading = await screen.findByRole('heading', { name: 'هذا الجهاز غير مربوط بمتجر بعد' });
+    expect(screen.getByTestId('radix-direction')).toContainElement(heading);
+  });
 });
