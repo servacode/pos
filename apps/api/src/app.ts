@@ -11,6 +11,7 @@ import { clientAddressing, clientIp } from './http/client-ip';
 import { installErrorHandling } from './http/error-handler';
 import { loggerOptions, newRequestRef } from './http/logging';
 import { postgresRateLimitStore } from './http/rate-limit';
+import { installSecurityHeaders } from './http/security-headers';
 import { authRoutes } from './routes/auth';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
@@ -72,6 +73,7 @@ export async function buildApp({
     errorResponseBuilder: () => ({ statusCode: 429, code: 'rate_limited' }),
   });
 
+  installSecurityHeaders(app, { https: env.COOKIE_SECURE });
   installErrorHandling(app);
 
   await app.register(healthRoutes);

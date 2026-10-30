@@ -2,12 +2,25 @@ import { z } from 'zod';
 import { weakSecretReason } from './auth/tokens';
 import { parseProxyTrust, type ProxyTrust } from './http/client-ip';
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
+/** Passwords from docker-compose.yml and scripts/db-bootstrap.sh, for local development only */
+const DEV_DB_PASSWORDS = new Set(['', 'postgres', 'serva_app', 'serva_owner']);
+
+function hasDefaultPassword(url: string): boolean {
+  try {
+    return DEV_DB_PASSWORDS.has(decodeURIComponent(new URL(url).password));
+  } catch {
+    return false;
+  }
+}
+
 const perMinute = (fallback: number) => z.coerce.number().int().positive().default(fallback);
 
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    HOST: z.string().default('0.0.0.0'),
+    /** Listen address. Loopback by default; a container sets 0.0.0.0 explicitly (with NODE_ENV=production). */
+    HOST: z.string().default('127.0.0.1'),
     PORT: z.coerce.number().int().positive().default(3000),
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
     /** Signs access tokens (one key per gate is derived from it). Generate: openssl rand -base64 48 */
@@ -71,10 +84,39 @@ const envSchema = z
     PASSWORD_HASH_CONCURRENCY: z.coerce.number().int().positive().default(2),
     /** Password checks allowed to wait; beyond this, sign-in answers 503 at once */
     PASSWORD_HASH_QUEUE: z.coerce.number().int().min(0).default(32),
+    /**
+     * Secure flag on the refresh cookie. On by default (browsers accept it on http://localhost);
+     * "false" is allowed only outside production, for browsers that refuse it on localhost.
+     */
+    COOKIE_SECURE: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   })
   .superRefine((env, ctx) => {
     const production = env.NODE_ENV === 'production';
+    if (env.NODE_ENV === 'development' && !LOOPBACK.has(env.HOST)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['NODE_ENV'],
+        message: `NODE_ENV is "development" (the default) but HOST is ${env.HOST}. Set NODE_ENV=production on a server, or listen on 127.0.0.1 for local development.`,
+      });
+    }
+    if (production && !env.COOKIE_SECURE) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['COOKIE_SECURE'],
+        message: 'COOKIE_SECURE=false is not allowed in production',
+      });
+    }
+    if (production && hasDefaultPassword(env.DATABASE_URL)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DATABASE_URL'],
+        message: 'DATABASE_URL uses a development default password; set a real one in production',
+      });
+    }
     const weak = weakSecretReason(env.JWT_SECRET, production);
     if (weak) ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: `JWT_SECRET ${weak}` });
     for (const old of env.JWT_PREVIOUS_SECRETS) {

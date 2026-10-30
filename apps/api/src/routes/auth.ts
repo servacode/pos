@@ -37,7 +37,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   const setRefreshCookie = (reply: FastifyReply, session: IssuedSession) =>
     reply.setCookie(REFRESH_COOKIE, session.refreshToken, {
       httpOnly: true,
-      secure: env.NODE_ENV === 'production',
+      secure: env.COOKIE_SECURE,
       sameSite: 'strict',
       path: COOKIE_PATH,
       expires: session.expiresAt,
@@ -45,7 +45,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   const clearRefreshCookie = (reply: FastifyReply) =>
     reply.clearCookie(REFRESH_COOKIE, {
       httpOnly: true,
-      secure: env.NODE_ENV === 'production',
+      secure: env.COOKIE_SECURE,
       sameSite: 'strict',
       path: COOKIE_PATH,
     });
