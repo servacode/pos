@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import {
-  ChartColumn,
   Check,
   CircleAlert,
   CircleCheck,
@@ -10,15 +9,6 @@ import {
   House,
   Info,
   LogOut,
-  MessageCircle,
-  Package,
-  PackagePlus,
-  Printer,
-  Settings,
-  ShoppingCart,
-  UserPlus,
-  Users,
-  Warehouse,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react';
@@ -62,12 +52,6 @@ function defineIcon(Glyph: LucideIcon, { directional = false }: IconOptions = {}
 }
 
 export const HomeIcon = defineIcon(House);
-export const CartIcon = defineIcon(ShoppingCart);
-export const PackageIcon = defineIcon(Package);
-export const WarehouseIcon = defineIcon(Warehouse);
-export const UsersIcon = defineIcon(Users);
-export const ChartIcon = defineIcon(ChartColumn);
-export const SettingsIcon = defineIcon(Settings);
 export const LogoutIcon = defineIcon(LogOut, { directional: true });
 export const EyeIcon = defineIcon(Eye);
 export const EyeOffIcon = defineIcon(EyeOff);
@@ -76,7 +60,3 @@ export const AlertCircleIcon = defineIcon(CircleAlert);
 export const InfoIcon = defineIcon(Info);
 export const CheckCircleIcon = defineIcon(CircleCheck);
 export const GiftIcon = defineIcon(Gift);
-export const PackagePlusIcon = defineIcon(PackagePlus);
-export const UserPlusIcon = defineIcon(UserPlus);
-export const PrinterIcon = defineIcon(Printer);
-export const MessageIcon = defineIcon(MessageCircle);

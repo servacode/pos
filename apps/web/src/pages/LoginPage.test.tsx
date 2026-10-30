@@ -12,7 +12,7 @@ describe('LoginPage', () => {
     fetchMock.mockClear();
 
     await user.type(screen.getByLabelText('رقم الجوال'), '12345');
-    await user.type(screen.getByLabelText('كلمة المرور'), 'secret-pass');
+    await user.type(screen.getByLabelText('كلمة السر'), 'secret-pass');
     await user.click(screen.getByRole('button', { name: 'دخول' }));
 
     expect(screen.getByText('رقم الجوال غير صحيح. مثال: 0912345678')).toBeInTheDocument();
@@ -30,7 +30,7 @@ describe('LoginPage', () => {
     const { user } = renderApp('/login');
 
     await user.type(await screen.findByLabelText('رقم الجوال'), '٠٩١٢٣٤٥٦٧٨');
-    await user.type(screen.getByLabelText('كلمة المرور'), 'secret-pass');
+    await user.type(screen.getByLabelText('كلمة السر'), 'secret-pass');
     await user.click(screen.getByRole('button', { name: 'دخول' }));
 
     expect(await screen.findByRole('heading', { name: 'متجرك جاهز، أحمد' })).toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('LoginPage', () => {
     const { user } = renderApp('/login');
 
     await user.type(await screen.findByLabelText('رقم الجوال'), '0912345678');
-    await user.type(screen.getByLabelText('كلمة المرور'), 'wrong-pass');
+    await user.type(screen.getByLabelText('كلمة السر'), 'wrong-pass');
     await user.click(screen.getByRole('button', { name: 'دخول' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('رقم الجوال أو كلمة المرور غير صحيحة');

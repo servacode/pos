@@ -29,7 +29,3 @@ export function Badge({
     </span>
   );
 }
-
-export function SoonBadge({ className }: { className?: string }) {
-  return <Badge className={className}>قريباً</Badge>;
-}

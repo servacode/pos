@@ -1,10 +1,10 @@
 import type { ApiErrorBody, ErrorCode, RefreshResponse } from '@serva/core';
 
-export const NETWORK_ERROR_MESSAGE = 'تعذّر الاتصال بالخادم. تحقق من الإنترنت وحاول مجدداً.';
+export const NETWORK_ERROR_MESSAGE = 'لا يوجد إنترنت الآن. تحقّق من الاتصال وحاول مرة أخرى.';
 const UNEXPECTED_ERROR_MESSAGE = 'حدث خطأ غير متوقع. حاول مجدداً.';
 const SERVER_ERROR_MESSAGE = 'الخادم مشغول حالياً. حاول بعد قليل.';
 const RATE_LIMIT_MESSAGE = 'محاولات كثيرة. انتظر قليلاً ثم حاول مجدداً.';
-const SESSION_EXPIRED_MESSAGE = 'انتهت جلستك. سجّل الدخول مجدداً.';
+const SESSION_EXPIRED_MESSAGE = 'انتهى دخولك. سجّل الدخول مرة أخرى.';
 
 export type ApiErrorCode = ErrorCode | 'network_error' | 'unknown';
 

@@ -4,20 +4,9 @@ import { useMe } from '../auth/useAuth';
 import { AppShell } from '../layout/AppShell';
 import { cn } from '../lib/cn';
 import { firstName, formatDays } from '../lib/format';
-import { Badge, SoonBadge } from '../ui/Badge';
+import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
-import { GiftIcon, MessageIcon, PackagePlusIcon, PrinterIcon, UserPlusIcon, type Icon } from '../ui/icons';
-
-const NEXT_STEPS: readonly { title: string; description: string; icon: Icon }[] = [
-  {
-    title: 'أضف منتجاتك',
-    description: 'بالباركود أو يدوياً، مع السعر بالليرة أو الدولار.',
-    icon: PackagePlusIcon,
-  },
-  { title: 'أضف موظفيك', description: 'حدّد لكل موظف ما يقدر يعمله.', icon: UserPlusIcon },
-  { title: 'اربط الطابعة', description: 'اطبع الإيصالات على طابعتك الحرارية.', icon: PrinterIcon },
-  { title: 'اربط واتساب', description: 'أرسل الفاتورة للزبون برسالة.', icon: MessageIcon },
-];
+import { GiftIcon } from '../ui/icons';
 
 function trialMessage(daysLeft: number, numberFormat: MeResponse['settings']['numberFormat']): string {
   if (daysLeft <= 0) return 'تنتهي الباقة المجانية اليوم';
@@ -51,29 +40,13 @@ function TrialBanner({ me }: { me: MeResponse }) {
   );
 }
 
+// The start checklist (tab 04) joins this card when its steps exist; until then the page shows no
+// «قريباً» items (tab 12: no button the user cannot use).
 function WelcomeCard({ me }: { me: MeResponse }) {
   return (
-    <Card className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold text-ink sm:text-3xl">متجرك جاهز، {firstName(me.user.fullName)}</h1>
-        <p className="text-ink-muted">خطوات بسيطة تجهّز متجرك للبيع. نشتغل عليها الآن وتتوفر لك قريباً.</p>
-      </div>
-      <ol className="-my-4 flex flex-col divide-y divide-line sm:my-0 sm:rounded-control sm:border sm:border-line">
-        {NEXT_STEPS.map(({ title, description, icon: StepIcon }) => (
-          <li key={title} className="flex items-center gap-4 py-4 sm:px-4">
-            <span className="grid size-11 shrink-0 place-items-center rounded-control bg-brand-soft text-brand-ink">
-              <StepIcon />
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold text-ink">
-                {title}
-                <SoonBadge />
-              </p>
-              <p className="text-sm text-ink-muted">{description}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
+    <Card className="flex flex-col gap-2">
+      <h1 className="text-2xl font-bold text-ink">متجرك جاهز، {firstName(me.user.fullName)}</h1>
+      <p className="text-ink-muted">هذه رئيسية متجرك: معلومات المتجر والباقة في مكان واحد.</p>
     </Card>
   );
 }
