@@ -36,6 +36,18 @@ describe('ESLint config for the web app', () => {
     expect(await ruleIds(code)).toContain('no-restricted-syntax');
   });
 
+  it.each([
+    ['jsx-a11y/alt-text', 'export const A = () => <img src="/logo.png" />;\n'],
+    [
+      'jsx-a11y/click-events-have-key-events',
+      'export const A = (p: { go: () => void }) => <div onClick={p.go}>افتح</div>;\n',
+    ],
+    ['jsx-a11y/no-autofocus', 'export const A = () => <input aria-label="بحث" autoFocus />;\n'],
+    ['jsx-a11y/anchor-is-valid', 'export const A = () => <a href="#">الشروط</a>;\n'],
+  ])('runs jsx-a11y: %s', async (rule, code) => {
+    expect(await ruleIds(code)).toContain(rule);
+  });
+
   it('accepts colour tokens', async () => {
     const tokens = [
       'bg-surface text-ink-muted border-line-control',

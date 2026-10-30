@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
+import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 // Tab 14 › مصدر واحد: web screens name colours by token (bg-surface, text-ink-muted,
 // border-line-control…), never by palette shade (bg-brand-900, text-white), arbitrary value
@@ -37,9 +38,12 @@ export default tseslint.config(
     languageOptions: {
       globals: { ...globals.browser },
     },
-    plugins: { 'react-hooks': reactHooks },
+    plugins: { 'react-hooks': reactHooks, 'jsx-a11y': jsxA11y },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      ...jsxA11y.flatConfigs.recommended.rules,
+      // Moving focus into a field the user just opened (e.g. «عندك كود وكيل؟») is intended.
+      'jsx-a11y/no-autofocus': ['error', { ignoreNonDOM: true }],
     },
   },
   {
