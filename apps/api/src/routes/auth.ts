@@ -20,7 +20,7 @@ const metaOf = (request: FastifyRequest): RequestMeta => ({
 });
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
-  const { env, db } = app;
+  const { env, db, clock } = app;
   const authLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE, timeWindow: '1 minute' } };
 
   const setRefreshCookie = (reply: FastifyReply, session: IssuedSession) =>
@@ -43,6 +43,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       { userId: session.userId, tenantId: session.tenantId, sessionId: session.sessionId },
       env.JWT_SECRET,
       env.ACCESS_TOKEN_TTL_SECONDS,
+      clock.now(),
     );
 
   app.post('/v1/auth/register', { config: authLimit }, async (request, reply) => {
@@ -52,7 +53,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       db,
       data,
       passwordHash,
-      { refreshTtlDays: env.REFRESH_TOKEN_TTL_DAYS },
+      { refreshTtlDays: env.REFRESH_TOKEN_TTL_DAYS, now: clock.now() },
       metaOf(request),
     );
     setRefreshCookie(reply, result.session);
@@ -85,12 +86,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!passwordOk || account.status !== 'active') throw invalid;
 
     const meta = metaOf(request);
+    const now = clock.now();
     const { session, tenantName } = await withTenant(db, account.tenant_id, async (tx) => {
-      await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, account.user_id));
+      await tx.update(users).set({ lastLoginAt: now }).where(eq(users.id, account.user_id));
       const [tenant] = await tx.select({ name: tenants.name }).from(tenants).limit(1);
       const session = await createSession(
         tx,
-        { tenantId: account.tenant_id, userId: account.user_id, ttlDays: env.REFRESH_TOKEN_TTL_DAYS },
+        { tenantId: account.tenant_id, userId: account.user_id, ttlDays: env.REFRESH_TOKEN_TTL_DAYS, now },
         meta,
       );
       await audit(tx, { tenantId: account.tenant_id, userId: account.user_id, action: 'user.login' }, meta);
@@ -113,7 +115,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const token = request.cookies[REFRESH_COOKIE];
       if (!token) throw unauthorized();
-      const session = await rotateSession(db, token, env.REFRESH_TOKEN_TTL_DAYS, metaOf(request));
+      const session = await rotateSession(
+        db,
+        token,
+        env.REFRESH_TOKEN_TTL_DAYS,
+        clock.now(),
+        metaOf(request),
+      );
       if (!session) {
         clearRefreshCookie(reply);
         throw unauthorized();
@@ -129,7 +137,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/auth/logout', async (request, reply) => {
     const token = request.cookies[REFRESH_COOKIE];
-    if (token) await revokeSession(db, token);
+    if (token) await revokeSession(db, token, clock.now());
     clearRefreshCookie(reply);
     return reply.status(204).send();
   });

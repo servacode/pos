@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { createDb, type DbHandle } from '@serva/db';
 import type { ApiErrorBody } from '@serva/core';
+import { systemClock, type Clock } from './clock';
 import type { Env } from './env';
 import { AppError } from './errors';
 import { authRoutes } from './routes/auth';
@@ -14,13 +15,19 @@ export interface BuildAppOptions {
   env: Env;
   /** Pass an existing connection (tests); otherwise one is created from DATABASE_URL and closed with the app */
   database?: DbHandle;
+  /** Source of time; tests pass a ManualClock */
+  clock?: Clock;
 }
 
 const errorBody = (code: ApiErrorBody['error']['code'], message: string): ApiErrorBody => ({
   error: { code, message },
 });
 
-export async function buildApp({ env, database }: BuildAppOptions): Promise<FastifyInstance> {
+export async function buildApp({
+  env,
+  database,
+  clock = systemClock,
+}: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: env.LOG_LEVEL === 'silent' ? false : { level: env.LOG_LEVEL },
     trustProxy: env.TRUST_PROXY,
@@ -30,6 +37,7 @@ export async function buildApp({ env, database }: BuildAppOptions): Promise<Fast
   const handle = database ?? createDb(env.DATABASE_URL);
   app.decorate('db', handle.db);
   app.decorate('env', env);
+  app.decorate('clock', clock);
   app.decorateRequest('auth', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());
 

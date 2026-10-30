@@ -4,6 +4,7 @@ import type { LightMyRequestResponse } from 'fastify';
 import { createDb, type DbHandle } from '@serva/db';
 import type { RegisterStoreInput } from '@serva/core';
 import { buildApp } from '../src/app';
+import { ManualClock, type Clock } from '../src/clock';
 import { loadEnv } from '../src/env';
 import { REFRESH_COOKIE } from '../src/routes/auth';
 import { TEST_APP_URL, TEST_OWNER_URL } from './urls';
@@ -31,18 +32,51 @@ export async function closeAppDb(): Promise<void> {
   handle = undefined;
 }
 
-export function makeApp(overrides: Record<string, string> = {}): Promise<FastifyInstance> {
-  return buildApp({ env: testEnv(overrides), database: appDb() });
+/**
+ * Builds the app against the test database. Time is a ManualClock fixed at a known instant
+ * unless a clock is passed, so expiry and trial rules are deterministic.
+ */
+export function makeApp(
+  overrides: Record<string, string> = {},
+  options: { clock?: Clock } = {},
+): Promise<FastifyInstance> {
+  return buildApp({ env: testEnv(overrides), database: appDb(), clock: options.clock ?? new ManualClock() });
 }
 
-/** Empties every table except plans, as the owner role. */
+/** Reference tables filled by migrations; every other table is emptied between tests. */
+const SEEDED_TABLES = new Set(['plans']);
+
+let owner: postgres.Sql | undefined;
+/** Connection as the owner role (not subject to row-level security). Closed by closeOwnerDb(). */
+export function ownerDb(): postgres.Sql {
+  owner ??= postgres(TEST_OWNER_URL, { max: 1, onnotice: () => {} });
+  return owner;
+}
+
+export async function closeOwnerDb(): Promise<void> {
+  await owner?.end();
+  owner = undefined;
+}
+
+/**
+ * Empties every table in the public schema except seeded reference tables. The list comes from
+ * the catalog, so a new table can never leak state between tests by being forgotten here.
+ */
 export async function resetDatabase(): Promise<void> {
-  const owner = postgres(TEST_OWNER_URL, { max: 1, onnotice: () => {} });
+  const sql = postgres(TEST_OWNER_URL, { max: 1, onnotice: () => {} });
   try {
-    await owner`truncate table sessions, audit_logs, user_roles, users, roles, registers, branches,
-      subscriptions, tenant_settings, tenants, platform_users restart identity cascade`;
+    const tables = await sql<{ name: string }[]>`
+      select c.relname as name
+      from pg_class c
+      where c.relnamespace = 'public'::regnamespace
+        and c.relkind in ('r', 'p')
+        and not c.relispartition`;
+    const names = tables.map((t) => t.name).filter((name) => !SEEDED_TABLES.has(name));
+    if (names.length > 0) {
+      await sql.unsafe(`truncate table ${names.map((n) => `"${n}"`).join(', ')} restart identity cascade`);
+    }
   } finally {
-    await owner.end();
+    await sql.end();
   }
 }
 

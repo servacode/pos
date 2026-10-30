@@ -6,7 +6,11 @@ import { verifyAccessToken } from './tokens';
 export async function requireAuth(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ')) throw unauthorized();
-  const claims = await verifyAccessToken(header.slice('Bearer '.length), request.server.env.JWT_SECRET);
+  const claims = await verifyAccessToken(
+    header.slice('Bearer '.length),
+    request.server.env.JWT_SECRET,
+    request.server.clock.now(),
+  );
   if (!claims) throw unauthorized();
   request.auth = claims;
 }

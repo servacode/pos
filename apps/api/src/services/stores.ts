@@ -17,6 +17,7 @@ import {
 import { AppError, isUniqueViolation } from '../errors';
 import { audit } from './audit';
 import { createSession, type IssuedSession } from './sessions';
+import { DAY_MS } from '../clock';
 import type { RequestMeta } from '../types';
 
 export interface RegisteredStore {
@@ -33,7 +34,7 @@ export async function registerStore(
   db: Database,
   data: RegisterStoreData,
   passwordHash: string,
-  options: { refreshTtlDays: number },
+  options: { refreshTtlDays: number; now: Date },
   meta: RequestMeta,
 ): Promise<RegisteredStore> {
   const tenantId = randomUUID();
@@ -47,9 +48,8 @@ export async function registerStore(
         .limit(1);
       if (!plan) throw new Error('No default plan is configured');
 
-      const now = new Date();
-      const trialEndsAt =
-        plan.trialDays === null ? null : new Date(now.getTime() + plan.trialDays * 86_400_000);
+      const { now } = options;
+      const trialEndsAt = plan.trialDays === null ? null : new Date(now.getTime() + plan.trialDays * DAY_MS);
       const otherCurrencies = (['SYP', 'USD'] as const).filter((c) => c !== data.baseCurrency);
 
       await tx.insert(tenants).values({
@@ -101,7 +101,7 @@ export async function registerStore(
 
       const session = await createSession(
         tx,
-        { tenantId, userId: user!.id, ttlDays: options.refreshTtlDays },
+        { tenantId, userId: user!.id, ttlDays: options.refreshTtlDays, now },
         meta,
       );
       await audit(

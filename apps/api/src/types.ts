@@ -1,11 +1,13 @@
 import type { Database } from '@serva/db';
 import type { AccessClaims } from './auth/tokens';
+import type { Clock } from './clock';
 import type { Env } from './env';
 
 declare module 'fastify' {
   interface FastifyInstance {
     db: Database;
     env: Env;
+    clock: Clock;
   }
   interface FastifyRequest {
     /** Set by requireAuth for authenticated routes */

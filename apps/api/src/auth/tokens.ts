@@ -20,23 +20,34 @@ const keyFor = (secret: string) => {
   return key;
 };
 
-export function signAccessToken(claims: AccessClaims, secret: string, ttlSeconds: number): Promise<string> {
+export function signAccessToken(
+  claims: AccessClaims,
+  secret: string,
+  ttlSeconds: number,
+  now: Date,
+): Promise<string> {
+  const issuedAt = Math.floor(now.getTime() / 1000);
   return new SignJWT({ tid: claims.tenantId, sid: claims.sessionId })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(claims.userId)
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
-    .setIssuedAt()
-    .setExpirationTime(`${ttlSeconds}s`)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(issuedAt + ttlSeconds)
     .sign(keyFor(secret));
 }
 
-export async function verifyAccessToken(token: string, secret: string): Promise<AccessClaims | null> {
+export async function verifyAccessToken(
+  token: string,
+  secret: string,
+  now: Date,
+): Promise<AccessClaims | null> {
   try {
     const { payload } = await jwtVerify(token, keyFor(secret), {
       issuer: ISSUER,
       audience: AUDIENCE,
       algorithms: ['HS256'],
+      currentDate: now,
     });
     if (
       typeof payload.sub !== 'string' ||
