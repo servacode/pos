@@ -39,11 +39,14 @@ function significantBefore(text: string, position: number): number {
   return stripBidiControls(toLatinDigits(text.slice(0, position))).replace(/[^0-9.-]/g, '').length;
 }
 
+/** Characters that count as typed input (digits, separator, minus), Latin or Arabic-Indic. */
+const SIGNIFICANT_CHARS = new Set('0123456789.-٠١٢٣٤٥٦٧٨٩٫−');
+
 function positionAfter(text: string, significant: number): number {
   if (significant === 0) return 0;
   let seen = 0;
   for (let i = 0; i < text.length; i += 1) {
-    if (/[0-9.\-٠-٩٫−]/.test(text.charAt(i))) seen += 1;
+    if (SIGNIFICANT_CHARS.has(text.charAt(i))) seen += 1;
     if (seen === significant) return i + 1;
   }
   return text.length;
@@ -136,7 +139,7 @@ function minorToCanonical(minor: number | null, currency: CurrencyId, shown: num
 }
 
 function canonicalToMinor(canonical: string, currency: CurrencyId): number | null {
-  if (!/\d/.test(canonical)) return null;
+  if (![...canonical].some((c) => c >= '0' && c <= '9')) return null;
   return toMinor(canonical.replace(/\.$/, ''), currency);
 }
 
