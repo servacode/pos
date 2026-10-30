@@ -29,11 +29,11 @@ describe('priceInvoice — approved worked example', () => {
       { lineNo: 3, unitPriceMinor: 890, qty: 1000, taxRateBp: 1500, discount: { type: 'amount', minor: 40 } }, // rice
     ],
   };
-  const invoice = priceInvoice(input);
-  const [milk, bread, rice] = invoice.lines;
+  // Priced inside each test, so an engine that throws fails the tests rather than the file's collection.
+  const price = () => priceInvoice(input);
 
   it('prices milk', () => {
-    expect(milk).toEqual({
+    expect(price().lines[0]).toEqual({
       lineNo: 1,
       grossMinor: 250,
       lineDiscountMinor: 0,
@@ -48,7 +48,7 @@ describe('priceInvoice — approved worked example', () => {
   });
 
   it('prices bread', () => {
-    expect(bread).toEqual({
+    expect(price().lines[1]).toEqual({
       lineNo: 2,
       grossMinor: 225,
       lineDiscountMinor: 0,
@@ -63,7 +63,7 @@ describe('priceInvoice — approved worked example', () => {
   });
 
   it('prices rice', () => {
-    expect(rice).toEqual({
+    expect(price().lines[2]).toEqual({
       lineNo: 3,
       grossMinor: 890,
       lineDiscountMinor: 40,
@@ -78,7 +78,7 @@ describe('priceInvoice — approved worked example', () => {
   });
 
   it('totals the lines exactly, without cash rounding', () => {
-    expect(invoice.totals).toEqual({
+    expect(price().totals).toEqual({
       grossMinor: 1365,
       lineDiscountMinor: 40,
       invoiceDiscountMinor: 100,
@@ -93,10 +93,11 @@ describe('priceInvoice — approved worked example', () => {
   });
 
   it('gives change from 20.00', () => {
-    expect(computeChange(invoice.totals.totalMinor, 2000)).toBe(591);
+    expect(computeChange(price().totals.totalMinor, 2000)).toBe(591);
   });
 
   it('rounds only the cash payment to 0.05, leaving the invoice at 14.09', () => {
+    const invoice = price();
     const cash = roundCashDue(invoice.totals.totalMinor, 5);
     expect(cash).toEqual({ exactMinor: 1409, dueMinor: 1410, roundingMinor: 1 });
     expect(computeChange(cash.dueMinor, 2000)).toBe(590);
@@ -378,10 +379,10 @@ describe('roundCashDue — cash rounding at payment (spec 10, step 6)', () => {
   });
 
   it('rejects an invalid step or amount', () => {
-    expect(() => roundCashDue(100, -5)).toThrow(RangeError);
-    expect(() => roundCashDue(100, 0.5)).toThrow(RangeError);
-    expect(() => roundCashDue(100.5, 5)).toThrow(RangeError);
-    expect(() => roundCashDue(Number.NaN, 0)).toThrow(RangeError);
+    expect(() => roundCashDue(100, -5)).toThrow(/cashStepMinor must be/);
+    expect(() => roundCashDue(100, 0.5)).toThrow(/cashStepMinor must be/);
+    expect(() => roundCashDue(100.5, 5)).toThrow(/exactMinor must be a safe integer/);
+    expect(() => roundCashDue(Number.NaN, 0)).toThrow(/exactMinor/);
   });
 
   it('keeps the rounding within half a step (property)', () => {
@@ -411,26 +412,26 @@ describe('priceInvoice — validation', () => {
     priceInvoice({ taxInclusive: false, lines: [line], ...overrides });
 
   it('requires at least one line', () => {
-    expect(() => price({ lines: [] })).toThrow(RangeError);
-    expect(() => price({ lines: undefined as unknown as PricingLineInput[] })).toThrow(RangeError);
+    expect(() => price({ lines: [] })).toThrow(/at least one line/);
+    expect(() => price({ lines: undefined as unknown as PricingLineInput[] })).toThrow(/at least one line/);
   });
 
   it('requires a unique positive line number on every line', () => {
     expect(() => price({ lines: [line, { ...line }] })).toThrow(/lines\[1\]\.lineNo 1 is used twice/);
-    expect(() => price({ lines: [{ ...line, lineNo: 0 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, lineNo: 1.5 }] })).toThrow(RangeError);
+    expect(() => price({ lines: [{ ...line, lineNo: 0 }] })).toThrow(/lines\[0\]\.lineNo must be a positive/);
+    expect(() => price({ lines: [{ ...line, lineNo: 1.5 }] })).toThrow(/lines\[0\]\.lineNo/);
     expect(() => price({ lines: [{ ...line, lineNo: undefined as unknown as number }] })).toThrow(
       /lines\[0\]\.lineNo/,
     );
   });
 
   it('requires non-negative safe integers for price, quantity and tax', () => {
-    expect(() => price({ lines: [{ ...line, unitPriceMinor: -1 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, unitPriceMinor: 1.25 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, qty: 0.5 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, qty: -1000 }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, taxRateBp: Number.NaN }] })).toThrow(RangeError);
-    expect(() => price({ lines: [{ ...line, taxRateBp: -1500 }] })).toThrow(RangeError);
+    expect(() => price({ lines: [{ ...line, unitPriceMinor: -1 }] })).toThrow(/lines\[0\]\.unitPriceMinor/);
+    expect(() => price({ lines: [{ ...line, unitPriceMinor: 1.25 }] })).toThrow(/lines\[0\]\.unitPriceMinor/);
+    expect(() => price({ lines: [{ ...line, qty: 0.5 }] })).toThrow(/lines\[0\]\.qty/);
+    expect(() => price({ lines: [{ ...line, qty: -1000 }] })).toThrow(/lines\[0\]\.qty/);
+    expect(() => price({ lines: [{ ...line, taxRateBp: Number.NaN }] })).toThrow(/lines\[0\]\.taxRateBp/);
+    expect(() => price({ lines: [{ ...line, taxRateBp: -1500 }] })).toThrow(/lines\[0\]\.taxRateBp/);
     expect(() => price({ lines: [{ ...line, unitPriceMinor: Number.MAX_SAFE_INTEGER, qty: 2000 }] })).toThrow(
       RangeError,
     );
@@ -442,12 +443,18 @@ describe('priceInvoice — validation', () => {
 
   it('rejects out-of-range line discounts', () => {
     const withDiscount = (discount: Discount) => price({ lines: [{ ...line, discount }] });
-    expect(() => withDiscount({ type: 'amount', minor: 101 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'amount', minor: -1 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'percent', bp: 10001 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'percent', bp: -1 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'percent', bp: 12.5 })).toThrow(RangeError);
-    expect(() => withDiscount({ type: 'fixed' } as unknown as Discount)).toThrow(RangeError);
+    expect(() => withDiscount({ type: 'amount', minor: 101 })).toThrow(
+      /lines\[0\]\.discount \(101\) exceeds the amount it applies to \(100\)/,
+    );
+    expect(() => withDiscount({ type: 'amount', minor: -1 })).toThrow(/lines\[0\]\.discount\.minor/);
+    expect(() => withDiscount({ type: 'percent', bp: 10001 })).toThrow(
+      /lines\[0\]\.discount\.bp must be an integer between 0 and 10000, got 10001/,
+    );
+    expect(() => withDiscount({ type: 'percent', bp: -1 })).toThrow(/discount\.bp/);
+    expect(() => withDiscount({ type: 'percent', bp: 12.5 })).toThrow(/discount\.bp/);
+    expect(() => withDiscount({ type: 'fixed' } as unknown as Discount)).toThrow(
+      /lines\[0\]\.discount has an unknown discount type/,
+    );
     expect(withDiscount({ type: 'amount', minor: 100 }).totals.netMinor).toBe(0);
   });
 
@@ -456,9 +463,11 @@ describe('priceInvoice — validation', () => {
       { lineNo: 1, unitPriceMinor: 125, qty: 2000, taxRateBp: 1500 },
       { lineNo: 2, unitPriceMinor: 890, qty: 1000, taxRateBp: 1500, discount: { type: 'amount', minor: 40 } },
     ];
-    expect(() => price({ lines, invoiceDiscount: { type: 'amount', minor: 1101 } })).toThrow(RangeError);
+    expect(() => price({ lines, invoiceDiscount: { type: 'amount', minor: 1101 } })).toThrow(
+      /invoiceDiscount \(1101\) exceeds/,
+    );
     expect(price({ lines, invoiceDiscount: { type: 'amount', minor: 1100 } }).totals.netMinor).toBe(0);
-    expect(() => price({ invoiceDiscount: { type: 'percent', bp: 10001 } })).toThrow(RangeError);
+    expect(() => price({ invoiceDiscount: { type: 'percent', bp: 10001 } })).toThrow(/invoiceDiscount\.bp/);
     expect(() =>
       price({ lines: [{ ...line, unitPriceMinor: 0 }], invoiceDiscount: { type: 'amount', minor: 1 } }),
     ).toThrow(RangeError);
@@ -472,9 +481,11 @@ describe('computeChange', () => {
   });
 
   it('throws when the customer has not paid enough', () => {
-    expect(() => computeChange(1409, 1408)).toThrow(RangeError);
-    expect(() => computeChange(-1, 0)).toThrow(RangeError);
-    expect(() => computeChange(100, 150.5)).toThrow(RangeError);
+    expect(() => computeChange(1409, 1408)).toThrow(
+      /tendered amount \(1408\) is less than the payable amount \(1409\)/,
+    );
+    expect(() => computeChange(-1, 0)).toThrow(/payableMinor must be/);
+    expect(() => computeChange(100, 150.5)).toThrow(/tenderedMinor must be/);
   });
 });
 
