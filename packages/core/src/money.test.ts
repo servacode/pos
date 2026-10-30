@@ -17,6 +17,7 @@ import {
 } from './money';
 import type { CurrencyId } from './currencies';
 import { seededRandom } from './test-random';
+import { stripBidiControls, toLatinDigits } from './text';
 
 describe('roundDiv', () => {
   it('rounds half away from zero', () => {
@@ -281,45 +282,101 @@ describe('toMinor', () => {
 });
 
 describe('formatMoney', () => {
-  it('formats with Latin digits and the symbol after a space', () => {
-    expect(formatMoney(125000, 'SYP')).toBe('1,250.00 ل.س');
-    expect(formatMoney(1250, 'USD')).toBe('12.50 $');
-    expect(formatMoney(5, 'USD')).toBe('0.05 $');
-    expect(formatMoney(0, 'USD')).toBe('0.00 $');
-    expect(formatMoney(123456789, 'SYP', { symbol: false })).toBe('1,234,567.89');
-    expect(formatMoney(100000, 'SYP', { symbol: false })).toBe('1,000.00');
+  /** The isolated form formatMoney writes: RLI ⟨LRI number PDI⟩ symbol PDI, or LRI number PDI alone. */
+  const iso = (number: string, symbol?: string) =>
+    symbol === undefined ? `⁦${number}⁩` : `⁧⁦${number}⁩ ${symbol}⁩`;
+
+  it('isolates the number (LTR) and the amount with its symbol (RTL), symbol after the number', () => {
+    expect(formatMoney(1250, 'USD')).toBe(iso('12.50', '$'));
+    expect(formatMoney(5, 'USD')).toBe(iso('0.05', '$'));
+    expect(formatMoney(0, 'USD')).toBe(iso('0.00', '$'));
+    expect(formatMoney(123456789, 'USD', { symbol: false })).toBe(iso('1,234,567.89'));
   });
 
-  it('formats negative values with a leading minus', () => {
-    expect(formatMoney(-1250, 'USD')).toBe('-12.50 $');
-    expect(formatMoney(-125000, 'SYP', { trimZeros: true })).toBe('-1,250 ل.س');
+  it('shows the display decimals of the currency, not its stored decimals', () => {
+    // Spec 14: the new pound is stored in qirsh and shown without fractions by default.
+    expect(formatMoney(125000, 'SYP')).toBe(iso('1,250', 'ل.س'));
+    expect(formatMoney(125000, 'SYP', { decimals: 2 })).toBe(iso('1,250.00', 'ل.س'));
+    expect(formatMoney(125050, 'SYP', { decimals: 2, symbol: false })).toBe(iso('1,250.50'));
+    expect(formatMoney(1250, 'USD', { decimals: 4, symbol: false })).toBe(iso('12.5000'));
+    expect(formatMoney(125_000_000, 'SYP_OLD')).toBe(iso('1,250,000', 'ل.س قديمة'));
+  });
+
+  it('rounds hidden fractions half away from zero, for display only', () => {
+    expect(formatMoney(125050, 'SYP', { symbol: false })).toBe(iso('1,251'));
+    expect(formatMoney(125049, 'SYP', { symbol: false })).toBe(iso('1,250'));
+    expect(formatMoney(-125050, 'SYP', { symbol: false })).toBe(iso('−1,251'));
+    expect(formatMoney(1255, 'USD', { decimals: 1, symbol: false })).toBe(iso('12.6'));
+  });
+
+  it('writes negatives with the minus sign U+2212 inside the LTR isolate, never «−0»', () => {
+    expect(formatMoney(-1250, 'USD')).toBe(iso('−12.50', '$'));
+    expect(formatMoney(-125000, 'SYP')).toBe(iso('−1,250', 'ل.س'));
+    expect(formatMoney(-50, 'SYP', { symbol: false })).toBe(iso('−1'));
+    expect(formatMoney(-49, 'SYP', { symbol: false })).toBe(iso('0'));
+    expect(formatMoney(-1250, 'USD')).not.toContain('-');
+  });
+
+  it('drops the sign for balances shown as «له» / «عليه» (signDisplay: never)', () => {
+    expect(formatMoney(-500000, 'SYP', { signDisplay: 'never' })).toBe(iso('5,000', 'ل.س'));
+    expect(formatMoney(500000, 'SYP', { signDisplay: 'never' })).toBe(iso('5,000', 'ل.س'));
+    expect(formatMoney(-500000, 'SYP', { signDisplay: 'auto' })).toBe(iso('−5,000', 'ل.س'));
+  });
+
+  it('writes plain text for export, ESC/POS and pole displays: no controls, ASCII minus', () => {
+    expect(formatMoney(-125000, 'SYP', { plain: true })).toBe('-1,250 ل.س');
+    expect(formatMoney(-1250, 'USD', { plain: true, symbol: false })).toBe('-12.50');
+    expect(formatMoney(-125000, 'SYP', { plain: true, digits: 'arab' })).toBe('-١٬٢٥٠ ل.س');
+    expect(formatMoney(1250, 'USD', { plain: true })).toBe('12.50 $');
   });
 
   it('trims a zero fraction only', () => {
-    expect(formatMoney(125000, 'SYP', { trimZeros: true })).toBe('1,250 ل.س');
-    expect(formatMoney(125050, 'SYP', { trimZeros: true })).toBe('1,250.50 ل.س');
+    expect(formatMoney(125000, 'SYP', { decimals: 2, trimZeros: true })).toBe(iso('1,250', 'ل.س'));
+    expect(formatMoney(125050, 'SYP', { decimals: 2, trimZeros: true })).toBe(iso('1,250.50', 'ل.س'));
   });
 
   it('formats with Arabic-Indic digits and separators', () => {
-    expect(formatMoney(123456789, 'SYP', { digits: 'arab' })).toBe('١٬٢٣٤٬٥٦٧٫٨٩ ل.س');
-    expect(formatMoney(1250, 'USD', { digits: 'arab' })).toBe('١٢٫٥٠ $');
-    expect(formatMoney(125000, 'SYP', { digits: 'arab', trimZeros: true, symbol: false })).toBe('١٬٢٥٠');
-    expect(formatMoney(-5, 'USD', { digits: 'arab' })).toBe('-٠٫٠٥ $');
+    expect(formatMoney(123456789, 'SYP', { digits: 'arab', decimals: 2 })).toBe(iso('١٬٢٣٤٬٥٦٧٫٨٩', 'ل.س'));
+    expect(formatMoney(1250, 'USD', { digits: 'arab' })).toBe(iso('١٢٫٥٠', '$'));
+    expect(formatMoney(125000, 'SYP', { digits: 'arab', symbol: false })).toBe(iso('١٬٢٥٠'));
+    expect(formatMoney(-5, 'USD', { digits: 'arab' })).toBe(iso('−٠٫٠٥', '$'));
   });
 
-  it('round-trips through toMinor in both digit sets', () => {
-    const rand = seededRandom(7);
-    for (let run = 0; run < 500; run++) {
-      const minor = rand.int(-1e12, 1e12);
-      for (const digits of ['latn', 'arab'] as const) {
-        expect(toMinor(formatMoney(minor, 'SYP', { digits, symbol: false }), 'SYP')).toBe(minor);
-      }
-    }
+  it('round-trips through toMinor in both digit sets at the stored decimals (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -1e12, max: 1e12 }),
+        fc.constantFrom<CurrencyId>('SYP', 'USD', 'SYP_OLD'),
+        fc.constantFrom('latn' as const, 'arab' as const),
+        fc.boolean(),
+        (minor, currency, digits, plain) => {
+          const text = formatMoney(minor, currency, { digits, plain, symbol: false, decimals: 2 });
+          expect(toMinor(text, currency)).toBe(minor);
+        },
+      ),
+    );
   });
 
-  it('rejects non-integer amounts', () => {
+  it('isolated and plain forms carry the same characters (property)', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: -1e12, max: 1e12 }), fc.boolean(), (minor, arab) => {
+        const digits = arab ? 'arab' : 'latn';
+        const isolated = formatMoney(minor, 'SYP', { digits });
+        expect(toLatinDigits(stripBidiControls(isolated))).toBe(
+          toLatinDigits(formatMoney(minor, 'SYP', { digits, plain: true })),
+        );
+      }),
+    );
+  });
+
+  it('rejects non-integer amounts, bad display decimals and unknown options', () => {
     expect(() => formatMoney(12.5, 'USD')).toThrow(RangeError);
     expect(() => formatMoney(Number.NaN, 'USD')).toThrow(RangeError);
+    expect(() => formatMoney(1, 'USD', { decimals: -1 })).toThrow(RangeError);
+    expect(() => formatMoney(1, 'USD', { decimals: 1.5 })).toThrow(RangeError);
+    expect(() => formatMoney(1, 'USD', { decimals: 7 })).toThrow(RangeError);
+    expect(() => formatMoney(1, 'USD', { signDisplay: 'always' as 'auto' })).toThrow(RangeError);
+    expect(() => formatMoney(1, 'EUR' as CurrencyId)).toThrow(RangeError);
   });
 });
 

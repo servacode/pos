@@ -207,11 +207,32 @@ export function toMinor(amount: string, currency: CurrencyId): number {
 export interface FormatMoneyOptions {
   /** 'latn' (default): 1,250.00 — 'arab': ١٬٢٥٠٫٠٠ */
   digits?: 'latn' | 'arab';
-  /** Append the currency symbol after a space (default true). */
+  /** Append the currency symbol after the number (default true). */
   symbol?: boolean;
+  /**
+   * Fraction digits to show, 0–6. Defaults to the currency's displayDecimals (new pound 0, dollar 2); a
+   * store setting may override it. Display only: hidden fractions round half away from zero.
+   */
+  decimals?: number;
   /** Drop the fraction when it is all zeros (1,250 instead of 1,250.00). */
   trimZeros?: boolean;
+  /**
+   * 'auto' (default): «−» before a negative amount. 'never': the magnitude only, for balances that show
+   * «له» / «عليه» with a direction icon instead of a sign (spec 14).
+   */
+  signDisplay?: 'auto' | 'never';
+  /**
+   * Plain text for CSV export, ESC/POS receipts and pole displays: no bidi controls and an ASCII "-",
+   * because thermal-printer code pages have neither. Screens use the default isolated form.
+   */
+  plain?: boolean;
 }
+
+const MAX_DISPLAY_DECIMALS = 6;
+const LRI = '⁦'; // LEFT-TO-RIGHT ISOLATE
+const RLI = '⁧'; // RIGHT-TO-LEFT ISOLATE
+const PDI = '⁩'; // POP DIRECTIONAL ISOLATE
+const MINUS_SIGN = '−';
 
 const ARABIC_CHARS: Record<string, string> = {
   '0': '٠',
@@ -228,20 +249,41 @@ const ARABIC_CHARS: Record<string, string> = {
   '.': '٫',
 };
 
-/** Formats minor units for display, e.g. formatMoney(125000, 'SYP') → "1,250.00 ل.س". Locale-independent. */
+/**
+ * Formats minor units for display, locale-independent: formatMoney(125000, 'SYP') shows "1,250 ل.س".
+ * Spec 14 bidi rules: the signed number sits in a left-to-right isolate, so «−» stays on the left of the
+ * digits inside Arabic text, and the number with its symbol sits in a right-to-left isolate, so the symbol
+ * follows the number and nothing around the amount can reorder it. The minus is U+2212, never a hyphen.
+ * toMinor and parseDecimal accept the result back.
+ */
 export function formatMoney(minor: number, currency: CurrencyId, opts: FormatMoneyOptions = {}): string {
   assertSafeInteger(minor, 'minor');
-  const { decimals, symbolAr } = getCurrency(currency);
-  const digits = String(Math.abs(minor)).padStart(decimals + 1, '0');
-  const intPart = digits.slice(0, digits.length - decimals);
-  const fracPart = digits.slice(digits.length - decimals);
+  const { decimals: stored, displayDecimals, symbolAr } = getCurrency(currency);
+  const shown = opts.decimals ?? displayDecimals;
+  if (!Number.isInteger(shown) || shown < 0 || shown > MAX_DISPLAY_DECIMALS) {
+    throw new RangeError(`decimals must be an integer between 0 and ${MAX_DISPLAY_DECIMALS}, got ${shown}`);
+  }
+  const signDisplay = opts.signDisplay ?? 'auto';
+  if (signDisplay !== 'auto' && signDisplay !== 'never') {
+    throw new RangeError(`signDisplay must be 'auto' or 'never', got ${JSON.stringify(signDisplay)}`);
+  }
+
+  const exact = BigInt(Math.abs(minor));
+  const magnitude = shown < stored ? roundDiv(exact, pow10(stored - shown)) : exact * pow10(shown - stored);
+  const digits = magnitude.toString().padStart(shown + 1, '0');
+  const intPart = digits.slice(0, digits.length - shown);
+  const fracPart = digits.slice(digits.length - shown);
 
   let text = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (fracPart !== '' && !(opts.trimZeros && /^0+$/.test(fracPart))) text += `.${fracPart}`;
-  if (minor < 0) text = `-${text}`;
   if (opts.digits === 'arab') text = text.replace(/[\d,.]/g, (ch) => ARABIC_CHARS[ch] ?? ch);
-  if (opts.symbol ?? true) text += ` ${symbolAr}`;
-  return text;
+  // An amount that displays as zero gets no sign.
+  const negative = minor < 0 && magnitude > 0n && signDisplay === 'auto';
+  const withSymbol = opts.symbol ?? true;
+
+  if (opts.plain) return `${negative ? '-' : ''}${text}${withSymbol ? ` ${symbolAr}` : ''}`;
+  const number = `${LRI}${negative ? MINUS_SIGN : ''}${text}${PDI}`;
+  return withSymbol ? `${RLI}${number} ${symbolAr}${PDI}` : number;
 }
 
 /**
