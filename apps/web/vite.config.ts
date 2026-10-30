@@ -15,6 +15,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
     target: BUILD_TARGET,
+    // The chunk graph the size budget (.size-limit.js) measures. Not under dist/.vite, because
+    // turbo's cache does not restore files inside dot-folders.
+    manifest: 'vite-manifest.json',
   },
   server: {
     port: 5173,
