@@ -1,11 +1,9 @@
-import { eq, and } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { DEFAULT_ROLES, type RegisterStoreData } from '@serva/core';
 import {
   branches,
-  plans,
   registers,
   roles,
-  subscriptions,
   tenantSettings,
   tenants,
   userRoles,
@@ -17,7 +15,6 @@ import {
 import { AppError, isUniqueViolation } from '../errors';
 import { audit } from './audit';
 import { createSession, type IssuedSession, type SessionPolicy } from './sessions';
-import { DAY_MS } from '../clock';
 import type { RequestMeta } from '../types';
 
 export interface RegisteredStore {
@@ -40,16 +37,7 @@ export async function registerStore(
   const tenantId = uuidv7();
   try {
     return await withTenant(db, tenantId, async (tx) => {
-      const [plan] = await tx
-        .select()
-        .from(plans)
-        .where(and(eq(plans.isDefault, true), eq(plans.isActive, true)))
-        .orderBy(plans.sortOrder)
-        .limit(1);
-      if (!plan) throw new Error('No default plan is configured');
-
       const { now } = options;
-      const trialEndsAt = plan.trialDays === null ? null : new Date(now.getTime() + plan.trialDays * DAY_MS);
       const otherCurrencies = (['SYP', 'USD'] as const).filter((c) => c !== data.baseCurrency);
 
       await tx.insert(tenants).values({
@@ -63,14 +51,8 @@ export async function registerStore(
         baseCurrency: data.baseCurrency,
         enabledCurrencies: [data.baseCurrency, ...otherCurrencies],
       });
-      await tx.insert(subscriptions).values({
-        tenantId,
-        planId: plan.id,
-        status: 'trialing',
-        trialEndsAt,
-        currentPeriodStart: now,
-        currentPeriodEnd: trialEndsAt,
-      });
+      // Billing rows are not writable by the store role; this starts the default plan's trial.
+      await tx.execute(sql`select subscription_start_trial(${now.toISOString()}::timestamptz)`);
 
       const [branch] = await tx
         .insert(branches)

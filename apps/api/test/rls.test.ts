@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { eq, sql } from 'drizzle-orm';
-import { branches, registers, tenants, users, withTenant } from '@serva/db';
+import { eq, sql, type SQL } from 'drizzle-orm';
+import { branches, plans, registers, tenants, users, withTenant } from '@serva/db';
 import { appDb, closeAppDb, makeApp, registerStore, resetDatabase } from './helpers';
 
 let app: FastifyInstance;
@@ -91,5 +91,54 @@ describe('row-level security between stores', () => {
   it('cannot read platform admin accounts', async () => {
     const code = await pgErrorCode(appDb().db.execute(sql`select * from platform_users`));
     expect(code).toBe('42501'); // permission denied
+  });
+});
+
+describe('billing and store status are not writable by the store role', () => {
+  const inStoreA = (statement: SQL) =>
+    pgErrorCode(withTenant(appDb().db, storeA.tenantId, (tx) => tx.execute(statement)));
+
+  it('cannot change its own subscription', async () => {
+    expect(
+      await inStoreA(
+        sql`update subscriptions set status = 'active', current_period_end = now() + interval '10 years'`,
+      ),
+    ).toBe('42501');
+    expect(await inStoreA(sql`delete from subscriptions`)).toBe('42501');
+  });
+
+  it('cannot create a second subscription or start another trial', async () => {
+    const [plan] = await withTenant(appDb().db, storeA.tenantId, (tx) => tx.select().from(plans).limit(1));
+    expect(
+      await inStoreA(
+        sql`insert into subscriptions (tenant_id, plan_id, status) values (${storeA.tenantId}, ${plan!.id}, 'active')`,
+      ),
+    ).toBe('42501');
+    expect(await inStoreA(sql`select subscription_start_trial(now())`)).toBe('23505');
+  });
+
+  it('cannot start a trial dated in the future, or without a store', async () => {
+    const fresh = '0193e5b4-0000-7000-8000-000000000001';
+    const future = withTenant(appDb().db, fresh, async (tx) => {
+      await tx.insert(tenants).values({ id: fresh, name: 'x', sectors: [] });
+      await tx.execute(sql`select subscription_start_trial(now() + interval '30 days')`);
+    });
+    expect(await pgErrorCode(future)).toBe('22023');
+    expect(await pgErrorCode(appDb().db.execute(sql`select subscription_start_trial(now())`))).toBe('42501');
+  });
+
+  it("cannot change its store's status or agent attribution, but can rename it", async () => {
+    expect(await inStoreA(sql`update tenants set status = 'active'`)).toBe('42501');
+    expect(await inStoreA(sql`update tenants set referral_code = 'AG-1'`)).toBe('42501');
+
+    const renamed = await withTenant(appDb().db, storeA.tenantId, (tx) =>
+      tx.update(tenants).set({ name: 'متجر أ الجديد' }).returning({ name: tenants.name }),
+    );
+    expect(renamed).toEqual([{ name: 'متجر أ الجديد' }]);
+  });
+
+  it('cannot change or delete audit history', async () => {
+    expect(await inStoreA(sql`update audit_logs set action = 'nothing'`)).toBe('42501');
+    expect(await inStoreA(sql`delete from audit_logs`)).toBe('42501');
   });
 });
