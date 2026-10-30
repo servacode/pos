@@ -55,6 +55,8 @@ export const subscriptionStatus = pgEnum('subscription_status', [
 export const billingCycle = pgEnum('billing_cycle', ['monthly', 'yearly']);
 export const platformRole = pgEnum('platform_role', ['super_admin', 'support', 'accountant']);
 export const userStatus = pgEnum('user_status', ['active', 'disabled']);
+/** Administrative state of a store, set by the platform team (e.g. suspended for abuse). */
+export const tenantStatus = pgEnum('tenant_status', ['active', 'suspended']);
 
 // ─── Platform (no tenant_id) ──────────────────────────────────────────────────
 
@@ -118,6 +120,8 @@ export const tenants = pgTable(
     sectors: text('sectors').array().notNull(),
     /** Referral code typed at sign-up; linked to an agent once the agents module exists */
     referralCode: text('referral_code'),
+    /** Checked at login, refresh and on every authenticated request */
+    status: tenantStatus('status').notNull().default('active'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -320,8 +324,12 @@ export const auditLogs = pgTable(
 );
 
 /**
- * Refresh-token sessions. Looked up by token hash before the tenant is known,
- * so this table is not under RLS; it never stores the raw token.
+ * Refresh-token sessions, under RLS like every store table. Before the store is known, a session
+ * is found by its token hash through session_find_by_hash(); the raw token is never stored.
+ *
+ * Each refresh rotates the token into a new row of the same family. The family id is the
+ * session id carried by access tokens, and the family ends at absolute_expires_at whatever
+ * happens, so a session cannot live forever by refreshing.
  */
 export const sessions = pgTable(
   'sessions',
@@ -329,11 +337,13 @@ export const sessions = pgTable(
     id: id(),
     tenantId: uuid('tenant_id').notNull(),
     userId: uuid('user_id').notNull(),
+    familyId: uuid('family_id').notNull(),
     tokenHash: text('token_hash').notNull().unique(),
     userAgent: text('user_agent'),
     ip: text('ip'),
     createdAt: createdAt(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     replacedBy: uuid('replaced_by'),
   },
@@ -341,5 +351,7 @@ export const sessions = pgTable(
     primaryKey({ name: 'sessions_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
     index('sessions_user_idx').on(t.userId),
+    index('sessions_family_idx').on(t.tenantId, t.familyId),
+    tenantIsolation(),
   ],
 );

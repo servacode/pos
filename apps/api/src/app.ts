@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { createDb, type DbHandle } from '@serva/db';
 import type { ApiErrorBody } from '@serva/core';
+import { SessionGate } from './auth/session-gate';
 import { systemClock, type Clock } from './clock';
 import type { Env } from './env';
 import { AppError } from './errors';
@@ -38,6 +39,7 @@ export async function buildApp({
   app.decorate('db', handle.db);
   app.decorate('env', env);
   app.decorate('clock', clock);
+  app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
   app.decorateRequest('auth', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());
 

@@ -6,6 +6,8 @@ export const ERROR_CODES = [
   'unauthorized',
   'forbidden',
   'not_found',
+  /** The request repeats one that just happened (e.g. two tabs refreshing at once): retry */
+  'conflict',
   'rate_limited',
   'internal',
 ] as const;

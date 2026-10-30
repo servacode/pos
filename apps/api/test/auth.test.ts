@@ -142,8 +142,9 @@ describe('refresh and logout', () => {
     expect(rotated).toBeDefined();
     expect(rotated).not.toBe(cookie);
 
+    // Within the grace window a reuse is treated as two tabs racing: 409, retry with the new cookie.
     const reused = await refresh(cookie);
-    expect(reused.statusCode).toBe(401);
+    expect(reused.statusCode).toBe(409);
     expect((await refresh(rotated!)).statusCode).toBe(200);
   });
 

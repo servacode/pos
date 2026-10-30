@@ -16,7 +16,7 @@ import {
 } from '@serva/db';
 import { AppError, isUniqueViolation } from '../errors';
 import { audit } from './audit';
-import { createSession, type IssuedSession } from './sessions';
+import { createSession, type IssuedSession, type SessionPolicy } from './sessions';
 import { DAY_MS } from '../clock';
 import type { RequestMeta } from '../types';
 
@@ -34,7 +34,7 @@ export async function registerStore(
   db: Database,
   data: RegisterStoreData,
   passwordHash: string,
-  options: { refreshTtlDays: number; now: Date },
+  options: { sessionPolicy: SessionPolicy; now: Date },
   meta: RequestMeta,
 ): Promise<RegisteredStore> {
   const tenantId = uuidv7();
@@ -101,7 +101,7 @@ export async function registerStore(
 
       const session = await createSession(
         tx,
-        { tenantId, userId: user!.id, ttlDays: options.refreshTtlDays, now },
+        { tenantId, userId: user!.id, now, policy: options.sessionPolicy },
         meta,
       );
       await audit(

@@ -17,6 +17,10 @@ const envSchema = z.object({
     .positive()
     .default(15 * 60),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  /** A sign-in session ends this many days after sign-in, however often it is refreshed */
+  SESSION_ABSOLUTE_DAYS: z.coerce.number().int().positive().default(90),
+  /** How long a "session still live" answer is cached per server instance (0 = always ask) */
+  AUTH_CHECK_CACHE_SECONDS: z.coerce.number().int().min(0).max(60).default(30),
   /** Requests per minute per IP on login/register */
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
   /** Set when running behind a reverse proxy so client IPs are read correctly */

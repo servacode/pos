@@ -6,7 +6,13 @@ import { hashSecret, verifyAgainstDummy, verifySecret } from '../auth/passwords'
 import { signAccessToken } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
 import { audit } from '../services/audit';
-import { createSession, revokeSession, rotateSession, type IssuedSession } from '../services/sessions';
+import {
+  createSession,
+  revokeSession,
+  rotateSession,
+  type IssuedSession,
+  type SessionPolicy,
+} from '../services/sessions';
 import { registerStore } from '../services/stores';
 import type { RequestMeta } from '../types';
 import { parseBody } from './validation';
@@ -21,6 +27,10 @@ const metaOf = (request: FastifyRequest): RequestMeta => ({
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   const { env, db, clock } = app;
+  const sessionPolicy: SessionPolicy = {
+    ttlDays: env.REFRESH_TOKEN_TTL_DAYS,
+    absoluteDays: env.SESSION_ABSOLUTE_DAYS,
+  };
   const authLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE, timeWindow: '1 minute' } };
 
   const setRefreshCookie = (reply: FastifyReply, session: IssuedSession) =>
@@ -53,7 +63,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       db,
       data,
       passwordHash,
-      { refreshTtlDays: env.REFRESH_TOKEN_TTL_DAYS, now: clock.now() },
+      { sessionPolicy, now: clock.now() },
       metaOf(request),
     );
     setRefreshCookie(reply, result.session);
@@ -76,6 +86,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       password_hash: string;
       status: 'active' | 'disabled';
       full_name: string;
+      tenant_status: 'active' | 'suspended';
     }>(sql`select * from auth_find_login(${data.phone})`);
     const account = rows[0];
     if (!account) {
@@ -84,6 +95,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     }
     const passwordOk = await verifySecret(account.password_hash, data.password);
     if (!passwordOk || account.status !== 'active') throw invalid;
+    if (account.tenant_status !== 'active') {
+      // Only said once the password is proven, so it reveals nothing to a stranger.
+      throw new AppError(403, 'forbidden', 'هذا المتجر موقوف. تواصل مع الدعم.');
+    }
 
     const meta = metaOf(request);
     const now = clock.now();
@@ -92,7 +107,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const [tenant] = await tx.select({ name: tenants.name }).from(tenants).limit(1);
       const session = await createSession(
         tx,
-        { tenantId: account.tenant_id, userId: account.user_id, ttlDays: env.REFRESH_TOKEN_TTL_DAYS, now },
+        { tenantId: account.tenant_id, userId: account.user_id, now, policy: sessionPolicy },
         meta,
       );
       await audit(tx, { tenantId: account.tenant_id, userId: account.user_id, action: 'user.login' }, meta);
@@ -115,20 +130,19 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const token = request.cookies[REFRESH_COOKIE];
       if (!token) throw unauthorized();
-      const session = await rotateSession(
-        db,
-        token,
-        env.REFRESH_TOKEN_TTL_DAYS,
-        clock.now(),
-        metaOf(request),
-      );
-      if (!session) {
+      const result = await rotateSession(db, token, sessionPolicy, clock.now(), metaOf(request));
+      if (result.status === 'race') {
+        // Another tab refreshed with this cookie a moment ago and already holds the new one.
+        // No Set-Cookie here, or this answer could arrive last and erase the new cookie.
+        throw new AppError(409, 'conflict', 'تم تجديد الجلسة للتو من نافذة أخرى. أعد المحاولة.');
+      }
+      if (result.status === 'invalid') {
         clearRefreshCookie(reply);
         throw unauthorized();
       }
-      setRefreshCookie(reply, session);
+      setRefreshCookie(reply, result.session);
       const body: RefreshResponse = {
-        accessToken: await accessTokenFor(session),
+        accessToken: await accessTokenFor(result.session),
         expiresIn: env.ACCESS_TOKEN_TTL_SECONDS,
       };
       return reply.send(body);
@@ -137,7 +151,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/auth/logout', async (request, reply) => {
     const token = request.cookies[REFRESH_COOKIE];
-    if (token) await revokeSession(db, token, clock.now());
+    const sessionId = token ? await revokeSession(db, token, clock.now()) : null;
+    if (sessionId) app.sessionGate.forget(sessionId);
     clearRefreshCookie(reply);
     return reply.status(204).send();
   });

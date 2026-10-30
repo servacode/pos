@@ -21,6 +21,44 @@ afterAll(async () => {
 });
 beforeEach(resetDatabase);
 
+describe('row-level security in the catalog', () => {
+  it('every table with tenant_id (and tenants itself) has RLS enabled and at least one policy', async () => {
+    const offenders = await ownerDb()<{ table: string; rls: boolean; policies: number }[]>`
+      select c.relname as table, c.relrowsecurity as rls,
+             (select count(*)::int from pg_policy p where p.polrelid = c.oid) as policies
+      from pg_class c
+      where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p') and not c.relispartition
+        and (c.relname = 'tenants' or exists (
+          select 1 from pg_attribute a where a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped))
+        and (not c.relrowsecurity
+             or not exists (select 1 from pg_policy p where p.polrelid = c.oid))
+      order by 1`;
+    expect(offenders).toEqual([]);
+  });
+
+  it('every tenant policy filters on the store set by withTenant()', async () => {
+    const policies = await ownerDb()<{ table: string; using: string; check: string }[]>`
+      select tablename as table, qual as using, with_check as check
+      from pg_policies where schemaname = 'public' order by 1`;
+    expect(policies.length).toBeGreaterThan(0);
+    for (const p of policies) {
+      expect(p.using, p.table).toMatch(/app_current_tenant\(\)/);
+      expect(p.check ?? p.using, p.table).toMatch(/app_current_tenant\(\)/);
+    }
+  });
+
+  it('SECURITY DEFINER functions pin their search_path and are not executable by everyone', async () => {
+    const offenders = await ownerDb()<{ fn: string }[]>`
+      select p.proname as fn
+      from pg_proc p
+      where p.pronamespace = 'public'::regnamespace and p.prosecdef
+        and (not coalesce(array_to_string(p.proconfig, ',') like '%search_path=%', false)
+             or has_function_privilege('public', p.oid, 'execute'))
+      order by 1`;
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('schema conventions', () => {
   it('every table with updated_at also has version and the trigger that maintains both', async () => {
     const offenders = await ownerDb()<{ table: string }[]>`
