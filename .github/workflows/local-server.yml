@@ -76,7 +76,7 @@ jobs:
       - name: Lose data, then restore the backup on the live server
         run: |
           docker compose -f deploy/local/compose.yml exec -T -u postgres postgres psql -v ON_ERROR_STOP=1 -d serva \
-            -c "delete from branches" -c "delete from tenant_settings" -c "delete from tenants where name like 'متجر الاختبار %'"
+            -c "delete from branches" -c "delete from tenant_settings" -c "delete from sync_tombstones" -c "delete from tenants where name like 'متجر الاختبار %'"
           pnpm local:restore "$(ls deploy/local/backups/*-ci.dump.enc | tail -n 1)" --replace-live --yes
           bash scripts/local/ci-checks.sh fixture-present
 
