@@ -347,6 +347,11 @@ export const userRoles = pgTable(
   ],
 );
 
+/**
+ * Who did what, append-only (09): the actor and their kind, the grant used (support or accountant),
+ * the field-by-field changes, the reason, the device and both clocks. Partitioned by month
+ * (created_at), so old months are dropped as partitions; see 0008_audit_logs.sql.
+ */
 export const auditLogs = pgTable(
   'audit_logs',
   {
@@ -355,16 +360,26 @@ export const auditLogs = pgTable(
       .notNull()
       .references(() => tenants.id),
     userId: uuid('user_id'),
+    /** user, accountant, platform_support, device, system */
+    actorType: text('actor_type').notNull().default('user'),
+    /** Support grant or accountant link the action was made under */
+    grantId: uuid('grant_id'),
     action: text('action').notNull(),
     entity: text('entity'),
     entityId: text('entity_id'),
+    /** Field-by-field changes: { field: [before, after] } */
+    changes: jsonb('changes'),
+    /** Other context of the action */
     data: jsonb('data'),
+    reason: text('reason'),
+    deviceId: uuid('device_id'),
+    deviceTime: timestamp('device_time', { withTimezone: true }),
     ip: text('ip'),
     userAgent: text('user_agent'),
     createdAt: createdAt(),
   },
   (t) => [
-    primaryKey({ name: 'audit_logs_pkey', columns: [t.tenantId, t.id] }),
+    primaryKey({ name: 'audit_logs_pkey', columns: [t.tenantId, t.id, t.createdAt] }),
     index('audit_logs_tenant_created_idx').on(t.tenantId, t.createdAt),
     tenantIsolation(),
   ],

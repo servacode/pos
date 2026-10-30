@@ -57,6 +57,13 @@
       "when": 1793393927965,
       "tag": "0007_drop_replaced_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793394354475,
+      "tag": "0008_audit_logs",
+      "breakpoints": true
     }
   ]
 }

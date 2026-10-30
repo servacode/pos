@@ -59,6 +59,47 @@ describe('row-level security in the catalog', () => {
   });
 });
 
+describe('audit history', () => {
+  it('is partitioned by month, and partitions are reachable only through the protected parent', async () => {
+    const partitions = await ownerDb()<{ name: string; app_access: boolean }[]>`
+      select c.relname as name,
+             has_table_privilege('serva_app', c.oid, 'select') or has_table_privilege('serva_app', c.oid, 'insert') as app_access
+      from pg_inherits i join pg_class c on c.oid = i.inhrelid
+      where i.inhparent = 'audit_logs'::regclass order by 1`;
+    expect(partitions.map((p) => p.name)).toContain('audit_logs_default');
+    const month = new Date().toISOString().slice(0, 7).replace('-', '_');
+    expect(partitions.map((p) => p.name)).toContain(`audit_logs_${month}`);
+    expect(partitions.filter((p) => p.app_access)).toEqual([]);
+
+    const anyPartitionGranted = await ownerDb()<{ table: string }[]>`
+      select c.relname as table from pg_class c
+      where c.relispartition and c.relnamespace = 'public'::regnamespace
+        and (has_table_privilege('serva_app', c.oid, 'select') or has_table_privilege('serva_app', c.oid, 'insert'))`;
+    expect(anyPartitionGranted).toEqual([]);
+  });
+
+  it('cannot be changed or deleted, even by the owner role', async () => {
+    const { body } = await registerStore(app);
+    const tenantId: string = body.tenant.id;
+    await expect(ownerDb()`update audit_logs set action = 'x' where tenant_id = ${tenantId}`).rejects.toThrow(
+      /append-only/,
+    );
+    await expect(ownerDb()`delete from audit_logs where tenant_id = ${tenantId}`).rejects.toThrow(
+      /append-only/,
+    );
+    await expect(ownerDb()`delete from legal_acceptances where tenant_id = ${tenantId}`).rejects.toThrow(
+      /append-only/,
+    );
+  });
+
+  it('records who acted and how', async () => {
+    const { body } = await registerStore(app);
+    const [row] = await ownerDb()<{ actor_type: string; action: string; user_id: string }[]>`
+      select actor_type, action, user_id from audit_logs where tenant_id = ${body.tenant.id}`;
+    expect(row).toEqual({ actor_type: 'user', action: 'store.registered', user_id: body.user.id });
+  });
+});
+
 describe('schema conventions', () => {
   it('every table with updated_at also has version and the trigger that maintains both', async () => {
     const offenders = await ownerDb()<{ table: string }[]>`
