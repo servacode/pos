@@ -59,9 +59,12 @@ jobs:
             --exclude docs \
             apps packages scripts
 
+  # Needs the repository's Dependency graph (Settings > Code security). Turn it on
+  # there, then set the repository variable DEPENDENCY_REVIEW=true to run this job.
+  # Until then `pnpm audit` in the security job blocks vulnerable dependencies.
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && vars.DEPENDENCY_REVIEW == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
