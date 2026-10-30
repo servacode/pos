@@ -1,0 +1,7 @@
+/* addon: restaurant (waiter, kitchen screen, floor map, «جاهز» call screen). Paste after serva-ui.css. */
+.t-kitchen{font-size:30px;line-height:40px;font-weight:600}.t-call{font-size:140px;line-height:150px;font-weight:700}.t-price{font-size:96px;line-height:104px;font-weight:700}
+.ticket{display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--line);border-top:6px solid var(--brand);border-radius:16px;background:var(--surface)}
+.ticket.warn{border-top-color:var(--warning)}.ticket.late{border-top-color:var(--danger)}
+.tbl{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:2px solid var(--line);border-radius:16px;background:var(--surface);font-weight:600}
+.tbl.busy{border-color:var(--brand);background:var(--brand-soft)}.tbl.bill{border-color:var(--warning);background:var(--warning-soft)}.tbl.call{border-color:var(--danger);background:var(--danger-soft)}
+.shell-tablet{width:1180px;height:820px;display:grid;grid-template-rows:56px minmax(0,1fr);overflow:hidden}

@@ -1,0 +1,6 @@
+/* addon: charts (bars, line/area svg classes, heatmap cells, legend dot). Paste after serva-ui.css. RTL time axis: newest on the LEFT. */
+.bars{height:160px;display:flex;align-items:flex-end;gap:8px}.bar{flex:1;min-height:4px;border-radius:6px 6px 0 0;background:var(--c1)}.bar.soft{background:var(--s1)}.bar.alt{background:var(--c2)}
+.axis{display:flex;justify-content:space-between;font-size:12px;line-height:20px;color:var(--ink-subtle);font-variant-numeric:tabular-nums}
+.dot{width:10px;height:10px;display:inline-block;flex:none;border-radius:3px}
+.ln{fill:none;stroke:var(--c1);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}.ln2{fill:none;stroke:var(--c2);stroke-width:2;stroke-dasharray:4 4}.area{fill:var(--s1)}.gridln{stroke:var(--line);stroke-width:1}
+.h1c{background:var(--s1)}.h2c{background:var(--s2)}.h3c{background:var(--s3)}.h4c{background:var(--s4)}.h5c{background:var(--s5)}

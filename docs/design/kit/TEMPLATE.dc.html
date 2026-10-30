@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>اسم الشاشة</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+/*KIT*/
+/*ADDON*/
+</style>
+</helmet>
+<div class="sv" dir="rtl" style="width: 1440px; min-height: 900px">
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+/*
+HOW TO USE: replace the KIT marker with the whole of serva-ui.css, the ADDON marker with the addon(s) the screen needs
+(addon-cashier / addon-restaurant / addon-print / addon-charts / addon-dark), or delete it. Replace the root div with ONE
+of the shells below, set <title>, and make $preview (and the canvas.json boards entry w,h) equal the frame size.
+Delete this comment block when done. Icons: icons.md. Logo: logo.md. Rules and sample data: KIT.md.
+
+ADMIN WEB, 1440 x content height (addon: none, or addon-charts)
+<div class="sv shell-admin" dir="rtl" style="width: 1440px; min-height: 900px">
+  <aside class="adm-side" aria-label="القائمة">
+    [logo.md small header lockup, inside <div style="padding: 4px 8px 12px">]
+    <button type="button" class="nav-item is-on" aria-current="page">[icon inbox]بانتظارك<span class="count num">4</span></button>
+    <div class="nav-group">البيع</div>
+    <button type="button" class="nav-item">[icon home]الرئيسية</button>
+    (groups from tab 12: البيع / البضاعة / الناس / المال / المتجر)
+  </aside>
+  <div class="adm-main">
+    <header class="adm-top">
+      <select class="select" style="width: 200px; height: 40px" aria-label="الفرع"><option>كل الفروع</option></select>
+      <div class="affix grow" style="max-width: 420px">[icon search]<input class="input" style="height: 40px" placeholder="ابحث عن منتج أو زبون أو فاتورة" aria-label="بحث"></div>
+      <span class="grow"></span>
+      <button type="button" class="btn btn-secondary btn-sm">[icon cart]افتح الكاشير</button>
+      <button type="button" class="btn btn-ghost btn-icon btn-sm" aria-label="التنبيهات">[icon bell]</button>
+      <span class="avatar sm">خ</span>
+    </header>
+    <main class="adm-content">
+      <div class="page-head">
+        <div class="col g4"><nav class="crumbs" aria-label="المسار"><span>البضاعة</span><span>/</span><span>المنتجات</span></nav><h1 class="t-h1">المنتجات</h1></div>
+        <div class="row g12"><button type="button" class="btn btn-secondary">[icon upload]استورد من Excel</button><button type="button" class="btn btn-primary">[icon plus]أضف منتجاً</button></div>
+      </div>
+      (cards, .grid4 of KPI cards, .table-box > table.table …)
+    </main>
+  </div>
+</div>
+
+CASHIER, 1280 x 800 (addon-cashier)
+<div class="sv shell-cashier" dir="rtl">
+  <header class="cash-status">[logo small] <span class="t-label">مقهى الياسمين · فرع الرقة</span> <span class="t-caption">سامر · وردية منذ 8:10 ص</span>
+    <span class="grow"></span><span class="badge b-pending">بانتظار الدفع</span><span class="conn">[icon wifi]متصل · كل شيء أُرسل</span></header>
+  <div class="cash-body">
+    <section class="cash-cart" aria-label="السلة">(customer/seller chips, .cart-line rows, then .cart-total with .t-total amount + $ line + <button class="btn btn-primary btn-pay">)</section>
+    <section class="cash-items" aria-label="الأصناف">(.affix search with .input.input-touch, category .chip row, .item-grid of <button class="item">)</section>
+  </div>
+</div>
+(the cart is first in the markup, so it sits on the RIGHT in RTL, as tab 12 requires)
+
+PHONE, 390 x 844 (addon: none)
+<div class="sv shell-phone" dir="rtl">
+  <header class="ph-top"><h1 class="t-h3 grow">الرئيسية</h1>[icon buttons]</header>
+  <main class="ph-content">(cards, .li rows…)</main>
+  <nav class="ph-tabs" aria-label="التنقل">
+    <button type="button" class="ph-tab is-on" aria-current="page">[icon home 24]الرئيسية</button>
+    <button type="button" class="ph-tab">[icon inbox 24]بانتظارك</button>
+    <button type="button" class="ph-tab">[icon sales 24]المبيعات</button>
+    <button type="button" class="ph-tab">[icon products 24]المنتجات</button>
+    <button type="button" class="ph-tab">[icon more 24]المزيد</button>
+  </nav>
+  (or instead of .ph-tabs: <div class="ph-action"><button class="btn btn-primary btn-lg btn-block">…</button></div>)
+</div>
+
+TABLET, 1180 x 820 (addon-restaurant)
+<div class="sv shell-tablet" dir="rtl">
+  <header class="row g12" style="padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--line)">…</header>
+  <div style="display: grid; grid-template-columns: 360px minmax(0, 1fr); min-height: 0">(order panel | floor map of .tbl or menu grid)</div>
+</div>
+*/
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

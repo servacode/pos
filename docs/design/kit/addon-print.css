@@ -1,0 +1,9 @@
+/* addon: print (80/58 mm receipt, labels, A4). Paper is always black on white, weight ≥600 on thermal. Paste after serva-ui.css. */
+.receipt{width:302px;display:flex;flex-direction:column;gap:4px;padding:16px 14px 20px;background:#FFFFFF;color:#000000;font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;font-size:13px;line-height:20px;font-weight:600;box-shadow:var(--e2)}
+.receipt.w58{width:219px;font-size:12px}
+.receipt .r-c{text-align:center}.receipt .r-row{display:flex;justify-content:space-between;gap:8px}
+.receipt .r-big{font-size:20px;line-height:28px;font-weight:700}
+.receipt .r-cut{border:0;border-top:1px dashed #000000;margin:6px 0}
+.label-50x30{width:189px;height:113px;display:flex;flex-direction:column;justify-content:space-between;padding:8px;background:#FFFFFF;color:#000000;font-weight:600;font-size:12px;line-height:16px;box-shadow:var(--e2)}
+.a4{width:794px;min-height:1123px;display:flex;flex-direction:column;gap:20px;padding:48px 56px;background:#FFFFFF;color:#192621;font-size:13px;line-height:21px;box-shadow:var(--e2)}
+.a4 .table th{background:#EEF4F1}
