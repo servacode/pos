@@ -1,0 +1,4 @@
+# Generated on the local server; never committed.
+.env
+backups/
+serva-local-ca.crt
