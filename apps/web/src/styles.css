@@ -27,80 +27,90 @@
   }
 }
 
+/*
+ * Colour tokens: identity A «زمرّدي», the exact tab-14 values from docs/design/kit/serva-ui.css
+ * (light) and addon-dark.css (dark), written in oklch. Each value converts back to the kit's hex
+ * exactly, and src/styles.test.ts checks that and the contrast of every allowed pair.
+ * Screens use these names only (bg-surface, text-ink-muted, border-line-control…), never a palette
+ * shade or a raw colour; status colours stay separate from brand even while their values match.
+ */
 @theme static {
   --color-*: initial;
 
-  --color-white: oklch(1 0 0);
-
-  --color-brand-50: oklch(0.975 0.022 165);
-  --color-brand-100: oklch(0.945 0.045 164);
-  --color-brand-200: oklch(0.895 0.08 164);
-  --color-brand-300: oklch(0.83 0.115 164);
-  --color-brand-400: oklch(0.74 0.135 163);
-  --color-brand-500: oklch(0.65 0.135 163);
-  --color-brand-600: oklch(0.56 0.12 163);
-  --color-brand-700: oklch(0.48 0.1 165);
-  --color-brand-800: oklch(0.4 0.08 166);
-  --color-brand-900: oklch(0.33 0.062 168);
-  --color-brand-950: oklch(0.24 0.045 170);
-
-  --color-canvas: oklch(0.982 0.005 165);
+  --color-canvas: oklch(0.9815 0.005 165.01);
   --color-surface: oklch(1 0 0);
-  --color-surface-muted: oklch(0.962 0.008 165);
-  --color-line: oklch(0.915 0.01 165);
-  --color-line-strong: oklch(0.845 0.012 165);
-  --color-ink: oklch(0.255 0.02 170);
-  --color-ink-muted: oklch(0.47 0.02 170);
-  --color-ink-subtle: oklch(0.6 0.015 170);
+  --color-surface-muted: oklch(0.9618 0.0075 164.94);
+  --color-surface-total: oklch(0.9703 0.0124 164.8);
+  --color-line: oklch(0.9147 0.0101 164.85);
+  --color-line-control: oklch(0.6511 0.0127 161.86);
+  --color-ink: oklch(0.2547 0.0203 168.96);
+  --color-ink-muted: oklch(0.4708 0.0208 169.3);
+  --color-ink-subtle: oklch(0.53 0.0164 168.76);
 
-  --color-brand: oklch(0.56 0.12 163);
-  --color-brand-hover: oklch(0.5 0.11 164);
-  --color-on-brand: oklch(0.99 0.01 165);
-  --color-brand-soft: oklch(0.958 0.033 165);
-  --color-brand-ink: oklch(0.42 0.095 165);
-  --color-ring: oklch(0.62 0.13 163);
+  --color-brand: oklch(0.5331 0.1172 161.82);
+  --color-brand-hover: oklch(0.4729 0.1029 162.54);
+  --color-on-brand: oklch(0.9899 0.0099 164.88);
+  --color-brand-soft: oklch(0.959 0.033 165.16);
+  --color-brand-ink: oklch(0.4234 0.0907 163.65);
+  --color-ring: oklch(0.6203 0.1304 162.9);
 
-  --color-danger: oklch(0.56 0.19 25);
-  --color-danger-soft: oklch(0.966 0.018 25);
-  --color-danger-ink: oklch(0.47 0.16 25);
-  --color-info-soft: oklch(0.962 0.022 240);
-  --color-info-ink: oklch(0.43 0.1 245);
-  --color-warning-soft: oklch(0.966 0.045 88);
-  --color-warning-ink: oklch(0.46 0.1 65);
+  --color-success: oklch(0.5331 0.1172 161.82);
+  --color-success-soft: oklch(0.959 0.033 165.16);
+  --color-success-ink: oklch(0.4234 0.0907 163.65);
+  --color-warning: oklch(0.5693 0.1284 64.39);
+  --color-warning-soft: oklch(0.9652 0.0449 90.39);
+  --color-warning-ink: oklch(0.4589 0.0998 64.94);
+  --color-danger: oklch(0.5598 0.1896 24.92);
+  --color-on-danger: oklch(1 0 0);
+  --color-danger-soft: oklch(0.9645 0.0174 21.81);
+  --color-danger-ink: oklch(0.4693 0.1593 25.11);
+  --color-info: oklch(0.5201 0.13 245.04);
+  --color-info-soft: oklch(0.962 0.0208 236.75);
+  --color-info-ink: oklch(0.4308 0.1004 245.13);
 
-  --shadow-card: 0 1px 2px 0 oklch(0.25 0.02 170 / 0.05), 0 10px 30px -14px oklch(0.25 0.02 170 / 0.14);
-  --shadow-raised: 0 2px 6px 0 oklch(0.25 0.02 170 / 0.06), 0 20px 44px -18px oklch(0.25 0.02 170 / 0.24);
+  --shadow-*: initial;
+  --shadow-e1: 0 1px 2px rgb(25 38 33 / 0.06);
+  --shadow-e2: 0 4px 12px rgb(25 38 33 / 0.1);
+  --shadow-e3: 0 12px 32px rgb(25 38 33 / 0.16);
 }
 
 @layer base {
   @media (prefers-color-scheme: dark) {
     :root {
-      --color-canvas: oklch(0.175 0.012 170);
-      --color-surface: oklch(0.215 0.014 170);
-      --color-surface-muted: oklch(0.255 0.015 170);
-      --color-line: oklch(0.3 0.015 170);
-      --color-line-strong: oklch(0.38 0.016 170);
-      --color-ink: oklch(0.955 0.006 165);
-      --color-ink-muted: oklch(0.76 0.014 165);
-      --color-ink-subtle: oklch(0.6 0.014 165);
+      --color-canvas: oklch(0.1741 0.0115 175.47);
+      --color-surface: oklch(0.216 0.0153 165.97);
+      --color-surface-muted: oklch(0.2546 0.014 172.88);
+      --color-surface-total: oklch(0.2451 0.0296 165.33);
+      --color-line: oklch(0.2996 0.0135 173.2);
+      --color-line-control: oklch(0.5195 0.0165 168.74);
+      --color-ink: oklch(0.9545 0.005 165.01);
+      --color-ink-muted: oklch(0.7598 0.0141 167.04);
+      --color-ink-subtle: oklch(0.647 0.0137 164.58);
 
-      --color-brand: oklch(0.72 0.14 163);
-      --color-brand-hover: oklch(0.78 0.13 163);
-      --color-on-brand: oklch(0.2 0.04 168);
-      --color-brand-soft: oklch(0.29 0.05 165);
-      --color-brand-ink: oklch(0.85 0.1 163);
-      --color-ring: oklch(0.74 0.14 163);
+      --color-brand: oklch(0.7191 0.1395 163.11);
+      --color-brand-hover: oklch(0.7795 0.1299 162.87);
+      --color-on-brand: oklch(0.2009 0.0414 166.54);
+      --color-brand-soft: oklch(0.2896 0.0502 165.22);
+      --color-brand-ink: oklch(0.8506 0.1007 162.9);
+      --color-ring: oklch(0.7403 0.1402 162.92);
 
-      --color-danger: oklch(0.7 0.17 25);
-      --color-danger-soft: oklch(0.28 0.06 25);
-      --color-danger-ink: oklch(0.85 0.09 25);
-      --color-info-soft: oklch(0.28 0.05 245);
-      --color-info-ink: oklch(0.85 0.07 240);
-      --color-warning-soft: oklch(0.3 0.06 75);
-      --color-warning-ink: oklch(0.88 0.1 85);
+      --color-success: oklch(0.7191 0.1395 163.11);
+      --color-success-soft: oklch(0.2896 0.0502 165.22);
+      --color-success-ink: oklch(0.8506 0.1007 162.9);
+      --color-warning: oklch(0.8012 0.1401 80.03);
+      --color-warning-soft: oklch(0.3005 0.0602 75.86);
+      --color-warning-ink: oklch(0.8804 0.1005 85.13);
+      --color-danger: oklch(0.7005 0.1697 24.93);
+      --color-on-danger: oklch(0.202 0.0523 26.53);
+      --color-danger-soft: oklch(0.281 0.0597 26.19);
+      --color-danger-ink: oklch(0.8448 0.0849 25.25);
+      --color-info: oklch(0.7186 0.1099 240.06);
+      --color-info-soft: oklch(0.2798 0.0504 245.38);
+      --color-info-ink: oklch(0.8503 0.0698 238.92);
 
-      --shadow-card: 0 1px 2px 0 oklch(0 0 0 / 0.3), 0 10px 30px -14px oklch(0 0 0 / 0.5);
-      --shadow-raised: 0 2px 6px 0 oklch(0 0 0 / 0.35), 0 20px 44px -18px oklch(0 0 0 / 0.6);
+      --shadow-e1: none;
+      --shadow-e2: 0 4px 12px rgb(0 0 0 / 0.4);
+      --shadow-e3: 0 12px 32px rgb(0 0 0 / 0.5);
     }
   }
 

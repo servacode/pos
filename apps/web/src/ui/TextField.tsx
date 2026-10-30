@@ -33,10 +33,10 @@ export function TextField({
       </label>
       <div
         className={cn(
-          'flex items-center rounded-control border bg-surface transition-[border-color,box-shadow] duration-150 focus-within:ring-4',
+          'flex items-center rounded-control border bg-surface ring-inset transition-[border-color,box-shadow] duration-150',
           error
-            ? 'border-danger focus-within:ring-danger/15'
-            : 'border-line-strong hover:border-ink-subtle focus-within:border-brand focus-within:ring-ring/20',
+            ? 'border-danger ring-1 ring-danger'
+            : 'border-line-control focus-within:border-ring focus-within:ring-1 focus-within:ring-ring',
         )}
       >
         <input
@@ -45,7 +45,7 @@ export function TextField({
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
           className={cn(
-            'min-h-12 w-full min-w-0 flex-1 rounded-control bg-transparent px-4 text-base text-ink outline-none placeholder:text-ink-subtle',
+            'min-h-12 w-full min-w-0 flex-1 rounded-control bg-transparent px-3.5 text-base text-ink outline-none placeholder:text-ink-subtle',
             dir === 'ltr' && 'text-right',
           )}
           {...inputProps}

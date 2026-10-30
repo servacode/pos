@@ -26,7 +26,7 @@ export function AuthLayout({ title, subtitle, footer, children }: AuthLayoutProp
         <div className="mx-auto flex w-full max-w-lg flex-1 flex-col pt-10 sm:justify-center sm:pt-8 motion-safe:animate-rise">
           <h1 className="text-2xl font-bold text-ink sm:text-3xl">{title}</h1>
           <p className="mt-2 text-ink-muted">{subtitle}</p>
-          <div className="mt-7 sm:rounded-card sm:border sm:border-line sm:bg-surface sm:p-8 sm:shadow-card">
+          <div className="mt-7 sm:rounded-card sm:border sm:border-line sm:bg-surface sm:p-8 sm:shadow-e1">
             {children}
           </div>
           <p className="mt-7 text-center text-ink-muted">{footer}</p>
