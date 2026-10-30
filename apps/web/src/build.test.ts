@@ -12,28 +12,15 @@ describe('build target', () => {
   });
 });
 
-describe('fonts (tab 14 › الخط)', () => {
-  const css = `${read('./styles.css')}\n${read('./fonts.css')}`;
-  const faces = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map((m) => m[1]!);
+describe('one source for the design (tab 14 › مصدر واحد)', () => {
+  const styles = read('./styles.css');
 
-  it('loads IBM Plex Sans Arabic from woff2 files only', () => {
-    expect(css).not.toMatch(/@import ['"]@fontsource/);
-    expect(faces.length).toBeGreaterThan(0);
-    for (const face of faces) {
-      expect(face).toMatch(/font-family: 'IBM Plex Sans Arabic'/);
-      const urls = [...face.matchAll(/url\(([^)]*)\)/g)].map((m) => m[1]!);
-      expect(urls.length).toBeGreaterThan(0);
-      for (const url of urls) expect(url).toMatch(/\.woff2['"]?$/);
-    }
+  it('takes its theme from @serva/ui and defines no token of its own', () => {
+    expect(styles).toMatch(/@import 'tailwindcss';\s*@import '@serva\/ui\/theme\.css';/);
+    expect(styles).not.toMatch(/@theme|--color-|--font-|@font-face/);
   });
 
-  it('ships exactly three weights, 400, 600 and 700, each with Arabic and Latin', () => {
-    const weights = new Set(faces.map((face) => /font-weight: (\d+)/.exec(face)?.[1]));
-    expect([...weights].sort()).toEqual(['400', '600', '700']);
-    for (const weight of weights) {
-      for (const subset of ['arabic', 'latin']) {
-        expect(css).toContain(`ibm-plex-sans-arabic-${subset}-${weight}-normal.woff2`);
-      }
-    }
+  it('loads the fonts of @serva/ui', () => {
+    expect(read('./main.tsx')).toContain("import '@serva/ui/fonts.css';");
   });
 });

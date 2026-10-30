@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
   TERMS_VERSION,
   registerStoreInput,
@@ -8,15 +8,11 @@ import {
   type RegisterResponse,
   type RegisterStoreData,
 } from '@serva/core';
+import { Alert, Button, PasswordField, TextField, TextLink } from '@serva/ui';
 import { useAuth } from '../auth/useAuth';
 import { AuthLayout } from '../layout/AuthLayout';
 import { apiFetch, setAccessToken } from '../lib/api';
 import { useForm } from '../lib/useForm';
-import { Alert } from '../ui/Alert';
-import { Button } from '../ui/Button';
-import { PasswordField } from '../ui/PasswordField';
-import { TextField } from '../ui/TextField';
-import { TextLink } from '../ui/TextLink';
 
 interface RegisterValues {
   phone: string;
@@ -80,7 +76,10 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
       subtitle="ثلاث معلومات وتبدأ. يمكنك تعديل كل شيء لاحقاً."
       footer={
         <>
-          لديك حساب؟ <TextLink to="/login">سجّل الدخول</TextLink>
+          لديك حساب؟{' '}
+          <TextLink as={Link} to="/login">
+            سجّل الدخول
+          </TextLink>
         </>
       }
     >

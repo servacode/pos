@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
-import { cn } from '../lib/cn';
+import { cn } from './cn';
 
 interface ChoiceCardProps extends Omit<ComponentProps<'input'>, 'type' | 'size' | 'title'> {
   title: string;

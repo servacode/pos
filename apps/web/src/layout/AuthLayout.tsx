@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { Logo } from '../ui/Logo';
-import { CheckIcon } from '../ui/icons';
+import { CheckIcon, Logo } from '@serva/ui';
 
 const BENEFITS = [
   'بيع سريع وإيصال واضح بضغطة زر',

@@ -14,10 +14,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-sans-arabic": "^5.2.0",
     "@radix-ui/react-direction": "1.2.0",
     "@serva/core": "workspace:*",
-    "lucide-react": "1.57.0",
+    "@serva/ui": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router": "^7.9.0"

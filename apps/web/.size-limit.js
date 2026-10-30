@@ -1,6 +1,7 @@
 // Performance budget (tab 00 › الجودة, tab 23): checked on every merge after `pnpm build`.
 // - The sale screen (/pos) loads under 300 KB of JS + CSS after gzip.
 // - Each lazily loaded chunk stays under 60 KB gzip.
+// - The stylesheet (the @serva/ui theme and every class its components use) stays under 15 KB gzip.
 // - Fonts have their own budget: the woff2 files the cashier keeps (Arabic + Latin, 3 weights).
 // File lists come from Vite's manifest, so they follow the real chunk graph whatever Rollup names
 // or shares.
@@ -11,6 +12,12 @@ if (!existsSync(manifestUrl)) {
   throw new Error('dist/vite-manifest.json is missing: run `pnpm --filter @serva/web build` first.');
 }
 const manifest = JSON.parse(readFileSync(manifestUrl, 'utf8'));
+
+// The component gallery (/dev/ui) is for dev builds only and must never ship.
+const devOnly = Object.keys(manifest).filter((key) => key.startsWith('src/dev/'));
+if (devOnly.length > 0) {
+  throw new Error(`Dev-only code reached the production build: ${devOnly.join(', ')}`);
+}
 
 /** Every JS and CSS file the browser needs for these manifest entries and their static imports. */
 function filesFor(...keys) {
@@ -48,6 +55,12 @@ export default [
     limit: '300 kB',
   },
   ...lazyChunks,
+  {
+    name: 'Stylesheet: @serva/ui theme and component classes (gzip)',
+    path: manifest['index.html'].css.map((file) => `dist/${file}`),
+    gzip: true,
+    limit: '15 kB',
+  },
   {
     name: 'Cashier fonts (woff2: Arabic + Latin, 400/600/700)',
     path: cashierFonts,
