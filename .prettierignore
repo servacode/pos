@@ -4,3 +4,4 @@ coverage
 pnpm-lock.yaml
 packages/db/drizzle/meta
 docs/design/kit
+.claude
