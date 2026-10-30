@@ -37,5 +37,6 @@
 32. [المندوبون والتوزيع](32-sales-reps.md)
 33. [الأصول الثابتة والرواتب](33-assets-payroll.md)
 34. [التخصيص والموافقات والأرشفة](34-customization.md)
+35. [مراجعة الفريق](35-team-review.md)
 
 وانظر أيضاً: [طلب التعديلات لمشروع رحّال غو](../integrations/rahalgo-changes.md)
