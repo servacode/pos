@@ -1,8 +1,10 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   allocate,
   applyBasisPoints,
   convert,
+  fixedRate,
   formatMoney,
   lineGross,
   parseDecimal,
@@ -11,8 +13,9 @@ import {
   roundToStep,
   sumMinor,
   toMinor,
+  type ExchangeRate,
 } from './money';
-import type { CurrencyCode } from './currencies';
+import type { CurrencyId } from './currencies';
 import { seededRandom } from './test-random';
 
 describe('roundDiv', () => {
@@ -224,7 +227,7 @@ describe('toMinor', () => {
 
   it('rejects overflow and unknown currencies', () => {
     expect(() => toMinor('99999999999999999999', 'SYP')).toThrow(RangeError);
-    expect(() => toMinor('1', 'EUR' as CurrencyCode)).toThrow(RangeError);
+    expect(() => toMinor('1', 'EUR' as CurrencyId)).toThrow(RangeError);
   });
 });
 
@@ -272,45 +275,102 @@ describe('formatMoney', () => {
 });
 
 describe('parseRate', () => {
-  it('scales rates by 1e6 exactly', () => {
+  it('scales direct rates by 1e6 exactly', () => {
     expect(parseRate('13000')).toBe(13_000_000_000n);
+    expect(parseRate('130')).toBe(130_000_000n);
     expect(parseRate('3.75')).toBe(3_750_000n);
-    expect(parseRate('0.000077')).toBe(77n);
-    expect(parseRate('0.0000770')).toBe(77n); // trailing zeros are fine
+    expect(parseRate('1')).toBe(1_000_000n);
+    expect(parseRate('130.1234560')).toBe(130_123_456n); // trailing zeros are fine
     expect(parseRate('١٣٬٠٠٠')).toBe(13_000_000_000n);
   });
 
+  it('rejects inverted rates (below 1)', () => {
+    // 1 / 13000 rounded to six places is 0.000077: 0.1% off, so it may never be entered.
+    for (const inverted of ['0.000077', '0.007692', '0.999999']) {
+      expect(() => parseRate(inverted), inverted).toThrow(/inverted/);
+    }
+  });
+
   it('rejects zero, negative, too precise and malformed rates', () => {
-    for (const bad of ['0', '0.000000', '-1', '0.0000001', '1.2345678', 'abc', '']) {
+    for (const bad of ['0', '0.000000', '-1', '-13000', '1.2345678', 'abc', '']) {
       expect(() => parseRate(bad), bad).toThrow(RangeError);
     }
   });
 });
 
 describe('convert', () => {
-  it('converts USD → SYP', () => {
-    expect(convert(1250, 'USD', 'SYP', '13000')).toBe(16_250_000); // 12.50 $ → 162,500.00 ل.س
-    expect(convert(1, 'USD', 'SYP', '13000')).toBe(13_000);
-    expect(convert(1250, 'USD', 'SYP', '13000.5')).toBe(16_250_625);
+  const usdSyp = (rate: string): ExchangeRate => ({ unit: 'USD', quote: 'SYP', rate });
+
+  it('multiplies from the unit currency to the quote currency', () => {
+    expect(convert(1250, 'USD', 'SYP', usdSyp('130'))).toBe(162_500); // 12.50 $ → 1,625.00 ل.س
+    expect(convert(1250, 'USD', 'SYP', usdSyp('13000'))).toBe(16_250_000);
+    expect(convert(1, 'USD', 'SYP', usdSyp('13000'))).toBe(13_000);
+    expect(convert(1250, 'USD', 'SYP', usdSyp('13000.5'))).toBe(16_250_625);
   });
 
-  it('converts SYP → USD with a small rate, rounding half away from zero', () => {
-    expect(convert(16_250_000, 'SYP', 'USD', '0.000077')).toBe(1251); // 12.5125 → 12.51
-    expect(convert(5000, 'SYP', 'USD', '0.0001')).toBe(1); // 0.5 cent → 1
-    expect(convert(4999, 'SYP', 'USD', '0.0001')).toBe(0);
-    expect(convert(-5000, 'SYP', 'USD', '0.0001')).toBe(-1);
+  it('divides by the same direct rate in the reverse direction (spec 10: 12.50 $, not 12.51)', () => {
+    expect(convert(16_250_000, 'SYP', 'USD', usdSyp('13000'))).toBe(1250); // 162,500.00 ل.س → 12.50 $
+    // 13,000,000.00 new pounds at 130 = 100,000.00 $ (the inverse 0.007692 gave 99,996.00).
+    expect(convert(1_300_000_000, 'SYP', 'USD', usdSyp('130'))).toBe(10_000_000);
+    expect(convert(6500, 'SYP', 'USD', usdSyp('13000'))).toBe(1); // 0.5 cent → 1
+    expect(convert(6499, 'SYP', 'USD', usdSyp('13000'))).toBe(0);
+    expect(convert(-6500, 'SYP', 'USD', usdSyp('13000'))).toBe(-1);
+  });
+
+  it('converts old pounds to dollars exactly (1,300,000.00 old → 100.00 $)', () => {
+    const usdOld: ExchangeRate = { unit: 'USD', quote: 'SYP_OLD', rate: '13000' };
+    expect(convert(130_000_000, 'SYP_OLD', 'USD', usdOld)).toBe(10_000);
+    // 1,300,000,000 old pounds of stock read 100,000.00 $ through the dollar lens, not 100,100.00 $.
+    expect(convert(130_000_000_000, 'SYP_OLD', 'USD', usdOld)).toBe(10_000_000);
+    expect(convert(10_000, 'USD', 'SYP_OLD', usdOld)).toBe(130_000_000);
+  });
+
+  it('converts old ↔ new pounds at the fixed 100 : 1 without a rate', () => {
+    expect(fixedRate('SYP_OLD', 'SYP')).toEqual({ unit: 'SYP', quote: 'SYP_OLD', rate: '100' });
+    expect(fixedRate('SYP', 'SYP_OLD')).toEqual({ unit: 'SYP', quote: 'SYP_OLD', rate: '100' });
+    expect(fixedRate('USD', 'SYP')).toBeUndefined();
+    expect(convert(125_000_000, 'SYP_OLD', 'SYP')).toBe(1_250_000); // 1,250,000 old → 12,500 new
+    expect(convert(1_250_000, 'SYP', 'SYP_OLD')).toBe(125_000_000);
+    expect(convert(123_456, 'SYP_OLD', 'SYP')).toBe(1235); // 1,234.56 old → 12.3456 → 12.35 new
+    expect(convert(500, 'SYP_OLD', 'SYP', { unit: 'SYP', quote: 'SYP_OLD', rate: '100.000' })).toBe(5);
+  });
+
+  it('converts to the weaker currency and back without losing a cent (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -1e11, max: 1e11 }),
+        fc.integer({ min: 1_000_000, max: 50_000_000_000 }), // 1.000000 … 50,000.000000
+        (minor, scaledRate) => {
+          const rate = usdSyp((scaledRate / 1e6).toFixed(6));
+          const pounds = convert(minor, 'USD', 'SYP', rate);
+          expect(convert(pounds, 'SYP', 'USD', rate)).toBe(minor);
+        },
+      ),
+    );
   });
 
   it('returns the amount unchanged for the same currency', () => {
-    expect(convert(1234, 'USD', 'USD', 'not a rate')).toBe(1234);
+    expect(convert(1234, 'USD', 'USD')).toBe(1234);
+    expect(convert(1234, 'SYP', 'SYP', usdSyp('not a rate'))).toBe(1234);
   });
 
-  it('rejects bad rates and overflow', () => {
-    expect(() => convert(100, 'USD', 'SYP', '0')).toThrow(RangeError);
-    expect(() => convert(100, 'USD', 'SYP', '-13000')).toThrow(RangeError);
-    expect(() => convert(100, 'SYP', 'USD', '0.0000001')).toThrow(RangeError);
-    expect(() => convert(Number.MAX_SAFE_INTEGER, 'USD', 'SYP', '13000')).toThrow(RangeError);
-    expect(() => convert(1.5, 'USD', 'SYP', '13000')).toThrow(RangeError);
+  it('rejects inverted, missing, mismatched and bad rates, and overflow', () => {
+    expect(() => convert(100, 'SYP', 'USD', { unit: 'SYP', quote: 'USD', rate: '0.000077' })).toThrow(
+      /inverted/,
+    );
+    expect(() => convert(100, 'USD', 'SYP')).toThrow(/needed/);
+    expect(() => convert(100, 'USD', 'SYP_OLD', usdSyp('130'))).toThrow(/cannot convert/);
+    expect(() => convert(100, 'SYP_OLD', 'SYP', { unit: 'SYP', quote: 'SYP_OLD', rate: '99' })).toThrow(
+      /fixed/,
+    );
+    expect(() => convert(100, 'SYP_OLD', 'SYP', { unit: 'SYP_OLD', quote: 'SYP', rate: '100' })).toThrow(
+      /fixed/,
+    );
+    expect(() => convert(100, 'USD', 'SYP', usdSyp('0'))).toThrow(RangeError);
+    expect(() => convert(100, 'USD', 'SYP', usdSyp('-13000'))).toThrow(RangeError);
+    expect(() => convert(Number.MAX_SAFE_INTEGER, 'USD', 'SYP', usdSyp('13000'))).toThrow(RangeError);
+    expect(() => convert(1.5, 'USD', 'SYP', usdSyp('13000'))).toThrow(RangeError);
+    expect(() => convert(100, 'EUR' as CurrencyId, 'SYP', usdSyp('130'))).toThrow(/unknown currency/);
   });
 });
 
@@ -325,8 +385,9 @@ describe('refunds mirror sales (negative amounts)', () => {
       expect(lineGross(-amount, qty) + lineGross(amount, qty)).toBe(0);
       expect(applyBasisPoints(-amount, bp) + applyBasisPoints(amount, bp)).toBe(0);
       expect(roundToStep(-amount, step) + roundToStep(amount, step)).toBe(0);
-      expect(convert(-amount, 'SYP', 'USD', '0.000077') + convert(amount, 'SYP', 'USD', '0.000077')).toBe(0);
-      expect(convert(-amount, 'USD', 'SYP', '13000') + convert(amount, 'USD', 'SYP', '13000')).toBe(0);
+      const rate: ExchangeRate = { unit: 'USD', quote: 'SYP', rate: '13000' };
+      expect(convert(-amount, 'SYP', 'USD', rate) + convert(amount, 'SYP', 'USD', rate)).toBe(0);
+      expect(convert(-amount, 'USD', 'SYP', rate) + convert(amount, 'USD', 'SYP', rate)).toBe(0);
       expect(roundDiv(BigInt(-amount), BigInt(qty))).toBe(-roundDiv(BigInt(amount), BigInt(qty)));
     }
   });

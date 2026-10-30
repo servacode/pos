@@ -1,18 +1,20 @@
-import { CURRENCIES, type CurrencyCode } from './currencies';
+import { getCurrency, type CurrencyId } from './currencies';
 import { stripBidiControls, toLatinDigits } from './text';
 
 /**
  * Money is always an integer number of minor units (12.50 USD = 1250).
  * Quantities are integers in thousandths (0.250 kg = 250), percentages are basis points (15% = 1500),
- * and exchange rates are decimal strings with up to RATE_SCALE decimals. All arithmetic is integer
+ * and exchange rates are direct decimal strings (≥ 1, up to RATE_SCALE decimals). All arithmetic is integer
  * (BigInt where products can grow) and every rounding goes through roundDiv (half away from zero).
  */
 
 /** Quantities are stored in thousandths: 1 piece = 1000. */
 export const QTY_SCALE = 1000;
 
-/** Exchange rates carry at most this many decimal places ("0.000077"). */
+/** Exchange rates carry at most this many decimal places ("13000.125"). */
 export const RATE_SCALE = 6;
+
+const RATE_ONE = 10n ** BigInt(RATE_SCALE);
 
 const BP_SCALE = 10_000n;
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
@@ -34,13 +36,6 @@ function toSafeNumber(value: bigint, name: string): number {
 
 function pow10(exponent: number): bigint {
   return 10n ** BigInt(exponent);
-}
-
-function currencyInfo(currency: CurrencyCode) {
-  if (!Object.hasOwn(CURRENCIES, currency)) {
-    throw new RangeError(`unknown currency ${JSON.stringify(currency)}`);
-  }
-  return CURRENCIES[currency];
 }
 
 /** Integer division rounding half away from zero. The single rounding rule for all money math. */
@@ -170,7 +165,11 @@ export function parseDecimal(input: string, scale: number): bigint {
   return negative ? -magnitude : magnitude;
 }
 
-/** Parses an exchange rate into an integer scaled by 10^RATE_SCALE. It must be > 0 with ≤ 6 decimals. */
+/**
+ * Parses a direct exchange rate into an integer scaled by 10^RATE_SCALE. It must have ≤ 6 decimals and be
+ * ≥ 1: a rate is always entered as units of the weaker currency per one unit of the stronger (pounds per
+ * dollar), never inverted, because an inverse rounded to six places is off by up to 0.1%.
+ */
 export function parseRate(rate: string): bigint {
   const { fracDigits } = splitDecimal(rate);
   if (fracDigits.replace(/0+$/, '').length > RATE_SCALE) {
@@ -179,12 +178,18 @@ export function parseRate(rate: string): bigint {
   const scaled = parseDecimal(rate, RATE_SCALE);
   if (scaled <= 0n)
     throw new RangeError(`exchange rate must be greater than zero, got ${JSON.stringify(rate)}`);
+  if (scaled < RATE_ONE) {
+    throw new RangeError(
+      `exchange rate ${JSON.stringify(rate)} is inverted: enter how many units of the weaker currency ` +
+        'one unit of the stronger buys (e.g. pounds per dollar)',
+    );
+  }
   return scaled;
 }
 
 /** Parses a user-entered amount ("12.50", "١٬٢٥٠") into minor units of `currency`. */
-export function toMinor(amount: string, currency: CurrencyCode): number {
-  const { decimals } = currencyInfo(currency);
+export function toMinor(amount: string, currency: CurrencyId): number {
+  const { decimals } = getCurrency(currency);
   return toSafeNumber(parseDecimal(amount, decimals), 'amount');
 }
 
@@ -213,9 +218,9 @@ const ARABIC_CHARS: Record<string, string> = {
 };
 
 /** Formats minor units for display, e.g. formatMoney(125000, 'SYP') → "1,250.00 ل.س". Locale-independent. */
-export function formatMoney(minor: number, currency: CurrencyCode, opts: FormatMoneyOptions = {}): string {
+export function formatMoney(minor: number, currency: CurrencyId, opts: FormatMoneyOptions = {}): string {
   assertSafeInteger(minor, 'minor');
-  const { decimals, symbolAr } = currencyInfo(currency);
+  const { decimals, symbolAr } = getCurrency(currency);
   const digits = String(Math.abs(minor)).padStart(decimals + 1, '0');
   const intPart = digits.slice(0, digits.length - decimals);
   const fracPart = digits.slice(digits.length - decimals);
@@ -229,16 +234,57 @@ export function formatMoney(minor: number, currency: CurrencyCode, opts: FormatM
 }
 
 /**
- * Converts minor units of `from` into minor units of `to`. `rate` is how many units of `to` one unit of
- * `from` buys (USD→SYP "13000", SYP→USD "0.000077"). Same currency returns the amount unchanged.
+ * The one direct rate stored per currency pair: one `unit` is worth `rate` units of `quote`, quoted so the
+ * rate is ≥ 1 (pounds per dollar: { unit: 'USD', quote: 'SYP', rate: '130' }). The reverse direction
+ * divides by the same rate; there is no inverted rate.
  */
-export function convert(minor: number, from: CurrencyCode, to: CurrencyCode, rate: string): number {
+export interface ExchangeRate {
+  unit: CurrencyId;
+  quote: CurrencyId;
+  rate: string;
+}
+
+/** The fixed rate between two currencies (1 new pound = 100 old), or undefined when their rate floats. */
+export function fixedRate(a: CurrencyId, b: CurrencyId): ExchangeRate | undefined {
+  const ofA = getCurrency(a).fixedRate;
+  if (ofA?.unit === b) return { unit: b, quote: a, rate: ofA.rate };
+  const ofB = getCurrency(b).fixedRate;
+  if (ofB?.unit === a) return { unit: a, quote: b, rate: ofB.rate };
+  return undefined;
+}
+
+function resolveRate(from: CurrencyId, to: CurrencyId, rate: ExchangeRate | undefined): ExchangeRate {
+  const fixed = fixedRate(from, to);
+  if (rate === undefined) {
+    if (fixed) return fixed;
+    throw new RangeError(`an exchange rate is needed to convert ${from} to ${to}`);
+  }
+  const samePair = (rate.unit === from && rate.quote === to) || (rate.unit === to && rate.quote === from);
+  if (!samePair) {
+    throw new RangeError(`a ${rate.unit}/${rate.quote} rate cannot convert ${from} to ${to}`);
+  }
+  if (fixed && (rate.unit !== fixed.unit || parseRate(rate.rate) !== parseRate(fixed.rate))) {
+    throw new RangeError(`${fixed.quote} is fixed at ${fixed.rate} per ${fixed.unit}`);
+  }
+  return rate;
+}
+
+/**
+ * Converts minor units of `from` into minor units of `to` with the pair's direct rate: unit → quote
+ * multiplies (12.50 $ at 130 = 1,625.00 ل.س), quote → unit divides (162,500.00 ل.س at 13,000 = 12.50 $
+ * exactly). Pairs with a fixed ratio (old ↔ new pound) need no rate, and a rate given for them must match.
+ * The same currency returns the amount unchanged.
+ */
+export function convert(minor: number, from: CurrencyId, to: CurrencyId, rate?: ExchangeRate): number {
   assertSafeInteger(minor, 'minor');
-  const source = currencyInfo(from);
-  const target = currencyInfo(to);
+  const source = getCurrency(from);
+  const target = getCurrency(to);
   if (from === to) return minor;
-  const numerator = BigInt(minor) * parseRate(rate) * pow10(target.decimals);
-  const denominator = pow10(source.decimals) * pow10(RATE_SCALE);
+  const pair = resolveRate(from, to, rate);
+  const scaled = parseRate(pair.rate);
+  const toQuote = pair.unit === from;
+  const numerator = BigInt(minor) * (toQuote ? scaled : RATE_ONE) * pow10(target.decimals);
+  const denominator = pow10(source.decimals) * (toQuote ? RATE_ONE : scaled);
   return toSafeNumber(roundDiv(numerator, denominator), 'converted amount');
 }
 
