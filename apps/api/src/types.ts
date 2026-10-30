@@ -18,6 +18,8 @@ declare module 'fastify' {
     tokenKeys: TokenKeys;
     /** null when no channel is configured: sign-up answers 503 */
     otpSender: OtpSender | null;
+    /** "METHOD /url" of every registered route */
+    routeList: readonly string[];
   }
   interface FastifyRequest {
     /** Set by requireAuth for authenticated routes */

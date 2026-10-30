@@ -82,6 +82,14 @@ export async function buildApp({
     errorResponseBuilder: () => ({ statusCode: 429, code: 'rate_limited' }),
   });
 
+  // "METHOD /url" of every route, for the route registry test (IDOR probes, auth classification).
+  const routeList: string[] = [];
+  app.addHook('onRoute', (route) => {
+    for (const method of [route.method].flat())
+      if (method !== 'HEAD') routeList.push(`${method} ${route.url}`);
+  });
+  app.decorate('routeList', routeList);
+
   installSecurityHeaders(app, { https: env.COOKIE_SECURE });
   installErrorHandling(app);
 
