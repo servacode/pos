@@ -40,7 +40,10 @@ describe('setPinInput', () => {
 
 describe('staffSessionInput', () => {
   it('takes a user id and a 4- or 6-digit PIN', () => {
-    expect(staffSessionInput.parse({ userId: USER_ID, pin: '١٣٥٧' })).toEqual({ userId: USER_ID, pin: '1357' });
+    expect(staffSessionInput.parse({ userId: USER_ID, pin: '١٣٥٧' })).toEqual({
+      userId: USER_ID,
+      pin: '1357',
+    });
     expect(staffSessionInput.safeParse({ userId: 'x', pin: '1357' }).success).toBe(false);
     expect(staffSessionInput.safeParse({ userId: USER_ID, pin: '13579' }).success).toBe(false);
   });
