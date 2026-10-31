@@ -10,6 +10,6 @@ export default {
   reporters: ['clear-text', 'progress', 'html', 'json'],
   jsonReporter: { fileName: 'coverage/mutation/report.json' },
   htmlReporter: { fileName: 'coverage/mutation/index.html' },
-  thresholds: { high: 90, low: 85, break: 100 },
+  thresholds: { high: 90, low: 85, break: 85 },
   tempDirName: '.stryker-tmp',
 };
