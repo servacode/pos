@@ -31,5 +31,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     css: false,
+    // Above the 5s asyncUtilTimeout in vitest.setup.ts, so a slow render reports as the
+    // assertion that failed and not as a bare test timeout.
+    testTimeout: 15_000,
   },
 });
