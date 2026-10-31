@@ -54,8 +54,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { logout } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
   const role = me.user.roles[0]?.name;
-  // The owner and branch managers see the devices; the server checks each request again.
-  const showDevices = me.user.roles.some((r) => r.key === 'owner' || r.key === 'manager');
+  // Whoever may see the devices (owner, managers); the server checks each request again.
+  const showDevices = me.user.permissions.includes('devices.view');
 
   async function handleLogout() {
     setSigningOut(true);

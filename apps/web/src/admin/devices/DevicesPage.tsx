@@ -49,7 +49,7 @@ function groupByBranch(devices: DeviceSummary[], branches: { id: string; name: s
  */
 export function DevicesPage() {
   const me = useMe();
-  const isOwner = me.user.roles.some((role) => role.key === 'owner');
+  const isOwner = me.user.permissions.includes('devices.manage');
   const [devices, setDevices] = useState<DeviceSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);

@@ -20,6 +20,10 @@ function me(role: 'owner' | 'manager' = 'owner'): MeResponse {
     user: {
       ...base.user,
       roles: [{ key: role, name: role === 'owner' ? 'المالك' : 'مدير الفرع', branchId: null }],
+      permissions:
+        role === 'owner'
+          ? ['sale.create', 'devices.view', 'devices.manage']
+          : ['sale.create', 'devices.view'],
     },
     branches,
   };

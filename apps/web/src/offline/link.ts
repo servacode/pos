@@ -27,12 +27,6 @@ export interface LinkHelpers {
   }): Promise<void>;
 }
 
-function base64url(bytes: ArrayBuffer): string {
-  let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
 interface KeyRow {
   key: string;
   value: unknown;
@@ -50,41 +44,10 @@ function metaTable(store: SyncStore) {
   return (db?.meta as unknown as KeyTable | undefined) ?? null;
 }
 
-// Stand-ins used only while the package does not export the helpers yet.
-const fallback: LinkHelpers = {
-  async createDeviceKeys(store) {
-    const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, [
-      'sign',
-      'verify',
-    ]);
-    await metaTable(store)?.put({ key: 'deviceKeys', value: pair });
-    return { publicKey: base64url(await crypto.subtle.exportKey('spki', pair.publicKey)) };
-  },
-  async saveActivatedDevice(store, device) {
-    const record: DeviceRecord = {
-      storeName: device.storeName,
-      branchName: device.branchName,
-      deviceName: device.deviceName,
-      deviceId: device.deviceId,
-      token: device.token,
-      branchCode: device.branchCode,
-      deviceCode: device.deviceCode,
-      sets: [],
-    };
-    await store.putDevice(record);
-    await store.setMeta({ serverEpoch: device.serverEpoch });
-    return record;
-  },
-  // Without a snapshot the first pull downloads everything from empty cursors.
-  async runBootstrap() {},
-};
-
-const provided = syncClient as unknown as Partial<LinkHelpers>;
-
 export const linkHelpers: LinkHelpers = {
-  createDeviceKeys: provided.createDeviceKeys ?? fallback.createDeviceKeys,
-  saveActivatedDevice: provided.saveActivatedDevice ?? fallback.saveActivatedDevice,
-  runBootstrap: provided.runBootstrap ?? fallback.runBootstrap,
+  createDeviceKeys: syncClient.createDeviceKeys,
+  saveActivatedDevice: syncClient.saveActivatedDevice,
+  runBootstrap: syncClient.runBootstrap,
 };
 
 /** Kept while the owner decides, so a reload goes on waiting (step 3). */
