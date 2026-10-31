@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { CheckIcon, HomeIcon, LogoutIcon, QrCodeIcon, SendIcon } from './icons';
+import { ArchiveIcon, CategoriesIcon, CheckIcon, HomeIcon, LogoutIcon, QrCodeIcon, SendIcon } from './icons';
 
 function svgOf(element: ReactElement): SVGSVGElement {
   const { container } = render(<div dir="rtl">{element}</div>);
@@ -36,5 +36,11 @@ describe('icons', () => {
   it('has the device-linking glyphs, and a paper plane is not a direction', () => {
     expect(svgOf(<QrCodeIcon />)).toHaveClass('lucide-qr-code');
     expect(svgOf(<SendIcon />)).not.toHaveClass('rtl:-scale-x-100');
+  });
+
+  it('has the catalog glyphs: the category tree and the archive', () => {
+    expect(svgOf(<CategoriesIcon />)).toHaveClass('lucide-folder-tree');
+    expect(svgOf(<ArchiveIcon />)).toHaveClass('lucide-archive');
+    expect(svgOf(<CategoriesIcon />)).not.toHaveClass('rtl:-scale-x-100');
   });
 });
