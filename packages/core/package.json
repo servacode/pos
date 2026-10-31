@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./money": "./src/money.ts",
     "./pricing": "./src/pricing.ts",
+    "./sale": "./src/sale.ts",
     "./currencies": "./src/currencies.ts",
     "./text": "./src/text.ts",
     "./phone": "./src/phone.ts",

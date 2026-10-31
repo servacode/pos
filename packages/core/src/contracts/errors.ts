@@ -14,6 +14,8 @@ export const ERROR_CODES = [
   'device_revoked',
   'not_found',
   'method_not_allowed',
+  /** 409: the record changed since it was read (`version`); reload it before saving (17 › التعديل المتزامن) */
+  'stale_version',
   /** The request repeats one that just happened (e.g. two tabs refreshing at once): retry */
   'conflict',
   /** 413: split the request (e.g. a sync batch) into smaller ones */
