@@ -23,7 +23,7 @@ describe('AppShell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['الرئيسية', 'الأجهزة']);
+    ).toEqual(['الرئيسية', 'الأجهزة', 'شاشة الدليل']);
     expect(within(nav).getByRole('link', { name: 'الرئيسية' })).toHaveAttribute('aria-current', 'page');
     expect(document.body).not.toHaveTextContent('قريباً');
   });
@@ -48,7 +48,42 @@ describe('AppShell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['الرئيسية', 'المنتجات', 'التصنيفات', 'الأجهزة']);
+    ).toEqual(['الرئيسية', 'المنتجات', 'التصنيفات', 'الأجهزة', 'شاشة الدليل']);
+  });
+
+  it('gives the owner with the report and accounting keys every report, in the menu order', async () => {
+    signedIn([
+      'catalog.manage',
+      'devices.view',
+      'reports.financial',
+      'report.view',
+      'accounting.view',
+    ] as Permission[]);
+    const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual([
+      'الرئيسية',
+      'مبيعات اليوم',
+      'الورديات',
+      'المنتجات',
+      'التصنيفات',
+      'المحاسبة',
+      'الأجهزة',
+      'شاشة الدليل',
+    ]);
+  });
+
+  it('shows the shifts to a manager who may close any shift, without the books', async () => {
+    signedIn(['shift.close_any']);
+    const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((link) => link.textContent),
+    ).toEqual(['الرئيسية', 'الورديات']);
   });
 
   it('gives a cashier only the home page, and their own sign-in code', async () => {
