@@ -110,6 +110,8 @@ jobs:
       - name: Create database roles and databases
         run: bash scripts/db-bootstrap.sh
       - run: pnpm format:check
+      - name: Financial kernel paths exist and have code owners (ADR-0001)
+        run: node scripts/ci/check-codeowners.mjs
       - run: pnpm lint
       - run: pnpm typecheck
       - name: Test in Asia/Damascus time (the main run below is in UTC)

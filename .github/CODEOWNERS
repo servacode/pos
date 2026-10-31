@@ -1,0 +1,44 @@
+# The financial kernel (ADR-0001, docs/adr/README.md). A change here needs a test that protects
+# the earlier behaviour (ADR-0017). scripts/ci/check-codeowners.mjs fails CI if a kernel path
+# listed in scripts/ci/kernel-paths.txt is missing or not owned below.
+#
+# Only plain paths are used (no wildcards), so the check stays a simple prefix match.
+
+# Money, pricing, settlement and the document contracts
+/packages/core/src/money.ts @servacode
+/packages/core/src/pricing.ts @servacode
+/packages/core/src/sale.ts @servacode
+/packages/core/src/currencies.ts @servacode
+/packages/core/src/contracts/documents.ts @servacode
+/packages/core/src/contracts/accounting.ts @servacode
+
+# Device-side numbering, hashing, the sync contract and the atomic save
+/packages/sync/src/numbering.ts @servacode
+/packages/sync/src/hash.ts @servacode
+/packages/sync/src/protocol.ts @servacode
+/packages/sync/src/dexie/ @servacode
+
+# Server-side posting, processing, sync intake and the reports read from them
+/apps/api/src/services/posting.ts @servacode
+/apps/api/src/services/processors.ts @servacode
+/apps/api/src/services/sync-push.ts @servacode
+/apps/api/src/services/reports.ts @servacode
+
+# Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator
+/packages/db/drizzle/ @servacode
+/packages/db/src/schema.ts @servacode
+/packages/db/src/migrate.ts @servacode
+/scripts/db-bootstrap.sql @servacode
+
+# Independent oracles: never edited to match the system
+/golden/ @servacode
+/apps/api/test/golden-day.test.ts @servacode
+/apps/api/test/posting.test.ts @servacode
+/apps/api/test/posting-properties.test.ts @servacode
+/apps/api/test/integrity.test.ts @servacode
+
+# Backup and restore, CI and governance
+/scripts/local/ @servacode
+/scripts/ci/ @servacode
+/.github/ @servacode
+/docs/adr/ @servacode
