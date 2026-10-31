@@ -336,6 +336,8 @@ export const salePayloadSchema = z
     if (sale.change !== null) {
       checkRate(['change', 'rate'], sale.change.currency, sale.change.rate);
       if (!hasCash) issue(['change'], 'change is only given for cash');
+      // A consistency check on a document's own fields, not an access decision.
+      // nosemgrep: ajinabraham.njsscan.generic.logic_bypass.node_logic_bypass
       if (sale.cashRounding !== null && sale.cashRounding.currency !== sale.change.currency) {
         issue(['change', 'currency'], 'change is given in the settlement currency');
       }
