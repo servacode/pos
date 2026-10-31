@@ -6,6 +6,7 @@ import {
   type StorageStatus,
   type SyncState,
   type SyncStore,
+  type SyncTransport,
 } from '@serva/sync/client';
 
 export const APP_VERSION = '0.0.0';
@@ -23,6 +24,14 @@ export async function checkStorage(
   return status;
 }
 
+/** HTTP transport authenticated with this device's token, read again on every request. */
+export function deviceTransport(store: SyncStore): SyncTransport {
+  return createFetchTransport({
+    getToken: async () => (await store.getDevice())?.token ?? null,
+    appVersion: APP_VERSION,
+  });
+}
+
 /**
  * Starts the push and pull loops for an activated device (one with a token). Returns null for a
  * device that is only named, since it has nothing to authenticate with yet.
@@ -35,10 +44,7 @@ export function startSync(
   if (!device.token) return null;
   const engine = new SyncEngine({
     store,
-    transport: createFetchTransport({
-      getToken: async () => (await store.getDevice())?.token ?? null,
-      appVersion: APP_VERSION,
-    }),
+    transport: deviceTransport(store),
     appVersion: APP_VERSION,
     isOnline: () => globalThis.navigator?.onLine ?? true,
     onState,

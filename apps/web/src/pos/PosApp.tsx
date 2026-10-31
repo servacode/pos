@@ -1,9 +1,13 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
-import { CashierShell, CashierStatusBar, ConnectionPill, DeviceIcon, Logo } from '@serva/ui';
+import { CashierShell, CashierStatusBar, ConnectionPill, Logo } from '@serva/ui';
 import type { LocalDevice } from '../offline/device';
 import { useDevice } from '../offline/useDevice';
 import { PinScreen } from './PinScreen';
 import { useOnline } from './useOnline';
+
+// Linking runs once per device: its screens load only on a device that is not linked yet.
+const DeviceLink = lazy(() => import('./link/DeviceLink').then((m) => ({ default: m.DeviceLink })));
 
 function OnlinePill() {
   return <ConnectionPill online={useOnline()} />;
@@ -37,41 +41,35 @@ function StatusBar({ device, persisted }: { device: LocalDevice | null; persiste
   );
 }
 
-function NotLinked() {
-  return (
-    <section
-      aria-labelledby="not-linked-title"
-      className="flex max-w-md flex-col items-center gap-4 text-center"
-    >
-      <span className="grid size-24 place-items-center rounded-full bg-brand-soft text-brand-ink">
-        <DeviceIcon size={48} />
-      </span>
-      <h1 id="not-linked-title" className="text-2xl font-bold text-ink">
-        هذا الجهاز غير مربوط بمتجر بعد
-      </h1>
-      <p className="text-ink-muted">
-        يُربط جهاز الكاشير بالمتجر مرة واحدة من حساب المالك، ثم يفتح هنا برمز الدخول حتى دون إنترنت.
-      </p>
-    </section>
-  );
-}
-
 /**
  * The cashier app. It boots only from what this device keeps locally (the device database) and
  * asks for the login code: no session refresh and no request before that, so it opens the same
  * with or without internet. An activated device then syncs in the background.
  */
 export function PosApp() {
-  const { loading, device, persisted } = useDevice();
+  const { loading, device, persisted, reload } = useDevice();
 
   return (
     <CashierShell
       statusBar={<StatusBar device={device} persisted={persisted} />}
-      mainClassName="grid place-items-center p-6"
+      mainClassName={
+        device || loading ? 'grid place-items-center p-6' : 'flex justify-center p-6 lg:px-14 lg:py-8'
+      }
     >
       <title>الكاشير · Serva POS</title>
       <Routes>
-        <Route index element={loading ? null : device ? <PinScreen /> : <NotLinked />} />
+        <Route
+          index
+          element={
+            loading ? null : device ? (
+              <PinScreen />
+            ) : (
+              <Suspense fallback={null}>
+                <DeviceLink onLinked={reload} />
+              </Suspense>
+            )
+          }
+        />
         <Route path="*" element={<Navigate to="/pos" replace />} />
       </Routes>
     </CashierShell>

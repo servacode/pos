@@ -1,6 +1,6 @@
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { lazy, Suspense } from 'react';
-import { Route, Routes } from 'react-router';
+import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { FullScreenLoader } from '@serva/ui';
 
 // Two apps, two code-split entries. The cashier (/pos) boots from what the device keeps locally
@@ -15,6 +15,12 @@ const UiGallery = import.meta.env.DEV
   ? lazy(() => import('./dev/UiGallery').then((m) => ({ default: m.UiGallery })))
   : null;
 
+/** The pairing QR holds `<origin>/link#spq_…`: a device's camera opens the cashier's link screen. */
+function PairingLink() {
+  const { hash } = useLocation();
+  return <Navigate to={{ pathname: '/pos', hash }} replace />;
+}
+
 export function App() {
   // Radix primitives read the reading direction from this provider (arrow keys in menus, tabs,
   // radio groups and sliders); the document itself is <html dir="rtl">.
@@ -24,6 +30,7 @@ export function App() {
         <Routes>
           {UiGallery ? <Route path="/dev/ui" element={<UiGallery />} /> : null}
           <Route path="/pos/*" element={<PosApp />} />
+          <Route path="/link" element={<PairingLink />} />
           <Route path="*" element={<AdminApp />} />
         </Routes>
       </Suspense>

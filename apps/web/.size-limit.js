@@ -34,6 +34,13 @@ function filesFor(...keys) {
   return [...files].map((file) => `dist/${file}`);
 }
 
+// The cashier chunk. Vite keys it by its source file, or by `_PosApp-<hash>.js` once another
+// chunk (the device-linking screens) imports from it.
+const posKey =
+  'src/pos/PosApp.tsx' in manifest
+    ? 'src/pos/PosApp.tsx'
+    : Object.keys(manifest).find((key) => manifest[key].isDynamicEntry && manifest[key].name === 'PosApp');
+
 const lazyChunks = Object.entries(manifest)
   .filter(([, chunk]) => chunk.isDynamicEntry)
   .map(([key, chunk]) => ({
@@ -50,7 +57,7 @@ const cashierFonts = readdirSync(new URL('./dist/assets/', import.meta.url))
 export default [
   {
     name: 'Sale screen /pos (JS + CSS, gzip)',
-    path: filesFor('index.html', 'src/pos/PosApp.tsx'),
+    path: filesFor('index.html', posKey),
     gzip: true,
     limit: '300 kB',
   },
