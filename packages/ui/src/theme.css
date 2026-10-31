@@ -1,0 +1,260 @@
+/*
+ * The Serva theme for Tailwind v4 (tab 14 › مصدر واحد): every colour, type size, radius, shadow and
+ * motion token of the apps lives here, once. An app's stylesheet is only:
+ *
+ *   @import 'tailwindcss';
+ *   @import '@serva/ui/theme.css';
+ *
+ * and its entry imports '@serva/ui/fonts.css' for the self-hosted IBM Plex Sans Arabic.
+ */
+
+/* The component classes live in this package, so Tailwind scans it for the classes it uses. */
+@source './';
+@source not './**/*.test.tsx';
+@source not './test';
+
+/*
+ * Dark mode follows the user's setting, written on the root as data-theme="light" | "dark"; with no
+ * attribute it follows the device (tab 14 › الوضع الداكن). `dark:` utilities use the same rule.
+ */
+@custom-variant dark {
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+}
+
+@theme {
+  --font-sans: 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, 'Segoe UI', Tahoma, sans-serif;
+
+  /* Three weights only (tab 14): font-normal, font-semibold, font-bold. */
+  --font-weight-*: initial;
+  --font-weight-normal: 400;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Type scale, tab 14 › الخط: size / line height in px. */
+  --text-xs--line-height: calc(20 / 12);
+  --text-sm--line-height: calc(23 / 14);
+  --text-base--line-height: calc(26 / 16);
+  --text-lg--line-height: calc(30 / 18);
+  --text-xl--line-height: calc(30 / 20);
+  --text-2xl--line-height: calc(36 / 24);
+  --text-3xl--line-height: calc(36 / 30);
+  --text-kpi: 1.875rem;
+  --text-kpi--line-height: calc(36 / 30);
+  --text-total: 2.5rem;
+  --text-total--line-height: calc(48 / 40);
+  --text-display: 3.5rem;
+  --text-display--line-height: calc(64 / 56);
+
+  /* Radii, tab 14 › الزوايا: 8 small, 14 fields and buttons, 20 cards and dialogs. */
+  --radius-small: 0.5rem;
+  --radius-control: 0.875rem;
+  --radius-card: 1.25rem;
+
+  /* Motion, tab 14 › الحركة: durations are used as duration-80/120/200/320/600. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --animate-rise: rise 200ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-fade: fade 200ms ease-out both;
+  --animate-pop: pop 600ms ease-out both;
+  --animate-skeleton: skeleton 1.4s ease-in-out infinite;
+  --animate-sheet-in: sheet-in 320ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-sheet-up: sheet-up 320ms cubic-bezier(0.2, 0, 0, 1) both;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes pop {
+    0% {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    70% {
+      transform: scale(1.06);
+    }
+  }
+  @keyframes skeleton {
+    50% {
+      opacity: 0.55;
+    }
+  }
+  /* The side sheet enters from the inline end: the left in Arabic. */
+  @keyframes sheet-in {
+    from {
+      transform: translateX(calc(var(--sheet-from, -1) * 100%));
+    }
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+  }
+}
+
+/*
+ * Colour tokens: identity A «زمرّدي», the exact tab-14 values from docs/design/kit/serva-ui.css
+ * (light) and addon-dark.css (dark), written in oklch. Each value converts back to the kit's hex
+ * exactly, and src/theme.test.ts checks that and the contrast of every allowed pair.
+ * Screens use these names only (bg-surface, text-ink-muted, border-line-control…), never a palette
+ * shade or a raw colour; status colours stay separate from brand even while their values match.
+ */
+@theme static {
+  --color-*: initial;
+
+  --color-canvas: oklch(0.9815 0.005 165.01);
+  --color-surface: oklch(1 0 0);
+  --color-surface-muted: oklch(0.9618 0.0075 164.94);
+  --color-surface-total: oklch(0.9703 0.0124 164.8);
+  --color-line: oklch(0.9147 0.0101 164.85);
+  --color-line-control: oklch(0.6511 0.0127 161.86);
+  --color-ink: oklch(0.2547 0.0203 168.96);
+  --color-ink-muted: oklch(0.4708 0.0208 169.3);
+  --color-ink-subtle: oklch(0.53 0.0164 168.76);
+
+  --color-brand: oklch(0.5331 0.1172 161.82);
+  --color-brand-hover: oklch(0.4729 0.1029 162.54);
+  --color-on-brand: oklch(0.9899 0.0099 164.88);
+  --color-brand-soft: oklch(0.959 0.033 165.16);
+  --color-brand-ink: oklch(0.4234 0.0907 163.65);
+  --color-ring: oklch(0.6203 0.1304 162.9);
+
+  --color-success: oklch(0.5331 0.1172 161.82);
+  --color-success-soft: oklch(0.959 0.033 165.16);
+  --color-success-ink: oklch(0.4234 0.0907 163.65);
+  --color-warning: oklch(0.5693 0.1284 64.39);
+  --color-warning-soft: oklch(0.9652 0.0449 90.39);
+  --color-warning-ink: oklch(0.4589 0.0998 64.94);
+  --color-danger: oklch(0.5598 0.1896 24.92);
+  --color-on-danger: oklch(1 0 0);
+  --color-danger-soft: oklch(0.9645 0.0174 21.81);
+  --color-danger-ink: oklch(0.4693 0.1593 25.11);
+  --color-info: oklch(0.5201 0.13 245.04);
+  --color-info-soft: oklch(0.962 0.0208 236.75);
+  --color-info-ink: oklch(0.4308 0.1004 245.13);
+
+  /* tab 14 › overlay: black at 40% (light) and 60% (dark), behind dialogs and sheets. */
+  --color-overlay: oklch(0 0 0 / 0.4);
+
+  --shadow-*: initial;
+  --shadow-e1: 0 1px 2px rgb(25 38 33 / 0.06);
+  --shadow-e2: 0 4px 12px rgb(25 38 33 / 0.1);
+  --shadow-e3: 0 12px 32px rgb(25 38 33 / 0.16);
+}
+
+@layer base {
+  :root {
+    @variant dark {
+      --color-canvas: oklch(0.1741 0.0115 175.47);
+      --color-surface: oklch(0.216 0.0153 165.97);
+      --color-surface-muted: oklch(0.2546 0.014 172.88);
+      --color-surface-total: oklch(0.2451 0.0296 165.33);
+      --color-line: oklch(0.2996 0.0135 173.2);
+      --color-line-control: oklch(0.5195 0.0165 168.74);
+      --color-ink: oklch(0.9545 0.005 165.01);
+      --color-ink-muted: oklch(0.7598 0.0141 167.04);
+      --color-ink-subtle: oklch(0.647 0.0137 164.58);
+
+      --color-brand: oklch(0.7191 0.1395 163.11);
+      --color-brand-hover: oklch(0.7795 0.1299 162.87);
+      --color-on-brand: oklch(0.2009 0.0414 166.54);
+      --color-brand-soft: oklch(0.2896 0.0502 165.22);
+      --color-brand-ink: oklch(0.8506 0.1007 162.9);
+      --color-ring: oklch(0.7403 0.1402 162.92);
+
+      --color-success: oklch(0.7191 0.1395 163.11);
+      --color-success-soft: oklch(0.2896 0.0502 165.22);
+      --color-success-ink: oklch(0.8506 0.1007 162.9);
+      --color-warning: oklch(0.8012 0.1401 80.03);
+      --color-warning-soft: oklch(0.3005 0.0602 75.86);
+      --color-warning-ink: oklch(0.8804 0.1005 85.13);
+      --color-danger: oklch(0.7005 0.1697 24.93);
+      --color-on-danger: oklch(0.202 0.0523 26.53);
+      --color-danger-soft: oklch(0.281 0.0597 26.19);
+      --color-danger-ink: oklch(0.8448 0.0849 25.25);
+      --color-info: oklch(0.7186 0.1099 240.06);
+      --color-info-soft: oklch(0.2798 0.0504 245.38);
+      --color-info-ink: oklch(0.8503 0.0698 238.92);
+
+      --color-overlay: oklch(0 0 0 / 0.6);
+
+      --shadow-e1: none;
+      --shadow-e2: 0 4px 12px rgb(0 0 0 / 0.4);
+      --shadow-e3: 0 12px 32px rgb(0 0 0 / 0.5);
+    }
+  }
+
+  :root {
+    color-scheme: light dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :root[data-theme='light'] {
+    color-scheme: light;
+  }
+
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+  }
+
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-line);
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-feature-settings: 'kern';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-soft);
+    color: var(--color-brand-ink);
+  }
+
+  /* The side sheet slides in from the inline end: the left in RTL, the right in LTR. */
+  [dir='ltr'] {
+    --sheet-from: 1;
+  }
+}
+
+/*
+ * Every amount, quantity, document number, phone and percent (tab 14 › عرض متساوٍ): equal-width
+ * digits inside a direction isolate, so «1,250 ل.س» never scrambles inside an Arabic sentence.
+ */
+@utility num {
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

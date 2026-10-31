@@ -1,12 +1,9 @@
 import type { ReactNode } from 'react';
 import { CURRENCIES, sectorLabel, type MeResponse } from '@serva/core';
+import { Badge, Card, cn, GiftIcon } from '@serva/ui';
 import { useMe } from '../auth/useAuth';
 import { AppShell } from '../layout/AppShell';
-import { cn } from '../lib/cn';
 import { firstName, formatDays } from '../lib/format';
-import { Badge } from '../ui/Badge';
-import { Card } from '../ui/Card';
-import { GiftIcon } from '../ui/icons';
 
 function trialMessage(daysLeft: number, numberFormat: MeResponse['settings']['numberFormat']): string {
   if (daysLeft <= 0) return 'تنتهي الباقة المجانية اليوم';

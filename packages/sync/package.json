@@ -1,0 +1,26 @@
+{
+  "name": "@serva/sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Sync contract v1 (tab 15): protocol types, ids, numbering, payload hash, and the device outbox and pull loops",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client/index.ts",
+    "./dexie": "./src/dexie/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src test vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "dexie": "4.4.6",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.5",
+    "fast-check": "4.10.2"
+  }
+}

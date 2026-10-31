@@ -1,10 +1,7 @@
-import { useCallback, useEffect, useState, type ComponentProps } from 'react';
-import { cn } from '../lib/cn';
-import { BackspaceIcon, LockIcon } from '../ui/icons';
+import { useCallback, useEffect, useState } from 'react';
+import { cn, Keypad, LockIcon } from '@serva/ui';
 
 const PIN_LENGTH = 4;
-// Calculator order, never mirrored (tab 14 › لوحات الأرقام لا تنقلب).
-const KEY_ROWS = ['7', '8', '9', '4', '5', '6', '1', '2', '3'] as const;
 const ARABIC_INDIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
 function digitOf(key: string): string | null {
@@ -18,19 +15,6 @@ function progress(count: number): string {
   if (count === 1) return 'كُتب رقم واحد من أربعة';
   if (count === 2) return 'كُتب رقمان من أربعة';
   return `كُتبت ${count} أرقام من أربعة`;
-}
-
-function Key({ className, ...props }: ComponentProps<'button'>) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        'grid h-16 place-items-center rounded-control border border-line bg-surface text-2xl font-semibold text-ink tabular-nums transition-colors select-none hover:bg-surface-muted active:bg-surface-muted',
-        className,
-      )}
-      {...props}
-    />
-  );
 }
 
 interface PinScreenProps {
@@ -98,18 +82,7 @@ export function PinScreen({ onComplete }: PinScreenProps) {
         <span className="sr-only">{progress(pin.length)}</span>
       </div>
 
-      <div role="group" aria-label="لوحة الأرقام" dir="ltr" className="grid w-full grid-cols-3 gap-2">
-        {KEY_ROWS.map((digit) => (
-          <Key key={digit} onClick={() => press(digit)}>
-            {digit}
-          </Key>
-        ))}
-        <span aria-hidden="true" />
-        <Key onClick={() => press('0')}>0</Key>
-        <Key onClick={erase} aria-label="امسح رقماً">
-          <BackspaceIcon size={24} />
-        </Key>
-      </div>
+      <Keypad onDigit={press} onBackspace={erase} />
 
       <p className="flex items-center gap-2 text-xs text-ink-muted">
         <LockIcon size={16} />

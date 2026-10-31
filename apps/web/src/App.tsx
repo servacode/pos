@@ -1,13 +1,19 @@
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router';
-import { FullScreenLoader } from './ui/FullScreenLoader';
+import { FullScreenLoader } from '@serva/ui';
 
 // Two apps, two code-split entries. The cashier (/pos) boots from what the device keeps locally
 // and asks for the login code, with no network request; the store admin restores its session
 // from the server. Neither loads the other's code.
 const PosApp = lazy(() => import('./pos/PosApp').then((m) => ({ default: m.PosApp })));
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })));
+
+// The component gallery (tab 14 › معرض المكوّنات) exists in dev builds only: in a production build
+// import.meta.env.DEV is false, so this import is dead code and no chunk is emitted for it.
+const UiGallery = import.meta.env.DEV
+  ? lazy(() => import('./dev/UiGallery').then((m) => ({ default: m.UiGallery })))
+  : null;
 
 export function App() {
   // Radix primitives read the reading direction from this provider (arrow keys in menus, tabs,
@@ -16,6 +22,7 @@ export function App() {
     <DirectionProvider dir="rtl">
       <Suspense fallback={<FullScreenLoader />}>
         <Routes>
+          {UiGallery ? <Route path="/dev/ui" element={<UiGallery />} /> : null}
           <Route path="/pos/*" element={<PosApp />} />
           <Route path="*" element={<AdminApp />} />
         </Routes>

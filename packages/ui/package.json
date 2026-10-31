@@ -1,0 +1,41 @@
+{
+  "name": "@serva/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Serva design system: tokens, fonts, icons and React components, Arabic RTL first",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./theme.css": "./src/theme.css",
+    "./fonts.css": "./src/fonts.css"
+  },
+  "scripts": {
+    "lint": "eslint src vitest.config.ts vitest.setup.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-sans-arabic": "^5.2.0",
+    "@radix-ui/react-dialog": "1.1.23",
+    "@radix-ui/react-direction": "1.2.0",
+    "@serva/core": "workspace:*",
+    "lucide-react": "1.57.0"
+  },
+  "peerDependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "jsdom": "^26.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}

@@ -1,31 +1,18 @@
-import { useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
-import { cn } from '../lib/cn';
-import { Logo } from '../ui/Logo';
-import { ConnectedIcon, DeviceIcon, OfflineIcon } from '../ui/icons';
-import { readLocalDevice, type LocalDevice } from './localDevice';
+import { CashierShell, CashierStatusBar, ConnectionPill, DeviceIcon, Logo } from '@serva/ui';
+import type { LocalDevice } from '../offline/device';
+import { useDevice } from '../offline/useDevice';
 import { PinScreen } from './PinScreen';
 import { useOnline } from './useOnline';
 
-function ConnectionPill() {
-  const online = useOnline();
-  return (
-    <span
-      className={cn(
-        'inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-semibold',
-        online ? 'bg-success-soft text-success-ink' : 'bg-warning-soft text-warning-ink',
-      )}
-    >
-      {online ? <ConnectedIcon size={16} /> : <OfflineIcon size={16} />}
-      {online ? 'متصل' : 'دون إنترنت · البيع مستمر'}
-    </span>
-  );
+function OnlinePill() {
+  return <ConnectionPill online={useOnline()} />;
 }
 
-/** The cashier status bar (kit: cash-status): above every layer, 44 px. */
-function StatusBar({ device }: { device: LocalDevice | null }) {
+/** The cashier status bar: the store, the branch and device, the connection. */
+function StatusBar({ device, persisted }: { device: LocalDevice | null; persisted: boolean | null }) {
   return (
-    <header className="relative z-60 flex h-11 items-center gap-3 border-b border-line bg-surface px-4">
+    <CashierStatusBar>
       <Logo />
       {device ? (
         <>
@@ -39,8 +26,14 @@ function StatusBar({ device }: { device: LocalDevice | null }) {
         </>
       ) : null}
       <span className="flex-1" />
-      <ConnectionPill />
-    </header>
+      {persisted === false ? (
+        // Tab 15 › ما يراه الكاشير: the browser may wipe this device's data.
+        <span role="alert" className="truncate text-sm font-semibold text-danger-ink">
+          هذا المتصفح قد يمسح البيانات، ثبّت التطبيق
+        </span>
+      ) : null}
+      <OnlinePill />
+    </CashierStatusBar>
   );
 }
 
@@ -64,22 +57,23 @@ function NotLinked() {
 }
 
 /**
- * The cashier app. It boots only from what this device keeps locally and asks for the login code:
- * no session refresh and no request of any kind, so it opens the same with or without internet.
+ * The cashier app. It boots only from what this device keeps locally (the device database) and
+ * asks for the login code: no session refresh and no request before that, so it opens the same
+ * with or without internet. An activated device then syncs in the background.
  */
 export function PosApp() {
-  const [device] = useState(readLocalDevice);
+  const { loading, device, persisted } = useDevice();
 
   return (
-    <div className="grid min-h-dvh grid-rows-[auto_minmax(0,1fr)] bg-canvas">
+    <CashierShell
+      statusBar={<StatusBar device={device} persisted={persisted} />}
+      mainClassName="grid place-items-center p-6"
+    >
       <title>الكاشير · Serva POS</title>
-      <StatusBar device={device} />
-      <main className="grid place-items-center p-6">
-        <Routes>
-          <Route index element={device ? <PinScreen /> : <NotLinked />} />
-          <Route path="*" element={<Navigate to="/pos" replace />} />
-        </Routes>
-      </main>
-    </div>
+      <Routes>
+        <Route index element={loading ? null : device ? <PinScreen /> : <NotLinked />} />
+        <Route path="*" element={<Navigate to="/pos" replace />} />
+      </Routes>
+    </CashierShell>
   );
 }

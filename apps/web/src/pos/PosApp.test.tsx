@@ -1,7 +1,10 @@
+import 'fake-indexeddb/auto';
 import { screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DeviceRecord } from '@serva/sync/client';
+import { deviceStore, resetDeviceStore } from '../offline/database';
+import { LEGACY_DEVICE_KEY, loadDevice, type LocalDevice } from '../offline/device';
 import { renderApp } from '../test/renderApp';
-import { LOCAL_DEVICE_KEY, readLocalDevice, type LocalDevice } from './localDevice';
 
 const device: LocalDevice = {
   storeName: 'مقهى الياسمين',
@@ -16,18 +19,29 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchSpy);
 });
 
-afterEach(() => {
+afterEach(async () => {
   localStorage.clear();
   vi.restoreAllMocks();
+  await resetDeviceStore();
 });
 
-function linkDevice() {
-  localStorage.setItem(LOCAL_DEVICE_KEY, JSON.stringify(device));
+const record: DeviceRecord = {
+  ...device,
+  deviceId: null,
+  token: null,
+  branchCode: null,
+  deviceCode: null,
+  sets: [],
+};
+
+/** A linked device keeps its record in the device database (IndexedDB). */
+async function linkDevice() {
+  await deviceStore().putDevice(record);
 }
 
 describe('/pos (cashier)', () => {
   it('boots from the device alone and asks for the login code, with no network request', async () => {
-    linkDevice();
+    await linkDevice();
     renderApp('/pos');
 
     expect(await screen.findByRole('heading', { name: 'اكتب رمز الدخول' })).toBeInTheDocument();
@@ -37,7 +51,7 @@ describe('/pos (cashier)', () => {
   });
 
   it('opens without internet and says so, still with no request', async () => {
-    linkDevice();
+    await linkDevice();
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     renderApp('/pos');
 
@@ -57,7 +71,7 @@ describe('/pos (cashier)', () => {
   });
 
   it('keeps the keypad LTR with 7 8 9 on top, and fills the dots from taps and the keyboard', async () => {
-    linkDevice();
+    await linkDevice();
     const { user } = renderApp('/pos');
 
     const keypad = await screen.findByRole('group', { name: 'لوحة الأرقام' });
@@ -90,25 +104,76 @@ describe('/pos (cashier)', () => {
   });
 
   it('sends unknown cashier paths back to the login code', async () => {
-    linkDevice();
+    await linkDevice();
     renderApp('/pos/sale');
 
     expect(await screen.findByRole('heading', { name: 'اكتب رمز الدخول' })).toBeInTheDocument();
   });
 });
 
-describe('readLocalDevice', () => {
-  it('treats a missing, damaged or blocked record as not linked', () => {
-    expect(readLocalDevice({ getItem: () => null })).toBeNull();
-    expect(readLocalDevice({ getItem: () => '{not json' })).toBeNull();
-    expect(readLocalDevice({ getItem: () => JSON.stringify({ storeName: 'x' }) })).toBeNull();
+describe('device record', () => {
+  it('moves the step-1 localStorage record into the device database, once', async () => {
+    localStorage.setItem(LEGACY_DEVICE_KEY, JSON.stringify(device));
+    expect(await loadDevice(deviceStore())).toEqual(record);
+    expect(localStorage.getItem(LEGACY_DEVICE_KEY)).toBeNull();
+    expect(await deviceStore().getDevice()).toEqual(record);
+    expect(await loadDevice(deviceStore())).toEqual(record);
+  });
+
+  it('treats a missing, damaged or blocked record as not linked', async () => {
+    const store = deviceStore();
+    const legacy = (getItem: () => string | null) => ({ getItem, removeItem: () => undefined });
     expect(
-      readLocalDevice({
-        getItem: () => {
-          throw new DOMException('blocked', 'SecurityError');
-        },
-      }),
+      await loadDevice(
+        store,
+        legacy(() => null),
+      ),
     ).toBeNull();
-    expect(readLocalDevice({ getItem: () => JSON.stringify(device) })).toEqual(device);
+    expect(
+      await loadDevice(
+        store,
+        legacy(() => '{not json'),
+      ),
+    ).toBeNull();
+    expect(
+      await loadDevice(
+        store,
+        legacy(() => JSON.stringify({ storeName: 'x' })),
+      ),
+    ).toBeNull();
+    expect(
+      await loadDevice(
+        store,
+        legacy(() => {
+          throw new DOMException('blocked', 'SecurityError');
+        }),
+      ),
+    ).toBeNull();
+    const broken = { getDevice: () => Promise.reject(new Error('IndexedDB unavailable')) };
+    expect(
+      await loadDevice(
+        broken as never,
+        legacy(() => null),
+      ),
+    ).toBeNull();
+  });
+
+  it('warns in red when the browser refuses to keep the data', async () => {
+    await linkDevice();
+    const persist = vi.fn(async () => false);
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { persisted: async () => false, persist, estimate: async () => ({}) },
+    });
+    try {
+      renderApp('/pos');
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'هذا المتصفح قد يمسح البيانات، ثبّت التطبيق',
+      );
+      expect(persist).toHaveBeenCalledOnce();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(navigator, 'storage');
+    }
   });
 });

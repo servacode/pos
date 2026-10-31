@@ -14,10 +14,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-sans-arabic": "^5.2.0",
     "@radix-ui/react-direction": "1.2.0",
     "@serva/core": "workspace:*",
-    "lucide-react": "1.57.0",
+    "@serva/sync": "workspace:*",
+    "@serva/ui": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router": "^7.9.0"
@@ -31,6 +31,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "fake-indexeddb": "6.2.5",
     "jsdom": "^26.1.0",
     "size-limit": "14.2.0",
     "tailwindcss": "^4.1.0",
