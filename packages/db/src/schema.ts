@@ -246,6 +246,12 @@ export const tenantSettings = pgTable(
       .default({ SYP: 1000, USD: 25 }),
     numberFormat: text('number_format').notNull().default('latn'),
     receiptFooter: text('receipt_footer'),
+    /** «نهاية يوم العمل», "HH:MM": sales before it belong to the previous business day */
+    businessDayCutoff: text('business_day_cutoff').notNull().default('00:00'),
+    /** «وضع الوردية»: per_cashier, shared or handover (09 › shifts) */
+    shiftMode: text('shift_mode').notNull().default('per_cashier'),
+    /** «دقائق الخمول»: a cashier device signs its user out after this many idle minutes */
+    idleMinutes: integer('idle_minutes').notNull().default(5),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -386,7 +392,12 @@ export const users = pgTable(
     /** E.164; unique across the platform because it is the login identifier */
     phone: text('phone'),
     passwordHash: text('password_hash'),
+    /** argon2id of the PIN «رمز الدخول»; never sent to a device */
     pinHash: text('pin_hash'),
+    /** 4 or 6, null while no PIN is set: which keypad a device shows */
+    pinLength: integer('pin_length'),
+    /** Moves up with every PIN change, so a device forgets what it learnt of the old one */
+    pinVersion: integer('pin_version').notNull().default(0),
     status: userStatus('status').notNull().default('active'),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     version: version(),
@@ -727,3 +738,523 @@ export const rateLimits = pgTable('rate_limits', {
   count: integer('count').notNull(),
   resetAt: timestamp('reset_at', { withTimezone: true }).notNull(),
 });
+
+// ─── Catalog (09 › الأصناف; docs/contracts/step4.md) ──────────────────────────
+// Master data, edited online by the owner and managers and pulled by every device of the store.
+// Every table here carries change_xid and the tombstone trigger (0011_catalog.sql).
+
+/** Seeded per store: «قطعة» (piece) and «كيلو» (kg) are system units, found by system_key. */
+export const units = pgTable(
+  'units',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    symbol: text('symbol').notNull(),
+    allowsFraction: boolean('allows_fraction').notNull().default(false),
+    /** piece or kg for the units every store gets; null for the owner's own */
+    systemKey: text('system_key'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'units_pkey', columns: [t.tenantId, t.id] }),
+    unique('units_system_key_unique').on(t.tenantId, t.systemKey),
+    index('units_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+export const taxRates = pgTable(
+  'tax_rates',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    /** Fixed once created: a used rate is never edited in place */
+    rateBp: integer('rate_bp').notNull(),
+    /** consumption, stamp, sales: picks the posting account */
+    kind: text('kind').notNull(),
+    showOnReceipt: boolean('show_on_receipt').notNull().default(true),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'tax_rates_pkey', columns: [t.tenantId, t.id] }),
+    index('tax_rates_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+export const categories = pgTable(
+  'categories',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    parentId: uuid('parent_id'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'categories_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.parentId], foreignColumns: [t.tenantId, t.id] }),
+    index('categories_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+export const products = pgTable(
+  'products',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    nameAr: text('name_ar').notNull(),
+    nameEn: text('name_en'),
+    /** normalizeArabic(nameAr + ' ' + nameEn), written by the API (15 › البحث في الأصناف) */
+    searchName: text('search_name').notNull(),
+    categoryId: uuid('category_id'),
+    brand: text('brand'),
+    /** stock, service */
+    type: text('type').notNull().default('stock'),
+    /** active, temporary */
+    status: text('status').notNull().default('active'),
+    unitId: uuid('unit_id').notNull(),
+    taxRateId: uuid('tax_rate_id'),
+    sellOnPos: boolean('sell_on_pos').notNull().default(true),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'products_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.categoryId], foreignColumns: [categories.tenantId, categories.id] }),
+    foreignKey({ columns: [t.tenantId, t.unitId], foreignColumns: [units.tenantId, units.id] }),
+    foreignKey({ columns: [t.tenantId, t.taxRateId], foreignColumns: [taxRates.tenantId, taxRates.id] }),
+    index('products_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    index('products_category_idx').on(t.tenantId, t.categoryId),
+    tenantIsolation(),
+  ],
+);
+
+export interface AttributeValue {
+  name: string;
+  value: string;
+}
+
+/** Sales, stock and barcodes always point at the variant; a simple product has one, hidden. */
+export const variants = pgTable(
+  'variants',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    productId: uuid('product_id').notNull(),
+    sku: text('sku'),
+    label: text('label'),
+    attributes: jsonb('attributes').$type<AttributeValue[]>().notNull().default([]),
+    sortOrder: integer('sort_order').notNull().default(0),
+    /** «الحد الأدنى في الفرع», thousandths */
+    minStockQty: bigint('min_stock_qty', { mode: 'number' }),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'variants_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.productId], foreignColumns: [products.tenantId, products.id] }),
+    index('variants_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    index('variants_product_idx').on(t.tenantId, t.productId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * One shelf price per variant, id = the variant's id (docs/contracts/step4.md decision 4): its
+ * own row, so a price edit moves only this small row in the pull.
+ */
+export const prices = pgTable(
+  'prices',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    currency: text('currency').notNull(),
+    priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
+    minPriceMinor: bigint('min_price_minor', { mode: 'number' }),
+    priceChangedAt: timestamp('price_changed_at', { withTimezone: true }).notNull().defaultNow(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'prices_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.id], foreignColumns: [variants.tenantId, variants.id] }),
+    index('prices_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/** Unique per store (17: «الرمز فريد في المتجر»); a removed barcode is deleted (a tombstone). */
+export const barcodes = pgTable(
+  'barcodes',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    variantId: uuid('variant_id').notNull(),
+    code: text('code').notNull(),
+    /** standard, internal */
+    kind: text('kind').notNull().default('standard'),
+    packQty: integer('pack_qty').notNull().default(1000),
+    packName: text('pack_name'),
+    packPriceMinor: bigint('pack_price_minor', { mode: 'number' }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'barcodes_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.variantId], foreignColumns: [variants.tenantId, variants.id] }),
+    unique('barcodes_code_unique').on(t.tenantId, t.code),
+    index('barcodes_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    index('barcodes_variant_idx').on(t.tenantId, t.variantId),
+    tenantIsolation(),
+  ],
+);
+
+/** Stock per branch and variant (phase 1: one warehouse per branch), thousandths; may go negative. */
+export const stockLevels = pgTable(
+  'stock_levels',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    qty: bigint('qty', { mode: 'number' }).notNull().default(0),
+    reservedQty: bigint('reserved_qty', { mode: 'number' }).notNull().default(0),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'stock_levels_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.variantId], foreignColumns: [variants.tenantId, variants.id] }),
+    unique('stock_levels_branch_variant_unique').on(t.tenantId, t.branchId, t.variantId),
+    index('stock_levels_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Every change of stock, append-only: a sale line moves −baseQty. One row per document and line,
+ * so a document processed twice cannot move stock twice. The variant is not a foreign key: a
+ * printed sale is never refused, even for a variant this server does not know.
+ */
+export const stockMovements = pgTable(
+  'stock_movements',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    /** Signed, thousandths of the base unit */
+    qty: bigint('qty', { mode: 'number' }).notNull(),
+    /** sale, … */
+    kind: text('kind').notNull(),
+    docId: uuid('doc_id').notNull(),
+    lineNo: integer('line_no').notNull(),
+    businessDate: date('business_date').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'stock_movements_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    unique('stock_movements_doc_line_unique').on(t.tenantId, t.docId, t.lineNo),
+    index('stock_movements_variant_idx').on(t.tenantId, t.variantId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/** Rates the store set (09 › exchange_rates): one `unit` is worth `rate` of `quote`. */
+export const exchangeRates = pgTable(
+  'exchange_rates',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    unit: text('unit').notNull(),
+    quote: text('quote').notNull(),
+    rate: text('rate').notNull(),
+    collectRate: text('collect_rate'),
+    minRate: text('min_rate'),
+    maxRate: text('max_rate'),
+    effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid('created_by'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'exchange_rates_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.createdBy], foreignColumns: [users.tenantId, users.id] }),
+    index('exchange_rates_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+// ─── PIN sign-in on devices (16 › تخمين رمز PIN) ──────────────────────────────
+
+/** Wrong PINs in a row per user and device, and the lockout they caused. */
+export const pinAttempts = pgTable(
+  'pin_attempts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    failures: integer('failures').notNull().default(0),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    lastFailedAt: timestamp('last_failed_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'pin_attempts_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    unique('pin_attempts_user_device_unique').on(t.tenantId, t.userId, t.deviceId),
+    tenantIsolation(),
+  ],
+);
+
+// ─── Documents processed from devices (17 › الإرسال) ──────────────────────────
+// Written by the sync processors from accepted documents; the id is the document's id, and the
+// whole payload is kept as it arrived. No journal entries yet.
+
+/**
+ * A shift (SFT). Made by its shift_open, or by its shift_close when that arrives first (the open
+ * fields stay null until the open arrives).
+ */
+export const shifts = pgTable(
+  'shifts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    number: text('number'),
+    /** open, closed */
+    status: text('status').notNull().default('open'),
+    openedBy: uuid('opened_by'),
+    mode: text('mode'),
+    handoverFromShiftId: uuid('handover_from_shift_id'),
+    opening: jsonb('opening'),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
+    businessDate: date('business_date'),
+    closeDocId: uuid('close_doc_id'),
+    closedBy: uuid('closed_by'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    closing: jsonb('closing'),
+    shortageTreatment: text('shortage_treatment'),
+    forced: boolean('forced'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'shifts_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/** A completed sale (INV). shift_linked turns true once its shift is known. */
+export const invoices = pgTable(
+  'invoices',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    number: text('number').notNull(),
+    businessDate: date('business_date').notNull(),
+    deviceTime: timestamp('device_time', { withTimezone: true }).notNull(),
+    /** As the payload names it; the shift may arrive later */
+    shiftId: uuid('shift_id').notNull(),
+    shiftLinked: boolean('shift_linked').notNull().default(false),
+    cashierId: uuid('cashier_id').notNull(),
+    salespersonId: uuid('salesperson_id'),
+    customerId: uuid('customer_id'),
+    customerName: text('customer_name'),
+    currency: text('currency').notNull(),
+    taxInclusive: boolean('tax_inclusive').notNull(),
+    grossMinor: bigint('gross_minor', { mode: 'number' }).notNull(),
+    discountMinor: bigint('discount_minor', { mode: 'number' }).notNull(),
+    taxMinor: bigint('tax_minor', { mode: 'number' }).notNull(),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    tipMinor: bigint('tip_minor', { mode: 'number' }).notNull(),
+    roundingBaseMinor: bigint('rounding_base_minor', { mode: 'number' }).notNull().default(0),
+    changeBaseMinor: bigint('change_base_minor', { mode: 'number' }).notNull().default(0),
+    flags: text('flags')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    payload: jsonb('payload').notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'invoices_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    index('invoices_shift_idx').on(t.tenantId, t.shiftId),
+    index('invoices_business_date_idx').on(t.tenantId, t.branchId, t.businessDate),
+    tenantIsolation(),
+  ],
+);
+
+export const invoiceLines = pgTable(
+  'invoice_lines',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    invoiceId: uuid('invoice_id').notNull(),
+    lineNo: integer('line_no').notNull(),
+    productId: uuid('product_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    name: text('name').notNull(),
+    barcode: text('barcode'),
+    packQty: integer('pack_qty').notNull(),
+    qty: bigint('qty', { mode: 'number' }).notNull(),
+    baseQty: bigint('base_qty', { mode: 'number' }).notNull(),
+    priceCurrency: text('price_currency').notNull(),
+    priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
+    unitPriceMinor: bigint('unit_price_minor', { mode: 'number' }).notNull(),
+    taxRateId: uuid('tax_rate_id'),
+    taxRateBp: integer('tax_rate_bp').notNull(),
+    grossMinor: bigint('gross_minor', { mode: 'number' }).notNull(),
+    discountMinor: bigint('discount_minor', { mode: 'number' }).notNull(),
+    taxMinor: bigint('tax_minor', { mode: 'number' }).notNull(),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'invoice_lines_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.invoiceId], foreignColumns: [invoices.tenantId, invoices.id] }),
+    unique('invoice_lines_line_unique').on(t.tenantId, t.invoiceId, t.lineNo),
+    index('invoice_lines_variant_idx').on(t.tenantId, t.variantId),
+    tenantIsolation(),
+  ],
+);
+
+export const invoicePayments = pgTable(
+  'invoice_payments',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    invoiceId: uuid('invoice_id').notNull(),
+    paymentNo: integer('payment_no').notNull(),
+    method: text('method').notNull(),
+    currency: text('currency').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    rate: jsonb('rate'),
+    baseAmountMinor: bigint('base_amount_minor', { mode: 'number' }).notNull(),
+    reference: text('reference'),
+    cardLast4: text('card_last4'),
+    cardBrand: text('card_brand'),
+    providerAccountId: uuid('provider_account_id'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'invoice_payments_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.invoiceId], foreignColumns: [invoices.tenantId, invoices.id] }),
+    unique('invoice_payments_no_unique').on(t.tenantId, t.invoiceId, t.paymentNo),
+    tenantIsolation(),
+  ],
+);
+
+/** Drawer movements (CSH): pay_in, pay_out, expense, safe_drop. */
+export const cashMovements = pgTable(
+  'cash_movements',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    number: text('number'),
+    businessDate: date('business_date').notNull(),
+    shiftId: uuid('shift_id').notNull(),
+    shiftLinked: boolean('shift_linked').notNull().default(false),
+    kind: text('kind').notNull(),
+    currency: text('currency').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    baseCurrency: text('base_currency').notNull(),
+    rate: jsonb('rate'),
+    baseAmountMinor: bigint('base_amount_minor', { mode: 'number' }).notNull(),
+    reason: text('reason').notNull(),
+    expenseAccountCode: text('expense_account_code'),
+    reference: text('reference'),
+    performedBy: uuid('performed_by').notNull(),
+    approval: jsonb('approval'),
+    payload: jsonb('payload').notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'cash_movements_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    index('cash_movements_shift_idx').on(t.tenantId, t.shiftId),
+    tenantIsolation(),
+  ],
+);

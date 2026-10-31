@@ -25,8 +25,10 @@ import {
   ownerDb,
   registerStore,
   resetDatabase,
+  settled,
   snapshotDir,
 } from './helpers';
+import { seedCatalog } from './catalog-fixtures';
 import { TEST_OWNER_URL } from './urls';
 
 let app: FastifyInstance;
@@ -95,8 +97,10 @@ async function fullPull(device: TestDevice) {
 
 describe('GET /v1/sync/bootstrap and the snapshot file', () => {
   it('describes a gzip NDJSON snapshot whose size and sha256 match, holding every set of a full pull', async () => {
-    const { tenantId } = await store();
+    const { tenantId, accessToken } = await store();
+    const catalog = await seedCatalog(app, tenantId, accessToken);
     const device = await createDevice(tenantId);
+    await settled();
     const info = await bootstrap(device);
     expect(info).toMatchObject({
       contractVersion: 1,
@@ -105,11 +109,20 @@ describe('GET /v1/sync/bootstrap and the snapshot file', () => {
       expiresAt: '2026-10-30T09:10:00.000Z',
     });
     expect(Object.keys(info.cursors).sort()).toEqual([
+      'barcodes',
       'branches',
+      'categories',
+      'exchange_rates',
+      'prices',
+      'products',
       'roles',
       'settings',
+      'stock_levels',
+      'tax_rates',
+      'units',
       'user_roles',
       'users',
+      'variants',
     ]);
 
     const file = await download(device, info.url);
@@ -134,6 +147,14 @@ describe('GET /v1/sync/bootstrap and the snapshot file', () => {
     );
     expect(sorted).toEqual(await fullPull(device));
     expect(JSON.stringify(snapshot)).not.toMatch(/passwordHash|pinHash|\$argon2|\+963/);
+    // Real catalog rows, and only the device's branch's stock.
+    expect(sorted.products).toHaveLength(2);
+    expect(sorted.variants).toHaveLength(3);
+    expect(sorted.prices).toHaveLength(3);
+    expect(sorted.barcodes).toHaveLength(3);
+    expect(sorted.units).toHaveLength(2);
+    expect(sorted.stock_levels).toEqual([expect.objectContaining({ branchId: device.branchId, qty: 24000 })]);
+    expect(JSON.stringify(sorted.stock_levels)).not.toContain(catalog.otherBranchId);
   });
 
   it('resumes with Range (206), restarts when If-Range no longer matches, and refuses a range past the end', async () => {
@@ -208,6 +229,7 @@ describe('a new device with the real client: link, bootstrap, then pull', () => 
 
   it('bootstrap followed by pull equals a full pull, even with a write that commits during the snapshot', async () => {
     const { tenantId, accessToken } = await store();
+    const catalog = await seedCatalog(app, tenantId, accessToken);
     const linked = await linkDevice(app, accessToken, await firstBranch(tenantId));
     const local = await newDevice('a');
     await saveActivatedDevice(local, linked.activated);
@@ -242,7 +264,10 @@ describe('a new device with the real client: link, bootstrap, then pull', () => 
 
       // Neither write is in the snapshot: the later one waits for the slow one (xmin). The user
       // it changed has moved past the snapshot's bound, so it comes with the pull.
-      expect((await local.readSet('branches')).map((b) => b.name)).toEqual(['الفرع الرئيسي']);
+      expect((await local.readSet('branches')).map((b) => b.name).sort()).toEqual([
+        'الفرع الرئيسي',
+        'فرع الرشيد',
+      ]);
       expect(await local.readSet('users')).toEqual([]);
 
       await reserved`commit`;
@@ -252,18 +277,44 @@ describe('a new device with the real client: link, bootstrap, then pull', () => 
       reserved.release();
       await slow.end({ timeout: 1 });
     }
-    // And one more write after it all.
-    await ownerDb()`delete from user_roles where tenant_id = ${tenantId}`;
+    // And more writes after it all: a price edit, a barcode removed, a product archived.
+    const [tea, shirt] = catalog.products;
+    const edit = await app.inject({
+      method: 'PATCH',
+      url: `/v1/products/${tea!.id}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: {
+        version: tea!.version,
+        variants: [
+          { id: tea!.variants[0]!.id, price: { currency: 'SYP', priceMinor: 4_750_000 }, barcodes: [] },
+        ],
+      },
+    });
+    expect(edit.statusCode, edit.body).toBe(200);
+    await app.inject({
+      method: 'POST',
+      url: `/v1/products/${shirt!.id}/archive`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
 
+    await ownerDb()`delete from user_roles where tenant_id = ${tenantId}`;
+    await settled();
     expect((await new Puller({ store: local, transport, limit: 2 }).drain()).kind).toBe('pulled');
     const full = await fullPull(linked);
     for (const [set, rows] of Object.entries(full)) {
       const mine = [...(await local.readSet(set))].sort((a, b) => a.id.localeCompare(b.id));
       expect(mine, set).toEqual(rows);
     }
-    expect((await local.readSet('branches')).map((b) => b.name)).toEqual(['فرع بطيء']);
+    expect((await local.readSet('branches')).map((b) => b.name)).toEqual(['فرع بطيء', 'فرع بطيء']);
     expect((await local.readSet('users')).map((u) => u.fullName).sort()).toEqual(['سريع', 'موظف جديد']);
     expect(await local.readSet('user_roles')).toEqual([]);
+    expect((await local.readSet('prices')).map((p) => p.priceMinor).sort()).toEqual([1200, 1300, 4_750_000]);
+    expect((await local.readSet('barcodes')).map((b) => b.code)).toEqual([
+      shirt!.variants[1]!.barcodes[0]!.code,
+    ]);
+    expect((await local.readSet('products')).find((p) => p.id === shirt!.id)).toMatchObject({
+      archived: true,
+    });
     expect((await local.getMeta()).serverEpoch).toBe(1);
   });
 });

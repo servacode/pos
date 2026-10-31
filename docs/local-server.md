@@ -72,6 +72,16 @@
 
 لتحديث الكود ثم نشره: `git pull` ثم `pnpm local:deploy`. أمر النشر يأخذ نسخة احتياطية أولاً، ثم يبني ويحدّث قاعدة البيانات ويعيد التشغيل، ثم يفحص الخادم. وإن فشل أي فحص يكتب **DEPLOY FAILED** أو **SMOKE TEST FAILED** بالأحمر.
 
+### أصناف تجريبية لسوبرماركت
+
+لتجربة الكاشير دون إدخال الأصناف يدوياً: افتح حساب المتجر أولاً، ثم شغّل:
+
+```bash
+bash scripts/local/demo-catalog.sh
+```
+
+يضيف نحو 40 صنفاً من سوبرماركت في الرقة، بباركوداتها وأسعارها بالليرة وبعضها بالدولار (سعر الصرف 130)، مع كميات في الفرع الرئيسي، والخضار بالكيلو. تشغيله مرة ثانية لا يكرر شيئاً. وإن كان على الخادم أكثر من متجر فاكتب رمز المتجر (6 أرقام) بعد الأمر: `bash scripts/local/demo-catalog.sh 123456`.
+
 ### أول تشغيل: احفظ هاتين القيمتين
 
 عند أول `pnpm local:deploy` يُنشأ ملف الأسرار `deploy/local/.env` بقيم عشوائية قوية، وتظهر على الشاشة مرة واحدة:
@@ -203,6 +213,8 @@ pnpm local:restore deploy/local/backups/<اسم النسخة>.dump.enc --replace
 | `web`      | `apps/web/Dockerfile` (nginx, uid 101) | Static build, security headers, CSP with a per-request nonce, reverse proxy for `/v1/` and `/health`, `:80` → `:443` redirect, `/serva-local-ca.crt`.                        |
 
 `api`, `migrate` and `web` run non-root with a read-only root file system, `cap_drop: ALL` and `no-new-privileges`. Logs rotate (10 MB × 5). Everything but the one-shots has `restart: unless-stopped`.
+
+`scripts/local/demo-catalog.sh [store code]` runs the `migrate` image once more with `node dist/scripts/seed.js --demo-catalog [--store=<code>]` (apps/api/src/scripts/demo-catalog.ts): about 40 products, idempotent. In development: `DATABASE_MIGRATION_URL=… pnpm --filter @serva/api seed -- --demo-catalog`.
 
 ### Images
 

@@ -467,7 +467,22 @@ describe('GET /v1/sync/pull', () => {
     const { tenantId } = await store();
     const device = await createDevice(tenantId);
     const res = await pull(device);
-    expect(Object.keys(res.sets).sort()).toEqual(['branches', 'roles', 'settings', 'user_roles', 'users']);
+    expect(Object.keys(res.sets).sort()).toEqual([
+      'barcodes',
+      'branches',
+      'categories',
+      'exchange_rates',
+      'prices',
+      'products',
+      'roles',
+      'settings',
+      'stock_levels',
+      'tax_rates',
+      'units',
+      'user_roles',
+      'users',
+      'variants',
+    ]);
     expect(res.hasMore).toBe(false);
     expect(res.serverEpoch).toBe(1);
     expect(res.sets.branches!.upserts).toEqual([
@@ -477,7 +492,15 @@ describe('GET /v1/sync/pull', () => {
       expect.objectContaining({ id: tenantId, baseCurrency: 'SYP' }),
     ]);
     const user = res.sets.users!.upserts[0]!;
-    expect(Object.keys(user).sort()).toEqual(['fullName', 'id', 'status', 'version']);
+    expect(Object.keys(user).sort()).toEqual([
+      'fullName',
+      'id',
+      'pinLength',
+      'pinVersion',
+      'status',
+      'version',
+    ]);
+    expect(user).toMatchObject({ pinLength: null, pinVersion: 0 });
     expect(JSON.stringify(res)).not.toMatch(/passwordHash|pinHash|password_hash|pin_hash|\$argon2/);
     expect(JSON.stringify(res.sets.users)).not.toMatch(/phone|\+963/);
   });

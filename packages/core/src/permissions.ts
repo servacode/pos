@@ -14,6 +14,7 @@ export const PERMISSIONS = {
   'shift.close_any': 'إغلاق أي وردية',
   'shift.view_difference': 'رؤية فرق الصندوق',
   'catalog.manage': 'المنتجات والأسعار',
+  'cost.view': 'التكلفة وأسعار الشراء',
   'purchases.manage': 'المشتريات والموردون',
   'inventory.adjust': 'اعتماد الجرد والتسويات',
   'reports.financial': 'التقارير المالية والأرباح',

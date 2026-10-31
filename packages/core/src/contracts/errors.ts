@@ -8,6 +8,8 @@ export const ERROR_CODES = [
   /** Too many wrong attempts: ask for a new code */
   'locked',
   'invalid_credentials',
+  /** 401: the PIN «رمز الدخول» typed on a device is wrong, or the user cannot sign in there */
+  'pin_invalid',
   'unauthorized',
   'forbidden',
   /** The device was revoked by the owner: it stops selling and syncing (17) */
@@ -37,5 +39,7 @@ export interface ApiErrorBody {
     fields?: Record<string, string>;
     /** Short reference shown to the user; the same id as the request in the server logs */
     ref?: string;
+    /** With `locked`: seconds until another try is allowed */
+    retryAfter?: number;
   };
 }

@@ -9,6 +9,7 @@ export * from './contracts/devices';
 export * from './contracts/common';
 export * from './contracts/catalog';
 export * from './contracts/documents';
+export * from './contracts/staff';
 export * from './money';
 export * from './pricing';
 export * from './sale';

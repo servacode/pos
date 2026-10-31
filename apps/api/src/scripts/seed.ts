@@ -2,11 +2,20 @@
  * Seeds reference data that the platform admin will later edit from the admin panel:
  * the paid plans (no prices yet) and the first platform admin account.
  * Runs as the owner role: DATABASE_MIGRATION_URL.
+ *
+ * `--demo-catalog [--store=<6-digit store code>]` also adds about 40 products of a Raqqa
+ * supermarket to a store (the only one on the server when no code is given); see
+ * scripts/demo-catalog.ts. Running it again adds nothing twice.
  */
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createDb, plans, platformUsers, type PlanLimits } from '@serva/db';
 import { hashSecret } from '../auth/passwords';
+import { demoStore, seedDemoCatalog } from './demo-catalog';
+
+const args = process.argv.slice(2);
+const demoCatalog = args.includes('--demo-catalog');
+const storeCode = args.find((a) => a.startsWith('--store='))?.slice('--store='.length);
 
 const envFile = [resolve('.env'), resolve('../../.env')].find((f) => existsSync(f));
 if (envFile) process.loadEnvFile(envFile);
@@ -87,6 +96,16 @@ try {
     console.log(`Platform admin ready: ${email}`);
   } else {
     console.log('PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD not set; skipped platform admin.');
+  }
+
+  if (demoCatalog) {
+    try {
+      const result = await seedDemoCatalog(db, await demoStore(db, storeCode));
+      console.log(`Demo catalog: ${result.created} products added, ${result.skipped} already there.`);
+    } catch (error) {
+      console.error(`Demo catalog not added: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
   }
 } finally {
   await client.end();

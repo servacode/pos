@@ -674,6 +674,8 @@ export interface SettingsRow {
   businessDayCutoff: string;
   /** Added in phase 1: «وضع الوردية», per_cashier by default */
   shiftMode: ShiftMode;
+  /** Added in phase 1: «دقائق الخمول» (17 › PATCH /v1/settings/sales), the cashier signs out after it; 5 by default */
+  idleMinutes: number;
   version: number;
 }
 
