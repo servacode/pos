@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { TradeRate } from './contracts/common';
-import { businessDateOf, rateFor, settleSale } from './sale';
+import { buildSalePayload, businessDateOf, rateFor, settleSale, verifySalePayload } from './sale';
 
 /**
  * A rate naming a currency the store cannot trade in. The type system rules this out, but
@@ -102,6 +102,8 @@ describe('an exchange rate is matched on both of its currencies', () => {
     // The mirror of the case above, for the other half of the lookup: the unit is the
     // invoice currency but the quote is a third one.
     expect(() => rateFor([foreignRate('SYP', 'SYP_OLD')], 'USD', 'SYP')).toThrow(/exchange rate/);
+    // Quote matches the currency asked for, unit belongs to neither: still the wrong pair.
+    expect(() => rateFor([foreignRate('SYP_OLD', 'USD')], 'USD', 'SYP')).toThrow(/exchange rate/);
     expect(() => rateFor([], 'USD', 'SYP')).toThrow(/exchange rate/);
   });
 
@@ -194,5 +196,160 @@ describe('the business day ends at the cutoff, to the minute', () => {
     );
     expect(businessDateOf(new Date(lateNight), 'Asia/Damascus', '04:00')).toBe('2026-10-30');
     expect(() => businessDateOf(new Date(Number.NaN), 'Asia/Damascus')).toThrow(/instant/);
+  });
+});
+
+describe('what counts as cash in the settlement currency', () => {
+  const usdSyp: TradeRate = { unit: 'USD', quote: 'SYP', rate: '130' };
+
+  // Kills `p.currency === settlement` → `true` in the settlement-tender filter. Under the
+  // mutant a pound note counts as if it were a dollar note, so the change owed is worked
+  // out from the wrong pile.
+  it('leaves out cash in another currency', () => {
+    const settled = settleSale({
+      currency: 'SYP',
+      exchangeRates: [usdSyp],
+      changeCurrency: 'USD',
+      totalMinor: 130_000,
+      payments: [
+        { method: 'cash', currency: 'SYP', amountMinor: 65_000 },
+        { method: 'cash', currency: 'USD', amountMinor: 600, rate: usdSyp },
+      ],
+      cashSteps: STEPS,
+    });
+    // 1,300 ل.س due, 650 ل.س in notes and 6.00 $ (780 ل.س): 5.00 $ settles the rest and
+    // 1.00 $ comes back. Only the dollars count towards the dollar change.
+    expect(settled.cashRounding).toMatchObject({ currency: 'USD', exactMinor: 500, dueMinor: 500 });
+    expect(settled.change).toMatchObject({ currency: 'USD', amountMinor: 100 });
+    expect(settled.covered).toBe(true);
+  });
+
+  // Kills `p.method === 'cash'` → `true` in the settlement-tender filter. A card paid in
+  // the settlement currency is not cash in the drawer: counted as such, the sale would
+  // round it to a cash step and hand back change for money never received.
+  it('leaves out a card paid in the settlement currency', () => {
+    const settled = settleSale({
+      currency: 'SYP',
+      exchangeRates: [usdSyp],
+      changeCurrency: 'USD',
+      totalMinor: 130_000,
+      payments: [{ method: 'card', currency: 'USD', amountMinor: 1000, rate: usdSyp, reference: '1' }],
+      cashSteps: STEPS,
+    });
+    // 10.00 $ on the card covers 1,300 ل.س exactly: no drawer, so no rounding and no change.
+    expect(settled.covered).toBe(true);
+    expect(settled.cashRounding).toBe(null);
+    expect(settled.change).toBe(null);
+  });
+
+  // Kills `p.method === 'cash'` → `true` the other way round: the "one rate" rule covers
+  // the drawer, not the card machine. A card taken at yesterday's rate beside cash at
+  // today's is ordinary; counting the card as drawer cash would refuse that sale outright.
+  it('lets a card and the drawer carry different rates', () => {
+    expect(() =>
+      settleSale({
+        currency: 'SYP',
+        exchangeRates: [usdSyp],
+        changeCurrency: 'USD',
+        totalMinor: 260_000,
+        payments: [
+          {
+            method: 'card',
+            currency: 'USD',
+            amountMinor: 1000,
+            rate: { ...usdSyp, rate: '128' },
+            reference: '1',
+          },
+          { method: 'cash', currency: 'USD', amountMinor: 1000, rate: usdSyp },
+        ],
+        cashSteps: STEPS,
+      }),
+    ).not.toThrow();
+  });
+
+  // Kills `p.currency === base` → `false` in the rate lookup. A note already in the base
+  // currency needs no rate; under the mutant a rate sent with it would be kept and the
+  // note valued through it.
+  it('records no rate against a note already in the base currency', () => {
+    const settled = settleSale({
+      currency: 'SYP',
+      exchangeRates: [usdSyp],
+      totalMinor: 100_000,
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 100_000, rate: usdSyp }],
+      cashSteps: STEPS,
+    });
+    expect(settled.payments[0]!.rate).toBe(null);
+    expect(settled.payments[0]!.baseAmountMinor).toBe(100_000);
+  });
+});
+
+describe('the device and engine comparison refuses anything but a true match', () => {
+  // verifySalePayload is how the server catches a till that sent different numbers from
+  // the ones its own engine computes. Its deep comparison had several mutants alive, each
+  // making the comparison more forgiving — and a forgiving comparison is a tampered sale
+  // accepted without a flag.
+  const sale = () =>
+    buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [{ unit: 'USD', quote: 'SYP', rate: '130' }],
+      lines: [
+        {
+          lineNo: 1,
+          productId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a11',
+          variantId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a12',
+          name: 'صنف',
+          qty: 1000,
+          priceCurrency: 'SYP',
+          priceMinor: 32_500,
+          taxRateBp: 0,
+        },
+      ],
+      shiftId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a01',
+      cashierId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a02',
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 33_000 }],
+      cashSteps: STEPS,
+    });
+
+  it('agrees with an untouched payload', () => {
+    expect(verifySalePayload(sale())).toEqual([]);
+  });
+
+  // Kills `ka.length === kb.length` → `true`: an object missing a key, or carrying an
+  // extra one, would compare equal as long as the keys they share agree.
+  it('notices a key dropped from a nested object, and one added', () => {
+    const short = sale();
+    delete (short.totals as unknown as Record<string, unknown>).taxMinor;
+    expect(verifySalePayload(short).map((m) => m.path)).toContain('totals');
+
+    const long = sale();
+    (long.totals as unknown as Record<string, unknown>).extraMinor = 0;
+    expect(verifySalePayload(long).map((m) => m.path)).toContain('totals');
+  });
+
+  // The `Array.isArray(a) !== Array.isArray(b)` guard has no test here on purpose: every
+  // value this function compares is an object or a number, never an array, so no payload
+  // can reach that line through verifySalePayload. It stays as a guard for future fields.
+
+  // Kills the `typeof a !== 'object'` / `a === null` guards: null against an object, and a
+  // number against an object, must never compare equal.
+  it('tells null and a plain value apart from an object', () => {
+    const nulled = sale();
+    (nulled as unknown as Record<string, unknown>).totals = null;
+    expect(verifySalePayload(nulled).map((m) => m.path)).toContain('totals');
+
+    const numbered = sale();
+    (numbered as unknown as Record<string, unknown>).totals = 0;
+    expect(verifySalePayload(numbered).map((m) => m.path)).toContain('totals');
+
+    const fromNull = sale();
+    (fromNull as unknown as Record<string, unknown>).change = { currency: 'SYP' };
+    expect(verifySalePayload(fromNull).map((m) => m.path)).toContain('change');
+  });
+
+  it('notices a number changed deep inside a line', () => {
+    const tampered = sale();
+    tampered.lines[0]!.priced.totalMinor -= 100;
+    expect(verifySalePayload(tampered).map((m) => m.path)).toContain('lines.0.priced');
   });
 });
