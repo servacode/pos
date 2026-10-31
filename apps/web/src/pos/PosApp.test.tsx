@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceRecord } from '@serva/sync/client';
 import { deviceStore, resetDeviceStore } from '../offline/database';
 import { LEGACY_DEVICE_KEY, loadDevice, type LocalDevice } from '../offline/device';
+import { posSets } from '../test/pos';
 import { renderApp } from '../test/renderApp';
 
 const device: LocalDevice = {
@@ -34,17 +35,31 @@ const record: DeviceRecord = {
   sets: [],
 };
 
-/** A linked device keeps its record in the device database (IndexedDB). */
+/** A linked device keeps its record and the pulled sets in the device database (IndexedDB). */
 async function linkDevice() {
   await deviceStore().putDevice(record);
+  await deviceStore().applySnapshot(
+    {
+      sets: posSets() as unknown as Record<string, Array<Record<string, unknown> & { id: string }>>,
+      cursors: {},
+    },
+    Date.now(),
+  );
+}
+
+async function pickSamer(user: ReturnType<typeof renderApp>['user']) {
+  const staff = await screen.findByRole('list', { name: 'الموظفون' });
+  await user.click(within(staff).getByRole('button', { name: /سامر/ }));
 }
 
 describe('/pos (cashier)', () => {
-  it('boots from the device alone and asks for the login code, with no network request', async () => {
+  it('boots from the device alone and asks who works, with no network request', async () => {
     await linkDevice();
     renderApp('/pos');
 
-    expect(await screen.findByRole('heading', { name: 'اكتب رمز الدخول' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'من يعمل الآن؟' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /سامر/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /مريم/ })).toBeInTheDocument();
     expect(screen.getByText('مقهى الياسمين')).toBeInTheDocument();
     expect(screen.getByText('الرقة · شارع تل أبيض · كاشير 3')).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -55,7 +70,7 @@ describe('/pos (cashier)', () => {
     vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     renderApp('/pos');
 
-    await screen.findByRole('heading', { name: 'اكتب رمز الدخول' });
+    await screen.findByRole('heading', { name: 'من يعمل الآن؟' });
     expect(screen.getByText('دون إنترنت · البيع مستمر')).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -72,7 +87,9 @@ describe('/pos (cashier)', () => {
   it('keeps the keypad LTR with 7 8 9 on top, and fills the dots from taps and the keyboard', async () => {
     await linkDevice();
     const { user } = renderApp('/pos');
+    await pickSamer(user);
 
+    expect(screen.getByRole('heading', { name: 'أهلاً سامر' })).toBeInTheDocument();
     const keypad = await screen.findByRole('group', { name: 'لوحة الأرقام' });
     expect(keypad).toHaveAttribute('dir', 'ltr');
     const keys = within(keypad).getAllByRole('button');
@@ -102,11 +119,19 @@ describe('/pos (cashier)', () => {
     expect(dots).toHaveTextContent('كُتبت 3 أرقام من أربعة');
   });
 
-  it('sends unknown cashier paths back to the login code', async () => {
+  it('sends unknown cashier paths back to the sign-in', async () => {
     await linkDevice();
     renderApp('/pos/sale');
 
-    expect(await screen.findByRole('heading', { name: 'اكتب رمز الدخول' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'من يعمل الآن؟' })).toBeInTheDocument();
+  });
+
+  it('says plainly when no staff reached a newly linked device yet', async () => {
+    await deviceStore().putDevice(record);
+    renderApp('/pos');
+
+    expect(await screen.findByText('لا أسماء موظفين على هذا الجهاز بعد')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

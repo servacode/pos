@@ -11,6 +11,8 @@ import '../admin/products/ProductPage';
 import '../admin/categories/CategoriesPage';
 import '../admin/staff/PinPage';
 import '../pos/PosApp';
+import '../pos/staff/StaffSignIn';
+import '../pos/CashierApp';
 import '../pos/link/DeviceLink';
 
 export function renderApp(path = '/') {

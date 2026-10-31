@@ -142,7 +142,15 @@ describe('device database (Dexie)', () => {
     const store = new DexieSyncStore(new DeviceDatabase('upgrade-test', { indexedDB: factory, IDBKeyRange }));
     expect(await store.getDevice()).toEqual(linkedDevice());
     expect(await store.getDeviceKeys()).toBeNull();
-    expect(store.db.verno).toBe(2);
+    expect(store.db.verno).toBe(3);
+    expect(await store.db.local.count()).toBe(0);
+  });
+
+  it("keeps the cashier app's local state through a server restore", async () => {
+    const store = await linkedStore();
+    await store.db.local.put({ key: 'shift', value: { id: 's1' } });
+    await store.restartAfterRestore(2);
+    expect(await store.db.local.get('shift')).toEqual({ key: 'shift', value: { id: 's1' } });
   });
 
   it('after a server restore, queues every retained confirmed document again and forgets pulled data', async () => {
