@@ -58,9 +58,24 @@ export function rateValue(rate: TradeRate): string {
   return rate.rate;
 }
 
+/** Digits with at most one dot after the first digit («12», «12.», «12.5»). No regex: Semgrep's ReDoS rule. */
+function isPlainDecimal(text: string): boolean {
+  let dot = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === '.') {
+      if (dot || i === 0) return false;
+      dot = true;
+    } else if (c < '0' || c > '9') {
+      return false;
+    }
+  }
+  return text.length > 0;
+}
+
 /** Major units typed («1,500» or «12.5») to minor units of the currency; null while unusable. */
 export function parseAmount(text: string, currency: CurrencyCode): number | null {
-  if (!/^\d+(\.\d*)?$/.test(text)) return null;
+  if (!isPlainDecimal(text)) return null;
   const { decimals } = CURRENCIES[currency];
   const [whole = '0', frac = ''] = text.split('.');
   if (frac.length > decimals) return null;

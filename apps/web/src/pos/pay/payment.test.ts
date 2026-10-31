@@ -45,6 +45,9 @@ describe('payment helpers', () => {
     );
     expect(parseAmount('12.345', 'USD')).toBeNull();
     expect(parseAmount('', 'SYP')).toBeNull();
+    for (const bad of ['.5', '1.2.3', '1,500', '12a', '-5', ' 5']) expect(parseAmount(bad, 'USD')).toBeNull();
+    expect(parseAmount('12.', 'USD')).toBe(1200);
+    expect(parseAmount('12.5', 'USD')).toBe(1250);
   });
 
   it('hands the change back in notes when it can, largest first', () => {
