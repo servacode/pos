@@ -189,11 +189,20 @@ describe('sync tables', () => {
         and c.relname <> 'sync_tombstones'
       order by 1`;
     expect(tables.map((t) => t.table)).toEqual([
+      'barcodes',
       'branches',
+      'categories',
+      'exchange_rates',
+      'prices',
+      'products',
       'roles',
+      'stock_levels',
+      'tax_rates',
       'tenant_settings',
+      'units',
       'user_roles',
       'users',
+      'variants',
     ]);
     expect(tables.filter((t) => !t.touch || !t.tombstone || !t.indexed)).toEqual([]);
   });
@@ -314,5 +323,73 @@ describe('sync tables', () => {
     await expect(
       ownerDb()`update tenants set store_code = '12345' where id = ${b.tenant.id}`,
     ).rejects.toThrow(/tenants_store_code_check/);
+  });
+});
+
+describe('catalog and sale tables (0011)', () => {
+  const inStoreOf = (tenantId: string) => (statement: SQL) =>
+    withTenant(appDb().db, tenantId, (tx) => tx.execute(statement)).then(
+      () => 'ok',
+      (e: { cause?: { code?: string }; code?: string }) => e.cause?.code ?? e.code,
+    );
+
+  it('a new store has the two system units and no tax rate', async () => {
+    const { body } = await registerStore(app);
+    const rows = await ownerDb()<
+      { name: string; symbol: string; allows_fraction: boolean; system_key: string }[]
+    >`
+      select name, symbol, allows_fraction, system_key from units where tenant_id = ${body.tenant.id} order by system_key desc`;
+    expect(rows).toEqual([
+      { name: 'قطعة', symbol: 'قطعة', allows_fraction: false, system_key: 'piece' },
+      { name: 'كيلو', symbol: 'كغ', allows_fraction: true, system_key: 'kg' },
+    ]);
+    const [taxes] = await ownerDb()<{ n: number }[]>`
+      select count(*)::int as n from tax_rates where tenant_id = ${body.tenant.id}`;
+    expect(taxes!.n).toBe(0);
+  });
+
+  it('the store role cannot delete catalog rows, nor change stock movements or stored sale lines', async () => {
+    const { body } = await registerStore(app);
+    const tenantId: string = body.tenant.id;
+    const inStore = inStoreOf(tenantId);
+    const denied = '42501';
+    expect(await inStore(sql`delete from units`)).toBe(denied);
+    expect(await inStore(sql`delete from products`)).toBe(denied);
+    expect(await inStore(sql`delete from variants`)).toBe(denied);
+    expect(await inStore(sql`delete from prices`)).toBe(denied);
+    expect(await inStore(sql`delete from stock_levels`)).toBe(denied);
+    expect(await inStore(sql`update stock_movements set qty = 0`)).toBe(denied);
+    expect(await inStore(sql`delete from stock_movements`)).toBe(denied);
+    expect(await inStore(sql`update invoice_lines set qty = 0`)).toBe(denied);
+    expect(await inStore(sql`update invoice_payments set amount_minor = 0`)).toBe(denied);
+    expect(await inStore(sql`update invoices set total_minor = 0`)).toBe(denied);
+    expect(await inStore(sql`delete from invoices`)).toBe(denied);
+    expect(await inStore(sql`update cash_movements set amount_minor = 1`)).toBe(denied);
+    // A barcode taken off a variant is deleted, and devices get its tombstone.
+    expect(await inStore(sql`delete from barcodes`)).toBe('ok');
+  });
+
+  it('a PIN hash always comes with its length, 4 or 6', async () => {
+    const { body } = await registerStore(app);
+    const userId: string = body.user.id;
+    await expect(ownerDb()`update users set pin_length = 6 where id = ${userId}`).rejects.toThrow(
+      /users_pin_check/,
+    );
+    await expect(
+      ownerDb()`update users set pin_hash = 'x', pin_length = 5 where id = ${userId}`,
+    ).rejects.toThrow(/users_pin_check/);
+    await ownerDb()`update users set pin_hash = 'x', pin_length = 4 where id = ${userId}`;
+  });
+
+  it('renaming the store touches the settings row, so devices pull it again', async () => {
+    const { body } = await registerStore(app);
+    const tenantId: string = body.tenant.id;
+    const [before] = await ownerDb()<{ version: number }[]>`
+      select version from tenant_settings where tenant_id = ${tenantId}`;
+    await ownerDb()`update tenants set name = 'سوبرماركت الفرات' where id = ${tenantId}`;
+    await ownerDb()`update tenants set status = 'active' where id = ${tenantId}`;
+    const [after] = await ownerDb()<{ version: number }[]>`
+      select version from tenant_settings where tenant_id = ${tenantId}`;
+    expect(after!.version).toBe(before!.version + 1);
   });
 });
