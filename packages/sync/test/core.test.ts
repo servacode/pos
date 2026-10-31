@@ -7,6 +7,7 @@ import {
   canonicalJson,
   createUuidV7,
   DOC_SERIES,
+  documentPayloadRejection,
   DOC_TYPES,
   epochChanged,
   formatDocNumber,
@@ -27,6 +28,7 @@ import {
   type SyncDocument,
   type SyncDocumentBody,
 } from '../src';
+import { buildSalePayload } from '@serva/core/sale';
 
 describe('UUIDv7 ids made on the device', () => {
   it('are version 7, variant 10, and carry their creation time', () => {
@@ -229,6 +231,40 @@ describe('protocol schemas', () => {
       makeDoc({ deviceTime: 'yesterday' }),
     ];
     for (const doc of bad) expect(syncDocumentSchema.safeParse(doc).success, JSON.stringify(doc)).toBe(false);
+  });
+
+  it('check a payload by its type: a malformed sale is rejected alone, with invalid_payload', () => {
+    const sale = buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [],
+      lines: [
+        {
+          lineNo: 1,
+          productId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a01',
+          variantId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a02',
+          name: 'شاي',
+          qty: 1000,
+          priceCurrency: 'SYP',
+          priceMinor: 60000,
+          taxRateBp: 0,
+        },
+      ],
+      shiftId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a03',
+      cashierId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a04',
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 100000 }],
+      cashSteps: { SYP: 1000 },
+    });
+    expect(documentPayloadRejection({ type: 'sale', payload: sale })).toBeNull();
+    // Valid for the envelope, so the batch is not refused…
+    const toy = makeDoc({ payload: { total: 1500, lines: [{ lineNo: 1, qty: 1000 }] } });
+    expect(syncDocumentSchema.safeParse(toy).success).toBe(true);
+    // … but the document itself is.
+    const rejection = documentPayloadRejection(toy);
+    expect(rejection?.code).toBe('invalid_payload');
+    expect(rejection?.issues.map((i) => i.path)).toContain('shiftId');
+    // Types without a payload schema yet are stored as they arrive.
+    expect(documentPayloadRejection({ type: 'return', payload: { total: 500 } })).toBeNull();
   });
 
   it('limit a push to 50 documents', () => {

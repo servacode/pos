@@ -198,6 +198,9 @@ importers:
 
   packages/sync:
     dependencies:
+      '@serva/core':
+        specifier: workspace:*
+        version: link:../core
       dexie:
         specifier: 4.4.6
         version: 4.4.6

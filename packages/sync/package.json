@@ -16,6 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@serva/core": "workspace:*",
     "dexie": "4.4.6",
     "zod": "^4.1.0"
   },
