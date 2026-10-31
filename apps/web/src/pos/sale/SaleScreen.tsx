@@ -807,7 +807,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   type="button"
                   aria-label="امسح البحث"
                   onClick={() => setQuery('')}
-                  className="grid size-10 place-items-center rounded-small text-ink-muted hover:bg-surface-muted"
+                  className="grid size-12 place-items-center rounded-small text-ink-muted hover:bg-surface-muted"
                 >
                   <CloseIcon size={16} />
                 </button>
@@ -849,7 +849,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 type="button"
                 aria-label="أخفِ التنبيه"
                 onClick={() => setNotice(null)}
-                className="grid size-10 place-items-center rounded-small"
+                className="grid size-12 place-items-center rounded-small"
               >
                 <CloseIcon size={16} />
               </button>
