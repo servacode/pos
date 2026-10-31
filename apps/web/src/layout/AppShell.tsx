@@ -1,11 +1,20 @@
 import { useState, type ReactNode } from 'react';
 import { Link, NavLink } from 'react-router';
-import { AdminShell, Button, HomeIcon, Logo, LogoMark, LogoutIcon, navItemClass } from '@serva/ui';
+import {
+  AdminShell,
+  Button,
+  DeviceIcon,
+  HomeIcon,
+  Logo,
+  LogoMark,
+  LogoutIcon,
+  navItemClass,
+} from '@serva/ui';
 import { useAuth, useMe } from '../auth/useAuth';
 
 // The menu lists only screens that exist (tab 12: no button the user cannot use). Sections join it
 // as they ship, each with its icon from @serva/ui and its glossary name (الزبائن، المنتجات…).
-function Sidebar({ planName }: { planName: string }) {
+function Sidebar({ planName, showDevices }: { planName: string; showDevices: boolean }) {
   return (
     <>
       <Link
@@ -23,6 +32,14 @@ function Sidebar({ planName }: { planName: string }) {
               الرئيسية
             </NavLink>
           </li>
+          {showDevices ? (
+            <li>
+              <NavLink to="/devices" className={({ isActive }) => navItemClass(isActive)}>
+                <DeviceIcon size={24} />
+                الأجهزة
+              </NavLink>
+            </li>
+          ) : null}
         </ul>
       </nav>
       <p className="mt-auto rounded-control bg-surface-muted px-3 py-2 text-sm text-ink-muted">
@@ -37,6 +54,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { logout } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
   const role = me.user.roles[0]?.name;
+  // The owner and branch managers see the devices; the server checks each request again.
+  const showDevices = me.user.roles.some((r) => r.key === 'owner' || r.key === 'manager');
 
   async function handleLogout() {
     setSigningOut(true);
@@ -45,7 +64,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AdminShell
-      sidebar={<Sidebar planName={me.subscription.planName} />}
+      sidebar={<Sidebar planName={me.subscription.planName} showDevices={showDevices} />}
       topBar={
         <>
           <LogoMark className="lg:hidden" />
