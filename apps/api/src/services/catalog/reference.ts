@@ -165,7 +165,15 @@ const unitView = (u: typeof units.$inferSelect): Unit => ({
 export async function listUnits(db: Database, ctx: CatalogContext): Promise<{ items: Unit[] }> {
   return withTenant(db, ctx.auth.tenantId, async (tx) => {
     await requireCatalogReader(tx, ctx.auth.userId);
-    const rows = await tx.select().from(units).orderBy(asc(units.createdAt), asc(units.id));
+    // The two system units first, in a fixed order (they share created_at), then the store's own.
+    const rows = await tx
+      .select()
+      .from(units)
+      .orderBy(
+        sql`case ${units.systemKey} when 'piece' then 0 when 'kg' then 1 else 2 end`,
+        asc(units.createdAt),
+        asc(units.id),
+      );
     return { items: rows.map(unitView) };
   });
 }
