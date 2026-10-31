@@ -51,8 +51,12 @@ export function ShiftsPage() {
       total: 'المجموع',
     },
     { key: 'device', header: 'الجهاز', cell: (row) => <bdi className="num">{row.deviceCode}</bdi> },
-    { key: 'openedBy', header: 'فتحها', cell: (row) => row.openedBy.fullName },
-    { key: 'openedAt', header: 'الفتح', cell: (row) => zonedClock(row.openedAt, tz, digits) },
+    { key: 'openedBy', header: 'فتحها', cell: (row) => row.openedBy?.fullName ?? 'غير معروف' },
+    {
+      key: 'openedAt',
+      header: 'الفتح',
+      cell: (row) => (row.openedAt ? zonedClock(row.openedAt, tz, digits) : '—'),
+    },
     {
       key: 'closedAt',
       header: 'الإغلاق',

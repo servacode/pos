@@ -285,10 +285,22 @@ afterAll(async () => {
 // ─── Helpers for the comparisons ─────────────────────────────────────────────
 
 /** A list of differences, each a readable line, so a failure shows every one at once. */
+/** JSON with object keys sorted, so key order never counts as a difference. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        )
+      : v,
+  );
+}
+
 class Diffs {
   readonly items: string[] = [];
+  /** Equal values, whatever order the object keys come in (arrays keep their order). */
   eq(what: string, actual: unknown, wanted: unknown): void {
-    if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
+    if (canonical(actual) !== canonical(wanted)) {
       this.items.push(`${what}: system ${JSON.stringify(actual)}, sheet ${JSON.stringify(wanted)}`);
     }
   }

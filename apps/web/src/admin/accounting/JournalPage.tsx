@@ -66,7 +66,7 @@ function lineColumns(base: CurrencyCode): DataColumn<JournalLine>[] {
               {line.rate ? (
                 <>
                   {' '}
-                  بسعر <bdi className="num">{line.rate}</bdi>
+                  بسعر <bdi className="num">{line.rate.rate}</bdi>
                 </>
               ) : null}
             </span>

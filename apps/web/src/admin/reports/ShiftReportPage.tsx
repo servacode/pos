@@ -206,8 +206,8 @@ function ShiftReceipt({
         <Row label="الوردية">
           <bdi dir="ltr">{report.number}</bdi>
         </Row>
-        <Row label="فتحها">{report.openedBy.fullName}</Row>
-        <Row label="فُتحت">{zonedDateTime(report.openedAt, tz, digits)}</Row>
+        <Row label="فتحها">{report.openedBy?.fullName ?? 'غير معروف'}</Row>
+        <Row label="فُتحت">{report.openedAt ? zonedDateTime(report.openedAt, tz, digits) : '—'}</Row>
         {report.closedAt ? <Row label="أُغلقت">{zonedDateTime(report.closedAt, tz, digits)}</Row> : null}
       </div>
       <Rule />
@@ -263,7 +263,7 @@ function ShiftReceipt({
       ))}
       <Rule />
       <div className="flex justify-between gap-4 pt-6 text-xs">
-        <span>الكاشير: {report.openedBy.fullName}</span>
+        <span>الكاشير: {report.openedBy?.fullName ?? 'غير معروف'}</span>
         <span>المدير</span>
       </div>
       <p className="text-center text-xs">
@@ -294,10 +294,10 @@ function ShiftA4({
         <div>
           <p className="text-lg font-bold">{me.tenant.name}</p>
           <p>
-            الوردية <bdi dir="ltr">{report.number}</bdi> · {report.openedBy.fullName}
+            الوردية <bdi dir="ltr">{report.number}</bdi> · {report.openedBy?.fullName ?? 'غير معروف'}
           </p>
           <p>
-            {zonedDateTime(report.openedAt, me.tenant.timezone, digits)}
+            {report.openedAt ? zonedDateTime(report.openedAt, me.tenant.timezone, digits) : '—'}
             {report.closedAt ? ` — ${zonedDateTime(report.closedAt, me.tenant.timezone, digits)}` : ''}
           </p>
         </div>
@@ -376,7 +376,7 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
             <bdi dir="ltr" className="num">
               {report.number}
             </bdi>{' '}
-            · {report.openedBy.fullName}
+            · {report.openedBy?.fullName ?? 'غير معروف'}
           </>
         }
         actions={
@@ -399,7 +399,9 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
           <MetaItem label="الجهاز">
             <bdi className="num">{report.deviceCode}</bdi>
           </MetaItem>
-          <MetaItem label="فُتحت">{zonedDateTime(report.openedAt, tz, digits)}</MetaItem>
+          <MetaItem label="فُتحت">
+            {report.openedAt ? zonedDateTime(report.openedAt, tz, digits) : '—'}
+          </MetaItem>
           <MetaItem label="أُغلقت">
             {report.closedAt ? zonedDateTime(report.closedAt, tz, digits) : 'ما زالت مفتوحة'}
           </MetaItem>

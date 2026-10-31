@@ -243,7 +243,7 @@ export function journalEntry(overrides: Partial<JournalEntry> = {}): JournalEntr
         creditMinor: 0,
         currency: 'USD',
         amountMinor: 900,
-        rate: '130',
+        rate: { unit: 'USD', quote: 'SYP', rate: '130' },
       },
       {
         accountCode: '4100',
