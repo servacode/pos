@@ -55,6 +55,13 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation'> =
   'GET /v1/tax-rates': 'signed-in',
   'POST /v1/tax-rates': 'signed-in',
   'PATCH /v1/tax-rates/:id': 'signed-in',
+  'GET /v1/accounts': 'signed-in',
+  'GET /v1/reports/day': 'signed-in',
+  'GET /v1/shifts': 'signed-in',
+  'GET /v1/shifts/:id': 'signed-in',
+  'GET /v1/journal': 'signed-in',
+  'GET /v1/reports/trial-balance': 'signed-in',
+  'GET /v1/sync/evidence': 'signed-in',
 };
 
 interface Stores {
@@ -211,6 +218,20 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       headers: { authorization: `Activation ${deviceB.activationSecret}` },
     });
     expect(res.statusCode).toBe(401);
+  },
+  // Store B's owner asking for store A's shift report: 404, nothing of store A in the answer.
+  'GET /v1/shifts/:id': async (app, { a, b }) => {
+    const deviceA = await createDevice(a.tenantId);
+    const [userA] = await ownerDb()<{ id: string }[]>`select id from users where tenant_id = ${a.tenantId}`;
+    const shiftId = createUuidV7()();
+    await ownerDb()`insert into shifts (tenant_id, id, branch_id, device_id, number, opened_by, opened_at)
+      values (${a.tenantId}, ${shiftId}, ${deviceA.branchId}, ${deviceA.deviceId}, 'SFT-001-002-0000001',
+              ${userA!.id}, now())`;
+    const own = await app.inject({ method: 'GET', url: `/v1/shifts/${shiftId}`, headers: owner(a) });
+    expect(own.statusCode).toBe(200);
+    const res = await app.inject({ method: 'GET', url: `/v1/shifts/${shiftId}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('SFT-001-002');
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);

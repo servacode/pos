@@ -207,6 +207,11 @@ async function processDocument(
     .where(and(eq(syncInbox.tenantId, device.tenantId), eq(syncInbox.docId, doc.id)));
   if (existing) {
     if (!sameHash(existing.payloadHash, hash)) return { id: doc.id, status: 'id_conflict', flags: [] };
+    // Counted for the evidence screen (23 › شاشة الدليل: «مكرر»); nothing else changes.
+    await tx
+      .update(syncInbox)
+      .set({ duplicateCount: sql`${syncInbox.duplicateCount} + 1`, lastDuplicateAt: now })
+      .where(and(eq(syncInbox.tenantId, device.tenantId), eq(syncInbox.docId, doc.id)));
     return {
       id: doc.id,
       status: 'duplicate',

@@ -66,6 +66,9 @@ export async function registerStore(
       // Branch codes are 3 digits: they go into every document number (INV-001-002-0000154).
       await tx.insert(branches).values({ tenantId, code: '001', name: 'الفرع الرئيسي' });
       await seedCatalogDefaults(tx, tenantId);
+      // The chart of accounts of tab 10 (migration 0012 › accounts_seed): every store's 49 accounts
+      // and a drawer and a safe account per currency.
+      await tx.execute(sql`select accounts_seed(${tenantId})`);
 
       const createdRoles = await tx
         .insert(roles)

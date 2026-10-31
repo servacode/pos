@@ -18,6 +18,9 @@ export const PERMISSIONS = {
   'purchases.manage': 'المشتريات والموردون',
   'inventory.adjust': 'اعتماد الجرد والتسويات',
   'reports.financial': 'التقارير المالية والأرباح',
+  // Phase 1, step 3: «مبيعات اليوم» and the shift reports; the journal, trial balance and chart.
+  'report.view': 'مبيعات اليوم وتقارير الورديات',
+  'accounting.view': 'الدفاتر والقيود وميزان المراجعة',
   'users.manage': 'المستخدمون والصلاحيات',
   'whatsapp.manage': 'ربط واتساب',
   'subscription.manage': 'الاشتراك والدفع للمنصة',

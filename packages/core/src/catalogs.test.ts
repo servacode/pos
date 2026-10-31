@@ -30,6 +30,10 @@ describe('default roles', () => {
     expect(manager).not.toContain('devices.manage');
     expect(manager).toContain('reports.financial');
     expect(manager).toContain('devices.view');
+    // Phase 1, step 3: the day and shift reports, the journal and the trial balance.
+    expect(manager).toContain('report.view');
+    expect(manager).toContain('accounting.view');
+    expect(role('cashier')?.permissions).not.toContain('report.view');
     expect(manager).toHaveLength(ALL_PERMISSIONS.length - 4);
   });
 
