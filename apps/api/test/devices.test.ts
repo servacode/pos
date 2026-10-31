@@ -13,7 +13,15 @@ import type { ActivatedDeviceInfo } from '@serva/sync/client';
 import { hashSecret } from '../src/auth/passwords';
 import { ManualClock } from '../src/clock';
 import { activateDevice, createDevice, deviceFields, firstBranch, linkDevice } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
+import {
+  closeAppDb,
+  closeOwnerDb,
+  makeApp,
+  ownerDb,
+  registerStore,
+  resetDatabase,
+  salePayload,
+} from './helpers';
 
 // The device helpers of @serva/sync take the contract's ActivatedDevice as it is.
 const _sameShape: ActivatedDeviceInfo = {} as ActivatedDevice;
@@ -619,7 +627,7 @@ async function pushSales(device: { code: string; authorization: string }, number
       engineVersion: '1.0.0',
       contractVersion: 1,
       deps: [],
-      payload: { total: 100 },
+      payload: salePayload(100),
     };
     return { ...body, hash: payloadHash(body) };
   });

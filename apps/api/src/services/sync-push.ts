@@ -11,6 +11,7 @@ import {
 } from '@serva/db';
 import {
   CONTRACT_VERSION,
+  documentPayloadRejection,
   parseDocNumber,
   payloadHash,
   SUPPORTED_CONTRACT_VERSIONS,
@@ -282,6 +283,10 @@ async function classify(
 ): Promise<{ status: StoredStatus; code: string | null; flags: SyncFlag[] }> {
   const rejected = (code: string) => ({ status: 'rejected' as const, code, flags: [] });
   if (!SUPPORTED_CONTRACT_VERSIONS.includes(doc.contractVersion)) return rejected('contract_unsupported');
+  // A payload that breaks its type's schema (packages/core › contracts/documents.ts) is refused
+  // alone, before anything is processed or numbered.
+  const malformed = documentPayloadRejection(doc);
+  if (malformed) return rejected(malformed.code);
 
   const parsed = doc.number ? parseDocNumber(doc.number) : null;
   if (parsed) {
