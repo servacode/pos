@@ -66,6 +66,7 @@ export { Dialog, Sheet, type DialogProps, type SheetProps } from './Dialog';
 export { TOAST_DURATION_MS, ToastProvider, useToast, type ToastOptions, type ToastTone } from './Toast';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { Skeleton, SkeletonText } from './Skeleton';
+export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Avatar, initialsOf, type AvatarProps } from './Avatar';
 export { Money, type MoneyProps } from './Money';
 
