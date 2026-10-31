@@ -121,9 +121,13 @@ jobs:
       - run: pnpm test
       # The golden calculator is written independently of the product code, so it only
       # catches a mistake in that code while it keeps running. It was not in CI before.
-      - name: Golden day — the independent calculator (Python, no dependencies)
+      # openpyxl is only for the two tests that read back the generated sheets; the
+      # calculation itself uses the standard library alone.
+      - name: Golden day — the independent calculator (Python)
         working-directory: golden/calc
-        run: python3 -m unittest discover -s . -p 'test_*.py' --verbose
+        run: |
+          pip install --quiet openpyxl==3.1.5
+          python3 -m unittest discover -s . -p 'test_*.py' --verbose
       - run: pnpm build
       - name: Size budget (sale screen JS + CSS under 300 KB gzip, fonts separate)
         run: pnpm --filter @serva/web size
