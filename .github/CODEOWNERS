@@ -42,3 +42,43 @@
 /scripts/ci/ @servacode
 /.github/ @servacode
 /docs/adr/ @servacode
+
+# Reached by import from the financial kernel: a change here can change a posted amount.
+# Listed in scripts/ci/kernel-reached.txt.
+# money.ts formats amounts through it
+/packages/core/src/text.ts @servacode
+# shared shapes of the document and accounting contracts
+/packages/core/src/contracts/common.ts @servacode
+# the document types the protocol and the local store accept
+/packages/sync/src/doc-types.ts @servacode
+# identifiers the protocol deduplicates on
+/packages/sync/src/uuid.ts @servacode
+# the offline queue the local store writes to
+/packages/sync/src/outbox.ts @servacode
+# the local store interface behind Dexie
+/packages/sync/src/client/store.ts @servacode
+# shared request types of the push path
+/apps/api/src/types.ts @servacode
+# the error codes the report routes return
+/apps/api/src/errors.ts @servacode
+# the day boundary the golden day depends on
+/apps/api/src/clock.ts @servacode
+# who may push documents
+/apps/api/src/auth/device-guard.ts @servacode
+# who may read financial reports
+/apps/api/src/auth/permissions.ts @servacode
+# the token the report routes trust
+/apps/api/src/auth/tokens.ts @servacode
+# the audit trail of the push path
+/apps/api/src/services/audit.ts @servacode
+# push cursors and deduplication state
+/apps/api/src/services/sync-state.ts @servacode
+# what the posting tests assert against
+/apps/api/test/accounting-fixtures.ts @servacode
+# the shared harness of the financial tests
+/apps/api/test/helpers.ts @servacode
+# the devices the financial tests post from
+/apps/api/test/devices.ts @servacode
+# the staff the golden day posts as
+/apps/api/test/staff.ts @servacode
+
