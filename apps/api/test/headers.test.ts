@@ -65,6 +65,19 @@ describe('startup refuses unsafe configuration', () => {
     expect(() => production({ OTP_DELIVERY: 'log' })).toThrow(/OTP_DELIVERY=log/);
   });
 
+  it('refuses on-screen sign-up codes anywhere but the local server, in every mode', () => {
+    for (const NODE_ENV of ['development', 'test', 'production']) {
+      const env = NODE_ENV === 'production' ? production : testEnv;
+      expect(() => env({ NODE_ENV, OTP_DELIVERY: 'screen' })).toThrow(/OTP_DELIVERY=screen/);
+      expect(() => env({ NODE_ENV, OTP_DELIVERY: 'screen', DEPLOYMENT: 'cloud' })).toThrow(
+        /allowed only with DEPLOYMENT=local/,
+      );
+    }
+    expect(testEnv({}).DEPLOYMENT).toBe('cloud');
+    expect(() => testEnv({ DEPLOYMENT: 'shop' })).toThrow(/DEPLOYMENT/);
+    expect(production({ DEPLOYMENT: 'local', OTP_DELIVERY: 'screen' }).OTP_DELIVERY).toBe('screen');
+  });
+
   it('refuses the development database passwords in production', () => {
     for (const password of ['serva_app', 'serva_owner', 'postgres']) {
       expect(() => production({ DATABASE_URL: `postgres://serva_app:${password}@db:5432/serva` })).toThrow(

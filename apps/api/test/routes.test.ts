@@ -13,6 +13,7 @@ import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabas
  */
 const ROUTES: Record<string, 'public' | 'signed-in' | 'device'> = {
   'GET /health': 'public',
+  'GET /v1/meta': 'public',
   'POST /v1/auth/register': 'public',
   'POST /v1/auth/register/verify': 'public',
   'POST /v1/auth/login': 'public',

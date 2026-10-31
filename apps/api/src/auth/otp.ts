@@ -1,5 +1,6 @@
 import { createHmac, randomInt } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
+import type { Env } from '../env';
 import { deriveKey } from './tokens';
 
 export interface OtpMessage {
@@ -24,6 +25,29 @@ export function logOtpSender(log: FastifyBaseLogger): OtpSender {
       log.info(`[development] ${purpose} code for ${phone}: ${code}`);
     },
   };
+}
+
+/**
+ * Test mode of the local server (OTP_DELIVERY=screen, DEPLOYMENT=local only): there is no SMS
+ * there, so the sign-up answer carries the code. Nothing is sent.
+ */
+export function screenOtpSender(): OtpSender {
+  return {
+    async send() {},
+  };
+}
+
+/** True when sign-up codes are shown on screen (the local server's test mode). */
+export function isTestMode(env: Env): boolean {
+  return env.OTP_DELIVERY === 'screen' && env.DEPLOYMENT === 'local';
+}
+
+/** The sender OTP_DELIVERY asks for; null means sign-up answers 503. */
+export function otpSenderFor(env: Env, log: FastifyBaseLogger): OtpSender | null {
+  const delivery = env.OTP_DELIVERY ?? (env.NODE_ENV === 'production' ? 'none' : 'log');
+  if (delivery === 'log') return logOtpSender(log);
+  if (delivery === 'screen' && isTestMode(env)) return screenOtpSender();
+  return null;
 }
 
 export function newOtpCode(): string {

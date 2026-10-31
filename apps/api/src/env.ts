@@ -53,12 +53,15 @@ const envSchema = z
     LOGIN_PHONE_LIMIT_PER_HOUR: perMinute(20),
     /** Sign-up codes per hour sent to one phone number */
     REGISTER_PHONE_LIMIT_PER_HOUR: perMinute(5),
+    /** Where this server runs: "cloud" (default) or "local", the server in the shop (tab 00). */
+    DEPLOYMENT: z.enum(['cloud', 'local']).default('cloud'),
     /**
      * How sign-up codes are delivered: "log" writes them to the server log (development only);
-     * "none" turns sign-up off until an SMS/Telegram channel is connected. Default: log outside
+     * "none" turns sign-up off until an SMS/Telegram channel is connected; "screen" answers the
+     * code to the sign-up screen itself (test mode, DEPLOYMENT=local only). Default: log outside
      * production, none in production.
      */
-    OTP_DELIVERY: z.enum(['log', 'none']).optional(),
+    OTP_DELIVERY: z.enum(['log', 'none', 'screen']).optional(),
     /** Requests per minute per signed-in session (17: 300 per token) */
     SESSION_RATE_LIMIT_PER_MINUTE: perMinute(300),
     /** Requests per minute per store, all its users and devices together */
@@ -120,6 +123,14 @@ const envSchema = z
         code: 'custom',
         path: ['OTP_DELIVERY'],
         message: 'OTP_DELIVERY=log writes codes to the log; not allowed in production',
+      });
+    }
+    // Showing the code on screen proves nothing about the phone: never on the cloud, in any mode.
+    if (env.OTP_DELIVERY === 'screen' && env.DEPLOYMENT !== 'local') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OTP_DELIVERY'],
+        message: 'OTP_DELIVERY=screen shows sign-up codes on screen; allowed only with DEPLOYMENT=local',
       });
     }
     if (production && !env.COOKIE_SECURE) {
