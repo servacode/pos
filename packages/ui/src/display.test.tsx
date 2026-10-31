@@ -10,6 +10,7 @@ import { EmptyState } from './EmptyState';
 import { CustomersIcon } from './icons';
 import { AppIcon, Logo, LOGO_S_PATH, LogoMark, LogoStacked } from './Logo';
 import { Money } from './Money';
+import { ProgressBar } from './ProgressBar';
 import { SegmentedControl } from './SegmentedControl';
 import { Skeleton } from './Skeleton';
 import { Tabs } from './Tabs';
@@ -48,6 +49,8 @@ describe('StatusChip', () => {
     ['debt', 'دين', 'bg-surface-muted'],
     ['overdueDebt', 'دين متأخر', 'bg-danger-soft'],
     ['pendingSend', 'بانتظار الإرسال', 'bg-warning-soft'],
+    ['pendingApproval', 'بانتظار موافقتك', 'bg-warning-soft'],
+    ['rejected', 'مرفوض', 'bg-surface-muted'],
   ] as const)('shows %s as «%s» with its colour', (status, label, token) => {
     renderUi(<StatusChip status={status} />);
     expect(screen.getByText(label)).toHaveClass(token);
@@ -361,5 +364,29 @@ describe('Logo (docs/design/kit/logo.md)', () => {
     for (const arabic of screen.getAllByText('سيرفا'))
       expect(arabic).toHaveClass('text-brand-ink', 'font-semibold');
     expect(LOGO_S_PATH).toBe('M42 22 A10 10 0 1 0 32 32 A10 10 0 1 1 22 42');
+  });
+});
+
+describe('ProgressBar', () => {
+  it('announces its label and value, and fills to the ratio', () => {
+    renderUi(<ProgressBar label="تنزيل بيانات المحل" value={30} max={120} valueText="25%" />);
+
+    const bar = screen.getByRole('progressbar', { name: 'تنزيل بيانات المحل' });
+    expect(bar).toHaveAttribute('aria-valuenow', '30');
+    expect(bar).toHaveAttribute('aria-valuemax', '120');
+    expect(bar).toHaveAttribute('aria-valuetext', '25%');
+    expect(bar.firstElementChild).toHaveStyle({ width: '25%' });
+    expect(bar.firstElementChild).toHaveClass('bg-brand');
+  });
+
+  it('clamps an overshoot, and pulses without a value while the total is unknown', () => {
+    const { unmount } = renderUi(<ProgressBar label="س" value={500} max={100} tone="warning" />);
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '100');
+    expect(screen.getByRole('progressbar').firstElementChild).toHaveClass('bg-warning');
+    unmount();
+
+    renderUi(<ProgressBar label="س" />);
+    expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');
+    expect(screen.getByRole('progressbar').firstElementChild).toHaveClass('w-1/3');
   });
 });

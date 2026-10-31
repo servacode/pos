@@ -21,7 +21,7 @@ describe('AppShell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['الرئيسية']);
+    ).toEqual(['الرئيسية', 'الأجهزة']);
     expect(within(nav).getByRole('link', { name: 'الرئيسية' })).toHaveAttribute('aria-current', 'page');
     expect(document.body).not.toHaveTextContent('قريباً');
   });

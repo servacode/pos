@@ -19,6 +19,23 @@ function meRoute(validToken: string) {
 }
 
 describe('apiFetch', () => {
+  it('sends a fixed Authorization header as given, and never refreshes on its 401', async () => {
+    setAccessToken('admin-token');
+    const { requestsTo } = mockFetch({
+      'GET /v1/devices/activations/a1': unauthorized,
+      'POST /v1/auth/refresh': { status: 200, body: { accessToken: 'x', expiresIn: 900 } },
+    });
+
+    await expect(
+      apiFetch('/v1/devices/activations/a1', { authorization: 'Activation sda_secret' }),
+    ).rejects.toMatchObject({ status: 401 });
+
+    expect(requestsTo('GET', '/v1/devices/activations/a1')[0]!.headers.Authorization).toBe(
+      'Activation sda_secret',
+    );
+    expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(0);
+  });
+
   it('refreshes once on 401 and retries with the new token', async () => {
     setAccessToken('stale');
     const { requests, requestsTo } = mockFetch({

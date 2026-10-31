@@ -27,6 +27,11 @@ export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   auth?: boolean;
+  /**
+   * A fixed Authorization header for a request outside the signed-in admin: the owner's token on a
+   * cashier being linked, or `Activation <secret>` while it waits. No refresh is tried with it.
+   */
+  authorization?: string;
 }
 
 const REFRESH_PATH = '/v1/auth/refresh';
@@ -55,10 +60,17 @@ function expireSession(): void {
   for (const listener of sessionExpiredListeners) listener();
 }
 
-async function send(path: string, method: string, body: unknown, token: string | null): Promise<Response> {
+async function send(
+  path: string,
+  method: string,
+  body: unknown,
+  token: string | null,
+  authorization?: string,
+): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
+  else if (authorization) headers.Authorization = authorization;
   let res: Response;
   try {
     res = await fetch(path, {
@@ -134,8 +146,8 @@ export function refreshAccessToken(): Promise<string | null> {
 }
 
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, auth = false } = options;
-  if (!auth) return parse<T>(await send(path, method, body, null));
+  const { method = 'GET', body, auth = false, authorization } = options;
+  if (!auth) return parse<T>(await send(path, method, body, null, authorization));
 
   const usedToken = accessToken;
   const first = await send(path, method, body, usedToken);
