@@ -39,7 +39,8 @@ const saleArb = fc.record({
 });
 
 /** A sale the cashier could really close, or null when these payments would not cover it. */
-function makeSale(c: fc.infer<typeof saleArb>): SalePayload | null {
+type SaleCase = typeof saleArb extends fc.Arbitrary<infer T> ? T : never;
+function makeSale(c: SaleCase): SalePayload | null {
   const lines: SaleCartLine[] = c.lines.map((l, i) =>
     cartLine(i + 1, l.usd ? Math.ceil(l.priceMinor / 130) : l.priceMinor, {
       qty: l.qty,

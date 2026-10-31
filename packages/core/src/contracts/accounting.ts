@@ -93,8 +93,9 @@ export interface ShiftSummary {
   number: string;
   branchId: string;
   deviceCode: string;
-  openedBy: { id: string; fullName: string };
-  openedAt: string;
+  /** null while only the close has arrived (a close can reach the server before its opening) */
+  openedBy: { id: string; fullName: string } | null;
+  openedAt: string | null;
   closedAt: string | null;
   status: 'open' | 'closed';
   salesCount: number;
