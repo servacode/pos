@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { TERMS_VERSION } from '@serva/core';
 import { apiError, mockFetch } from '../test/fetchMock';
@@ -50,6 +50,42 @@ describe('RegisterPage', () => {
       password: 'secret-pass',
     });
     await waitFor(() => expect(screen.queryByLabelText('رمز التحقق')).not.toBeInTheDocument());
+  });
+
+  it('shows no test box on a normal server', async () => {
+    mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh, 'POST /v1/auth/register': codeSent });
+    const { user } = renderApp('/register');
+
+    await fillDetails(user);
+    await user.click(screen.getByRole('button', { name: 'افتح متجري' }));
+    expect(await screen.findByLabelText('رمز التحقق')).toHaveValue('');
+    expect(screen.queryByRole('note', { name: 'وضع التجربة' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/وضع التجربة/)).not.toBeInTheDocument();
+  });
+
+  it('on the local test server, shows the code in a test box and fills it in', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedOutRefresh,
+      'POST /v1/auth/register': { status: 202, body: { ...codeSent.body, testCode: '123456' } },
+      'POST /v1/auth/register/verify': { status: 201, body: authResponse },
+      'GET /v1/me': { status: 200, body: makeMe() },
+    });
+    const { user } = renderApp('/register');
+
+    await fillDetails(user);
+    await user.click(screen.getByRole('button', { name: 'افتح متجري' }));
+
+    const box = await screen.findByRole('note', { name: 'وضع التجربة' });
+    expect(box).toHaveTextContent('وضع التجربة — الرمز: \u2066123 456\u2069');
+    expect(box).toHaveClass('bg-warning-soft');
+    expect(screen.getByLabelText('رمز التحقق')).toHaveValue('');
+
+    await user.click(within(box).getByRole('button', { name: 'املأ الرمز' }));
+    expect(screen.getByLabelText('رمز التحقق')).toHaveValue('123456');
+    await user.click(screen.getByRole('button', { name: 'تأكيد وفتح المتجر' }));
+
+    await waitFor(() => expect(requestsTo('POST', '/v1/auth/register/verify')).toHaveLength(1));
+    expect(requestsTo('POST', '/v1/auth/register/verify')[0]?.body).toMatchObject({ code: '123456' });
   });
 
   it('shows per-field Arabic errors without calling the API', async () => {

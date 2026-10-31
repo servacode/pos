@@ -32,6 +32,8 @@ interface PendingCode {
   registrationId: string;
   phone: string;
   password: string;
+  /** The local server's test mode only: the code, shown on screen (no SMS there) */
+  testCode?: string;
 }
 
 /**
@@ -64,7 +66,12 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
       }),
     onSubmit: async (data: RegisterStoreData) => {
       const sent = await apiFetch<RegisterResponse>('/v1/auth/register', { method: 'POST', body: data });
-      onCodeSent({ registrationId: sent.registrationId, phone: data.phone, password: data.password });
+      onCodeSent({
+        registrationId: sent.registrationId,
+        phone: data.phone,
+        password: data.password,
+        testCode: sent.testCode,
+      });
     },
   });
 
@@ -193,6 +200,9 @@ function CodeStep({ pending, onChangeNumber }: { pending: PendingCode; onChangeN
       <title>رمز التحقق · Serva POS</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
+        {pending.testCode ? (
+          <TestCodeBox code={pending.testCode} onFill={() => setValue('code', pending.testCode ?? '')} />
+        ) : null}
         <TextField
           name="code"
           label="رمز التحقق"
@@ -211,5 +221,28 @@ function CodeStep({ pending, onChangeNumber }: { pending: PendingCode; onChangeN
         </Button>
       </form>
     </AuthLayout>
+  );
+}
+
+/**
+ * The local server's test mode: there is no SMS there, so the code is shown here, clearly marked
+ * as a test, with a button that types it in.
+ */
+function TestCodeBox({ code, onFill }: { code: string; onFill: () => void }) {
+  // "123 456", isolated (LRI…PDI) so the digits keep their order inside the Arabic sentence.
+  const spaced = `⁦${code.slice(0, 3)} ${code.slice(3)}⁩`;
+  return (
+    <div
+      role="note"
+      aria-label="وضع التجربة"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-warning/40 bg-warning-soft px-4 py-3 text-warning-ink"
+    >
+      <p className="font-semibold">
+        وضع التجربة — الرمز: <span className="text-lg tabular-nums">{spaced}</span>
+      </p>
+      <Button type="button" variant="secondary" size="md" onClick={onFill}>
+        املأ الرمز
+      </Button>
+    </div>
   );
 }

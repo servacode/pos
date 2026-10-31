@@ -1,4 +1,5 @@
 import type { ApiErrorBody, ErrorCode, RefreshResponse } from '@serva/core';
+import { noteTestMode } from './testMode';
 
 export const NETWORK_ERROR_MESSAGE = 'لا يوجد إنترنت الآن. تحقّق من الاتصال وحاول مرة أخرى.';
 const UNEXPECTED_ERROR_MESSAGE = 'حدث خطأ غير متوقع. حاول مجدداً.';
@@ -58,8 +59,9 @@ async function send(path: string, method: string, body: unknown, token: string |
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
+  let res: Response;
   try {
-    return await fetch(path, {
+    res = await fetch(path, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -68,6 +70,8 @@ async function send(path: string, method: string, body: unknown, token: string |
   } catch {
     throw new ApiError(0, 'network_error', NETWORK_ERROR_MESSAGE);
   }
+  noteTestMode(res);
+  return res;
 }
 
 async function readJson(res: Response): Promise<unknown> {

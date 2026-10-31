@@ -1,7 +1,8 @@
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router';
-import { FullScreenLoader } from '@serva/ui';
+import { FullScreenLoader, TestModeRibbon } from '@serva/ui';
+import { useTestMode } from './lib/testMode';
 
 // Two apps, two code-split entries. The cashier (/pos) boots from what the device keeps locally
 // and asks for the login code, with no network request; the store admin restores its session
@@ -16,10 +17,13 @@ const UiGallery = import.meta.env.DEV
   : null;
 
 export function App() {
+  const testMode = useTestMode();
   // Radix primitives read the reading direction from this provider (arrow keys in menus, tabs,
   // radio groups and sliders); the document itself is <html dir="rtl">.
   return (
     <DirectionProvider dir="rtl">
+      {/* The local server's test mode: on every page, admin and cashier alike. */}
+      {testMode ? <TestModeRibbon className="sticky top-0 z-50" /> : null}
       <Suspense fallback={<FullScreenLoader />}>
         <Routes>
           {UiGallery ? <Route path="/dev/ui" element={<UiGallery />} /> : null}
