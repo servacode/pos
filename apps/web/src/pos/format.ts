@@ -1,20 +1,5 @@
 import { displayNumber, type Digits } from '@serva/ui';
-
-/** Levantine month names, as on the boards and receipts («30 تشرين الأول 2026»). */
-const MONTHS = [
-  'كانون الثاني',
-  'شباط',
-  'آذار',
-  'نيسان',
-  'أيار',
-  'حزيران',
-  'تموز',
-  'آب',
-  'أيلول',
-  'تشرين الأول',
-  'تشرين الثاني',
-  'كانون الأول',
-];
+import { MONTHS } from '../lib/dates';
 
 /** «4:32 م» in the store's digits. */
 export function clockText(ms: number, digits: Digits = 'latn'): string {
