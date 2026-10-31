@@ -363,7 +363,7 @@ describe('POST /v1/sync/push', () => {
     const doc = deviceDocs(device);
     const sent = [doc(), doc()];
     await pushOk(device, [sent[0]!], { lastIssued: { INV: 2 } });
-    await ownerDb()`update devices set revoked_at = now() where id = ${device.deviceId}`;
+    await ownerDb()`update devices set status = 'revoked', revoked_at = now() where id = ${device.deviceId}`;
 
     const res = await pushOk(device, [sent[1]!, doc(), doc('customer', { name: 'x' })], {
       lastIssued: { INV: 99 },

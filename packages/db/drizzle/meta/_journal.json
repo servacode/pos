@@ -71,6 +71,13 @@
       "when": 1793400667483,
       "tag": "0009_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793428031320,
+      "tag": "0010_devices",
+      "breakpoints": true
     }
   ]
 }

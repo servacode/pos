@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { eq, sql, type SQL } from 'drizzle-orm';
 import { branches, withTenant } from '@serva/db';
+import { createDevice } from './devices';
 import { appDb, closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
 
 /**
@@ -249,8 +250,69 @@ describe('sync tables', () => {
         sql`insert into sync_tombstones (tenant_id, collection, record_id) values (${tenantId}, 'users', ${tenantId})`,
       ),
     ).toBe('42501');
-    expect(await inStore(sql`update devices set revoked_at = null`)).toBe('42501');
+    expect(await inStore(sql`update devices set public_key = 'x', kind = 'hub'`)).toBe('42501');
+    expect(await inStore(sql`delete from devices`)).toBe('42501');
     expect(await inStore(sql`update sync_inbox set payload_hash = 'x'`)).toBe('42501');
     expect(await inStore(sql`delete from sync_inbox`)).toBe('42501');
+  });
+
+  it('a revoked device never comes back, and a code or a token once given never changes, for any role', async () => {
+    const { body } = await registerStore(app);
+    const tenantId: string = body.tenant.id;
+    const revoked = await createDevice(tenantId, { revoked: true });
+    const active = await createDevice(tenantId);
+    const inStore = (statement: SQL) =>
+      withTenant(appDb().db, tenantId, (tx) => tx.execute(statement)).then(
+        () => 'ok',
+        (e: { cause?: { code?: string }; code?: string }) => e.cause?.code ?? e.code,
+      );
+    const checkViolation = '23514';
+    expect(
+      await inStore(
+        sql`update devices set revoked_at = null, status = 'active' where id = ${revoked.deviceId}`,
+      ),
+    ).toBe(checkViolation);
+    expect(
+      await inStore(sql`update devices set status = 'pending_approval' where id = ${active.deviceId}`),
+    ).toBe(checkViolation);
+    expect(await inStore(sql`update devices set code = '999' where id = ${active.deviceId}`)).toBe(
+      checkViolation,
+    );
+    expect(await inStore(sql`update devices set token_hash = 'x' where id = ${active.deviceId}`)).toBe(
+      checkViolation,
+    );
+    // Not even the owner role, which bypasses row-level security.
+    await expect(
+      ownerDb()`update devices set status = 'active', revoked_at = null where id = ${revoked.deviceId}`,
+    ).rejects.toThrow(/stays revoked|cannot go from revoked/);
+    // A code exists exactly when the device was approved.
+    await expect(
+      ownerDb()`insert into devices (tenant_id, branch_id, name, status) values (${tenantId}, ${active.branchId}, 'x', 'active')`,
+    ).rejects.toThrow(/devices_code_status_check/);
+    // What a device itself reports is still writable.
+    expect(
+      await inStore(
+        sql`update devices set unsent_count = 3, last_heartbeat_at = now() where id = ${active.deviceId}`,
+      ),
+    ).toBe('ok');
+  });
+
+  it('every store has a unique 6-digit store code, and the store role cannot change it', async () => {
+    const a = (await registerStore(app, { phone: '0911111111' })).body;
+    const b = (await registerStore(app, { phone: '0922222222' })).body;
+    const codes = await ownerDb()<{ store_code: string }[]>`select store_code from tenants`;
+    expect(codes).toHaveLength(2);
+    for (const { store_code } of codes) expect(store_code).toMatch(/^[0-9]{6}$/);
+    expect(codes[0]!.store_code).not.toBe(codes[1]!.store_code);
+    const changed = await withTenant(appDb().db, a.tenant.id, (tx) =>
+      tx.execute(sql`update tenants set store_code = '000000'`),
+    ).then(
+      () => 'ok',
+      (e: { cause?: { code?: string } }) => e.cause?.code,
+    );
+    expect(changed).toBe('42501');
+    await expect(
+      ownerDb()`update tenants set store_code = '12345' where id = ${b.tenant.id}`,
+    ).rejects.toThrow(/tenants_store_code_check/);
   });
 });

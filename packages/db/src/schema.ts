@@ -182,11 +182,18 @@ export const tenants = pgTable(
     agentId: uuid('agent_id').references(() => agents.id),
     /** Checked at login, refresh and on every authenticated request */
     status: tenantStatus('status').notNull().default('active'),
+    /**
+     * Public 6-digit code typed with a manual pairing code (17 › الأجهزة). Random and unique,
+     * given by tenant_new_store_code(); not a secret.
+     */
+    storeCode: text('store_code')
+      .notNull()
+      .default(sql`tenant_new_store_code()`),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  () => [tenantIsolation(sql`id`)],
+  (t) => [unique('tenants_store_code_unique').on(t.storeCode), tenantIsolation(sql`id`)],
 );
 
 export const subscriptions = pgTable(
@@ -274,12 +281,14 @@ export const branches = pgTable(
 
 /**
  * Devices (09: formerly registers): a cashier, an Android POS with a built-in printer, a sales
- * rep's phone, a waiter's device, a price checker, a kitchen screen, a branch hub. The minimum for
- * sync now; pairing, approval and licences (17 › الأجهزة) add to it.
+ * rep's phone, a waiter's device, a price checker, a kitchen screen, a branch hub.
  *
- * The 3-digit code goes into every document number the device issues (INV-001-002-0000154). It is
- * reserved at activation and never reused in its branch, so a re-activated device gets a new one.
- * The device token is stored only as a hash and found through device_find_by_token_hash().
+ * A device linked with a pairing code waits for the owner's «اسمح» (pending_approval: no code, no
+ * token) and polls with a secret kept only as a hash. On approval it takes the next 3-digit code
+ * of its branch, which goes into every document number it issues (INV-001-002-0000154) and is
+ * never reused, so a re-activated device gets a new one. The device token is made when the device
+ * collects it, stored only as a hash and found through device_find_by_token_hash(). The allowed
+ * status changes are enforced by a trigger (0010_devices.sql).
  */
 export const devices = pgTable(
   'devices',
@@ -287,20 +296,38 @@ export const devices = pgTable(
     id: id(),
     tenantId: uuid('tenant_id').notNull(),
     branchId: uuid('branch_id').notNull(),
-    code: text('code').notNull(),
+    /** null until approved */
+    code: text('code'),
     name: text('name').notNull(),
     /** cashier, android_pos, rep_phone, waiter, price_checker, kitchen_screen, call_screen, hub */
     kind: text('kind').notNull().default('cashier'),
     /** browser, windows, android, ios */
     platform: text('platform').notNull().default('browser'),
-    /** sha256 of the device token; null until activated */
+    /** pending_approval, active, rejected, revoked */
+    status: text('status').notNull().default('active'),
+    /** sha256 of the device token; null until the device collects it */
     tokenHash: text('token_hash'),
     /** Public key of the device's own key pair (pairing, licences) */
     publicKey: text('public_key'),
+    /** The pairing code it was linked with; null when the owner signed in on the device */
+    pairingId: uuid('pairing_id'),
+    /** sha256 of the secret the device polls with while it waits for approval */
+    activationSecretHash: text('activation_secret_hash'),
+    /** The wait for approval ends here */
+    activationExpiresAt: timestamp('activation_expires_at', { withTimezone: true }),
+    /** When the device collected its token (given once) */
+    tokenIssuedAt: timestamp('token_issued_at', { withTimezone: true }),
+    approvedBy: uuid('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
     /** Revoked (lost or stolen): documents after its last announced number are quarantined */
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+    /** Heartbeat (17 › POST /v1/sync/heartbeat); the last number per series is in doc_sequences */
+    lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
+    /** Documents waiting on the device, as it last reported */
+    unsentCount: integer('unsent_count'),
+    storageUsedBytes: bigint('storage_used_bytes', { mode: 'number' }),
     appVersion: text('app_version'),
     /** Device clock minus server clock at the last sync */
     clockOffsetMs: integer('clock_offset_ms'),
@@ -311,10 +338,14 @@ export const devices = pgTable(
   (t) => [
     primaryKey({ name: 'devices_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.approvedBy], foreignColumns: [users.tenantId, users.id] }),
     unique('devices_branch_code_unique').on(t.tenantId, t.branchId, t.code),
     uniqueIndex('devices_token_hash_unique')
       .on(t.tokenHash)
       .where(sql`${t.tokenHash} is not null`),
+    uniqueIndex('devices_activation_secret_hash_unique')
+      .on(t.activationSecretHash)
+      .where(sql`${t.activationSecretHash} is not null`),
     tenantIsolation(),
   ],
 );
@@ -394,6 +425,44 @@ export const userRoles = pgTable(
     foreignKey({ columns: [t.tenantId, t.roleId], foreignColumns: [roles.tenantId, roles.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     unique('user_roles_unique').on(t.userId, t.roleId, t.branchId).nullsNotDistinct(),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A pairing code the owner makes for one branch (09 › device_pairings, 16 › زرع جهاز): a QR token
+ * of 128 random bits and an 8-character code typed with the store code, both stored only as
+ * hashes. Valid 10 minutes, dead after 5 wrong tries, used by one device only. Found before the
+ * store is known through device_pairing_find_by_qr_hash() and tenant_find_by_store_code().
+ */
+export const devicePairings = pgTable(
+  'device_pairings',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    /** sha256 of the QR token */
+    qrTokenHash: text('qr_token_hash').notNull(),
+    /** sha256 of the store id and the manual code */
+    codeHash: text('code_hash').notNull(),
+    createdBy: uuid('created_by').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** Wrong codes typed for this store while it was open */
+    attempts: integer('attempts').notNull().default(0),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    /** The device linked with it */
+    deviceId: uuid('device_id'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'device_pairings_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.createdBy], foreignColumns: [users.tenantId, users.id] }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    uniqueIndex('device_pairings_qr_token_hash_unique').on(t.qrTokenHash),
+    index('device_pairings_code_idx').on(t.tenantId, t.codeHash),
     tenantIsolation(),
   ],
 );
