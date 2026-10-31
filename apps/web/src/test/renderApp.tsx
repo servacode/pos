@@ -6,6 +6,10 @@ import { App } from '../App';
 // its findBy timeout on compiling the chunk.
 import '../admin/AdminApp';
 import '../admin/devices/DevicesPage';
+import '../admin/products/ProductsPage';
+import '../admin/products/ProductPage';
+import '../admin/categories/CategoriesPage';
+import '../admin/staff/PinPage';
 import '../pos/PosApp';
 import '../pos/link/DeviceLink';
 
