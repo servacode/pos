@@ -178,7 +178,7 @@ export async function pushDocuments(
   });
 }
 
-const clampInt = (n: number) => Math.max(-2_147_483_648, Math.min(2_147_483_647, Math.round(n)));
+export const clampInt = (n: number) => Math.max(-2_147_483_648, Math.min(2_147_483_647, Math.round(n)));
 
 async function processDocument(
   tx: Transaction,
@@ -349,7 +349,15 @@ async function linkWaiting(tx: Transaction, tenantId: string, docId: string, now
           where i.tenant_id = w.tenant_id and i.doc_id = d.id and i.status in ('accepted', 'pending_link')))`);
 }
 
-async function recordAnnounced(tx: Transaction, device: DeviceClaims, lastIssued: Record<string, number>) {
+/**
+ * The last number the device says it issued per series. Only ever goes up; never called for a
+ * revoked device, whose cut-off stays what it announced before it was revoked.
+ */
+export async function recordAnnounced(
+  tx: Transaction,
+  device: DeviceClaims,
+  lastIssued: Record<string, number>,
+) {
   for (const [series, last] of Object.entries(lastIssued)) {
     await tx
       .insert(docSequences)

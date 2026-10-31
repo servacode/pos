@@ -1,7 +1,9 @@
+import { Dexie } from 'dexie';
+import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
-import { DeviceNotLinkedError } from '../src/dexie';
+import { DeviceDatabase, DeviceNotLinkedError, DexieSyncStore } from '../src/dexie';
 import { createUuidV7, payloadHash, syncDocumentSchema } from '../src';
-import { freshStore, linkedStore, sale } from './helpers';
+import { freshStore, linkedDevice, linkedStore, sale } from './helpers';
 
 const ctx = (now = Date.parse('2026-10-30T09:00:00Z')) => ({ now, newId: createUuidV7({ now: () => now }) });
 
@@ -105,6 +107,42 @@ describe('device database (Dexie)', () => {
     await store.resetSets(['users']);
     expect(await store.readSet('users')).toEqual([]);
     expect(await store.getCursors()).toEqual({ branches: '7' });
+  });
+
+  it('applies a snapshot in one step: its sets replaced, their cursors and the epoch saved, other sets kept', async () => {
+    const store = await linkedStore();
+    await store.applyPullPage(
+      {
+        users: { upserts: [{ id: 'stale' }], deletes: [], cursor: '3' },
+        roles: { upserts: [{ id: 'r1' }], deletes: [], cursor: '3' },
+      },
+      1,
+    );
+    await store.applySnapshot(
+      { sets: { users: [{ id: 'u1' }, { id: 'u2' }], branches: [] }, cursors: { users: '9', branches: '9' } },
+      2,
+    );
+    expect(await store.readSet('users')).toEqual([{ id: 'u1' }, { id: 'u2' }]);
+    expect(await store.readSet('roles')).toEqual([{ id: 'r1' }]);
+    expect(await store.getCursors()).toEqual({ users: '9', branches: '9', roles: '3' });
+    expect((await store.getMeta()).serverEpoch).toBeNull();
+    await store.applySnapshot({ sets: {}, cursors: {}, serverEpoch: 5 }, 3);
+    expect(await store.getMeta()).toMatchObject({ serverEpoch: 5, lastPullAt: 3 });
+  });
+
+  it('opens a database made by the first version and keeps what it holds (forward-only upgrade)', async () => {
+    const factory = new IDBFactory();
+    const old = new Dexie('upgrade-test', { indexedDB: factory, IDBKeyRange });
+    old
+      .version(1)
+      .stores({ device: '&key', outbox: '&seq, &id, status, [status+seq], [status+confirmedAt]' });
+    await old.table('device').put({ ...linkedDevice(), key: 'self' });
+    old.close();
+
+    const store = new DexieSyncStore(new DeviceDatabase('upgrade-test', { indexedDB: factory, IDBKeyRange }));
+    expect(await store.getDevice()).toEqual(linkedDevice());
+    expect(await store.getDeviceKeys()).toBeNull();
+    expect(store.db.verno).toBe(2);
   });
 
   it('after a server restore, queues every retained confirmed document again and forgets pulled data', async () => {

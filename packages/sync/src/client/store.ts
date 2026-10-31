@@ -58,9 +58,24 @@ export interface ResultUpdate {
  * Windows and Android builds can implement the same interface over SQLite. Every method is one
  * local transaction: it happens entirely or not at all.
  */
+/** A WebCrypto key pair (CryptoKeyPair), named without the DOM types this package does not load. */
+export type DeviceKeyPair = Extract<
+  Awaited<ReturnType<typeof globalThis.crypto.subtle.generateKey>>,
+  { privateKey: unknown }
+>;
+
+export interface AppliedSnapshot {
+  sets: Record<string, Array<Record<string, unknown> & { id: string }>>;
+  cursors: Record<string, string>;
+  serverEpoch?: number;
+}
+
 export interface SyncStore {
   getDevice(): Promise<DeviceRecord | null>;
   putDevice(device: DeviceRecord): Promise<void>;
+  /** The device's own key pair; the private key is not extractable and never leaves the device */
+  getDeviceKeys(): Promise<DeviceKeyPair | null>;
+  putDeviceKeys(keys: DeviceKeyPair): Promise<void>;
 
   /**
    * Saves a document in the outbox, with its id, its seq, its number and a second copy in the
@@ -99,6 +114,11 @@ export interface SyncStore {
   applyPullPage(sets: Record<string, PullSetPage>, now: number): Promise<void>;
   /** Drops the cached rows and cursors of these sets so they download again */
   resetSets(sets: string[]): Promise<void>;
+  /**
+   * Applies a downloaded snapshot: replaces every row of its sets, saves their cursors and, when
+   * given, the server epoch, all in one transaction (15 › التطبيق في خطوة واحدة).
+   */
+  applySnapshot(snapshot: AppliedSnapshot, now: number): Promise<void>;
   /** Rows of a pulled set */
   readSet(set: string): Promise<Array<Record<string, unknown> & { id: string }>>;
 }

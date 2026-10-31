@@ -1,16 +1,28 @@
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
-import type { DeviceRecord, NewDocument, SyncTransport, TransportResult } from '../src/client';
+import type {
+  DeviceRecord,
+  DownloadOptions,
+  NewDocument,
+  SyncTransport,
+  TransportResult,
+} from '../src/client';
 import { DexieSyncStore, DeviceDatabase } from '../src/dexie';
 import {
   CONTRACT_VERSION,
   INITIAL_CURSOR,
   payloadHash,
   pushRequestSchema,
+  type BootstrapResponse,
+  type HeartbeatRequest,
+  type HeartbeatResponse,
   type PullResponse,
   type PushRequest,
   type PushResponse,
   type PushResult,
   type ResyncResponse,
+  type SnapshotLine,
   type StoredStatus,
 } from '../src';
 
@@ -225,17 +237,70 @@ export class ModelServer {
     };
   }
 
+  /** Snapshot files by id, as the server keeps them */
+  readonly files = new Map<string, Uint8Array>();
+  readonly heartbeats: HeartbeatRequest[] = [];
+
+  /** A snapshot file of these sets, in the server's format, from the same rows a pull reads. */
+  buildSnapshot(sets: string[] = [...this.state.rows.keys()]): BootstrapResponse {
+    const snapshotId = `00000000-0000-4000-8000-${String(this.files.size + 1).padStart(12, '0')}`;
+    const lines: SnapshotLine[] = [
+      {
+        kind: 'header',
+        snapshotId,
+        contractVersion: CONTRACT_VERSION,
+        serverEpoch: this.state.epoch,
+        createdAt: new Date().toISOString(),
+        sets,
+      },
+    ];
+    const cursors: Record<string, string> = {};
+    let rows = 0;
+    for (const set of sets) {
+      const page = this.pull({ [set]: INITIAL_CURSOR }, Number.MAX_SAFE_INTEGER).sets[set]!;
+      for (const row of page.upserts) lines.push({ kind: 'row', set, row });
+      rows += page.upserts.length;
+      cursors[set] = page.cursor;
+      lines.push({ kind: 'cursor', set, cursor: page.cursor });
+    }
+    lines.push({ kind: 'end', rows });
+    const file = new Uint8Array(gzipSync(lines.map((l) => `${JSON.stringify(l)}\n`).join('')));
+    this.files.set(snapshotId, file);
+    return {
+      contractVersion: CONTRACT_VERSION,
+      serverTime: new Date().toISOString(),
+      snapshotId,
+      url: `/v1/sync/snapshots/${snapshotId}`,
+      bytes: file.length,
+      sha256: createHash('sha256').update(file).digest('hex'),
+      cursors,
+      serverEpoch: this.state.epoch,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    };
+  }
+
   resync(sets: string[]): ResyncResponse {
+    const snapshot = this.buildSnapshot(sets);
+    return {
+      ...snapshot,
+      sets: Object.fromEntries(sets.map((s) => [s, { cursor: INITIAL_CURSOR, snapshotUrl: snapshot.url }])),
+    };
+  }
+
+  heartbeat(request: HeartbeatRequest): HeartbeatResponse {
+    this.heartbeats.push(structuredClone(request));
     return {
       contractVersion: CONTRACT_VERSION,
       serverEpoch: this.state.epoch,
       serverTime: new Date().toISOString(),
-      sets: Object.fromEntries(sets.map((s) => [s, { cursor: INITIAL_CURSOR, snapshotUrl: null }])),
+      commands: {},
     };
   }
 }
 
 export type Fault = 'lose_request' | 'lose_response' | 'busy' | 'too_large';
+/** cut: the connection drops after `cutAfter` bytes; restart: a 200 with the whole file to a Range */
+export type DownloadFault = 'cut' | 'lose_request' | 'restart' | 'not_found';
 
 /** A transport to a ModelServer that can lose requests or answers on demand. */
 export class ModelTransport implements SyncTransport {
@@ -278,5 +343,44 @@ export class ModelTransport implements SyncTransport {
 
   async resync(sets: string[]): Promise<TransportResult<ResyncResponse>> {
     return { ok: true, body: this.server.resync(sets) };
+  }
+
+  readonly downloadFaults: DownloadFault[] = [];
+  /** Bytes sent before a 'cut' */
+  cutAfter = 64;
+  /** Every download request: where it started from */
+  readonly downloads: Array<{ offset: number; etag: string | null }> = [];
+  heartbeatDown = false;
+
+  async heartbeat(request: HeartbeatRequest): Promise<TransportResult<HeartbeatResponse>> {
+    if (this.heartbeatDown) return { ok: false, kind: 'network' };
+    return { ok: true, body: this.server.heartbeat(request) };
+  }
+
+  async bootstrap(): Promise<TransportResult<BootstrapResponse>> {
+    return { ok: true, body: this.server.buildSnapshot() };
+  }
+
+  async download(url: string, options: DownloadOptions): Promise<TransportResult<{ complete: true }>> {
+    this.downloads.push({ offset: options.offset, etag: options.etag });
+    const fault = this.downloadFaults.shift();
+    if (fault === 'lose_request') return { ok: false, kind: 'network' };
+    const file = this.server.files.get(url.split('/').at(-1)!);
+    if (!file || fault === 'not_found') return { ok: false, kind: 'refused', status: 404, code: 'not_found' };
+    let from = options.offset;
+    if (fault === 'restart' && from > 0) {
+      options.onRestart();
+      from = 0;
+    }
+    const rest = file.subarray(from);
+    if (fault === 'cut') {
+      options.onData(rest.slice(0, this.cutAfter));
+      return { ok: false, kind: 'network' };
+    }
+    // In two pieces, as a network would.
+    const half = Math.ceil(rest.length / 2);
+    options.onData(rest.slice(0, half));
+    options.onData(rest.slice(half));
+    return { ok: true, body: { complete: true } };
   }
 }
