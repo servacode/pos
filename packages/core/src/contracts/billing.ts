@@ -460,6 +460,12 @@ export interface PublicPaymentAccount {
   bankBranch: string | null;
   /** Shown above the form, e.g. «اكتب رقم الفاتورة SUB-… في الملاحظة» */
   instructions: string | null;
+  /**
+   * 13: «تغيير طرق الدفع يُعلن داخل تطبيقات كل المتاجر قبل سريانه». When an approved or pending
+   * change will replace this account's details: the page warns «تتغيّر بيانات هذا الحساب في …، ادفع
+   * فقط للأرقام الظاهرة هنا». The new details are never shown before they take effect.
+   */
+  changesAt: string | null;
 }
 
 // ─── Invoices ────────────────────────────────────────────────────────────────
