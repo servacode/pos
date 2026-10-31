@@ -274,7 +274,9 @@ export function settleSale(input: SettlementInput): SaleSettlement {
   const paidBase = sumMinor(payments.map((p) => p.baseAmountMinor));
   const remainingMinor = Math.max(0, due - paidBase);
   const remainingCashMinor = Math.max(0, -changeS);
-  const covered = hasCash ? changeS >= 0 : remainder === 0;
+  // Without cash, a remainder smaller than half the cash step rounds to nothing: the sale closes
+  // with that rounding and no cash, instead of waiting for a payment of zero.
+  const covered = hasCash ? changeS >= 0 : remainder === 0 || dueS === 0;
   if (!covered) {
     return {
       dueMinor: due,
@@ -296,7 +298,17 @@ export function settleSale(input: SettlementInput): SaleSettlement {
       remainingCashMinor: 0,
       payments,
       change: null,
-      cashRounding: null,
+      cashRounding:
+        remainder === 0
+          ? null
+          : {
+              currency: settlement,
+              stepMinor: step,
+              exactMinor: exactS,
+              dueMinor: 0,
+              roundingMinor: -exactS,
+              roundingBaseMinor: paidBase - due,
+            },
     };
   }
 

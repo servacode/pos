@@ -146,6 +146,7 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
     settings: [
       {
         id: ids.tenant,
+        idleMinutes: 5,
         baseCurrency: 'SYP',
         enabledCurrencies: ['SYP', 'USD'],
         taxInclusive: true,

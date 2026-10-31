@@ -320,6 +320,29 @@ describe('settleSale', () => {
     expect(settled.change).toMatchObject({ amountMinor: 1000 });
   });
 
+  it('closes a sale whose cash left rounds to nothing, with no cash handed over', () => {
+    const settled = settleSale({
+      currency: 'SYP',
+      exchangeRates: [],
+      totalMinor: 100400,
+      payments: [{ method: 'card', currency: 'SYP', amountMinor: 100000, reference: '1' }],
+      cashSteps: STEPS,
+    });
+    // 4.00 ل.س left rounds to 0 with a 10 ل.س step: nothing to collect, and the rounding is kept.
+    expect(settled).toMatchObject({ covered: true, remainingCashMinor: 0, change: null });
+    expect(settled.cashRounding).toMatchObject({ exactMinor: 400, dueMinor: 0, roundingBaseMinor: -400 });
+    // A remainder that rounds up still waits for cash.
+    expect(
+      settleSale({
+        currency: 'SYP',
+        exchangeRates: [],
+        totalMinor: 100600,
+        payments: [{ method: 'card', currency: 'SYP', amountMinor: 100000, reference: '1' }],
+        cashSteps: STEPS,
+      }),
+    ).toMatchObject({ covered: false, remainingCashMinor: 1000 });
+  });
+
   it('finds rates in either direction and none for the invoice currency', () => {
     const inverse: TradeRate = { unit: 'SYP', quote: 'USD', rate: '1' };
     expect(rateFor([USD_130], 'SYP', 'SYP')).toBeUndefined();

@@ -1,26 +1,8 @@
-import type { Permission } from '@serva/core';
+import type { StaffSessionInput, StaffSessionResponse } from '@serva/core';
 import { APP_VERSION } from '../../offline/sync';
 
-/**
- * POST /v1/device/staff-sessions (`Authorization: Device <token>`), as the step-4 brief defines it.
- * These shapes belong in packages/core/src/contracts/staff.ts (written by the server package);
- * until that file lands this local copy matches it field for field: `staffSessionInput` is
- * { userId, pin } and the answer is StaffSessionResponse.
- */
-export interface StaffSessionInput {
-  userId: string;
-  /** 4 or 6 digits; Arabic digits are accepted by the server too, the device sends Latin ones */
-  pin: string;
-}
-
-export interface StaffSessionResponse {
-  userId: string;
-  fullName: string;
-  roles: { key: string; name: string; branchId: string | null }[];
-  permissions: Permission[];
-  pinVersion: number;
-  pinLength: 4 | 6;
-}
+/** POST /v1/device/staff-sessions (`Authorization: Device <token>`): shapes from `@serva/core` (contracts/staff). */
+export type { StaffSessionInput, StaffSessionResponse };
 
 export type StaffSessionAnswer =
   | { kind: 'ok'; body: StaffSessionResponse }

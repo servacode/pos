@@ -120,7 +120,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     ).finally(onSignOut);
   }, [pos.local, session.userId, onSignOut]);
 
-  const idleMinutes = (settings as { idleMinutes?: number } | null)?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
+  const idleMinutes = settings?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
   useIdle(idleMinutes * 60_000, lock);
 
   // Print once the receipt is in the page; the portal stays until the next one.

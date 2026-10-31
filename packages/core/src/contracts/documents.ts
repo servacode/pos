@@ -342,8 +342,14 @@ export const salePayloadSchema = z
         issue(['change', 'currency'], 'change is given in the settlement currency');
       }
     }
-    if (hasCash !== (sale.cashRounding !== null)) {
-      issue(['cashRounding'], 'cashRounding is present exactly when there is a cash payment');
+    // With no cash, rounding appears only when the cash left rounded to nothing (dueMinor 0).
+    if (
+      hasCash ? sale.cashRounding === null : sale.cashRounding !== null && sale.cashRounding.dueMinor !== 0
+    ) {
+      issue(
+        ['cashRounding'],
+        'cashRounding is present with a cash payment, or when the cash left rounds to zero',
+      );
     }
     if (nonCashBase > bigSum([sale.totals.totalMinor, sale.tipMinor])) {
       issue(['payments'], 'non-cash payments exceed the amount due');
