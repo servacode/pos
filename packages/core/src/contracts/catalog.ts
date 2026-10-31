@@ -366,11 +366,6 @@ export interface ProductDetail {
   unitId: string;
   taxRateId: string | null;
   sellOnPos: boolean;
-  /**
-   * A sample item «تجريبي» added by the setup wizard (04; contracts/onboarding.ts): removed with
-   * one tap or by itself at the first real invoice. Missing means false (servers before step 6).
-   */
-  isDemo?: boolean;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -387,8 +382,6 @@ export interface ProductListItem {
   categoryName: string | null;
   type: ProductType;
   status: ProductStatus;
-  /** A wizard sample item «تجريبي»; missing means false */
-  isDemo?: boolean;
   archivedAt: string | null;
   /** Live variants */
   variantCount: number;

@@ -1,8 +1,6 @@
 import { z } from 'zod';
 import { normalizePhone } from '../phone';
-import type { FeatureKey, SectorKey } from '../sectors';
-import type { StoreAccess, SubscriptionState } from './billing';
-import type { OnboardingStep } from './onboarding';
+import type { SectorKey } from '../sectors';
 import type { CurrencyCode } from '../currencies';
 import { toLatinDigits } from '../text';
 import type { Permission, SystemRoleKey } from '../permissions';
@@ -45,11 +43,6 @@ export const registerStoreInput = z.object({
   password: passwordSchema,
   /** Optional referral code of the agent who brought the store */
   agentCode: agentCodeSchema.optional(),
-  /**
-   * How the code came: from the agent's link (`/register?agent=CODE`, pre-filled) or typed by the
-   * owner (23 › 7). Ignored without `agentCode`; `code` when not given.
-   */
-  agentVia: z.enum(['link', 'code']).optional(),
   termsVersion: z
     .string('الموافقة على الشروط مطلوبة')
     .trim()
@@ -150,20 +143,7 @@ export interface MeResponse {
     currentPeriodEnd: string | null;
     /** Whole days left in the trial or paid period; null when unlimited */
     daysLeft: number | null;
-    /**
-     * Step 6 (contracts/billing.ts subscriptionState): what the screens act on, and whether writes
-     * work. Optional only until the server fills them; the web treats missing as `full`.
-     */
-    state?: SubscriptionState;
-    access?: StoreAccess;
-    provisionalUntil?: string | null;
   };
-  /**
-   * Step 6 (contracts/onboarding.ts): the wizard step to resume (`done` once completed) and the
-   * switched-on features the menu shows. Optional only until the server fills them.
-   */
-  onboarding?: { step: OnboardingStep; completedAt: string | null };
-  features?: FeatureKey[];
   branches: { id: string; code: string; name: string }[];
 }
 
