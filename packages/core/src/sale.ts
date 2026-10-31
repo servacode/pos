@@ -9,7 +9,7 @@ import type {
   SalePayment,
 } from './contracts/documents';
 import type { TradeRate } from './contracts/common';
-import { convert, roundDiv, sumMinor } from './money';
+import { convert, lineGross, roundDiv, sumMinor } from './money';
 import { priceInvoice, roundCashDue, type PricedInvoice } from './pricing';
 
 /**
@@ -140,6 +140,24 @@ export function lineBaseQty(qty: number, packQty: number): number {
     throw new RangeError(`packQty must be a positive safe integer, got ${packQty}`);
   }
   return sumMinor([Number(roundDiv(BigInt(qty) * BigInt(packQty), 1000n))]);
+}
+
+/**
+ * The price of one pack sold through a pack barcode (catalog BarcodeRow): its own packPriceMinor
+ * when set, else packQty × the unit price, rounded half away from zero. In the variant's currency.
+ */
+export function packPrice(unitPriceMinor: number, packQty: number, packPriceMinor: number | null): number {
+  return packPriceMinor ?? lineGross(unitPriceMinor, packQty);
+}
+
+/**
+ * Whether a discount needs the manager (11 › ما يحتاج موافقة: يتجاوز حد الدور): discountMinor is
+ * more than maxDiscountBp of the amount it applies to. A line's discount applies to its gross; the
+ * invoice discount to the lines' total after their own discounts. A price typed in the cart is a
+ * discount too, and a price under the variant's minPriceMinor needs the manager whatever the limit.
+ */
+export function discountOverLimit(discountMinor: number, baseMinor: number, maxDiscountBp: number): boolean {
+  return BigInt(discountMinor) * 10_000n > BigInt(baseMinor) * BigInt(maxDiscountBp);
 }
 
 /**

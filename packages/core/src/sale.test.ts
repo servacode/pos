@@ -7,6 +7,8 @@ import { PRICING_ENGINE_VERSION, priceInvoice } from './pricing';
 import {
   buildSalePayload,
   businessDateOf,
+  discountOverLimit,
+  packPrice,
   lineBaseQty,
   priceSale,
   rateFor,
@@ -325,6 +327,20 @@ describe('settleSale', () => {
     expect(rateFor([inverse], 'SYP', 'USD')).toBe(inverse);
     expect(rateFor([inverse], 'USD', 'SYP')).toBe(inverse);
     expect(() => rateFor([], 'USD', 'SYP')).toThrow(RangeError);
+  });
+
+  it('prices a pack from its own price or from the unit price', () => {
+    expect(packPrice(364000, 4000, 1456000)).toBe(1456000);
+    expect(packPrice(364000, 4000, null)).toBe(1456000);
+    expect(packPrice(333, 1500, null)).toBe(500);
+  });
+
+  it('asks for the manager only above the role’s limit', () => {
+    // A cashier's limit is 10%: 60.00 off 600.00 is fine, 60.01 is not.
+    expect(discountOverLimit(6000, 60000, 1000)).toBe(false);
+    expect(discountOverLimit(6001, 60000, 1000)).toBe(true);
+    expect(discountOverLimit(1, 60000, 0)).toBe(true);
+    expect(discountOverLimit(60000, 60000, 10000)).toBe(false);
   });
 
   it('computes base quantities and refuses impossible ones', () => {
