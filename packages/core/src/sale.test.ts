@@ -559,6 +559,29 @@ describe('sale payload properties', () => {
     );
   });
 
+  it('closes a zero sale with a tip too small to collect in the change currency (found by CI)', () => {
+    const sale = buildSalePayload(
+      caseToCart({
+        lines: [
+          { priceMinor: 0, priceCurrency: 'SYP', qty: 1, packQty: 1000, taxRateBp: 0, discount: undefined },
+        ],
+        rate: '130',
+        taxInclusive: false,
+        invoiceDiscountBp: undefined,
+        tipMinor: 1,
+        cardShare: 0,
+        usdTender: 0,
+        extraTender: 0,
+        changeCurrency: 'USD',
+        sypStep: 0,
+        usdStep: 0,
+      } as CartCase),
+    );
+    expect(imbalance(sale)).toBe(0);
+    expect(validateDocumentPayload('sale', sale)).toEqual({ ok: true, checked: true });
+    expect(verifySalePayload(sale)).toEqual([]);
+  });
+
   it('payments always cover the total: Σ payments − change = total + tip + rounding, and the payload is valid', () => {
     fc.assert(
       fc.property(cartArb, (c) => {
