@@ -26,4 +26,3 @@ scripts/local/
 scripts/ci/
 .github/
 docs/adr/
-packages/core/src/does-not-exist.ts
