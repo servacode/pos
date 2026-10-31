@@ -9,7 +9,7 @@ import {
   staffSessionInput,
 } from './staff';
 
-const USER = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a04';
+const USER_ID = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a04';
 
 describe('setPinInput', () => {
   it('accepts 4 or 6 digits, Arabic digits read as Latin', () => {
@@ -40,9 +40,9 @@ describe('setPinInput', () => {
 
 describe('staffSessionInput', () => {
   it('takes a user id and a 4- or 6-digit PIN', () => {
-    expect(staffSessionInput.parse({ userId: USER, pin: '١٣٥٧' })).toEqual({ userId: USER, pin: '1357' });
+    expect(staffSessionInput.parse({ userId: USER_ID, pin: '١٣٥٧' })).toEqual({ userId: USER_ID, pin: '1357' });
     expect(staffSessionInput.safeParse({ userId: 'x', pin: '1357' }).success).toBe(false);
-    expect(staffSessionInput.safeParse({ userId: USER, pin: '13579' }).success).toBe(false);
+    expect(staffSessionInput.safeParse({ userId: USER_ID, pin: '13579' }).success).toBe(false);
   });
 });
 
