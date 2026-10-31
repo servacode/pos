@@ -7,6 +7,8 @@ import { App } from '../App';
 import '../admin/AdminApp';
 import '../admin/devices/DevicesPage';
 import '../pos/PosApp';
+import '../pos/staff/StaffSignIn';
+import '../pos/CashierApp';
 import '../pos/link/DeviceLink';
 
 export function renderApp(path = '/') {

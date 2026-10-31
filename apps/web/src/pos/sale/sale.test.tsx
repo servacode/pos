@@ -4,10 +4,10 @@ import type { SalePayload } from '@serva/core/contracts/documents';
 import { validateDocumentPayload } from '@serva/core/contracts/documents';
 import { verifySalePayload } from '@serva/core/sale';
 import { stripBidiControls } from '@serva/core/text';
-import { memoryLocal, type LocalStore } from '../../offline/local';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { ids, PINS, PRODUCTS } from '../../test/pos';
-import { renderPos, type RenderPosOptions } from '../../test/renderPos';
+import type { renderPos } from '../../test/renderPos';
+import { saleScreen, scan, SHIFT_ID } from '../../test/renderPos';
 
 let print: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -17,39 +17,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-export const SHIFT_ID = '0192a000-0000-7000-8000-00000000ffff';
-
-export async function openShift(local: LocalStore, userId = ids.samer) {
-  await local.set(`shift:${userId}`, {
-    key: `shift:${userId}`,
-    id: SHIFT_ID,
-    number: 'SFT-001-002-0000001',
-    openedBy: userId,
-    openedByName: 'سامر',
-    openedAt: Date.now(),
-    mode: 'per_cashier',
-    opening: [{ currency: 'SYP', amountMinor: 0, denominations: null }],
-  });
-}
-
-/** Signed in as سامر (cashier) with an open shift, on the sale screen. */
-export async function saleScreen(options: RenderPosOptions = {}) {
-  const local = options.local ?? memoryLocal();
-  await openShift(local);
-  const pos = renderPos({ ...options, local });
-  const list = await screen.findByRole('list', { name: 'الموظفون' });
-  await pos.user.click(within(list).getByRole('button', { name: /سامر/ }));
-  await pos.user.keyboard(PINS[ids.samer]!);
-  await screen.findByRole('list', { name: 'الأصناف' });
-  return pos;
-}
-
-/** What a scanner does: the whole code fast, then Enter, wherever the focus is. */
-export async function scan(user: ReturnType<typeof renderPos>['user'], code: string) {
-  (document.activeElement as HTMLElement | null)?.blur();
-  await user.keyboard(`${code}{Enter}`);
-}
 
 /** Text as read, without the direction isolates amounts carry. */
 const plain = (el: Element) => stripBidiControls(el.textContent ?? '');

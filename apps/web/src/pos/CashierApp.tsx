@@ -8,7 +8,8 @@ import { PrintableReceipt, type PaperWidth, type ReceiptData } from './receipt/R
 import { SaleDone } from './receipt/SaleDone';
 import { EMPTY_CART, type Cart } from './sale/cart';
 import { SaleScreen } from './sale/SaleScreen';
-import { usePos } from './services';
+import { PosProvider, usePos } from './services';
+import { validated } from './validate';
 import { readShift, type OpenShift } from './shift/shift';
 import { staffRoster, type StaffSession } from './staff/staff';
 import { StatusBar, type OutboxStatus } from './StatusBar';
@@ -53,7 +54,17 @@ export interface CashierAppProps {
  * its reprint, held carts, and the sign-out when the device sits idle. Loaded after the code pad,
  * so the first screen stays small.
  */
-export function CashierApp({ session, catalog, persisted, online, outbox, onSignOut }: CashierAppProps) {
+export function CashierApp(props: CashierAppProps) {
+  const outer = usePos();
+  const pos = useMemo(() => ({ ...outer, save: validated(outer.save) }), [outer]);
+  return (
+    <PosProvider services={pos}>
+      <CashierScreens {...props} />
+    </PosProvider>
+  );
+}
+
+function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut }: CashierAppProps) {
   const pos = usePos();
   const digits = useDigits();
   const settings = catalog.settings;
@@ -73,11 +84,12 @@ export function CashierApp({ session, catalog, persisted, online, outbox, onSign
   const [printJob, setPrintJob] = useState<{ data: ReceiptData; copy: boolean } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const shiftMode = settings?.shiftMode ?? null;
   useEffect(() => {
-    if (!settings) return;
+    if (!shiftMode) return;
     let alive = true;
     void Promise.all([
-      readShift(pos.local, settings.shiftMode, session.userId),
+      readShift(pos.local, shiftMode, session.userId),
       pos.local.get<Cart>(cartKey(session.userId)),
       pos.local.get<Cart[]>(HELD_KEY),
       pos.local.get<LastSale>(LAST_SALE_KEY),
@@ -96,7 +108,7 @@ export function CashierApp({ session, catalog, persisted, online, outbox, onSign
     return () => {
       alive = false;
     };
-  }, [pos.local, settings, session.userId]);
+  }, [pos.local, shiftMode, session.userId]);
 
   const setCart = useCallback((update: (cart: Cart) => Cart) => setCartState(update), []);
 

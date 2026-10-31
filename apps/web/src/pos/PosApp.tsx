@@ -7,12 +7,13 @@ import { useDevice } from '../offline/useDevice';
 import { loadCatalog, type Catalog } from './catalog';
 import { PosProvider, saveWith, type PosServices } from './services';
 import { staffRoster, type StaffSession } from './staff/staff';
-import { StaffSignIn } from './staff/StaffSignIn';
 import { StatusBar, type OutboxStatus } from './StatusBar';
 import { useOnline } from './useOnline';
 
 // Linking runs once per device: its screens load only on a device that is not linked yet.
 const DeviceLink = lazy(() => import('./link/DeviceLink').then((m) => ({ default: m.DeviceLink })));
+// Who works and their code: loaded as soon as the device is known (a local file, no network).
+const StaffSignIn = lazy(() => import('./staff/StaffSignIn').then((m) => ({ default: m.StaffSignIn })));
 // The sale screen and everything after the sign-in.
 const CashierApp = lazy(() => import('./CashierApp').then((m) => ({ default: m.CashierApp })));
 
@@ -103,7 +104,11 @@ export function PosSession({ services, persisted }: { services: PosServices; per
             }
             mainClassName="grid place-items-center p-6 lg:px-14 lg:py-8"
           >
-            {catalog ? <StaffSignIn staff={staff} onSignedIn={setSession} /> : null}
+            {catalog ? (
+              <Suspense fallback={null}>
+                <StaffSignIn staff={staff} onSignedIn={setSession} />
+              </Suspense>
+            ) : null}
           </CashierShell>
         )}
       </DigitsProvider>
@@ -120,19 +125,20 @@ export function PosApp() {
   const { loading, device, persisted, sync, reload, engineSave } = useDevice();
   const online = useOnline();
 
+  const local = useMemo(() => (device ? dexieLocal(deviceStore().db) : null), [device]);
   const services = useMemo<PosServices | null>(() => {
-    if (!device) return null;
+    if (!device || !local) return null;
     const store = deviceStore();
     return {
       store,
-      local: dexieLocal(store.db),
+      local,
       device,
       save: saveWith(store, engineSave),
       online: () => globalThis.navigator?.onLine ?? true,
       now: Date.now,
       sync,
     };
-  }, [device, engineSave, sync]);
+  }, [device, local, engineSave, sync]);
 
   return (
     <>
