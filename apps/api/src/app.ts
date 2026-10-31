@@ -20,6 +20,7 @@ import { deviceRoutes } from './routes/devices';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
 import { syncRoutes } from './routes/sync';
+import { DOCUMENT_PROCESSORS } from './services/processors';
 import type { SyncProcessors } from './services/sync-push';
 import './types';
 
@@ -33,7 +34,7 @@ export interface BuildAppOptions {
   logStream?: NodeJS.WritableStream;
   /** Delivers sign-up codes; by default from OTP_DELIVERY */
   otpSender?: OtpSender | null;
-  /** What the server does with each synced document type (phase 1 registers sale posting here) */
+  /** What the server does with each synced document type; the phase-1 processors by default */
   syncProcessors?: SyncProcessors;
 }
 
@@ -43,7 +44,7 @@ export async function buildApp({
   clock = systemClock,
   logStream,
   otpSender,
-  syncProcessors,
+  syncProcessors = DOCUMENT_PROCESSORS,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const addressing = clientAddressing(env.TRUST_PROXY);
   const app = Fastify({
