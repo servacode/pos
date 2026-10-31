@@ -8,6 +8,8 @@ export class AppError extends Error {
     readonly code: ErrorCode,
     message: string,
     readonly fields?: Record<string, string>,
+    /** With `locked`: seconds until another try (also sent as Retry-After) */
+    readonly retryAfter?: number,
   ) {
     super(message);
     this.name = 'AppError';
@@ -19,6 +21,7 @@ export class AppError extends Error {
         code: this.code,
         message: this.message,
         ...(this.fields ? { fields: this.fields } : {}),
+        ...(this.retryAfter !== undefined ? { retryAfter: this.retryAfter } : {}),
         ...(ref ? { ref } : {}),
       },
     };

@@ -51,7 +51,7 @@ describe('/pos on a new device', () => {
     await user.type(screen.getByLabelText('اسم الجهاز'), 'كاشير 3');
     await user.click(screen.getByRole('button', { name: 'اطلب موافقة المالك' }));
 
-    expect(await screen.findByRole('heading', { name: 'اكتب رمز الدخول' })).toBeInTheDocument();
+    expect(await screen.findByText('لا أسماء موظفين على هذا الجهاز بعد')).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/devices/activate')[0]!.body).toMatchObject({
       method: 'qr',
       qrToken: QR_TOKEN,

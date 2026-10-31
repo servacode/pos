@@ -6,7 +6,15 @@ import { createUuidV7, parseDocNumber, type PushRequest } from '@serva/sync';
 import { Puller, Pusher, type NewDocument, type SyncTransport } from '@serva/sync/client';
 import { DeviceDatabase, DexieSyncStore } from '@serva/sync/dexie';
 import { createDevice, injectTransport, type Fault, type TestDevice } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
+import {
+  closeAppDb,
+  closeOwnerDb,
+  makeApp,
+  ownerDb,
+  registerStore,
+  resetDatabase,
+  salePayload,
+} from './helpers';
 
 /**
  * The real device code (Dexie over an in-memory IndexedDB, the fetch transport, the push and pull
@@ -78,7 +86,7 @@ async function client(): Promise<Client> {
 const newId = createUuidV7();
 const sale = (total: number, deps: string[] = []): NewDocument => ({
   type: deps.length ? 'return' : 'sale',
-  payload: { total, lines: [{ lineNo: 1, qty: 1000, price: total }] },
+  payload: deps.length ? { total, lines: [{ lineNo: 1, qty: 1000, price: total }] } : salePayload(total),
   deps,
   businessDate: '2026-10-30',
   engineVersion: '1.0.0',

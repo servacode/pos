@@ -5,7 +5,7 @@ import postgres from 'postgres';
 import type { FastifyInstance } from 'fastify';
 import type { LightMyRequestResponse } from 'fastify';
 import { createDb, type DbHandle } from '@serva/db';
-import { TERMS_VERSION, type RegisterStoreInput } from '@serva/core';
+import { buildSalePayload, TERMS_VERSION, type RegisterStoreInput } from '@serva/core';
 import { buildApp } from '../src/app';
 import type { OtpMessage, OtpSender } from '../src/auth/otp';
 import { ManualClock, type Clock } from '../src/clock';
@@ -150,4 +150,53 @@ export async function registerStore(app: FastifyInstance, overrides: Partial<Reg
   });
   if (res.statusCode !== 201) throw new Error(`register/verify failed: ${res.statusCode} ${res.body}`);
   return { res, body: res.json(), cookie: refreshCookie(res)! };
+}
+
+/**
+ * A valid `sale` payload (packages/core › contracts/documents.ts) of `totalMinor` pounds paid in
+ * cash, with `extra` fields beside it (unknown keys are kept and ignored by validation).
+ */
+export function salePayload(totalMinor = 1500, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [],
+      lines: [
+        {
+          lineNo: 1,
+          productId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a01',
+          variantId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a02',
+          name: 'شاي',
+          qty: 1000,
+          priceCurrency: 'SYP',
+          priceMinor: totalMinor,
+          taxRateBp: 0,
+        },
+      ],
+      shiftId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a03',
+      cashierId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a04',
+      payments: totalMinor > 0 ? [{ method: 'cash', currency: 'SYP', amountMinor: totalMinor }] : [],
+      cashSteps: {},
+    }),
+    ...extra,
+  };
+}
+
+/**
+ * Waits until every transaction that began before now has ended: the pull serves rows below
+ * pg_snapshot_xmin only (15 › السحب), and xmin is cluster-wide, so another database's test run on
+ * the same server can hold back what this test just wrote. Tests that pull right after writing
+ * call this first.
+ */
+export async function settled(timeoutMs = 20_000): Promise<void> {
+  const [mark] = await ownerDb()<{ xid: string }[]>`select pg_current_xact_id()::text as xid`;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const [now] = await ownerDb()<{ done: boolean }[]>`
+      select pg_snapshot_xmin(pg_current_snapshot()) > ${mark!.xid}::xid8 as done`;
+    if (now!.done) return;
+    if (Date.now() > deadline) throw new Error('another transaction on the server stayed open');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }

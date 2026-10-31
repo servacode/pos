@@ -5,7 +5,7 @@ export default {
   testRunner: 'vitest',
   plugins: ['@stryker-mutator/vitest-runner'],
   vitest: { configFile: 'vitest.config.ts' },
-  mutate: ['src/money.ts', 'src/pricing.ts', 'src/currencies.ts', 'src/text.ts'],
+  mutate: ['src/money.ts', 'src/pricing.ts', 'src/sale.ts', 'src/currencies.ts', 'src/text.ts'],
   coverageAnalysis: 'perTest',
   reporters: ['clear-text', 'progress', 'html'],
   htmlReporter: { fileName: 'coverage/mutation/index.html' },

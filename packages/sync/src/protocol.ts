@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  validateDocumentPayload,
+  type INVALID_PAYLOAD,
+  type PayloadIssue,
+} from '@serva/core/contracts/documents';
 import { DOC_TYPES, seriesOf, type DocType } from './doc-types';
 import { hashCanonical } from './hash';
 import { parseDocNumber } from './numbering';
@@ -120,6 +125,20 @@ export const syncDocumentSchema = z
     }
   });
 
+/**
+ * The payload check of a document (packages/core › contracts/documents.ts), by its type: the
+ * device runs it before saving a document, the server before processing one. It is kept out of
+ * syncDocumentSchema on purpose: a malformed payload must cost only its own document
+ * (`rejected` with `invalid_payload`), never a 400 for the whole batch (15 › المرفوض لا يوقف الطابور).
+ * Types without a payload schema yet pass.
+ */
+export function documentPayloadRejection(
+  doc: Pick<SyncDocumentBody, 'type' | 'payload'>,
+): { code: typeof INVALID_PAYLOAD; issues: PayloadIssue[] } | null {
+  const result = validateDocumentPayload(doc.type, doc.payload);
+  return result.ok ? null : { code: result.code, issues: result.issues };
+}
+
 export const pushRequestSchema = z.object({
   contractVersion: z.number().int().min(1),
   appVersion: z.string().min(1).max(32),
@@ -142,8 +161,8 @@ export type PushRequest = z.input<typeof pushRequestSchema>;
  * - pending_link: accepted, but it depends on a document of another device that has not arrived;
  *   linked by the server when it does (never "retry" between devices);
  * - id_conflict: the same id with a different hash: held for support, the queue goes on;
- * - rejected: structurally invalid (unbalanced, number reused by another document, depends on a
- *   rejected document of this device…), with a code;
+ * - rejected: structurally invalid (a payload that breaks its schema: invalid_payload; unbalanced,
+ *   number reused by another document, depends on a rejected document of this device…), with a code;
  * - quarantined: from a revoked device, numbered after the last number it announced;
  * - retry: temporary pressure on the server only; never stops the rest of the batch.
  */

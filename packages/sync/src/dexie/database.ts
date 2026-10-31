@@ -16,6 +16,9 @@ import type { SyncDocument } from '../protocol';
  * - records: the local cache of pulled sets (products, users, settings…)
  * - doc_journal: the second copy of every document, written in the same transaction
  * - keys (v2): the device's ECDSA key pair, private key not extractable
+ * - local (v3): small state the cashier app keeps for itself on this device, by key: the staff
+ *   sign-in key and verifiers with their lockouts, the open shift, held carts, the last receipt.
+ *   Never sent, never cleared by a pull or a server restore.
  */
 export interface DeviceRow extends DeviceRecord {
   key: 'self';
@@ -45,6 +48,11 @@ export interface JournalRow {
   savedAt: number;
 }
 
+export interface LocalRow {
+  key: string;
+  value: unknown;
+}
+
 export interface KeyRow {
   key: 'device';
   keys: DeviceKeyPair;
@@ -61,6 +69,7 @@ export class DeviceDatabase extends Dexie {
   records!: Table<RecordRow, [string, string]>;
   doc_journal!: Table<JournalRow, string>;
   keys!: Table<KeyRow, 'device'>;
+  local!: Table<LocalRow, string>;
 
   constructor(name: string = DEVICE_DB_NAME, options: DexieOptions = {}) {
     // Saving a sale must reach the disk before its receipt prints (15 › الحفظ على القرص فعلاً).
@@ -76,5 +85,7 @@ export class DeviceDatabase extends Dexie {
     });
     // The device's key pair (CryptoKey objects are stored as they are: structured-cloneable).
     this.version(2).stores({ keys: '&key' });
+    // The cashier app's own state (CryptoKey values are stored as they are, like the key pair).
+    this.version(3).stores({ local: '&key' });
   }
 }

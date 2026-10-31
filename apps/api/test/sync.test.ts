@@ -17,7 +17,15 @@ import {
 } from '@serva/sync';
 import { DocumentRejection } from '../src/services/sync-push';
 import { createDevice, type TestDevice } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
+import {
+  closeAppDb,
+  closeOwnerDb,
+  makeApp,
+  ownerDb,
+  registerStore,
+  resetDatabase,
+  salePayload,
+} from './helpers';
 import { TEST_OWNER_URL } from './urls';
 
 let app: FastifyInstance;
@@ -31,7 +39,8 @@ beforeAll(async () => {
         // Stand-ins for phase 1 posting: a sale whose printed total differs from the server's
         // computation is accepted with a flag; an unbalanced receipt is refused.
         sale: async ({ doc }) =>
-          doc.payload.printedTotal !== undefined && doc.payload.printedTotal !== doc.payload.total
+          doc.payload.printedTotal !== undefined &&
+          doc.payload.printedTotal !== (doc.payload.totals as { totalMinor: number }).totalMinor
             ? { flags: ['totals_mismatch'] }
             : doc.payload.permissionWithdrawn
               ? { flags: ['permission_stale'] }
@@ -66,7 +75,7 @@ function deviceDocs(device: Pick<TestDevice, 'code'>, branchCode = '001') {
   const series: Partial<Record<DocType, string>> = { sale: 'INV', return: 'SRT', receipt: 'RCV' };
   return (
     type: DocType = 'sale',
-    payload: Record<string, unknown> = { total: 1500 },
+    payload: Record<string, unknown> = type === 'sale' ? salePayload(1500) : { total: 1500 },
     deps: string[] = [],
   ) => {
     seq += 1;
@@ -326,12 +335,30 @@ describe('POST /v1/sync/push', () => {
     ]);
   });
 
+  it('rejects a malformed payload alone with invalid_payload, and the rest of the batch goes on', async () => {
+    const { tenantId } = await store();
+    const device = await createDevice(tenantId);
+    const doc = deviceDocs(device);
+    const unbalanced = salePayload(1500);
+    (unbalanced.totals as { totalMinor: number }).totalMinor = 1400;
+    const res = await pushOk(device, [doc('sale', { total: 1500 }), doc('sale', unbalanced), doc()]);
+    expect(res.results.map((r) => [r.status, r.code ?? null])).toEqual([
+      ['rejected', 'invalid_payload'],
+      ['rejected', 'invalid_payload'],
+      ['accepted', null],
+    ]);
+    // Kept as they arrived, with their code, for the manager’s list of refused documents.
+    const rows = await ownerDb()<{ status: string; result_code: string | null }[]>`
+      select status, result_code from sync_inbox where device_id = ${device.deviceId} order by device_seq`;
+    expect(rows.map((r) => r.result_code)).toEqual(['invalid_payload', 'invalid_payload', null]);
+  });
+
   it('accepts and flags what happened in the shop: totals_mismatch, permission_stale, clock_skew', async () => {
     const { tenantId } = await store();
     const device = await createDevice(tenantId);
     const doc = deviceDocs(device);
-    const mismatch = doc('sale', { total: 1500, printedTotal: 1400 });
-    const stale = doc('sale', { total: 1500, permissionWithdrawn: true });
+    const mismatch = doc('sale', salePayload(1500, { printedTotal: 1400 }));
+    const stale = doc('sale', salePayload(1500, { permissionWithdrawn: true }));
     const { hash: _h, ...aheadBody } = doc();
     aheadBody.deviceTime = '2026-10-30T10:00:00.000Z'; // an hour ahead of the server clock
     const res = await pushOk(device, [mismatch, stale, { ...aheadBody, hash: payloadHash(aheadBody) }]);
@@ -417,7 +444,7 @@ describe('POST /v1/sync/push', () => {
     expect(zipped.statusCode, zipped.body).toBe(200);
     expect(zipped.json().results[0].status).toBe('accepted');
 
-    const huge = body([doc('sale', { total: 1, note: 'x'.repeat(PUSH_MAX_WIRE_BYTES) })]);
+    const huge = body([doc('sale', salePayload(100, { padding: 'x'.repeat(PUSH_MAX_WIRE_BYTES) }))]);
     const tooLarge = await app.inject({ method: 'POST', url: '/v1/sync/push', headers, payload: huge });
     expect(tooLarge.statusCode).toBe(413);
     expect(tooLarge.json().error.code).toBe('payload_too_large');
@@ -440,7 +467,22 @@ describe('GET /v1/sync/pull', () => {
     const { tenantId } = await store();
     const device = await createDevice(tenantId);
     const res = await pull(device);
-    expect(Object.keys(res.sets).sort()).toEqual(['branches', 'roles', 'settings', 'user_roles', 'users']);
+    expect(Object.keys(res.sets).sort()).toEqual([
+      'barcodes',
+      'branches',
+      'categories',
+      'exchange_rates',
+      'prices',
+      'products',
+      'roles',
+      'settings',
+      'stock_levels',
+      'tax_rates',
+      'units',
+      'user_roles',
+      'users',
+      'variants',
+    ]);
     expect(res.hasMore).toBe(false);
     expect(res.serverEpoch).toBe(1);
     expect(res.sets.branches!.upserts).toEqual([
@@ -450,7 +492,15 @@ describe('GET /v1/sync/pull', () => {
       expect.objectContaining({ id: tenantId, baseCurrency: 'SYP' }),
     ]);
     const user = res.sets.users!.upserts[0]!;
-    expect(Object.keys(user).sort()).toEqual(['fullName', 'id', 'status', 'version']);
+    expect(Object.keys(user).sort()).toEqual([
+      'fullName',
+      'id',
+      'pinLength',
+      'pinVersion',
+      'status',
+      'version',
+    ]);
+    expect(user).toMatchObject({ pinLength: null, pinVersion: 0 });
     expect(JSON.stringify(res)).not.toMatch(/passwordHash|pinHash|password_hash|pin_hash|\$argon2/);
     expect(JSON.stringify(res.sets.users)).not.toMatch(/phone|\+963/);
   });

@@ -18,6 +18,8 @@ export async function audit(
     changes?: Record<string, [unknown, unknown]>;
     data?: unknown;
     reason?: string;
+    /** The device the action was made on */
+    deviceId?: string;
   },
   meta: RequestMeta,
 ): Promise<void> {
@@ -32,6 +34,7 @@ export async function audit(
     changes: entry.changes ?? null,
     data: entry.data ?? null,
     reason: entry.reason ?? null,
+    deviceId: entry.deviceId ?? null,
     ip: meta.ip,
     userAgent: meta.userAgent,
   });

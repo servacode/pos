@@ -15,10 +15,13 @@ import { postgresRateLimitStore } from './http/rate-limit';
 import { installSecurityHeaders } from './http/security-headers';
 import { installTestMode } from './http/test-mode';
 import { authRoutes } from './routes/auth';
+import { catalogRoutes } from './routes/catalog';
 import { deviceRoutes } from './routes/devices';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
+import { staffRoutes } from './routes/staff';
 import { syncRoutes } from './routes/sync';
+import { DOCUMENT_PROCESSORS } from './services/processors';
 import type { SyncProcessors } from './services/sync-push';
 import './types';
 
@@ -32,7 +35,7 @@ export interface BuildAppOptions {
   logStream?: NodeJS.WritableStream;
   /** Delivers sign-up codes; by default from OTP_DELIVERY */
   otpSender?: OtpSender | null;
-  /** What the server does with each synced document type (phase 1 registers sale posting here) */
+  /** What the server does with each synced document type; the phase-1 processors by default */
   syncProcessors?: SyncProcessors;
 }
 
@@ -42,7 +45,7 @@ export async function buildApp({
   clock = systemClock,
   logStream,
   otpSender,
-  syncProcessors,
+  syncProcessors = DOCUMENT_PROCESSORS,
 }: BuildAppOptions): Promise<FastifyInstance> {
   const addressing = clientAddressing(env.TRUST_PROXY);
   const app = Fastify({
@@ -103,5 +106,7 @@ export async function buildApp({
   await app.register(meRoutes);
   await app.register(syncRoutes(syncProcessors));
   await app.register(deviceRoutes);
+  await app.register(catalogRoutes);
+  await app.register(staffRoutes);
   return app;
 }

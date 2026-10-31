@@ -14,6 +14,7 @@ import {
 } from '@serva/db';
 import { AppError, isUniqueViolation } from '../errors';
 import { audit } from './audit';
+import { seedCatalogDefaults } from './catalog-defaults';
 import { createSession, type IssuedSession, type SessionPolicy } from './sessions';
 import type { RequestMeta } from '../types';
 
@@ -64,6 +65,7 @@ export async function registerStore(
 
       // Branch codes are 3 digits: they go into every document number (INV-001-002-0000154).
       await tx.insert(branches).values({ tenantId, code: '001', name: 'الفرع الرئيسي' });
+      await seedCatalogDefaults(tx, tenantId);
 
       const createdRoles = await tx
         .insert(roles)

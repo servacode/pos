@@ -148,6 +148,9 @@ importers:
       fake-indexeddb:
         specifier: 6.2.5
         version: 6.2.5
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
@@ -198,6 +201,9 @@ importers:
 
   packages/sync:
     dependencies:
+      '@serva/core':
+        specifier: workspace:*
+        version: link:../core
       dexie:
         specifier: 4.4.6
         version: 4.4.6

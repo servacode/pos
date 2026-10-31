@@ -1,5 +1,12 @@
 import { allocate, applyBasisPoints, lineGross, roundDiv, roundToStep, sumMinor } from './money';
 
+/**
+ * Version of this engine's arithmetic, sent as `engineVersion` on every document (17 › حقول
+ * إلزامية). The server recomputes a sale with the same version (15 › اقبل ونبّه للمال), so any change
+ * to how priceInvoice or roundCashDue round a number must bump it and keep the old path available.
+ */
+export const PRICING_ENGINE_VERSION = '1.0.0';
+
 export type Discount = { type: 'amount'; minor: number } | { type: 'percent'; bp: number };
 
 export interface PricingLineInput {

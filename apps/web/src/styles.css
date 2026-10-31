@@ -4,3 +4,31 @@
  */
 @import 'tailwindcss';
 @import '@serva/ui/theme.css';
+
+/* The cashier's wrong-code shake (tab 12 › الدخول), only for those who allow motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .pin-shake {
+    animation: pin-shake 360ms ease-in-out both;
+  }
+}
+@keyframes pin-shake {
+  20%,
+  60% {
+    transform: translateX(-8px);
+  }
+  40%,
+  80% {
+    transform: translateX(8px);
+  }
+}
+
+/* Receipt printing (tab 21). */
+@media print {
+  @page {
+    margin: 0;
+  }
+  /* While a receipt is ready to print, only the receipt prints (pos/receipt/Receipt.tsx). */
+  body:has(> [data-print-receipt]) > :not([data-print-receipt]) {
+    display: none !important;
+  }
+}

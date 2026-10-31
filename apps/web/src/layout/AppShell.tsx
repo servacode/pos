@@ -1,20 +1,11 @@
 import { useState, type ReactNode } from 'react';
 import { Link, NavLink } from 'react-router';
-import {
-  AdminShell,
-  Button,
-  DeviceIcon,
-  HomeIcon,
-  Logo,
-  LogoMark,
-  LogoutIcon,
-  navItemClass,
-} from '@serva/ui';
+import { AdminShell, Button, KeyIcon, Logo, LogoMark, LogoutIcon, cn, navItemClass } from '@serva/ui';
 import { useAuth, useMe } from '../auth/useAuth';
+import { navFor, type NavEntry } from './nav';
 
-// The menu lists only screens that exist (tab 12: no button the user cannot use). Sections join it
-// as they ship, each with its icon from @serva/ui and its glossary name (الزبائن، المنتجات…).
-function Sidebar({ planName, showDevices }: { planName: string; showDevices: boolean }) {
+// The menu lists only screens that exist and that the user may open (nav.ts).
+function Sidebar({ planName, entries }: { planName: string; entries: NavEntry[] }) {
   return (
     <>
       <Link
@@ -26,20 +17,14 @@ function Sidebar({ planName, showDevices }: { planName: string; showDevices: boo
       </Link>
       <nav aria-label="القائمة الرئيسية">
         <ul className="flex flex-col gap-1">
-          <li>
-            <NavLink to="/" end className={({ isActive }) => navItemClass(isActive)}>
-              <HomeIcon size={24} />
-              الرئيسية
-            </NavLink>
-          </li>
-          {showDevices ? (
-            <li>
-              <NavLink to="/devices" className={({ isActive }) => navItemClass(isActive)}>
-                <DeviceIcon size={24} />
-                الأجهزة
+          {entries.map(({ to, label, icon: EntryIcon, end }) => (
+            <li key={to}>
+              <NavLink to={to} end={end} className={({ isActive }) => navItemClass(isActive)}>
+                <EntryIcon size={24} />
+                {label}
               </NavLink>
             </li>
-          ) : null}
+          ))}
         </ul>
       </nav>
       <p className="mt-auto rounded-control bg-surface-muted px-3 py-2 text-sm text-ink-muted">
@@ -54,8 +39,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { logout } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
   const role = me.user.roles[0]?.name;
-  // Whoever may see the devices (owner, managers); the server checks each request again.
-  const showDevices = me.user.permissions.includes('devices.view');
 
   async function handleLogout() {
     setSigningOut(true);
@@ -64,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AdminShell
-      sidebar={<Sidebar planName={me.subscription.planName} showDevices={showDevices} />}
+      sidebar={<Sidebar planName={me.subscription.planName} entries={navFor(me.user.permissions)} />}
       topBar={
         <>
           <LogoMark className="lg:hidden" />
@@ -75,6 +58,21 @@ export function AppShell({ children }: { children: ReactNode }) {
               {role ? <span className="text-ink-subtle"> · {role}</span> : null}
             </p>
           </div>
+          {/* The user's own settings: for now the code they sign in with on cashier devices. */}
+          <NavLink
+            to="/me/pin"
+            aria-label="رمز الدخول للكاشير"
+            title="رمز الدخول للكاشير"
+            className={({ isActive }) =>
+              cn(
+                'inline-flex min-h-12 shrink-0 items-center gap-2 rounded-control px-3 font-semibold text-ink hover:bg-surface-muted sm:px-4',
+                isActive && 'bg-brand-soft text-brand-ink',
+              )
+            }
+          >
+            <KeyIcon />
+            <span className="hidden md:inline">رمز الدخول للكاشير</span>
+          </NavLink>
           <Button
             variant="ghost"
             onClick={handleLogout}

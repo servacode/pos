@@ -22,7 +22,7 @@ export function hashDeviceToken(token: string): string {
 }
 
 export const deviceRevoked = () =>
-  new AppError(403, 'device_revoked', 'أُوقف هذا الجهاز من حساب المالك. لا يمكنه البيع أو المزامنة.');
+  new AppError(403, 'device_revoked', 'أُوقف هذا الجهاز من حساب المالك. لا يمكنه البيع أو إرسال الفواتير.');
 
 /**
  * preHandler for device routes: `Authorization: Device <token>`. The store comes from the device
