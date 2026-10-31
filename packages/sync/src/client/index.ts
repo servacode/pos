@@ -5,3 +5,6 @@ export * from './push';
 export * from './pull';
 export * from './storage';
 export * from './engine';
+export * from './heartbeat';
+export * from './bootstrap';
+export * from './activation';

@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { weakSecretReason } from './auth/tokens';
 import { parseProxyTrust, type ProxyTrust } from './http/client-ip';
@@ -70,6 +72,22 @@ const envSchema = z
     DEVICE_RATE_LIMIT_PER_MINUTE: perMinute(240),
     /** Push batches per minute per device (17 › الحدود: a separate limit for the push) */
     SYNC_PUSH_RATE_LIMIT_PER_MINUTE: perMinute(60),
+    /** Device activations with a QR or a typed code, per minute per client address */
+    ACTIVATE_RATE_LIMIT_PER_MINUTE: perMinute(10),
+    /** Activations with a typed code, per hour per store code (from any address) */
+    ACTIVATE_STORE_LIMIT_PER_HOUR: perMinute(30),
+    /** Where bootstrap snapshot files are kept; a temporary folder by default */
+    SNAPSHOT_DIR: z.string().min(1).default(join(tmpdir(), 'serva-snapshots')),
+    /** How long a snapshot file can be downloaded; a new device reuses one for half that time */
+    SNAPSHOT_TTL_SECONDS: z.coerce.number().int().min(60).default(3600),
+    /**
+     * Web address the pairing QR opens (<origin>/link#…), e.g. https://app.serva.sy. By default
+     * the address the owner's request came to.
+     */
+    PUBLIC_WEB_ORIGIN: z
+      .url()
+      .optional()
+      .transform((v) => (v ? new URL(v).origin : undefined)),
     /**
      * Proxies in front of the server that may report the client address in X-Forwarded-For:
      * "false" (none, default) or their addresses/CIDR ranges, comma-separated. Never "true".

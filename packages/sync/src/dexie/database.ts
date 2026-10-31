@@ -1,5 +1,5 @@
 import { Dexie, type DexieOptions, type Table } from 'dexie';
-import type { DeviceRecord, SyncMeta } from '../client/store';
+import type { DeviceKeyPair, DeviceRecord, SyncMeta } from '../client/store';
 import type { OutboxEntry } from '../outbox';
 import type { SyncDocument } from '../protocol';
 
@@ -15,6 +15,7 @@ import type { SyncDocument } from '../protocol';
  * - meta: server epoch, clock offset, last sync times
  * - records: the local cache of pulled sets (products, users, settings…)
  * - doc_journal: the second copy of every document, written in the same transaction
+ * - keys (v2): the device's ECDSA key pair, private key not extractable
  */
 export interface DeviceRow extends DeviceRecord {
   key: 'self';
@@ -44,6 +45,11 @@ export interface JournalRow {
   savedAt: number;
 }
 
+export interface KeyRow {
+  key: 'device';
+  keys: DeviceKeyPair;
+}
+
 export const DEVICE_DB_NAME = 'serva-device';
 
 export class DeviceDatabase extends Dexie {
@@ -54,6 +60,7 @@ export class DeviceDatabase extends Dexie {
   meta!: Table<MetaRow, 'sync'>;
   records!: Table<RecordRow, [string, string]>;
   doc_journal!: Table<JournalRow, string>;
+  keys!: Table<KeyRow, 'device'>;
 
   constructor(name: string = DEVICE_DB_NAME, options: DexieOptions = {}) {
     // Saving a sale must reach the disk before its receipt prints (15 › الحفظ على القرص فعلاً).
@@ -67,5 +74,7 @@ export class DeviceDatabase extends Dexie {
       records: '&[set+id], set',
       doc_journal: '&id, seq',
     });
+    // The device's key pair (CryptoKey objects are stored as they are: structured-cloneable).
+    this.version(2).stores({ keys: '&key' });
   }
 }

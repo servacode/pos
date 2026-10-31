@@ -1,4 +1,12 @@
-import type { PullResponse, PushRequest, PushResponse, ResyncResponse } from '../protocol';
+import type {
+  BootstrapResponse,
+  HeartbeatRequest,
+  HeartbeatResponse,
+  PullResponse,
+  PushRequest,
+  PushResponse,
+  ResyncResponse,
+} from '../protocol';
 
 /** How a request ended, in the terms the loops act on. */
 export type TransportResult<T> =
@@ -18,10 +26,25 @@ export type TransportResult<T> =
   /** Another 4xx: the request itself is wrong (a bug); retrying the same will not help */
   | { ok: false; kind: 'refused'; status: number; code: string | null };
 
+export interface DownloadOptions {
+  /** Bytes already held: asks for the rest with Range (and If-Range, so a changed file restarts) */
+  offset: number;
+  /** The file's ETag, for If-Range */
+  etag: string | null;
+  /** Each piece as it arrives, so a cut connection keeps what came */
+  onData: (chunk: Uint8Array) => void;
+  /** The server sent the whole file again instead of the rest: drop what was held */
+  onRestart: () => void;
+}
+
 export interface SyncTransport {
   push(request: PushRequest): Promise<TransportResult<PushResponse>>;
   pull(cursors: Record<string, string>, limit?: number): Promise<TransportResult<PullResponse>>;
   resync(sets: string[]): Promise<TransportResult<ResyncResponse>>;
+  heartbeat(request: HeartbeatRequest): Promise<TransportResult<HeartbeatResponse>>;
+  bootstrap(): Promise<TransportResult<BootstrapResponse>>;
+  /** Streams a snapshot file; ok once the whole rest of it arrived */
+  download(url: string, options: DownloadOptions): Promise<TransportResult<{ complete: true }>>;
 }
 
 export interface FetchTransportOptions {
@@ -34,6 +57,8 @@ export interface FetchTransportOptions {
   /** gzip push bodies above this size (bytes) when CompressionStream exists; default 8 KiB */
   gzipAbove?: number;
   timeoutMs?: number;
+  /** For a whole snapshot file; default 10 minutes (a cut download resumes anyway) */
+  downloadTimeoutMs?: number;
 }
 
 async function gzip(text: string): Promise<Uint8Array | null> {
@@ -53,6 +78,7 @@ export function createFetchTransport(options: FetchTransportOptions): SyncTransp
   const doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
   const gzipAbove = options.gzipAbove ?? 8 * 1024;
   const timeoutMs = options.timeoutMs ?? 60_000;
+  const downloadTimeoutMs = options.downloadTimeoutMs ?? 10 * 60_000;
 
   async function request<T>(
     path: string,
@@ -94,15 +120,45 @@ export function createFetchTransport(options: FetchTransportOptions): SyncTransp
         return { ok: false, kind: 'network' };
       }
     }
-    const error = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
-    const code = error?.error?.code ?? null;
-    if (res.status === 413) return { ok: false, kind: 'too_large' };
-    if (res.status === 429 || res.status === 503)
-      return { ok: false, kind: 'busy', retryAfterMs: retryAfter(res) };
-    if (res.status === 401) return { ok: false, kind: 'unauthorized' };
-    if (res.status === 403 && code === 'device_revoked') return { ok: false, kind: 'revoked' };
-    if (res.status >= 500) return { ok: false, kind: 'server', status: res.status };
-    return { ok: false, kind: 'refused', status: res.status, code };
+    return failure(res);
+  }
+
+  async function download(
+    path: string,
+    { offset, etag, onData, onRestart }: DownloadOptions,
+  ): Promise<TransportResult<{ complete: true }>> {
+    const token = await options.getToken();
+    if (!token) return { ok: false, kind: 'unauthorized' };
+    const headers: Record<string, string> = {
+      Accept: 'application/gzip',
+      Authorization: `Device ${token}`,
+      'X-App-Version': options.appVersion,
+    };
+    if (offset > 0) {
+      headers.Range = `bytes=${offset}-`;
+      if (etag) headers['If-Range'] = etag;
+    }
+    try {
+      const res = await doFetch(`${base}${path}`, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(downloadTimeoutMs),
+      });
+      if (!res.ok) return await failure(res);
+      // 200 to a Range request: the server sends the whole file again.
+      if (offset > 0 && res.status !== 206) onRestart();
+      if (!res.body) return { ok: false, kind: 'network' };
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value.length > 0) onData(value);
+      }
+      return { ok: true, body: { complete: true } };
+    } catch {
+      // Cut in the middle: what arrived stays with the caller, which asks for the rest.
+      return { ok: false, kind: 'network' };
+    }
   }
 
   return {
@@ -114,5 +170,22 @@ export function createFetchTransport(options: FetchTransportOptions): SyncTransp
     },
     resync: (sets) =>
       request<ResyncResponse>('/v1/sync/resync', { method: 'POST', body: JSON.stringify({ sets }) }),
+    heartbeat: (req) =>
+      request<HeartbeatResponse>('/v1/sync/heartbeat', { method: 'POST', body: JSON.stringify(req) }),
+    bootstrap: () => request<BootstrapResponse>('/v1/sync/bootstrap', { method: 'GET' }),
+    download,
   };
+}
+
+/** The terms the loops act on, from an error answer. */
+async function failure<T>(res: Response): Promise<TransportResult<T>> {
+  const error = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+  const code = error?.error?.code ?? null;
+  if (res.status === 413) return { ok: false, kind: 'too_large' };
+  if (res.status === 429 || res.status === 503)
+    return { ok: false, kind: 'busy', retryAfterMs: retryAfter(res) };
+  if (res.status === 401) return { ok: false, kind: 'unauthorized' };
+  if (res.status === 403 && code === 'device_revoked') return { ok: false, kind: 'revoked' };
+  if (res.status >= 500) return { ok: false, kind: 'server', status: res.status };
+  return { ok: false, kind: 'refused', status: res.status, code };
 }

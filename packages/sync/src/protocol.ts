@@ -281,10 +281,56 @@ export const resyncRequestSchema = z.object({
     .max(32),
 });
 
-export interface ResyncResponse {
+/**
+ * The first download (17 › GET /v1/sync/bootstrap; 15 › السحب إلى الجهاز): one gzip NDJSON file
+ * of every set (snapshot.ts), downloaded from `url` with HTTP Range resume (device-authenticated),
+ * checked against `sha256`, then pulled from `cursors`. A resync answers the same shape for the
+ * sets it names.
+ */
+export interface SnapshotInfo {
+  snapshotId: string;
+  /** Path under the API origin: /v1/sync/snapshots/<id> */
+  url: string;
+  /** Size of the gzip file */
+  bytes: number;
+  /** sha256 of the gzip file, hex */
+  sha256: string;
+  /** Per set: pull from here once the snapshot is applied */
+  cursors: Record<string, string>;
+  serverEpoch: number;
+  /** The file can be downloaded until then */
+  expiresAt: string;
+}
+
+export interface BootstrapResponse extends SnapshotInfo {
+  contractVersion: number;
+  serverTime: string;
+}
+
+/** POST /v1/sync/resync: a snapshot of the sets it names, in the bootstrap's shape. */
+export interface ResyncResponse extends BootstrapResponse {
+  /** Per set: start from cursor 0, or apply the snapshot at snapshotUrl and pull from `cursors` */
+  sets: Record<string, { cursor: string; snapshotUrl: string | null }>;
+}
+
+/**
+ * Heartbeat (17 › POST /v1/sync/heartbeat; 15 › إشارة حياة): the last number issued per series,
+ * what still waits to be sent, the app version, the clock (from sentAt) and the space used. The
+ * server compares the numbers with what reached it and shows the owner what is missing.
+ */
+export const heartbeatRequestSchema = z.object({
+  contractVersion: z.number().int().min(1),
+  appVersion: z.string().min(1).max(32),
+  sentAt: isoTime,
+  lastIssued: z.record(z.string().regex(/^[A-Z]{2,3}$/), z.number().int().min(0)).default({}),
+  unsentCount: z.number().int().min(0).max(10_000_000),
+  storageUsedBytes: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().default(null),
+});
+export type HeartbeatRequest = z.input<typeof heartbeatRequestSchema>;
+
+export interface HeartbeatResponse {
   contractVersion: number;
   serverEpoch: number;
   serverTime: string;
-  /** Per set: start again from this cursor. A snapshot file link comes with the bootstrap step. */
-  sets: Record<string, { cursor: string; snapshotUrl: string | null }>;
+  commands: SyncCommands;
 }

@@ -15,6 +15,7 @@ import { postgresRateLimitStore } from './http/rate-limit';
 import { installSecurityHeaders } from './http/security-headers';
 import { installTestMode } from './http/test-mode';
 import { authRoutes } from './routes/auth';
+import { deviceRoutes } from './routes/devices';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
 import { syncRoutes } from './routes/sync';
@@ -101,5 +102,6 @@ export async function buildApp({
   await app.register(authRoutes);
   await app.register(meRoutes);
   await app.register(syncRoutes(syncProcessors));
+  await app.register(deviceRoutes);
   return app;
 }

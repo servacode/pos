@@ -11,13 +11,7 @@ import {
   type Database,
   type Transaction,
 } from '@serva/db';
-import {
-  CONTRACT_VERSION,
-  INITIAL_CURSOR,
-  type PullResponse,
-  type PullSetPage,
-  type ResyncResponse,
-} from '@serva/sync';
+import { CONTRACT_VERSION, INITIAL_CURSOR, type PullResponse, type PullSetPage } from '@serva/sync';
 import type { DeviceClaims } from '../auth/device-guard';
 import { AppError } from '../errors';
 import { readServerState } from './sync-state';
@@ -112,7 +106,7 @@ function parseCursor(cursor: string): Key {
 const compareKeys = (a: Key, b: Key) =>
   a.xid < b.xid ? -1 : a.xid > b.xid ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
-function unknownSets(names: string[]): void {
+export function unknownSets(names: string[]): void {
   const unknown = names.filter((name) => !(name in PULL_SETS));
   if (unknown.length > 0) {
     throw new AppError(400, 'validation_failed', 'مجموعة مزامنة غير معروفة.', {
@@ -138,10 +132,7 @@ export async function pullChanges(
   unknownSets(names);
   return withTenant(db, device.tenantId, async (tx) => {
     const state = await readServerState(tx);
-    const [bound] = await tx.execute<{ xmin: string }>(
-      sql`select pg_snapshot_xmin(pg_current_snapshot())::text as xmin`,
-    );
-    const xmin = BigInt(bound!.xmin);
+    const xmin = await currentXmin(tx);
     const sets: Record<string, PullSetPage> = {};
     const resync: string[] = [];
     let hasMore = false;
@@ -165,6 +156,29 @@ export async function pullChanges(
       commands: resync.length > 0 ? { resync } : {},
     };
   });
+}
+
+/**
+ * One page of a set after a cursor, below the xmin bound. Pull and the bootstrap snapshot both
+ * read sets only through this, so they cannot disagree.
+ */
+export async function pullSetPage(
+  tx: Transaction,
+  tenantId: string,
+  name: string,
+  cursor: string,
+  xmin: bigint,
+  limit: number,
+): Promise<{ page: PullSetPage; hasMore: boolean }> {
+  return pullSet(tx, tenantId, PULL_SETS[name]!, name, parseCursor(cursor), xmin, limit);
+}
+
+/** pg_snapshot_xmin of this moment: every transaction below it has ended (15 › السحب). */
+export async function currentXmin(tx: Transaction): Promise<bigint> {
+  const [bound] = await tx.execute<{ xmin: string }>(
+    sql`select pg_snapshot_xmin(pg_current_snapshot())::text as xmin`,
+  );
+  return BigInt(bound!.xmin);
 }
 
 async function pullSet(
@@ -245,26 +259,3 @@ async function pullSet(
 }
 
 const cursorOf = (key: Key) => (key.id === MAX_UUID ? key.xid.toString() : `${key.xid}.${key.id}`);
-
-/**
- * POST /v1/sync/resync: the device downloads these sets again from the start (its scope changed
- * or its local copy was damaged). The snapshot file of the bootstrap step comes later; for now
- * the device pulls the set from cursor 0.
- */
-export async function resyncSets(
-  db: Database,
-  device: DeviceClaims,
-  names: string[],
-  now: Date,
-): Promise<ResyncResponse> {
-  unknownSets(names);
-  return withTenant(db, device.tenantId, async (tx) => {
-    const state = await readServerState(tx);
-    return {
-      contractVersion: CONTRACT_VERSION,
-      serverEpoch: state.serverEpoch,
-      serverTime: now.toISOString(),
-      sets: Object.fromEntries(names.map((name) => [name, { cursor: INITIAL_CURSOR, snapshotUrl: null }])),
-    };
-  });
-}

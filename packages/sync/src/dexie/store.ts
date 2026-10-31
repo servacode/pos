@@ -1,7 +1,9 @@
 import type { DexieOptions } from 'dexie';
 import {
   EMPTY_META,
+  type AppliedSnapshot,
   type CreateContext,
+  type DeviceKeyPair,
   type DeviceRecord,
   type NewDocument,
   type ResultUpdate,
@@ -44,6 +46,14 @@ export class DexieSyncStore implements SyncStore {
 
   async putDevice(device: DeviceRecord): Promise<void> {
     await this.db.device.put({ ...device, key: 'self' });
+  }
+
+  async getDeviceKeys(): Promise<DeviceKeyPair | null> {
+    return (await this.db.keys.get('device'))?.keys ?? null;
+  }
+
+  async putDeviceKeys(keys: DeviceKeyPair): Promise<void> {
+    await this.db.keys.put({ key: 'device', keys });
   }
 
   async createDocument(input: NewDocument, context: CreateContext): Promise<OutboxEntry> {
@@ -243,6 +253,26 @@ export class DexieSyncStore implements SyncStore {
     await db.transaction('rw', [db.records, db.sync_cursors], async () => {
       await db.records.where('set').anyOf(sets).delete();
       await db.sync_cursors.bulkDelete(sets);
+    });
+  }
+
+  async applySnapshot(snapshot: AppliedSnapshot, now: number): Promise<void> {
+    const { db } = this;
+    await db.transaction('rw', [db.records, db.sync_cursors, db.meta], async () => {
+      for (const [set, rows] of Object.entries(snapshot.sets)) {
+        await db.records.where('set').equals(set).delete();
+        if (rows.length > 0) await db.records.bulkPut(rows.map((data) => ({ set, id: data.id, data })));
+      }
+      for (const [set, cursor] of Object.entries(snapshot.cursors)) {
+        await db.sync_cursors.put({ set, cursor, updatedAt: now });
+      }
+      if (snapshot.serverEpoch !== undefined) {
+        const current = { ...EMPTY_META, ...(await db.meta.get('sync'))?.value };
+        await db.meta.put({
+          key: 'sync',
+          value: { ...current, serverEpoch: snapshot.serverEpoch, lastPullAt: now },
+        });
+      }
     });
   }
 

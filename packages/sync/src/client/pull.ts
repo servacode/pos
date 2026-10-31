@@ -1,5 +1,6 @@
 import { epochChanged } from '../outbox';
 import { INITIAL_CURSOR, type PullSetPage } from '../protocol';
+import { BootstrapError, downloadSnapshot } from './bootstrap';
 import type { SyncStore } from './store';
 import type { SyncTransport } from './transport';
 
@@ -109,8 +110,20 @@ export class Puller {
       const { requeued } = await this.store.restartAfterRestore(res.body.serverEpoch);
       return { kind: 'restarted', requeued };
     }
-    await this.store.resetSets(Object.keys(res.body.sets));
-    return { kind: 'resync', sets: Object.keys(res.body.sets) };
+    const names = Object.keys(res.body.sets);
+    try {
+      // The answer is a snapshot of those sets: they are replaced at once, then pulled from its cursors.
+      const snapshot = await downloadSnapshot(this.transport, res.body, { maxAttempts: 3 });
+      await this.store.applySnapshot({ sets: snapshot.sets, cursors: snapshot.cursors }, this.now());
+    } catch (error) {
+      if (!(error instanceof BootstrapError)) throw error;
+      if (error.reason === 'unauthorized' || error.reason === 'revoked') {
+        return { kind: 'stopped', reason: error.reason };
+      }
+      // No snapshot: the sets download again from the start with the next pulls.
+      await this.store.resetSets(names);
+    }
+    return { kind: 'resync', sets: names };
   }
 
   /** Pulls pages until nothing more is waiting, a pull fails, or `maxPages` were taken. */
