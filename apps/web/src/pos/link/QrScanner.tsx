@@ -52,6 +52,10 @@ export function QrScanner({ onToken, onClose }: { onToken: (token: string) => vo
         for (const code of codes) {
           const token = parsePairingQr(code.rawValue);
           if (token && alive) {
+            // Turn the camera off at once, not when the screen happens to unmount.
+            alive = false;
+            stream?.getTracks().forEach((track) => track.stop());
+            stream = null;
             onTokenRef.current(token);
             return;
           }
