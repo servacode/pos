@@ -41,3 +41,33 @@ const BIDI_CONTROLS = /[\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/g;
 export function stripBidiControls(input: string): string {
   return input.replace(BIDI_CONTROLS, '');
 }
+
+/** Letter forms folded together for search: hamza seats to bare alef/waw/yaa, taa marbuta to haa, alef maqsura to yaa. */
+const SEARCH_FOLD: Readonly<Record<string, string>> = {
+  أ: 'ا',
+  إ: 'ا',
+  آ: 'ا',
+  ٱ: 'ا',
+  ؤ: 'و',
+  ئ: 'ي',
+  ى: 'ي',
+  ة: 'ه',
+  ی: 'ي', // Persian yeh
+  ک: 'ك', // Persian kaf
+};
+
+/** Harakat, shadda, sukun, superscript alef (U+064B–U+065F, U+0670) and tatweel (U+0640). */
+const SEARCH_DROP = /[ً-ٰٟـ]/g;
+
+/**
+ * The one search form used by the cashier, the admin and the server, so a product typed «شوكولا»,
+ * «شوكولاتة» or «شُوكولاته» is found the same everywhere: diacritics and tatweel removed, hamza seats,
+ * taa marbuta and alef maqsura folded, digits Latin, Latin letters lower case, spaces collapsed.
+ */
+export function normalizeArabic(input: string): string {
+  let out = '';
+  for (const ch of stripBidiControls(toLatinDigits(input)).replace(SEARCH_DROP, '').toLowerCase()) {
+    out += SEARCH_FOLD[ch] ?? ch;
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}

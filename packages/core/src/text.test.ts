@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripBidiControls, toLatinDigits } from './text';
+import { normalizeArabic, stripBidiControls, toLatinDigits } from './text';
 
 describe('toLatinDigits', () => {
   it('converts Arabic-Indic and Persian digits', () => {
@@ -31,5 +31,20 @@ describe('stripBidiControls', () => {
     expect(stripBidiControls(`${controls}١٢٫٥${controls}`)).toBe('١٢٫٥');
     expect(stripBidiControls('\u2067\u2066−1,250\u2069 ل.س\u2069')).toBe('−1,250 ل.س');
     expect(stripBidiControls('بلا علامات')).toBe('بلا علامات');
+  });
+});
+
+describe('normalizeArabic', () => {
+  it('folds the forms a shopkeeper types differently', () => {
+    expect(normalizeArabic('شُوكولاتة')).toBe(normalizeArabic('شوكولاته'));
+    expect(normalizeArabic('أرز إيراني')).toBe('ارز ايراني');
+    expect(normalizeArabic('مُسـتـشفى')).toBe('مستشفي');
+    expect(normalizeArabic('مؤسسة شاطئ')).toBe('موسسه شاطي');
+    expect(normalizeArabic('  Pepsi   ٣٣٠ مل ')).toBe('pepsi 330 مل');
+  });
+  it('is idempotent', () => {
+    for (const s of ['آلة حاسبة', 'قهوة ‎عربية', 'Nescafé ٢٠٠غ']) {
+      expect(normalizeArabic(normalizeArabic(s))).toBe(normalizeArabic(s));
+    }
   });
 });

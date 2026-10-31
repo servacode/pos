@@ -139,7 +139,7 @@ Each question below has the default the contract takes. Each default is the safe
   - **Default:** every cash movement asks for the manager's code, as the design board shows. No threshold setting exists yet.
 - **Q6. Wallet and card providers.** `provider_accounts` doesn't exist yet.
   - **Default:** `providerAccountId: null`. Posting uses 1140 and 1150 without the provider subaccount until providers exist.
-- **Q7. Arabic search normalization.** `normalizeArabic()` (15 › البحث) is not in core yet.
+- **Q7. Arabic search normalization.** Done: `normalizeArabic()` in `packages/core/src/text.ts`. The cashier, the admin and the server (a stored `search_name` column) all use it.
   - **Default:** the server's `q` search and the device's index must both use it, so it should land in `@serva/core/text` before either one ships search. The contract only promises that `q` matches a normalized name or an exact barcode.
 - **Q8. Product images, matrix generation (`/variants/generate`) and wholesale tiers** are not in this step.
   - **Default:** the product card builds the size × colour matrix on the client and sends it as `variants`. Tiers wait for price lists (phase 2).
