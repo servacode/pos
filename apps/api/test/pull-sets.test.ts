@@ -4,7 +4,7 @@ import type { PullSetRows } from '@serva/core';
 import type { PullResponse } from '@serva/sync';
 import { seedCatalog } from './catalog-fixtures';
 import { createDevice } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
+import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase, settled } from './helpers';
 
 /**
  * Every pull row carries exactly the fields of its contract interface (packages/core ›
@@ -57,6 +57,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'timezone',
     'businessDayCutoff',
     'shiftMode',
+    'idleMinutes',
     'version',
   ],
   users: ['id', 'fullName', 'status', 'pinLength', 'pinVersion', 'version'],
@@ -77,6 +78,7 @@ afterAll(async () => {
 beforeEach(resetDatabase);
 
 async function pullAll(authorization: string): Promise<PullResponse> {
+  await settled();
   const res = await app.inject({ method: 'GET', url: '/v1/sync/pull', headers: { authorization } });
   expect(res.statusCode, res.body).toBe(200);
   return res.json();
@@ -132,6 +134,7 @@ describe('catalog pull sets', () => {
       timezone: 'Asia/Damascus',
       businessDayCutoff: '00:00',
       shiftMode: 'per_cashier',
+      idleMinutes: 5,
     });
   });
 
@@ -165,6 +168,7 @@ describe('catalog pull sets', () => {
       },
     });
     await ownerDb()`update tenants set name = 'سوبرماركت الفرات' where id = ${body.tenant.id}`;
+    await settled();
     const res = await app.inject({
       method: 'GET',
       url: `/v1/sync/pull?cursors=${encodeURIComponent(JSON.stringify(cursors))}`,

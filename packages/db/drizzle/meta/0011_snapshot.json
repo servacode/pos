@@ -1,5 +1,5 @@
 {
-  "id": "49a5ce2f-0a66-47d3-aa06-e8f2b6313476",
+  "id": "01020942-e600-4f4e-9577-212fca0334b3",
   "prevId": "ca7579ed-b8ef-4aa3-bea9-a39af94bfccd",
   "version": "7",
   "dialect": "postgresql",
@@ -5239,6 +5239,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'per_cashier'"
+        },
+        "idle_minutes": {
+          "name": "idle_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 5
         },
         "version": {
           "name": "version",

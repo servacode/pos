@@ -182,3 +182,21 @@ export function salePayload(totalMinor = 1500, extra: Record<string, unknown> = 
     ...extra,
   };
 }
+
+/**
+ * Waits until every transaction that began before now has ended: the pull serves rows below
+ * pg_snapshot_xmin only (15 › السحب), and xmin is cluster-wide, so another database's test run on
+ * the same server can hold back what this test just wrote. Tests that pull right after writing
+ * call this first.
+ */
+export async function settled(timeoutMs = 20_000): Promise<void> {
+  const [mark] = await ownerDb()<{ xid: string }[]>`select pg_current_xact_id()::text as xid`;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const [now] = await ownerDb()<{ done: boolean }[]>`
+      select pg_snapshot_xmin(pg_current_snapshot()) > ${mark!.xid}::xid8 as done`;
+    if (now!.done) return;
+    if (Date.now() > deadline) throw new Error('another transaction on the server stayed open');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}

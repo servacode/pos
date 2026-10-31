@@ -25,6 +25,7 @@ import {
   ownerDb,
   registerStore,
   resetDatabase,
+  settled,
   snapshotDir,
 } from './helpers';
 import { seedCatalog } from './catalog-fixtures';
@@ -99,6 +100,7 @@ describe('GET /v1/sync/bootstrap and the snapshot file', () => {
     const { tenantId, accessToken } = await store();
     const catalog = await seedCatalog(app, tenantId, accessToken);
     const device = await createDevice(tenantId);
+    await settled();
     const info = await bootstrap(device);
     expect(info).toMatchObject({
       contractVersion: 1,
@@ -296,6 +298,7 @@ describe('a new device with the real client: link, bootstrap, then pull', () => 
     });
 
     await ownerDb()`delete from user_roles where tenant_id = ${tenantId}`;
+    await settled();
     expect((await new Puller({ store: local, transport, limit: 2 }).drain()).kind).toBe('pulled');
     const full = await fullPull(linked);
     for (const [set, rows] of Object.entries(full)) {

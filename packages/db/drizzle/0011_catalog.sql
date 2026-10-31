@@ -4,7 +4,7 @@
 --     tombstones; products.search_name (normalizeArabic, written by the API) has a trigram index;
 --   * stock_movements (append-only, one row per document line), and the documents the sync
 --     processors store: shifts, invoices with their lines and payments, cash_movements;
---   * tenant_settings gains the business-day cutoff and the shift mode; users gain pin_length and
+--   * tenant_settings gains the business-day cutoff, the shift mode and the idle minutes; users gain pin_length and
 --     pin_version; pin_attempts keeps the PIN lockout per user and device;
 --   * every existing store gets the two system units; owners and managers get cost.view.
 
@@ -331,6 +331,7 @@ CREATE TABLE "variants" (
 ALTER TABLE "variants" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "tenant_settings" ADD COLUMN "business_day_cutoff" text DEFAULT '00:00' NOT NULL;--> statement-breakpoint
 ALTER TABLE "tenant_settings" ADD COLUMN "shift_mode" text DEFAULT 'per_cashier' NOT NULL;--> statement-breakpoint
+ALTER TABLE "tenant_settings" ADD COLUMN "idle_minutes" integer DEFAULT 5 NOT NULL;--> statement-breakpoint
 ALTER TABLE "users" ADD COLUMN "pin_length" integer;--> statement-breakpoint
 ALTER TABLE "users" ADD COLUMN "pin_version" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "barcodes" ADD CONSTRAINT "barcodes_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -424,6 +425,7 @@ ALTER TABLE "exchange_rates" ADD CONSTRAINT "exchange_rates_pair_check" CHECK ("
 ALTER TABLE "exchange_rates" ADD CONSTRAINT "exchange_rates_rate_check" CHECK ("rate" ~ '^[0-9]+(\.[0-9]{1,6})?$');--> statement-breakpoint
 ALTER TABLE "tenant_settings" ADD CONSTRAINT "tenant_settings_cutoff_check" CHECK ("business_day_cutoff" ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$');--> statement-breakpoint
 ALTER TABLE "tenant_settings" ADD CONSTRAINT "tenant_settings_shift_mode_check" CHECK ("shift_mode" IN ('per_cashier', 'shared', 'handover'));--> statement-breakpoint
+ALTER TABLE "tenant_settings" ADD CONSTRAINT "tenant_settings_idle_minutes_check" CHECK ("idle_minutes" BETWEEN 1 AND 240);--> statement-breakpoint
 ALTER TABLE "users" ADD CONSTRAINT "users_pin_check" CHECK (("pin_hash" IS NULL) = ("pin_length" IS NULL) AND coalesce("pin_length", 4) IN (4, 6) AND "pin_version" >= 0);--> statement-breakpoint
 ALTER TABLE "pin_attempts" ADD CONSTRAINT "pin_attempts_failures_check" CHECK ("failures" >= 0);--> statement-breakpoint
 ALTER TABLE "shifts" ADD CONSTRAINT "shifts_status_check" CHECK ("status" IN ('open', 'closed'));--> statement-breakpoint

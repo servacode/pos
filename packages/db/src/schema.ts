@@ -250,6 +250,8 @@ export const tenantSettings = pgTable(
     businessDayCutoff: text('business_day_cutoff').notNull().default('00:00'),
     /** «وضع الوردية»: per_cashier, shared or handover (09 › shifts) */
     shiftMode: text('shift_mode').notNull().default('per_cashier'),
+    /** «دقائق الخمول»: a cashier device signs its user out after this many idle minutes */
+    idleMinutes: integer('idle_minutes').notNull().default(5),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

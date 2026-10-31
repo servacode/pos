@@ -69,6 +69,7 @@ const PULL_SETS: Record<string, PullSet> = {
       timezone: sql<string>`(select t.timezone from tenants t where t.id = tenant_settings.tenant_id)`,
       businessDayCutoff: tenantSettings.businessDayCutoff,
       shiftMode: tenantSettings.shiftMode,
+      idleMinutes: tenantSettings.idleMinutes,
       version: tenantSettings.version,
     },
   },

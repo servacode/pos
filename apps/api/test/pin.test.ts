@@ -4,7 +4,7 @@ import type { StaffSessionResponse } from '@serva/core';
 import type { PullResponse } from '@serva/sync';
 import { ManualClock } from '../src/clock';
 import { createDevice, type TestDevice } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
+import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase, settled } from './helpers';
 import { bearer, staffUser, testStore, type TestStore } from './staff';
 
 let app: FastifyInstance;
@@ -64,6 +64,7 @@ describe('PUT /v1/me/pin', () => {
   it('devices see the new length and version, never the hash', async () => {
     await setPin(s.accessToken, '285713');
     const device = await createDevice(s.tenantId);
+    await settled();
     const res = await app.inject({
       method: 'GET',
       url: '/v1/sync/pull',
