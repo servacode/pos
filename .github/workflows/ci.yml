@@ -119,6 +119,11 @@ jobs:
         env:
           TZ: Asia/Damascus
       - run: pnpm test
+      # The golden calculator is written independently of the product code, so it only
+      # catches a mistake in that code while it keeps running. It was not in CI before.
+      - name: Golden day — the independent calculator (Python, no dependencies)
+        working-directory: golden/calc
+        run: python3 -m unittest discover -s . -p 'test_*.py' --verbose
       - run: pnpm build
       - name: Size budget (sale screen JS + CSS under 300 KB gzip, fonts separate)
         run: pnpm --filter @serva/web size

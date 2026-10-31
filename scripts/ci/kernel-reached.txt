@@ -1,0 +1,23 @@
+# Files the financial kernel imports directly (ADR-0001). They are not the kernel itself,
+# but a change here can change a posted amount, a permission or a document, so they have
+# an owner. Unlike scripts/ci/kernel-paths.txt they are not followed any further: closure
+# is checked one step out from the kernel, which is what catches a new financial file.
+# Keep in step with the "reached by import" section of .github/CODEOWNERS.
+packages/core/src/text.ts
+packages/core/src/contracts/common.ts
+packages/sync/src/doc-types.ts
+packages/sync/src/uuid.ts
+packages/sync/src/outbox.ts
+packages/sync/src/client/store.ts
+apps/api/src/types.ts
+apps/api/src/errors.ts
+apps/api/src/clock.ts
+apps/api/src/auth/device-guard.ts
+apps/api/src/auth/permissions.ts
+apps/api/src/auth/tokens.ts
+apps/api/src/services/audit.ts
+apps/api/src/services/sync-state.ts
+apps/api/test/accounting-fixtures.ts
+apps/api/test/helpers.ts
+apps/api/test/devices.ts
+apps/api/test/staff.ts
