@@ -137,14 +137,7 @@ export class SnapshotStore {
         for (const set of sets) {
           let cursor = INITIAL_CURSOR;
           for (;;) {
-            const { page, hasMore } = await pullSetPage(
-              tx,
-              device.tenantId,
-              set,
-              cursor,
-              xmin,
-              PULL_PAGE_SIZE,
-            );
+            const { page, hasMore } = await pullSetPage(tx, device, set, cursor, xmin, PULL_PAGE_SIZE);
             for (const row of page.upserts) await write({ kind: 'row', set, row });
             for (const deleted of page.deletes) await write({ kind: 'delete', set, id: deleted });
             rows += page.upserts.length;

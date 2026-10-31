@@ -1,12 +1,21 @@
 import { and, asc, eq, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import {
+  barcodes,
   branches,
+  categories,
+  exchangeRates,
+  prices,
+  products,
   roles,
+  stockLevels,
   syncTombstones,
+  taxRates,
   tenantSettings,
+  units,
   userRoles,
   users,
+  variants,
   withTenant,
   type Database,
   type Transaction,
@@ -19,15 +28,25 @@ import { readServerState } from './sync-state';
 /**
  * A set a device pulls: one table, the columns a device may see, and the column that is its id.
  * Columns not listed never leave the server (password and PIN hashes, phones, cost: 17 › الكلفة
- * لا تصل جهاز الكاشير أبداً). Products, prices, customers and stock join with their tables in
- * phase 1; every one of them carries change_xid and the tombstone trigger (catalog test).
+ * لا تصل جهاز الكاشير أبداً). Every table carries change_xid and the tombstone trigger (catalog
+ * test). The rows are exactly the contract's (packages/core › contracts/catalog.ts PullSetRows).
+ * `scope` narrows a set to what the device's branch keeps (stock_levels: its own branch only).
  */
 interface PullSet {
   table: PgTable & { changeXid: PgColumn };
   id: PgColumn;
   tenantId: PgColumn;
-  columns: Record<string, PgColumn>;
+  columns: Record<string, PgColumn | SQL>;
+  scope?: (device: PullScope) => SQL;
 }
+
+/** Whose rows a page holds: the store, and the device's branch for branch-scoped sets. */
+export interface PullScope {
+  tenantId: string;
+  branchId: string;
+}
+
+const archivedFlag = (column: PgColumn) => sql<boolean>`(${column} is not null)`;
 
 const PULL_SETS: Record<string, PullSet> = {
   settings: {
@@ -42,6 +61,14 @@ const PULL_SETS: Record<string, PullSet> = {
       cashRoundingSteps: tenantSettings.cashRoundingSteps,
       numberFormat: tenantSettings.numberFormat,
       receiptFooter: tenantSettings.receiptFooter,
+      // From tenants: a change there touches this row (0011), so it is pulled again.
+      storeName: sql<string>`(select t.name from tenants t where t.id = tenant_settings.tenant_id)`,
+      taxNumber: sql<
+        string | null
+      >`(select t.tax_number from tenants t where t.id = tenant_settings.tenant_id)`,
+      timezone: sql<string>`(select t.timezone from tenants t where t.id = tenant_settings.tenant_id)`,
+      businessDayCutoff: tenantSettings.businessDayCutoff,
+      shiftMode: tenantSettings.shiftMode,
       version: tenantSettings.version,
     },
   },
@@ -62,7 +89,14 @@ const PULL_SETS: Record<string, PullSet> = {
     table: users,
     id: users.id,
     tenantId: users.tenantId,
-    columns: { fullName: users.fullName, status: users.status, version: users.version },
+    // No PIN hash ever (16 › تخمين رمز PIN): only which keypad to show and when the PIN changed.
+    columns: {
+      fullName: users.fullName,
+      status: users.status,
+      pinLength: users.pinLength,
+      pinVersion: users.pinVersion,
+      version: users.version,
+    },
   },
   roles: {
     table: roles,
@@ -85,6 +119,130 @@ const PULL_SETS: Record<string, PullSet> = {
       roleId: userRoles.roleId,
       branchId: userRoles.branchId,
       version: userRoles.version,
+    },
+  },
+  products: {
+    table: products,
+    id: products.id,
+    tenantId: products.tenantId,
+    columns: {
+      nameAr: products.nameAr,
+      nameEn: products.nameEn,
+      categoryId: products.categoryId,
+      brand: products.brand,
+      type: products.type,
+      status: products.status,
+      unitId: products.unitId,
+      taxRateId: products.taxRateId,
+      sellOnPos: products.sellOnPos,
+      archived: archivedFlag(products.archivedAt),
+      version: products.version,
+    },
+  },
+  variants: {
+    table: variants,
+    id: variants.id,
+    tenantId: variants.tenantId,
+    columns: {
+      productId: variants.productId,
+      sku: variants.sku,
+      label: variants.label,
+      attributes: variants.attributes,
+      sortOrder: variants.sortOrder,
+      archived: archivedFlag(variants.archivedAt),
+      version: variants.version,
+    },
+  },
+  prices: {
+    table: prices,
+    id: prices.id,
+    tenantId: prices.tenantId,
+    columns: {
+      variantId: sql<string>`${prices.id}`,
+      currency: prices.currency,
+      priceMinor: prices.priceMinor,
+      minPriceMinor: prices.minPriceMinor,
+      priceChangedAt: prices.priceChangedAt,
+      version: prices.version,
+    },
+  },
+  barcodes: {
+    table: barcodes,
+    id: barcodes.id,
+    tenantId: barcodes.tenantId,
+    columns: {
+      variantId: barcodes.variantId,
+      code: barcodes.code,
+      kind: barcodes.kind,
+      packQty: barcodes.packQty,
+      packName: barcodes.packName,
+      packPriceMinor: barcodes.packPriceMinor,
+      version: barcodes.version,
+    },
+  },
+  categories: {
+    table: categories,
+    id: categories.id,
+    tenantId: categories.tenantId,
+    columns: {
+      name: categories.name,
+      parentId: categories.parentId,
+      sortOrder: categories.sortOrder,
+      archived: archivedFlag(categories.archivedAt),
+      version: categories.version,
+    },
+  },
+  units: {
+    table: units,
+    id: units.id,
+    tenantId: units.tenantId,
+    columns: {
+      name: units.name,
+      symbol: units.symbol,
+      allowsFraction: units.allowsFraction,
+      version: units.version,
+    },
+  },
+  tax_rates: {
+    table: taxRates,
+    id: taxRates.id,
+    tenantId: taxRates.tenantId,
+    columns: {
+      name: taxRates.name,
+      rateBp: taxRates.rateBp,
+      kind: taxRates.kind,
+      showOnReceipt: taxRates.showOnReceipt,
+      archived: archivedFlag(taxRates.archivedAt),
+      version: taxRates.version,
+    },
+  },
+  stock_levels: {
+    table: stockLevels,
+    id: stockLevels.id,
+    tenantId: stockLevels.tenantId,
+    columns: {
+      branchId: stockLevels.branchId,
+      variantId: stockLevels.variantId,
+      qty: stockLevels.qty,
+      reservedQty: stockLevels.reservedQty,
+      version: stockLevels.version,
+    },
+    // The device's own branch only (17 › السحب).
+    scope: (device) => sql`${stockLevels.branchId} = ${device.branchId}`,
+  },
+  exchange_rates: {
+    table: exchangeRates,
+    id: exchangeRates.id,
+    tenantId: exchangeRates.tenantId,
+    columns: {
+      unit: exchangeRates.unit,
+      quote: exchangeRates.quote,
+      rate: exchangeRates.rate,
+      collectRate: exchangeRates.collectRate,
+      minRate: exchangeRates.minRate,
+      maxRate: exchangeRates.maxRate,
+      effectiveAt: exchangeRates.effectiveAt,
+      version: exchangeRates.version,
     },
   },
 };
@@ -143,7 +301,7 @@ export async function pullChanges(
         resync.push(name);
         continue;
       }
-      const page = await pullSet(tx, device.tenantId, PULL_SETS[name]!, name, after, xmin, limit);
+      const page = await pullSet(tx, device, PULL_SETS[name]!, name, after, xmin, limit);
       sets[name] = page.page;
       hasMore ||= page.hasMore;
     }
@@ -164,13 +322,13 @@ export async function pullChanges(
  */
 export async function pullSetPage(
   tx: Transaction,
-  tenantId: string,
+  device: PullScope,
   name: string,
   cursor: string,
   xmin: bigint,
   limit: number,
 ): Promise<{ page: PullSetPage; hasMore: boolean }> {
-  return pullSet(tx, tenantId, PULL_SETS[name]!, name, parseCursor(cursor), xmin, limit);
+  return pullSet(tx, device, PULL_SETS[name]!, name, parseCursor(cursor), xmin, limit);
 }
 
 /** pg_snapshot_xmin of this moment: every transaction below it has ended (15 › السحب). */
@@ -183,7 +341,7 @@ export async function currentXmin(tx: Transaction): Promise<bigint> {
 
 async function pullSet(
   tx: Transaction,
-  tenantId: string,
+  device: PullScope,
   set: PullSet,
   name: string,
   after: Key,
@@ -202,9 +360,10 @@ async function pullSet(
     .from(set.table)
     .where(
       and(
-        eq(set.tenantId, tenantId),
+        eq(set.tenantId, device.tenantId),
         afterCursor(set.table.changeXid, set.id),
         sql`${set.table.changeXid} < ${xmin.toString()}::xid8`,
+        set.scope?.(device),
       ),
     )
     .orderBy(asc(set.table.changeXid), asc(set.id))
@@ -215,7 +374,7 @@ async function pullSet(
     .from(syncTombstones)
     .where(
       and(
-        eq(syncTombstones.tenantId, tenantId),
+        eq(syncTombstones.tenantId, device.tenantId),
         eq(syncTombstones.collection, name),
         afterCursor(syncTombstones.changeXid, syncTombstones.recordId),
         sql`${syncTombstones.changeXid} < ${xmin.toString()}::xid8`,
