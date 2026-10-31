@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import {
+  Archive,
   ArrowLeft,
   Banknote,
   Barcode,
@@ -16,6 +17,7 @@ import {
   Ellipsis,
   Eye,
   EyeOff,
+  FolderTree,
   Gift,
   House,
   Inbox,
@@ -150,6 +152,9 @@ export const CashIcon = defineIcon(Banknote);
 export const BarcodeIcon = defineIcon(Barcode);
 export const WeighedIcon = defineIcon(Scale);
 export const OfferIcon = defineIcon(Tag);
+// The catalog (12 › المنتجات): the category tree, and the 30-day archive of products and categories.
+export const CategoriesIcon = defineIcon(FolderTree);
+export const ArchiveIcon = defineIcon(Archive);
 // Lives on the keypad, which stays LTR (7 8 9 on top), so it always points left: not mirrored.
 export const BackspaceIcon = defineIcon(Delete);
 
