@@ -35,6 +35,7 @@ export function installErrorHandling(app: FastifyInstance): void {
   app.setErrorHandler((error: FastifyError | AppError, request, reply) => {
     if (error instanceof AppError) {
       if (error.statusCode >= 500) request.log.error({ err: error }, 'request failed');
+      if (error.retryAfter !== undefined) reply.header('retry-after', String(error.retryAfter));
       return reply.status(error.statusCode).send(error.toBody(request.id));
     }
     const status = typeof error.statusCode === 'number' ? error.statusCode : 500;

@@ -267,7 +267,7 @@ const compareKeys = (a: Key, b: Key) =>
 export function unknownSets(names: string[]): void {
   const unknown = names.filter((name) => !(name in PULL_SETS));
   if (unknown.length > 0) {
-    throw new AppError(400, 'validation_failed', 'مجموعة مزامنة غير معروفة.', {
+    throw new AppError(400, 'validation_failed', 'مجموعة بيانات غير معروفة.', {
       cursors: unknown.join(', '),
     });
   }

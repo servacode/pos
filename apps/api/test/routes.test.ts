@@ -21,6 +21,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation'> =
   'POST /v1/auth/refresh': 'public',
   'POST /v1/auth/logout': 'public',
   'GET /v1/me': 'signed-in',
+  'PUT /v1/me/pin': 'signed-in',
+  'POST /v1/device/staff-sessions': 'device',
   'POST /v1/sync/push': 'device',
   'GET /v1/sync/pull': 'device',
   'POST /v1/sync/resync': 'device',
@@ -329,6 +331,29 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     const text = gunzipSync(file.rawPayload).toString('utf8');
     expect(parseSnapshot(text).sets.settings!.map((s) => s.id)).toEqual([b.tenantId]);
     expect(text).not.toContain(a.tenantId);
+  },
+  // Store B's device typing the right PIN of store A's owner: refused, and store A records nothing.
+  'POST /v1/device/staff-sessions': async (app, { a, b }) => {
+    const set = await app.inject({
+      method: 'PUT',
+      url: '/v1/me/pin',
+      headers: owner(a),
+      payload: { pin: '285713', password: 'secret-pass-1' },
+    });
+    expect(set.statusCode).toBe(204);
+    const [userA] = await ownerDb()<{ id: string }[]>`select id from users where tenant_id = ${a.tenantId}`;
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/staff-sessions',
+      headers: { authorization: deviceB.authorization },
+      payload: { userId: userA!.id, pin: '285713' },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.body).not.toContain('المالك');
+    const [attempts] = await ownerDb()<{ n: number }[]>`
+      select count(*)::int as n from pin_attempts where tenant_id = ${a.tenantId}`;
+    expect(attempts!.n).toBe(0);
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/sync/snapshots/:id']!(app, { a, b });
