@@ -31,4 +31,8 @@
   body:has(> [data-print-receipt]) > :not([data-print-receipt]) {
     display: none !important;
   }
+  /* The same for an admin report sheet, 80 mm or A4 (lib/print.tsx). */
+  body:has(> [data-print-sheet]) > :not([data-print-sheet]) {
+    display: none !important;
+  }
 }

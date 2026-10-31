@@ -1,20 +1,5 @@
 import { displayNumber, type Digits } from '@serva/ui';
-
-/** Levantine month names, as on the boards and receipts («30 تشرين الأول 2026»). */
-const MONTHS = [
-  'كانون الثاني',
-  'شباط',
-  'آذار',
-  'نيسان',
-  'أيار',
-  'حزيران',
-  'تموز',
-  'آب',
-  'أيلول',
-  'تشرين الأول',
-  'تشرين الثاني',
-  'كانون الأول',
-];
+import { MONTHS } from '../lib/dates';
 
 /** «4:32 م» in the store's digits. */
 export function clockText(ms: number, digits: Digits = 'latn'): string {
@@ -25,9 +10,14 @@ export function clockText(ms: number, digits: Digits = 'latn'): string {
 }
 
 /** «30 تشرين الأول 2026». */
+/** Digits only, never grouped: a year is «2026», not «2,026». */
+function plainDigits(text: string, digits: Digits): string {
+  return digits === 'latn' ? text : [...text].map((ch) => displayNumber(ch, digits)).join('');
+}
+
 export function dateText(ms: number, digits: Digits = 'latn'): string {
   const date = new Date(ms);
-  return `${displayNumber(String(date.getDate()), digits)} ${MONTHS[date.getMonth()]} ${displayNumber(String(date.getFullYear()), digits)}`;
+  return `${displayNumber(String(date.getDate()), digits)} ${MONTHS[date.getMonth()]} ${plainDigits(String(date.getFullYear()), digits)}`;
 }
 
 /** «3 س 12 د» since a moment. */

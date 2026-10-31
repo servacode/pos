@@ -600,7 +600,9 @@ describe('sale payload properties', () => {
         const sale = buildSalePayload(input);
         const r = sale.cashRounding;
         const hasCash = sale.payments.some((p) => p.method === 'cash');
-        expect(r !== null).toBe(hasCash);
+        // Rounding comes with a cash payment, or alone when the cash left rounded to nothing.
+        if (hasCash) expect(r).not.toBeNull();
+        else expect(r === null || r.dueMinor === 0).toBe(true);
         if (!r) return;
         const step = r.currency === 'SYP' ? c.sypStep : c.usdStep;
         expect(r.currency).toBe(c.changeCurrency);

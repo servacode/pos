@@ -19,6 +19,7 @@ import { catalogRoutes } from './routes/catalog';
 import { deviceRoutes } from './routes/devices';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
+import { reportRoutes } from './routes/reports';
 import { staffRoutes } from './routes/staff';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
@@ -108,5 +109,6 @@ export async function buildApp({
   await app.register(deviceRoutes);
   await app.register(catalogRoutes);
   await app.register(staffRoutes);
+  await app.register(reportRoutes);
   return app;
 }

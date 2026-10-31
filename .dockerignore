@@ -14,5 +14,7 @@
 docs
 deploy/local/backups
 deploy/local/*.crt
-**/reports
+# Test and mutation reports at a package root only (not source folders such as src/admin/reports)
+apps/*/reports
+packages/*/reports
 **/.stryker-tmp

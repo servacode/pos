@@ -621,6 +621,9 @@ export const syncInbox = pgTable(
       .default(sql`'{}'::text[]`),
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
     processedAt: timestamp('processed_at', { withTimezone: true }),
+    /** Copies received after the first (a lost answer, a replay): the evidence screen's «مكرر» */
+    duplicateCount: integer('duplicate_count').notNull().default(0),
+    lastDuplicateAt: timestamp('last_duplicate_at', { withTimezone: true }),
   },
   (t) => [
     primaryKey({ name: 'sync_inbox_pkey', columns: [t.tenantId, t.docId] }),
@@ -1255,6 +1258,160 @@ export const cashMovements = pgTable(
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
     index('cash_movements_shift_idx').on(t.tenantId, t.shiftId),
+    tenantIsolation(),
+  ],
+);
+
+// ─── Accounting (09 › المحاسبة; 10 › دليل الحسابات الافتراضي، القيود التلقائية) ──────
+
+/**
+ * The chart of accounts of a store. Seeded at sign-up by accounts_seed() (migration 0012), which
+ * holds the chart of tab 10; an optional module's account (2210, 2550…) is added by
+ * account_ensure() the first time something posts to it. The parent is an explicit field, not the
+ * number's prefix. A group (6100, 6500, 1110 with its drawers) is never posted to.
+ */
+export const accounts = pgTable(
+  'accounts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    code: text('code').notNull(),
+    parentCode: text('parent_code'),
+    name: text('name').notNull(),
+    nameEn: text('name_en'),
+    /** asset, liability, equity, revenue, expense */
+    type: text('type').notNull(),
+    /** debit or credit: the side a normal balance sits on (4200 and 3160 are debit, 1290 credit) */
+    normalSide: text('normal_side').notNull(),
+    /** balance_sheet, trading, profit_loss (10 › الحساب الختامي) */
+    finalAccount: text('final_account').notNull(),
+    isGroup: boolean('is_group').notNull().default(false),
+    isSystem: boolean('is_system').notNull().default(false),
+    /** A single-currency account (a drawer in dollars); null takes any currency */
+    currency: text('currency'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'accounts_pkey', columns: [t.tenantId, t.id] }),
+    unique('accounts_code_unique').on(t.tenantId, t.code),
+    foreignKey({
+      name: 'accounts_parent_fk',
+      columns: [t.tenantId, t.parentCode],
+      foreignColumns: [t.tenantId, t.code],
+    }),
+    tenantIsolation(),
+  ],
+);
+
+/** The last entry number given per store and year: numbers have no gaps (10 › رقم القيد). */
+export const journalSequences = pgTable(
+  'journal_sequences',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    year: integer('year').notNull(),
+    lastNumber: integer('last_number').notNull().default(0),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'journal_sequences_pkey', columns: [t.tenantId, t.id] }),
+    unique('journal_sequences_year_unique').on(t.tenantId, t.year),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A posted entry: never changed nor deleted; a correction is a reversing entry (10 › قواعد
+ * الضمان). One automatic entry per document (unique by source), balanced in the base currency,
+ * which the database checks itself.
+ */
+export const journalEntries = pgTable(
+  'journal_entries',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id'),
+    year: integer('year').notNull(),
+    seq: integer('seq').notNull(),
+    /** «2026-0000154»: year and its gap-free sequence */
+    number: text('number').notNull(),
+    /** The event's date, as printed on the document */
+    entryDate: date('entry_date').notNull(),
+    /** The ledger's date; differs only when a document lands in a locked period (phase 2) */
+    postingDate: date('posting_date').notNull(),
+    /** auto, manual, reversal */
+    kind: text('kind').notNull(),
+    /** sale, shift_close, cash_movement, manual, reversal */
+    sourceType: text('source_type').notNull(),
+    sourceId: uuid('source_id').notNull(),
+    sourceNumber: text('source_number'),
+    memo: text('memo').notNull(),
+    baseCurrency: text('base_currency').notNull(),
+    /** Σ debits = Σ credits */
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    reversesId: uuid('reverses_id'),
+    createdBy: uuid('created_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'journal_entries_pkey', columns: [t.tenantId, t.id] }),
+    unique('journal_entries_number_unique').on(t.tenantId, t.year, t.seq),
+    unique('journal_entries_source_unique').on(t.tenantId, t.sourceType, t.sourceId, t.kind),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    index('journal_entries_date_idx').on(t.tenantId, t.entryDate),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * The lines of an entry, inserted in one statement with it. debit/credit are in the base
+ * currency; amount_minor is the line's own currency, signed (+ debit, − credit), so a dollar
+ * drawer keeps its dollars. shift_id is the drawer's shift; party is a customer or a staff member.
+ */
+export const journalLines = pgTable(
+  'journal_lines',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    entryId: uuid('entry_id').notNull(),
+    lineNo: integer('line_no').notNull(),
+    accountId: uuid('account_id').notNull(),
+    debitMinor: bigint('debit_minor', { mode: 'number' }).notNull().default(0),
+    creditMinor: bigint('credit_minor', { mode: 'number' }).notNull().default(0),
+    currency: text('currency').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    rate: jsonb('rate'),
+    branchId: uuid('branch_id'),
+    shiftId: uuid('shift_id'),
+    /** customer, user */
+    partyType: text('party_type'),
+    partyId: uuid('party_id'),
+    memo: text('memo'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'journal_lines_pkey', columns: [t.tenantId, t.id] }),
+    unique('journal_lines_line_unique').on(t.tenantId, t.entryId, t.lineNo),
+    foreignKey({
+      columns: [t.tenantId, t.entryId],
+      foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+    foreignKey({ columns: [t.tenantId, t.accountId], foreignColumns: [accounts.tenantId, accounts.id] }),
+    index('journal_lines_account_idx').on(t.tenantId, t.accountId),
+    index('journal_lines_shift_idx').on(t.tenantId, t.shiftId),
     tenantIsolation(),
   ],
 );

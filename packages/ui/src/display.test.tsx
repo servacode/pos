@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { formatMoney, stripBidiControls } from '@serva/core';
 import { describe, expect, it, vi } from 'vitest';
 import { Avatar, initialsOf } from './Avatar';
+import { Balance } from './Balance';
 import { STATUSES, StatusChip, type Status } from './Badge';
 import { Banner } from './Banner';
 import { Card, StatTile } from './Card';
@@ -38,6 +39,33 @@ describe('Money', () => {
   it('shows a balance without a sign when asked', () => {
     renderUi(<Money minor={-4850000} currency="SYP" signDisplay="never" />);
     expect(screen.getByText((_, element) => element?.tagName === 'BDI').textContent).not.toContain('−');
+  });
+});
+
+describe('Balance', () => {
+  it('writes «عليه» for a debit balance and «له» for a credit one, never a minus sign or red', () => {
+    renderUi(
+      <>
+        <p data-testid="owes">
+          <Balance minor={4850000} currency="SYP" />
+        </p>
+        <p data-testid="owed">
+          <Balance minor={-1250} currency="USD" />
+        </p>
+        <p data-testid="zero">
+          <Balance minor={0} currency="SYP" />
+        </p>
+      </>,
+    );
+
+    expect(stripBidiControls(screen.getByTestId('owes').textContent!)).toBe('عليه 48,500 ل.س');
+    expect(stripBidiControls(screen.getByTestId('owed').textContent!)).toBe('له 12.50 $');
+    expect(stripBidiControls(screen.getByTestId('zero').textContent!)).toBe('0 ل.س');
+    for (const id of ['owes', 'owed']) {
+      expect(screen.getByTestId(id).textContent).not.toContain('−');
+      expect(screen.getByTestId(id).querySelector('.text-danger-ink')).toBeNull();
+      expect(screen.getByTestId(id).querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
   });
 });
 

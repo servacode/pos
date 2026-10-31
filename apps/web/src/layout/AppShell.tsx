@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AdminShell
-      sidebar={<Sidebar planName={me.subscription.planName} entries={navFor(me.user.permissions)} />}
+      sidebar={<Sidebar planName={me.subscription.planName} entries={navFor(me)} />}
       topBar={
         <>
           <LogoMark className="lg:hidden" />

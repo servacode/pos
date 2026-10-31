@@ -33,6 +33,7 @@ import {
   Logo,
   LogoMark,
   LogoStacked,
+  Balance,
   Money,
   MoneyField,
   MoreIcon,
@@ -431,6 +432,10 @@ function BidiSection() {
         </p>
         <p>
           صافي الشهر في التقرير: <Money minor={-300000} currency="SYP" negativeTone />.
+        </p>
+        <p className="flex flex-wrap items-center gap-3">
+          الأرصدة بالكلمة: <Balance minor={4850000} currency="SYP" /> <Balance minor={-1250} currency="USD" />{' '}
+          <Balance minor={0} currency="SYP" />
         </p>
         <p>
           الدولار: <Money minor={1250} currency="USD" /> بسعر صرف <bdi className="num">130</bdi>.

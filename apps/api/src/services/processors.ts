@@ -20,6 +20,7 @@ import {
   type Transaction,
 } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
+import { postCashMovement, postSale, postShiftClose } from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
 
 /**
@@ -28,7 +29,8 @@ import type { DocumentContext, SyncProcessors } from './sync-push';
  * sale is never refused here (08 › قاعدة 8): an unknown variant, a missing shift, negative stock
  * or totals that differ from the engine's are accepted and flagged. Each document is processed
  * once (the inbox answers replays), and every insert is keyed by the document id, so a second
- * run could not move stock twice. No journal entries yet.
+ * run could not move stock twice. Each also posts its journal entry here (services/posting.ts),
+ * in the same savepoint, so a document and its entry are stored together or not at all.
  */
 
 /** approval_offline when someone approved without a connection (contract: approvals). */
@@ -171,6 +173,17 @@ async function processSale({ tx, device, doc }: DocumentContext) {
       })),
     );
   }
+  await postSale(
+    tx,
+    {
+      tenantId,
+      branchId: device.branchId,
+      docId: doc.id,
+      number: doc.number!,
+      businessDate: doc.businessDate,
+    },
+    sale,
+  );
 
   return { flags };
 }
@@ -228,7 +241,7 @@ async function processShiftClose({ tx, device, doc }: DocumentContext) {
     shortageTreatment: close.shortageTreatment,
     forced: close.forced,
   };
-  await tx
+  const [closed] = await tx
     .insert(shifts)
     .values({
       tenantId: device.tenantId,
@@ -242,14 +255,24 @@ async function processShiftClose({ tx, device, doc }: DocumentContext) {
       target: [shifts.tenantId, shifts.id],
       set: fields,
       where: isNull(shifts.closeDocId),
-    });
+    })
+    .returning({ closeDocId: shifts.closeDocId });
+  // Only the close that closed the shift moves money; a second close of the same shift is stored
+  // in the inbox and posts nothing.
+  if (closed?.closeDocId === doc.id) {
+    await postShiftClose(
+      tx,
+      { tenantId: device.tenantId, branchId: device.branchId, docId: doc.id, businessDate: doc.businessDate },
+      close,
+    );
+  }
   return { flags: offlineApproval([close.approval]) };
 }
 
 /** cash_movement: pay-in, pay-out, expense or drop, linked to its shift when that has arrived. */
 async function processCashMovement({ tx, device, doc }: DocumentContext) {
   const m = cashMovementPayloadSchema.parse(doc.payload);
-  await tx
+  const [inserted] = await tx
     .insert(cashMovements)
     .values({
       tenantId: device.tenantId,
@@ -273,7 +296,21 @@ async function processCashMovement({ tx, device, doc }: DocumentContext) {
       approval: m.approval,
       payload: doc.payload,
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: cashMovements.id });
+  if (inserted) {
+    await postCashMovement(
+      tx,
+      {
+        tenantId: device.tenantId,
+        branchId: device.branchId,
+        docId: doc.id,
+        number: doc.number,
+        businessDate: doc.businessDate,
+      },
+      m,
+    );
+  }
   return { flags: offlineApproval([m.approval]) };
 }
 
