@@ -131,3 +131,39 @@ jobs:
       - run: pnpm build
       - name: Size budget (sale screen JS + CSS under 300 KB gzip, fonts separate)
         run: pnpm --filter @serva/web size
+
+  # ADR-0001, task M0-2: mutation testing of the financial kernel. Coverage says a line ran;
+  # this says a test would have noticed had the line been wrong. Each package breaks under a
+  # score of 85, set in its stryker.config.mjs.
+  #
+  # It runs on every pull request, not only nightly, and not only over the changed files: at
+  # about two and a half minutes per package in parallel it is cheap enough to run whole, and
+  # a changed-file run would let a change reach main whose effect on the kernel was never
+  # measured. Make this a required check so that cannot happen.
+  mutation:
+    name: Mutation testing of the financial kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [core, sync]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Mutate @serva/${{ matrix.package }}
+        run: pnpm --filter @serva/${{ matrix.package }} test:mutation
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-${{ matrix.package }}
+          path: packages/${{ matrix.package }}/coverage/mutation/
+          retention-days: 14
