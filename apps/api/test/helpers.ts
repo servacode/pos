@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import postgres from 'postgres';
 import type { FastifyInstance } from 'fastify';
 import type { LightMyRequestResponse } from 'fastify';
@@ -10,6 +13,9 @@ import { loadEnv } from '../src/env';
 import { REFRESH_COOKIE } from '../src/routes/auth';
 import type { SyncProcessors } from '../src/services/sync-push';
 import { TEST_APP_URL, TEST_OWNER_URL } from './urls';
+
+/** Snapshot files of this test run, apart from any real server's */
+export const snapshotDir = mkdtempSync(join(tmpdir(), 'serva-snapshots-test-'));
 
 export function testEnv(overrides: Record<string, string> = {}) {
   return loadEnv({
@@ -25,6 +31,9 @@ export function testEnv(overrides: Record<string, string> = {}) {
     STORE_RATE_LIMIT_PER_MINUTE: '100000',
     DEVICE_RATE_LIMIT_PER_MINUTE: '100000',
     SYNC_PUSH_RATE_LIMIT_PER_MINUTE: '100000',
+    ACTIVATE_RATE_LIMIT_PER_MINUTE: '100000',
+    ACTIVATE_STORE_LIMIT_PER_HOUR: '100000',
+    SNAPSHOT_DIR: snapshotDir,
     ...overrides,
   });
 }

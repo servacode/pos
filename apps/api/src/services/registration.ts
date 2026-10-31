@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import type { RegisterResponse, RegisterStoreData, VerifyRegistrationData } from '@serva/core';
 import { uuidv7 } from '@serva/db';
 import type { FastifyInstance } from 'fastify';
-import { hashOtp, newOtpCode } from '../auth/otp';
+import { hashOtp, isTestMode, newOtpCode } from '../auth/otp';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { registerStore, type RegisteredStore } from './stores';
@@ -48,21 +48,23 @@ export async function startRegistration(
 
   const registrationId = uuidv7();
   const answer: RegisterResponse = { registrationId, expiresIn: CODE_TTL_SECONDS };
+  const onScreen = isTestMode(env);
+  const code = newOtpCode();
   const existing = await db.execute(sql`select 1 from auth_find_login(${data.phone})`);
   if (existing.length > 0) {
     // Same answer, no code. (Later: tell that phone it already has an account, through the same channel.)
-    return answer;
+    // In test mode the answer still shows a code, never stored, so verification rejects it.
+    return onScreen ? { ...answer, testCode: code } : answer;
   }
 
   const now = clock.now();
-  const code = newOtpCode();
   const payload: PendingSignUp = { fullName: data.fullName, agentId, termsVersion: data.termsVersion };
   await db.execute(sql`select otp_create(
     ${registrationId}::uuid, 'registration', ${data.phone}, ${hashOtp(env.JWT_SECRET, registrationId, code)},
     ${JSON.stringify(payload)}::jsonb, ${new Date(now.getTime() + CODE_TTL_SECONDS * 1000).toISOString()}::timestamptz,
     ${meta.ip}, ${now.toISOString()}::timestamptz)`);
   await otpSender.send({ phone: data.phone, code, purpose: 'registration' });
-  return answer;
+  return onScreen ? { ...answer, testCode: code } : answer;
 }
 
 /**

@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import { createDb, type DbHandle } from '@serva/db';
-import { logOtpSender, type OtpSender } from './auth/otp';
+import { otpSenderFor, type OtpSender } from './auth/otp';
 import { PasswordHasher } from './auth/passwords';
 import { SessionGate } from './auth/session-gate';
 import { TokenKeys } from './auth/tokens';
@@ -13,7 +13,9 @@ import { installErrorHandling } from './http/error-handler';
 import { loggerOptions, newRequestRef } from './http/logging';
 import { postgresRateLimitStore } from './http/rate-limit';
 import { installSecurityHeaders } from './http/security-headers';
+import { installTestMode } from './http/test-mode';
 import { authRoutes } from './routes/auth';
+import { deviceRoutes } from './routes/devices';
 import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
 import { syncRoutes } from './routes/sync';
@@ -62,11 +64,7 @@ export async function buildApp({
     new PasswordHasher({ concurrency: env.PASSWORD_HASH_CONCURRENCY, queue: env.PASSWORD_HASH_QUEUE }),
   );
   app.decorate('tokenKeys', new TokenKeys(env.JWT_SECRET, env.JWT_PREVIOUS_SECRETS));
-  const delivery = env.OTP_DELIVERY ?? (env.NODE_ENV === 'production' ? 'none' : 'log');
-  app.decorate(
-    'otpSender',
-    otpSender !== undefined ? otpSender : delivery === 'log' ? logOtpSender(app.log) : null,
-  );
+  app.decorate('otpSender', otpSender !== undefined ? otpSender : otpSenderFor(env, app.log));
   app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
   app.decorateRequest('auth', null);
   app.decorateRequest('device', null);
@@ -97,11 +95,13 @@ export async function buildApp({
   app.decorate('routeList', routeList);
 
   installSecurityHeaders(app, { https: env.COOKIE_SECURE });
+  installTestMode(app);
   installErrorHandling(app);
 
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(meRoutes);
   await app.register(syncRoutes(syncProcessors));
+  await app.register(deviceRoutes);
   return app;
 }

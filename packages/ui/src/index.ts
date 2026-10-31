@@ -59,6 +59,7 @@ export { FieldGroup } from './FieldGroup';
 export { Badge, ConnectionPill, StatusChip, STATUSES, type BadgeTone, type Status } from './Badge';
 export { Alert } from './Alert';
 export { Banner, type BannerProps, type BannerTone } from './Banner';
+export { TestModeRibbon, type TestModeRibbonProps } from './TestModeRibbon';
 export { Card, CardHeader, StatTile, type CardProps, type StatTileProps } from './Card';
 export { DataTable, type DataColumn, type DataTableProps } from './DataTable';
 export { Tabs, type TabItem, type TabsProps } from './Tabs';
@@ -66,6 +67,7 @@ export { Dialog, Sheet, type DialogProps, type SheetProps } from './Dialog';
 export { TOAST_DURATION_MS, ToastProvider, useToast, type ToastOptions, type ToastTone } from './Toast';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { Skeleton, SkeletonText } from './Skeleton';
+export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Avatar, initialsOf, type AvatarProps } from './Avatar';
 export { Money, type MoneyProps } from './Money';
 

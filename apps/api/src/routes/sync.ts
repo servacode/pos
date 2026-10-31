@@ -1,7 +1,9 @@
+import { createReadStream } from 'node:fs';
 import { Transform, type Readable } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
+  heartbeatRequestSchema,
   PUSH_MAX_INFLATED_BYTES,
   PUSH_MAX_WIRE_BYTES,
   pullQuerySchema,
@@ -11,7 +13,9 @@ import {
 import { requireDevice, type DeviceClaims } from '../auth/device-guard';
 import { clientIp } from '../http/client-ip';
 import { AppError, unauthorized, validationError } from '../errors';
-import { pullChanges, resyncSets } from '../services/sync-pull';
+import { bootstrapSnapshot, resyncSnapshot, SnapshotStore } from '../services/snapshots';
+import { recordHeartbeat } from '../services/sync-heartbeat';
+import { pullChanges } from '../services/sync-pull';
 import { pushDocuments, type SyncProcessors } from '../services/sync-push';
 import { parseBody } from './validation';
 
@@ -65,6 +69,8 @@ const deviceOf = (request: FastifyRequest): DeviceClaims => {
  */
 export function syncRoutes(processors: SyncProcessors = {}) {
   return async (app: FastifyInstance): Promise<void> => {
+    const snapshots = new SnapshotStore(app.env.SNAPSHOT_DIR, app.env.SNAPSHOT_TTL_SECONDS * 1000);
+
     app.post(
       '/v1/sync/push',
       {
@@ -99,7 +105,86 @@ export function syncRoutes(processors: SyncProcessors = {}) {
     app.post('/v1/sync/resync', { onRequest: requireDevice() }, async (request) => {
       const device = deviceOf(request);
       const body = parseBody(resyncRequestSchema, request.body);
-      return resyncSets(app.db, device, body.sets, app.clock.now());
+      return resyncSnapshot(app.db, snapshots, device, body.sets, app.clock.now());
+    });
+
+    // A revoked device is still heard (its unsent count), and told to wipe.
+    app.post('/v1/sync/heartbeat', { onRequest: requireDevice({ allowRevoked: true }) }, async (request) => {
+      const device = deviceOf(request);
+      const body = parseBody(heartbeatRequestSchema, request.body);
+      return recordHeartbeat(app.db, device, body, app.clock.now());
+    });
+
+    app.get('/v1/sync/bootstrap', { onRequest: requireDevice() }, async (request) =>
+      bootstrapSnapshot(app.db, snapshots, deviceOf(request), app.clock.now()),
+    );
+
+    // The snapshot file: gzip as stored (no Content-Encoding, so the sha256 is of these bytes),
+    // resumable with Range from where a cut connection stopped.
+    app.get('/v1/sync/snapshots/:id', { onRequest: requireDevice() }, async (request, reply) => {
+      const device = deviceOf(request);
+      const { id } = request.params as { id: string };
+      const found = await snapshots.open(id, device.tenantId, app.clock.now());
+      if (!found) throw new AppError(404, 'not_found', 'انتهت صلاحية ملف التنزيل. ابدأ التنزيل من جديد.');
+      const { meta, path } = found;
+      const etag = `"${meta.sha256}"`;
+      reply
+        .header('etag', etag)
+        .header('accept-ranges', 'bytes')
+        .header('content-type', 'application/gzip')
+        .header('cache-control', 'private, no-store');
+      const ifRange = request.headers['if-range'];
+      const range = requestedRange(
+        request.headers.range,
+        Array.isArray(ifRange) ? ifRange[0] : ifRange,
+        etag,
+        meta.bytes,
+      );
+      if (range === 'unsatisfiable') {
+        reply.header('content-range', `bytes */${meta.bytes}`);
+        throw new AppError(416, 'bad_request', 'الجزء المطلوب من الملف غير موجود.');
+      }
+      if (range) {
+        reply
+          .code(206)
+          .header('content-range', `bytes ${range.start}-${range.end}/${meta.bytes}`)
+          .header('content-length', range.end - range.start + 1);
+        return reply.send(createReadStream(path, { start: range.start, end: range.end }));
+      }
+      reply.header('content-length', meta.bytes);
+      return reply.send(createReadStream(path));
     });
   };
+}
+
+const RANGE = /^bytes=(\d*)-(\d*)$/;
+
+/**
+ * One byte range (RFC 9110 §14): `bytes=a-`, `bytes=a-b` or `bytes=-n`. null means the whole
+ * file: no Range, several ranges, or an If-Range that no longer matches (the file changed).
+ */
+export function requestedRange(
+  header: string | undefined,
+  ifRange: string | undefined,
+  etag: string,
+  size: number,
+): { start: number; end: number } | 'unsatisfiable' | null {
+  if (!header) return null;
+  if (ifRange !== undefined && ifRange !== etag) return null;
+  const match = RANGE.exec(header.trim());
+  if (!match || (match[1] === '' && match[2] === '')) return null;
+  let start: number;
+  let end: number;
+  if (match[1] === '') {
+    const suffix = Number(match[2]);
+    if (suffix === 0) return 'unsatisfiable';
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === '' ? size - 1 : Math.min(Number(match[2]), size - 1);
+    if (end < start && match[2] !== '') return null;
+  }
+  if (start >= size) return 'unsatisfiable';
+  return { start, end };
 }

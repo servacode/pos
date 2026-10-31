@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { DeviceRecord, SyncState } from '@serva/sync/client';
 import { deviceStore } from './database';
 import { loadDevice } from './device';
@@ -10,6 +10,8 @@ export interface DeviceState {
   /** false: the browser may wipe this device's data (red warning); null: unknown or no such API */
   persisted: boolean | null;
   sync: SyncState | null;
+  /** Reads the device again, e.g. once linking saved it, and starts its sync loops. */
+  reload: () => void;
 }
 
 /**
@@ -18,12 +20,14 @@ export interface DeviceState {
  * paint of the login code, so it opens the same with or without internet.
  */
 export function useDevice(): DeviceState {
-  const [state, setState] = useState<DeviceState>({
+  const [state, setState] = useState<Omit<DeviceState, 'reload'>>({
     loading: true,
     device: null,
     persisted: null,
     sync: null,
   });
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration((g) => g + 1), []);
 
   useEffect(() => {
     let alive = true;
@@ -44,7 +48,7 @@ export function useDevice(): DeviceState {
       alive = false;
       stop?.();
     };
-  }, []);
+  }, [generation]);
 
-  return state;
+  return { ...state, reload };
 }

@@ -33,7 +33,7 @@ describe('Radix direction', () => {
   it('wraps the cashier app too', async () => {
     renderApp('/pos');
 
-    const heading = await screen.findByRole('heading', { name: 'هذا الجهاز غير مربوط بمتجر بعد' });
+    const heading = await screen.findByRole('heading', { name: 'هل هذا جهاز كاشير؟' });
     expect(screen.getByTestId('radix-direction')).toContainElement(heading);
   });
 });

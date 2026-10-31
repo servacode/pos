@@ -42,11 +42,12 @@ export function requireDevice(
       id: string;
       tenant_id: string;
       branch_id: string;
-      code: string;
+      code: string | null;
       revoked_at: string | null;
       tenant_status: string;
     }>(sql`select * from device_find_by_token_hash(${hashDeviceToken(token)})`);
-    if (!row || row.tenant_status !== 'active') throw unauthorized();
+    // A token exists only once the device is approved, so it always has its code.
+    if (!row?.code || row.tenant_status !== 'active') throw unauthorized();
     const device: DeviceClaims = {
       deviceId: row.id,
       tenantId: row.tenant_id,

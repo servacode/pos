@@ -11,6 +11,8 @@ export interface MockRequest {
 export interface MockReply {
   status: number;
   body?: unknown;
+  /** Extra response headers (Content-Type is always JSON) */
+  headers?: Record<string, string>;
 }
 
 type Route = MockReply | ((request: MockRequest) => MockReply | Promise<MockReply>);
@@ -30,7 +32,10 @@ export function mockFetch(routes: Record<string, Route>) {
     if (!route) throw new Error(`Unexpected request: ${request.method} ${request.path}`);
     const reply = typeof route === 'function' ? await route(request) : route;
     const body = reply.body === undefined ? null : JSON.stringify(reply.body);
-    return new Response(body, { status: reply.status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(body, {
+      status: reply.status,
+      headers: { 'Content-Type': 'application/json', ...reply.headers },
+    });
   });
   vi.stubGlobal('fetch', fetchMock);
 

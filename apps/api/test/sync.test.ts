@@ -1,15 +1,17 @@
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import postgres from 'postgres';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
   createUuidV7,
   formatDocNumber,
+  parseSnapshot,
   payloadHash,
   PUSH_MAX_WIRE_BYTES,
   type DocType,
   type PullResponse,
   type PushResponse,
+  type ResyncResponse,
   type SyncDocument,
   type SyncDocumentBody,
 } from '@serva/sync';
@@ -358,12 +360,17 @@ describe('POST /v1/sync/push', () => {
   });
 
   it('a revoked device: accepts what it numbered up to its last announcement, quarantines the rest, then says wipe', async () => {
-    const { tenantId } = await store();
+    const { tenantId, accessToken } = await store();
     const device = await createDevice(tenantId);
     const doc = deviceDocs(device);
     const sent = [doc(), doc()];
     await pushOk(device, [sent[0]!], { lastIssued: { INV: 2 } });
-    await ownerDb()`update devices set revoked_at = now() where id = ${device.deviceId}`;
+    const revoke = await app.inject({
+      method: 'POST',
+      url: `/v1/devices/${device.deviceId}/revoke`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(revoke.statusCode, revoke.body).toBe(200);
 
     const res = await pushOk(device, [sent[1]!, doc(), doc('customer', { name: 'x' })], {
       lastIssued: { INV: 99 },
@@ -559,7 +566,7 @@ describe('GET /v1/sync/pull', () => {
 });
 
 describe('POST /v1/sync/resync and the server epoch', () => {
-  it('gives the device fresh cursors for the sets it asks for', async () => {
+  it('answers a snapshot of the sets it asks for, in the bootstrap’s shape', async () => {
     const { tenantId } = await store();
     const device = await createDevice(tenantId);
     const res = await app.inject({
@@ -569,10 +576,21 @@ describe('POST /v1/sync/resync and the server epoch', () => {
       payload: { sets: ['users', 'roles'] },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({
+    const body = res.json<ResyncResponse>();
+    expect(body).toMatchObject({
       serverEpoch: 1,
-      sets: { users: { cursor: '0', snapshotUrl: null }, roles: { cursor: '0', snapshotUrl: null } },
+      url: `/v1/sync/snapshots/${body.snapshotId}`,
+      sets: { users: { cursor: '0', snapshotUrl: body.url }, roles: { cursor: '0', snapshotUrl: body.url } },
     });
+    expect(Object.keys(body.cursors).sort()).toEqual(['roles', 'users']);
+    const file = await app.inject({
+      method: 'GET',
+      url: body.url,
+      headers: { authorization: device.authorization },
+    });
+    const snapshot = parseSnapshot(gunzipSync(file.rawPayload).toString('utf8'));
+    expect(Object.keys(snapshot.sets).sort()).toEqual(['roles', 'users']);
+    expect(snapshot.sets.roles).toHaveLength(3);
   });
 
   it('carries the epoch on every answer; server_epoch_bump() after a restore moves it on', async () => {

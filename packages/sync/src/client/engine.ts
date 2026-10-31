@@ -2,6 +2,8 @@ import type { OutboxEntry } from '../outbox';
 import { CONFIRMED_RETENTION_DAYS } from '../protocol';
 import { uuidv7 } from '../uuid';
 import { backoffDelay } from './backoff';
+import { Heartbeat, type HeartbeatRun } from './heartbeat';
+import { estimateStorage, type StorageManagerLike } from './storage';
 import { Puller, type PullRun } from './pull';
 import { Pusher, type PushRun } from './push';
 import type { NewDocument, SyncStore } from './store';
@@ -14,6 +16,7 @@ export interface SyncState {
   failures: number;
   lastPush: PushRun['kind'] | null;
   lastPull: PullRun['kind'] | null;
+  lastHeartbeat: HeartbeatRun['kind'] | null;
   /** Set when the server refused the device; sync stays off until restarted */
   stopped: 'unauthorized' | 'revoked' | 'refused' | null;
 }
@@ -36,6 +39,10 @@ export interface SyncEngineOptions {
   pullIntervalMs?: number;
   /** A saved document is sent this soon (15: within seconds) */
   pushDelayMs?: number;
+  /** At most one heartbeat this often, sent at the end of a cycle (default 60 s) */
+  heartbeatIntervalMs?: number;
+  /** Bytes the device database uses; navigator.storage.estimate() by default */
+  storageUsage?: () => Promise<number | null>;
   onState?: (state: SyncState) => void;
 }
 
@@ -48,6 +55,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export class SyncEngine {
   readonly pusher: Pusher;
   readonly puller: Puller;
+  readonly heartbeat: Heartbeat;
   private readonly store: SyncStore;
   private readonly now: () => number;
   private readonly random: () => number;
@@ -67,6 +75,7 @@ export class SyncEngine {
     failures: 0,
     lastPush: null,
     lastPull: null,
+    lastHeartbeat: null,
     stopped: null,
   };
 
@@ -86,6 +95,17 @@ export class SyncEngine {
     const shared = { store: options.store, transport: options.transport, now: this.now };
     this.pusher = new Pusher({ ...shared, appVersion: options.appVersion });
     this.puller = new Puller(shared);
+    this.heartbeat = new Heartbeat({
+      ...shared,
+      appVersion: options.appVersion,
+      intervalMs: options.heartbeatIntervalMs,
+      storageUsage:
+        options.storageUsage ??
+        (async () => {
+          const nav = (globalThis as { navigator?: { storage?: StorageManagerLike } }).navigator;
+          return (await estimateStorage(nav?.storage)).usage;
+        }),
+    });
   }
 
   get current(): SyncState {
@@ -150,6 +170,8 @@ export class SyncEngine {
 
     const failed = push.kind === 'failed' || pull?.kind === 'failed';
     const stopped = push.kind === 'stopped' ? push.reason : pull?.kind === 'stopped' ? pull.reason : null;
+    // The heartbeat goes even when sending fails: the server learns what this device holds.
+    const beat = stopped === null ? await this.heartbeat.beat() : null;
     await this.store.pruneConfirmed(this.now() - CONFIRMED_RETENTION_DAYS * DAY_MS);
     await this.publish({
       online,
@@ -157,6 +179,7 @@ export class SyncEngine {
       failures: failed ? this.state.failures + 1 : 0,
       lastPush: push.kind,
       lastPull: pull?.kind ?? null,
+      lastHeartbeat: beat && beat.kind !== 'skipped' ? beat.kind : this.state.lastHeartbeat,
       stopped,
     });
   }

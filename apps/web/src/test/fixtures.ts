@@ -7,7 +7,7 @@ export function makeMe(subscription: Partial<MeResponse['subscription']> = {}): 
       fullName: 'أحمد الخطيب',
       phone: '+963912345678',
       roles: [{ key: 'owner', name: 'المالك', branchId: null }],
-      permissions: ['sale.create'],
+      permissions: ['sale.create', 'devices.view', 'devices.manage'],
     },
     tenant: {
       id: 'tenant-1',

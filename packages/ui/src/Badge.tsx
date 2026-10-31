@@ -53,6 +53,8 @@ export const STATUSES = {
   draft: { tone: 'neutral', label: 'مسودة' },
   active: { tone: 'success', label: 'نشط' },
   suspended: { tone: 'danger', label: 'موقوف' },
+  pendingApproval: { tone: 'warning', label: 'بانتظار موافقتك' },
+  rejected: { tone: 'neutral', label: 'مرفوض' },
   lowStock: { tone: 'warning', label: 'قارب على النفاد' },
 } as const satisfies Record<string, { tone: BadgeTone; label: string }>;
 

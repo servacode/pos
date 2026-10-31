@@ -201,17 +201,28 @@ describe('pull loop', () => {
   });
 
   it('downloads a set again on a resync command, and everything again after an epoch change', async () => {
-    const { store, server, puller, pusher } = await setup(2);
+    const { store, server, transport, puller, pusher } = await setup(2);
     await store.putDevice(linkedDevice({ sets: ['users'] }));
     server.write('users', { id: 'u1' });
     await pusher.drain();
     await puller.drain();
     expect(await store.readSet('users')).toHaveLength(1);
 
+    // A damaged local copy: the resync snapshot replaces the set as the server holds it.
+    await store.applyPullPage({ users: { upserts: [{ id: 'stale' }], deletes: [], cursor: '1' } }, 0);
+    expect(await puller.resync(['users'])).toEqual({ kind: 'resync', sets: ['users'] });
+    expect(await store.readSet('users')).toEqual([{ id: 'u1' }]);
+    expect(await store.getCursors()).toMatchObject({ users: String(server.state.xid) });
+    server.write('users', { id: 'u2' });
+    await puller.drain();
+    expect(await store.readSet('users')).toHaveLength(2);
+
+    // No snapshot to download (it expired): the set starts again from cursor 0.
+    transport.downloadFaults.push('not_found');
     expect(await puller.resync(['users'])).toEqual({ kind: 'resync', sets: ['users'] });
     expect(await store.readSet('users')).toEqual([]);
     await puller.drain();
-    expect(await store.readSet('users')).toHaveLength(1);
+    expect(await store.readSet('users')).toHaveLength(2);
 
     server.restore(server.snapshot());
     expect(await puller.pullOnce()).toEqual({ kind: 'restarted', requeued: 2 });

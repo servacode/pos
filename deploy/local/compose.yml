@@ -105,6 +105,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?missing; run pnpm local:up}
       # Only the web container may report the client address (X-Forwarded-For)
       TRUST_PROXY: ${SERVA_PROXY_IP:-172.30.77.10}
+      # Test mode (no SMS here): sign-up codes are shown on screen. SERVA_OTP_DELIVERY=none in
+      # deploy/local/.env turns it off. The API refuses "screen" without DEPLOYMENT=local.
+      DEPLOYMENT: local
+      OTP_DELIVERY: ${SERVA_OTP_DELIVERY:-screen}
       LOG_LEVEL: info
     depends_on:
       postgres:

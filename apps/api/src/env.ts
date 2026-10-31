@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { weakSecretReason } from './auth/tokens';
 import { parseProxyTrust, type ProxyTrust } from './http/client-ip';
@@ -53,12 +55,15 @@ const envSchema = z
     LOGIN_PHONE_LIMIT_PER_HOUR: perMinute(20),
     /** Sign-up codes per hour sent to one phone number */
     REGISTER_PHONE_LIMIT_PER_HOUR: perMinute(5),
+    /** Where this server runs: "cloud" (default) or "local", the server in the shop (tab 00). */
+    DEPLOYMENT: z.enum(['cloud', 'local']).default('cloud'),
     /**
      * How sign-up codes are delivered: "log" writes them to the server log (development only);
-     * "none" turns sign-up off until an SMS/Telegram channel is connected. Default: log outside
+     * "none" turns sign-up off until an SMS/Telegram channel is connected; "screen" answers the
+     * code to the sign-up screen itself (test mode, DEPLOYMENT=local only). Default: log outside
      * production, none in production.
      */
-    OTP_DELIVERY: z.enum(['log', 'none']).optional(),
+    OTP_DELIVERY: z.enum(['log', 'none', 'screen']).optional(),
     /** Requests per minute per signed-in session (17: 300 per token) */
     SESSION_RATE_LIMIT_PER_MINUTE: perMinute(300),
     /** Requests per minute per store, all its users and devices together */
@@ -67,6 +72,22 @@ const envSchema = z
     DEVICE_RATE_LIMIT_PER_MINUTE: perMinute(240),
     /** Push batches per minute per device (17 › الحدود: a separate limit for the push) */
     SYNC_PUSH_RATE_LIMIT_PER_MINUTE: perMinute(60),
+    /** Device activations with a QR or a typed code, per minute per client address */
+    ACTIVATE_RATE_LIMIT_PER_MINUTE: perMinute(10),
+    /** Activations with a typed code, per hour per store code (from any address) */
+    ACTIVATE_STORE_LIMIT_PER_HOUR: perMinute(30),
+    /** Where bootstrap snapshot files are kept; a temporary folder by default */
+    SNAPSHOT_DIR: z.string().min(1).default(join(tmpdir(), 'serva-snapshots')),
+    /** How long a snapshot file can be downloaded; a new device reuses one for half that time */
+    SNAPSHOT_TTL_SECONDS: z.coerce.number().int().min(60).default(3600),
+    /**
+     * Web address the pairing QR opens (<origin>/link#…), e.g. https://app.serva.sy. By default
+     * the address the owner's request came to.
+     */
+    PUBLIC_WEB_ORIGIN: z
+      .url()
+      .optional()
+      .transform((v) => (v ? new URL(v).origin : undefined)),
     /**
      * Proxies in front of the server that may report the client address in X-Forwarded-For:
      * "false" (none, default) or their addresses/CIDR ranges, comma-separated. Never "true".
@@ -120,6 +141,14 @@ const envSchema = z
         code: 'custom',
         path: ['OTP_DELIVERY'],
         message: 'OTP_DELIVERY=log writes codes to the log; not allowed in production',
+      });
+    }
+    // Showing the code on screen proves nothing about the phone: never on the cloud, in any mode.
+    if (env.OTP_DELIVERY === 'screen' && env.DEPLOYMENT !== 'local') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OTP_DELIVERY'],
+        message: 'OTP_DELIVERY=screen shows sign-up codes on screen; allowed only with DEPLOYMENT=local',
       });
     }
     if (production && !env.COOKIE_SECURE) {

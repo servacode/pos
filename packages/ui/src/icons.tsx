@@ -4,6 +4,7 @@ import {
   Banknote,
   Barcode,
   Bell,
+  Camera,
   ChartColumn,
   Check,
   ChevronDown,
@@ -19,27 +20,37 @@ import {
   House,
   Inbox,
   Info,
+  KeyRound,
+  Link,
   LockKeyhole,
   LogOut,
   Menu,
   Minus,
+  Monitor,
   MonitorSmartphone,
   Package,
+  Pencil,
   Plus,
   Printer,
+  QrCode,
   Receipt,
   RefreshCw,
   Scale,
   Search,
+  Send,
   Settings,
+  ShieldCheck,
   ShoppingCart,
+  Smartphone,
   Store,
+  Tablet,
   Tag,
   Trash,
   TrendingDown,
   TrendingUp,
   TriangleAlert,
   Undo2,
+  User,
   Users,
   Wifi,
   WifiOff,
@@ -141,3 +152,17 @@ export const WeighedIcon = defineIcon(Scale);
 export const OfferIcon = defineIcon(Tag);
 // Lives on the keypad, which stays LTR (7 8 9 on top), so it always points left: not mirrored.
 export const BackspaceIcon = defineIcon(Delete);
+
+// Devices and linking (12 › ربط الجهاز)
+export const QrCodeIcon = defineIcon(QrCode);
+export const KeyIcon = defineIcon(KeyRound);
+export const UserIcon = defineIcon(User);
+export const PhoneIcon = defineIcon(Smartphone);
+export const TabletIcon = defineIcon(Tablet);
+export const MonitorIcon = defineIcon(Monitor);
+export const CameraIcon = defineIcon(Camera);
+export const LinkIcon = defineIcon(Link);
+// A paper plane is an object, not a direction: never mirrored.
+export const SendIcon = defineIcon(Send);
+export const EditIcon = defineIcon(Pencil);
+export const ShieldCheckIcon = defineIcon(ShieldCheck);

@@ -5,5 +5,6 @@ export * from './currencies';
 export * from './permissions';
 export * from './contracts/errors';
 export * from './contracts/auth';
+export * from './contracts/devices';
 export * from './money';
 export * from './pricing';

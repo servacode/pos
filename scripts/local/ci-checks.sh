@@ -6,6 +6,8 @@
 #   ci-checks.sh negative <file> a damaged backup, a wrong passphrase and a manifest that does not
 #                                match the data must all FAIL the restore drill
 #   ci-checks.sh fixture-present the fixture rows are in the live database (after --replace-live)
+#   ci-checks.sh signup          opens a store through the real two-step sign-up, typing the code the
+#                                test mode shows on screen; a registered number gets a code that fails
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/local/lib.sh
@@ -114,10 +116,67 @@ fixture_present() {
   ok "The fixture data is in the live database ($count branches)"
 }
 
+api_post() { # api_post <path> <json>: body in $work/out, prints the status
+  curl --noproxy '*' -sS --max-time 20 --cacert "$CA_EXPORT" -o "$work/out" -w '%{http_code}' \
+    -H 'Content-Type: application/json' --data-binary "$2" "$API_BASE$1"
+}
+
+json_field() { # json_field <name>: a string field of $work/out
+  sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" "$work/out"
+}
+
+signup() {
+  [[ -s "$CA_EXPORT" ]] || export_ca
+  API_BASE="https://localhost:${SERVA_HTTPS_PORT:-443}"
+  work="$(mktemp -d)"
+  trap 'rm -rf "$work"' RETURN
+
+  local terms phone status registration code token
+  terms="$(sed -n "s/^export const TERMS_VERSION = '\([^']*\)';/\1/p" "$ROOT_DIR/packages/core/src/contracts/auth.ts")"
+  [[ -n "$terms" ]] || die "Cannot read TERMS_VERSION from packages/core"
+  # A fresh number on every run: 093 then 7 random digits
+  phone="093$(printf '%07d' $(($(od -An -N4 -tu4 /dev/urandom | tr -d ' ') % 10000000)))"
+
+  local start
+  start="$(printf '{"phone":"%s","fullName":"متجر فحص التشغيل","password":"ci-signup-pass-1","termsVersion":"%s"}' "$phone" "$terms")"
+  status="$(api_post /v1/auth/register "$start")"
+  [[ "$status" == 202 ]] || die "Sign-up step 1 answered $status: $(head -c 300 "$work/out")"
+  registration="$(json_field registrationId)"
+  code="$(json_field testCode)"
+  [[ -n "$registration" && "$code" =~ ^[0-9]{6}$ ]] ||
+    die "Sign-up step 1 shows no test code (is SERVA_OTP_DELIVERY=screen?): $(head -c 300 "$work/out")"
+  ok "Sign-up step 1: 202 with the on-screen test code"
+
+  status="$(api_post /v1/auth/register/verify "$(printf '{"registrationId":"%s","code":"%s","password":"ci-signup-pass-1"}' "$registration" "$code")")"
+  [[ "$status" == 201 ]] || die "Sign-up step 2 answered $status: $(head -c 300 "$work/out")"
+  token="$(json_field accessToken)"
+  [[ -n "$token" ]] || die "Sign-up step 2 gave no access token"
+  ok "Sign-up step 2: the code opened the store (201)"
+
+  status="$(curl --noproxy '*' -sS --max-time 20 --cacert "$CA_EXPORT" -o "$work/out" -w '%{http_code}' \
+    -H "Authorization: Bearer $token" "$API_BASE/v1/me")"
+  if [[ "$status" != 200 ]] || ! grep -q 'متجر فحص التشغيل' "$work/out"; then
+    die "/v1/me after sign-up answered $status"
+  fi
+  ok "The new owner is signed in (/v1/me)"
+
+  # The same number again: a code-shaped answer that verification must refuse
+  status="$(api_post /v1/auth/register "$start")"
+  registration="$(json_field registrationId)"
+  code="$(json_field testCode)"
+  [[ "$status" == 202 && "$code" =~ ^[0-9]{6}$ ]] || die "A registered number got $status without a code-shaped answer"
+  status="$(api_post /v1/auth/register/verify "$(printf '{"registrationId":"%s","code":"%s","password":"ci-other-pass-1"}' "$registration" "$code")")"
+  if [[ "$status" != 400 ]] || ! grep -q '"otp_invalid"' "$work/out"; then
+    die "The code shown for a registered number was accepted ($status): $(head -c 300 "$work/out")"
+  fi
+  ok "A registered number gets a code that verification refuses (no account found out)"
+}
+
 case "${1:-}" in
   hardening) hardening ;;
   seed) seed ;;
   negative) negative "${2:-}" ;;
   fixture-present) fixture_present ;;
-  *) die "Usage: ci-checks.sh hardening | seed | negative <backup.dump.enc> | fixture-present" ;;
+  signup) signup ;;
+  *) die "Usage: ci-checks.sh hardening | seed | negative <backup.dump.enc> | fixture-present | signup" ;;
 esac

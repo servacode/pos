@@ -58,6 +58,17 @@ export interface RegisterResponse {
   registrationId: string;
   /** Seconds the code stays valid */
   expiresIn: number;
+  /**
+   * The local server's test mode only (no SMS there): the code, shown on screen. For a number that
+   * already has an account it is a code-shaped decoy that verification rejects.
+   */
+  testCode?: string;
+}
+
+/** Answer to GET /v1/meta: public facts about this server. */
+export interface MetaResponse {
+  /** The local server's test mode: sign-up codes are shown on screen */
+  testMode: boolean;
 }
 
 export const registrationCodeSchema = z

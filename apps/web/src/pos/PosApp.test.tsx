@@ -60,12 +60,11 @@ describe('/pos (cashier)', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('tells an unlinked device to be linked first, without calling the server', async () => {
+  it('opens «ربط الجهاز» on an unlinked device, without calling the server', async () => {
     renderApp('/pos');
 
-    expect(
-      await screen.findByRole('heading', { name: 'هذا الجهاز غير مربوط بمتجر بعد' }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'هل هذا جهاز كاشير؟' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'خطوات الإعداد' })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'لوحة الأرقام' })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });

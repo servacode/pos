@@ -58,6 +58,19 @@ else
   fail "/health is not answered by the API (CSP: $(header health content-security-policy))"
 fi
 
+# Test mode (sign-up codes on screen) is on exactly when deploy/local/.env asks for it
+want_test_mode=false
+[[ "${SERVA_OTP_DELIVERY:-screen}" == screen ]] && want_test_mode=true
+status="$(get "$https_base/v1/meta" meta)"
+if [[ "$status" == 200 ]] && grep -q "\"testMode\":$want_test_mode" "$work/meta.body"; then
+  pass "Test mode is $want_test_mode, as SERVA_OTP_DELIVERY asks (/v1/meta)"
+  if [[ "$want_test_mode" == true ]]; then
+    warn "TEST MODE: sign-up codes are shown on screen. Set SERVA_OTP_DELIVERY=none in deploy/local/.env to turn it off."
+  fi
+else
+  fail "/v1/meta: got $status $(head -c 200 "$work/meta.body" 2> /dev/null), expected testMode $want_test_mode"
+fi
+
 # 2. The web app
 status="$(get "$https_base/" index)"
 if [[ "$status" == 200 ]] && grep -q 'id="root"' "$work/index.body"; then

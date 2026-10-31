@@ -20,6 +20,8 @@ export const PERMISSIONS = {
   'users.manage': 'المستخدمون والصلاحيات',
   'whatsapp.manage': 'ربط واتساب',
   'subscription.manage': 'الاشتراك والدفع للمنصة',
+  'devices.view': 'رؤية الأجهزة وما لم يصل منها',
+  'devices.manage': 'ربط الأجهزة وإيقافها',
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -36,7 +38,13 @@ export interface RoleTemplate {
   maxDiscountBp: number;
 }
 
-const OWNER_ONLY: readonly Permission[] = ['users.manage', 'whatsapp.manage', 'subscription.manage'];
+const OWNER_ONLY: readonly Permission[] = [
+  'users.manage',
+  'whatsapp.manage',
+  'subscription.manage',
+  // 09 › devices.manage: linking and revoking devices is the owner's alone
+  'devices.manage',
+];
 
 /** Roles created automatically for every new store. The owner can edit them or add more. */
 export const DEFAULT_ROLES: readonly RoleTemplate[] = [
