@@ -80,6 +80,9 @@ jobs:
           pnpm local:restore "$(ls deploy/local/backups/*-ci.dump.enc | tail -n 1)" --replace-live --yes
           bash scripts/local/ci-checks.sh fixture-present
 
+      - name: Sign up a store with the on-screen test code (two-step API, test mode)
+        run: bash scripts/local/ci-checks.sh signup
+
       - name: Drill reports
         if: always()
         run: cat deploy/local/backups/drills/*.txt 2> /dev/null || echo "No drill report."

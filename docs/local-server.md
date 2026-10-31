@@ -81,6 +81,17 @@
 
 لا ترسل ملف `.env` لأحد ولا ترفعه إلى أي مكان، ولا تحذفه، فكلمات سر قاعدة البيانات فيه.
 
+### وضع التجربة: رمز التسجيل على الشاشة
+
+الخادم المحلي لا يرسل رسائل SMS، لذلك يعمل افتراضياً في **وضع التجربة**: عند فتح حساب جديد يظهر رمز التحقق في مربع أصفر على الشاشة نفسها («وضع التجربة — الرمز: 123 456») مع زر يكتبه عنك. وفي أعلى كل صفحة شريط ثابت «نسخة تجربة على الخادم المحلي» كي لا يظنها أحد النسخة الحقيقية.
+
+في هذا الوضع لا يُثبَت أن رقم الجوال لصاحبه، فهو للتجربة فقط. لإيقافه:
+
+1. افتح `deploy/local/.env` وغيّر السطر (أو أضفه) إلى `SERVA_OTP_DELIVERY=none`.
+2. شغّل `pnpm local:up`.
+
+بعدها يتوقف فتح حسابات جديدة على هذا الخادم إلى أن تُربط رسائل SMS، ويختفي الشريط. للعودة: `SERVA_OTP_DELIVERY=screen` ثم `pnpm local:up`. هذا الوضع مرفوض تماماً على الخادم السحابي: لا يعمل إلا مع `DEPLOYMENT=local`.
+
 ## عنوان الخادم على الشبكة
 
 في نهاية `pnpm local:up` و`pnpm local:deploy` يظهر العنوان، مثل:
@@ -171,7 +182,7 @@ pnpm local:restore deploy/local/backups/<اسم النسخة>.dump.enc --replace
 | `RESTORE DRILL FAILED`                                      | لا تعتمد على تلك النسخة. خذ نسخة جديدة وأعد التمرين. إن تكرر الفشل فافحص مساحة القرص (`df -h`) وأخبر الفريق التقني.                                                                                                        |
 | `cannot decrypt`                                            | كلمة سر النسخ في `.env` ليست التي صُنعت بها النسخة.                                                                                                                                                                        |
 | بعد إعادة تشغيل الكمبيوتر لا يفتح شيء                       | شغّل Docker Desktop إن لم يبدأ وحده، ثم `pnpm local:up`.                                                                                                                                                                   |
-| رمز التحقق عند فتح حساب جديد لا يصل                         | طبيعي الآن: الخادم المحلي لا يرسل رسائل SMS بعد، فإرسال الرموز متوقف فيه.                                                                                                                                                  |
+| رمز التحقق عند فتح حساب جديد لا يصل                         | طبيعي: الخادم المحلي لا يرسل رسائل SMS. في وضع التجربة يظهر الرمز على الشاشة نفسها؛ وإن كان `SERVA_OTP_DELIVERY=none` فالتسجيل متوقف (انظر «وضع التجربة» أعلاه).                                                           |
 
 لا تكتب أبداً `docker compose down -v` ولا تحذف volumes من Docker Desktop: هذا يمحو قاعدة البيانات.
 
@@ -188,7 +199,7 @@ pnpm local:restore deploy/local/backups/<اسم النسخة>.dump.enc --replace
 | `postgres` | `postgres:16.15-bookworm`              | Data in volume `serva-local_pgdata`, page checksums on. Published on `127.0.0.1:${SERVA_PG_PORT:-5433}` only. Roles from `scripts/db-bootstrap.sql` via `pg/init-roles.sh`.  |
 | `certs`    | same image (for `openssl`)             | One-shot. Local CA (volume `ca`, key never mounted elsewhere), server certificate for the LAN addresses (volume `certs`). Renews on address change or 30 days before expiry. |
 | `migrate`  | `serva-api:local`                      | One-shot on every `up`: `dist/scripts/migrate.js` (owner role) then `dist/scripts/seed.js`. The API starts only after it succeeds.                                           |
-| `api`      | `apps/api/Dockerfile`                  | `NODE_ENV=production`, `TRUST_PROXY` = the web container's fixed IP, runtime role `serva_app`.                                                                               |
+| `api`      | `apps/api/Dockerfile`                  | `NODE_ENV=production`, `DEPLOYMENT=local`, `OTP_DELIVERY=${SERVA_OTP_DELIVERY:-screen}`, `TRUST_PROXY` = the web container's fixed IP, runtime role `serva_app`.             |
 | `web`      | `apps/web/Dockerfile` (nginx, uid 101) | Static build, security headers, CSP with a per-request nonce, reverse proxy for `/v1/` and `/health`, `:80` → `:443` redirect, `/serva-local-ca.crt`.                        |
 
 `api`, `migrate` and `web` run non-root with a read-only root file system, `cap_drop: ALL` and `no-new-privileges`. Logs rotate (10 MB × 5). Everything but the one-shots has `restart: unless-stopped`.
@@ -225,7 +236,12 @@ Service workers, `Secure` cookies (the API's refresh cookie is `Secure` in produ
 - `SERVA_PG_PORT`;
 - `SERVA_SUBNET` and `SERVA_PROXY_IP`: change them together;
 - `SERVA_EXTRA_HOSTS`;
-- `SERVA_BACKUP_DIR` and `SERVA_BACKUP_KEEP`.
+- `SERVA_BACKUP_DIR` and `SERVA_BACKUP_KEEP`;
+- `SERVA_OTP_DELIVERY`: `screen` (default, test mode) or `none`.
+
+### Test mode (`OTP_DELIVERY=screen`)
+
+Allowed only with `DEPLOYMENT=local`; the API's environment check refuses it otherwise, in every `NODE_ENV`. When on, the API logs a loud warning at startup, `POST /v1/auth/register` adds `testCode` to its 202 answer (for a number that already has an account, a code-shaped decoy that is never stored, so verification refuses it), every answer carries `x-serva-test-mode: 1`, and `GET /v1/meta` answers `{"testMode":true}`. The web app shows the code box on sign-up and the ribbon from that header; the cashier remembers the last value, since it opens without a request. `pnpm local:smoke` checks `/v1/meta` against `SERVA_OTP_DELIVERY`.
 
 A variable already set in the shell wins over the file. Script-only knobs:
 
@@ -254,6 +270,7 @@ Clone inside the WSL file system. `.gitattributes` keeps `*.sh`, `*.sql` and the
 5. `pnpm local:backup`, then `pnpm local:restore latest`;
 6. the negative drills: a damaged file, a damaged file with forged checksums, a wrong passphrase, and a manifest that disagrees with the data. Each must FAIL;
 7. a redeploy, which takes the pre-deploy backup and finds the migrations already applied;
-8. data deleted, then `--replace-live` restores it, and the job checks the rows are back.
+8. data deleted, then `--replace-live` restores it, and the job checks the rows are back;
+9. a store signed up through the real two-step API with the on-screen code, and a registered number's code refused (`ci-checks.sh signup`).
 
 `scripts/local/ci-checks.sh` holds the assertions.

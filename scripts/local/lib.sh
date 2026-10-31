@@ -102,6 +102,10 @@ SERVA_PROXY_IP=172.30.77.10
 # (private IPv4 addresses, or names ending in .local .lan .home.arpa .internal)
 SERVA_EXTRA_HOSTS=
 
+# Test mode: there is no SMS here, so the sign-up code is shown on screen and every page carries
+# «نسخة تجربة على الخادم المحلي». Set to none to stop sign-up instead (docs/local-server.md).
+SERVA_OTP_DELIVERY=screen
+
 # Backups: folder and how many to keep (oldest are deleted)
 SERVA_BACKUP_DIR=
 SERVA_BACKUP_KEEP=14
