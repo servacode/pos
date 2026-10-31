@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { DeviceRecord, SyncState } from '@serva/sync/client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { OutboxEntry } from '@serva/sync';
+import type { DeviceRecord, NewDocument, SyncEngine, SyncState } from '@serva/sync/client';
 import { deviceStore } from './database';
 import { loadDevice } from './device';
 import { checkStorage, startSync } from './sync';
@@ -12,6 +13,8 @@ export interface DeviceState {
   sync: SyncState | null;
   /** Reads the device again, e.g. once linking saved it, and starts its sync loops. */
   reload: () => void;
+  /** The sync loops' save (sent within seconds), or null while the device has no loops */
+  engineSave: ((input: NewDocument) => Promise<OutboxEntry>) | null;
 }
 
 /**
@@ -20,7 +23,7 @@ export interface DeviceState {
  * paint of the login code, so it opens the same with or without internet.
  */
 export function useDevice(): DeviceState {
-  const [state, setState] = useState<Omit<DeviceState, 'reload'>>({
+  const [state, setState] = useState<Omit<DeviceState, 'reload' | 'engineSave'>>({
     loading: true,
     device: null,
     persisted: null,
@@ -28,6 +31,9 @@ export function useDevice(): DeviceState {
   });
   const [generation, setGeneration] = useState(0);
   const reload = useCallback(() => setGeneration((g) => g + 1), []);
+  const engine = useRef<SyncEngine | null>(null);
+  const [hasEngine, setHasEngine] = useState(false);
+  const engineSave = useCallback((input: NewDocument) => engine.current!.save(input), []);
 
   useEffect(() => {
     let alive = true;
@@ -41,14 +47,18 @@ export function useDevice(): DeviceState {
         (storage) => alive && setState((s) => ({ ...s, persisted: storage.persisted })),
         () => undefined,
       );
-      const engine = startSync(store, device, (sync) => alive && setState((s) => ({ ...s, sync })));
-      stop = engine ? () => engine.stop() : null;
+      const started = startSync(store, device, (sync) => alive && setState((s) => ({ ...s, sync })));
+      engine.current = started;
+      setHasEngine(started !== null);
+      stop = started ? () => started.stop() : null;
     });
     return () => {
       alive = false;
       stop?.();
+      engine.current = null;
+      setHasEngine(false);
     };
   }, [generation]);
 
-  return { ...state, reload };
+  return { ...state, reload, engineSave: hasEngine ? engineSave : null };
 }
