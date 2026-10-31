@@ -37,6 +37,22 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation'> =
   'POST /v1/devices/:id/approve': 'signed-in',
   'POST /v1/devices/:id/reject': 'signed-in',
   'POST /v1/devices/:id/revoke': 'signed-in',
+  'GET /v1/products': 'signed-in',
+  'POST /v1/products': 'signed-in',
+  'GET /v1/products/:id': 'signed-in',
+  'PATCH /v1/products/:id': 'signed-in',
+  'POST /v1/products/:id/archive': 'signed-in',
+  'POST /v1/products/:id/restore': 'signed-in',
+  'GET /v1/barcodes/:code': 'signed-in',
+  'GET /v1/categories': 'signed-in',
+  'POST /v1/categories': 'signed-in',
+  'PATCH /v1/categories/:id': 'signed-in',
+  'GET /v1/units': 'signed-in',
+  'POST /v1/units': 'signed-in',
+  'PATCH /v1/units/:id': 'signed-in',
+  'GET /v1/tax-rates': 'signed-in',
+  'POST /v1/tax-rates': 'signed-in',
+  'PATCH /v1/tax-rates/:id': 'signed-in',
 };
 
 interface Stores {
@@ -89,8 +105,96 @@ function deviceIdor(path: (id: string) => string, method: 'PATCH' | 'POST') {
   };
 }
 
+let productCount = 0;
+/** A product of store A with one barcode, made through its owner. */
+async function productOf(app: FastifyInstance, a: Stores['a'], code = `IDOR-1${++productCount}`) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/products',
+    headers: owner(a),
+    payload: {
+      nameAr: 'منتج المتجر أ',
+      variants: [{ price: { currency: 'SYP', priceMinor: 100 }, barcodes: [{ kind: 'standard', code }] }],
+    },
+  });
+  return res.json<{ id: string; version: number }>();
+}
+
+const catalogRow = async (table: string, id: string) =>
+  (
+    await ownerDb()<{ version: number; archived_at: Date | null }[]>`
+    select version, archived_at from ${ownerDb()(table)} where id = ${id}`
+  )[0];
+
+/** Store B's owner acting on a catalog record of store A: 404, and the record is untouched. */
+function catalogIdor(
+  table: string,
+  make: (app: FastifyInstance, a: Stores['a']) => Promise<{ id: string }>,
+  method: 'GET' | 'PATCH' | 'POST',
+  path: (id: string) => string,
+) {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    const record = await make(app, a);
+    const before = await catalogRow(table, record.id);
+    const res = await app.inject({
+      method,
+      url: path(record.id),
+      headers: owner(b),
+      ...(method === 'PATCH'
+        ? { payload: { version: before!.version, name: 'مسروق', nameAr: 'مسروق' } }
+        : {}),
+    });
+    expect(res.statusCode, `${method} ${path(':id')}`).toBe(404);
+    expect(await catalogRow(table, record.id)).toEqual(before);
+  };
+}
+
+const makeReference =
+  (url: string, payload: Record<string, unknown>) => async (app: FastifyInstance, a: Stores['a']) =>
+    (await app.inject({ method: 'POST', url, headers: owner(a), payload })).json<{ id: string }>();
+
 /** Routes with an id in the path, each with a probe using another store's record. */
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  'GET /v1/products/:id': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}`),
+  'PATCH /v1/products/:id': catalogIdor('products', productOf, 'PATCH', (id) => `/v1/products/${id}`),
+  'POST /v1/products/:id/archive': catalogIdor(
+    'products',
+    productOf,
+    'POST',
+    (id) => `/v1/products/${id}/archive`,
+  ),
+  'POST /v1/products/:id/restore': catalogIdor(
+    'products',
+    productOf,
+    'POST',
+    (id) => `/v1/products/${id}/restore`,
+  ),
+  'PATCH /v1/categories/:id': catalogIdor(
+    'categories',
+    makeReference('/v1/categories', { name: 'تصنيف أ' }),
+    'PATCH',
+    (id) => `/v1/categories/${id}`,
+  ),
+  'PATCH /v1/units/:id': catalogIdor(
+    'units',
+    makeReference('/v1/units', { name: 'متر', symbol: 'م' }),
+    'PATCH',
+    (id) => `/v1/units/${id}`,
+  ),
+  'PATCH /v1/tax-rates/:id': catalogIdor(
+    'tax_rates',
+    makeReference('/v1/tax-rates', { name: 'طابع', rateBp: 100, kind: 'stamp' }),
+    'PATCH',
+    (id) => `/v1/tax-rates/${id}`,
+  ),
+  // Store B looking up store A's barcode finds nothing, even though barcodes are only unique per store.
+  'GET /v1/barcodes/:code': async (app, { a, b }) => {
+    await productOf(app, a, 'IDOR-0002');
+    const res = await app.inject({ method: 'GET', url: '/v1/barcodes/IDOR-0002', headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+    // Store B may hold the same code for its own product.
+    expect((await productOf(app, b, 'IDOR-0002')).id).toBeDefined();
+  },
   'PATCH /v1/devices/:id': deviceIdor((id) => `/v1/devices/${id}`, 'PATCH'),
   'POST /v1/devices/:id/approve': deviceIdor((id) => `/v1/devices/${id}/approve`, 'POST'),
   'POST /v1/devices/:id/reject': deviceIdor((id) => `/v1/devices/${id}/reject`, 'POST'),
