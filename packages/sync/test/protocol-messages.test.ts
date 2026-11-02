@@ -21,6 +21,7 @@ import {
   PUSH_MAX_INFLATED_BYTES,
   PUSH_MAX_WIRE_BYTES,
   SUPPORTED_CONTRACT_VERSIONS,
+  SYNC_FLAGS,
   syncDocumentSchema,
   utf8Length,
   type SyncDocument,
@@ -250,5 +251,14 @@ describe('the limits of a push are the ones the server enforces', () => {
   it('supports contract version 1', () => {
     expect(SUPPORTED_CONTRACT_VERSIONS).toContain(1);
     expect(SUPPORTED_CONTRACT_VERSIONS.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the flag that separates received from posted (task M0-3)', () => {
+  // A device reads this name to know a document arrived but entered no books. Renaming or
+  // dropping it would make every held document look posted on the till.
+  it('is part of the contract under its exact name', () => {
+    expect(SYNC_FLAGS).toContain('held_for_processing');
+    expect(SYNC_FLAGS.filter((f) => f === 'held_for_processing')).toHaveLength(1);
   });
 });

@@ -296,6 +296,7 @@ export function evidence(overrides: Partial<SyncEvidence> = {}): SyncEvidence {
     deviceName: 'كاشير 1',
     sent: 5,
     accepted: 5,
+    heldForProcessing: 0,
     duplicate: 5,
     rejected: 0,
     quarantined: 0,

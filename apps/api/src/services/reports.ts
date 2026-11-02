@@ -553,6 +553,7 @@ export async function syncEvidence(
     const [counts] = await tx.execute<Record<string, string>>(sql`
       select count(*)::text as sent,
              count(*) filter (where status in ('accepted', 'pending_link'))::text as accepted,
+             count(*) filter (where status in ('accepted', 'pending_link') and processed_at is null)::text as held,
              coalesce(sum(duplicate_count), 0)::text as duplicate,
              count(*) filter (where status = 'rejected')::text as rejected,
              count(*) filter (where status = 'quarantined')::text as quarantined
@@ -569,6 +570,7 @@ export async function syncEvidence(
       deviceName: device.name,
       sent: num(counts?.sent),
       accepted: num(counts?.accepted),
+      heldForProcessing: num(counts?.held),
       duplicate: num(counts?.duplicate),
       rejected: num(counts?.rejected),
       quarantined: num(counts?.quarantined),

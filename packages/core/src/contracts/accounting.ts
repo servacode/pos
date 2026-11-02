@@ -226,7 +226,13 @@ export interface SyncEvidence {
   deviceName: string;
   /** Distinct documents received */
   sent: number;
+  /** Received and kept, waiting for a link or not: arrived, which is not the same as posted */
   accepted: number;
+  /**
+   * Of `accepted`, those no processor has posted yet (task M0-3): no entry, no stock, no drawer.
+   * They wait for the phase that brings their processor.
+   */
+  heldForProcessing: number;
   /** Copies of documents already received (resent after a lost answer) */
   duplicate: number;
   rejected: number;

@@ -104,9 +104,14 @@ function EvidenceBody({ evidence }: { evidence: SyncEvidence }) {
             : `وصل كل ما أعلنه «${evidence.deviceName}»، وفيه مستندات مرفوضة أو محجوزة للمراجعة.`}
         </Banner>
       )}
-      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
         <StatTile label="أُرسل" value={n(evidence.sent)} />
         <StatTile label="قُبل" value={n(evidence.accepted)} />
+        <StatTile
+          label="محجوز للمعالجة"
+          value={n(evidence.heldForProcessing)}
+          footnote="وصل ومحفوظ، ولم يدخل الحسابات بعد"
+        />
         <StatTile label="مكرر" value={n(evidence.duplicate)} footnote="وصل مرة ثانية ولم يُحسب" />
         <StatTile label="رُفض" value={n(evidence.rejected)} />
         <StatTile label="محجوز للمراجعة" value={n(evidence.quarantined)} />
