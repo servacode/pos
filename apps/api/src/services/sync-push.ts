@@ -58,8 +58,9 @@ export interface DocumentContext {
  * What the server does with an accepted document of a type, inside that document's short
  * transaction (15 › معاملة قصيرة): phase 1 posts the sale, its stock movements and its journal
  * entry here. A processor returns flags (accept-and-flag: permission_stale, totals_mismatch…)
- * and throws DocumentRejection only for what is structurally invalid. Nothing is registered yet:
- * every phase-0 document is stored and accepted as it arrived.
+ * and throws DocumentRejection only for what is structurally invalid. A type with no processor is
+ * stored and accepted, flagged held_for_processing, and its processed_at stays null: it arrived,
+ * it was not posted (task M0-3). processed_at is set only when a processor has run.
  */
 export type DocumentProcessor = (ctx: DocumentContext) => Promise<{ flags?: SyncFlag[] } | void>;
 export type SyncProcessors = Partial<Record<DocType, DocumentProcessor>>;
@@ -244,30 +245,40 @@ async function processDocument(
       resultCode: code,
       flags,
       receivedAt: now,
-      processedAt: now,
+      // Received is not posted (task M0-3): processed_at is set below, and only once a
+      // processor has posted the document.
+      processedAt: null,
     })
     .returning({ receivedAt: syncInbox.receivedAt });
 
   let finalFlags = flags;
   let finalStatus: StoredStatus = status;
   let finalCode = code;
+  let processedAt: Date | null = null;
   if (status === 'accepted' || status === 'pending_link') {
     const processor = processors[doc.type];
-    try {
-      const extra = processor ? await processor({ tx, device, doc, status, now }) : undefined;
-      if (extra?.flags?.length) finalFlags = [...new Set([...flags, ...extra.flags])];
-    } catch (error) {
-      if (!(error instanceof DocumentRejection)) throw error;
-      finalStatus = 'rejected';
-      finalCode = error.code;
+    if (processor) {
+      try {
+        const extra = await processor({ tx, device, doc, status, now });
+        if (extra?.flags?.length) finalFlags = [...new Set([...flags, ...extra.flags])];
+        processedAt = now;
+      } catch (error) {
+        if (!(error instanceof DocumentRejection)) throw error;
+        finalStatus = 'rejected';
+        finalCode = error.code;
+      }
+    } else {
+      // Nothing posts this type yet. It is kept whole and stays accepted, so the device stops
+      // resending it, but it is flagged and left unprocessed: never counted as posted.
+      finalFlags = [...flags, 'held_for_processing'];
     }
-    if (finalFlags !== flags || finalStatus !== status) {
+    if (finalFlags !== flags || finalStatus !== status || processedAt) {
       await tx
         .update(syncInbox)
-        .set({ status: finalStatus, resultCode: finalCode, flags: finalFlags })
+        .set({ status: finalStatus, resultCode: finalCode, flags: finalFlags, processedAt })
         .where(and(eq(syncInbox.tenantId, device.tenantId), eq(syncInbox.docId, doc.id)));
     }
-    if (finalStatus !== 'rejected') await linkWaiting(tx, device.tenantId, doc.id, now);
+    if (finalStatus !== 'rejected') await linkWaiting(tx, device.tenantId, doc.id);
   }
   return {
     id: doc.id,
@@ -346,11 +357,15 @@ async function classify(
   return { status, code: null, flags };
 }
 
-/** Documents that were waiting for this one, and now have every dependency, become accepted. */
-async function linkWaiting(tx: Transaction, tenantId: string, docId: string, now: Date): Promise<void> {
+/**
+ * Documents that were waiting for this one, and now have every dependency, become accepted.
+ * processed_at is left as it is: a waiting document's processor (if its type has one) already
+ * ran when it arrived, and linking it posts nothing new (task M0-3).
+ */
+async function linkWaiting(tx: Transaction, tenantId: string, docId: string): Promise<void> {
   await tx.execute(sql`
     update sync_inbox w
-    set status = 'accepted', flags = array_remove(w.flags, 'pending_link'), processed_at = ${now.toISOString()}::timestamptz
+    set status = 'accepted', flags = array_remove(w.flags, 'pending_link')
     where w.tenant_id = ${tenantId} and w.status = 'pending_link' and w.deps @> array[${docId}]::uuid[]
       and not exists (
         select 1 from unnest(w.deps) as d(id)

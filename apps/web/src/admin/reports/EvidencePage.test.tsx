@@ -107,6 +107,20 @@ describe('«شاشة الدليل»', () => {
     ).toBeInTheDocument();
   });
 
+  it('counts apart what arrived and what has not entered the books yet (task M0-3)', async () => {
+    openEvidence({
+      'GET /v1/devices': { status: 200, body: { devices: [till1] } },
+      [`GET /v1/sync/evidence?deviceId=dev-1&date=${TODAY}`]: {
+        status: 200,
+        body: evidence({ accepted: 7, heldForProcessing: 3 }),
+      },
+    });
+
+    const held = (await screen.findByText('محجوز للمعالجة')).closest('div')!.parentElement!;
+    expect(within(held).getByText('3')).toBeInTheDocument();
+    expect(within(held).getByText('وصل ومحفوظ، ولم يدخل الحسابات بعد')).toBeInTheDocument();
+  });
+
   it('says there is no device yet', async () => {
     openEvidence({ 'GET /v1/devices': { status: 200, body: { devices: [waiting] } } });
 

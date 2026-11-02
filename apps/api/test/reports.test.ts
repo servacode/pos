@@ -467,6 +467,7 @@ describe('GET /v1/sync/evidence (23 › شاشة الدليل)', () => {
       deviceName: `كاشير ${store.device.code}`,
       sent: 6,
       accepted: 6,
+      heldForProcessing: 0,
       duplicate: 5,
       rejected: 0,
       quarantined: 0,

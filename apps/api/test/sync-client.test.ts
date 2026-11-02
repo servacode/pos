@@ -283,4 +283,24 @@ describe('device client against the server', () => {
       { numRuns: Number(process.env.FC_NUM_RUNS ?? 12) },
     );
   }, 300_000);
+
+  it('a document no processor posts is confirmed as delivered, and the device keeps the held flag (task M0-3)', async () => {
+    const c = await client();
+    const receipt: NewDocument = {
+      type: 'receipt',
+      payload: { total: 900 },
+      businessDate: '2026-10-30',
+      engineVersion: '1.0.0',
+    };
+    const held = await c.store.createDocument(receipt, { now: Date.now(), newId });
+    const posted = await c.store.createDocument(sale(1500), { now: Date.now(), newId });
+    await c.pusher.drain();
+
+    // Confirmed means "the server has it, stop resending" — for both. Only the flag says which
+    // one entered the books.
+    const confirmed = new Map((await c.store.listByStatus('confirmed')).map((e) => [e.id, e]));
+    expect(confirmed.get(held.id)?.flags).toContain('held_for_processing');
+    expect(confirmed.get(posted.id)?.flags).not.toContain('held_for_processing');
+    expect(await c.store.countPending()).toBe(0);
+  });
 });

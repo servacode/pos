@@ -313,11 +313,18 @@ describe('POST /v1/sync/push', () => {
     const sale = deviceDocs(a)();
     const ret = deviceDocs(b)('return', { total: 500 }, [sale.id]);
 
+    // No processor posts a return yet (task M0-3): linked or not, it is held, never shown clean.
     const early = await pushOk(b, [ret]);
-    expect(early.results[0]).toMatchObject({ status: 'pending_link', flags: ['pending_link'] });
+    expect(early.results[0]).toMatchObject({
+      status: 'pending_link',
+      flags: ['pending_link', 'held_for_processing'],
+    });
     await pushOk(a, [sale]);
     const rows = await inbox(tenantId);
-    expect(rows.find((r) => r.doc_id === ret.id)).toMatchObject({ status: 'accepted', flags: [] });
+    expect(rows.find((r) => r.doc_id === ret.id)).toMatchObject({
+      status: 'accepted',
+      flags: ['held_for_processing'],
+    });
     // Its replay now reports what it became.
     expect((await pushOk(b, [ret])).results[0]).toMatchObject({ status: 'duplicate', outcome: 'accepted' });
   });

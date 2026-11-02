@@ -194,6 +194,12 @@ export const SYNC_FLAGS = [
   'credit_limit_exceeded',
   'over_return',
   'posted_to_open_period',
+  /**
+   * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,
+   * no stock, no drawer. "accepted" says the document arrived, never that it was posted; this
+   * flag says so out loud, and the document waits for the processor its phase brings.
+   */
+  'held_for_processing',
 ] as const;
 export type SyncFlag = (typeof SYNC_FLAGS)[number];
 

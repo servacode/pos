@@ -36,6 +36,7 @@
 /apps/api/test/posting.test.ts @servacode
 /apps/api/test/posting-properties.test.ts @servacode
 /apps/api/test/integrity.test.ts @servacode
+/apps/api/test/held-for-processing.test.ts @servacode
 
 # Backup and restore, CI and governance
 /scripts/local/ @servacode
