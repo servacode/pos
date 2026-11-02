@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { DOC_TYPES, type DocType, type PushResponse, type SyncDocument } from '@serva/sync';
+import { DOC_TYPES, payloadHash, type DocType, type PushResponse, type SyncDocument } from '@serva/sync';
 import { DOCUMENT_PROCESSORS } from '../src/services/processors';
 import type { SyncProcessors } from '../src/services/sync-push';
 import {
@@ -26,6 +26,7 @@ import {
   shiftOpen,
   type Store,
 } from './accounting-fixtures';
+import { createDevice } from './devices';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 
 /** The types this server posts today; every other type in DOC_SERIES is held. */
@@ -88,6 +89,25 @@ async function postedFor(tenantId: string, ids: string[]) {
       (select count(*) from cash_movements where tenant_id = ${tenantId} and id = any(${ids}::uuid[]))::int as movements,
       (select count(*) from journal_entries where tenant_id = ${tenantId} and source_id = any(${ids}::uuid[]))::int as entries`;
   return row!;
+}
+
+/** The same document, depending on others (the device hashes what it sends, deps included). */
+function dependingOn(doc: SyncDocument, deps: string[]): SyncDocument {
+  const { hash: _old, ...body } = doc;
+  const next = { ...body, deps };
+  return { ...next, hash: payloadHash(next) };
+}
+
+/** A shift opened and closed with every drawer balanced: its close posts no entry. */
+function balancedShift(store: Store, doc: ReturnType<typeof documents>) {
+  const open = doc('shift_open', shiftOpen(store.userId));
+  const close = doc(
+    'shift_close',
+    shiftClose(store.userId, open.id, [{ currency: 'SYP', opening: 100_000, counted: 100_000 }], {
+      shiftNumber: open.number!,
+    }),
+  );
+  return [open, close];
 }
 
 /** One valid document of each processed type, in an order the processors accept. */
@@ -172,6 +192,55 @@ describe('a type with a processor', () => {
     const res = await push(app, store, [bad]);
     expect(res.results[0]).toMatchObject({ status: 'rejected', code: 'invalid_payload', flags: [] });
     expect((await inbox(store.tenantId)).get(bad.id)).toMatchObject({ processed_at: null, flags: [] });
+  });
+});
+
+describe('waiting for a document of another device (pending_link)', () => {
+  // processed_at must not claim more than happened. The processors never read deps or the
+  // status (processors.ts), and linking a waiting document only changes its status and flags
+  // (linkWaiting in sync-push.ts): every financial effect is written when the processor runs, on
+  // arrival. So a waiting document with a processor is posted in full, and one without stays held.
+  it('a waiting sale is posted in full on arrival, and linking it later adds nothing', async () => {
+    const store = await openStore(app);
+    const other = { ...store, device: await createDevice(store.tenantId) };
+    const missing = documents(other.device)('customer', { name: 'زبون' });
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const sold = dependingOn(doc('sale', goldenFirstSale(store, open.id)), [missing.id]);
+
+    const early = await push(app, store, [open, sold]);
+    expect(early.results[1]).toMatchObject({ status: 'pending_link', flags: ['pending_link'] });
+    const before = (await inbox(store.tenantId)).get(sold.id)!;
+    expect(before.processed_at).toBeInstanceOf(Date);
+    const posted = await postedFor(store.tenantId, [sold.id]);
+    expect(posted).toMatchObject({ invoices: 1, entries: 1 });
+
+    await push(app, other, [missing]);
+    const after = (await inbox(store.tenantId)).get(sold.id)!;
+    expect(after).toMatchObject({ status: 'accepted', flags: [] });
+    expect(after.processed_at).toEqual(before.processed_at);
+    expect(await postedFor(store.tenantId, [sold.id])).toEqual(posted);
+  });
+
+  it('a waiting document with no processor stays held before and after it is linked', async () => {
+    const store = await openStore(app);
+    const other = { ...store, device: await createDevice(store.tenantId) };
+    const missing = documents(other.device)('customer', { name: 'زبون' });
+    const ret = dependingOn(documents(store.device)('return', { total: 500 }), [missing.id]);
+
+    await push(app, store, [ret]);
+    expect((await inbox(store.tenantId)).get(ret.id)).toMatchObject({
+      status: 'pending_link',
+      flags: ['pending_link', 'held_for_processing'],
+      processed_at: null,
+    });
+    await push(app, other, [missing]);
+    expect((await inbox(store.tenantId)).get(ret.id)).toMatchObject({
+      status: 'accepted',
+      flags: ['held_for_processing'],
+      processed_at: null,
+    });
+    expect(await postedFor(store.tenantId, [ret.id])).toMatchObject({ entries: 0 });
   });
 });
 
@@ -344,6 +413,7 @@ describe('migration 0013: the rows stored before this change', () => {
     const doc = documents(store.device);
     const docs = [
       ...processedDocs(store, doc),
+      ...balancedShift(store, doc),
       ...HELD.map((type) => doc(type, { total: 1500 })),
       doc('sale', { not: 'a sale' }), // rejected
     ];
@@ -371,6 +441,34 @@ describe('migration 0013: the rows stored before this change', () => {
         docs.map((d) => d.id),
       ),
     ).toEqual(posted);
+  });
+
+  // Phase 1 step 2 had the four processors but no posting: invoices, cash movements and shifts
+  // were written, journal entries came with step 3 (0012_accounting) with no backfill. A row alone
+  // does not prove the document was posted.
+  it('holds what a step-2 database posted without an entry, and keeps what needs none', async () => {
+    const store = await openStore(app);
+    const doc = documents(store.device);
+    const [open, sold, moved, closed] = processedDocs(store, doc);
+    const [balancedOpen, balancedClose] = balancedShift(store, doc);
+    await push(app, store, [open!, sold!, moved!, closed!, balancedOpen!, balancedClose!]);
+    expect(await postedFor(store.tenantId, [balancedClose!.id])).toMatchObject({ entries: 0 });
+
+    // The database as step 2 left it: every row a processor wrote, and no entry at all.
+    // (Entries are append-only; TRUNCATE skips the row triggers, as resetDatabase does.)
+    await ownerDb().unsafe('truncate table journal_lines, journal_entries');
+    await restoreOldState(store.tenantId);
+    await migrate();
+
+    const rows = await inbox(store.tenantId);
+    const held = (d: SyncDocument) => rows.get(d.id)!.processed_at === null;
+    expect(held(sold!), 'sale with an invoice but no entry').toBe(true);
+    expect(held(moved!), 'cash movement with no entry').toBe(true);
+    expect(held(closed!), 'unbalanced close with no entry').toBe(true);
+    expect(held(open!), 'an opening posts no entry').toBe(false);
+    expect(held(balancedOpen!)).toBe(false);
+    expect(held(balancedClose!), 'a balanced close posts no entry').toBe(false);
+    expect(rows.get(sold!.id)!.flags).toContain('held_for_processing');
   });
 
   it('holds a phase-0 sale stored before its processor existed, and runs twice without harm', async () => {
