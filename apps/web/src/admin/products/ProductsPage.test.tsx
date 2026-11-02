@@ -70,8 +70,12 @@ describe('/products list', () => {
   });
 
   it('shows the loading rows first', async () => {
-    let answer: (reply: MockReply) => void = () => undefined;
-    openProducts({ [list()]: () => new Promise<MockReply>((resolve) => (answer = resolve)) });
+    // The answer exists before anything renders. Capturing `resolve` inside the handler raced the
+    // page: when the busy table showed before the list was requested, `answer` was still the no-op,
+    // the request never resolved and the row never came, however long the test waited.
+    let answer!: (reply: MockReply) => void;
+    const reply = new Promise<MockReply>((resolve) => (answer = resolve));
+    openProducts({ [list()]: () => reply });
 
     const table = await screen.findByRole('table', { name: 'المنتجات' });
     expect(table).toHaveAttribute('aria-busy', 'true');
