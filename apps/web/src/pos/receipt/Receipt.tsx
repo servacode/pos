@@ -2,7 +2,12 @@ import { createPortal } from 'react-dom';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { convert } from '@serva/core/money';
 import type { BranchRow, SettingsRow } from '@serva/core/contracts/catalog';
-import type { PaymentMethod, ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
+import type {
+  PaymentMethod,
+  ReceiptPayload,
+  ReturnPayload,
+  SalePayload,
+} from '@serva/core/contracts/documents';
 import { rateFor } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
 import { cn, displayNumber, formatQuantity, Money, useDigits } from '@serva/ui';
@@ -25,8 +30,8 @@ export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base:
 }
 
 export interface ReceiptData {
-  /** A sale receipt unless it says return */
-  kind?: 'sale' | 'return';
+  /** A sale receipt unless it says return or receipt (a customer's payment) */
+  kind?: 'sale' | 'return' | 'receipt';
   doc: Pick<SyncDocument, 'number' | 'deviceTime' | 'payload'>;
   settings: SettingsRow;
   branch: BranchRow | null;
@@ -100,6 +105,51 @@ const REFUND_LABEL: Record<ReturnPayload['refunds'][number]['method'], string> =
   wallet: 'رُدّ إلى شام كاش',
   transfer: 'رُدّ بتحويل',
 };
+
+/** The payment voucher (08 › سند قبض): who paid, how much and how, toward their account. */
+function PaymentVoucher({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
+  const digits = useDigits();
+  const r = data.doc.payload as unknown as ReceiptPayload;
+  const at = Date.parse(data.doc.deviceTime);
+  return (
+    <div dir="rtl" lang="ar" aria-label={`سند قبض ${width} مم`} className={slipClass(width)}>
+      <ReceiptHeader data={data} width={width} copy={copy} />
+      <Rule />
+      <div className="flex flex-col items-center">
+        <span>سند قبض</span>
+        <bdi dir="ltr" className="num font-bold">
+          {data.doc.number}
+        </bdi>
+        <span>
+          {dateText(at, digits)} ، {clockText(at, digits)}
+        </span>
+        <span>
+          الكاشير: {data.cashierName} · {data.deviceName}
+        </span>
+      </div>
+      <Rule />
+      <Row label="استلمنا من">{r.customerName}</Row>
+      <Row label="المبلغ" strong>
+        <Money minor={r.amountMinor} currency={r.currency} />
+      </Row>
+      <Row label="الطريقة">{methodLabel(r.method, r.currency, r.currency)}</Row>
+      {r.reference ? (
+        <Row label={<span className="text-xs">المرجع</span>}>
+          <bdi dir="ltr">{r.reference}</bdi>
+        </Row>
+      ) : null}
+      {r.note ? <Row label={<span className="text-xs">ملاحظة</span>}>{r.note}</Row> : null}
+      <p className="text-center text-xs">دفعة على الحساب</p>
+      <Rule />
+      <p className="text-center text-[10px]">
+        سيرفا ·{' '}
+        <span lang="en" dir="ltr">
+          Serva
+        </span>
+      </p>
+    </div>
+  );
+}
 
 /** The return slip (08 › مرتجع مبيعات): what came back, from which invoice, and what was paid back. */
 function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
@@ -189,6 +239,7 @@ export function Receipt({
 }) {
   const digits = useDigits();
   if (data.kind === 'return') return <ReturnReceipt data={data} width={width} copy={copy} />;
+  if (data.kind === 'receipt') return <PaymentVoucher data={data} width={width} copy={copy} />;
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
   const at = Date.parse(data.doc.deviceTime);

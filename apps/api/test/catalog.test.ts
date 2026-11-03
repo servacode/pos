@@ -192,6 +192,7 @@ describe('sync tables', () => {
       'barcodes',
       'branches',
       'categories',
+      'customers',
       'exchange_rates',
       'prices',
       'products',

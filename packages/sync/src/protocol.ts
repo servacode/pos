@@ -193,6 +193,7 @@ export const SYNC_FLAGS = [
   'negative_stock',
   'credit_limit_exceeded',
   'over_return',
+  'duplicate_customer',
   'posted_to_open_period',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,

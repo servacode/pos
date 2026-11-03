@@ -47,11 +47,11 @@ beforeEach(async () => {
   const a = documents(store.device);
   const b = documents(second);
   const docs = {
-    a1: a('customer', { name: 'أحمد' }),
-    a2: a('customer', { name: 'bad' }),
-    a3: a('customer', { name: 'سامر' }),
-    b1: b('customer', { name: 'invalid' }),
-    b2: b('customer', { name: 'ليلى' }),
+    a1: a('cart_event', { name: 'أحمد' }),
+    a2: a('cart_event', { name: 'bad' }),
+    a3: a('cart_event', { name: 'سامر' }),
+    b1: b('cart_event', { name: 'invalid' }),
+    b2: b('cart_event', { name: 'ليلى' }),
   };
   // Sent out of order: the catch-up must still follow each till's own order
   await push(app, store.device, [docs.a3, docs.a1, docs.a2]);
@@ -88,7 +88,12 @@ describe('the catch-up of held documents', () => {
     const seen: string[] = [];
     const report = await reprocessHeld(
       appDb().db,
-      { tenantId: store.tenantId, type: 'customer', processors: { customer: fakeProcessor(seen) }, now: NOW },
+      {
+        tenantId: store.tenantId,
+        type: 'cart_event',
+        processors: { cart_event: fakeProcessor(seen) },
+        now: NOW,
+      },
       META,
     );
     const firstTill = [ids.a1, ids.a2, ids.a3];
@@ -127,8 +132,8 @@ describe('the catch-up of held documents', () => {
       appDb().db,
       {
         tenantId: store.tenantId,
-        type: 'customer',
-        processors: { customer: fakeProcessor(first) },
+        type: 'cart_event',
+        processors: { cart_event: fakeProcessor(first) },
         now: NOW,
       },
       META,
@@ -138,8 +143,8 @@ describe('the catch-up of held documents', () => {
       appDb().db,
       {
         tenantId: store.tenantId,
-        type: 'customer',
-        processors: { customer: fakeProcessor(again) },
+        type: 'cart_event',
+        processors: { cart_event: fakeProcessor(again) },
         now: NOW,
       },
       META,
@@ -151,12 +156,17 @@ describe('the catch-up of held documents', () => {
   it('a till resending its documents after the catch-up changes nothing', async () => {
     await reprocessHeld(
       appDb().db,
-      { tenantId: store.tenantId, type: 'customer', processors: { customer: fakeProcessor([]) }, now: NOW },
+      {
+        tenantId: store.tenantId,
+        type: 'cart_event',
+        processors: { cart_event: fakeProcessor([]) },
+        now: NOW,
+      },
       META,
     );
     const before = await inbox(store.tenantId);
     const a = documents(store.device);
-    const res = await push(app, store.device, [a('customer', { name: 'أحمد' }, ids.a1)]);
+    const res = await push(app, store.device, [a('cart_event', { name: 'أحمد' }, ids.a1)]);
     expect(res.results[0]!.status).toBe('duplicate');
     expect(await inbox(store.tenantId)).toEqual(before);
   });
@@ -164,10 +174,15 @@ describe('the catch-up of held documents', () => {
   it('touches no other store and no other type', async () => {
     const other = await openStore(app, '0913131313');
     const o = documents(other.device);
-    await push(app, other.device, [o('customer', { name: 'غريب' })]);
+    await push(app, other.device, [o('cart_event', { name: 'غريب' })]);
     await reprocessHeld(
       appDb().db,
-      { tenantId: store.tenantId, type: 'customer', processors: { customer: fakeProcessor([]) }, now: NOW },
+      {
+        tenantId: store.tenantId,
+        type: 'cart_event',
+        processors: { cart_event: fakeProcessor([]) },
+        now: NOW,
+      },
       META,
     );
     const [row] = await inbox(other.tenantId);
@@ -178,22 +193,27 @@ describe('the catch-up of held documents', () => {
   it('writes the run to the audit log', async () => {
     await reprocessHeld(
       appDb().db,
-      { tenantId: store.tenantId, type: 'customer', processors: { customer: fakeProcessor([]) }, now: NOW },
+      {
+        tenantId: store.tenantId,
+        type: 'cart_event',
+        processors: { cart_event: fakeProcessor([]) },
+        now: NOW,
+      },
       META,
     );
     const [entry] = await ownerDb()<{ actor_type: string; data: Record<string, number | string> }[]>`
       select actor_type, data from audit_logs where tenant_id = ${store.tenantId} and action = 'documents.reprocess_held'`;
     expect(entry!.actor_type).toBe('system');
-    expect(entry!.data).toEqual({ type: 'customer', found: 5, processed: 3, rejected: 1, failed: 1 });
+    expect(entry!.data).toEqual({ type: 'cart_event', found: 5, processed: 3, rejected: 1, failed: 1 });
   });
 
   it('refuses a type that still has no processor', async () => {
     await expect(
       reprocessHeld(
         appDb().db,
-        { tenantId: store.tenantId, type: 'customer', processors: {}, now: NOW },
+        { tenantId: store.tenantId, type: 'cart_event', processors: {}, now: NOW },
         META,
       ),
-    ).rejects.toThrow(/No processor for customer/);
+    ).rejects.toThrow(/No processor for cart_event/);
   });
 });

@@ -87,6 +87,12 @@ export interface DayReport {
   };
   /** Sales less returns, tax included */
   netSalesMinor: number;
+  /** What customers paid toward their debts (RCV) */
+  collections: {
+    count: number;
+    totalMinor: number;
+    byMethod: { method: RefundMethod; currency: CurrencyCode; amountMinor: number; count: number }[];
+  };
   baseCurrency: CurrencyCode;
 }
 
@@ -126,6 +132,8 @@ export interface ShiftCurrencyReport {
   changeGivenMinor: number;
   /** Cash paid back for returns from this drawer */
   refundsMinor: number;
+  /** Cash customers paid toward their debts into this drawer */
+  receiptsMinor: number;
   payInMinor: number;
   payOutMinor: number;
   dropsMinor: number;
@@ -164,6 +172,7 @@ export const journalQuery = z.object({
 export const JOURNAL_SOURCE_TYPES = [
   'sale',
   'return',
+  'receipt',
   'shift_close',
   'cash_movement',
   'manual',

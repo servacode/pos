@@ -7,6 +7,7 @@ import type {
   CashMovementKind,
   CashMovementPayload,
   PaymentMethod,
+  ReceiptPayload,
   ReturnPayload,
   SalePayload,
   ShiftClosePayload,
@@ -134,13 +135,20 @@ export async function deviceDocuments(store: SyncStore): Promise<OutboxEntry[]> 
 
 type Terms = Pick<
   ShiftCloseCash,
-  'cashInMinor' | 'changeOutMinor' | 'refundsMinor' | 'payInMinor' | 'payOutMinor' | 'dropsMinor'
+  | 'cashInMinor'
+  | 'changeOutMinor'
+  | 'refundsMinor'
+  | 'receiptsMinor'
+  | 'payInMinor'
+  | 'payOutMinor'
+  | 'dropsMinor'
 >;
 
 const NO_TERMS: Terms = {
   cashInMinor: 0,
   changeOutMinor: 0,
   refundsMinor: 0,
+  receiptsMinor: 0,
   payInMinor: 0,
   payOutMinor: 0,
   dropsMinor: 0,
@@ -200,6 +208,10 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       for (const r of (payload as unknown as ReturnPayload).refunds) {
         if (r.method === 'cash') termsOf(r.currency).refundsMinor += r.amountMinor;
       }
+    } else if (doc.type === 'receipt') {
+      // A customer's payment in cash goes into this drawer
+      const r = payload as unknown as ReceiptPayload;
+      if (r.method === 'cash') termsOf(r.currency).receiptsMinor += r.amountMinor;
     } else if (doc.type === 'cash_movement') {
       const move = payload as unknown as CashMovementPayload;
       const t = termsOf(move.currency);
@@ -226,7 +238,8 @@ export function closeDrawer(
     t.cashInMinor +
     t.payInMinor -
     t.changeOutMinor -
-    t.refundsMinor -
+    t.refundsMinor +
+    t.receiptsMinor -
     t.payOutMinor -
     t.dropsMinor;
   const countedMinor = countTotal(counted);
@@ -240,7 +253,7 @@ export function closeDrawer(
     cashInMinor: t.cashInMinor,
     changeOutMinor: t.changeOutMinor,
     refundsMinor: t.refundsMinor,
-    receiptsMinor: 0,
+    receiptsMinor: t.receiptsMinor,
     payInMinor: t.payInMinor,
     fxInMinor: 0,
     payOutMinor: t.payOutMinor,

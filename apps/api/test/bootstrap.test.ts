@@ -112,6 +112,7 @@ describe('GET /v1/sync/bootstrap and the snapshot file', () => {
       'barcodes',
       'branches',
       'categories',
+      'customers',
       'exchange_rates',
       'prices',
       'products',

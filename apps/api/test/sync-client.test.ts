@@ -287,7 +287,7 @@ describe('device client against the server', () => {
   it('a document no processor posts is confirmed as delivered, and the device keeps the held flag (task M0-3)', async () => {
     const c = await client();
     const receipt: NewDocument = {
-      type: 'receipt',
+      type: 'quotation',
       payload: { total: 900 },
       businessDate: '2026-10-30',
       engineVersion: '1.0.0',

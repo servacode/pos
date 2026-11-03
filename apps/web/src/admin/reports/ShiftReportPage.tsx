@@ -52,6 +52,7 @@ function cashLines(withDifference: boolean): CashLine[] {
     { key: 'sales', label: 'المبيعات نقداً', value: money((r) => r.cashSalesMinor) },
     { key: 'change', label: 'الباقي المعطى', value: money((r) => r.changeGivenMinor, -1) },
     { key: 'refunds', label: 'المرتجعات نقداً', value: money((r) => r.refundsMinor, -1) },
+    { key: 'receipts', label: 'دفعات الزبائن نقداً', value: money((r) => r.receiptsMinor) },
     { key: 'payIn', label: 'الإيداع في الدرج', value: money((r) => r.payInMinor) },
     { key: 'payOut', label: 'السحب من الدرج', value: money((r) => r.payOutMinor, -1) },
     { key: 'drops', label: 'إلى الخزنة', value: money((r) => r.dropsMinor, -1) },

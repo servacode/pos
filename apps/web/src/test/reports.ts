@@ -83,6 +83,7 @@ export function dayReport(overrides: Partial<DayReport> = {}): DayReport {
     ],
     returns: { count: 0, totalMinor: 0, taxMinor: 0, byMethod: [] },
     netSalesMinor: 1_284_500,
+    collections: { count: 0, totalMinor: 0, byMethod: [] },
     baseCurrency: 'SYP',
     ...overrides,
   };
@@ -116,6 +117,7 @@ export function shiftReport(overrides: Partial<ShiftReport> = {}): ShiftReport {
         cashSalesMinor: 26_840_000,
         changeGivenMinor: 120_000,
         refundsMinor: 0,
+        receiptsMinor: 0,
         payInMinor: 1_200_000,
         payOutMinor: 150_000,
         dropsMinor: 15_000_000,
@@ -129,6 +131,7 @@ export function shiftReport(overrides: Partial<ShiftReport> = {}): ShiftReport {
         cashSalesMinor: 41_000,
         changeGivenMinor: 0,
         refundsMinor: 0,
+        receiptsMinor: 0,
         payInMinor: 0,
         payOutMinor: 0,
         dropsMinor: 0,

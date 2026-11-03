@@ -188,6 +188,16 @@ export async function dayReport(
       group by r.refund_method, r.currency
       order by array_position(array['cash', 'card', 'wallet', 'transfer'], r.refund_method), r.currency`);
     const returnsTotal = num(returned?.total);
+    const collected = await tx.execute<{
+      method: RefundMethod;
+      currency: CurrencyCode;
+      amount: string;
+      n: string;
+    }>(sql`
+      select r.method, r.currency, sum(r.amount_minor)::text as amount, count(*)::text as n
+      from receipts r where r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}
+      group by r.method, r.currency
+      order by array_position(array['cash', 'card', 'wallet', 'transfer'], r.method), r.currency`);
     return {
       date: query.date,
       branchId: query.branchId ?? null,
@@ -218,6 +228,16 @@ export async function dayReport(
         })),
       },
       netSalesMinor: total - returnsTotal,
+      collections: {
+        count: collected.reduce((n, r) => n + num(r.n), 0),
+        totalMinor: collected.reduce((n, r) => n + num(r.amount), 0),
+        byMethod: collected.map((r) => ({
+          method: r.method,
+          currency: r.currency,
+          amountMinor: num(r.amount),
+          count: num(r.n),
+        })),
+      },
       baseCurrency: await baseCurrencyOf(tx),
     };
   });
@@ -319,6 +339,9 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       from invoices i where ${ofShift} and jsonb_typeof(i.payload -> 'change') = 'object'
       group by i.payload -> 'change' ->> 'currency'
       union all
+      select r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
+      where r.shift_id = ${id} and r.method = 'cash' group by r.currency
+      union all
       select r.currency, 'refund', sum(r.total_minor)::text from sale_returns r
       where r.shift_id = ${id} and r.refund_method = 'cash' group by r.currency
       union all
@@ -353,6 +376,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
           cashSalesMinor: 0,
           changeGivenMinor: 0,
           refundsMinor: 0,
+          receiptsMinor: 0,
           payInMinor: 0,
           payOutMinor: 0,
           dropsMinor: 0,
@@ -374,6 +398,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       if (f.kind === 'cash_in') d.cashSalesMinor += amount;
       else if (f.kind === 'change') d.changeGivenMinor += amount;
       else if (f.kind === 'refund') d.refundsMinor += amount;
+      else if (f.kind === 'receipt') d.receiptsMinor += amount;
       else if (f.kind === 'pay_in') d.payInMinor += amount;
       else if (f.kind === 'pay_out' || f.kind === 'expense') d.payOutMinor += amount;
       else if (f.kind === 'safe_drop') d.dropsMinor += amount;
@@ -385,6 +410,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
         d.cashSalesMinor -
         d.changeGivenMinor -
         d.refundsMinor +
+        d.receiptsMinor +
         d.payInMinor -
         d.payOutMinor -
         d.dropsMinor;

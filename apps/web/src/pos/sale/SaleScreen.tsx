@@ -633,6 +633,7 @@ export function SaleScreen(props: SaleScreenProps) {
             catalog={catalog}
             shiftId={props.shiftId}
             cashierId={session.userId}
+            canCredit={session.permissions.has('sale.credit')}
             onBack={() => setMode({ kind: 'items' })}
             onCompleted={(entry) => {
               setMode({ kind: 'items' });

@@ -23,6 +23,8 @@ export const ids = {
   kilo: '0192a000-0000-7000-8000-0000000000e2',
   dairy: '0192a000-0000-7000-8000-0000000000f1',
   grocery: '0192a000-0000-7000-8000-0000000000f2',
+  abuKhaled: '0192a000-0000-7000-8000-0000000000a1',
+  ummSamer: '0192a000-0000-7000-8000-0000000000a2',
 };
 
 /** The codes each person types (the server's side of the fake). */
@@ -171,7 +173,7 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
         id: ids.cashierRole,
         key: 'cashier',
         name: 'كاشير',
-        permissions: ['sale.create', 'sale.discount', 'shift.close_own'],
+        permissions: ['sale.create', 'sale.discount', 'shift.close_own', 'receipt.create'],
         maxDiscountBp: 1000,
         version: 1,
       },
@@ -188,6 +190,8 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
           'shift.close_any',
           'shift.view_difference',
           'sale.refund',
+          'sale.credit',
+          'receipt.create',
         ],
         maxDiscountBp: 10000,
         version: 1,
@@ -207,6 +211,17 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
         isActive: true,
         version: 1,
       },
+    ],
+    customers: [
+      {
+        id: ids.abuKhaled,
+        name: 'أبو خالد',
+        phone: '+963933111222',
+        creditLimitMinor: 100_000,
+        archived: false,
+        version: 1,
+      },
+      { id: ids.ummSamer, name: 'أم سامر', phone: null, creditLimitMinor: null, archived: false, version: 1 },
     ],
     ...overrides,
   };

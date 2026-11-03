@@ -61,6 +61,7 @@
 /packages/core/src/text.ts @servacode
 # shared shapes of the document and accounting contracts
 /packages/core/src/contracts/common.ts @servacode
+/packages/core/src/contracts/customers.ts @servacode
 # the document types the protocol and the local store accept
 /packages/sync/src/doc-types.ts @servacode
 # identifiers the protocol deduplicates on

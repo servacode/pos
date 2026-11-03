@@ -18,6 +18,12 @@ const CategoriesPage = lazy(() =>
 // The start wizard and «إعدادات المتجر» (04)
 const WelcomePage = lazy(() => import('./store/WelcomePage').then((m) => ({ default: m.WelcomePage })));
 const SettingsPage = lazy(() => import('./store/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const CustomersPage = lazy(() =>
+  import('./customers/CustomersPage').then((m) => ({ default: m.CustomersPage })),
+);
+const CustomerPage = lazy(() =>
+  import('./customers/CustomerPage').then((m) => ({ default: m.CustomerPage })),
+);
 const PinPage = lazy(() => import('./staff/PinPage').then((m) => ({ default: m.PinPage })));
 // The reports: «مبيعات اليوم», the shifts and their close report, «شاشة الدليل», and the books.
 const DayReportPage = lazy(() =>
@@ -57,6 +63,8 @@ export function AdminApp() {
           <Route path="/products" element={page(<ProductsPage />)} />
           <Route path="/products/:id" element={page(<ProductRoute />)} />
           <Route path="/categories" element={page(<CategoriesPage />)} />
+          <Route path="/customers" element={page(<CustomersPage />)} />
+          <Route path="/customers/:id" element={page(<CustomerPage />)} />
           <Route path="/me/pin" element={page(<PinPage />)} />
           <Route path="/welcome" element={page(<WelcomePage />)} />
           <Route path="/settings" element={page(<SettingsPage />)} />

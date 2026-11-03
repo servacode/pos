@@ -12,6 +12,7 @@ import type {
   VariantRow,
 } from '@serva/core/contracts/catalog';
 import type { TradeRate } from '@serva/core/contracts/common';
+import type { CustomerRow } from '@serva/core/contracts/customers';
 import { normalizeArabic, toLatinDigits } from '@serva/core/text';
 import type { SyncStore } from '@serva/sync/client';
 import type { StaffSets } from './staff/staff';
@@ -55,6 +56,8 @@ export interface Catalog {
   /** The rate dollars are taken at in payment, when the store sets one (10 › سعر قبض الدولار) */
   collectRates: Partial<Record<CurrencyCode, TradeRate>>;
   staff: StaffSets;
+  /** The store's customers, archived ones left out, by name */
+  customers: CustomerRow[];
 }
 
 export type CatalogSets = { [K in keyof PullSetRows]: PullSetRows[K][] };
@@ -74,6 +77,7 @@ export const CATALOG_SETS = [
   'roles',
   'user_roles',
   'branches',
+  'customers',
 ] as const satisfies readonly (keyof PullSetRows)[];
 
 export async function readCatalogSets(store: SyncStore): Promise<CatalogSets> {
@@ -172,6 +176,9 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     rates,
     collectRates,
     staff: { users: sets.users, roles: sets.roles, user_roles: sets.user_roles, branches: sets.branches },
+    customers: (sets.customers ?? [])
+      .filter((c) => !c.archived)
+      .sort((a, b) => a.name.localeCompare(b.name, 'ar')),
   };
 }
 

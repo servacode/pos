@@ -22,6 +22,9 @@ const ShiftCloseScreen = lazy(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.ShiftCloseScreen })),
 );
 const ReturnScreen = lazy(() => import('./return/ReturnScreen').then((m) => ({ default: m.ReturnScreen })));
+const ReceiptScreen = lazy(() =>
+  import('./customers/ReceiptScreen').then((m) => ({ default: m.ReceiptScreen })),
+);
 const CashMovementScreen = lazy(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.CashMovementScreen })),
 );
@@ -39,7 +42,7 @@ interface LastSale {
   cashierName: string;
 }
 
-type View = 'sale' | 'close' | 'cash' | 'return';
+type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt';
 
 export interface CashierAppProps {
   session: StaffSession;
@@ -271,6 +274,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               {(
                 [
                   shift ? { label: 'مرتجع', key: 'Alt+R', action: () => setView('return') } : null,
+                  shift && session.permissions.has('receipt.create')
+                    ? { label: 'قبض من زبون', key: null, action: () => setView('receipt') }
+                    : null,
                   shift ? { label: 'حركات الدرج', key: 'Alt+7', action: () => setView('cash') } : null,
                   lastSale ? { label: 'إيصال آخر فاتورة', key: null, action: reprint } : null,
                   { label: 'اقفل الشاشة', key: 'Alt+L', action: lock },
@@ -328,6 +334,16 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 setView('sale');
                 onSignOut();
               }}
+            />
+          ) : view === 'receipt' ? (
+            <ReceiptScreen
+              session={session}
+              catalog={catalog}
+              shift={shift}
+              onBack={() => setView('sale')}
+              onPrint={(doc) =>
+                setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'receipt' }, copy: false })
+              }
             />
           ) : view === 'return' ? (
             <ReturnScreen

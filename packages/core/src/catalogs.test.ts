@@ -38,11 +38,11 @@ describe('default roles', () => {
     expect(manager).toHaveLength(ALL_PERMISSIONS.length - 5);
   });
 
-  it('limits the cashier to selling with a 10% discount', () => {
+  it('limits the cashier to selling with a 10% discount and taking customers’ payments', () => {
     expect(role('cashier')).toEqual({
       key: 'cashier',
       nameAr: 'كاشير',
-      permissions: ['sale.create', 'sale.discount', 'shift.close_own'],
+      permissions: ['sale.create', 'sale.discount', 'shift.close_own', 'receipt.create'],
       maxDiscountBp: 1000,
     });
   });

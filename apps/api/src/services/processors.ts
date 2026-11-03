@@ -1,6 +1,8 @@
 import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import {
   cashMovementPayloadSchema,
+  customerPayloadSchema,
+  receiptPayloadSchema,
   returnPayloadSchema,
   salePayloadSchema,
   shiftClosePayloadSchema,
@@ -10,6 +12,10 @@ import {
 } from '@serva/core';
 import {
   cashMovements,
+  customers,
+  journalLines,
+  accounts,
+  receipts,
   invoiceLines,
   invoicePayments,
   invoices,
@@ -23,7 +29,7 @@ import {
   type Transaction,
 } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
-import { postCashMovement, postReturn, postSale, postShiftClose } from './posting';
+import { postCashMovement, postReceipt, postReturn, postSale, postShiftClose } from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
 
 /**
@@ -204,6 +210,10 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     },
     sale,
   );
+  // A credit sale over the customer's limit is accepted and flagged (08 › قاعدة 8)
+  if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) {
+    if (await overCreditLimit(tx, tenantId, sale.customerId)) flags.push('credit_limit_exceeded');
+  }
 
   return { flags };
 }
@@ -305,7 +315,104 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
   return { flags };
 }
 
-/** Sales, returns and movements that named this shift before it arrived are linked to it now. */
+/** What a customer owes now: their 1200 lines, debit less credit, base currency. */
+export async function customerBalance(
+  tx: Transaction,
+  tenantId: string,
+  customerId: string,
+): Promise<number> {
+  const [row] = await tx
+    .select({
+      balance: sql<string>`coalesce(sum(${journalLines.debitMinor} - ${journalLines.creditMinor}), 0)::text`,
+    })
+    .from(journalLines)
+    .innerJoin(
+      accounts,
+      and(eq(accounts.tenantId, journalLines.tenantId), eq(accounts.id, journalLines.accountId)),
+    )
+    .where(
+      and(
+        eq(journalLines.tenantId, tenantId),
+        eq(accounts.code, '1200'),
+        eq(journalLines.partyType, 'customer'),
+        eq(journalLines.partyId, customerId),
+      ),
+    );
+  return Number(row?.balance ?? 0);
+}
+
+async function overCreditLimit(tx: Transaction, tenantId: string, customerId: string): Promise<boolean> {
+  const [customer] = await tx
+    .select({ limit: customers.creditLimitMinor })
+    .from(customers)
+    .where(and(eq(customers.tenantId, tenantId), eq(customers.id, customerId)));
+  if (customer?.limit === null || customer?.limit === undefined) return false;
+  return (await customerBalance(tx, tenantId, customerId)) > customer.limit;
+}
+
+/**
+ * customer: a customer the till added. Stored under the document's id, once; a phone this store
+ * already has is accepted and flagged duplicate_customer for the owner to merge.
+ */
+async function processCustomer({ tx, device, doc }: DocumentContext) {
+  const c = customerPayloadSchema.parse(doc.payload);
+  const flags: SyncFlag[] = [];
+  if (c.phone) {
+    const [same] = await tx
+      .select({ id: customers.id })
+      .from(customers)
+      .where(and(eq(customers.tenantId, device.tenantId), eq(customers.phone, c.phone)));
+    if (same) flags.push('duplicate_customer');
+  }
+  await tx
+    .insert(customers)
+    .values({ tenantId: device.tenantId, id: doc.id, name: c.name, phone: c.phone, createdByDoc: doc.id })
+    .onConflictDoNothing();
+  return { flags };
+}
+
+/** receipt (RCV): a customer's payment, into the drawer of its shift or the card's account. */
+async function processReceipt({ tx, device, doc }: DocumentContext) {
+  const r = receiptPayloadSchema.parse(doc.payload);
+  const [inserted] = await tx
+    .insert(receipts)
+    .values({
+      tenantId: device.tenantId,
+      id: doc.id,
+      branchId: device.branchId,
+      deviceId: device.deviceId,
+      number: doc.number!,
+      businessDate: doc.businessDate,
+      deviceTime: new Date(doc.deviceTime),
+      customerId: r.customerId,
+      shiftId: r.shiftId,
+      shiftLinked: await shiftOpened(tx, r.shiftId),
+      cashierId: r.cashierId,
+      currency: r.currency,
+      amountMinor: r.amountMinor,
+      method: r.method,
+      reference: r.reference,
+      payload: doc.payload,
+    })
+    .onConflictDoNothing()
+    .returning({ id: receipts.id });
+  if (inserted) {
+    await postReceipt(
+      tx,
+      {
+        tenantId: device.tenantId,
+        branchId: device.branchId,
+        docId: doc.id,
+        number: doc.number!,
+        businessDate: doc.businessDate,
+      },
+      r,
+    );
+  }
+  return { flags: [] };
+}
+
+/** Sales, returns, payments and movements that named this shift before it arrived are linked to it now. */
 async function linkToShift(tx: Transaction, shiftId: string): Promise<void> {
   await tx
     .update(invoices)
@@ -319,6 +426,10 @@ async function linkToShift(tx: Transaction, shiftId: string): Promise<void> {
     .update(saleReturns)
     .set({ shiftLinked: true })
     .where(and(eq(saleReturns.shiftId, shiftId), eq(saleReturns.shiftLinked, false)));
+  await tx
+    .update(receipts)
+    .set({ shiftLinked: true })
+    .where(and(eq(receipts.shiftId, shiftId), eq(receipts.shiftLinked, false)));
 }
 
 /** shift_open: the shift's id is the document's; a close that came first keeps its status. */
@@ -439,6 +550,8 @@ async function processCashMovement({ tx, device, doc }: DocumentContext) {
 export const DOCUMENT_PROCESSORS: SyncProcessors = {
   sale: processSale,
   return: processReturn,
+  receipt: processReceipt,
+  customer: processCustomer,
   shift_open: processShiftOpen,
   shift_close: processShiftClose,
   cash_movement: processCashMovement,

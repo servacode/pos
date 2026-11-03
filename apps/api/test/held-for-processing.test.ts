@@ -116,6 +116,7 @@ function processedDocs(store: Store, doc: ReturnType<typeof documents>) {
   const open = doc('shift_open', shiftOpen(store.userId));
   const golden = goldenFirstSale(store, open.id);
   const sold = doc('sale', golden);
+  const customer = doc('customer', { name: 'أبو خالد', phone: null, createdBy: store.userId });
   return [
     open,
     sold,
@@ -136,16 +137,36 @@ function processedDocs(store: Store, doc: ReturnType<typeof documents>) {
         picks: [{ saleLineNo: 3, qty: 1000 }],
       }),
     ),
+    customer,
+    doc('receipt', {
+      customerId: customer.id,
+      customerName: 'أبو خالد',
+      shiftId: open.id,
+      cashierId: store.userId,
+      currency: 'SYP',
+      amountMinor: 5_000,
+      method: 'wallet',
+      reference: 'W-1',
+      note: null,
+    }),
   ];
 }
 
 describe('which types are posted today', () => {
-  it('splits DOC_SERIES into the 5 types with a processor and the 17 held ones', () => {
-    expect(PROCESSED).toEqual(['cash_movement', 'return', 'sale', 'shift_close', 'shift_open']);
+  it('splits DOC_SERIES into the 7 types with a processor and the 15 held ones', () => {
+    expect(PROCESSED).toEqual([
+      'cash_movement',
+      'customer',
+      'receipt',
+      'return',
+      'sale',
+      'shift_close',
+      'shift_open',
+    ]);
     expect(DOC_TYPES).toHaveLength(22);
     // When a phase adds a processor this number drops: the held documents of that type are then
     // the catch-up of that phase (M1), never posted here on their own.
-    expect(HELD).toHaveLength(17);
+    expect(HELD).toHaveLength(15);
   });
 });
 
@@ -218,7 +239,7 @@ describe('waiting for a document of another device (pending_link)', () => {
   it('a waiting sale is posted in full on arrival, and linking it later adds nothing', async () => {
     const store = await openStore(app);
     const other = { ...store, device: await createDevice(store.tenantId) };
-    const missing = documents(other.device)('customer', { name: 'زبون' });
+    const missing = documents(other.device)('cart_event', { name: 'زبون' });
     const doc = documents(store.device);
     const open = doc('shift_open', shiftOpen(store.userId));
     const sold = dependingOn(doc('sale', goldenFirstSale(store, open.id)), [missing.id]);
@@ -240,7 +261,7 @@ describe('waiting for a document of another device (pending_link)', () => {
   it('a waiting document with no processor stays held before and after it is linked', async () => {
     const store = await openStore(app);
     const other = { ...store, device: await createDevice(store.tenantId) };
-    const missing = documents(other.device)('customer', { name: 'زبون' });
+    const missing = documents(other.device)('cart_event', { name: 'زبون' });
     const ret = dependingOn(documents(store.device)('trade_in', { total: 500 }), [missing.id]);
 
     await push(app, store, [ret]);
@@ -344,7 +365,7 @@ describe('an interrupted push', () => {
 
   it('a lost answer: the device resends a held document and is told again it is held', async () => {
     const store = await openStore(app);
-    const held = documents(store.device)('receipt', { total: 900 });
+    const held = documents(store.device)('quotation', { total: 900 });
     await push(app, store, [held]); // the answer never reached the device
     const replay = await push(app, store, [held]);
     expect(replay.results[0]).toMatchObject({
@@ -359,24 +380,24 @@ describe('a processor added later (the boundary of the M1 catch-up)', () => {
   it('a new server posts new documents of the type, and never silently posts the held ones', async () => {
     const store = await openStore(app);
     const doc = documents(store.device);
-    const old = doc('receipt', { total: 900 });
+    const old = doc('quotation', { total: 900 });
     await push(app, store, [old]);
 
     const ran: string[] = [];
     const upgraded = await appWith({
       ...DOCUMENT_PROCESSORS,
-      receipt: async ({ doc: d }) => {
+      quotation: async ({ doc: d }) => {
         ran.push(d.id);
       },
     });
 
-    // The old receipt arrives again after the upgrade: it is a duplicate, its processor does not run.
+    // The old quotation arrives again after the upgrade: it is a duplicate, its processor does not run.
     const replay = await push(upgraded, store, [old]);
     expect(replay.results[0]).toMatchObject({ status: 'duplicate', flags: ['held_for_processing'] });
     expect(ran).toEqual([]);
 
-    // A new receipt is posted by the new processor.
-    const fresh = doc('receipt', { total: 400 });
+    // A new quotation is posted by the new processor.
+    const fresh = doc('quotation', { total: 400 });
     const res = await push(upgraded, store, [fresh]);
     expect(res.results[0]).toMatchObject({ status: 'accepted', flags: [] });
     expect(ran).toEqual([fresh.id]);
@@ -402,7 +423,7 @@ describe('what the merchant sees', () => {
       headers: { authorization: `Bearer ${store.accessToken}` },
     });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toMatchObject({ sent: 22, accepted: 22, heldForProcessing: 17 });
+    expect(res.json()).toMatchObject({ sent: 22, accepted: 22, heldForProcessing: 15 });
   });
 });
 

@@ -11,6 +11,7 @@ import {
   qtySchema,
   uuidSchema,
 } from './common';
+import { customerPayloadSchema, type CustomerPayload } from './customers';
 
 /**
  * Payloads of the documents a cashier device sends in phase 1 (17 › الإرسال; 15 › عقد المزامنة v1;
@@ -706,6 +707,35 @@ export const returnPayloadSchema = z
   });
 export type ReturnPayload = z.output<typeof returnPayloadSchema>;
 
+// ─── Receipt (RCV) ───────────────────────────────────────────────────────────
+
+/** How a customer pays what they owe */
+export const RECEIPT_METHODS = ['cash', 'card', 'wallet', 'transfer'] as const;
+export type ReceiptMethod = (typeof RECEIPT_METHODS)[number];
+
+/**
+ * `receipt` (RCV, 08 › سند قبض): money a customer pays toward what they owe, taken at the till
+ * in the base currency. Posts Dr the drawer of the shift (or card, wallet, transfer) and Cr 1200
+ * for the customer. More than the customer owes is accepted: the rest is the store's debt to them.
+ */
+export const receiptPayloadSchema = z
+  .object({
+    customerId: uuidSchema,
+    customerName: z.string().trim().min(1).max(120),
+    shiftId: uuidSchema,
+    cashierId: userId,
+    currency: currencyCodeSchema,
+    amountMinor: positiveMinorSchema,
+    method: z.enum(RECEIPT_METHODS),
+    reference: z.string().trim().min(1).max(64).nullable(),
+    note: z.string().trim().max(200).nullable(),
+  })
+  .refine((r) => r.method === 'cash' || r.reference !== null, {
+    path: ['reference'],
+    message: 'a card, wallet or transfer payment needs its reference',
+  });
+export type ReceiptPayload = z.output<typeof receiptPayloadSchema>;
+
 // ─── Validation entry point ──────────────────────────────────────────────────
 
 /** The payload schema of each document type that has one in this contract version. */
@@ -715,6 +745,8 @@ export const DOCUMENT_PAYLOAD_SCHEMAS = {
   shift_close: shiftClosePayloadSchema,
   cash_movement: cashMovementPayloadSchema,
   return: returnPayloadSchema,
+  receipt: receiptPayloadSchema,
+  customer: customerPayloadSchema,
 } as const;
 export type PayloadDocType = keyof typeof DOCUMENT_PAYLOAD_SCHEMAS;
 export interface DocumentPayloads {
@@ -723,6 +755,8 @@ export interface DocumentPayloads {
   shift_close: ShiftClosePayload;
   cash_movement: CashMovementPayload;
   return: ReturnPayload;
+  receipt: ReceiptPayload;
+  customer: CustomerPayload;
 }
 
 /** The push result code of a document whose payload breaks its schema (stored as rejected). */

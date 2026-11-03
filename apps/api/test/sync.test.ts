@@ -37,7 +37,7 @@ beforeAll(async () => {
     {
       syncProcessors: {
         // Stand-ins for phase 1 posting: a sale whose printed total differs from the server's
-        // computation is accepted with a flag; an unbalanced receipt is refused.
+        // computation is accepted with a flag; an unbalanced quotation is refused.
         sale: async ({ doc }) =>
           doc.payload.printedTotal !== undefined &&
           doc.payload.printedTotal !== (doc.payload.totals as { totalMinor: number }).totalMinor
@@ -45,7 +45,7 @@ beforeAll(async () => {
             : doc.payload.permissionWithdrawn
               ? { flags: ['permission_stale'] }
               : undefined,
-        receipt: async ({ doc }) => {
+        quotation: async ({ doc }) => {
           if (doc.payload.unbalanced) throw new DocumentRejection('unbalanced');
         },
       },
@@ -76,6 +76,7 @@ function deviceDocs(device: Pick<TestDevice, 'code'>, branchCode = '001') {
     sale: 'INV',
     return: 'SRT',
     receipt: 'RCV',
+    quotation: 'QUO',
     trade_in: 'TRI',
   };
   return (
@@ -210,7 +211,7 @@ describe('POST /v1/sync/push', () => {
     const { tenantId } = await store();
     const device = await createDevice(tenantId);
     const doc = deviceDocs(device);
-    const batch = [doc(), doc(), doc('customer', { name: 'سمير' })];
+    const batch = [doc(), doc(), doc('cart_event', { name: 'سمير' })];
 
     const first = await pushOk(device, batch);
     expect(first.results.map((r) => r.status)).toEqual(['accepted', 'accepted', 'accepted']);
@@ -338,8 +339,8 @@ describe('POST /v1/sync/push', () => {
     const { tenantId } = await store();
     const device = await createDevice(tenantId);
     const doc = deviceDocs(device);
-    const bad = doc('receipt', { unbalanced: true });
-    const dependent = doc('receipt', { amount: 1 }, [bad.id]);
+    const bad = doc('quotation', { unbalanced: true });
+    const dependent = doc('quotation', { amount: 1 }, [bad.id]);
     const res = await pushOk(device, [bad, dependent]);
     expect(res.results.map((r) => [r.status, r.code])).toEqual([
       ['rejected', 'unbalanced'],
@@ -411,7 +412,7 @@ describe('POST /v1/sync/push', () => {
     });
     expect(revoke.statusCode, revoke.body).toBe(200);
 
-    const res = await pushOk(device, [sent[1]!, doc(), doc('customer', { name: 'x' })], {
+    const res = await pushOk(device, [sent[1]!, doc(), doc('cart_event', { name: 'x' })], {
       lastIssued: { INV: 99 },
     });
     expect(res.results.map((r) => [r.status, r.code])).toEqual([
@@ -483,6 +484,7 @@ describe('GET /v1/sync/pull', () => {
       'barcodes',
       'branches',
       'categories',
+      'customers',
       'exchange_rates',
       'prices',
       'products',
