@@ -2187,6 +2187,8 @@ export const onlineStores = pgTable(
     /** «التوصيل داخل المدينة خلال يوم، 10,000 ل.س» */
     note: text('note'),
     showOutOfStock: boolean('show_out_of_stock').notNull().default(false),
+    /** whatsapp: «اطلب عبر واتساب»; shop: the order is placed in the shop, the phone confirmed by a code */
+    orderMode: text('order_mode').notNull().default('whatsapp'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2221,16 +2223,27 @@ export const onlineOrders = pgTable(
     currency: text('currency').notNull(),
     totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
     lines: jsonb('lines').$type<OnlineOrderLine[]>().notNull(),
+    /** The customer's own page for the order: /shop/{slug}/o/{trackToken} */
+    trackToken: text('track_token')
+      .notNull()
+      .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+    /** Where its pieces are held once accepted (the store's main branch) */
+    branchId: uuid('branch_id'),
+    /** The sale that delivered it, from the till */
+    saleId: uuid('sale_id'),
     decidedBy: uuid('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    changeXid: changeXid(),
   },
   (t) => [
     primaryKey({ name: 'online_orders_pkey', columns: [t.tenantId, t.id] }),
     unique('online_orders_seq_unique').on(t.tenantId, t.seq),
     index('online_orders_status_idx').on(t.tenantId, t.status, t.createdAt),
+    unique('online_orders_track_unique').on(t.tenantId, t.trackToken),
+    index('online_orders_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
   ],
 );

@@ -116,6 +116,8 @@ export interface SaleCart
   note?: string | null;
   /** Restaurants and cafés: order type, table and order number; left out of a shop's sale */
   service?: ServiceInfo | null;
+  /** An online shop order this sale delivers (26 › حياة الطلب); left out of an ordinary sale */
+  onlineOrderId?: string | null;
 }
 
 /** The rate pairing `currency` with the invoice currency, or undefined for the invoice currency itself. */
@@ -386,6 +388,7 @@ export function buildSalePayload(cart: SaleCart): SalePayload {
     cashRounding: settlement.cashRounding,
     note: cart.note ?? null,
     ...(cart.service ? { service: cart.service } : {}),
+    ...(cart.onlineOrderId ? { onlineOrderId: cart.onlineOrderId } : {}),
   };
 }
 

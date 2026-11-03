@@ -96,6 +96,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/shop/:slug': 'public',
   'GET /v1/shop/:slug/products/:id': 'public',
   'POST /v1/shop/:slug/orders': 'public',
+  'POST /v1/shop/:slug/orders/code': 'public',
+  'GET /v1/shop/:slug/orders/:token': 'public',
   'GET /v1/online-store': 'signed-in',
   'PUT /v1/online-store': 'signed-in',
   'GET /v1/online-orders': 'signed-in',
@@ -355,6 +357,43 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(400);
     const box = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: owner(stores.b) });
     expect(box.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'POST /v1/shop/:slug/orders/code': async (app, stores) => {
+    await twoShops(app, stores);
+    const ask = (slug: string) =>
+      app.inject({ method: 'POST', url: `/v1/shop/${slug}/orders/code`, payload: { phone: '0944555666' } });
+    // Both shops take orders on WhatsApp: no code is sent for either, nor for a shop that is not there
+    expect((await ask('b-shop')).statusCode).toBe(400);
+    expect((await ask('no-such-shop')).statusCode).toBe(404);
+  },
+  'GET /v1/shop/:slug/orders/:token': async (app, stores) => {
+    await twoShops(app, stores);
+    const service = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: owner(stores.a),
+      payload: {
+        nameAr: 'تقصير',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 100 } }],
+      },
+    });
+    const placed = await app.inject({
+      method: 'POST',
+      url: '/v1/shop/a-shop/orders',
+      payload: {
+        name: 'زبون',
+        phone: '0944555666',
+        fulfilment: 'pickup',
+        lines: [{ variantId: service.json<{ variants: { id: string }[] }>().variants[0]!.id, qty: 1 }],
+      },
+    });
+    expect(placed.statusCode, placed.body).toBe(201);
+    const token = placed.json<{ trackPath: string }>().trackPath.split('/').at(-1)!;
+    const at = (slug: string) => app.inject({ method: 'GET', url: `/v1/shop/${slug}/orders/${token}` });
+    expect((await at('a-shop')).statusCode).toBe(200);
+    // A's order is not on B's link
+    expect((await at('b-shop')).statusCode).toBe(404);
   },
   'POST /v1/online-orders/:id/status': async (app, stores) => {
     const product = await twoShops(app, stores);

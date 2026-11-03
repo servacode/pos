@@ -47,6 +47,8 @@ export const onlineStoreInput = z.object({
   pickup: z.boolean(),
   note: z.string().trim().max(300).nullable(),
   showOutOfStock: z.boolean(),
+  /** whatsapp: «اطلب عبر واتساب»; shop: placed in the shop, the phone confirmed by a code */
+  orderMode: z.enum(['whatsapp', 'shop']).default('whatsapp'),
 });
 export type OnlineStoreInput = z.input<typeof onlineStoreInput>;
 
@@ -60,6 +62,7 @@ export interface OnlineStoreSettings {
   pickup: boolean;
   note: string | null;
   showOutOfStock: boolean;
+  orderMode: 'whatsapp' | 'shop';
 }
 
 export interface ShopStore {
@@ -71,6 +74,7 @@ export interface ShopStore {
   delivery: boolean;
   pickup: boolean;
   note: string | null;
+  orderMode: 'whatsapp' | 'shop';
 }
 
 export interface ShopProductCard {
@@ -120,10 +124,37 @@ export const shopOrderInput = z.object({
     .array(z.object({ variantId: uuidSchema, qty: z.int().min(1).max(50) }))
     .min(1, 'السلة فارغة')
     .max(MAX_ORDER_LINES),
+  /** In «من المتجر مباشرة»: the code sent to the phone (POST /v1/shop/{slug}/orders/code) */
+  challengeId: uuidSchema.optional(),
+  code: z.string().trim().min(4).max(8).optional(),
 });
 export type ShopOrderInput = z.input<typeof shopOrderInput>;
 
+/**
+ *   POST /v1/shop/{slug}/orders/code   { phone } → ShopCodeSent   (the shop's order mode is «shop»)
+ *   GET  /v1/shop/{slug}/orders/{token}            → ShopOrderTrack
+ */
+export const shopCodeInput = z.object({ phone: phoneSchema });
+export interface ShopCodeSent {
+  challengeId: string;
+  expiresIn: number;
+  /** The local server's test mode only: no message is sent there */
+  testCode?: string;
+}
+
+export interface ShopOrderTrack {
+  number: string;
+  status: OnlineOrderStatus;
+  fulfilment: 'delivery' | 'pickup';
+  currency: CurrencyCode;
+  totalMinor: number;
+  lines: { name: string; label: string | null; qty: number; totalMinor: number }[];
+  createdAt: string;
+}
+
 export interface ShopOrderPlaced {
+  /** The customer's own page for the order, in the shop: /shop/{slug}/o/{token} */
+  trackPath: string;
   number: string;
   currency: CurrencyCode;
   totalMinor: number;
@@ -140,7 +171,7 @@ export interface OnlineOrder {
   id: string;
   number: string;
   status: OnlineOrderStatus;
-  source: 'whatsapp';
+  source: 'whatsapp' | 'shop';
   customerName: string;
   phone: string;
   fulfilment: 'delivery' | 'pickup';
@@ -167,3 +198,22 @@ export const onlineOrderStatusInput = z.object({
   status: z.enum(['accepted', 'rejected', 'done']),
   version: versionSchema,
 });
+
+/**
+ * `online_orders` pulled to the tills of the branch that holds them (26 › حياة الطلب): the accepted
+ * orders only, for the cashier to open into the cart and sell; a sold or rejected one leaves.
+ */
+export interface OnlineOrderRow {
+  id: string;
+  number: string;
+  status: OnlineOrderStatus;
+  customerName: string;
+  phone: string;
+  fulfilment: 'delivery' | 'pickup';
+  address: string | null;
+  note: string | null;
+  currency: CurrencyCode;
+  totalMinor: number;
+  lines: OnlineOrder['lines'];
+  version: number;
+}

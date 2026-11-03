@@ -17,6 +17,7 @@ const HOME: ShopHome = {
     delivery: true,
     pickup: true,
     note: 'التوصيل خلال يوم',
+    orderMode: 'whatsapp',
   },
   categories: [
     { id: 'c-men', name: 'رجالي', parentId: null },
@@ -96,6 +97,7 @@ describe('the online shop', () => {
         return {
           status: 201,
           body: {
+            trackPath: '/shop/nour/o/t0',
             number: 'ONL-000007',
             currency: 'SYP',
             totalMinor: 1_370_000,
@@ -145,6 +147,80 @@ describe('the online shop', () => {
     expect(openWhatsApp).toHaveBeenCalledWith('https://wa.me/963933123456?text=x');
     expect(requestsTo('POST', '/v1/shop/nour/orders')).toHaveLength(1);
     expect(localStorage.getItem('serva-shop-cart:nour')).toBe('[]');
+  });
+
+  it('in «من المتجر مباشرة» confirms the phone by a code, then links the order’s own page', async () => {
+    localStorage.setItem(
+      'serva-shop-cart:nour',
+      JSON.stringify([
+        {
+          variantId: 'v-lw',
+          productId: 'p-shirt',
+          name: 'قميص كتان',
+          label: 'L · أبيض',
+          imageUrl: null,
+          priceMinor: 460_000,
+          qty: 1,
+        },
+      ]),
+    );
+    const { requestsTo } = mockFetch({
+      'GET /v1/shop/nour': {
+        status: 200,
+        body: { ...HOME, store: { ...HOME.store, orderMode: 'shop', whatsapp: null } },
+      },
+      'POST /v1/shop/nour/orders/code': (r: MockRequest) => {
+        expect(r.body).toEqual({ phone: '0944555666' });
+        return { status: 200, body: { challengeId: 'ch-1', expiresIn: 600, testCode: '424242' } };
+      },
+      'POST /v1/shop/nour/orders': (r: MockRequest) => {
+        expect(r.body).toMatchObject({ challengeId: 'ch-1', code: '424242', fulfilment: 'pickup' });
+        return {
+          status: 201,
+          body: {
+            trackPath: '/shop/nour/o/abc123',
+            number: 'ONL-000008',
+            currency: 'SYP',
+            totalMinor: 460_000,
+            message: 'طلب',
+            whatsappUrl: null,
+          },
+        };
+      },
+      'GET /v1/shop/nour/orders/abc123': {
+        status: 200,
+        body: {
+          number: 'ONL-000008',
+          status: 'accepted',
+          fulfilment: 'pickup',
+          currency: 'SYP',
+          totalMinor: 460_000,
+          lines: [{ name: 'قميص كتان', label: 'L · أبيض', qty: 1, totalMinor: 460_000 }],
+          createdAt: '2026-11-03T10:00:00Z',
+        },
+      },
+    });
+    const { user } = renderApp('/shop/nour/cart');
+    await screen.findByRole('region', { name: 'السلة' });
+    await user.type(screen.getByLabelText('الاسم'), 'ريم');
+    await user.type(screen.getByLabelText('رقم الجوال'), '0944555666');
+    await user.click(screen.getByRole('button', { name: 'استلام من المحل' }));
+    expect(screen.queryByRole('button', { name: 'اطلب عبر واتساب' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'أرسل رمز التأكيد' }));
+    const code = await screen.findByLabelText('رمز التأكيد');
+    expect(screen.getByText('وضع التجربة: الرمز 424242')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'أكّد الطلب' })).toBeDisabled();
+    await user.type(code, '42-42 42');
+    await user.click(screen.getByRole('button', { name: 'أكّد الطلب' }));
+    const done = await screen.findByRole('region', { name: 'وصل طلبك' });
+    expect(done).toHaveTextContent('وصل طلبك إلى المحل');
+    expect(openWhatsApp).not.toHaveBeenCalled();
+    expect(requestsTo('POST', '/v1/shop/nour/orders')).toHaveLength(1);
+
+    await user.click(within(done).getByRole('link', { name: 'تابع طلبك' }));
+    const page = await screen.findByRole('region', { name: 'طلبك' });
+    expect(page).toHaveTextContent('ONL-000008');
+    expect(within(page).getByRole('status')).toHaveTextContent('أكّد المحل طلبك');
   });
 
   it('says so when the link is not a shop', async () => {

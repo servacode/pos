@@ -218,6 +218,13 @@
       "when": 1793743284657,
       "tag": "0030_transfers",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793744273814,
+      "tag": "0031_shop_orders",
+      "breakpoints": true
     }
   ]
 }

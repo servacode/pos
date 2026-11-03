@@ -93,6 +93,20 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
   branches: ['id', 'code', 'name', 'address', 'phone', 'isActive', 'version'],
   customers: ['id', 'name', 'phone', 'creditLimitMinor', 'priceTier', 'loyaltyPoints', 'archived', 'version'],
   vouchers: ['id', 'code', 'currency', 'amountMinor', 'redeemedMinor', 'version'],
+  online_orders: [
+    'id',
+    'number',
+    'status',
+    'customerName',
+    'phone',
+    'fulfilment',
+    'address',
+    'note',
+    'currency',
+    'totalMinor',
+    'lines',
+    'version',
+  ],
   promotions: [
     'id',
     'name',
@@ -153,6 +167,12 @@ describe('catalog pull sets', () => {
     await ownerDb()`
       insert into vouchers (id, tenant_id, code, return_id, currency, amount_minor)
       values (gen_random_uuid(), ${body.tenant.id}, 'SRT-001-001-0000001', gen_random_uuid(), 'SYP', 45000)`;
+    // An online shop order the owner accepted, waiting for the till
+    await ownerDb()`
+      insert into online_orders (tenant_id, seq, number, status, source, customer_name, phone, fulfilment,
+                                 currency, total_minor, lines, decided_at)
+      values (${body.tenant.id}, 1, 'ONL-000001', 'accepted', 'shop', 'ريم', '+963944555666', 'pickup',
+              'SYP', 900000, '[]'::jsonb, now())`;
     const page = await pullAll((await createDevice(body.tenant.id)).authorization);
     expect(Object.keys(page.sets).sort()).toEqual(Object.keys(FIELDS).sort());
     for (const [set, fields] of Object.entries(FIELDS)) {

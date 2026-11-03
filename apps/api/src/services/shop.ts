@@ -7,23 +7,29 @@ import {
   type CurrencyCode,
   type OnlineOrder,
   type OnlineStoreSettings,
+  type ShopCodeSent,
   type ShopHome,
   type ShopOrderPlaced,
+  type ShopOrderTrack,
   type ShopProduct,
   type TradeRate,
   type onlineOrderStatusInput,
   type onlineStoreInput,
+  type shopCodeInput,
   type shopOrderInput,
 } from '@serva/core';
 import {
   onlineOrders,
   onlineStores,
+  uuidv7,
   withTenant,
   type Database,
   type OnlineOrderLine,
   type Transaction,
 } from '@serva/db';
+import type { FastifyInstance } from 'fastify';
 import type { z } from 'zod';
+import { hashOtp, isTestMode, newOtpCode, OtpDeliveryError } from '../auth/otp';
 import { requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError, isUniqueViolation } from '../errors';
@@ -32,10 +38,15 @@ import { audit } from './audit';
 import { imageUrl } from './catalog/images';
 
 /**
- * The online shop, first step (26 › المتجر الإلكتروني; contracts/shop.ts): the store's goods on its
- * own link, and orders sent on WhatsApp. Public reads carry nothing a customer should not see: no
- * cost, no stock counts (only «متوفر»), no staff, no other store.
+ * The online shop (26 › المتجر الإلكتروني; contracts/shop.ts): the store's goods on its own link,
+ * and orders sent on WhatsApp or placed in the shop itself, the phone confirmed by a code. Public
+ * reads carry nothing a customer should not see: no cost, no stock counts (only «متوفر»), no staff,
+ * no other store. An accepted order holds its pieces: the shop counts them out until the till sells
+ * them (the sale closes the order) or the order is rejected.
  */
+
+const CODE_TTL_SECONDS = 600;
+const MAX_CODE_ATTEMPTS = 5;
 
 const SHOP = 'هذا المتجر غير موجود أو غير مفعّل.';
 const notFound = (message: string) => new AppError(404, 'not_found', message);
@@ -61,8 +72,10 @@ async function storeOf(tx: Transaction, tenantId: string) {
     pickup: boolean;
     note: string | null;
     show_out_of_stock: boolean;
+    order_mode: 'whatsapp' | 'shop';
   }>(sql`
-    select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note, o.show_out_of_stock
+    select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
+           o.show_out_of_stock, o.order_mode
     from online_stores o
     join tenants t on t.id = o.tenant_id
     join tenant_settings s on s.tenant_id = o.tenant_id
@@ -92,8 +105,12 @@ function inBase(
 
 const sellable = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos`;
 const liveVariant = sql`v.archived_at is null`;
-/** On the shelf in any branch, or a service that has no stock */
-const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) > 0)`;
+/** Pieces held by accepted orders not sold yet, in stock units (a thousandth of a piece) */
+const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online_orders o
+  cross join lateral jsonb_array_elements(o.lines) x
+  where o.status = 'accepted' and x->>'variantId' = v.id::text), 0)`;
+/** On the shelf in any branch, less what accepted orders hold; or a service that has no stock */
+const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} > 0)`;
 
 export function shopHome(db: Database, slug: string): Promise<ShopHome> {
   return tenantOf(db, slug).then((tenantId) =>
@@ -165,6 +182,7 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           delivery: store.delivery,
           pickup: store.pickup,
           note: store.note,
+          orderMode: store.order_mode,
         },
         categories: categories
           .filter((c) => shown.has(c.id))
@@ -269,13 +287,79 @@ export function orderMessage(order: {
   ].join('\n');
 }
 
+const codeUnavailable = () =>
+  new AppError(503, 'unavailable', 'تعذّر إرسال الرمز الآن. أعد المحاولة بعد قليل.');
+
+/**
+ * «من المتجر مباشرة»: a code to the customer's phone first, so an order always has a number that
+ * answers. The challenge holds which store asked; the code is checked when the order is placed.
+ */
+export async function requestShopCode(
+  app: FastifyInstance,
+  slug: string,
+  input: z.output<typeof shopCodeInput>,
+  meta: RequestMeta,
+): Promise<ShopCodeSent> {
+  const { db, clock, env, otpSender } = app;
+  const tenantId = await tenantOf(db, slug);
+  const store = await withTenant(db, tenantId, (tx) => storeOf(tx, tenantId));
+  if (store.order_mode !== 'shop') throw fieldError('phone', 'هذا المتجر يستقبل الطلبات على واتساب.');
+  if (!otpSender) throw codeUnavailable();
+  const challengeId = uuidv7();
+  const code = newOtpCode();
+  const now = clock.now();
+  await db.execute(sql`select otp_create(
+    ${challengeId}::uuid, 'shop_order', ${input.phone}, ${hashOtp(env.JWT_SECRET, challengeId, code)},
+    ${JSON.stringify({ tenantId })}::jsonb, ${new Date(now.getTime() + CODE_TTL_SECONDS * 1000).toISOString()}::timestamptz,
+    ${meta.ip}, ${now.toISOString()}::timestamptz)`);
+  try {
+    await otpSender.send({ phone: input.phone, code, purpose: 'shop_order' });
+  } catch (error) {
+    if (error instanceof OtpDeliveryError) throw codeUnavailable();
+    throw error;
+  }
+  const answer: ShopCodeSent = { challengeId, expiresIn: CODE_TTL_SECONDS };
+  return isTestMode(env) ? { ...answer, testCode: code } : answer;
+}
+
+/**
+ * The code is used up before the order is written, outside its transaction: a wrong one counts an
+ * attempt even though the order fails, so five guesses lock it.
+ */
+async function checkShopCode(
+  app: FastifyInstance,
+  tenantId: string,
+  input: z.output<typeof shopOrderInput>,
+): Promise<void> {
+  if (!input.challengeId || !input.code) throw fieldError('code', 'اكتب الرمز الذي وصلك على جوالك');
+  const [result] = await app.db.execute<{
+    status: string;
+    phone: string | null;
+    payload: { tenantId?: string } | null;
+  }>(
+    sql`select * from otp_consume(${input.challengeId}::uuid, 'shop_order',
+      ${hashOtp(app.env.JWT_SECRET, input.challengeId, input.code)}, ${MAX_CODE_ATTEMPTS},
+      ${app.clock.now().toISOString()}::timestamptz)`,
+  );
+  if (result?.status === 'locked') {
+    throw new AppError(429, 'locked', 'محاولات خاطئة كثيرة. اطلب رمزاً جديداً.');
+  }
+  if (result?.status === 'expired') throw fieldError('code', 'انتهت صلاحية الرمز. اطلب رمزاً جديداً.');
+  if (result?.status !== 'ok' || result.payload?.tenantId !== tenantId || result.phone !== input.phone) {
+    throw fieldError('code', 'الرمز غير صحيح. تأكد منه وأعد المحاولة.');
+  }
+}
+
 export function placeShopOrder(
-  db: Database,
+  app: FastifyInstance,
   slug: string,
   input: z.output<typeof shopOrderInput>,
 ): Promise<ShopOrderPlaced> {
-  return tenantOf(db, slug).then((tenantId) =>
-    withTenant(db, tenantId, async (tx) => {
+  const { db } = app;
+  return tenantOf(db, slug).then(async (tenantId) => {
+    const mode = (await withTenant(db, tenantId, (tx) => storeOf(tx, tenantId))).order_mode;
+    if (mode === 'shop') await checkShopCode(app, tenantId, input);
+    return withTenant(db, tenantId, async (tx) => {
       const store = await storeOf(tx, tenantId);
       const base = store.base as CurrencyCode;
       if (input.fulfilment === 'delivery' && !store.delivery)
@@ -347,16 +431,52 @@ export function placeShopOrder(
         totalMinor,
         lines,
       };
-      await tx.insert(onlineOrders).values({ tenantId, seq, source: 'whatsapp', ...order });
+      const [made] = await tx
+        .insert(onlineOrders)
+        .values({ tenantId, seq, source: mode, ...order })
+        .returning({ token: onlineOrders.trackToken });
       const message = orderMessage(order);
       return {
+        trackPath: `/shop/${store.slug}/o/${made!.token}`,
         number,
         currency: base,
         totalMinor,
         message,
-        whatsappUrl: store.whatsapp
-          ? `https://wa.me/${store.whatsapp.replace('+', '')}?text=${encodeURIComponent(message)}`
-          : null,
+        whatsappUrl:
+          mode === 'whatsapp' && store.whatsapp
+            ? `https://wa.me/${store.whatsapp.replace('+', '')}?text=${encodeURIComponent(message)}`
+            : null,
+      };
+    });
+  });
+}
+
+/** The 32 letters and digits of a track token, and nothing else */
+function isTrackToken(token: string): boolean {
+  if (token.length !== 32) return false;
+  for (const ch of token) if (!((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'))) return false;
+  return true;
+}
+
+/** The customer's page for one order: its state and lines, by the unguessable token in its link. */
+export function shopOrderTrack(db: Database, slug: string, token: string): Promise<ShopOrderTrack> {
+  const gone = () => notFound('هذا الطلب غير موجود.');
+  if (!isTrackToken(token)) return Promise.reject(gone());
+  return tenantOf(db, slug).then((tenantId) =>
+    withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(onlineOrders)
+        .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)));
+      if (!row) throw gone();
+      return {
+        number: row.number,
+        status: row.status as ShopOrderTrack['status'],
+        fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
+        currency: row.currency as CurrencyCode,
+        totalMinor: row.totalMinor,
+        lines: row.lines.map((l) => ({ name: l.name, label: l.label, qty: l.qty, totalMinor: l.totalMinor })),
+        createdAt: row.createdAt.toISOString(),
       };
     }),
   );
@@ -373,6 +493,7 @@ const DEFAULTS = (slug: string): OnlineStoreSettings => ({
   pickup: true,
   note: null,
   showOutOfStock: false,
+  orderMode: 'whatsapp',
 });
 
 export function getOnlineStore(db: Database, auth: AccessClaims): Promise<OnlineStoreSettings> {
@@ -394,6 +515,7 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       pickup: row.pickup,
       note: row.note,
       showOutOfStock: row.showOutOfStock,
+      orderMode: row.orderMode as OnlineStoreSettings['orderMode'],
     };
   });
 }
@@ -404,7 +526,8 @@ export async function saveOnlineStore(
   input: z.output<typeof onlineStoreInput>,
   meta: RequestMeta,
 ): Promise<OnlineStoreSettings> {
-  if (input.enabled && !input.whatsapp) throw fieldError('whatsapp', 'اكتب رقم واتساب الطلبات لتفعيل المتجر');
+  if (input.enabled && input.orderMode === 'whatsapp' && !input.whatsapp)
+    throw fieldError('whatsapp', 'اكتب رقم واتساب الطلبات لتفعيل المتجر');
   if (!input.delivery && !input.pickup)
     throw fieldError('delivery', 'اختر التوصيل أو الاستلام من المحل أو الاثنين');
   try {
@@ -418,6 +541,7 @@ export async function saveOnlineStore(
         pickup: input.pickup,
         note: input.note || null,
         showOutOfStock: input.showOutOfStock,
+        orderMode: input.orderMode,
       };
       if (input.version === null) {
         const made = await tx
@@ -455,7 +579,7 @@ const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   id: r.id,
   number: r.number,
   status: r.status as OnlineOrder['status'],
-  source: 'whatsapp',
+  source: r.source as OnlineOrder['source'],
   customerName: r.customerName,
   phone: r.phone,
   fulfilment: r.fulfilment as OnlineOrder['fulfilment'],

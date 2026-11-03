@@ -22,6 +22,7 @@ const settings: OnlineStoreSettings = {
   pickup: true,
   note: null,
   showOutOfStock: false,
+  orderMode: 'whatsapp',
 };
 
 const order = (status: OnlineOrder['status']): OnlineOrder => ({

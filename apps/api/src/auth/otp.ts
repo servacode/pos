@@ -6,7 +6,7 @@ import { deriveKey } from './tokens';
 export interface OtpMessage {
   phone: string;
   code: string;
-  purpose: 'registration';
+  purpose: 'registration' | 'shop_order';
 }
 
 /**
@@ -42,7 +42,10 @@ export function screenOtpSender(): OtpSender {
 export const OTP_GATEWAY_TIMEOUT_MS = 10_000;
 
 /** The message the phone receives; the gateway may send its own wording from `code`. */
-export const otpText = (code: string) => `رمز التحقق في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق.`;
+export const otpText = (code: string, purpose: OtpMessage['purpose'] = 'registration') =>
+  purpose === 'shop_order'
+    ? `رمز تأكيد طلبك من المتجر: ${code}\nصالح 10 دقائق.`
+    : `رمز التحقق في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق.`;
 
 /**
  * OTP_DELIVERY=gateway: hands the code to a separate sending service (a WhatsApp bot today, an SMS
@@ -64,7 +67,7 @@ export function gatewayOtpSender(
         const res = await send(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-          body: JSON.stringify({ phone, code, purpose, text: otpText(code) }),
+          body: JSON.stringify({ phone, code, purpose, text: otpText(code, purpose) }),
           signal: AbortSignal.timeout(OTP_GATEWAY_TIMEOUT_MS),
         });
         status = res.status;

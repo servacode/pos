@@ -21,6 +21,7 @@ import {
   invoiceLines,
   invoicePayments,
   invoices,
+  onlineOrders,
   products,
   saleReturnLines,
   saleReturns,
@@ -227,6 +228,26 @@ async function processSale({ tx, device, doc }: DocumentContext) {
   flags.push(...(await redeemVouchers(tx, tenantId, sale)));
   // Loyalty points (03 › نقاط الولاء): earned on what was not paid with points, spent at their value
   flags.push(...(await applyLoyalty(tx, tenantId, sale)));
+  // An online order sold here (26 › حياة الطلب): it leaves the tills and its pieces their hold
+  if (sale.onlineOrderId) {
+    await tx
+      .update(onlineOrders)
+      .set({
+        status: 'done',
+        saleId: doc.id,
+        branchId: device.branchId,
+        decidedBy: sale.cashierId,
+        decidedAt: sql`now()`,
+        updatedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(onlineOrders.tenantId, tenantId),
+          eq(onlineOrders.id, sale.onlineOrderId),
+          eq(onlineOrders.status, 'accepted'),
+        ),
+      );
+  }
   // A credit sale over the customer's limit is accepted and flagged (08 › قاعدة 8)
   if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) {
     if (await overCreditLimit(tx, tenantId, sale.customerId)) flags.push('credit_limit_exceeded');

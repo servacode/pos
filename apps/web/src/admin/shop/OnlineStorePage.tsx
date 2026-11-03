@@ -98,8 +98,22 @@ function SettingsCard() {
         onChange={(e) => set({ slug: e.target.value.toLowerCase().slice(0, 40) })}
         error={fields.slug}
       />
+      <SegmentedControl
+        label="كيف يصلك الطلب"
+        value={form.orderMode}
+        onValueChange={(orderMode) => set({ orderMode })}
+        options={[
+          { value: 'whatsapp', label: 'رسالة واتساب' },
+          { value: 'shop', label: 'من المتجر مباشرة' },
+        ]}
+      />
+      <p className="text-sm text-ink-muted">
+        {form.orderMode === 'shop'
+          ? 'يتأكد الزبون من رقمه برمز يصله، ويصل الطلب هنا مباشرة. اقبله فتُحجز قطعه ويظهر على الكاشير ليبيعه.'
+          : 'يُحفظ الطلب هنا ويفتح واتساب عند الزبون برسالة جاهزة إلى رقمك.'}
+      </p>
       <TextField
-        label="رقم واتساب الطلبات"
+        label={form.orderMode === 'shop' ? 'رقم واتساب المحل (اختياري)' : 'رقم واتساب الطلبات'}
         dir="ltr"
         inputMode="tel"
         value={form.whatsapp ?? ''}
@@ -195,6 +209,7 @@ function OrdersCard() {
               >
                 {STATUS_TEXT[o.status]}
               </Badge>
+              {o.source === 'shop' ? <Badge tone="neutral">رقم مؤكَّد</Badge> : null}
               <span className="flex-1" />
               <Money minor={o.totalMinor} currency={o.currency} className="font-bold" />
             </div>
@@ -231,9 +246,14 @@ function OrdersCard() {
                   </Button>
                 </>
               ) : o.status === 'accepted' ? (
-                <Button size="sm" onClick={() => void move(o, 'done')}>
-                  سُلّم
-                </Button>
+                <>
+                  <span className="self-center text-sm text-ink-muted">
+                    قطعه محجوزة، ويبيعه الكاشير من «طلبات المتجر».
+                  </span>
+                  <Button size="sm" variant="secondary" onClick={() => void move(o, 'done')}>
+                    سُلّم دون بيع على الكاشير
+                  </Button>
+                </>
               ) : null}
             </div>
           </li>
