@@ -117,6 +117,12 @@ describe('stock cost by value (10 › الكلفة والربح)', () => {
     expect(averageValue(s, PIECE)).toBe(4);
   });
 
+  it('values a return at what is left, not at the average before the last sale', () => {
+    // 3 for 10, one sold at 3: two worth 7 remain, so one back is worth 4 (3.5, half up)
+    const s = stockOut(stockIn(EMPTY_STOCK, 3 * PIECE, 10).after, PIECE).after;
+    expect(stockBack(s, PIECE)).toMatchObject({ valueMinor: 4, after: { qty: 3 * PIECE, valueMinor: 11 } });
+  });
+
   it('keeps the last real average when a purchase brings oversold stock back to exactly nothing', () => {
     let s = stockIn(EMPTY_STOCK, 2 * PIECE, 2_000).after;
     s = stockOut(s, 3 * PIECE).after;
@@ -145,5 +151,24 @@ describe('stock cost by value (10 › الكلفة والربح)', () => {
     expect(() => stockIn(EMPTY_STOCK, PIECE, -5)).toThrow(
       'valueMinor must be a non-negative integer, got -5',
     );
+  });
+
+  it('returns while below nothing fill the oversold pieces at what they were costed', () => {
+    // The case the property test found: 19 worth 1,696,002, 21 sold, then two come back
+    let s = stockIn(EMPTY_STOCK, 19 * PIECE, 1_696_002).after;
+    s = stockOut(s, 21 * PIECE).after;
+    expect(s).toMatchObject({ qty: -2 * PIECE, valueMinor: -178_527 });
+    const first = stockBack(s, PIECE);
+    // Half of what the two were costed at (178,527 ÷ 2, half up)
+    expect(first.valueMinor).toBe(89_264);
+    expect(first.after).toMatchObject({ qty: -PIECE, valueMinor: -89_263 });
+    s = stockBack(first.after, PIECE).after;
+    expect(s).toMatchObject({ qty: 0, valueMinor: 0 });
+    // More back than was oversold: the rest at the last average
+    const t = stockOut(stockIn(EMPTY_STOCK, 2 * PIECE, 200).after, 3 * PIECE).after;
+    expect(stockBack(t, 2 * PIECE)).toMatchObject({
+      valueMinor: 200,
+      after: { qty: PIECE, valueMinor: 100 },
+    });
   });
 });

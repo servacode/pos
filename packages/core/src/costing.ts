@@ -72,10 +72,21 @@ export function averageValue(s: StockValue, qty: number): number {
   return share(s.refValueMinor, qty, s.refQty);
 }
 
-/** Goods back in at the current average (a customer's return, a surplus found in a count). */
+/**
+ * Goods back in at the current average (a customer's return, a surplus found in a count). When the
+ * stock is below nothing, the pieces coming back first fill the ones sold beyond it, at what those
+ * were costed, so stock back at exactly nothing is worth exactly nothing.
+ */
 export function stockBack(s: StockValue, qty: number): { valueMinor: number; after: StockValue } {
   assertQty(qty);
-  const valueMinor = averageValue(s, qty);
+  let valueMinor: number;
+  if (s.qty >= 0) {
+    valueMinor = averageValue(s, qty);
+  } else {
+    const owed = Math.min(-s.qty, qty);
+    const booked = owed === -s.qty ? -s.valueMinor : share(-s.valueMinor, owed, -s.qty);
+    valueMinor = booked + (qty > owed ? share(s.refValueMinor, qty - owed, s.refQty) : 0);
+  }
   return { valueMinor, after: withRef({ ...s, qty: s.qty + qty, valueMinor: s.valueMinor + valueMinor }) };
 }
 
