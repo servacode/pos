@@ -48,8 +48,15 @@ export const DEFAULT_SCALE_BARCODE: ScaleBarcodeConfig = {
 };
 
 /** The EAN-13 check digit of the first twelve digits. */
+/** Exactly `length` ASCII digits, checked character by character. */
+function digitsOf(text: string, length: number): boolean {
+  if (text.length !== length) return false;
+  for (const ch of text) if (ch < '0' || ch > '9') return false;
+  return true;
+}
+
 export function ean13CheckDigit(first12: string): number {
-  if (!/^\d{12}$/.test(first12)) throw new RangeError('twelve digits expected');
+  if (!digitsOf(first12, 12)) throw new RangeError('twelve digits expected');
   let sum = 0;
   for (let i = 0; i < 12; i++) sum += Number(first12[i]) * (i % 2 === 0 ? 1 : 3);
   return (10 - (sum % 10)) % 10;
@@ -66,7 +73,7 @@ export type ScaleReading =
  * store does not use, a wrong check digit, or a value of zero.
  */
 export function parseScaleBarcode(code: string, config: ScaleBarcodeConfig): ScaleReading | null {
-  if (!/^\d{13}$/.test(code)) return null;
+  if (!digitsOf(code, 13)) return null;
   if (!config.prefixes.includes(code.slice(0, 2))) return null;
   if (ean13CheckDigit(code.slice(0, 12)) !== Number(code[12])) return null;
   const itemCode = code.slice(2, 2 + config.itemDigits);
