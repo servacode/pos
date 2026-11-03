@@ -27,6 +27,16 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation'> =
   'POST /v1/customers': 'signed-in',
   'GET /v1/customers/:id': 'signed-in',
   'PUT /v1/customers/:id': 'signed-in',
+  'GET /v1/suppliers': 'signed-in',
+  'POST /v1/suppliers': 'signed-in',
+  'PUT /v1/suppliers/:id': 'signed-in',
+  'GET /v1/purchases': 'signed-in',
+  'POST /v1/purchases': 'signed-in',
+  'GET /v1/purchases/:id': 'signed-in',
+  'POST /v1/supplier-payments': 'signed-in',
+  'GET /v1/inventory': 'signed-in',
+  'POST /v1/stocktakes': 'signed-in',
+  'GET /v1/reports/profit': 'signed-in',
   'PUT /v1/store/profile': 'signed-in',
   'PUT /v1/store/currency': 'signed-in',
   'PUT /v1/store/onboarding': 'signed-in',
@@ -134,7 +144,7 @@ async function productOf(app: FastifyInstance, a: Stores['a'], code = `IDOR-1${+
       variants: [{ price: { currency: 'SYP', priceMinor: 100 }, barcodes: [{ kind: 'standard', code }] }],
     },
   });
-  return res.json<{ id: string; version: number }>();
+  return res.json<{ id: string; version: number; variants: { id: string }[] }>();
 }
 
 const catalogRow = async (table: string, id: string) =>
@@ -193,7 +203,52 @@ function customerIdor(method: 'GET' | 'PUT') {
   };
 }
 
+/** Store B's owner on store A's supplier and purchase: 404, nothing changed. */
+async function supplierOf(app: FastifyInstance, a: Stores['a']) {
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/suppliers',
+    headers: owner(a),
+    payload: { name: 'مورد أ' },
+  });
+  return made.json<{ id: string }>().id;
+}
+
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  'PUT /v1/suppliers/:id': async (app, { a, b }) => {
+    const id = await supplierOf(app, a);
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/suppliers/${id}`,
+      headers: owner(b),
+      payload: { name: 'مسروق' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ name: string }[]>`select name from suppliers where id = ${id}`;
+    expect(row!.name).toBe('مورد أ');
+  },
+  'GET /v1/purchases/:id': async (app, { a, b }) => {
+    const supplierId = await supplierOf(app, a);
+    const product = await productOf(app, a);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/purchases',
+      headers: owner(a),
+      payload: {
+        supplierId,
+        date: '2026-10-30',
+        payment: 'credit',
+        lines: [{ variantId: product.variants[0]!.id, qty: 1000, costMinor: 100 }],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/purchases/${made.json<{ id: string }>().id}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+  },
   'GET /v1/customers/:id': customerIdor('GET'),
   'PUT /v1/customers/:id': customerIdor('PUT'),
   'GET /v1/products/:id': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}`),

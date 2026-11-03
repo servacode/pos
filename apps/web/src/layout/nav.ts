@@ -1,5 +1,6 @@
 import type { MeResponse } from '@serva/core';
 import {
+  CartIcon,
   CategoriesIcon,
   CustomersIcon,
   ClockIcon,
@@ -10,6 +11,7 @@ import {
   ReportsIcon,
   SalesIcon,
   ShieldCheckIcon,
+  TrendUpIcon,
   type Icon,
 } from '@serva/ui';
 import {
@@ -48,6 +50,8 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { to: '/products', label: 'المنتجات', icon: ProductsIcon, permission: ['catalog.manage'] },
   { to: '/categories', label: 'التصنيفات', icon: CategoriesIcon, permission: ['catalog.manage'] },
   { to: '/customers', label: 'الزبائن', icon: CustomersIcon, permission: ['customers.view'] },
+  { to: '/purchases', label: 'المشتريات', icon: CartIcon, permission: ['purchases.manage'] },
+  { to: '/inventory', label: 'المخزون والأرباح', icon: TrendUpIcon, permission: ['cost.view'] },
   {
     to: '/accounting',
     label: 'المحاسبة',

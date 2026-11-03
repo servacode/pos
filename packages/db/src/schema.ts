@@ -1424,6 +1424,197 @@ export const receipts = pgTable(
   ],
 );
 
+// ─── Purchases and stock value (08 › فاتورة شراء، الجرد; 10 › الكلفة والربح) ─────────────
+
+/** The store's suppliers. What the store owes each is the 2100 lines that name them. */
+export const suppliers = pgTable(
+  'suppliers',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    phone: text('phone'),
+    notes: text('notes'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ name: 'suppliers_pkey', columns: [t.tenantId, t.id] }), tenantIsolation()],
+);
+
+/** «PUR-2026-000001», «PAY-…», «STK-…»: the dashboard's own documents, numbered per year with no gaps. */
+export const documentSequences = pgTable(
+  'document_sequences',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    series: text('series').notNull(),
+    year: integer('year').notNull(),
+    lastNumber: integer('last_number').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ name: 'document_sequences_pkey', columns: [t.tenantId, t.series, t.year] }),
+    tenantIsolation(),
+  ],
+);
+
+/** A purchase from a supplier: goods into a branch at what they cost. Never changed once posted. */
+export const purchases = pgTable(
+  'purchases',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** credit, cash, bank */
+    payment: text('payment').notNull(),
+    reference: text('reference'),
+    notes: text('notes'),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'purchases_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    unique('purchases_number_unique').on(t.tenantId, t.number),
+    index('purchases_date_idx').on(t.tenantId, t.businessDate),
+    tenantIsolation(),
+  ],
+);
+
+export const purchaseLines = pgTable(
+  'purchase_lines',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    purchaseId: uuid('purchase_id').notNull(),
+    lineNo: integer('line_no').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    name: text('name').notNull(),
+    qty: bigint('qty', { mode: 'number' }).notNull(),
+    costMinor: bigint('cost_minor', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'purchase_lines_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.purchaseId], foreignColumns: [purchases.tenantId, purchases.id] }),
+    unique('purchase_lines_line_unique').on(t.tenantId, t.purchaseId, t.lineNo),
+    tenantIsolation(),
+  ],
+);
+
+/** Money paid to a supplier toward what the store owes them. */
+export const supplierPayments = pgTable(
+  'supplier_payments',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    /** cash (from the safe), bank */
+    method: text('method').notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'supplier_payments_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * What each variant's stock in each branch is worth (packages/core › costing.ts): its quantity and
+ * total value, and the last average known while there was some. The sum of value_minor is what
+ * account 1300 holds (integrity check stock_value_ledger).
+ */
+export const stockValues = pgTable(
+  'stock_values',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    qty: bigint('qty', { mode: 'number' }).notNull().default(0),
+    valueMinor: bigint('value_minor', { mode: 'number' }).notNull().default(0),
+    refQty: bigint('ref_qty', { mode: 'number' }).notNull().default(0),
+    refValueMinor: bigint('ref_value_minor', { mode: 'number' }).notNull().default(0),
+    version: version(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'stock_values_pkey', columns: [t.tenantId, t.branchId, t.variantId] }),
+    tenantIsolation(),
+  ],
+);
+
+/** The cost each sold or returned line went at, once: what the cost of sales entry posted. */
+export const movementCosts = pgTable(
+  'movement_costs',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    docId: uuid('doc_id').notNull(),
+    lineNo: integer('line_no').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** sale (out), return (back) */
+    kind: text('kind').notNull(),
+    /** Signed like the stock: a sale's cost is negative value out */
+    costMinor: bigint('cost_minor', { mode: 'number' }).notNull(),
+    /** The entry that posted it (null when it cost nothing) */
+    entryId: uuid('entry_id'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'movement_costs_pkey', columns: [t.tenantId, t.docId, t.lineNo] }),
+    tenantIsolation(),
+  ],
+);
+
+/** A count of the shelves: what was there, what the books said, and the difference posted. */
+export const stocktakes = pgTable(
+  'stocktakes',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    note: text('note'),
+    lines: jsonb('lines').notNull(),
+    diffValueMinor: bigint('diff_value_minor', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'stocktakes_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    tenantIsolation(),
+  ],
+);
+
 // ─── Accounting (09 › المحاسبة; 10 › دليل الحسابات الافتراضي، القيود التلقائية) ──────
 
 /**

@@ -24,6 +24,12 @@ const CustomersPage = lazy(() =>
 const CustomerPage = lazy(() =>
   import('./customers/CustomerPage').then((m) => ({ default: m.CustomerPage })),
 );
+const PurchasesPage = lazy(() =>
+  import('./purchases/PurchasesPage').then((m) => ({ default: m.PurchasesPage })),
+);
+const InventoryPage = lazy(() =>
+  import('./purchases/InventoryPage').then((m) => ({ default: m.InventoryPage })),
+);
 const PinPage = lazy(() => import('./staff/PinPage').then((m) => ({ default: m.PinPage })));
 // The reports: «مبيعات اليوم», the shifts and their close report, «شاشة الدليل», and the books.
 const DayReportPage = lazy(() =>
@@ -64,6 +70,8 @@ export function AdminApp() {
           <Route path="/products/:id" element={page(<ProductRoute />)} />
           <Route path="/categories" element={page(<CategoriesPage />)} />
           <Route path="/customers" element={page(<CustomersPage />)} />
+          <Route path="/purchases" element={page(<PurchasesPage />)} />
+          <Route path="/inventory" element={page(<InventoryPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />
           <Route path="/me/pin" element={page(<PinPage />)} />
           <Route path="/welcome" element={page(<WelcomePage />)} />
