@@ -834,3 +834,58 @@ export interface PullSetRows {
   promotions: PromotionRow;
   vouchers: VoucherRow;
 }
+
+// ─── Product pictures (03 › الألبسة: صور القطع) ───────────────────────────────
+
+/**
+ *   GET    /v1/products/{id}/images             catalog reader   → { items: ProductImage[] }
+ *   POST   /v1/products/{id}/images             catalog.manage   productImageInput → ProductImage (201)
+ *   PATCH  /v1/products/{id}/images/{imageId}   catalog.manage   productImagePatch → ProductImage
+ *   DELETE /v1/products/{id}/images/{imageId}   catalog.manage   → 204
+ *   POST   /v1/products/{id}/images/order       catalog.manage   { ids } → { items }
+ *   GET    /v1/images/{tenantId}/{uploadId}[?size=thumb]   public, the picture's bytes
+ *
+ * The browser resizes a picture before it is sent (the full one at most 1600 px on its long
+ * side, a thumbnail at 400) and sends both in base64. The server checks their first bytes.
+ */
+export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+export type ImageType = (typeof IMAGE_TYPES)[number];
+export const MAX_PRODUCT_IMAGES = 12;
+/** Decoded bytes */
+export const MAX_IMAGE_BYTES = 2_500_000;
+export const MAX_THUMB_BYTES = 250_000;
+
+const optionValueSchema = z.string().trim().min(1).max(60).nullable();
+
+export const productImageInput = z.object({
+  contentType: z.enum(IMAGE_TYPES),
+  data: z.base64().max(Math.ceil(MAX_IMAGE_BYTES / 3) * 4, 'الصورة أكبر من المسموح'),
+  thumb: z.base64().max(Math.ceil(MAX_THUMB_BYTES / 3) * 4, 'الصورة المصغّرة أكبر من المسموح'),
+  width: z.int().min(1).max(4000),
+  height: z.int().min(1).max(4000),
+  optionValue: optionValueSchema.default(null),
+});
+export type ProductImageInput = z.input<typeof productImageInput>;
+
+export const productImagePatch = z.object({
+  version: versionSchema,
+  optionValue: optionValueSchema,
+});
+
+export const productImageOrder = z.object({ ids: z.array(uuidSchema).min(1).max(MAX_PRODUCT_IMAGES) });
+
+export interface ProductImage {
+  id: string;
+  uploadId: string;
+  url: string;
+  thumbUrl: string;
+  optionValue: string | null;
+  sortOrder: number;
+  width: number;
+  height: number;
+  version: number;
+}
+
+export interface ProductImagesResponse {
+  items: ProductImage[];
+}

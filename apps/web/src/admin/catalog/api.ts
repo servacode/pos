@@ -5,6 +5,9 @@ import type {
   CreateProductInput,
   ListResponse,
   ProductDetail,
+  ProductImage,
+  ProductImageInput,
+  ProductImagesResponse,
   ProductListItem,
   ProductListQuery,
   TaxRate,
@@ -87,3 +90,26 @@ export function listUnits() {
 export function listTaxRates() {
   return apiFetch<{ items: TaxRate[] }>('/v1/tax-rates', { auth: true });
 }
+
+// ─── Product pictures ─────────────────────────────────────────────────────────
+
+const images = (productId: string) => `/v1/products/${id(productId)}/images`;
+
+export const listProductImages = (productId: string) =>
+  apiFetch<ProductImagesResponse>(images(productId), { auth: true });
+export const addProductImage = (productId: string, input: ProductImageInput) =>
+  apiFetch<ProductImage>(images(productId), { method: 'POST', body: input, auth: true });
+export const setImageOption = (productId: string, image: ProductImage, optionValue: string | null) =>
+  apiFetch<ProductImage>(`${images(productId)}/${id(image.id)}`, {
+    method: 'PATCH',
+    body: { version: image.version, optionValue },
+    auth: true,
+  });
+export const deleteProductImage = (productId: string, imageId: string) =>
+  apiFetch<void>(`${images(productId)}/${id(imageId)}`, { method: 'DELETE', auth: true });
+export const orderProductImages = (productId: string, ids: string[]) =>
+  apiFetch<ProductImagesResponse>(`${images(productId)}/order`, {
+    method: 'POST',
+    body: { ids },
+    auth: true,
+  });

@@ -6,6 +6,9 @@ import {
   createProductInput,
   createTaxRateInput,
   createUnitInput,
+  productImageInput,
+  productImageOrder,
+  productImagePatch,
   productListQuery,
   updateCategoryInput,
   updateProductInput,
@@ -13,6 +16,14 @@ import {
   updateUnitInput,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
+import {
+  addProductImage,
+  deleteProductImage,
+  listProductImages,
+  orderProductImages,
+  readImage,
+  updateProductImage,
+} from '../services/catalog/images';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import { fieldError, notFound, type CatalogContext } from '../services/catalog/common';
@@ -98,6 +109,56 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   app.post('/v1/products/:id/restore', signedIn, async (request) =>
     setProductArchived(db, idOf(request, PRODUCT), false, ctxOf(request)),
   );
+
+  // ─── Product pictures ──────────────────────────────────────────────────────
+  const IMAGE = 'هذه الصورة غير موجودة.';
+  const imageIdOf = (request: FastifyRequest) => {
+    const parsed = uuid.safeParse((request.params as { imageId?: string }).imageId);
+    if (!parsed.success) throw notFound(IMAGE);
+    return parsed.data;
+  };
+  app.get('/v1/products/:id/images', signedIn, async (request) =>
+    listProductImages(db, idOf(request, PRODUCT), ctxOf(request)),
+  );
+  app.post('/v1/products/:id/images', { ...signedIn, bodyLimit: 4 * 1024 * 1024 }, async (request, reply) => {
+    const input = parseCatalog(productImageInput, request.body);
+    return reply.status(201).send(await addProductImage(db, idOf(request, PRODUCT), input, ctxOf(request)));
+  });
+  app.post('/v1/products/:id/images/order', signedIn, async (request) =>
+    orderProductImages(
+      db,
+      idOf(request, PRODUCT),
+      parseCatalog(productImageOrder, request.body),
+      ctxOf(request),
+    ),
+  );
+  app.patch('/v1/products/:id/images/:imageId', signedIn, async (request) =>
+    updateProductImage(
+      db,
+      idOf(request, PRODUCT),
+      imageIdOf(request),
+      parseCatalog(productImagePatch, request.body),
+      ctxOf(request),
+    ),
+  );
+  app.delete('/v1/products/:id/images/:imageId', signedIn, async (request, reply) => {
+    await deleteProductImage(db, idOf(request, PRODUCT), imageIdOf(request), ctxOf(request));
+    return reply.status(204).send();
+  });
+  // Public: the dashboard's <img> carries no token, and the shop's own pages show them to anyone
+  app.get('/v1/images/:tenantId/:imageId', async (request, reply) => {
+    const tenant = uuid.safeParse((request.params as { tenantId?: string }).tenantId);
+    if (!tenant.success) throw notFound(IMAGE);
+    const thumb = (request.query as { size?: string }).size === 'thumb';
+    const image = await readImage(db, tenant.data, imageIdOf(request), thumb);
+    if (!image) throw notFound(IMAGE);
+    return reply
+      .header('content-type', image.contentType)
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .header('x-content-type-options', 'nosniff')
+      .header('content-security-policy', "default-src 'none'")
+      .send(image.body);
+  });
 
   app.get('/v1/barcodes/:code', signedIn, async (request) => {
     const code = barcodeCodeSchema.safeParse((request.params as { code?: string }).code);

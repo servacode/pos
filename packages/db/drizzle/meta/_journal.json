@@ -183,6 +183,13 @@
       "when": 1793729486129,
       "tag": "0025_vouchers",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793734647726,
+      "tag": "0026_product_images",
+      "breakpoints": true
     }
   ]
 }
