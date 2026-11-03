@@ -35,6 +35,9 @@ const PAYMENT_TEXT: Record<PurchasePayment, string> = {
 interface Line extends PickedVariant {
   qty: string;
   cost: string;
+  /** «رقم الدفعة» and «تاريخ الانتهاء» (03 › الصيدليات), both optional */
+  batch?: string;
+  expiry?: string;
 }
 
 /**
@@ -278,6 +281,8 @@ function PurchaseForm({
                 variantId: l.variantId,
                 qty: parsed[i]!.qty!,
                 costMinor: parsed[i]!.cost!,
+                batchNo: l.batch?.trim() || null,
+                expiryDate: l.expiry || null,
               })),
             }),
           )
@@ -326,14 +331,19 @@ function PurchaseForm({
       <VariantPicker
         onPick={(v) =>
           setLines((list) =>
-            list.some((l) => l.variantId === v.variantId) ? list : [...list, { ...v, qty: '', cost: '' }],
+            list.some((l) => l.variantId === v.variantId)
+              ? list
+              : [...list, { ...v, qty: '', cost: '', batch: '', expiry: '' }],
           )
         }
       />
       {lines.length > 0 ? (
         <ul aria-label="أصناف الفاتورة" className="flex flex-col gap-2">
           {lines.map((l, i) => (
-            <li key={l.variantId} className="grid grid-cols-[minmax(0,1fr)_8rem_10rem_auto] items-end gap-3">
+            <li
+              key={l.variantId}
+              className="grid grid-cols-2 items-end gap-3 md:grid-cols-[minmax(0,1fr)_8rem_10rem_8rem_10rem_auto]"
+            >
               <span className="pb-3 font-semibold text-ink">{l.name}</span>
               <TextField
                 label={`كمية ${l.name}`}
@@ -355,6 +365,26 @@ function PurchaseForm({
                   setLines((all) => all.map((x, j) => (j === i ? { ...x, cost: e.target.value } : x)))
                 }
                 error={s.fields[`lines.${i}.costMinor`]}
+              />
+              <TextField
+                label={`دفعة ${l.name}`}
+                hint="اختياري"
+                dir="ltr"
+                value={l.batch ?? ''}
+                onChange={(e) =>
+                  setLines((all) => all.map((x, j) => (j === i ? { ...x, batch: e.target.value } : x)))
+                }
+              />
+              <TextField
+                label={`انتهاء ${l.name}`}
+                hint="اختياري"
+                type="date"
+                dir="ltr"
+                value={l.expiry ?? ''}
+                onChange={(e) =>
+                  setLines((all) => all.map((x, j) => (j === i ? { ...x, expiry: e.target.value } : x)))
+                }
+                error={s.fields[`lines.${i}.expiryDate`]}
               />
               <button
                 type="button"

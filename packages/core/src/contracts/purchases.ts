@@ -18,6 +18,7 @@ import { isoDateSchema, nonNegativeMinorSchema, positiveMinorSchema, uuidSchema 
  *   GET  /v1/inventory?branchId        InventoryResponse             (cost.view)
  *   POST /v1/stocktakes                stocktakeInput → StocktakeDetail (inventory.adjust)
  *   GET  /v1/reports/profit?from&to    ProfitReport                  (reports.financial)
+ *   GET  /v1/inventory/expiry?days     ExpiryResponse                (purchases.manage)
  */
 
 const optionalText = (max: number, message: string) =>
@@ -66,6 +67,10 @@ export const purchaseLineInput = z.object({
   qty: z.int('الكمية مطلوبة').positive('الكمية أكبر من صفر').max(1_000_000_000, 'الكمية كبيرة'),
   /** What the line cost in all, base currency minor units */
   costMinor: nonNegativeMinorSchema,
+  /** «رقم الدفعة» (03 › الصيدليات) */
+  batchNo: optionalText(40, 'رقم الدفعة طويل'),
+  /** «تاريخ الانتهاء» of what came in */
+  expiryDate: isoDateSchema.nullable().optional(),
 });
 
 export const purchaseInput = z
@@ -91,6 +96,8 @@ export interface PurchaseLineRow {
   name: string;
   qty: number;
   costMinor: number;
+  batchNo: string | null;
+  expiryDate: string | null;
 }
 
 export interface PurchaseRow {
@@ -196,6 +203,31 @@ export interface StocktakeDetail {
   /** Sum of the differences' value */
   diffValueMinor: number;
   baseCurrency: CurrencyCode;
+}
+
+/** Batches still on the shelf that end within `days` (90 by default), or already have. */
+export const expiryQuery = z.object({ days: z.coerce.number().int().min(1).max(730).default(90) });
+
+/**
+ * A batch on the shelf (03 › الصيدليات: الصلاحية). What is left of each receipt is an estimate:
+ * the stock is taken from the newest receipts first, as the oldest sell first.
+ */
+export interface ExpiryRow {
+  variantId: string;
+  name: string;
+  batchNo: string | null;
+  expiryDate: string;
+  purchaseNumber: string;
+  receivedOn: string;
+  /** What is left of the batch, base units, thousandths */
+  qty: number;
+  /** Days from today; negative when it has expired */
+  daysLeft: number;
+}
+
+export interface ExpiryResponse {
+  items: ExpiryRow[];
+  today: string;
 }
 
 export const profitQuery = z.object({

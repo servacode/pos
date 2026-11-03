@@ -63,6 +63,8 @@ export interface ProductDraft {
   nameAr: string;
   nameEn: string;
   brand: string;
+  /** «الاسم العلمي» (pharmacies); "" = none */
+  genericName?: string;
   /** "" = بلا تصنيف */
   categoryId: string;
   type: ProductType;
@@ -183,6 +185,7 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     nameAr: detail.nameAr,
     nameEn: detail.nameEn ?? '',
     brand: detail.brand ?? '',
+    genericName: detail.genericName ?? '',
     categoryId: detail.categoryId ?? '',
     type: detail.type,
     unitId: detail.unitId,
@@ -323,6 +326,7 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       nameAr: draft.nameAr.trim(),
       nameEn: textOrNull(draft.nameEn),
       brand: textOrNull(draft.brand),
+      ...(textOrNull(draft.genericName ?? '') ? { genericName: textOrNull(draft.genericName ?? '') } : {}),
       categoryId: draft.categoryId || null,
       type: draft.type,
       unitId: draft.unitId || undefined,
@@ -387,6 +391,9 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   if (nameAr !== original.nameAr) body.nameAr = nameAr;
   if (textOrNull(draft.nameEn) !== original.nameEn) body.nameEn = textOrNull(draft.nameEn);
   if (textOrNull(draft.brand) !== original.brand) body.brand = textOrNull(draft.brand);
+  if (textOrNull(draft.genericName ?? '') !== (original.genericName ?? null)) {
+    body.genericName = textOrNull(draft.genericName ?? '');
+  }
   if ((draft.categoryId || null) !== original.categoryId) body.categoryId = draft.categoryId || null;
   if (draft.type !== original.type) body.type = draft.type;
   if (draft.unitId && draft.unitId !== original.unitId) body.unitId = draft.unitId;

@@ -937,6 +937,8 @@ export const products = pgTable(
     searchName: text('search_name').notNull(),
     categoryId: uuid('category_id'),
     brand: text('brand'),
+    /** «الاسم العلمي» of a medicine (03 › الصيدليات): the till finds the product by it too */
+    genericName: text('generic_name'),
     /** stock, service */
     type: text('type').notNull().default('stock'),
     /** active, temporary */
@@ -993,6 +995,11 @@ export const variants = pgTable(
     sortOrder: integer('sort_order').notNull().default(0),
     /** «الحد الأدنى في الفرع», thousandths */
     minStockQty: bigint('min_stock_qty', { mode: 'number' }),
+    /**
+     * The earliest expiry of what is on the shelf (services/expiry.ts: the stock taken from the
+     * newest receipts first); null when no receipt gave one. The till warns on it.
+     */
+    nearestExpiry: date('nearest_expiry'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
@@ -1618,11 +1625,15 @@ export const purchaseLines = pgTable(
     name: text('name').notNull(),
     qty: bigint('qty', { mode: 'number' }).notNull(),
     costMinor: bigint('cost_minor', { mode: 'number' }).notNull(),
+    /** «رقم الدفعة» and «تاريخ الانتهاء» as received (03 › الصيدليات: الدفعة والصلاحية) */
+    batchNo: text('batch_no'),
+    expiryDate: date('expiry_date'),
   },
   (t) => [
     primaryKey({ name: 'purchase_lines_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.purchaseId], foreignColumns: [purchases.tenantId, purchases.id] }),
     unique('purchase_lines_line_unique').on(t.tenantId, t.purchaseId, t.lineNo),
+    index('purchase_lines_variant_idx').on(t.tenantId, t.variantId),
     tenantIsolation(),
   ],
 );

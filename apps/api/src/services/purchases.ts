@@ -50,6 +50,7 @@ import {
   type StockKey,
 } from './costing';
 import { postEntry, type DraftLine } from './posting';
+import { refreshExpiry } from './expiry';
 
 /**
  * Suppliers, purchases, payments to suppliers, counts, the stock's value and the profit
@@ -234,6 +235,8 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
       name: l.name,
       qty: l.qty,
       costMinor: l.costMinor,
+      batchNo: l.batchNo,
+      expiryDate: l.expiryDate,
     })),
     baseCurrency: await baseCurrency(tx),
   };
@@ -317,9 +320,15 @@ export async function createPurchase(
         name: l.name,
         qty: l.qty,
         costMinor: l.costMinor,
+        batchNo: l.batchNo ?? null,
+        expiryDate: l.expiryDate ?? null,
       })),
     );
     await moveStock(tx, auth.tenantId, branchId, id, 'purchase', input.date, lines);
+    await refreshExpiry(
+      tx,
+      lines.map((l) => l.variantId),
+    );
 
     // Into the stock's value; pieces sold before they were bought are settled now
     const values = await loadValues(
@@ -636,6 +645,10 @@ export async function createStocktake(
       createdBy: auth.userId,
     });
     await moveStock(tx, auth.tenantId, branchId, id, 'stocktake', input.date, moves);
+    await refreshExpiry(
+      tx,
+      moves.map((m) => m.variantId),
+    );
     const currency = await baseCurrency(tx);
     // A loss (negative difference) is Dr 6300 / Cr 1300
     await postEntry(tx, {

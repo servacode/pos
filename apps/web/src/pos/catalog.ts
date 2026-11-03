@@ -38,6 +38,8 @@ export interface CatalogItem {
   categoryPath?: readonly string[];
   /** «الإضافات والخيارات»: the cashier picks them when the item goes into the cart */
   modifiers?: readonly ModifierGroup[];
+  /** The earliest expiry of what is on the shelf, «2026-12-31»; null when none was received */
+  nearestExpiry?: string | null;
   unit: UnitRow | null;
   taxRate: TaxRateRow | null;
   price: {
@@ -160,11 +162,12 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       productId: product.id,
       name,
       searchKey: normalizeArabic(
-        [name, product.nameEn, product.brand, variant.sku].filter(Boolean).join(' '),
+        [name, product.nameEn, product.brand, product.genericName, variant.sku].filter(Boolean).join(' '),
       ),
       categoryId: product.categoryId,
       categoryPath: categoryPath(product.categoryId),
       modifiers: product.modifiers ?? [],
+      nearestExpiry: variant.nearestExpiry ?? null,
       unit: units.get(product.unitId) ?? null,
       taxRate: product.taxRateId ? (taxes.get(product.taxRateId) ?? null) : null,
       price: {
