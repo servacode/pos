@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import { App } from './App';
 import '@serva/ui/fonts.css';
 import './styles.css';
+import { registerServiceWorker } from './sw/register';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Root element #root not found');
@@ -15,3 +16,5 @@ createRoot(root).render(
     </BrowserRouter>
   </StrictMode>,
 );
+
+registerServiceWorker();
