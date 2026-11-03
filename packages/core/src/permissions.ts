@@ -26,6 +26,7 @@ export const PERMISSIONS = {
   'subscription.manage': 'الاشتراك والدفع للمنصة',
   'devices.view': 'رؤية الأجهزة وما لم يصل منها',
   'devices.manage': 'ربط الأجهزة وإيقافها',
+  'settings.manage': 'إعدادات المتجر: الاسم والعملة وسعر الصرف',
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -48,6 +49,8 @@ const OWNER_ONLY: readonly Permission[] = [
   'subscription.manage',
   // 09 › devices.manage: linking and revoking devices is the owner's alone
   'devices.manage',
+  // 04 › الإعدادات: the store's name, currency and dollar rate (migration 0015 adds it to owners)
+  'settings.manage',
 ];
 
 /** Roles created automatically for every new store. The owner can edit them or add more. */

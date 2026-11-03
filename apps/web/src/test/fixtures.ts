@@ -31,6 +31,8 @@ export function makeMe(subscription: Partial<MeResponse['subscription']> = {}): 
       ...subscription,
     },
     branches: [{ id: 'branch-1', code: 'MAIN', name: 'الفرع الرئيسي' }],
+    // Past the start wizard: tests of the wizard set it back
+    onboarding: { step: 4, done: true },
   };
 }
 

@@ -5,6 +5,7 @@ import {
   DeviceIcon,
   HomeIcon,
   ProductsIcon,
+  SettingsIcon,
   ReportsIcon,
   SalesIcon,
   ShieldCheckIcon,
@@ -54,6 +55,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   },
   { to: '/devices', label: 'الأجهزة', icon: DeviceIcon, permission: ['devices.view'] },
   { to: '/evidence', label: 'شاشة الدليل', icon: ShieldCheckIcon, permission: EVIDENCE_ACCESS },
+  { to: '/settings', label: 'إعدادات المتجر', icon: SettingsIcon, permission: ['settings.manage'] },
 ];
 
 export function navFor(me: Pick<MeResponse, 'user' | 'settings'>): NavEntry[] {

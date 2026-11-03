@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Navigate } from 'react-router';
 import { CURRENCIES, sectorLabel, type MeResponse } from '@serva/core';
 import { Badge, Card, cn, GiftIcon } from '@serva/ui';
 import { useMe } from '../auth/useAuth';
@@ -93,6 +94,10 @@ function StoreCard({ me }: { me: MeResponse }) {
 
 export function HomePage() {
   const me = useMe();
+  // A new store starts in the wizard (04 › معالج البداية); the owner can leave it and come back.
+  if (!me.onboarding.done && me.user.permissions.includes('settings.manage')) {
+    return <Navigate to="/welcome" replace />;
+  }
   return (
     <AppShell>
       <div className="flex flex-col gap-6 motion-safe:animate-rise">
