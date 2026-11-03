@@ -48,6 +48,7 @@ import {
 import { ModifiersEditor } from './ModifiersEditor';
 import { ImagesEditor } from './ImagesEditor';
 import { OptionsEditor } from './OptionsEditor';
+import { StockGrid } from './StockGrid';
 import { VariantBlock } from './VariantBlock';
 
 interface Lookups {
@@ -558,6 +559,7 @@ export function ProductPage() {
         {product && draft.type === 'stock' ? (
           <Section title="في كل الفروع">
             <StockByBranch product={product} numberFormat={me.settings.numberFormat} />
+            <StockGrid product={product} numberFormat={me.settings.numberFormat} />
           </Section>
         ) : null}
       </form>
