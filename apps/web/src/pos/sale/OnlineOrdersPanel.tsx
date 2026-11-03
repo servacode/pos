@@ -50,6 +50,14 @@ export function OnlineOrdersPanel({
                   {o.fulfilment === 'delivery' ? `توصيل إلى ${o.address ?? ''}` : 'استلام من المحل'}
                   {o.note ? ` · ${o.note}` : ''}
                 </span>
+                {o.depositCode ? (
+                  <span className="text-sm font-semibold text-brand-ink">
+                    عربون بالقسيمة{' '}
+                    <bdi dir="ltr" className="num">
+                      {o.depositCode}
+                    </bdi>
+                  </span>
+                ) : null}
               </span>
               <Money minor={o.totalMinor} currency={o.currency as CurrencyCode} className="font-bold" />
               <Button onClick={() => onOpen(o)}>افتح في السلة</Button>

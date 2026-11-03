@@ -210,6 +210,9 @@ function OrdersCard() {
                 {STATUS_TEXT[o.status]}
               </Badge>
               {o.source === 'shop' ? <Badge tone="neutral">رقم مؤكَّد</Badge> : null}
+              {o.source === 'hold' ? (
+                <Badge tone="neutral">حجز في المحل{o.depositCode ? ` · عربون ${o.depositCode}` : ''}</Badge>
+              ) : null}
               <span className="flex-1" />
               <Money minor={o.totalMinor} currency={o.currency} className="font-bold" />
             </div>

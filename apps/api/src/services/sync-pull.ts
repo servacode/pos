@@ -334,6 +334,7 @@ const PULL_SETS: Record<string, PullSet> = {
       currency: onlineOrders.currency,
       totalMinor: onlineOrders.totalMinor,
       lines: onlineOrders.lines,
+      depositCode: onlineOrders.depositCode,
       version: onlineOrders.version,
     },
     scope: () =>

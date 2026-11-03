@@ -171,7 +171,8 @@ export interface OnlineOrder {
   id: string;
   number: string;
   status: OnlineOrderStatus;
-  source: 'whatsapp' | 'shop';
+  /** hold: pieces held at the counter for a customer, with a deposit (03 › الألبسة: الحجز بعربون) */
+  source: 'whatsapp' | 'shop' | 'hold';
   customerName: string;
   phone: string;
   fulfilment: 'delivery' | 'pickup';
@@ -179,6 +180,8 @@ export interface OnlineOrder {
   note: string | null;
   currency: CurrencyCode;
   totalMinor: number;
+  /** A hold's deposit: the code of the voucher the customer paid it as, spent at pickup */
+  depositCode: string | null;
   lines: {
     variantId: string;
     productId: string;
@@ -215,5 +218,30 @@ export interface OnlineOrderRow {
   currency: CurrencyCode;
   totalMinor: number;
   lines: OnlineOrder['lines'];
+  depositCode: string | null;
   version: number;
+}
+
+/**
+ * «احجز» at the till (03 › الألبسة: الحجز بعربون): the cart held for a customer. The deposit is
+ * sold first as a voucher (GFT), its code kept on the hold and offered at pickup; the hold is an
+ * accepted order of this branch, so its pieces are held and it waits on the tills like a shop order.
+ *
+ *   POST /v1/device/holds   (Authorization: Device)   holdInput → HoldPlaced (201)
+ */
+export const holdInput = z.object({
+  customerName: z.string().trim().min(1, 'اكتب اسم الزبون').max(80),
+  phone: phoneSchema,
+  note: z.string().trim().max(300).nullable().optional(),
+  depositCode: z.string().trim().min(1).max(40).nullable(),
+  lines: z
+    .array(z.object({ variantId: uuidSchema, qty: z.int().min(1).max(50) }))
+    .min(1, 'السلة فارغة')
+    .max(MAX_ORDER_LINES),
+});
+export interface HoldPlaced {
+  id: string;
+  number: string;
+  currency: CurrencyCode;
+  totalMinor: number;
 }

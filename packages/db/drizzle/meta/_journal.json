@@ -232,6 +232,13 @@
       "when": 1793745442942,
       "tag": "0032_supplier_returns",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793746070327,
+      "tag": "0033_holds",
+      "breakpoints": true
     }
   ]
 }

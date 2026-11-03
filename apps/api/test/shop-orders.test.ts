@@ -255,3 +255,36 @@ describe('an accepted order on its way to the till', () => {
     expect(await available()).toBe(true);
   });
 });
+
+describe('«احجز» at the till', () => {
+  it('holds the cart for a customer with the deposit voucher’s code, ready for pickup', async () => {
+    const store = await openStore(app);
+    await openShop(store, 'whatsapp');
+    const { variantId } = await dress(store);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/holds',
+      headers: { authorization: store.device.authorization },
+      payload: {
+        customerName: 'سلمى',
+        phone: '0933111222',
+        note: 'تمرّ الخميس',
+        depositCode: 'GFT-001-001-0000001',
+        lines: [{ variantId, qty: 2 }],
+      },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json()).toMatchObject({ number: 'ONL-000001', totalMinor: 1_800_000 });
+    // Both dresses held: the shop shows none left
+    expect(await available()).toBe(false);
+    const [held] = await tillOrders(store);
+    expect(held).toMatchObject({
+      status: 'accepted',
+      customerName: 'سلمى',
+      depositCode: 'GFT-001-001-0000001',
+      lines: [{ variantId, qty: 2 }],
+    });
+    const [boxed] = await ordersBox(store);
+    expect(boxed).toMatchObject({ source: 'hold', status: 'accepted', fulfilment: 'pickup' });
+  });
+});

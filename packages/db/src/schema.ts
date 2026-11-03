@@ -2265,6 +2265,8 @@ export const onlineOrders = pgTable(
     branchId: uuid('branch_id'),
     /** The sale that delivered it, from the till */
     saleId: uuid('sale_id'),
+    /** A hold's deposit (source 'hold'): the code of the voucher it was paid as */
+    depositCode: text('deposit_code'),
     decidedBy: uuid('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     version: version(),

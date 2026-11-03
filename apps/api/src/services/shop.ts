@@ -7,6 +7,7 @@ import {
   type CurrencyCode,
   type OnlineOrder,
   type OnlineStoreSettings,
+  type HoldPlaced,
   type ShopCodeSent,
   type ShopHome,
   type ShopOrderPlaced,
@@ -14,6 +15,7 @@ import {
   type ShopProduct,
   type TradeRate,
   type onlineOrderStatusInput,
+  type holdInput,
   type onlineStoreInput,
   type shopCodeInput,
   type shopOrderInput,
@@ -29,6 +31,7 @@ import {
 } from '@serva/db';
 import type { FastifyInstance } from 'fastify';
 import type { z } from 'zod';
+import type { DeviceClaims } from '../auth/device-guard';
 import { hashOtp, isTestMode, newOtpCode, OtpDeliveryError } from '../auth/otp';
 import { requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
@@ -259,6 +262,74 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
   );
 }
 
+/**
+ * The order's lines at the server's prices in the store's currency, the same piece twice made one
+ * line. A shop order needs each piece on the shelf (less what other orders hold); a hold at the
+ * counter has the piece in hand.
+ */
+async function priceLines(
+  tx: Transaction,
+  base: CurrencyCode,
+  input: { variantId: string; qty: number }[],
+  needOnShelf: boolean,
+): Promise<OnlineOrderLine[]> {
+  const rates = await ratesOf(tx);
+  const ids = [...new Set(input.map((l) => l.variantId))];
+  const rows = await tx.execute<{
+    id: string;
+    product_id: string;
+    name: string;
+    label: string | null;
+    currency: string;
+    price: string;
+    available: boolean;
+  }>(sql`
+    select v.id, p.id as product_id, p.name_ar as name, v.label, pr.currency,
+           pr.price_minor::text as price, ${availableSql} as available
+    from variants v
+    join products p on p.id = v.product_id
+    join prices pr on pr.id = v.id
+    where v.id in (${sql.join(
+      ids.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    )}) and ${liveVariant} and ${sellable}`);
+  const known = new Map(rows.map((r) => [r.id, r]));
+  const lines: OnlineOrderLine[] = [];
+  for (const [index, line] of input.entries()) {
+    const row = known.get(line.variantId);
+    const price = row ? inBase(Number(row.price), row.currency as CurrencyCode, base, rates) : null;
+    if (!row || price === null || (needOnShelf && !row.available)) {
+      throw fieldError(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
+    }
+    const existing = lines.find((l) => l.variantId === line.variantId);
+    if (existing) {
+      existing.qty += line.qty;
+      existing.totalMinor = existing.priceMinor * existing.qty;
+    } else {
+      lines.push({
+        variantId: row.id,
+        productId: row.product_id,
+        name: row.name,
+        label: row.label,
+        qty: line.qty,
+        priceMinor: price,
+        totalMinor: price * line.qty,
+      });
+    }
+  }
+  return lines;
+}
+
+/** The next order number of a store (ONL-000001…); the lock keeps two orders off the same one */
+async function nextOrderNumber(tx: Transaction, tenantId: string): Promise<{ seq: number; number: string }> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('online_orders'), hashtext(${tenantId}))`);
+  const [last] = await tx.execute<{ seq: number | null }>(
+    sql`select max(seq) as seq from online_orders where tenant_id = ${tenantId}`,
+  );
+  const seq = (last?.seq ?? 0) + 1;
+  return { seq, number: `ONL-${String(seq).padStart(6, '0')}` };
+}
+
 /** The order as WhatsApp opens with it: short lines, the store's numbers, nothing to retype. */
 export function orderMessage(order: {
   number: string;
@@ -368,58 +439,9 @@ export function placeShopOrder(
         throw fieldError('fulfilment', 'هذا المحل يوصّل فقط.');
       if (input.fulfilment === 'delivery' && !input.address)
         throw fieldError('address', 'اكتب عنوان التوصيل');
-      const rates = await ratesOf(tx);
-      const ids = [...new Set(input.lines.map((l) => l.variantId))];
-      const rows = await tx.execute<{
-        id: string;
-        product_id: string;
-        name: string;
-        label: string | null;
-        currency: string;
-        price: string;
-        available: boolean;
-      }>(sql`
-        select v.id, p.id as product_id, p.name_ar as name, v.label, pr.currency,
-               pr.price_minor::text as price, ${availableSql} as available
-        from variants v
-        join products p on p.id = v.product_id
-        join prices pr on pr.id = v.id
-        where v.id in (${sql.join(
-          ids.map((id) => sql`${id}::uuid`),
-          sql`, `,
-        )}) and ${liveVariant} and ${sellable}`);
-      const known = new Map(rows.map((r) => [r.id, r]));
-      const lines: OnlineOrderLine[] = [];
-      for (const [index, line] of input.lines.entries()) {
-        const row = known.get(line.variantId);
-        const price = row ? inBase(Number(row.price), row.currency as CurrencyCode, base, rates) : null;
-        if (!row || price === null || !row.available) {
-          throw fieldError(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
-        }
-        const existing = lines.find((l) => l.variantId === line.variantId);
-        if (existing) {
-          existing.qty += line.qty;
-          existing.totalMinor = existing.priceMinor * existing.qty;
-        } else {
-          lines.push({
-            variantId: row.id,
-            productId: row.product_id,
-            name: row.name,
-            label: row.label,
-            qty: line.qty,
-            priceMinor: price,
-            totalMinor: price * line.qty,
-          });
-        }
-      }
+      const lines = await priceLines(tx, base, input.lines, true);
       const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
-      // Numbers follow each other within a store; the lock keeps two orders off the same one
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('online_orders'), hashtext(${tenantId}))`);
-      const [last] = await tx.execute<{ seq: number | null }>(
-        sql`select max(seq) as seq from online_orders where tenant_id = ${tenantId}`,
-      );
-      const seq = (last?.seq ?? 0) + 1;
-      const number = `ONL-${String(seq).padStart(6, '0')}`;
+      const { seq, number } = await nextOrderNumber(tx, tenantId);
       const order = {
         number,
         customerName: input.name,
@@ -448,6 +470,48 @@ export function placeShopOrder(
             : null,
       };
     });
+  });
+}
+
+/**
+ * «احجز» at the till (03 › الألبسة: الحجز بعربون): the cart held for a customer at this branch, as
+ * an accepted order, so its pieces are held and it waits on the tills for pickup.
+ */
+export function placeHold(
+  db: Database,
+  device: DeviceClaims,
+  input: z.output<typeof holdInput>,
+): Promise<HoldPlaced> {
+  return withTenant(db, device.tenantId, async (tx) => {
+    const [settings] = await tx.execute<{ base: string }>(
+      sql`select base_currency as base from tenant_settings where tenant_id = ${device.tenantId}`,
+    );
+    const base = (settings?.base ?? 'SYP') as CurrencyCode;
+    const lines = await priceLines(tx, base, input.lines, false);
+    const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
+    const { seq, number } = await nextOrderNumber(tx, device.tenantId);
+    const [made] = await tx
+      .insert(onlineOrders)
+      .values({
+        tenantId: device.tenantId,
+        seq,
+        number,
+        status: 'accepted',
+        source: 'hold',
+        customerName: input.customerName,
+        phone: input.phone,
+        fulfilment: 'pickup',
+        address: null,
+        note: input.note || null,
+        currency: base,
+        totalMinor,
+        lines,
+        branchId: device.branchId,
+        depositCode: input.depositCode,
+        decidedAt: sql`now()`,
+      })
+      .returning({ id: onlineOrders.id });
+    return { id: made!.id, number, currency: base, totalMinor };
   });
 }
 
@@ -580,6 +644,7 @@ const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   number: r.number,
   status: r.status as OnlineOrder['status'],
   source: r.source as OnlineOrder['source'],
+  depositCode: r.depositCode,
   customerName: r.customerName,
   phone: r.phone,
   fulfilment: r.fulfilment as OnlineOrder['fulfilment'],

@@ -4,7 +4,7 @@ import type { SalePayload } from '@serva/core/contracts/documents';
 import { validateDocumentPayload } from '@serva/core/contracts/documents';
 import type { OnlineOrderRow } from '@serva/core/contracts/shop';
 import { memoryLocal } from '../../offline/local';
-import { ids, PINS, posSets, PRODUCTS } from '../../test/pos';
+import { ids, PINS, posSets, PRODUCTS, staffServer } from '../../test/pos';
 import { openShift, renderPos, scan } from '../../test/renderPos';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 
@@ -26,6 +26,7 @@ const order = (over: Partial<OnlineOrderRow> = {}): OnlineOrderRow => ({
   note: null,
   currency: 'SYP',
   totalMinor: 50_000,
+  depositCode: null,
   lines: [
     {
       variantId: PRODUCTS.oil.variant.id,
@@ -105,5 +106,92 @@ describe('«طلبات المتجر» at the till (26 › حياة الطلب)',
     expect(cart.onlineOrder).toEqual({ id: order().id, number: 'ONL-000001', customerName: 'ريم' });
     expect(missing).toEqual(['فستان (M)']);
     expect(waitingOrders([order()], [order().id])).toEqual([]);
+  });
+});
+
+describe('«احجز» at the till (03 › الألبسة: الحجز بعربون)', () => {
+  function server(answer: () => Response) {
+    const staff = staffServer();
+    const holds: Record<string, unknown>[] = [];
+    const fn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url) === '/v1/device/holds') {
+        holds.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return answer();
+      }
+      return staff(url, init);
+    });
+    return { fetch: fn as unknown as typeof fetch, holds };
+  }
+
+  it('takes the deposit as a voucher, then holds the cart with its code', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const { fetch, holds } = server(
+      () =>
+        new Response(
+          JSON.stringify({ id: 'h-1', number: 'ONL-000004', currency: 'SYP', totalMinor: 50_000 }),
+          { status: 201 },
+        ),
+    );
+    const { user, outbox } = renderPos({ local, fetch });
+    await signIn(user);
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.click(screen.getByRole('button', { name: 'احجز' }));
+    const panel = await screen.findByRole('region', { name: 'احجز للزبون' });
+    await user.type(within(panel).getByLabelText('اسم الزبون'), 'سلمى');
+    await user.type(within(panel).getByLabelText('جوال الزبون'), '0933111222');
+    await user.type(within(panel).getByLabelText('العربون نقداً (اختياري)'), '100');
+    await user.click(within(panel).getByRole('button', { name: 'احجز' }));
+
+    expect(await screen.findByText(/حُجز ONL-000004/)).toBeInTheDocument();
+    const voucher = outbox.find((e) => e.type === 'gift_voucher')!;
+    expect(voucher.doc.payload).toMatchObject({ amountMinor: 10_000, method: 'cash' });
+    expect(holds).toEqual([
+      expect.objectContaining({
+        customerName: 'سلمى',
+        phone: '0933111222',
+        depositCode: voucher.doc.number,
+        lines: [{ variantId: PRODUCTS.oil.variant.id, qty: 2 }],
+      }),
+    ]);
+    // The cart is empty for the next customer
+    expect(screen.queryByRole('list', { name: 'أسطر الفاتورة' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the deposit when the hold does not reach the server, and sends it again without a second one', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    let up = false;
+    const { fetch, holds } = server(() =>
+      up
+        ? new Response(
+            JSON.stringify({ id: 'h-1', number: 'ONL-000005', currency: 'SYP', totalMinor: 25_000 }),
+            {
+              status: 201,
+            },
+          )
+        : new Response('{}', { status: 503 }),
+    );
+    const { user, outbox } = renderPos({ local, fetch });
+    await signIn(user);
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.click(screen.getByRole('button', { name: 'احجز' }));
+    const panel = await screen.findByRole('region', { name: 'احجز للزبون' });
+    await user.type(within(panel).getByLabelText('اسم الزبون'), 'سلمى');
+    await user.type(within(panel).getByLabelText('جوال الزبون'), '0933111222');
+    await user.type(within(panel).getByLabelText('العربون نقداً (اختياري)'), '50');
+    await user.click(within(panel).getByRole('button', { name: 'احجز' }));
+    expect(await within(panel).findByText(/ولم يصل الحجز إلى الخادم/)).toBeInTheDocument();
+    up = true;
+    await user.click(within(panel).getByRole('button', { name: 'أعد إرسال الحجز' }));
+    expect(await screen.findByText(/حُجز ONL-000005/)).toBeInTheDocument();
+    expect(outbox.filter((e) => e.type === 'gift_voucher')).toHaveLength(1);
+    expect(holds).toHaveLength(2);
+  });
+
+  it('opens a hold at pickup with its deposit voucher offered first', () => {
+    const { cart } = orderCart(order({ depositCode: 'GFT-001-001-0000009' }), { byVariant: new Map() });
+    expect(cart.voucher).toBe('GFT-001-001-0000009');
   });
 });

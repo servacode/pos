@@ -1,4 +1,5 @@
-import type { OnlineOrderRow } from '@serva/core/contracts/shop';
+import type { HoldPlaced, OnlineOrderRow } from '@serva/core/contracts/shop';
+import { APP_VERSION } from '../../offline/sync';
 import type { Catalog } from '../catalog';
 import { addItem, EMPTY_CART, type Cart } from './cart';
 
@@ -18,6 +19,8 @@ export function orderCart(
   let cart: Cart = {
     ...EMPTY_CART,
     onlineOrder: { id: order.id, number: order.number, customerName: order.customerName },
+    // A hold's deposit, paid as a voucher, comes off first at payment
+    ...(order.depositCode ? { voucher: order.depositCode } : {}),
   };
   const missing: string[] = [];
   for (const line of order.lines) {
@@ -31,3 +34,49 @@ export function orderCart(
 /** The orders waiting here: accepted, and not sold on this till already */
 export const waitingOrders = (orders: readonly OnlineOrderRow[], sold: readonly string[]) =>
   orders.filter((o) => !sold.includes(o.id));
+
+/** holdInput of `@serva/core` (contracts/shop) */
+export interface HoldInput {
+  customerName: string;
+  phone: string;
+  note?: string | null;
+  depositCode: string | null;
+  lines: { variantId: string; qty: number }[];
+}
+
+export type HoldAnswer =
+  | { kind: 'ok'; body: HoldPlaced }
+  /** Refused, with the server's words (a piece no longer sold, a wrong phone…) */
+  | { kind: 'refused'; message: string }
+  /** No answer: the hold needs the server */
+  | { kind: 'network' };
+
+/** POST /v1/device/holds (`Authorization: Device <token>`): the cart held for a customer */
+export async function postHold(
+  input: HoldInput,
+  token: string,
+  fetchFn: typeof fetch = (...args) => globalThis.fetch(...args),
+): Promise<HoldAnswer> {
+  let res: Response;
+  try {
+    res = await fetchFn('/v1/device/holds', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Device ${token}`,
+        'X-App-Version': APP_VERSION,
+      },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return { kind: 'network' };
+  }
+  const body = (await res.json().catch(() => null)) as
+    (HoldPlaced & { error?: { message?: string; fields?: Record<string, string> } }) | null;
+  if (res.ok && body) return { kind: 'ok', body };
+  if (res.status >= 500 || !body) return { kind: 'network' };
+  const fields = Object.values(body.error?.fields ?? {});
+  return { kind: 'refused', message: fields[0] ?? body.error?.message ?? 'رُفض الحجز.' };
+}

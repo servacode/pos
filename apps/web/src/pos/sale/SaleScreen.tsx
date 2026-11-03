@@ -47,6 +47,7 @@ import {
   priceCart,
   setPriceTier,
   type ItemChoice,
+  EMPTY_CART,
   removeLine,
   restoreLine,
   unitPriceOf,
@@ -64,6 +65,8 @@ import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
 import { TableBoard } from './TableBoard';
+import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
+import { HoldPanel } from './HoldPanel';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
@@ -81,6 +84,7 @@ export type SaleMode =
   | { kind: 'choose'; item: CatalogItem; hit: BarcodeHit | null }
   | { kind: 'tables' }
   | { kind: 'online' }
+  | { kind: 'hold' }
   | { kind: 'serial'; lineNo: number };
 
 export interface SaleScreenProps {
@@ -106,6 +110,8 @@ export interface SaleScreenProps {
   onNextSale: () => void;
   /** Keyboard actions that belong to the cashier app (menu, lock) */
   extraShortcuts?: (event: KeyboardEvent) => boolean;
+  /** Prints a hold's deposit voucher (CashierApp's printer) */
+  onPrintDeposit?: (saved: SavedGiftVoucher) => void;
 }
 
 const SELLER_KEY = 'salesperson';
@@ -558,6 +564,11 @@ export function SaleScreen(props: SaleScreenProps) {
             }
           >
             عرض سعر
+          </Button>
+        ) : null}
+        {priced && !cart.onlineOrder ? (
+          <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'hold' })}>
+            احجز
           </Button>
         ) : null}
         {waitingOnline.length > 0 ? (
@@ -1070,6 +1081,29 @@ export function SaleScreen(props: SaleScreenProps) {
             add(item, hit, undefined, choice);
           }}
           onCancel={() => setMode({ kind: 'items' })}
+        />
+      ) : effectiveMode.kind === 'hold' && priced ? (
+        <HoldPanel
+          cart={cart}
+          totalMinor={totalMinor}
+          currency={ctx.currency}
+          shiftId={props.shiftId}
+          cashierId={session.userId}
+          timezone={settings.timezone}
+          cutoff={settings.businessDayCutoff}
+          onPrintDeposit={props.onPrintDeposit}
+          onClose={() => setMode({ kind: 'items' })}
+          onDone={(hold) => {
+            setCart(() => EMPTY_CART);
+            setSelected(null);
+            setMode({ kind: 'items' });
+            setNotice({
+              tone: 'info',
+              text: hold.depositCode
+                ? `حُجز ${hold.number}. العربون بالقسيمة ${hold.depositCode} ويُخصم عند الاستلام.`
+                : `حُجز ${hold.number}. يجده الكاشير في «طلبات المتجر» عند الاستلام.`,
+            });
+          }}
         />
       ) : effectiveMode.kind === 'online' ? (
         <OnlineOrdersPanel

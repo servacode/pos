@@ -63,6 +63,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/cheques': 'signed-in',
   'POST /v1/cheques/actions': 'signed-in',
   'POST /v1/device/staff-sessions': 'device',
+  'POST /v1/device/holds': 'device',
   'POST /v1/sync/push': 'device',
   'GET /v1/sync/pull': 'device',
   'POST /v1/sync/resync': 'device',
@@ -732,6 +733,25 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     const [attempts] = await ownerDb()<{ n: number }[]>`
       select count(*)::int as n from pin_attempts where tenant_id = ${a.tenantId}`;
     expect(attempts!.n).toBe(0);
+  },
+  // Store B's device holding store A's piece: refused, and neither store has a hold
+  'POST /v1/device/holds': async (app, { a, b }) => {
+    const product = await productOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/holds',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        customerName: 'زبون',
+        phone: '0944555666',
+        depositCode: null,
+        lines: [{ variantId: product.variants[0]!.id, qty: 1 }],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from online_orders`;
+    expect(n!.n).toBe(0);
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/sync/snapshots/:id']!(app, { a, b });

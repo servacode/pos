@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  holdInput,
   onlineOrderListQuery,
   onlineOrderStatusInput,
   onlineStoreInput,
@@ -7,12 +8,14 @@ import {
   shopOrderInput,
   uuidSchema,
 } from '@serva/core';
+import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import {
   getOnlineStore,
   listOnlineOrders,
+  placeHold,
   placeShopOrder,
   requestShopCode,
   saveOnlineStore,
@@ -68,6 +71,13 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
       String((request.params as { token?: string }).token ?? '').slice(0, 64),
     ),
   );
+
+  // ─── The till: «احجز» ────────────────────────────────────────────────────
+  app.post('/v1/device/holds', { onRequest: requireDevice() }, async (request, reply) => {
+    if (!request.device) throw unauthorized();
+    const placed = await placeHold(app.db, request.device, parseBody(holdInput, request.body));
+    return reply.status(201).send(placed);
+  });
 
   // ─── The dashboard ───────────────────────────────────────────────────────
   app.get('/v1/online-store', { preHandler: requireAuth }, async (request) => {

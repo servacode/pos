@@ -517,6 +517,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         }
         onNextSale={() => setDone(null)}
         extraShortcuts={extraShortcuts}
+        onPrintDeposit={(doc) =>
+          setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'gift' }, copy: false })
+        }
       />
       {printPortal}
     </>
