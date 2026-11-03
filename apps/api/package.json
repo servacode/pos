@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "seed": "tsx src/scripts/seed.ts",
     "integrity": "tsx src/scripts/integrity.ts",
+    "reprocess": "tsx src/scripts/reprocess.ts",
     "lint": "eslint src test",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",

@@ -24,6 +24,7 @@
 /apps/api/src/services/sync-push.ts @servacode
 /apps/api/src/services/reports.ts @servacode
 /apps/api/src/services/integrity.ts @servacode
+/apps/api/src/services/reprocess.ts @servacode
 
 # Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator
 /packages/db/drizzle/ @servacode
@@ -40,6 +41,7 @@
 /apps/api/test/held-for-processing.test.ts @servacode
 /apps/api/test/integrity-service.test.ts @servacode
 /apps/api/test/restore-counters.test.ts @servacode
+/apps/api/test/reprocess.test.ts @servacode
 /apps/api/test/upgrade/ @servacode
 /apps/api/test/drill/ @servacode
 
