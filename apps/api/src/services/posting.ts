@@ -60,7 +60,7 @@ export interface DraftLine {
   amountMinor: number;
   rate: TradeRate | null;
   shiftId?: string | null;
-  party?: { type: 'customer' | 'user'; id: string } | null;
+  party?: { type: 'customer' | 'supplier' | 'user'; id: string } | null;
   memo?: string | null;
 }
 

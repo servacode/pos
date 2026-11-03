@@ -27,6 +27,8 @@ import type { Transaction } from '@serva/db';
  *                      (4100−4200−4300), tax (22xx), tips (2550), cash rounding (6400), and each
  *                      payment method (1110 drawers, 1140 card, 1150 wallet, 1130 transfer,
  *                      1200 credit)
+ *   stock_value_ledger what the stock is worth (stock_values, packages/core › costing.ts) equals
+ *                      account 1300, per branch
  *
  * Returns (sale_returns, migration 0016) count where the table exists: the check also runs on a
  * database one migration behind (the upgrade test).
@@ -38,7 +40,12 @@ import type { Transaction } from '@serva/db';
 export const FINGERPRINT_VERSION = 'serva-books-v1';
 
 export type IntegrityCheckName =
-  'entries_balanced' | 'journal_numbering' | 'stock_movements' | 'drawer_ledger' | 'day_report_ledger';
+  | 'entries_balanced'
+  | 'journal_numbering'
+  | 'stock_movements'
+  | 'drawer_ledger'
+  | 'day_report_ledger'
+  | 'stock_value_ledger';
 
 export const INTEGRITY_CHECKS: readonly IntegrityCheckName[] = [
   'entries_balanced',
@@ -46,6 +53,7 @@ export const INTEGRITY_CHECKS: readonly IntegrityCheckName[] = [
   'stock_movements',
   'drawer_ledger',
   'day_report_ledger',
+  'stock_value_ledger',
 ];
 
 export interface IntegrityCheck {
@@ -396,6 +404,31 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
   return check('day_report_ledger', problems);
 }
 
+async function stockValueLedger(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
+  if (!(await hasTable(tx, 'stock_values'))) return check('stock_value_ledger', []);
+  const rows = await tx.execute<{ branch: string; stock: string; ledger: string }>(sql`
+    with stock as (
+      select branch_id, sum(value_minor) as amount from stock_values where tenant_id = ${tenantId} group by branch_id
+    ),
+    books as (
+      select e.branch_id, sum(l.debit_minor - l.credit_minor) as amount
+      from journal_lines l
+      join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
+      join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+      where l.tenant_id = ${tenantId} and a.code = '1300'
+      group by e.branch_id
+    )
+    select coalesce(s.branch_id, b.branch_id)::text as branch, coalesce(s.amount, 0)::text as stock,
+           coalesce(b.amount, 0)::text as ledger
+    from stock s full join books b on b.branch_id = s.branch_id
+    where coalesce(s.amount, 0) <> coalesce(b.amount, 0)
+    order by 1`);
+  return check(
+    'stock_value_ledger',
+    rows.map((r) => `الفرع ${r.branch}: قيمة المخزون ${r.stock} وحساب 1300 ${r.ledger}`),
+  );
+}
+
 /** Every check and both fingerprints of one store. Read only. */
 export async function checkIntegrity(tx: Transaction, tenantId: string): Promise<IntegrityReport> {
   const checks = [
@@ -404,6 +437,7 @@ export async function checkIntegrity(tx: Transaction, tenantId: string): Promise
     await stockMovements(tx, tenantId),
     await drawerLedger(tx, tenantId),
     await dayReportLedger(tx, tenantId),
+    await stockValueLedger(tx, tenantId),
   ];
   return {
     tenantId,

@@ -3,6 +3,7 @@ packages/core/src/money.ts
 packages/core/src/pricing.ts
 packages/core/src/sale.ts
 packages/core/src/sale-return.ts
+packages/core/src/costing.ts
 packages/core/src/currencies.ts
 packages/core/src/contracts/documents.ts
 packages/core/src/contracts/accounting.ts
@@ -17,6 +18,8 @@ apps/api/src/services/reports.ts
 apps/api/src/services/integrity.ts
 apps/api/src/services/reprocess.ts
 apps/api/src/services/rebuild.ts
+apps/api/src/services/costing.ts
+apps/api/src/services/purchases.ts
 packages/db/drizzle/
 packages/db/src/schema.ts
 packages/db/src/migrate.ts

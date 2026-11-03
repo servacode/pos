@@ -16,6 +16,7 @@ import { AppError, unauthorized, validationError } from '../errors';
 import { bootstrapSnapshot, resyncSnapshot, SnapshotStore } from '../services/snapshots';
 import { recordHeartbeat } from '../services/sync-heartbeat';
 import { pullChanges } from '../services/sync-pull';
+import { costAfterPush } from '../services/costing';
 import { pushDocuments, type SyncProcessors } from '../services/sync-push';
 import { parseBody } from './validation';
 
@@ -86,12 +87,17 @@ export function syncRoutes(processors: SyncProcessors = {}) {
       async (request) => {
         const device = deviceOf(request);
         const body = parseBody(pushRequestSchema, request.body);
-        return pushDocuments(app.db, device, body, {
+        const answer = await pushDocuments(app.db, device, body, {
           meta: { ip: clientIp(request), userAgent: request.headers['user-agent'] ?? null },
           now: app.clock.now(),
           processors,
           onError: (error, docId) => request.log.error({ err: error, docId }, 'sync document failed'),
         });
+        // What was sold is costed next, apart: a failure there is retried on the next push
+        await costAfterPush(app.db, device.tenantId, (error) =>
+          request.log.error({ err: error }, 'costing after push failed'),
+        );
+        return answer;
       },
     );
 
