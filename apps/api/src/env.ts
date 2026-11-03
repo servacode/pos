@@ -17,6 +17,9 @@ function hasDefaultPassword(url: string): boolean {
 }
 
 const perMinute = (fallback: number) => z.coerce.number().int().positive().default(fallback);
+/** An empty value means not set: docker compose passes `${X:-}` as "" when X is absent. */
+const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === '' ? undefined : value), schema);
 
 const envSchema = z
   .object({
@@ -68,8 +71,8 @@ const envSchema = z
      * OTP_DELIVERY=gateway: the service that sends the code to the phone (a WhatsApp bot today, an
      * SMS provider later). It receives POST {phone, code, purpose, text} with this bearer token.
      */
-    OTP_GATEWAY_URL: z.url().optional(),
-    OTP_GATEWAY_TOKEN: z.string().min(16).optional(),
+    OTP_GATEWAY_URL: unsetWhenEmpty(z.url().optional()),
+    OTP_GATEWAY_TOKEN: unsetWhenEmpty(z.string().min(16).optional()),
     /** Requests per minute per signed-in session (17: 300 per token) */
     SESSION_RATE_LIMIT_PER_MINUTE: perMinute(300),
     /** Requests per minute per store, all its users and devices together */

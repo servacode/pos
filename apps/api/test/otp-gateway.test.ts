@@ -148,6 +148,12 @@ describe('sign-up codes through the gateway', () => {
 });
 
 describe('the gateway settings', () => {
+  it('read as not set when empty, as docker compose passes an unset value', () => {
+    const env = testEnv({ OTP_GATEWAY_URL: '', OTP_GATEWAY_TOKEN: '' });
+    expect(env.OTP_GATEWAY_URL).toBeUndefined();
+    expect(env.OTP_GATEWAY_TOKEN).toBeUndefined();
+  });
+
   it('need a URL and a token of 16 characters at least', () => {
     expect(() => testEnv({ OTP_DELIVERY: 'gateway' })).toThrow(/OTP_GATEWAY_URL and OTP_GATEWAY_TOKEN/);
     expect(() =>
