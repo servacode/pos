@@ -19,6 +19,7 @@ import { fieldError, notFound, type CatalogContext } from '../services/catalog/c
 import {
   createProduct,
   getProduct,
+  listOptionValues,
   listProducts,
   lookupBarcode,
   setProductArchived,
@@ -83,6 +84,7 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     const input = parseCatalog(createProductInput, request.body);
     return reply.status(201).send(await createProduct(db, input, ctxOf(request)));
   });
+  app.get('/v1/products/options', signedIn, async (request) => listOptionValues(db, ctxOf(request)));
   app.get('/v1/products/:id', signedIn, async (request) =>
     getProduct(db, idOf(request, PRODUCT), ctxOf(request)),
   );

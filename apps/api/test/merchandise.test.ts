@@ -195,6 +195,23 @@ describe('the clothing report', () => {
     expect(anonymous.statusCode).toBe(401);
   });
 
+  it('offers back the options and values the store already used, first use first', async () => {
+    const store = await openStore(app);
+    await product(store, 'قميص', [
+      ['M', 'أبيض'],
+      ['L', 'زيتي فاتح'],
+    ]);
+    await product(store, 'قميص آخر', [['S', 'أبيض']]);
+    const res = await app.inject({ method: 'GET', url: '/v1/products/options', headers: as(store) });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({
+      options: [
+        { name: 'المقاس', values: ['M', 'L', 'S'] },
+        { name: 'اللون', values: ['أبيض', 'زيتي فاتح'] },
+      ],
+    });
+  });
+
   it('hangs sizes the way a shop does', () => {
     const at = (values: string[]) => optionOrder(values.map((value, position) => ({ value, position })));
     expect(at(['XL', 's', 'M', 'XXL', 'XS'])).toEqual(['XS', 's', 'M', 'XL', 'XXL']);

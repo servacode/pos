@@ -207,6 +207,60 @@ describe('a new product', () => {
   });
 });
 
+describe('ready sizes, shoe numbers, ages and colours', () => {
+  it('taps the built-in values in shop order, and offers the store’s own beside them', async () => {
+    const { user, requestsTo } = openCard('/products/new', {
+      'POST /v1/products': { status: 201, body: product() },
+      'GET /v1/products/options': {
+        status: 200,
+        body: { options: [{ name: 'اللون', values: ['أسود', 'نيلي'] }] },
+      },
+    });
+    await user.type(await screen.findByLabelText('اسم المنتج'), 'حذاء رياضي');
+    await user.type(screen.getByLabelText('سعر البيع'), '900');
+    await user.click(screen.getByRole('switch', { name: 'له مقاسات أو ألوان' }));
+    await user.click(screen.getByRole('button', { name: 'نمرة (أحذية)' }));
+    const big = screen.getByRole('group', { name: 'النمرة: كبار' });
+    // Tapped out of order, they come out 40, 41
+    await user.click(within(big).getByRole('button', { name: '41' }));
+    await user.click(within(big).getByRole('button', { name: '40' }));
+    expect(within(big).getByRole('button', { name: '40' })).toHaveAttribute('aria-pressed', 'true');
+    // The store's own colour, not in the built-in list
+    const own = await screen.findByRole('group', { name: 'اللون: قيم المحل' });
+    expect(within(own).queryByRole('button', { name: 'أسود' })).not.toBeInTheDocument();
+    await user.click(within(own).getByRole('button', { name: 'نيلي' }));
+    await user.click(
+      within(screen.getByRole('group', { name: 'اللون: الألوان' })).getByRole('button', { name: 'أبيض' }),
+    );
+    expect(screen.getByText('4 متغيّرات')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await vi.waitFor(() => expect(requestsTo('POST', '/v1/products')).toHaveLength(1));
+    const body = requestsTo('POST', '/v1/products')[0]!.body as {
+      variants: { attributes: { name: string; value: string }[] }[];
+    };
+    expect(body.variants.map((v) => v.attributes.map((a) => `${a.name}=${a.value}`).join(' '))).toEqual([
+      'النمرة=40 اللون=أبيض',
+      'النمرة=40 اللون=نيلي',
+      'النمرة=41 اللون=أبيض',
+      'النمرة=41 اللون=نيلي',
+    ]);
+  });
+
+  it('lists children’s ages, and takes a whole group at once', async () => {
+    const { user } = openCard('/products/new');
+    await user.type(await screen.findByLabelText('اسم المنتج'), 'بيجاما أطفال');
+    await user.click(screen.getByRole('switch', { name: 'له مقاسات أو ألوان' }));
+    await user.click(screen.getByRole('button', { name: 'عمر (أطفال)' }));
+    const babies = screen.getByRole('group', { name: 'العمر: رضّع' });
+    await user.click(within(babies).getByRole('button', { name: 'اختر الكل' }));
+    expect(within(screen.getByRole('list', { name: 'قيم العمر' })).getAllByRole('listitem')).toHaveLength(7);
+    const kids = screen.getByRole('group', { name: 'العمر: أطفال' });
+    expect(within(kids).getByRole('button', { name: 'سنتان' })).toBeInTheDocument();
+    expect(within(kids).getByRole('button', { name: '3 سنوات' })).toBeInTheDocument();
+    expect(within(kids).getByRole('button', { name: '12 سنة' })).toBeInTheDocument();
+  });
+});
+
 describe('an existing product', () => {
   it('shows its data, its stock per branch, and sends only what changed', async () => {
     const { user, requestsTo } = openCard(`/products/${ids.milk}`, {

@@ -10,6 +10,7 @@ import {
   type CurrencyCode,
   type ProductDetail,
   type ProductListItem,
+  type OptionValuesResponse,
   type ProductListResponse,
   type ProductStatus,
   type ProductType,
@@ -721,5 +722,24 @@ export async function setProductArchived(
       );
     }
     return productDetail(tx, id);
+  });
+}
+
+/** GET /v1/products/options: the options and values the store's pieces use, first use first. */
+export async function listOptionValues(db: Database, ctx: CatalogContext): Promise<OptionValuesResponse> {
+  return withTenant(db, ctx.auth.tenantId, async (tx) => {
+    await requireCatalogReader(tx, ctx.auth.userId);
+    const rows = await tx.execute<{ name: string; value: string }>(sql`
+      select x.a->>'name' as name, x.a->>'value' as value
+      from variants v
+      cross join lateral jsonb_array_elements(v.attributes) with ordinality as x(a, n)
+      where v.tenant_id = ${ctx.auth.tenantId}
+        and coalesce(x.a->>'name', '') <> '' and coalesce(x.a->>'value', '') <> ''
+      group by 1, 2
+      order by min(x.n), 1, min(v.created_at), min(v.sort_order), 2
+      limit 2000`);
+    const byName = new Map<string, string[]>();
+    for (const r of rows) byName.set(r.name, [...(byName.get(r.name) ?? []), r.value]);
+    return { options: [...byName].map(([name, values]) => ({ name, values })) };
   });
 }

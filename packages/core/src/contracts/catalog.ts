@@ -447,6 +447,15 @@ export interface ProductListItem {
 
 export type ProductListResponse = ListResponse<ProductListItem>;
 
+/**
+ * GET /v1/products/options (catalog reader): every option the store's pieces use (المقاس، اللون،
+ * النمرة، العمر، …) with its values, in the order they were first used. The product card offers
+ * them beside the built-in lists, so a value the store adds once is there for every product.
+ */
+export interface OptionValuesResponse {
+  options: { name: string; values: string[] }[];
+}
+
 /** GET /v1/barcodes/{code}: the product behind a code (the cashier searches on its own device). */
 export interface BarcodeLookupResponse {
   productId: string;
