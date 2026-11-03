@@ -141,6 +141,8 @@ const PULL_SETS: Record<string, PullSet> = {
       taxRateId: products.taxRateId,
       sellOnPos: products.sellOnPos,
       genericName: products.genericName,
+      tracksSerial: products.tracksSerial,
+      warrantyMonths: products.warrantyMonths,
       modifiers: products.modifiers,
       archived: archivedFlag(products.archivedAt),
       version: products.version,

@@ -25,6 +25,7 @@ import {
   documentSequences,
   purchaseLines,
   purchases,
+  serials,
   stockLevels,
   stockMovements,
   stocktakes,
@@ -51,6 +52,7 @@ import {
 } from './costing';
 import { postEntry, type DraftLine } from './posting';
 import { refreshExpiry } from './expiry';
+import { receiveSerials } from './serials';
 
 /**
  * Suppliers, purchases, payments to suppliers, counts, the stock's value and the profit
@@ -218,6 +220,11 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
     .from(purchaseLines)
     .where(eq(purchaseLines.purchaseId, id))
     .orderBy(asc(purchaseLines.lineNo));
+  const numbers = await tx
+    .select({ variantId: serials.variantId, serial: serials.serial })
+    .from(serials)
+    .where(eq(serials.purchaseId, id))
+    .orderBy(asc(serials.serial));
   return {
     id: row.id,
     number: row.number,
@@ -237,6 +244,7 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
       costMinor: l.costMinor,
       batchNo: l.batchNo,
       expiryDate: l.expiryDate,
+      serials: numbers.filter((n) => n.variantId === l.variantId).map((n) => n.serial),
     })),
     baseCurrency: await baseCurrency(tx),
   };
@@ -325,6 +333,7 @@ export async function createPurchase(
       })),
     );
     await moveStock(tx, auth.tenantId, branchId, id, 'purchase', input.date, lines);
+    await receiveSerials(tx, auth.tenantId, id, input.lines);
     await refreshExpiry(
       tx,
       lines.map((l) => l.variantId),

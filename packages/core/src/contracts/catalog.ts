@@ -256,6 +256,10 @@ const productFields = {
   brand: optionalText(60, 'اسم الماركة طويل جداً'),
   /** «الاسم العلمي» (03 › الصيدليات): the till finds the medicine by it too */
   genericName: optionalText(120, 'الاسم العلمي طويل جداً'),
+  /** «له رقم تسلسلي أو IMEI» (03 › الإلكترونيات): each piece is received and sold by its number */
+  tracksSerial: z.boolean().default(false),
+  /** «الكفالة» in months from the sale; null: none */
+  warrantyMonths: z.int().min(1).max(120).nullable().default(null),
   type: z.enum(PRODUCT_TYPES).default('stock'),
   /** Omitted: the store's «قطعة» */
   unitId: uuidSchema.optional(),
@@ -317,6 +321,8 @@ export const updateProductInput = z
     categoryId: uuidSchema.nullable().optional(),
     brand: patchText(60, 'اسم الماركة طويل جداً'),
     genericName: patchText(120, 'الاسم العلمي طويل جداً'),
+    tracksSerial: z.boolean().optional(),
+    warrantyMonths: z.int().min(1).max(120).nullable().optional(),
     type: z.enum(PRODUCT_TYPES).optional(),
     unitId: uuidSchema.optional(),
     taxRateId: uuidSchema.nullable().optional(),
@@ -401,6 +407,8 @@ export interface ProductDetail {
   categoryId: string | null;
   brand: string | null;
   genericName: string | null;
+  tracksSerial: boolean;
+  warrantyMonths: number | null;
   type: ProductType;
   status: ProductStatus;
   unitId: string;
@@ -571,6 +579,10 @@ export interface ProductRow {
   brand: string | null;
   /** «الاسم العلمي»; searched on the till */
   genericName: string | null;
+  /** Each piece is sold by its serial number or IMEI, asked at the till */
+  tracksSerial: boolean;
+  /** «الكفالة» in months, printed with the numbers on the receipt */
+  warrantyMonths: number | null;
   type: ProductType;
   status: ProductStatus;
   unitId: string;

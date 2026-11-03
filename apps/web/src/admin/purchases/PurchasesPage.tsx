@@ -38,6 +38,8 @@ interface Line extends PickedVariant {
   /** «رقم الدفعة» and «تاريخ الانتهاء» (03 › الصيدليات), both optional */
   batch?: string;
   expiry?: string;
+  /** Serial numbers or IMEIs, one per line of text (03 › الإلكترونيات) */
+  serials?: string;
 }
 
 /**
@@ -283,6 +285,14 @@ function PurchaseForm({
                 costMinor: parsed[i]!.cost!,
                 batchNo: l.batch?.trim() || null,
                 expiryDate: l.expiry || null,
+                ...(l.serials?.trim()
+                  ? {
+                      serials: l.serials
+                        .split(/[\n,،]+/)
+                        .map((x) => x.trim())
+                        .filter(Boolean),
+                    }
+                  : {}),
               })),
             }),
           )
@@ -386,6 +396,22 @@ function PurchaseForm({
                 }
                 error={s.fields[`lines.${i}.expiryDate`]}
               />
+              <label className="col-span-2 flex flex-col gap-1 text-sm font-semibold text-ink md:col-span-6">
+                الأرقام التسلسلية أو IMEI (رقم في كل سطر، للأجهزة)
+                <textarea
+                  aria-label={`أرقام ${l.name}`}
+                  dir="ltr"
+                  rows={2}
+                  value={l.serials ?? ''}
+                  onChange={(e) =>
+                    setLines((all) => all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)))
+                  }
+                  className="rounded-control border border-line-control bg-surface p-2 font-normal"
+                />
+                {s.fields[`lines.${i}.serials`] ? (
+                  <span className="text-danger-ink">{s.fields[`lines.${i}.serials`]}</span>
+                ) : null}
+              </label>
               <button
                 type="button"
                 aria-label={`احذف ${l.name}`}

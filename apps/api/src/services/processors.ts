@@ -8,6 +8,7 @@ import {
   shiftClosePayloadSchema,
   shiftOpenPayloadSchema,
   verifySalePayload,
+  type SalePayload,
   type Approval,
 } from '@serva/core';
 import {
@@ -31,6 +32,7 @@ import {
 import type { SyncFlag } from '@serva/sync';
 import { postCashMovement, postReceipt, postReturn, postSale, postShiftClose } from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
+import { returnSerials, sellSerials } from './serials';
 
 /**
  * What the server does with the phase-1 documents once they are accepted (17 › الإرسال), inside
@@ -125,6 +127,7 @@ async function processSale({ tx, device, doc }: DocumentContext) {
 
   const { tenantId } = device;
   if (await moveStock(tx, device, doc, 'sale', sale.lines, -1)) flags.push('negative_stock');
+  flags.push(...(await sellSerials(tx, tenantId, doc.id, doc.businessDate, sale.lines)));
 
   const [inserted] = await tx
     .insert(invoices)
@@ -301,6 +304,16 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     })),
   );
   await moveStock(tx, device, doc, 'return', ret.lines, 1);
+  const [original] = await tx
+    .select({ payload: invoices.payload })
+    .from(invoices)
+    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, ret.saleId)));
+  await returnSerials(
+    tx,
+    ret.saleId,
+    ret.lines,
+    (original?.payload as SalePayload | undefined)?.lines ?? null,
+  );
   await postReturn(
     tx,
     {

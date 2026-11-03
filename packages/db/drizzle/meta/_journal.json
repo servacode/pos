@@ -169,6 +169,13 @@
       "when": 1793712492115,
       "tag": "0023_pharmacy",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793713937923,
+      "tag": "0024_serials",
+      "breakpoints": true
     }
   ]
 }

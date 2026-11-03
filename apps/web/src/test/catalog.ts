@@ -143,6 +143,8 @@ export function product(overrides: Partial<ProductDetail> = {}): ProductDetail {
     categoryId: ids.dairy,
     brand: 'المراعي',
     genericName: null,
+    tracksSerial: false,
+    warrantyMonths: null,
     type: 'stock',
     status: 'active',
     unitId: ids.piece,

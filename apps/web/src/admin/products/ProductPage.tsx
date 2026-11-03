@@ -62,6 +62,8 @@ const TOP_FIELDS = [
   'categoryId',
   'brand',
   'genericName',
+  'tracksSerial',
+  'warrantyMonths',
   'type',
   'unitId',
   'taxRateId',
@@ -476,6 +478,23 @@ export function ProductPage() {
                 checked={draft.sellOnPos}
                 disabled={!canManage}
                 onCheckedChange={(sellOnPos) => update({ sellOnPos })}
+              />
+              <Switch
+                label="له رقم تسلسلي أو IMEI"
+                description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
+                checked={draft.tracksSerial ?? false}
+                disabled={!canManage}
+                onCheckedChange={(tracksSerial) => update({ tracksSerial })}
+              />
+              <TextField
+                name="warrantyMonths"
+                label="الكفالة بالأشهر (اختياري)"
+                inputMode="numeric"
+                dir="ltr"
+                value={draft.warranty ?? ''}
+                disabled={!canManage}
+                onChange={(event) => update({ warranty: event.target.value })}
+                error={errors.warrantyMonths}
               />
             </div>
           </Section>

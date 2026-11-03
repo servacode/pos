@@ -1,4 +1,5 @@
 import type {
+  SerialRow,
   ExpiryResponse,
   InventoryResponse,
   ProfitReport,
@@ -55,3 +56,7 @@ export function moneyOf(text: string): number | null {
 /** `GET /v1/inventory/expiry?days=` (purchases.manage): batches on the shelf ending within `days` */
 export const listExpiry = (days: number) =>
   apiFetch<ExpiryResponse>(`/v1/inventory/expiry?days=${days}`, { auth: true });
+
+/** `GET /v1/serials?q=` (catalog.manage): a piece by its serial number or IMEI */
+export const findSerials = (q: string) =>
+  apiFetch<{ items: SerialRow[] }>(`/v1/serials${q ? `?q=${encodeURIComponent(q)}` : ''}`, { auth: true });

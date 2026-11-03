@@ -158,6 +158,11 @@ export const saleLineSchema = z.object({
   priceCurrency: currencyCodeSchema,
   /** Catalog price of one pack in priceCurrency, before any discount */
   priceMinor: nonNegativeMinorSchema,
+  /**
+   * The pieces' serial numbers or IMEIs (03 › الإلكترونيات), one per piece; added in contract v1
+   * as optional, so a line without them leaves it out.
+   */
+  serials: z.array(z.string().trim().min(3).max(40)).max(1000).optional(),
   /** Price of one pack in the invoice currency: what the engine prices */
   unitPriceMinor: nonNegativeMinorSchema,
   /** The tax rate row (posting picks its account); null with taxRateBp 0 when untaxed */

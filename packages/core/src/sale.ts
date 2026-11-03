@@ -49,6 +49,8 @@ export interface SaleCartLine {
   taxRateId?: string | null;
   taxRateBp: number;
   discount?: SaleDiscount | null;
+  /** Serial numbers or IMEIs of the pieces, one each (left out of a line without them) */
+  serials?: readonly string[];
 }
 
 export interface SalePricingInput {
@@ -202,6 +204,7 @@ export function priceSale(input: SalePricingInput): { lines: SaleLine[]; priced:
       taxRateId: line.taxRateId ?? null,
       taxRateBp: line.taxRateBp,
       discount: line.discount ?? null,
+      ...(line.serials?.length ? { serials: [...line.serials] } : {}),
       priced: result,
     };
   });

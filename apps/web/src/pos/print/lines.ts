@@ -97,6 +97,7 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
         end: `−${money(l.priced.lineDiscountMinor, base)}`,
       });
     }
+    if (l.serials?.length) lines.push({ kind: 'text', text: `IMEI ${l.serials.join('، ')}` });
   }
   lines.push({ kind: 'rule' });
   const t = sale.totals;

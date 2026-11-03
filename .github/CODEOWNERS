@@ -32,6 +32,7 @@
 /apps/api/src/services/rebuild.ts @servacode
 /apps/api/src/services/costing.ts @servacode
 /apps/api/src/services/expiry.ts @servacode
+/apps/api/src/services/serials.ts @servacode
 /apps/api/src/services/purchases.ts @servacode
 
 # Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator

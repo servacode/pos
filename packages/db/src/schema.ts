@@ -939,6 +939,10 @@ export const products = pgTable(
     brand: text('brand'),
     /** «الاسم العلمي» of a medicine (03 › الصيدليات): the till finds the product by it too */
     genericName: text('generic_name'),
+    /** «له رقم تسلسلي أو IMEI» (03 › الإلكترونيات): every piece is received and sold by its number */
+    tracksSerial: boolean('tracks_serial').notNull().default(false),
+    /** «الكفالة» in months from the day of sale; null: none */
+    warrantyMonths: integer('warranty_months'),
     /** stock, service */
     type: text('type').notNull().default('stock'),
     /** active, temporary */
@@ -1999,6 +2003,37 @@ export const chequeActions = pgTable(
   (t) => [
     primaryKey({ name: 'cheque_actions_pkey', columns: [t.tenantId, t.id] }),
     unique('cheque_actions_payment_unique').on(t.tenantId, t.sourceType, t.sourceId, t.paymentNo),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A piece known by its serial number or IMEI (03 › الإلكترونيات): received in stock by a purchase,
+ * sold by a sale line that names it. One row per number in the store.
+ */
+export const serials = pgTable(
+  'serials',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    variantId: uuid('variant_id').notNull(),
+    serial: text('serial').notNull(),
+    /** in_stock or sold */
+    status: text('status').notNull(),
+    purchaseId: uuid('purchase_id'),
+    saleId: uuid('sale_id'),
+    soldOn: date('sold_on'),
+    warrantyUntil: date('warranty_until'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'serials_pkey', columns: [t.tenantId, t.id] }),
+    unique('serials_serial_unique').on(t.tenantId, t.serial),
+    index('serials_variant_idx').on(t.tenantId, t.variantId),
     tenantIsolation(),
   ],
 );

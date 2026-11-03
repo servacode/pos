@@ -98,6 +98,12 @@ describe('sale payload', () => {
     expect(served.service).toEqual({ orderType: 'dine_in', table: '7', orderNo: 41 });
     expect(salePayloadSchema.safeParse(served).success).toBe(true);
     expect('service' in validSale()).toBe(false);
+    // A phone's line carries its IMEI; a line without numbers leaves the field out
+    const phone = buildSalePayload(
+      saleCart({ lines: [{ ...saleCart().lines[1]!, priceMinor: 0, serials: ['IMEI351'] }], payments: [] }),
+    );
+    expect(phone.lines[0]!.serials).toEqual(['IMEI351']);
+    expect('serials' in validSale().lines[0]!).toBe(false);
     expect(
       salePayloadSchema.safeParse({ ...served, service: { orderType: 'drive', table: null, orderNo: null } })
         .success,

@@ -68,6 +68,8 @@ function product(
       categoryId: options.categoryId ?? ids.grocery,
       brand: null,
       genericName: null,
+      tracksSerial: false,
+      warrantyMonths: null,
       type: 'stock',
       status: 'active',
       unitId: options.unitId ?? ids.piece,
