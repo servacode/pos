@@ -1330,6 +1330,39 @@ export const journalSequences = pgTable(
 );
 
 /**
+ * Numbers a restore stepped over (task M0-8). A database restored from a backup has forgotten
+ * everything numbered after the backup was taken: entry numbers already shown in a report, and
+ * device codes of tills linked since, which still hold their tokens and number their documents
+ * with that code. Handing those numbers out again would make one number mean two things, so
+ * restore_counters_jump() moves each counter past a margin and records the range here:
+ *   journal      entry numbers `from_number`…`to_number` of `year` (never posted, on purpose)
+ *   device_code  codes `from_number`…`to_number` of the branch `branch_id` (never given again)
+ * The integrity check accepts a journal range recorded here; any other gap is still an error.
+ */
+export const counterJumps = pgTable(
+  'counter_jumps',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** journal, device_code */
+    counter: text('counter').notNull(),
+    year: integer('year'),
+    branchId: uuid('branch_id'),
+    fromNumber: integer('from_number').notNull(),
+    toNumber: integer('to_number').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'counter_jumps_pkey', columns: [t.tenantId, t.id] }),
+    index('counter_jumps_counter_idx').on(t.tenantId, t.counter),
+    tenantIsolation(),
+  ],
+);
+
+/**
  * A posted entry: never changed nor deleted; a correction is a reversing entry (10 › قواعد
  * الضمان). One automatic entry per document (unique by source), balanced in the base currency,
  * which the database checks itself.

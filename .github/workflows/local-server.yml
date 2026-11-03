@@ -87,6 +87,7 @@ jobs:
         run: |
           bash scripts/local/ci-checks.sh day after-backup
           bash scripts/local/ci-checks.sh books full
+          bash scripts/local/ci-checks.sh numbers full
           bash scripts/local/ci-checks.sh other-books at-backup full
 
       - name: Lose data, then restore the backup on the live server
@@ -109,6 +110,8 @@ jobs:
           bash scripts/local/ci-checks.sh day resend
           bash scripts/local/ci-checks.sh books resent
           bash scripts/local/ci-checks.sh same-books full resent
+          bash scripts/local/ci-checks.sh numbers resent
+          bash scripts/local/ci-checks.sh no-reused-numbers full resent
           echo "From the end of the restore to identical books: $((SECONDS - start)) s"
 
       - name: Sign up a store with the on-screen test code (two-step API, test mode)

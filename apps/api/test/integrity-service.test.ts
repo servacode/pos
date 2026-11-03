@@ -284,7 +284,7 @@ describe('each check catches what it is for', () => {
     );
     const r = await report(d.store.tenantId);
     expect(failing(r)).toEqual(['journal_numbering']);
-    expect(problems(r, 'journal_numbering')).toEqual(['سنة 2026: 4 قيداً بأرقام من 1 إلى 5']);
+    expect(problems(r, 'journal_numbering')).toEqual(['سنة 2026: لا قيد بالأرقام من 4 إلى 4']);
   });
 });
 
