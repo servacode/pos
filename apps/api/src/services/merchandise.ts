@@ -53,7 +53,7 @@ async function branchesOf(tx: Transaction, auth: AccessClaims, branchId: string 
 export function merchandiseReport(
   db: Database,
   auth: AccessClaims,
-  query: { from: string; to: string; branchId?: string; idleDays: number },
+  query: { from: string; to: string; branchId?: string; categoryId?: string; idleDays: number },
   now: Date,
 ): Promise<MerchandiseReport> {
   return withTenant(db, auth.tenantId, async (tx) => {
@@ -65,6 +65,14 @@ export function merchandiseReport(
             ids.map((id) => sql`${id}::uuid`),
             sql`, `,
           )})`;
+    // One department and its sub-categories; every product otherwise
+    const inCategory = (column: SQL): SQL =>
+      query.categoryId
+        ? sql`${column} in (with recursive tree as (
+            select id from categories where id = ${query.categoryId}
+            union all select c.id from categories c join tree t on c.parent_id = t.id
+          ) select id from tree)`
+        : sql`true`;
     const cost = await permissionScope(tx, auth.userId, 'cost.view');
     const canCost = cost.all || (ids !== null && ids.every((id) => cost.branchIds.has(id)));
     if (canCost) await costPending(tx, auth.tenantId);
@@ -79,6 +87,7 @@ export function merchandiseReport(
         from invoice_lines l
         join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
         where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`)}
+          and ${inCategory(sql`(select p.category_id from products p where p.id = l.product_id)`)}
         group by l.variant_id
       ),
       back as (
@@ -86,6 +95,7 @@ export function merchandiseReport(
         from sale_return_lines rl
         join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
         where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
+          and ${inCategory(sql`(select p.category_id from variants v2 join products p on p.id = v2.product_id where v2.id = rl.variant_id)`)}
         group by rl.variant_id
       )`;
 
@@ -210,8 +220,32 @@ export function merchandiseReport(
       left join last_sold ls on ls.variant_id = k.variant_id
       left join last_in li on li.variant_id = k.variant_id
       where coalesce(ls.d, '1900-01-01'::date) < ${cutoff} and coalesce(li.d, '1900-01-01'::date) < ${cutoff}
+        and ${inCategory(sql`p.category_id`)}
       order by greatest(ls.d, li.d) nulls first, name, k.variant_id
       limit 300`);
+
+    const sellers = await tx.execute<{
+      id: string;
+      name: string | null;
+      n: string;
+      total: string;
+      back: string;
+    }>(sql`
+      with sold as (
+        select coalesce(i.salesperson_id, i.cashier_id) as id, count(*) as n, sum(i.total_minor) as total
+        from invoices i
+        where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`)}
+        group by 1
+      ),
+      back as (
+        select coalesce(i.salesperson_id, i.cashier_id) as id, sum(r.total_minor) as total
+        from sale_returns r join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
+        where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
+        group by 1
+      )
+      select s.id, u.full_name as name, s.n::text as n, s.total::text as total, coalesce(b.total, 0)::text as back
+      from sold s left join back b on b.id = s.id left join users u on u.id = s.id
+      order by s.total desc, s.id`);
 
     const slowMovers = slow.map((r) => ({
       variantId: r.variant_id,
@@ -246,6 +280,13 @@ export function merchandiseReport(
       })),
       slowMovers,
       slowValueMinor: canCost ? slowMovers.reduce((n, r) => n + (r.valueMinor ?? 0), 0) : null,
+      bySeller: sellers.map((r) => ({
+        userId: r.id,
+        fullName: r.name ?? '',
+        invoiceCount: num(r.n),
+        totalMinor: num(r.total),
+        returnedMinor: num(r.back),
+      })),
     };
   });
 }

@@ -16,6 +16,8 @@ export const merchandiseQuery = z
     from: isoDateSchema,
     to: isoDateSchema,
     branchId: uuidSchema.optional(),
+    /** One department (رجالي، نسائي، ولادي) and its sub-categories */
+    categoryId: uuidSchema.optional(),
     idleDays: z.coerce.number().int().min(7).max(365).default(60),
   })
   .refine((q) => q.from <= q.to, { path: ['to'], message: 'نهاية المدة قبل بدايتها' });
@@ -60,4 +62,15 @@ export interface MerchandiseReport {
   }[];
   /** What the slow pieces cost, together; null without «التكلفة» */
   slowValueMinor: number | null;
+  /**
+   * Each seller's sales in the period (03 › عمولة البائع): the salesperson named on the sale, else
+   * its cashier; net of what came back from those sales. Not narrowed by category.
+   */
+  bySeller: {
+    userId: string;
+    fullName: string;
+    invoiceCount: number;
+    totalMinor: number;
+    returnedMinor: number;
+  }[];
 }

@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MeResponse, MerchandiseReport } from '@serva/core';
 import { mockFetch } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
@@ -52,6 +52,9 @@ const report = (idleDays: number, withCost: boolean): MerchandiseReport => ({
     },
   ],
   slowValueMinor: withCost ? 300_000 : null,
+  bySeller: [
+    { userId: 'u-1', fullName: 'رنا', invoiceCount: 12, totalMinor: 5_400_000, returnedMinor: 400_000 },
+  ],
 });
 
 const url = (period: number, idle: number) =>
@@ -62,6 +65,18 @@ describe('«حركة الأصناف»', () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/categories': {
+        status: 200,
+        body: {
+          items: [
+            { id: 'c-kids', name: 'ولادي', parentId: null, sortOrder: 0, productCount: 3, archivedAt: null },
+          ],
+        },
+      },
+      [`GET ${url(30, 60)}&categoryId=c-kids`]: () => ({
+        status: 200,
+        body: { ...report(60, true), bySeller: [] },
+      }),
       [`GET ${url(30, 60)}`]: () => ({ status: 200, body: report(60, true) }),
       [`GET ${url(30, 90)}`]: () => ({ status: 200, body: report(90, false) }),
     });
@@ -82,6 +97,17 @@ describe('«حركة الأصناف»', () => {
     );
     expect(slow).toHaveTextContent('لم يُبع');
     expect(screen.getByText('رأس مال نائم فيها')).toBeInTheDocument();
+
+    // 5% of what Rana sold less what came back: 5% of 50,000
+    await user.type(screen.getByLabelText('نسبة العمولة ٪'), '5');
+    expect(within(screen.getByRole('table', { name: 'البائعون' })).getAllByRole('row')[1]).toHaveTextContent(
+      '2,500',
+    );
+    // One department
+    await screen.findByRole('option', { name: 'ولادي' });
+    await user.selectOptions(screen.getByLabelText('القسم'), 'ولادي');
+    await vi.waitFor(() => expect(requestsTo('GET', `${url(30, 60)}&categoryId=c-kids`)).toHaveLength(1));
+    await user.selectOptions(screen.getByLabelText('القسم'), 'كل الأقسام');
 
     // Without «التكلفة» the cost is not there
     await user.click(screen.getByRole('radio', { name: '3 أشهر' }));
