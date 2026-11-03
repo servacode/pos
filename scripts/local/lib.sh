@@ -109,6 +109,11 @@ SERVA_OTP_DELIVERY=screen
 # Backups: folder and how many to keep (oldest are deleted)
 SERVA_BACKUP_DIR=
 SERVA_BACKUP_KEEP=14
+# Off-site copy of every backup: an external disk or a cloud-synced folder (docs/local-server.md)
+SERVA_OFFSITE_DIR=
+SERVA_OFFSITE_KEEP=30
+# Daily backup time for pnpm local:schedule (24-hour HH:MM, this computer's clock)
+SERVA_BACKUP_TIME=02:17
 EOF
   )
   ok "Secrets created."
