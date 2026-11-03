@@ -31,6 +31,8 @@ export type DeviceStatus = 'pending_approval' | 'active' | 'revoked' | 'rejected
 
 export const PAIRING_TTL_SECONDS = 600;
 export const PAIRING_MAX_ATTEMPTS = 5;
+/** How long a linked device waits for the owner's «اسمح» (the request, not the code). */
+export const ACTIVATION_TTL_SECONDS = 30 * 60;
 
 /** No 0/O, 1/I/L: the code is read off a screen and typed by hand. */
 export const PAIRING_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';

@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto
 import { and, asc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import {
   PAIRING_CODE_ALPHABET,
+  ACTIVATION_TTL_SECONDS,
   PAIRING_MAX_ATTEMPTS,
   PAIRING_TTL_SECONDS,
   type ActivateDeviceData,
@@ -40,7 +41,7 @@ import { readServerState } from './sync-state';
  */
 
 /** How long a linked device waits for the owner's answer (product decision, see the report). */
-export const ACTIVATION_TTL_MS = 30 * 60_000;
+export const ACTIVATION_TTL_MS = ACTIVATION_TTL_SECONDS * 1000;
 /** How often a waiting device asks again */
 export const POLL_AFTER_SECONDS = 5;
 /** sda_ + 43 base64url chars = 256 random bits */

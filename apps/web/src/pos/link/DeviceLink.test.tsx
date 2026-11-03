@@ -245,6 +245,12 @@ describe('step 3 «بانتظار موافقة المالك من جواله»', 
     expect(screen.getByText('رمز الربط K7QM-4TZP')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'الوقت الباقي للموافقة' })).toBeInTheDocument();
     expect(screen.getByText(/ينتهي الطلب بعد/)).toHaveTextContent(/[89]:\d\d/);
+    // The request lives 30 minutes on the server (not the code's 10): the note must say so.
+    expect(screen.getByText(/الطلب صالح/)).toHaveTextContent('الطلب صالح 30 دقيقة');
+    expect(screen.getByRole('progressbar', { name: 'الوقت الباقي للموافقة' })).toHaveAttribute(
+      'aria-valuemax',
+      String(30 * 60_000),
+    );
     await vi.waitFor(() => expect(requestsTo('GET', ACTIVATION)).toHaveLength(1));
     expect(requestsTo('GET', ACTIVATION)[0]!.headers.Authorization).toBe(
       `Activation ${link.activationSecret}`,
