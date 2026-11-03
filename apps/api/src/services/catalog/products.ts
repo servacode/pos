@@ -33,6 +33,7 @@ import {
   type Database,
   type Transaction,
 } from '@serva/db';
+import { createUuidV7 } from '@serva/sync';
 import type { z } from 'zod';
 import { AppError, isUniqueViolation } from '../../errors';
 import { audit } from '../audit';
@@ -404,10 +405,18 @@ async function writeBarcodes(
       if (Object.keys(changed).length > 0)
         await tx.update(barcodes).set(values).where(eq(barcodes.id, b.id!));
     } else {
-      await tx.insert(barcodes).values({ tenantId, variantId, ...values });
+      await tx.insert(barcodes).values({ id: nextBarcodeId(), tenantId, variantId, ...values });
     }
   }
 }
+
+/**
+ * Barcode ids from a generator that only goes up, even within one millisecond: a variant's
+ * barcodes are read back by (created_at, id), and the ones saved in one transaction share
+ * created_at, so the id alone must keep the order they were entered in. The database's own
+ * uuid_generate_v7() is random within a millisecond, which shuffled them now and then.
+ */
+const nextBarcodeId = createUuidV7();
 
 /** Two live variants never share their options, and with more than one each needs options. */
 async function checkLiveVariants(tx: Transaction, productId: string): Promise<void> {

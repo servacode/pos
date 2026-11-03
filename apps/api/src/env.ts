@@ -17,6 +17,9 @@ function hasDefaultPassword(url: string): boolean {
 }
 
 const perMinute = (fallback: number) => z.coerce.number().int().positive().default(fallback);
+/** An empty value means not set: docker compose passes `${X:-}` as "" when X is absent. */
+const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((value) => (value === '' ? undefined : value), schema);
 
 const envSchema = z
   .object({
@@ -63,7 +66,13 @@ const envSchema = z
      * code to the sign-up screen itself (test mode, DEPLOYMENT=local only). Default: log outside
      * production, none in production.
      */
-    OTP_DELIVERY: z.enum(['log', 'none', 'screen']).optional(),
+    OTP_DELIVERY: z.enum(['log', 'none', 'screen', 'gateway']).optional(),
+    /**
+     * OTP_DELIVERY=gateway: the service that sends the code to the phone (a WhatsApp bot today, an
+     * SMS provider later). It receives POST {phone, code, purpose, text} with this bearer token.
+     */
+    OTP_GATEWAY_URL: unsetWhenEmpty(z.url().optional()),
+    OTP_GATEWAY_TOKEN: unsetWhenEmpty(z.string().min(16).optional()),
     /** Requests per minute per signed-in session (17: 300 per token) */
     SESSION_RATE_LIMIT_PER_MINUTE: perMinute(300),
     /** Requests per minute per store, all its users and devices together */
@@ -150,6 +159,23 @@ const envSchema = z
         path: ['OTP_DELIVERY'],
         message: 'OTP_DELIVERY=screen shows sign-up codes on screen; allowed only with DEPLOYMENT=local',
       });
+    }
+    if (env.OTP_DELIVERY === 'gateway') {
+      if (!env.OTP_GATEWAY_URL || !env.OTP_GATEWAY_TOKEN) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OTP_GATEWAY_URL'],
+          message:
+            'OTP_DELIVERY=gateway needs OTP_GATEWAY_URL and OTP_GATEWAY_TOKEN (16 characters at least)',
+        });
+      } else if (env.DEPLOYMENT === 'cloud' && production && !env.OTP_GATEWAY_URL.startsWith('https://')) {
+        // The code and the token cross the internet: never in clear text from the cloud.
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OTP_GATEWAY_URL'],
+          message: 'OTP_GATEWAY_URL must be https:// on the cloud server',
+        });
+      }
     }
     if (production && !env.COOKIE_SECURE) {
       ctx.addIssue({
