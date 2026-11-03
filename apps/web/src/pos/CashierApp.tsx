@@ -5,6 +5,11 @@ import { Button, CashierShell, EmptyState, MoreIcon, PrintIcon, useDigits, Warni
 import type { Catalog } from './catalog';
 import { clockText } from './format';
 import { PrintableReceipt, type PaperWidth, type ReceiptData } from './receipt/Receipt';
+import { printJob as escposJob } from './print/escpos';
+import { receiptLines } from './print/lines';
+import { DEFAULT_PRINTER, PRINTER_KEY, PrinterScreen, type PrinterSetting } from './print/PrinterScreen';
+import { renderLines } from './print/render';
+import { sendToPrinter } from './print/usb';
 import { SaleDone } from './receipt/SaleDone';
 import { EMPTY_CART, type Cart } from './sale/cart';
 import { SaleScreen } from './sale/SaleScreen';
@@ -32,6 +37,18 @@ const CashMovementScreen = lazy(() =>
 /** Minutes without a touch or a key before the device signs the cashier out (09 › tenant_settings). */
 export const DEFAULT_IDLE_MINUTES = 5;
 
+/** Whether the document took cash into the drawer: then the drawer opens after printing */
+function paidInCash(data: ReceiptData): boolean {
+  const payload = data.doc.payload as {
+    payments?: { method: string }[];
+    method?: string;
+    refunds?: { method: string }[];
+  };
+  if (data.kind === 'receipt') return payload.method === 'cash';
+  if (data.kind === 'return') return (payload.refunds ?? []).some((r) => r.method === 'cash');
+  return (payload.payments ?? []).some((p) => p.method === 'cash');
+}
+
 const HELD_KEY = 'heldCarts';
 const LAST_SALE_KEY = 'lastSale';
 const PAPER_KEY = 'paperWidth';
@@ -42,7 +59,7 @@ interface LastSale {
   cashierName: string;
 }
 
-type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt';
+type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt' | 'printer';
 
 export interface CashierAppProps {
   session: StaffSession;
@@ -86,6 +103,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const [done, setDone] = useState<ReceiptData | null>(null);
   const [paper, setPaper] = useState<PaperWidth>(80);
   const [printJob, setPrintJob] = useState<{ data: ReceiptData; copy: boolean } | null>(null);
+  const [printer, setPrinter] = useState<PrinterSetting>(DEFAULT_PRINTER);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const shiftMode = settings?.shiftMode ?? null;
@@ -98,7 +116,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       pos.local.get<Cart[]>(HELD_KEY),
       pos.local.get<LastSale>(LAST_SALE_KEY),
       pos.local.get<PaperWidth>(PAPER_KEY),
-    ]).then(([openShift, savedCart, heldCarts, last, width]) => {
+      pos.local.get<PrinterSetting>(PRINTER_KEY),
+    ]).then(([openShift, savedCart, heldCarts, last, width, printerSetting]) => {
       if (!alive) return;
       setShift(openShift);
       if (savedCart) {
@@ -108,6 +127,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       setHeld(heldCarts ?? []);
       setLastSale(last);
       if (width) setPaper(width);
+      if (printerSetting) setPrinter(printerSetting);
     });
     return () => {
       alive = false;
@@ -127,18 +147,34 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const idleMinutes = settings?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
   useIdle(idleMinutes * 60_000, lock);
 
-  // Print once the receipt is in the page; the portal stays until the next one.
+  // Print once the receipt is in the page; the portal stays until the next one. A USB thermal
+  // printer takes the receipt as an image with no dialog; if it fails, the dialog opens instead.
   useEffect(() => {
     if (!printJob) return;
-    const timer = setTimeout(() => {
+    let cancelled = false;
+    const dialog = () => {
       try {
         window.print();
       } catch {
         // No printer dialog in this environment: the receipt stays on screen.
       }
+    };
+    const timer = setTimeout(() => {
+      if (printer.mode !== 'usb') return dialog();
+      const image = renderLines(receiptLines(printJob.data, printJob.copy), paper);
+      if (!image) return dialog();
+      const tookCash = paidInCash(printJob.data);
+      void sendToPrinter(escposJob(image.bits, image.width, image.height, printer.drawer && tookCash)).then(
+        (ok) => {
+          if (!ok && !cancelled) dialog();
+        },
+      );
     }, 0);
-    return () => clearTimeout(timer);
-  }, [printJob]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [printJob, printer, paper]);
 
   if (!settings) {
     return (
@@ -279,6 +315,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                     : null,
                   shift ? { label: 'حركات الدرج', key: 'Alt+7', action: () => setView('cash') } : null,
                   lastSale ? { label: 'إيصال آخر فاتورة', key: null, action: reprint } : null,
+                  { label: 'الطابعة', key: null, action: () => setView('printer') },
                   { label: 'اقفل الشاشة', key: 'Alt+L', action: lock },
                   shift ? { label: 'أغلق الوردية', key: null, action: () => setView('close') } : null,
                 ] satisfies ({ label: string; key: string | null; action: () => void } | null)[]
@@ -316,6 +353,31 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   ) : null;
 
   if (shift === undefined) return null;
+
+  if (view === 'printer') {
+    return (
+      <CashierShell statusBar={statusBar} mainClassName="flex justify-center p-6 lg:px-10">
+        <PrinterScreen
+          setting={printer}
+          paper={paper}
+          onChange={(next) => {
+            setPrinter(next);
+            void pos.local.set(PRINTER_KEY, next);
+          }}
+          onPaper={(w) => {
+            setPaper(w);
+            void pos.local.set(PAPER_KEY, w);
+          }}
+          onTest={() => {
+            if (lastSale) setPrintJob({ data: receiptData(lastSale.doc, lastSale.cashierName), copy: true });
+            else window.print();
+          }}
+          onBack={() => setView('sale')}
+        />
+        {printPortal}
+      </CashierShell>
+    );
+  }
 
   if (shift === null || view !== 'sale') {
     return (
