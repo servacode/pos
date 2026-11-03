@@ -82,6 +82,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/products': 'signed-in',
   'POST /v1/products': 'signed-in',
   'GET /v1/products/:id': 'signed-in',
+  'GET /v1/products/options': 'signed-in',
   'PATCH /v1/products/:id': 'signed-in',
   'POST /v1/products/:id/archive': 'signed-in',
   'POST /v1/products/:id/restore': 'signed-in',
