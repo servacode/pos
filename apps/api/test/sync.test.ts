@@ -486,6 +486,7 @@ describe('GET /v1/sync/pull', () => {
       'categories',
       'customers',
       'exchange_rates',
+      'online_orders',
       'prices',
       'products',
       'promotions',
