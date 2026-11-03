@@ -9,6 +9,7 @@ packages/sync/src/doc-types.ts
 packages/sync/src/uuid.ts
 packages/sync/src/outbox.ts
 packages/sync/src/client/store.ts
+packages/db/src/client.ts
 apps/api/src/types.ts
 apps/api/src/errors.ts
 apps/api/src/clock.ts

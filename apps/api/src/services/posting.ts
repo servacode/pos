@@ -311,7 +311,7 @@ export async function postSale(tx: Transaction, source: SaleSource, sale: SalePa
     const rows = await tx
       .select({ id: taxRates.id, kind: taxRates.kind })
       .from(taxRates)
-      .where(inArray(taxRates.id, rateIds));
+      .where(and(eq(taxRates.tenantId, source.tenantId), inArray(taxRates.id, rateIds)));
     for (const row of rows) kinds.set(row.id, row.kind);
   }
   // A rate the server does not know (deleted, another store's) still owes tax: the general account.

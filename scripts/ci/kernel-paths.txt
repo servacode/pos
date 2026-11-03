@@ -15,9 +15,11 @@ apps/api/src/services/sync-push.ts
 apps/api/src/services/reports.ts
 apps/api/src/services/integrity.ts
 apps/api/src/services/reprocess.ts
+apps/api/src/services/rebuild.ts
 packages/db/drizzle/
 packages/db/src/schema.ts
 packages/db/src/migrate.ts
+packages/db/src/maintenance.ts
 scripts/db-bootstrap.sql
 golden/
 apps/api/test/golden-day.test.ts
@@ -27,6 +29,7 @@ apps/api/test/integrity.test.ts
 apps/api/test/integrity-service.test.ts
 apps/api/test/restore-counters.test.ts
 apps/api/test/reprocess.test.ts
+apps/api/test/rebuild.test.ts
 apps/api/test/upgrade/
 apps/api/test/drill/
 apps/api/test/held-for-processing.test.ts
