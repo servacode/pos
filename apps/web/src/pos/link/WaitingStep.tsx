@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PAIRING_TTL_SECONDS, type ActivatedDevice } from '@serva/core';
+import { ACTIVATION_TTL_SECONDS, type ActivatedDevice } from '@serva/core';
 import {
   AlertCircleIcon,
   Banner,
@@ -185,11 +185,13 @@ export function WaitingStep({ link, onActive, onRestart }: WaitingStepProps) {
         <ProgressBar
           label="الوقت الباقي للموافقة"
           value={Math.max(0, left)}
-          max={PAIRING_TTL_SECONDS * 1000}
+          max={ACTIVATION_TTL_SECONDS * 1000}
           valueText={`${formatCountdown(left)} دقيقة باقية`}
           tone="warning"
         />
-        <p className="text-xs text-ink-muted">الطلب صالح 10 دقائق. بعدها اطلب رمزاً جديداً من الإدارة.</p>
+        <p className="text-xs text-ink-muted">
+          الطلب صالح {ACTIVATION_TTL_SECONDS / 60} دقيقة. بعدها اطلب رمزاً جديداً من الإدارة.
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
