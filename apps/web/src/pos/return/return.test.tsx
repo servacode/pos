@@ -163,7 +163,7 @@ describe('«استبدال» on the till (03 › الملابس)', () => {
     const pay = await screen.findByRole('region', { name: 'الدفع' });
     // The voucher's 250 is in; the 100 left is paid in cash
     const parts = await within(pay).findByRole('list', { name: 'الأجزاء المدفوعة' });
-    expect(parts).toHaveTextContent('قسيمة استبدال');
+    expect(parts).toHaveTextContent('قسيمة');
     expect(parts).toHaveTextContent('250');
     await user.keyboard('100{Enter}');
     await screen.findByRole('region', { name: 'تمت البيعة' });
@@ -196,7 +196,7 @@ describe('«استبدال» on the till (03 › الملابس)', () => {
     await scan(user, PRODUCTS.tea.barcode!.code);
     await user.keyboard('{F12}');
     let pay = await screen.findByRole('region', { name: 'الدفع' });
-    await user.click(within(pay).getByRole('button', { name: 'قسيمة استبدال' }));
+    await user.click(await within(pay).findByRole('button', { name: 'قسيمة' }));
     await user.type(within(pay).getByLabelText('رقم القسيمة'), '1');
     expect(within(pay).getByRole('status', { name: 'رصيد القسيمة' })).toHaveTextContent('500');
     await user.keyboard('{Enter}');
@@ -210,7 +210,7 @@ describe('«استبدال» on the till (03 › الملابس)', () => {
     await scan(user, PRODUCTS.tea.barcode!.code);
     await user.keyboard('{F12}');
     pay = await screen.findByRole('region', { name: 'الدفع' });
-    await user.click(within(pay).getByRole('button', { name: 'قسيمة استبدال' }));
+    await user.click(await within(pay).findByRole('button', { name: 'قسيمة' }));
     await user.type(within(pay).getByLabelText('رقم القسيمة'), 'SRT-001-002-0000001');
     expect(within(pay).getByRole('status', { name: 'رصيد القسيمة' })).toHaveTextContent('150');
     expect(within(pay).getByRole('button', { name: 'أتمّ الدفع' })).toBeDisabled();

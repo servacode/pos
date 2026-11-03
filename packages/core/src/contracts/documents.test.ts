@@ -3,6 +3,7 @@ import { buildSalePayload, type SaleCart } from '../sale';
 import {
   cashMovementPayloadSchema,
   DOCUMENT_PAYLOAD_SCHEMAS,
+  giftVoucherPayloadSchema,
   hasPayloadSchema,
   INVALID_PAYLOAD,
   salePayloadSchema,
@@ -433,6 +434,35 @@ describe('cash_movement payload', () => {
   });
 });
 
+describe('gift_voucher payload', () => {
+  const gift = {
+    shiftId: SHIFT,
+    cashierId: CASHIER,
+    currency: 'SYP',
+    amountMinor: 50_000,
+    method: 'cash',
+    reference: null,
+    forName: 'سارة',
+  };
+  it('takes cash without a reference, and another method only with one', () => {
+    expect(giftVoucherPayloadSchema.safeParse(gift).success).toBe(true);
+    expect(giftVoucherPayloadSchema.safeParse({ ...gift, method: 'card' }).success).toBe(false);
+    expect(giftVoucherPayloadSchema.safeParse({ ...gift, method: 'card', reference: 'A-1' }).success).toBe(
+      true,
+    );
+    expect(DOCUMENT_PAYLOAD_SCHEMAS.gift_voucher).toBe(giftVoucherPayloadSchema);
+  });
+  it('refuses a voucher for nothing, on credit, or paid with another voucher', () => {
+    expect(giftVoucherPayloadSchema.safeParse({ ...gift, amountMinor: 0 }).success).toBe(false);
+    expect(giftVoucherPayloadSchema.safeParse({ ...gift, method: 'credit' }).success).toBe(false);
+    expect(giftVoucherPayloadSchema.safeParse({ ...gift, method: 'voucher', reference: 'X' }).success).toBe(
+      false,
+    );
+    expect(giftVoucherPayloadSchema.safeParse({ ...gift, forName: 'x'.repeat(81) }).success).toBe(false);
+    expect(validateDocumentPayload('gift_voucher', { ...gift, reference: '' }).ok).toBe(false);
+  });
+});
+
 describe('validateDocumentPayload', () => {
   it('checks the types it knows and passes the others unchecked', () => {
     expect(Object.keys(DOCUMENT_PAYLOAD_SCHEMAS)).toEqual([
@@ -442,6 +472,7 @@ describe('validateDocumentPayload', () => {
       'cash_movement',
       'return',
       'receipt',
+      'gift_voucher',
       'customer',
     ]);
     expect(hasPayloadSchema('sale')).toBe(true);

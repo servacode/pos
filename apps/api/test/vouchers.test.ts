@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { buildReturnPayload, type PullSetRows } from '@serva/core';
+import { buildReturnPayload, type PullSetRows, type ShiftReport } from '@serva/core';
 import { createDb, withTenant } from '@serva/db';
 import type { PullResponse } from '@serva/sync';
 import { checkIntegrity } from '../src/services/integrity';
@@ -18,6 +18,8 @@ import {
   type Store,
 } from './accounting-fixtures';
 import { appDb, closeAppDb, closeOwnerDb, makeApp, resetDatabase, settled } from './helpers';
+
+const as = (store: Pick<Store, 'accessToken'>) => ({ authorization: `Bearer ${store.accessToken}` });
 import { TEST_OWNER_URL } from './urls';
 
 /**
@@ -119,6 +121,59 @@ describe('exchange vouchers', () => {
     const ghost = doc('sale', spend(store, open.id, 'SRT-999', 10_000, 10_000));
     const res = await push(app, store.device, [half, over, ghost]);
     expect(res.results.map((r) => r.flags)).toEqual([[], ['voucher_overdrawn'], ['unknown_voucher']]);
+    const rebuilt = await checkRebuild(owner.db, {
+      tenantId: store.tenantId,
+      processors: DOCUMENT_PROCESSORS,
+      now: new Date('2026-10-31T00:00:00Z'),
+    });
+    expect(rebuilt.same).toBe(true);
+  });
+
+  it('sells a gift voucher into the drawer, owes it in 2310, and a sale spends it like any voucher', async () => {
+    const store = await openStore(app);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const gift = doc('gift_voucher', {
+      shiftId: open.id,
+      cashierId: store.userId,
+      currency: 'SYP',
+      amountMinor: 100_000,
+      method: 'cash',
+      reference: null,
+      forName: 'سارة',
+    });
+    const card = doc('gift_voucher', {
+      shiftId: open.id,
+      cashierId: store.userId,
+      currency: 'SYP',
+      amountMinor: 50_000,
+      method: 'card',
+      reference: 'A-77',
+      forName: null,
+    });
+    const res = await push(app, store.device, [open, gift, card]);
+    expect(res.results.map((r) => r.status)).toEqual(['accepted', 'accepted', 'accepted']);
+    expect(gift.number).toMatch(/^GFT-001-/);
+    const entries = await postedEntries(store.tenantId);
+    expect(compact(entries.find((e) => e.sourceId === gift.id))).toEqual([
+      ['111001', 100_000, 0],
+      ['2310', 0, 100_000],
+    ]);
+    expect(compact(entries.find((e) => e.sourceId === card.id))).toEqual([
+      ['1140', 50_000, 0],
+      ['2310', 0, 50_000],
+    ]);
+
+    // Only the cash one is in the drawer
+    const shift = (
+      await app.inject({ method: 'GET', url: `/v1/shifts/${open.id}`, headers: as(store) })
+    ).json<ShiftReport>();
+    expect(shift.byCurrency[0]).toMatchObject({ receiptsMinor: 100_000 });
+
+    const spent = doc('sale', spend(store, open.id, gift.number!, 80_000, 80_000));
+    expect((await push(app, store.device, [spent])).results[0]!.flags).toEqual([]);
+    const report = await withTenant(appDb().db, store.tenantId, (tx) => checkIntegrity(tx, store.tenantId));
+    expect(report.checks.flatMap((x) => x.problems.map((p) => `${x.name}: ${p}`))).toEqual([]);
     const rebuilt = await checkRebuild(owner.db, {
       tenantId: store.tenantId,
       processors: DOCUMENT_PROCESSORS,

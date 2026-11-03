@@ -786,6 +786,33 @@ export const receiptPayloadSchema = z
   });
 export type ReceiptPayload = z.output<typeof receiptPayloadSchema>;
 
+// ─── Gift voucher (GFT) ──────────────────────────────────────────────────────
+
+/** How a gift voucher is paid for: never on credit, never with another voucher */
+export const GIFT_VOUCHER_METHODS = ['cash', 'card', 'wallet', 'transfer'] as const;
+
+/**
+ * `gift_voucher` (GFT, 03 › الألبسة: قسيمة هدية): a voucher sold at the till for an amount, spent
+ * later like an exchange voucher by its code, the document's number. Nothing is sold yet: it posts
+ * Dr the drawer of the shift (or card, wallet, transfer) and Cr 2310 for what the store owes.
+ */
+export const giftVoucherPayloadSchema = z
+  .object({
+    shiftId: uuidSchema,
+    cashierId: userId,
+    currency: currencyCodeSchema,
+    amountMinor: positiveMinorSchema,
+    method: z.enum(GIFT_VOUCHER_METHODS),
+    reference: z.string().trim().min(1).max(64).nullable(),
+    /** «إلى سارة»: printed on the voucher; optional */
+    forName: z.string().trim().max(80).nullable(),
+  })
+  .refine((g) => g.method === 'cash' || g.reference !== null, {
+    path: ['reference'],
+    message: 'a card, wallet or transfer payment needs its reference',
+  });
+export type GiftVoucherPayload = z.output<typeof giftVoucherPayloadSchema>;
+
 // ─── Validation entry point ──────────────────────────────────────────────────
 
 /** The payload schema of each document type that has one in this contract version. */
@@ -796,6 +823,7 @@ export const DOCUMENT_PAYLOAD_SCHEMAS = {
   cash_movement: cashMovementPayloadSchema,
   return: returnPayloadSchema,
   receipt: receiptPayloadSchema,
+  gift_voucher: giftVoucherPayloadSchema,
   customer: customerPayloadSchema,
 } as const;
 export type PayloadDocType = keyof typeof DOCUMENT_PAYLOAD_SCHEMAS;

@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import {
   cashMovementPayloadSchema,
   customerPayloadSchema,
+  giftVoucherPayloadSchema,
   receiptPayloadSchema,
   returnPayloadSchema,
   salePayloadSchema,
@@ -31,7 +32,14 @@ import {
   type Transaction,
 } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
-import { postCashMovement, postReceipt, postReturn, postSale, postShiftClose } from './posting';
+import {
+  postCashMovement,
+  postGiftVoucher,
+  postReceipt,
+  postReturn,
+  postSale,
+  postShiftClose,
+} from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
 import { returnSerials, sellSerials } from './serials';
 
@@ -457,6 +465,42 @@ async function processReceipt({ tx, device, doc }: DocumentContext) {
   return { flags: [] };
 }
 
+/**
+ * gift_voucher (GFT, 03 › الألبسة: قسيمة هدية): a voucher sold at the till, its code the document's
+ * number, spent later like an exchange voucher. The money goes in, 2310 owes it.
+ */
+async function processGiftVoucher({ tx, device, doc }: DocumentContext) {
+  const g = giftVoucherPayloadSchema.parse(doc.payload);
+  const [inserted] = await tx
+    .insert(vouchers)
+    .values({
+      tenantId: device.tenantId,
+      code: doc.number!,
+      returnId: doc.id,
+      kind: 'gift',
+      shiftId: g.shiftId,
+      method: g.method,
+      currency: g.currency,
+      amountMinor: g.amountMinor,
+    })
+    .onConflictDoNothing()
+    .returning({ id: vouchers.id });
+  if (inserted) {
+    await postGiftVoucher(
+      tx,
+      {
+        tenantId: device.tenantId,
+        branchId: device.branchId,
+        docId: doc.id,
+        number: doc.number!,
+        businessDate: doc.businessDate,
+      },
+      g,
+    );
+  }
+  return { flags: [] };
+}
+
 /** Sales, returns, payments and movements that named this shift before it arrived are linked to it now. */
 async function linkToShift(tx: Transaction, shiftId: string): Promise<void> {
   await tx
@@ -596,6 +640,7 @@ export const DOCUMENT_PROCESSORS: SyncProcessors = {
   sale: processSale,
   return: processReturn,
   receipt: processReceipt,
+  gift_voucher: processGiftVoucher,
   customer: processCustomer,
   shift_open: processShiftOpen,
   shift_close: processShiftClose,

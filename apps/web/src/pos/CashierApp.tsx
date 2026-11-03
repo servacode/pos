@@ -30,6 +30,9 @@ const ReturnScreen = lazy(() => import('./return/ReturnScreen').then((m) => ({ d
 const ReceiptScreen = lazy(() =>
   import('./customers/ReceiptScreen').then((m) => ({ default: m.ReceiptScreen })),
 );
+const GiftVoucherScreen = lazy(() =>
+  import('./customers/GiftVoucherScreen').then((m) => ({ default: m.GiftVoucherScreen })),
+);
 const CashMovementScreen = lazy(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.CashMovementScreen })),
 );
@@ -44,7 +47,7 @@ function paidInCash(data: ReceiptData): boolean {
     method?: string;
     refunds?: { method: string }[];
   };
-  if (data.kind === 'receipt') return payload.method === 'cash';
+  if (data.kind === 'receipt' || data.kind === 'gift') return payload.method === 'cash';
   if (data.kind === 'return') return (payload.refunds ?? []).some((r) => r.method === 'cash');
   return (payload.payments ?? []).some((p) => p.method === 'cash');
 }
@@ -59,7 +62,7 @@ interface LastSale {
   cashierName: string;
 }
 
-type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt' | 'printer';
+type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt' | 'gift' | 'printer';
 
 export interface CashierAppProps {
   session: StaffSession;
@@ -339,6 +342,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                   shift && session.permissions.has('receipt.create')
                     ? { label: 'قبض من زبون', key: null, action: () => setView('receipt') }
                     : null,
+                  shift && session.permissions.has('sale.create')
+                    ? { label: 'قسيمة هدية', key: null, action: () => setView('gift') }
+                    : null,
                   shift ? { label: 'حركات الدرج', key: 'Alt+7', action: () => setView('cash') } : null,
                   lastSale ? { label: 'إيصال آخر فاتورة', key: null, action: reprint } : null,
                   { label: 'الطابعة', key: null, action: () => setView('printer') },
@@ -431,6 +437,16 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               onBack={() => setView('sale')}
               onPrint={(doc) =>
                 setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'receipt' }, copy: false })
+              }
+            />
+          ) : view === 'gift' ? (
+            <GiftVoucherScreen
+              session={session}
+              catalog={catalog}
+              shift={shift}
+              onBack={() => setView('sale')}
+              onPrint={(doc) =>
+                setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'gift' }, copy: false })
               }
             />
           ) : view === 'return' ? (

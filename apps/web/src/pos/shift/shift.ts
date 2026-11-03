@@ -7,6 +7,7 @@ import type {
   CashMovementKind,
   CashMovementPayload,
   PaymentMethod,
+  GiftVoucherPayload,
   ReceiptPayload,
   ReturnPayload,
   SalePayload,
@@ -212,6 +213,10 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       // A customer's payment in cash goes into this drawer
       const r = payload as unknown as ReceiptPayload;
       if (r.method === 'cash') termsOf(r.currency).receiptsMinor += r.amountMinor;
+    } else if (doc.type === 'gift_voucher') {
+      // A gift voucher sold for cash goes into this drawer, as money received
+      const g = payload as unknown as GiftVoucherPayload;
+      if (g.method === 'cash') termsOf(g.currency).receiptsMinor += g.amountMinor;
     } else if (doc.type === 'cash_movement') {
       const move = payload as unknown as CashMovementPayload;
       const t = termsOf(move.currency);

@@ -8,7 +8,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   transfer: 'تحويل',
   credit: 'آجل',
   cheque: 'شيك',
-  voucher: 'قسيمة استبدال',
+  voucher: 'قسيمة',
 };
 
 /** «نقداً · ليرة», «نقداً · دولار», «بطاقة» (print/ShiftReport › المبيعات حسب الطريقة والعملة). */

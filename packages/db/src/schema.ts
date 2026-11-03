@@ -2050,7 +2050,13 @@ export const vouchers = pgTable(
       .notNull()
       .references(() => tenants.id),
     code: text('code').notNull(),
+    /** The document that issued it: the return (exchange) or the gift voucher sale */
     returnId: uuid('return_id').notNull(),
+    /** exchange (a return refunded on a voucher) or gift (sold at the till) */
+    kind: text('kind').notNull().default('exchange'),
+    /** A gift voucher's shift and how it was paid, for the drawer count */
+    shiftId: uuid('shift_id'),
+    method: text('method'),
     currency: text('currency').notNull(),
     amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
     redeemedMinor: bigint('redeemed_minor', { mode: 'number' }).notNull().default(0),
@@ -2063,6 +2069,7 @@ export const vouchers = pgTable(
     primaryKey({ name: 'vouchers_pkey', columns: [t.tenantId, t.id] }),
     unique('vouchers_code_unique').on(t.tenantId, t.code),
     index('vouchers_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    index('vouchers_shift_idx').on(t.tenantId, t.shiftId),
     tenantIsolation(),
   ],
 );
