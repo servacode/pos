@@ -17,6 +17,9 @@ const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ 
 const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
 );
+const TransfersPage = lazy(() =>
+  import('./purchases/TransfersPage').then((m) => ({ default: m.TransfersPage })),
+);
 const BulkPricesPage = lazy(() =>
   import('./products/BulkPricesPage').then((m) => ({ default: m.BulkPricesPage })),
 );
@@ -96,6 +99,7 @@ export function AdminApp() {
           <Route path="/expiry" element={page(<ExpiryPage />)} />
           <Route path="/online-store" element={page(<OnlineStorePage />)} />
           <Route path="/prices" element={page(<BulkPricesPage />)} />
+          <Route path="/transfers" element={page(<TransfersPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
           <Route path="/serials" element={page(<SerialsPage />)} />
           <Route path="/labels" element={page(<LabelsPage />)} />

@@ -208,7 +208,7 @@ export function merchandiseReport(
       ),
       last_in as (
         select variant_id, max(business_date) as d from stock_movements
-        where kind in ('purchase', 'stocktake') and qty > 0 and ${inBranches(sql`branch_id`)}
+        where kind in ('purchase', 'stocktake', 'transfer') and qty > 0 and ${inBranches(sql`branch_id`)}
         group by variant_id
       )
       select k.variant_id, v.product_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,

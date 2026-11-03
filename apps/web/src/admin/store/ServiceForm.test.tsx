@@ -23,6 +23,7 @@ const store: StoreResponse = {
   onboarding: { step: 4, done: true },
   scaleBarcode: null,
   service: null,
+  loyalty: null,
 };
 
 function owner(): MeResponse {
@@ -85,5 +86,29 @@ describe('ModifiersEditor', () => {
     ]);
     await user.click(screen.getByRole('button', { name: 'احذف وسط' }));
     expect(last[0]!.options.map((o) => o.name)).toEqual(['كبير']);
+  });
+});
+
+describe('«نقاط الولاء» in the settings', () => {
+  it('turns points on: a point per 1,000, worth 10', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: store }),
+      'PUT /v1/store/loyalty': (r: MockRequest) => ({
+        status: 200,
+        body: { ...store, ...(r.body as Partial<StoreResponse>) },
+      }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'نقاط الولاء' });
+    await user.click(within(form).getByRole('switch', { name: /الزبون يجمع نقاطاً/ }));
+    expect(within(form).getByLabelText('نقطة لكل')).toHaveValue('1000');
+    expect(within(form).getByLabelText('قيمة النقطة')).toHaveValue('10');
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/store/loyalty')[0]!.body).toEqual({
+      loyalty: { earnEveryMinor: 100_000, pointValueMinor: 1_000 },
+    });
   });
 });

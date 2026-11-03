@@ -353,6 +353,8 @@ export const tenantSettings = pgTable(
     }>(),
     /** «الصالة والمطبخ» (packages/core › contracts/store.ts ServiceSettings); null for a shop */
     service: jsonb('service').$type<{ tables: string[]; orderNumbers: boolean; kitchenTickets: boolean }>(),
+    /** «نقاط الولاء»: null, no points */
+    loyalty: jsonb('loyalty').$type<{ earnEveryMinor: number; pointValueMinor: number }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1491,6 +1493,8 @@ export const customers = pgTable(
     creditLimitMinor: bigint('credit_limit_minor', { mode: 'number' }),
     /** retail or wholesale: the price the till sells to them at */
     priceTier: text('price_tier').notNull().default('retail'),
+    /** «نقاط الولاء» earned less spent; kept by the sale processor, reset and replayed by the rebuild */
+    loyaltyPoints: integer('loyalty_points').notNull().default(0),
     /** The till document that created it, when a till did */
     createdByDoc: uuid('created_by_doc'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1739,6 +1743,36 @@ export const stocktakes = pgTable(
   (t) => [
     primaryKey({ name: 'stocktakes_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Goods sent from one branch to another (09 › transfers), in one step. Its stock movements carry
+ * `id` at the sender and `inId` at the receiver; so do its two entries (1900 جاري الفروع).
+ */
+export const transfers = pgTable(
+  'transfers',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    inId: uuid('in_id').notNull(),
+    number: text('number').notNull(),
+    fromBranchId: uuid('from_branch_id').notNull(),
+    toBranchId: uuid('to_branch_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    note: text('note'),
+    lines: jsonb('lines').notNull(),
+    valueMinor: bigint('value_minor', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'transfers_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.fromBranchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.toBranchId], foreignColumns: [branches.tenantId, branches.id] }),
     tenantIsolation(),
   ],
 );

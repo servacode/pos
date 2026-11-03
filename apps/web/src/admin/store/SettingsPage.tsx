@@ -5,6 +5,7 @@ import { useAuth, useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { getStore } from './api';
+import { LoyaltyForm } from './LoyaltyForm';
 import { ScaleForm } from './ScaleForm';
 import { ServiceForm } from './ServiceForm';
 import { CurrencyForm, ProfileForm } from './StoreForms';
@@ -60,6 +61,10 @@ export function SettingsPage() {
             <section className="flex flex-col gap-3">
               <h2 className="text-lg font-semibold text-ink">الصالة والمطبخ</h2>
               <ServiceForm store={store} onSaved={saved} />
+            </section>
+            <section className="flex flex-col gap-3">
+              <h2 className="text-lg font-semibold text-ink">نقاط الولاء</h2>
+              <LoyaltyForm store={store} onSaved={saved} />
             </section>
           </>
         ) : null}

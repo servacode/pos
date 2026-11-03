@@ -346,6 +346,7 @@ const MEASURES: Record<string, string> = {
   'pay:credit': 'الآجل',
   'pay:cheque': 'الشيكات',
   'pay:voucher': 'قسائم الاستبدال',
+  'pay:points': 'نقاط الولاء',
 };
 
 async function dayReportLedger(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
@@ -400,6 +401,7 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
         when a.code = '1200' then 'pay:credit'
         when a.code = '1160' then 'pay:cheque'
         when a.code = '2310' then 'pay:voucher'
+        when a.code = '6700' then 'pay:points'
         else 'other:' || a.code
       end as measure,
       a.code in ('4100', '4200', '4300', '2200', '2210', '2220', '2550', '6400') as credit_side

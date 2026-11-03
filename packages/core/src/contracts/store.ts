@@ -100,6 +100,20 @@ export const storeServiceInput = z.object({ service: serviceSettingsSchema.nulla
 export type StoreServiceInput = z.input<typeof storeServiceInput>;
 export type StoreServiceData = z.output<typeof storeServiceInput>;
 
+/**
+ * «نقاط الولاء» (03 › الألبسة): a customer named on a sale earns a point for each `earnEveryMinor`
+ * spent, and spends points at the till at `pointValueMinor` each (posted to 6700, the programme's
+ * cost). Null: no points.
+ */
+export const loyaltySettingsSchema = z.object({
+  earnEveryMinor: z.int().min(1, 'اكتب المبلغ لكل نقطة').max(1_000_000_000),
+  pointValueMinor: z.int().min(1, 'اكتب قيمة النقطة').max(100_000_000),
+});
+export type LoyaltySettings = z.output<typeof loyaltySettingsSchema>;
+export const storeLoyaltyInput = z.object({ loyalty: loyaltySettingsSchema.nullable() });
+export type StoreLoyaltyInput = z.input<typeof storeLoyaltyInput>;
+export type StoreLoyaltyData = z.output<typeof storeLoyaltyInput>;
+
 export interface StoreResponse {
   name: string;
   legalName: string | null;
@@ -117,4 +131,5 @@ export interface StoreResponse {
   onboarding: { step: number; done: boolean };
   scaleBarcode: ScaleBarcodeConfig | null;
   service: ServiceSettings | null;
+  loyalty: LoyaltySettings | null;
 }

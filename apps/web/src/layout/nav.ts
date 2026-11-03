@@ -68,6 +68,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   },
   { to: '/purchases', label: 'المشتريات', icon: CartIcon, permission: ['purchases.manage'] },
   { to: '/inventory', label: 'المخزون والأرباح', icon: TrendUpIcon, permission: ['cost.view'] },
+  { to: '/transfers', label: 'التحويل بين الفروع', icon: CartIcon, permission: ['inventory.adjust'] },
   { to: '/expiry', label: 'الصلاحية', icon: ClockIcon, permission: ['purchases.manage'] },
   { to: '/serials', label: 'الأرقام التسلسلية', icon: BarcodeIcon, permission: ['catalog.manage'] },
   {

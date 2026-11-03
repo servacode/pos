@@ -366,6 +366,7 @@ const METHOD_NAMES = {
   credit: 'آجل',
   cheque: 'شيك',
   voucher: 'قسيمة',
+  points: 'نقاط',
 } as const;
 
 const KIND_TEXT: Record<Exclude<CashMovementKind, 'expense'>, { label: string; hint: string }> = {

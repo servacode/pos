@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { CustomerRow } from './customers';
 import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
-import type { ServiceSettings } from './store';
+import type { LoyaltySettings, ServiceSettings } from './store';
 import type { CurrencyCode } from '../currencies';
 import type { Permission } from '../permissions';
 import type { ShiftMode } from './documents';
@@ -752,6 +752,8 @@ export interface SettingsRow {
   scaleBarcode: ScaleBarcodeConfig | null;
   /** «الصالة والمطبخ» (contracts/store.ts ServiceSettings); null for a shop without them */
   service: ServiceSettings | null;
+  /** «نقاط الولاء» (contracts/store.ts LoyaltySettings); null when the store gives none */
+  loyalty: LoyaltySettings | null;
   version: number;
 }
 

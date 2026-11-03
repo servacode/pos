@@ -245,6 +245,7 @@ describe('a return', () => {
     expect(defaultRefundMethod(paidBy('transfer'))).toBe('transfer');
     // What a voucher paid goes back on a voucher, never as cash
     expect(defaultRefundMethod(paidBy('voucher'))).toBe('voucher');
+    expect(defaultRefundMethod(paidBy('points' as 'voucher'))).toBe('voucher');
     const mixed = {
       ...aSale([line(1, 1_000)]),
       payments: [{ method: 'card' }, { method: 'cash' }],

@@ -204,6 +204,20 @@
       "when": 1793739282959,
       "tag": "0028_gift_vouchers",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793742005756,
+      "tag": "0029_loyalty_points",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793743284657,
+      "tag": "0030_transfers",
+      "breakpoints": true
     }
   ]
 }

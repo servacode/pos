@@ -230,6 +230,8 @@ const METHOD_ACCOUNTS = {
   credit: '1200',
   cheque: '1160',
   voucher: '2310',
+  // Loyalty points spent: what the programme costs the store (03 › نقاط الولاء)
+  points: '6700',
 } as const;
 
 const methodMemo: Record<string, string> = {
@@ -239,6 +241,7 @@ const methodMemo: Record<string, string> = {
   credit: 'آجل',
   cheque: 'شيك',
   voucher: 'قسيمة استبدال',
+  points: 'نقاط الولاء',
 };
 
 export interface SaleSource {

@@ -7,6 +7,7 @@ import type {
   StoreProfileData,
   StoreResponse,
   StoreScaleData,
+  StoreLoyaltyData,
   StoreServiceData,
 } from '@serva/core';
 import {
@@ -67,6 +68,7 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
     onboarding: { step: settings.onboardingStep, done: settings.onboardedAt !== null },
     scaleBarcode: settings.scaleBarcode ?? null,
     service: settings.service ?? null,
+    loyalty: settings.loyalty ?? null,
   };
 }
 
@@ -254,4 +256,32 @@ function changesOf(before: StoreResponse, after: StoreResponse, keys: (keyof Sto
     if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changes[key] = [before[key], after[key]];
   }
   return changes;
+}
+
+/** «نقاط الولاء»: the rates every till and the server use from the next sale on. */
+export function updateLoyalty(
+  db: Database,
+  auth: AccessClaims,
+  input: StoreLoyaltyData,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'settings.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ loyalty: input.loyalty });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.loyalty_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['loyalty']),
+      },
+      meta,
+    );
+    return after;
+  });
 }

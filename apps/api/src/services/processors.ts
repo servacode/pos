@@ -27,6 +27,7 @@ import {
   shifts,
   stockLevels,
   stockMovements,
+  tenantSettings,
   variants,
   vouchers,
   type Transaction,
@@ -224,6 +225,8 @@ async function processSale({ tx, device, doc }: DocumentContext) {
   );
   // Vouchers spent (03 › قسيمة الاستبدال): never refused, flagged when unknown or overdrawn
   flags.push(...(await redeemVouchers(tx, tenantId, sale)));
+  // Loyalty points (03 › نقاط الولاء): earned on what was not paid with points, spent at their value
+  flags.push(...(await applyLoyalty(tx, tenantId, sale)));
   // A credit sale over the customer's limit is accepted and flagged (08 › قاعدة 8)
   if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) {
     if (await overCreditLimit(tx, tenantId, sale.customerId)) flags.push('credit_limit_exceeded');
@@ -350,6 +353,36 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     ret,
   );
   return { flags };
+}
+
+/**
+ * A named customer's points move with each sale: the points spent (their payment at the point's
+ * value, rounded up) come off, a point per `earnEveryMinor` of the rest goes on. Spending more than
+ * they have is accepted and flagged points_overdrawn, never refused.
+ */
+async function applyLoyalty(tx: Transaction, tenantId: string, sale: SalePayload): Promise<SyncFlag[]> {
+  if (!sale.customerId) return [];
+  const [settings] = await tx
+    .select({ loyalty: tenantSettings.loyalty })
+    .from(tenantSettings)
+    .where(eq(tenantSettings.tenantId, tenantId));
+  const loyalty = settings?.loyalty ?? null;
+  const paidWithPoints = sale.payments
+    .filter((p) => p.method === 'points')
+    .reduce((n, p) => n + p.baseAmountMinor, 0);
+  if (!loyalty && paidWithPoints === 0) return [];
+  const spent = paidWithPoints > 0 && loyalty ? Math.ceil(paidWithPoints / loyalty.pointValueMinor) : 0;
+  const earned = loyalty
+    ? Math.floor(Math.max(0, sale.totals.totalMinor - paidWithPoints) / loyalty.earnEveryMinor)
+    : 0;
+  if (spent === 0 && earned === 0) return paidWithPoints > 0 && !loyalty ? ['points_overdrawn'] : [];
+  const [row] = await tx
+    .update(customers)
+    .set({ loyaltyPoints: sql`${customers.loyaltyPoints} + ${earned - spent}` })
+    .where(and(eq(customers.tenantId, tenantId), eq(customers.id, sale.customerId)))
+    .returning({ points: customers.loyaltyPoints });
+  // What they had before this sale is what they have now, less what it earned, plus what it spent
+  return spent > 0 && (!row || row.points - earned < 0) ? ['points_overdrawn'] : [];
 }
 
 /** A sale's voucher payments against the vouchers they name: their redeemed amount grows. */
