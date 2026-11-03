@@ -1777,6 +1777,40 @@ export const transfers = pgTable(
   ],
 );
 
+/**
+ * Returns to the supplier (09 › purchase returns): pieces sent back out of a branch at its average
+ * cost, credited by the supplier off its balance or paid back. One journal entry (source
+ * 'supplier_return'); `lines` keeps what each line cost and what was credited for it.
+ */
+export const supplierReturns = pgTable(
+  'supplier_returns',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** credit | cash | bank */
+    refund: text('refund').notNull(),
+    reference: text('reference'),
+    note: text('note'),
+    lines: jsonb('lines').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    costMinor: bigint('cost_minor', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'supplier_returns_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    tenantIsolation(),
+  ],
+);
+
 // ─── Accounting (09 › المحاسبة; 10 › دليل الحسابات الافتراضي، القيود التلقائية) ──────
 
 /**

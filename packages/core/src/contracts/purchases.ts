@@ -321,3 +321,68 @@ export interface TransferRow {
   pieces: number;
   valueMinor: number;
 }
+
+// ─── Returns to the supplier (09 › purchase returns) ──────────────────────────
+
+/**
+ *   GET  /v1/supplier-returns   purchases.manage   → { items: SupplierReturnRow[] }
+ *   POST /v1/supplier-returns   purchases.manage   supplierReturnInput → SupplierReturnDetail (201)
+ *
+ * Pieces sent back to their supplier (a fault, a wrong size, what did not sell): out of the branch
+ * at its average cost, and the supplier owes the store what it credits for them, off its balance
+ * (credit) or paid back in cash or by bank. What the supplier credits above or below the pieces'
+ * cost goes to cost of sales: Dr 2100 (or the cash or bank) / Cr 1300 / ±5100.
+ */
+export const supplierReturnInput = z
+  .object({
+    supplierId: uuidSchema,
+    branchId: uuidSchema.optional(),
+    date: isoDateSchema,
+    refund: z.enum(PURCHASE_PAYMENTS),
+    /** The supplier's credit note number */
+    reference: optionalText(64, 'الرقم طويل'),
+    note: optionalText(200, 'الملاحظة طويلة'),
+    lines: z
+      .array(
+        z.object({
+          variantId: uuidSchema,
+          qty: z.int('الكمية مطلوبة').positive('الكمية أكبر من الصفر').max(1_000_000_000, 'الكمية كبيرة'),
+          /** What the supplier credits for the whole line; left out, the pieces' average cost */
+          amountMinor: nonNegativeMinorSchema.nullable().optional(),
+        }),
+      )
+      .min(1, 'أضف صنفاً واحداً على الأقل')
+      .max(500),
+  })
+  .refine((r) => new Set(r.lines.map((l) => l.variantId)).size === r.lines.length, {
+    path: ['lines'],
+    message: 'كل صنف مرة واحدة في المرتجع',
+  });
+export type SupplierReturnInput = z.input<typeof supplierReturnInput>;
+
+export interface SupplierReturnDetail {
+  id: string;
+  number: string;
+  date: string;
+  supplierId: string;
+  supplierName: string;
+  branchId: string;
+  refund: PurchasePayment;
+  reference: string | null;
+  lines: { variantId: string; name: string; qty: number; amountMinor: number; costMinor: number }[];
+  /** What the supplier credits */
+  amountMinor: number;
+  /** What the pieces cost, at the branch's average */
+  costMinor: number;
+  baseCurrency: CurrencyCode;
+}
+
+export interface SupplierReturnRow {
+  id: string;
+  number: string;
+  date: string;
+  supplierName: string;
+  refund: PurchasePayment;
+  pieces: number;
+  amountMinor: number;
+}

@@ -191,6 +191,7 @@ export const JOURNAL_SOURCE_TYPES = [
   'gift_voucher',
   'purchase',
   'supplier_payment',
+  'supplier_return',
   'cost_of_sales',
   'stocktake',
   'transfer',
