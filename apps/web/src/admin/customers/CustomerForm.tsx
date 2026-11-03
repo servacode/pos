@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { CustomerDetail } from '@serva/core';
-import { Alert, Button, TextField } from '@serva/ui';
+import { Alert, Button, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { createCustomer, updateCustomer } from './api';
 
@@ -32,6 +32,7 @@ export function CustomerForm({
       ? String(customer.creditLimitMinor / 100)
       : '',
   );
+  const [wholesale, setWholesale] = useState(customer?.priceTier === 'wholesale');
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -45,7 +46,15 @@ export function CustomerForm({
     setSaving(true);
     setError(null);
     setFields({});
-    const input = { name, phone, taxNumber, address, notes, creditLimitMinor };
+    const input = {
+      name,
+      phone,
+      taxNumber,
+      address,
+      notes,
+      creditLimitMinor,
+      priceTier: wholesale ? ('wholesale' as const) : ('retail' as const),
+    };
     try {
       onSaved(customer ? await updateCustomer(customer.id, input) : await createCustomer(input));
     } catch (e) {
@@ -108,6 +117,12 @@ export function CustomerForm({
           error={fields.notes}
         />
       </div>
+      <Switch
+        label="زبون جملة"
+        description="عند اختياره على الكاشير تتحوّل الفاتورة إلى سعر الجملة"
+        checked={wholesale}
+        onCheckedChange={setWholesale}
+      />
       <div className="flex gap-3">
         <Button type="submit" loading={saving}>
           احفظ

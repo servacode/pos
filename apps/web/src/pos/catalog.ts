@@ -37,7 +37,13 @@ export interface CatalogItem {
   categoryPath?: readonly string[];
   unit: UnitRow | null;
   taxRate: TaxRateRow | null;
-  price: { currency: CurrencyCode; priceMinor: number; minPriceMinor: number | null };
+  price: {
+    currency: CurrencyCode;
+    priceMinor: number;
+    minPriceMinor: number | null;
+    /** «سعر الجملة» of one unit; null: sold wholesale at the shelf price */
+    wholesalePriceMinor?: number | null;
+  };
 }
 
 export interface BarcodeHit {
@@ -157,7 +163,12 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       categoryPath: categoryPath(product.categoryId),
       unit: units.get(product.unitId) ?? null,
       taxRate: product.taxRateId ? (taxes.get(product.taxRateId) ?? null) : null,
-      price: { currency: price.currency, priceMinor: price.priceMinor, minPriceMinor: price.minPriceMinor },
+      price: {
+        currency: price.currency,
+        priceMinor: price.priceMinor,
+        minPriceMinor: price.minPriceMinor,
+        wholesalePriceMinor: price.wholesalePriceMinor ?? null,
+      },
     };
     items.push(item);
     byVariant.set(item.variantId, item);

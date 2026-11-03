@@ -51,6 +51,7 @@ export const REFERENCE_LABEL: Partial<Record<PaymentMethod, string>> = {
   wallet: 'رقم العملية',
   card: 'رقم الموافقة من جهاز الدفع',
   transfer: 'رقم الحوالة أو التحويل',
+  cheque: 'رقم الشيك وتاريخ استحقاقه',
 };
 
 /** A rate's value of one foreign unit in the base currency, for «سعر 130». */

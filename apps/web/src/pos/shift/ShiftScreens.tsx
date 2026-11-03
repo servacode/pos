@@ -364,6 +364,7 @@ const METHOD_NAMES = {
   wallet: 'شام كاش',
   transfer: 'تحويل',
   credit: 'آجل',
+  cheque: 'شيك',
 } as const;
 
 const KIND_TEXT: Record<Exclude<CashMovementKind, 'expense'>, { label: string; hint: string }> = {

@@ -38,15 +38,22 @@ import { customerPayloadSchema, type CustomerPayload } from './customers';
  *   (08 › قواعد ثابتة 8), so the shift is referenced by id in the payload only.
  */
 
-/** Payment methods of phase 1 (09 › payments; 27 › الدفع عند الكاشير). Cheques, points and vouchers come later. */
-export const PAYMENT_METHODS = ['cash', 'card', 'wallet', 'transfer', 'credit'] as const;
+/**
+ * Payment methods (09 › payments; 27 › الدفع عند الكاشير). `cheque` (03 › الجملة: الآجل والشيكات)
+ * waits in 1160 «شيكات تحت التحصيل» until the owner marks it cashed or bounced; like credit it
+ * needs the customer. Points and vouchers come later.
+ */
+export const PAYMENT_METHODS = ['cash', 'card', 'wallet', 'transfer', 'credit', 'cheque'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /** Methods that settle the exact amount and never give change (10 › حساب الفاتورة, step 6). */
-export const NON_CASH_METHODS: readonly PaymentMethod[] = ['card', 'wallet', 'transfer', 'credit'];
+export const NON_CASH_METHODS: readonly PaymentMethod[] = ['card', 'wallet', 'transfer', 'credit', 'cheque'];
 
-/** Methods whose reference is mandatory: approval code, wallet transaction or transfer number (27). */
-export const REFERENCE_METHODS: readonly PaymentMethod[] = ['card', 'wallet', 'transfer'];
+/** Methods whose reference is mandatory: approval code, wallet transaction, transfer or cheque number (27). */
+export const REFERENCE_METHODS: readonly PaymentMethod[] = ['card', 'wallet', 'transfer', 'cheque'];
+
+/** Methods that put the amount on a named customer: credit (1200) and cheque (1160, party). */
+export const CUSTOMER_METHODS: readonly PaymentMethod[] = ['credit', 'cheque'];
 
 /**
  * Who approved something over the role's limit (11 › ما يحتاج موافقة): `pin` is the manager's code
@@ -328,10 +335,12 @@ export const salePayloadSchema = z
       checkRate(['payments', i, 'rate'], payment.currency, payment.rate);
       if (payment.method === 'cash') hasCash = true;
       else nonCashBase += BigInt(payment.baseAmountMinor);
-      if (payment.method === 'credit') {
-        if (sale.customerId === null) issue(['payments', i, 'method'], 'a credit sale needs its customer');
+      if (CUSTOMER_METHODS.includes(payment.method)) {
+        if (sale.customerId === null) {
+          issue(['payments', i, 'method'], `a ${payment.method} sale needs its customer`);
+        }
         if (payment.currency !== sale.currency) {
-          issue(['payments', i, 'currency'], 'credit is in the invoice currency');
+          issue(['payments', i, 'currency'], `${payment.method} is in the invoice currency`);
         }
       }
     });
@@ -712,7 +721,7 @@ export type ReturnPayload = z.output<typeof returnPayloadSchema>;
 // ─── Receipt (RCV) ───────────────────────────────────────────────────────────
 
 /** How a customer pays what they owe */
-export const RECEIPT_METHODS = ['cash', 'card', 'wallet', 'transfer'] as const;
+export const RECEIPT_METHODS = ['cash', 'card', 'wallet', 'transfer', 'cheque'] as const;
 export type ReceiptMethod = (typeof RECEIPT_METHODS)[number];
 
 /**
@@ -734,7 +743,7 @@ export const receiptPayloadSchema = z
   })
   .refine((r) => r.method === 'cash' || r.reference !== null, {
     path: ['reference'],
-    message: 'a card, wallet or transfer payment needs its reference',
+    message: 'a card, wallet, transfer or cheque payment needs its reference',
   });
 export type ReceiptPayload = z.output<typeof receiptPayloadSchema>;
 

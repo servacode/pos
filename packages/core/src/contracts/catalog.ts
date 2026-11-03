@@ -157,6 +157,8 @@ const variantFields = {
   price: priceInputSchema,
   /** «السعر الأدنى للمفاصلة» in the price currency: the cashier goes down to it without a manager code */
   minPriceMinor: nonNegativeMinorSchema.nullable().default(null),
+  /** «سعر الجملة» of one unit in the price currency (03 › الجملة); null: sold at the shelf price */
+  wholesalePriceMinor: nonNegativeMinorSchema.nullable().default(null),
   /** «الحد الأدنى في الفرع», thousandths: below it the owner is alerted */
   minStockQty: z.int().nonnegative().nullable().default(null),
   barcodes: z.array(barcodeInputSchema).max(20, '20 باركوداً على الأكثر').default([]),
@@ -262,6 +264,7 @@ export const updateVariantInput = z
     attributes: attributesSchema.optional(),
     price: priceInputSchema.optional(),
     minPriceMinor: nonNegativeMinorSchema.nullable().optional(),
+    wholesalePriceMinor: nonNegativeMinorSchema.nullable().optional(),
     minStockQty: z.int().nonnegative().nullable().optional(),
     barcodes: z.array(barcodeInputSchema).max(20, '20 باركوداً على الأكثر').optional(),
     archived: z.boolean().optional(),
@@ -348,6 +351,7 @@ export interface VariantDetail {
   attributes: { name: string; value: string }[];
   price: PriceView;
   minPriceMinor: number | null;
+  wholesalePriceMinor: number | null;
   minStockQty: number | null;
   /** When the price last changed (for «تغيّر سعرها») */
   priceChangedAt: string;
@@ -569,6 +573,8 @@ export interface PriceRow {
   priceMinor: number;
   /** «السعر الأدنى للمفاصلة» in the same currency; below it a price edit needs the manager */
   minPriceMinor: number | null;
+  /** «سعر الجملة» in the same currency, for sales at the wholesale price; null: the shelf price */
+  wholesalePriceMinor: number | null;
   priceChangedAt: string;
   version: number;
 }

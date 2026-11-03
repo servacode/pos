@@ -25,7 +25,7 @@ import type { Transaction } from '@serva/db';
  *   day_report_ledger  (reconciliation 4) per branch and day, the day report read from the
  *                      invoices less the returns equals the sale and return entries: net sales
  *                      (4100−4200−4300), tax (22xx), tips (2550), cash rounding (6400), and each
- *                      payment method (1110 drawers, 1140 card, 1150 wallet, 1130 transfer,
+ *                      payment method (1110 drawers, 1140 card, 1150 wallet, 1130 transfer, 1160 cheque,
  *                      1200 credit)
  *   stock_value_ledger what the stock is worth (stock_values, packages/core › costing.ts) equals
  *                      account 1300, per branch
@@ -329,6 +329,7 @@ const MEASURES: Record<string, string> = {
   'pay:wallet': 'المحفظة',
   'pay:transfer': 'التحويل',
   'pay:credit': 'الآجل',
+  'pay:cheque': 'الشيكات',
 };
 
 async function dayReportLedger(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
@@ -381,6 +382,7 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
         when a.code = '1150' then 'pay:wallet'
         when a.code = '1130' then 'pay:transfer'
         when a.code = '1200' then 'pay:credit'
+        when a.code = '1160' then 'pay:cheque'
         else 'other:' || a.code
       end as measure,
       a.code in ('4100', '4200', '4300', '2200', '2210', '2220', '2550', '6400') as credit_side

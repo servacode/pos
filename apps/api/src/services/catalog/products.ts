@@ -98,6 +98,7 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
     attributes: variant.attributes,
     price: { currency: price.currency as CurrencyCode, priceMinor: price.priceMinor },
     minPriceMinor: price.minPriceMinor,
+    wholesalePriceMinor: price.wholesalePriceMinor,
     minStockQty: variant.minStockQty,
     priceChangedAt: price.priceChangedAt.toISOString(),
     archivedAt: iso(variant.archivedAt),
@@ -489,6 +490,7 @@ export async function createProduct(
           currency: v.price.currency,
           priceMinor: v.price.priceMinor,
           minPriceMinor: v.minPriceMinor,
+          wholesalePriceMinor: v.wholesalePriceMinor,
           priceChangedAt: ctx.now,
         });
         await writeBarcodes(tx, tenantId, variant!.id, v.barcodes, generated);
@@ -614,6 +616,7 @@ export async function updateProduct(
             currency: v.price?.currency,
             priceMinor: v.price?.priceMinor,
             minPriceMinor: v.minPriceMinor,
+            wholesalePriceMinor: v.wholesalePriceMinor,
           };
           const priceDiff = diff(before.price, priceNext);
           if (Object.keys(priceDiff).length > 0) {
@@ -646,6 +649,7 @@ export async function updateProduct(
             currency: v.price!.currency,
             priceMinor: v.price!.priceMinor,
             minPriceMinor: v.minPriceMinor ?? null,
+            wholesalePriceMinor: v.wholesalePriceMinor ?? null,
             priceChangedAt: ctx.now,
           });
           variantChanges.push({ id: variantId, created: true });

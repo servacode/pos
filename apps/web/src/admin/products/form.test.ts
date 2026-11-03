@@ -70,6 +70,7 @@ describe('the create body', () => {
           attributes: [],
           price: { currency: 'SYP', priceMinor: 12000 },
           minPriceMinor: null,
+          wholesalePriceMinor: null,
           minStockQty: 5000,
           barcodes: [
             { kind: 'standard', code: '6290360100125', packQty: 1000, packName: null, packPriceMinor: null },

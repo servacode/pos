@@ -156,10 +156,19 @@ describe('finding a customer', () => {
         name: 'أبو خالد',
         phone: '+963933111222',
         creditLimitMinor: null,
+        priceTier: 'retail' as const,
         archived: false,
         version: 1,
       },
-      { id: '2', name: 'مطعم الياسمين', phone: null, creditLimitMinor: null, archived: false, version: 1 },
+      {
+        id: '2',
+        name: 'مطعم الياسمين',
+        phone: null,
+        creditLimitMinor: null,
+        priceTier: 'retail' as const,
+        archived: false,
+        version: 1,
+      },
     ];
     expect(findCustomers(list, 'ابو').map((c) => c.id)).toEqual(['1']);
     expect(findCustomers(list, '0933111').map((c) => c.id)).toEqual(['1']);

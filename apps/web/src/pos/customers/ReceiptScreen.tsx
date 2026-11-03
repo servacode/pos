@@ -16,6 +16,7 @@ const METHOD_TEXT: Record<ReceiptMethod, string> = {
   wallet: 'شام كاش',
   card: 'بطاقة',
   transfer: 'تحويل',
+  cheque: 'شيك',
 };
 
 export type SavedReceipt = Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;

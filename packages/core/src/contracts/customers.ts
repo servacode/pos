@@ -15,6 +15,10 @@ import { isoDateSchema, nonNegativeMinorSchema, uuidSchema } from './common';
  *   GET  /v1/customers/{id}        CustomerDetail with its statement (customer.view)
  */
 
+/** Which price a customer buys at */
+export const PRICE_TIERS = ['retail', 'wholesale'] as const;
+export type PriceTier = (typeof PRICE_TIERS)[number];
+
 const optionalText = (max: number, message: string) =>
   z
     .string()
@@ -35,6 +39,8 @@ export const customerInput = z.object({
   notes: optionalText(500, 'الملاحظات طويلة'),
   /** Most the customer may owe, in the base currency; null is no limit */
   creditLimitMinor: nonNegativeMinorSchema.nullable().optional(),
+  /** «زبون جملة»: the till sells to them at the wholesale price (03 › الجملة) */
+  priceTier: z.enum(PRICE_TIERS).optional(),
   archived: z.boolean().optional(),
 });
 export type CustomerInput = z.output<typeof customerInput>;
@@ -54,6 +60,7 @@ export interface CustomerRow {
   name: string;
   phone: string | null;
   creditLimitMinor: number | null;
+  priceTier: PriceTier;
   archived: boolean;
   version: number;
 }
@@ -65,6 +72,7 @@ export interface CustomerListItem {
   creditLimitMinor: number | null;
   /** What the customer owes the store, base currency (negative: the store owes them) */
   balanceMinor: number;
+  priceTier: PriceTier;
   archived: boolean;
 }
 

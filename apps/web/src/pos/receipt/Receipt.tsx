@@ -22,6 +22,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   wallet: 'شام كاش',
   transfer: 'تحويل',
   credit: 'آجل على الحساب',
+  cheque: 'شيك',
 };
 
 export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base: CurrencyCode): string {

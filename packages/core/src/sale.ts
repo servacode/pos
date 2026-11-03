@@ -359,8 +359,8 @@ export function buildSalePayload(cart: SaleCart): SalePayload {
     );
   }
   const customerId = cart.customerId ?? null;
-  if (customerId === null && cart.payments.some((p) => p.method === 'credit')) {
-    throw new RangeError('a credit payment needs a customer');
+  if (customerId === null && cart.payments.some((p) => p.method === 'credit' || p.method === 'cheque')) {
+    throw new RangeError('a credit or cheque payment needs a customer');
   }
   return {
     shiftId: cart.shiftId,

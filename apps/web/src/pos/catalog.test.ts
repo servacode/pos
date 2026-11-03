@@ -63,6 +63,7 @@ function bigStore(count: number): CatalogSets {
       currency: 'SYP',
       priceMinor: 10_000 + i,
       minPriceMinor: null,
+      wholesalePriceMinor: null,
       priceChangedAt: '2026-10-01T00:00:00Z',
       version: 1,
     });

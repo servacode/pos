@@ -62,6 +62,7 @@ describe('a new product', () => {
           attributes: [],
           price: { currency: 'SYP', priceMinor: 12000 },
           minPriceMinor: null,
+          wholesalePriceMinor: null,
           minStockQty: null,
           barcodes: [
             { kind: 'standard', code: '6290360100125', packQty: 1000, packName: null, packPriceMinor: null },

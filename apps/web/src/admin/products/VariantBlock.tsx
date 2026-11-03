@@ -114,6 +114,7 @@ export function VariantBlock({
                 currency: event.target.value as CurrencyCode,
                 priceMinor: null,
                 minPriceMinor: null,
+                wholesalePriceMinor: null,
                 barcodes: variant.barcodes.map((b) => ({ ...b, packPriceMinor: null })),
               })
             }
@@ -136,6 +137,16 @@ export function VariantBlock({
         valueMinor={variant.minPriceMinor}
         onValueChange={(minPriceMinor) => set({ minPriceMinor })}
         error={errors[k('minPriceMinor')]}
+      />
+      <MoneyField
+        key={`wholesale-${variant.currency}`}
+        name={k('wholesalePriceMinor')}
+        label="سعر الجملة (اختياري)"
+        hint="يُباع به عند اختيار «سعر الجملة» على الكاشير أو لزبون جملة."
+        currency={variant.currency}
+        valueMinor={variant.wholesalePriceMinor ?? null}
+        onValueChange={(wholesalePriceMinor) => set({ wholesalePriceMinor })}
+        error={errors[k('wholesalePriceMinor')]}
       />
       {variant.currency !== 'SYP' ? (
         <p className="text-sm text-ink-muted sm:col-span-2">
