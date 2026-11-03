@@ -81,4 +81,34 @@ describe('the receipt as printer lines', () => {
   it('marks a reprint as a copy', () => {
     expect(receiptLines(data, true)[0]).toEqual({ kind: 'center', text: '— نسخة —', bold: true });
   });
+
+  it('prints an exchange voucher under the return: its amount, its bars and its number', () => {
+    const ret = {
+      saleNumber: 'INV-001-002-0000007',
+      currency: 'SYP',
+      reason: 'المقاس صغير',
+      lines: [{ name: 'قميص M', qty: 1000, refund: { totalMinor: 45_000 } }],
+      totals: { totalMinor: 45_000, taxMinor: 0 },
+      refunds: [{ method: 'voucher', currency: 'SYP', amountMinor: 45_000, reference: null }],
+    };
+    const lines = receiptLines({
+      ...data,
+      kind: 'return',
+      doc: { ...data.doc, number: 'SRT-001-002-0000003', payload: ret as never },
+    } as never);
+    expect(lines).toContainEqual({ kind: 'center', text: 'قسيمة استبدال', bold: true, big: true });
+    expect(lines).toContainEqual({ kind: 'barcode', code: 'SRT-001-002-0000003' });
+    expect(lines).toContainEqual({ kind: 'center', text: '450 ل.س', bold: true, big: true });
+    // A cash return has none
+    const cash = receiptLines({
+      ...data,
+      kind: 'return',
+      doc: {
+        ...data.doc,
+        number: 'SRT-001-002-0000004',
+        payload: { ...ret, refunds: [{ ...ret.refunds[0], method: 'cash' }] } as never,
+      },
+    } as never);
+    expect(cash.some((l) => l.kind === 'barcode')).toBe(false);
+  });
 });

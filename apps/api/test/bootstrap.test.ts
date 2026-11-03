@@ -125,6 +125,7 @@ describe('GET /v1/sync/bootstrap and the snapshot file', () => {
       'user_roles',
       'users',
       'variants',
+      'vouchers',
     ]);
 
     const file = await download(device, info.url);

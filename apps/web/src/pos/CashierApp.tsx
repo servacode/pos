@@ -443,6 +443,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               onPrint={(doc) =>
                 setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'return' }, copy: false })
               }
+              onExchange={(code) => {
+                setCart((c) => ({ ...c, voucher: code }));
+                setDone(null);
+                setView('sale');
+              }}
             />
           ) : (
             <CashMovementScreen

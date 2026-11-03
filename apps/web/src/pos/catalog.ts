@@ -11,6 +11,7 @@ import type {
   TaxRateRow,
   UnitRow,
   VariantRow,
+  VoucherRow,
 } from '@serva/core/contracts/catalog';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { CustomerRow } from '@serva/core/contracts/customers';
@@ -77,6 +78,8 @@ export interface Catalog {
   customers: CustomerRow[];
   /** Promotions not stopped; which run now is decided at each sale (promotionActive) */
   promotions: PromotionRow[];
+  /** Exchange vouchers, as last pulled (pay/vouchers.ts adds this till's own) */
+  vouchers: VoucherRow[];
 }
 
 export type CatalogSets = { [K in keyof PullSetRows]: PullSetRows[K][] };
@@ -98,6 +101,7 @@ export const CATALOG_SETS = [
   'branches',
   'customers',
   'promotions',
+  'vouchers',
 ] as const satisfies readonly (keyof PullSetRows)[];
 
 export async function readCatalogSets(store: SyncStore): Promise<CatalogSets> {
@@ -225,6 +229,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       .filter((c) => !c.archived)
       .sort((a, b) => a.name.localeCompare(b.name, 'ar')),
     promotions: (sets.promotions ?? []).filter((p) => !p.archived),
+    vouchers: sets.vouchers ?? [],
   };
 }
 

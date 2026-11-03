@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { formatMoney, type CurrencyCode } from '@serva/core';
-import { barcodeModules } from './barcode';
+import { Bars } from '../../lib/Bars';
 
 /** One label to print: a piece of a product with its options, price and code. */
 export interface LabelItem {
@@ -34,33 +34,6 @@ export const LABEL_LAYOUTS = {
   },
 } as const;
 export type LabelLayout = keyof typeof LABEL_LAYOUTS;
-
-/** The bars as one SVG path: dark runs as rectangles, so it stays sharp at any printer's dots. */
-export function Bars({ code, height }: { code: string; height: number }) {
-  const { modules } = barcodeModules(code);
-  let d = '';
-  for (let i = 0; i < modules.length;) {
-    if (modules[i] !== '1') {
-      i++;
-      continue;
-    }
-    let j = i;
-    while (modules[j] === '1') j++;
-    d += `M${i} 0h${j - i}v${height}h${i - j}z`;
-    i = j;
-  }
-  return (
-    <svg
-      viewBox={`0 0 ${modules.length} ${height}`}
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={`باركود ${code}`}
-      className="block h-full w-full"
-    >
-      <path d={d} fill="currentColor" />
-    </svg>
-  );
-}
 
 /** One label: the store, the product and its options, the price big, the bars and their digits. */
 export function Label({ item, store, showStore }: { item: LabelItem; store: string; showStore: boolean }) {

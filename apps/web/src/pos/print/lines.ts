@@ -10,13 +10,17 @@ import { methodLabel, type ReceiptData } from '../receipt/Receipt';
  * What a thermal printer prints, line by line (21 › إيصال 80 مم): the same receipt as the screen's,
  * as plain lines a canvas can draw (render.ts) and the printer takes as an image, because most
  * thermal printers carry no Arabic font. A line is a centred text, a «label … amount» pair (label
- * at the start, which is the right in Arabic), or a rule.
+ * at the start, which is the right in Arabic), a barcode, or a rule.
  */
 export type PrintLine =
   | { kind: 'center'; text: string; bold?: boolean; big?: boolean }
   | { kind: 'pair'; start: string; end: string; bold?: boolean }
   | { kind: 'text'; text: string; bold?: boolean }
+  | { kind: 'barcode'; code: string }
   | { kind: 'rule' };
+
+/** Under an exchange voucher, on the slip and on the screen's copy */
+export const VOUCHER_NOTE = 'تُصرف في المحل بهذا الرقم، كلها أو على دفعات. لا تُصرف نقداً.';
 
 const money = (minor: number, currency: CurrencyCode) => stripBidiControls(formatMoney(minor, currency));
 
@@ -67,6 +71,20 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       bold: true,
     });
     lines.push({ kind: 'pair', start: 'السبب', end: r.reason });
+    const voucher = r.refunds.find((x) => x.method === 'voucher');
+    if (voucher && data.doc.number) {
+      lines.push({ kind: 'rule' });
+      lines.push({ kind: 'center', text: 'قسيمة استبدال', bold: true, big: true });
+      lines.push({
+        kind: 'center',
+        text: money(voucher.amountMinor, voucher.currency),
+        bold: true,
+        big: true,
+      });
+      lines.push({ kind: 'barcode', code: data.doc.number });
+      lines.push({ kind: 'center', text: data.doc.number });
+      lines.push({ kind: 'center', text: VOUCHER_NOTE });
+    }
     return [...lines, ...footer(data, false)];
   }
   if (data.kind === 'receipt') {

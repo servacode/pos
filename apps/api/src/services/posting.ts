@@ -39,6 +39,8 @@ import {
  *        1140 card, 1150 wallet, 1130 transfer
  * - receipt: a customer's payment. Dr 1110 drawer of the shift (cash), 1140 card, 1150 wallet,
  *   1130 transfer, 1160 cheque (party); Cr 1200 for the customer (party).
+ * - voucher (03 › قسيمة الاستبدال): a return refunded as a voucher credits 2310 instead of paying
+ *   out; a sale spending it debits 2310.
  * - cheque (services/cheques.ts, not a document): the owner marks a cheque in 1160 cashed, Dr 1130
  *   Cr 1160, or bounced, Dr 1200 Cr 1160, both for its customer.
  * - cash_movement: pay_in 1110 ← 1120; pay_out and safe_drop 1120 ← 1110; expense 61xx ← 1110.
@@ -226,6 +228,7 @@ const METHOD_ACCOUNTS = {
   transfer: '1130',
   credit: '1200',
   cheque: '1160',
+  voucher: '2310',
 } as const;
 
 const methodMemo: Record<string, string> = {
@@ -234,6 +237,7 @@ const methodMemo: Record<string, string> = {
   transfer: 'تحويل',
   credit: 'آجل',
   cheque: 'شيك',
+  voucher: 'قسيمة استبدال',
 };
 
 export interface SaleSource {

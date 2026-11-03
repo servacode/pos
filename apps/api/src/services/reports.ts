@@ -142,7 +142,7 @@ async function paymentsByMethod(tx: Transaction, where: SQL) {
     select method, currency, sum(amount)::text as amount, sum(base)::text as base,
            count(distinct invoice_id)::text as count
     from paid group by method, currency
-    order by array_position(array['cash', 'card', 'wallet', 'transfer', 'credit', 'cheque'], method), currency`);
+    order by array_position(array['cash', 'card', 'wallet', 'transfer', 'credit', 'cheque', 'voucher'], method), currency`);
   return rows.map((r) => ({
     method: r.method,
     currency: r.currency,
@@ -226,7 +226,7 @@ export async function dayReport(
       select r.refund_method as method, r.currency, sum(r.total_minor)::text as amount, count(*)::text as n
       from sale_returns r where ${returnsWhere} and r.refund_method is not null
       group by r.refund_method, r.currency
-      order by array_position(array['cash', 'card', 'wallet', 'transfer'], r.refund_method), r.currency`);
+      order by array_position(array['cash', 'card', 'wallet', 'transfer', 'voucher'], r.refund_method), r.currency`);
     const returnsTotal = num(returned?.total);
     const collected = await tx.execute<{
       method: ReceiptMethod;

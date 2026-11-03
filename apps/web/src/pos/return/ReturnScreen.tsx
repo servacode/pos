@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Approval, RefundMethod, ReturnPayload } from '@serva/core/contracts/documents';
+import {
+  REFUND_METHODS,
+  type Approval,
+  type RefundMethod,
+  type ReturnPayload,
+} from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
 import { buildReturnPayload, defaultRefundMethod, returnableLines } from '@serva/core/sale-return';
@@ -31,15 +36,22 @@ const REFUND_TEXT: Record<RefundMethod, string> = {
   card: 'إلى البطاقة',
   wallet: 'إلى شام كاش',
   transfer: 'بتحويل',
+  voucher: 'على قسيمة استبدال',
 };
 
 export type SavedReturn = Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
+
+const savedRefund = (saved: SavedReturn): RefundMethod =>
+  (saved.payload as unknown as ReturnPayload).refunds[0]?.method ?? 'cash';
 
 /**
  * «مرتجع» (08 › مرتجع مبيعات): the cashier finds an invoice of this till from the last week, picks
  * what comes back, the reason and how the money goes back, and saves a return (SRT) that names the
  * invoice. The amounts are the invoice's own (buildReturnPayload), never retyped. A cashier without
  * «المرتجعات» needs a manager's code.
+ *
+ * An exchange (03 › الملابس: الاستبدال) is a return on «قسيمة استبدال»: no money leaves the drawer,
+ * the receipt carries the voucher, and «بيع البديل» goes back to the sale with it at payment.
  */
 export function ReturnScreen({
   session,
@@ -48,6 +60,7 @@ export function ReturnScreen({
   shift,
   onBack,
   onPrint,
+  onExchange,
 }: {
   session: StaffSession;
   catalog: Catalog;
@@ -55,6 +68,8 @@ export function ReturnScreen({
   shift: OpenShift;
   onBack: () => void;
   onPrint: (saved: SavedReturn) => void;
+  /** Back to the sale with the voucher just issued, to sell the other piece */
+  onExchange?: (voucherCode: string) => void;
 }) {
   const pos = usePos();
   const digits = useDigits();
@@ -91,7 +106,7 @@ export function ReturnScreen({
     .map(([lineNo, q]) => ({ saleLineNo: Number(lineNo), qty: q }))
     .filter((p) => p.qty > 0);
   const why = reason === 'other' ? otherReason.trim() : reason;
-  const needsReference = method !== 'cash';
+  const needsReference = method !== 'cash' && method !== 'voucher';
 
   const draft = useMemo((): ReturnPayload | null => {
     if (!current || picks.length === 0) return null;
@@ -243,13 +258,23 @@ export function ReturnScreen({
                 currency={(saved.payload as unknown as ReturnPayload).currency}
                 className="font-bold"
               />{' '}
-              {REFUND_TEXT[(saved.payload as unknown as ReturnPayload).refunds[0]?.method ?? 'cash']}
+              {REFUND_TEXT[savedRefund(saved)]}
             </p>
-            <div className="flex gap-3">
+            {savedRefund(saved) === 'voucher' ? (
+              <p className="text-ink-muted">
+                القسيمة برقم المرتجع، مطبوعة على الإيصال. تُصرف على أي جهاز في المحل.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-3">
+              {savedRefund(saved) === 'voucher' && onExchange && saved.number ? (
+                <Button onClick={() => onExchange(saved.number!)}>بيع البديل بالقسيمة</Button>
+              ) : null}
               <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
                 اطبع الإيصال مرة أخرى
               </Button>
-              <Button onClick={() => setSaved(null)}>مرتجع آخر من نفس الفاتورة</Button>
+              <Button variant="secondary" onClick={() => setSaved(null)}>
+                مرتجع آخر من نفس الفاتورة
+              </Button>
               <Button variant="secondary" onClick={onBack}>
                 ارجع للبيع
               </Button>
@@ -341,8 +366,11 @@ export function ReturnScreen({
               />
             ) : null}
             <div role="group" aria-label="طريقة الرد" className="flex flex-wrap gap-2">
-              {(['cash', ...new Set(current.sale.payments.map((p) => p.method))] as const)
-                .filter((m, i, all): m is RefundMethod => m !== 'credit' && all.indexOf(m) === i)
+              {['cash', ...current.sale.payments.map((p) => p.method), 'voucher']
+                .filter(
+                  (m, i, all): m is RefundMethod =>
+                    (REFUND_METHODS as readonly string[]).includes(m) && all.indexOf(m) === i,
+                )
                 .map((m) => (
                   <button
                     key={m}
@@ -374,7 +402,9 @@ export function ReturnScreen({
               aria-label="المبلغ المردود"
               className="flex items-center justify-between rounded-card bg-surface-total p-4"
             >
-              <span className="font-semibold text-ink-muted">المبلغ المردود</span>
+              <span className="font-semibold text-ink-muted">
+                {method === 'voucher' ? 'مبلغ القسيمة' : 'المبلغ المردود'}
+              </span>
               <Money
                 minor={draft?.totals.totalMinor ?? 0}
                 currency={current.sale.currency}
@@ -390,7 +420,11 @@ export function ReturnScreen({
               <ManagerCode
                 staff={staff}
                 permission="sale.refund"
-                reason="المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه."
+                reason={
+                  method === 'voucher'
+                    ? 'المرتجع يُصدر قسيمة بمبلغه، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                    : 'المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                }
                 onApproved={(approval) => void record(approval)}
                 onCancel={() => setApproving(false)}
               />

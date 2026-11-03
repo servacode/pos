@@ -90,6 +90,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
   user_roles: ['id', 'userId', 'roleId', 'branchId', 'version'],
   branches: ['id', 'code', 'name', 'address', 'phone', 'isActive', 'version'],
   customers: ['id', 'name', 'phone', 'creditLimitMinor', 'priceTier', 'archived', 'version'],
+  vouchers: ['id', 'code', 'currency', 'amountMinor', 'redeemedMinor', 'version'],
   promotions: [
     'id',
     'name',
@@ -146,6 +147,10 @@ describe('catalog pull sets', () => {
       payload: { name: 'خصم الأسبوع', kind: 'percent', percentBp: 1000, scope: 'all' },
     });
     expect(promo.statusCode, promo.body).toBe(201);
+    // An exchange voucher, as a return on «قسيمة استبدال» leaves it
+    await ownerDb()`
+      insert into vouchers (id, tenant_id, code, return_id, currency, amount_minor)
+      values (gen_random_uuid(), ${body.tenant.id}, 'SRT-001-001-0000001', gen_random_uuid(), 'SYP', 45000)`;
     const page = await pullAll((await createDevice(body.tenant.id)).authorization);
     expect(Object.keys(page.sets).sort()).toEqual(Object.keys(FIELDS).sort());
     for (const [set, fields] of Object.entries(FIELDS)) {

@@ -12,7 +12,8 @@ import { rateFor } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
 import { cn, displayNumber, formatQuantity, Money, useDigits } from '@serva/ui';
 import { clockText, dateText } from '../format';
-import { discountLabel } from '../print/lines';
+import { Bars } from '../../lib/Bars';
+import { discountLabel, VOUCHER_NOTE } from '../print/lines';
 import { ORDER_TYPE_TEXT } from './KitchenTicket';
 
 export type PaperWidth = 80 | 58;
@@ -24,6 +25,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   transfer: 'تحويل',
   credit: 'آجل على الحساب',
   cheque: 'شيك',
+  voucher: 'قسيمة استبدال',
 };
 
 export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base: CurrencyCode): string {
@@ -107,6 +109,7 @@ const REFUND_LABEL: Record<ReturnPayload['refunds'][number]['method'], string> =
   card: 'رُدّ إلى البطاقة',
   wallet: 'رُدّ إلى شام كاش',
   transfer: 'رُدّ بتحويل',
+  voucher: 'قسيمة استبدال',
 };
 
 /** The payment voucher (08 › سند قبض): who paid, how much and how, toward their account. */
@@ -160,6 +163,7 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
   const ret = data.doc.payload as unknown as ReturnPayload;
   const at = Date.parse(data.doc.deviceTime);
   const amount = (minor: number) => <Money minor={minor} currency={ret.currency} symbol={false} />;
+  const voucher = ret.refunds.find((r) => r.method === 'voucher');
   return (
     <div dir="rtl" lang="ar" aria-label={`إيصال مرتجع ${width} مم`} className={slipClass(width)}>
       <ReceiptHeader data={data} width={width} copy={copy} />
@@ -214,6 +218,22 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
         </div>
       ))}
       <Row label={<span className="text-xs">السبب</span>}>{ret.reason}</Row>
+      {voucher && data.doc.number ? (
+        <>
+          <Rule />
+          <section aria-label="قسيمة الاستبدال" className="flex flex-col items-center gap-1 text-center">
+            <span className="text-base font-bold">قسيمة استبدال</span>
+            <Money minor={voucher.amountMinor} currency={voucher.currency} className="text-lg font-bold" />
+            <div className="h-12 w-full px-2">
+              <Bars code={data.doc.number} height={40} />
+            </div>
+            <bdi dir="ltr" className="num">
+              {data.doc.number}
+            </bdi>
+            <span className="text-xs">{VOUCHER_NOTE}</span>
+          </section>
+        </>
+      ) : null}
       <Rule />
       <p className="text-center text-[10px]">
         سيرفا ·{' '}

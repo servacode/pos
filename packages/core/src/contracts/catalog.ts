@@ -792,6 +792,19 @@ export interface BranchRow {
   version: number;
 }
 
+/**
+ * `vouchers` (03 › الملابس: قسيمة الاستبدال): exchange vouchers by their code, the return's number,
+ * with what was given and what sales the server has seen spent of it.
+ */
+export interface VoucherRow {
+  id: string;
+  code: string;
+  currency: CurrencyCode;
+  amountMinor: number;
+  redeemedMinor: number;
+  version: number;
+}
+
 /** Row type of every set a cashier device pulls in phase 1. */
 export interface PullSetRows {
   products: ProductRow;
@@ -810,4 +823,5 @@ export interface PullSetRows {
   branches: BranchRow;
   customers: CustomerRow;
   promotions: PromotionRow;
+  vouchers: VoucherRow;
 }
