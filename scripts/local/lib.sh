@@ -105,6 +105,10 @@ SERVA_EXTRA_HOSTS=
 # Test mode: there is no SMS here, so the sign-up code is shown on screen and every page carries
 # «نسخة تجربة على الخادم المحلي». Set to none to stop sign-up instead (docs/local-server.md).
 SERVA_OTP_DELIVERY=screen
+# SERVA_OTP_DELIVERY=gateway sends the codes through a WhatsApp bot or SMS service instead:
+# its address and the secret it expects (docs/local-server.md › إرسال الرمز عبر واتساب)
+SERVA_OTP_GATEWAY_URL=
+SERVA_OTP_GATEWAY_TOKEN=
 
 # Backups: folder and how many to keep (oldest are deleted)
 SERVA_BACKUP_DIR=

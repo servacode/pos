@@ -109,6 +109,9 @@ services:
       # deploy/local/.env turns it off. The API refuses "screen" without DEPLOYMENT=local.
       DEPLOYMENT: local
       OTP_DELIVERY: ${SERVA_OTP_DELIVERY:-screen}
+      # SERVA_OTP_DELIVERY=gateway: the WhatsApp bot (or SMS provider) that sends the codes
+      OTP_GATEWAY_URL: ${SERVA_OTP_GATEWAY_URL:-}
+      OTP_GATEWAY_TOKEN: ${SERVA_OTP_GATEWAY_TOKEN:-}
       LOG_LEVEL: info
     depends_on:
       postgres:

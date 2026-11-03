@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import type { RegisterResponse, RegisterStoreData, VerifyRegistrationData } from '@serva/core';
 import { uuidv7 } from '@serva/db';
 import type { FastifyInstance } from 'fastify';
-import { hashOtp, isTestMode, newOtpCode } from '../auth/otp';
+import { hashOtp, isTestMode, newOtpCode, OtpDeliveryError } from '../auth/otp';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { registerStore, type RegisteredStore } from './stores';
@@ -63,7 +63,13 @@ export async function startRegistration(
     ${registrationId}::uuid, 'registration', ${data.phone}, ${hashOtp(env.JWT_SECRET, registrationId, code)},
     ${JSON.stringify(payload)}::jsonb, ${new Date(now.getTime() + CODE_TTL_SECONDS * 1000).toISOString()}::timestamptz,
     ${meta.ip}, ${now.toISOString()}::timestamptz)`);
-  await otpSender.send({ phone: data.phone, code, purpose: 'registration' });
+  try {
+    await otpSender.send({ phone: data.phone, code, purpose: 'registration' });
+  } catch (error) {
+    // The challenge stays unused and expires; the person simply asks again.
+    if (error instanceof OtpDeliveryError) throw codeUnavailable();
+    throw error;
+  }
   return onScreen ? { ...answer, testCode: code } : answer;
 }
 
