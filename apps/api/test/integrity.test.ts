@@ -17,7 +17,9 @@ import {
   type Store,
 } from './accounting-fixtures';
 import { createDevice, type TestDevice } from './devices';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
+import { withTenant } from '@serva/db';
+import { checkIntegrity } from '../src/services/integrity';
+import { appDb, closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 
 /**
  * «فحص السلامة» (23 › شرط العبور; 10 › قواعد الضمان): after any day of two devices, sent in any
@@ -278,10 +280,15 @@ async function integrityCheck(store: Store, shiftIds: string[]) {
   const stock = await ownerDb()`
     select l.variant_id from stock_levels l
     where l.tenant_id = ${store.tenantId}
-      and l.qty <> 1000000 + coalesce((select sum(m.qty) from stock_movements m
+      and l.qty <> coalesce((select sum(m.qty) from stock_movements m
                                        where m.tenant_id = l.tenant_id and m.variant_id = l.variant_id
                                          and m.branch_id = l.branch_id), 0)`;
   expect(stock).toEqual([]);
+
+  // 5. The server's own check (services/integrity.ts, task M0-5) agrees, under row-level security.
+  const report = await withTenant(appDb().db, store.tenantId, (tx) => checkIntegrity(tx, store.tenantId));
+  expect(report.checks.flatMap((c) => c.problems)).toEqual([]);
+  expect(report.ok).toBe(true);
   return trial;
 }
 
@@ -293,6 +300,9 @@ async function storeWithProducts(phone: string) {
   for (const v of variants) {
     await ownerDb()`insert into stock_levels (tenant_id, branch_id, variant_id, qty)
       values (${store.tenantId}, ${store.device.branchId}, ${v.variantId}, 1000000)`;
+    // The opening stock as a movement too, so a level always equals its movements.
+    await ownerDb()`insert into stock_movements (tenant_id, branch_id, variant_id, qty, kind, doc_id, line_no, business_date)
+      values (${store.tenantId}, ${store.device.branchId}, ${v.variantId}, 1000000, 'opening', gen_random_uuid(), 1, '2026-10-30')`;
   }
   return { store, second, products: { variants } };
 }

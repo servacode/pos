@@ -13,6 +13,7 @@ apps/api/src/services/posting.ts
 apps/api/src/services/processors.ts
 apps/api/src/services/sync-push.ts
 apps/api/src/services/reports.ts
+apps/api/src/services/integrity.ts
 packages/db/drizzle/
 packages/db/src/schema.ts
 packages/db/src/migrate.ts
@@ -22,6 +23,7 @@ apps/api/test/golden-day.test.ts
 apps/api/test/posting.test.ts
 apps/api/test/posting-properties.test.ts
 apps/api/test/integrity.test.ts
+apps/api/test/integrity-service.test.ts
 apps/api/test/held-for-processing.test.ts
 scripts/local/
 scripts/ci/
