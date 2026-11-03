@@ -9,6 +9,7 @@ import type {
   JournalPage,
   JournalSourceType,
   PaymentMethod,
+  ReceiptMethod,
   RefundMethod,
   ShiftCurrencyReport,
   ShiftListResponse,
@@ -141,7 +142,7 @@ async function paymentsByMethod(tx: Transaction, where: SQL) {
     select method, currency, sum(amount)::text as amount, sum(base)::text as base,
            count(distinct invoice_id)::text as count
     from paid group by method, currency
-    order by array_position(array['cash', 'card', 'wallet', 'transfer', 'credit'], method), currency`);
+    order by array_position(array['cash', 'card', 'wallet', 'transfer', 'credit', 'cheque'], method), currency`);
   return rows.map((r) => ({
     method: r.method,
     currency: r.currency,
@@ -221,7 +222,7 @@ export async function dayReport(
       order by array_position(array['cash', 'card', 'wallet', 'transfer'], r.refund_method), r.currency`);
     const returnsTotal = num(returned?.total);
     const collected = await tx.execute<{
-      method: RefundMethod;
+      method: ReceiptMethod;
       currency: CurrencyCode;
       amount: string;
       n: string;
@@ -229,7 +230,7 @@ export async function dayReport(
       select r.method, r.currency, sum(r.amount_minor)::text as amount, count(*)::text as n
       from receipts r where r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}
       group by r.method, r.currency
-      order by array_position(array['cash', 'card', 'wallet', 'transfer'], r.method), r.currency`);
+      order by array_position(array['cash', 'card', 'wallet', 'transfer', 'cheque'], r.method), r.currency`);
     return {
       date: query.date,
       branchId: query.branchId ?? null,

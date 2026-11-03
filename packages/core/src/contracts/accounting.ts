@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { CurrencyCode } from '../currencies';
-import type { PaymentMethod, RefundMethod } from './documents';
+import type { PaymentMethod, ReceiptMethod, RefundMethod } from './documents';
 import { isoDateSchema, listPageQuery, uuidSchema, type TradeRate } from './common';
 
 /**
@@ -104,7 +104,7 @@ export interface DayReport {
   collections: {
     count: number;
     totalMinor: number;
-    byMethod: { method: RefundMethod; currency: CurrencyCode; amountMinor: number; count: number }[];
+    byMethod: { method: ReceiptMethod; currency: CurrencyCode; amountMinor: number; count: number }[];
   };
   baseCurrency: CurrencyCode;
 }
@@ -190,6 +190,7 @@ export const JOURNAL_SOURCE_TYPES = [
   'supplier_payment',
   'cost_of_sales',
   'stocktake',
+  'cheque',
   'shift_close',
   'cash_movement',
   'manual',

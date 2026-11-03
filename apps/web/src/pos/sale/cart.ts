@@ -50,11 +50,16 @@ export interface CartLine {
   approval: Approval | null;
   /** The product's category and those above it, for promotions on a category */
   categoryPath?: readonly string[];
+  /** One pack at the shelf price and at the wholesale price (null: none), in priceCurrency */
+  retailPriceMinor?: number;
+  wholesalePriceMinor?: number | null;
 }
 
 export interface Cart {
   lines: CartLine[];
   nextLineNo: number;
+  /** «سعر الجملة» (03 › الجملة): every line at its wholesale price where it has one */
+  priceTier?: 'retail' | 'wholesale';
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
   invoiceApproval: Approval | null;
 }
@@ -83,6 +88,11 @@ export function addItem(cart: Cart, item: CatalogItem, hit?: BarcodeHit | null, 
   if (same && !weighed) {
     return { ...cart, lines: cart.lines.map((l) => (l === same ? { ...l, qty: l.qty + qty } : l)) };
   }
+  const retail = hit
+    ? packPrice(item.price.priceMinor, packQty, hit.barcode.packPriceMinor)
+    : item.price.priceMinor;
+  const wholesaleUnit = item.price.wholesalePriceMinor ?? null;
+  const wholesale = wholesaleUnit === null ? null : packPrice(wholesaleUnit, packQty, null);
   const line: CartLine = {
     lineNo: cart.nextLineNo,
     variantId: item.variantId,
@@ -95,9 +105,9 @@ export function addItem(cart: Cart, item: CatalogItem, hit?: BarcodeHit | null, 
     packName: hit?.barcode.packName ?? null,
     qty,
     priceCurrency: item.price.currency,
-    priceMinor: hit
-      ? packPrice(item.price.priceMinor, packQty, hit.barcode.packPriceMinor)
-      : item.price.priceMinor,
+    priceMinor: cart.priceTier === 'wholesale' && wholesale !== null ? wholesale : retail,
+    retailPriceMinor: retail,
+    wholesalePriceMinor: wholesale,
     minPriceMinor: item.price.minPriceMinor,
     taxRateId: item.taxRate?.id ?? null,
     taxRateBp: item.taxRate?.rateBp ?? 0,
@@ -106,6 +116,19 @@ export function addItem(cart: Cart, item: CatalogItem, hit?: BarcodeHit | null, 
     categoryPath: item.categoryPath ?? [],
   };
   return { ...cart, lines: [...cart.lines, line], nextLineNo: cart.nextLineNo + 1 };
+}
+
+/** Every line at the shelf or the wholesale price; a line without a wholesale price keeps the shelf one. */
+export function setPriceTier(cart: Cart, tier: 'retail' | 'wholesale'): Cart {
+  return {
+    ...cart,
+    priceTier: tier,
+    lines: cart.lines.map((line) => {
+      const retail = line.retailPriceMinor ?? line.priceMinor;
+      const wholesale = line.wholesalePriceMinor ?? null;
+      return { ...line, priceMinor: tier === 'wholesale' && wholesale !== null ? wholesale : retail };
+    }),
+  };
 }
 
 export function updateLine(cart: Cart, lineNo: number, patch: Partial<CartLine>): Cart {

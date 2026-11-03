@@ -24,6 +24,7 @@ import {
   AddIcon,
   DeleteIcon,
   OfferIcon,
+  PrintIcon,
   RetryIcon,
   SearchIcon,
   UndoIcon,
@@ -41,6 +42,7 @@ import {
   lineNeed,
   pieceCount,
   priceCart,
+  setPriceTier,
   removeLine,
   restoreLine,
   unitPriceOf,
@@ -53,6 +55,7 @@ import {
   type PricingContext,
 } from './cart';
 import { useScanner } from './useScanner';
+import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 
 const PaymentPanel = lazy(() => import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })));
 
@@ -147,6 +150,7 @@ export function SaleScreen(props: SaleScreenProps) {
   const [notice, setNotice] = useState<{ tone: 'warning' | 'info'; text: string } | null>(null);
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
+  const [quote, setQuote] = useState<QuoteData | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const cartRef = useRef(cart);
   cartRef.current = cart;
@@ -263,6 +267,12 @@ export function SaleScreen(props: SaleScreenProps) {
     minLength: mode.kind === 'pay' ? 8 : 3,
   });
 
+  // A quote prints once it is on the page, then leaves it.
+  useEffect(() => {
+    if (!quote) return;
+    window.print();
+    setQuote(null);
+  }, [quote]);
   useEffect(() => {
     if (bump === null) return;
     const timer = setTimeout(() => setBump(null), 900);
@@ -421,6 +431,37 @@ export function SaleScreen(props: SaleScreenProps) {
           {lineCount === 0 ? 'فاتورة جديدة' : 'الفاتورة الحالية'}
         </span>
         <span className="flex-1" />
+        {session.permissions.has('sale.wholesale') || cart.priceTier === 'wholesale' ? (
+          <Button
+            size="sm"
+            variant={cart.priceTier === 'wholesale' ? 'primary' : 'secondary'}
+            aria-pressed={cart.priceTier === 'wholesale'}
+            onClick={() =>
+              setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
+            }
+          >
+            سعر الجملة
+          </Button>
+        ) : null}
+        {priced ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<PrintIcon size={16} />}
+            onClick={() =>
+              setQuote({
+                settings,
+                lines: priced.lines,
+                totals: priced.priced.totals,
+                at: Date.now(),
+                cashierName: session.fullName,
+                wholesale: cart.priceTier === 'wholesale',
+              })
+            }
+          >
+            عرض سعر
+          </Button>
+        ) : null}
         {props.heldCount > 0 ? (
           <span className="rounded-full bg-warning-soft px-3 py-1 text-xs font-semibold text-warning-ink">
             {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
@@ -673,6 +714,7 @@ export function SaleScreen(props: SaleScreenProps) {
 
   return (
     <CashierShell statusBar={props.statusBar} cart={cartPanel} mainClassName="gap-3.5 p-4 xl:px-6">
+      {quote ? <PrintableQuote data={quote} width={80} /> : null}
       {effectiveMode.kind === 'pay' && priced ? (
         <Suspense fallback={null}>
           <PaymentPanel
@@ -683,6 +725,7 @@ export function SaleScreen(props: SaleScreenProps) {
             shiftId={props.shiftId}
             cashierId={session.userId}
             canCredit={session.permissions.has('sale.credit')}
+            onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
             onBack={() => setMode({ kind: 'items' })}
             onCompleted={(entry) => {
               setMode({ kind: 'items' });

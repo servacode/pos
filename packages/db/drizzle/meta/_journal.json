@@ -148,6 +148,13 @@
       "when": 1793708078040,
       "tag": "0020_supermarket",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793709844823,
+      "tag": "0021_wholesale",
+      "breakpoints": true
     }
   ]
 }

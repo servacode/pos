@@ -43,6 +43,8 @@ export interface VariantDraft {
   currency: CurrencyCode;
   priceMinor: number | null;
   minPriceMinor: number | null;
+  /** «سعر الجملة» of one unit; null = none */
+  wholesalePriceMinor?: number | null;
   /** «الحد الأدنى في الفرع» as typed, in the product's unit ("5", "2.5"); "" = none. */
   minStock: string;
   barcodes: BarcodeDraft[];
@@ -127,6 +129,7 @@ export function emptyDraft(options: {
         currency: options.currency,
         priceMinor: null,
         minPriceMinor: null,
+        wholesalePriceMinor: null,
         minStock: '',
         barcodes: options.barcode ? [newBarcode('standard', options.barcode)] : [],
         archived: false,
@@ -144,6 +147,7 @@ function variantDraft(variant: VariantDetail): VariantDraft {
     currency: variant.price.currency,
     priceMinor: variant.price.priceMinor,
     minPriceMinor: variant.minPriceMinor,
+    wholesalePriceMinor: variant.wholesalePriceMinor ?? null,
     minStock: qtyText(variant.minStockQty),
     barcodes: variant.barcodes.map((b) => ({
       key: b.id,
@@ -247,6 +251,7 @@ export function applyAxes(variants: readonly VariantDraft[], axes: readonly Axis
       currency: template.currency,
       priceMinor: template.priceMinor,
       minPriceMinor: template.minPriceMinor,
+      wholesalePriceMinor: template.wholesalePriceMinor ?? null,
       minStock: template.minStock,
       barcodes: [],
       archived: false,
@@ -299,6 +304,7 @@ function fullVariant(variant: VariantDraft) {
     attributes: variant.attributes,
     price: { currency: variant.currency, priceMinor: variant.priceMinor ?? 0 },
     minPriceMinor: variant.minPriceMinor,
+    wholesalePriceMinor: variant.wholesalePriceMinor ?? null,
     minStockQty: qtyFromText(variant.minStock),
     barcodes: variant.barcodes.map(barcodeInput),
   };
@@ -356,6 +362,9 @@ function variantPatch(draft: VariantDraft, original: VariantDetail | undefined):
     patch.price = { currency: draft.currency, priceMinor: draft.priceMinor };
   }
   if (draft.minPriceMinor !== original.minPriceMinor) patch.minPriceMinor = draft.minPriceMinor;
+  if ((draft.wholesalePriceMinor ?? null) !== (original.wholesalePriceMinor ?? null)) {
+    patch.wholesalePriceMinor = draft.wholesalePriceMinor ?? null;
+  }
   const minStockQty = qtyFromText(draft.minStock);
   if (minStockQty !== original.minStockQty) patch.minStockQty = minStockQty;
   const barcodes = draft.barcodes.map(barcodeInput);
@@ -465,7 +474,8 @@ export function changedParts(before: ProductDetail, after: ProductDetail): strin
   if (before.categoryId !== after.categoryId) parts.push('التصنيف');
   if (before.unitId !== after.unitId || before.type !== after.type) parts.push('الوحدة');
   if (before.taxRateId !== after.taxRateId) parts.push('الضريبة');
-  const prices = (p: ProductDetail) => p.variants.map((v) => [v.id, v.price, v.minPriceMinor]);
+  const prices = (p: ProductDetail) =>
+    p.variants.map((v) => [v.id, v.price, v.minPriceMinor, v.wholesalePriceMinor]);
   if (!sameJson(prices(before), prices(after))) parts.push('السعر');
   const codes = (p: ProductDetail) => p.variants.map((v) => v.barcodes.map((b) => b.code));
   if (!sameJson(codes(before), codes(after))) parts.push('الباركود');

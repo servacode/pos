@@ -26,7 +26,8 @@ import {
  *
  * - sale: one entry per invoice.
  *     Dr 1110 drawer of each cash currency (tendered − change in it, at the payment's rate),
- *        1140 card, 1150 wallet, 1130 transfer, 1200 credit (the customer), 4200 discounts ex tax
+ *        1140 card, 1150 wallet, 1130 transfer, 1200 credit (the customer), 1160 cheque (the
+ *        customer named on the line), 4200 discounts ex tax
  *     Cr 4100 sales ex tax before discount, the tax account of each rate (2200/2210/2220),
  *        2550 tips; ± 6400 cash rounding (a gain is a credit)
  *   Cost of sales is not posted per sale: 10 › الكلفة والربح makes it one daily entry per branch
@@ -37,7 +38,9 @@ import {
  *     Cr 4200 discounts ex tax, and the money paid back: 1110 drawer of the shift (cash),
  *        1140 card, 1150 wallet, 1130 transfer
  * - receipt: a customer's payment. Dr 1110 drawer of the shift (cash), 1140 card, 1150 wallet,
- *   1130 transfer; Cr 1200 for the customer (party).
+ *   1130 transfer, 1160 cheque (party); Cr 1200 for the customer (party).
+ * - cheque (services/cheques.ts, not a document): the owner marks a cheque in 1160 cashed, Dr 1130
+ *   Cr 1160, or bounced, Dr 1200 Cr 1160, both for its customer.
  * - cash_movement: pay_in 1110 ← 1120; pay_out and safe_drop 1120 ← 1110; expense 61xx ← 1110.
  * - shift_close: per drawer currency, the counted difference: a shortage Dr 6200 (or 1250 when the
  *   owner charges it to the cashier) Cr 1110; a surplus Dr 1110 Cr 6200.
@@ -217,13 +220,20 @@ const baseLine = (account: AccountRef, baseMinor: number, currency: string, memo
 /** The liability account of a tax rate's kind (10 › نموذج الضرائب السوري). */
 const TAX_ACCOUNTS: Record<string, string> = { sales: '2200', consumption: '2210', stamp: '2220' };
 /** Non-cash methods and where they wait (10 › القيود التلقائية; contract Q6: no provider sub-accounts yet). */
-const METHOD_ACCOUNTS = { card: '1140', wallet: '1150', transfer: '1130', credit: '1200' } as const;
+const METHOD_ACCOUNTS = {
+  card: '1140',
+  wallet: '1150',
+  transfer: '1130',
+  credit: '1200',
+  cheque: '1160',
+} as const;
 
 const methodMemo: Record<string, string> = {
   card: 'بطاقة',
   wallet: 'محفظة إلكترونية',
   transfer: 'تحويل',
   credit: 'آجل',
+  cheque: 'شيك',
 };
 
 export interface SaleSource {
@@ -271,7 +281,11 @@ export function saleLines(sale: SalePayload, taxAccountOf: (taxRateId: string) =
         currency: p.currency,
         amountMinor: p.amountMinor,
         rate: p.rate,
-        party: p.method === 'credit' && sale.customerId ? { type: 'customer', id: sale.customerId } : null,
+        // Credit and cheques name the customer: what they owe, or whose cheque waits in 1160
+        party:
+          (p.method === 'credit' || p.method === 'cheque') && sale.customerId
+            ? { type: 'customer', id: sale.customerId }
+            : null,
         memo: [methodMemo[p.method], p.reference, p.cardLast4 ? `****${p.cardLast4}` : null]
           .filter(Boolean)
           .join(' '),
@@ -421,12 +435,15 @@ export function receiptLines(r: ReceiptPayload): DraftLine[] {
           rate: null,
           shiftId: r.shiftId,
         }
-      : baseLine(
-          { code: METHOD_ACCOUNTS[r.method] },
-          r.amountMinor,
-          r.currency,
-          [methodMemo[r.method], r.reference].filter(Boolean).join(' '),
-        );
+      : {
+          ...baseLine(
+            { code: METHOD_ACCOUNTS[r.method] },
+            r.amountMinor,
+            r.currency,
+            [methodMemo[r.method], r.reference].filter(Boolean).join(' '),
+          ),
+          ...(r.method === 'cheque' ? { party: { type: 'customer' as const, id: r.customerId } } : {}),
+        };
   return [
     money,
     {

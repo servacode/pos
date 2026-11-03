@@ -25,6 +25,7 @@ export const ids = {
   grocery: '0192a000-0000-7000-8000-0000000000f2',
   abuKhaled: '0192a000-0000-7000-8000-0000000000a1',
   ummSamer: '0192a000-0000-7000-8000-0000000000a2',
+  alNour: '0192a000-0000-7000-8000-0000000000a3',
 };
 
 /** The codes each person types (the server's side of the fake). */
@@ -49,7 +50,13 @@ function product(
   nameAr: string,
   priceMinor: number,
   barcode: string | null,
-  options: { categoryId?: string; unitId?: string; currency?: 'SYP' | 'USD'; minPriceMinor?: number } = {},
+  options: {
+    categoryId?: string;
+    unitId?: string;
+    currency?: 'SYP' | 'USD';
+    minPriceMinor?: number;
+    wholesalePriceMinor?: number;
+  } = {},
 ) {
   const productId = id();
   const variantId = id();
@@ -84,6 +91,7 @@ function product(
       currency: options.currency ?? 'SYP',
       priceMinor,
       minPriceMinor: options.minPriceMinor ?? null,
+      wholesalePriceMinor: options.wholesalePriceMinor ?? null,
       priceChangedAt: '2026-10-01T08:00:00.000Z',
       version: 1,
     } satisfies PullSetRows['prices'],
@@ -107,7 +115,7 @@ export const PRODUCTS = {
     categoryId: ids.dairy,
     minPriceMinor: 45_000,
   }),
-  sugar: product('سكر أبيض 1 كغ', 79_000, '6291001000028'),
+  sugar: product('سكر أبيض 1 كغ', 79_000, '6291001000028', { wholesalePriceMinor: 70_000 }),
   oil: product('زيت دوار الشمس 1 لتر', 25_000, '6291001000035'),
   labneh: product('لبنة 1 كغ', 28_000, '6291001000042', { categoryId: ids.dairy }),
   tea: product('شاي أحمر 400 غ', 35_000, '6291001000059'),
@@ -192,6 +200,7 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
           'shift.view_difference',
           'sale.refund',
           'sale.credit',
+          'sale.wholesale',
           'receipt.create',
         ],
         maxDiscountBp: 10000,
@@ -219,10 +228,28 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
         name: 'أبو خالد',
         phone: '+963933111222',
         creditLimitMinor: 100_000,
+        priceTier: 'retail',
         archived: false,
         version: 1,
       },
-      { id: ids.ummSamer, name: 'أم سامر', phone: null, creditLimitMinor: null, archived: false, version: 1 },
+      {
+        id: ids.ummSamer,
+        name: 'أم سامر',
+        phone: null,
+        creditLimitMinor: null,
+        priceTier: 'retail',
+        archived: false,
+        version: 1,
+      },
+      {
+        id: ids.alNour,
+        name: 'بقالية النور',
+        phone: '+963955000111',
+        creditLimitMinor: null,
+        priceTier: 'wholesale',
+        archived: false,
+        version: 1,
+      },
     ],
     promotions: [],
     ...overrides,

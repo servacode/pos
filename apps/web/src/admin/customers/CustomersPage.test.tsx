@@ -20,6 +20,7 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   phone: '+963933111222',
   creditLimitMinor: 5_000_000,
   balanceMinor: 1_800_000,
+  priceTier: 'retail',
   archived: false,
   taxNumber: null,
   address: null,

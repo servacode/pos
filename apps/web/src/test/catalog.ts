@@ -116,6 +116,7 @@ export function variant(overrides: Partial<VariantDetail> = {}): VariantDetail {
     attributes: [],
     price: { currency: 'SYP', priceMinor: 15000 },
     minPriceMinor: null,
+    wholesalePriceMinor: null,
     minStockQty: null,
     priceChangedAt: '2026-10-01T00:00:00.000Z',
     archivedAt: null,

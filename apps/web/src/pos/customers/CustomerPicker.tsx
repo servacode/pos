@@ -12,6 +12,7 @@ export interface PickedCustomer {
   id: string;
   name: string;
   creditLimitMinor: number | null;
+  priceTier?: 'retail' | 'wholesale';
 }
 
 /** Customers whose name or phone matches what the cashier typed, at most eight */
@@ -125,7 +126,14 @@ export function CustomerPicker({
               <li key={c.id}>
                 <button
                   type="button"
-                  onClick={() => onPicked({ id: c.id, name: c.name, creditLimitMinor: c.creditLimitMinor })}
+                  onClick={() =>
+                    onPicked({
+                      id: c.id,
+                      name: c.name,
+                      creditLimitMinor: c.creditLimitMinor,
+                      priceTier: c.priceTier,
+                    })
+                  }
                   className={cn(
                     'flex min-h-12 w-full items-center justify-between gap-2 rounded-control px-3 text-start hover:bg-surface-muted',
                   )}

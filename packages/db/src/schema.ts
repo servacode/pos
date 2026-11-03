@@ -1008,6 +1008,8 @@ export const prices = pgTable(
     currency: text('currency').notNull(),
     priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
     minPriceMinor: bigint('min_price_minor', { mode: 'number' }),
+    /** «سعر الجملة» of one unit in the price's currency; null: wholesale sells at the shelf price */
+    wholesalePriceMinor: bigint('wholesale_price_minor', { mode: 'number' }),
     priceChangedAt: timestamp('price_changed_at', { withTimezone: true }).notNull().defaultNow(),
     version: version(),
     createdAt: createdAt(),
@@ -1462,6 +1464,8 @@ export const customers = pgTable(
     notes: text('notes'),
     /** Base currency; null is no limit */
     creditLimitMinor: bigint('credit_limit_minor', { mode: 'number' }),
+    /** retail or wholesale: the price the till sells to them at */
+    priceTier: text('price_tier').notNull().default('retail'),
     /** The till document that created it, when a till did */
     createdByDoc: uuid('created_by_doc'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1939,6 +1943,37 @@ export const promotions = pgTable(
   (t) => [
     primaryKey({ name: 'promotions_pkey', columns: [t.tenantId, t.id] }),
     index('promotions_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * What the owner did with a cheque waiting in 1160 (services/cheques.ts): cashed into the bank or
+ * bounced back onto the customer's account. The cheque itself is its payment (invoice_payments or
+ * receipts with method cheque); this row is written once, with the journal entry it posted.
+ */
+export const chequeActions = pgTable(
+  'cheque_actions',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** sale (an invoice's payment) or receipt (a customer's payment) */
+    sourceType: text('source_type').notNull(),
+    sourceId: uuid('source_id').notNull(),
+    /** The payment's number inside its sale; 1 for a receipt */
+    paymentNo: integer('payment_no').notNull(),
+    action: text('action').notNull(),
+    actionDate: date('action_date').notNull(),
+    note: text('note'),
+    entryId: uuid('entry_id'),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'cheque_actions_pkey', columns: [t.tenantId, t.id] }),
+    unique('cheque_actions_payment_unique').on(t.tenantId, t.sourceType, t.sourceId, t.paymentNo),
     tenantIsolation(),
   ],
 );

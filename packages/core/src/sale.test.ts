@@ -271,6 +271,11 @@ describe('buildSalePayload', () => {
     ).toThrow(/customer/);
     expect(() =>
       buildSalePayload(
+        cart([line(1, 1000)], [{ method: 'cheque', currency: 'SYP', amountMinor: 1000, reference: 'CHQ-1' }]),
+      ),
+    ).toThrow(/customer/);
+    expect(() =>
+      buildSalePayload(
         cart([line(1, 1000)], [{ method: 'card', currency: 'SYP', amountMinor: 2000, reference: '1' }]),
       ),
     ).toThrow(/exceed/);

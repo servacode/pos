@@ -57,6 +57,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/promotions': 'signed-in',
   'POST /v1/promotions': 'signed-in',
   'PUT /v1/promotions/:id': 'signed-in',
+  'GET /v1/cheques': 'signed-in',
+  'POST /v1/cheques/actions': 'signed-in',
   'POST /v1/device/staff-sessions': 'device',
   'POST /v1/sync/push': 'device',
   'GET /v1/sync/pull': 'device',

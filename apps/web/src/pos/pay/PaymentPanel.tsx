@@ -49,6 +49,8 @@ export interface PaymentPanelProps {
   cashierId: string;
   /** «البيع بالآجل» (sale.credit): the credit method shows once a customer is picked */
   canCredit?: boolean;
+  /** A customer the owner marked «زبون جملة» was picked: the cart moves to the wholesale price */
+  onWholesaleCustomer?: () => void;
   onBack: () => void;
   onCompleted: (entry: OutboxEntry) => void;
 }
@@ -72,6 +74,7 @@ export function PaymentPanel({
   shiftId,
   cashierId,
   canCredit = false,
+  onWholesaleCustomer,
   onBack,
   onCompleted,
 }: PaymentPanelProps) {
@@ -85,6 +88,7 @@ export function PaymentPanel({
     const list = payOptions(base, settings.enabledCurrencies, catalog.rates, catalog.collectRates);
     if (customer && canCredit) {
       list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
+      list.push({ key: 'cheque', method: 'cheque', currency: base, label: 'شيك', rate: null });
     }
     return list;
   }, [base, settings.enabledCurrencies, catalog.rates, catalog.collectRates, customer, canCredit]);
@@ -122,6 +126,7 @@ export function PaymentPanel({
   const settlement = settleWith(tenders);
   const needsReference =
     nonCash && option.method !== 'credit' && current !== null && current.reference === null;
+  const onAccount = (method: string) => method === 'credit' || method === 'cheque';
   const canComplete =
     !saving && !('error' in settlement) && settlement.covered && !needsReference && tenders.length > 0;
 
@@ -273,6 +278,10 @@ export function PaymentPanel({
               onPicked={(picked) => {
                 setCustomer(picked);
                 setPicking(false);
+                if (picked.priceTier === 'wholesale' && cart.priceTier !== 'wholesale') {
+                  setParts([]);
+                  onWholesaleCustomer?.();
+                }
               }}
               onCancel={() => setPicking(false)}
             />
@@ -286,8 +295,8 @@ export function PaymentPanel({
                 variant="ghost"
                 onClick={() => {
                   setCustomer(null);
-                  setParts((list) => list.filter((p) => p.option.method !== 'credit'));
-                  if (option.method === 'credit') pick(options[0]!);
+                  setParts((list) => list.filter((p) => !onAccount(p.option.method)));
+                  if (onAccount(option.method)) pick(options[0]!);
                 }}
               >
                 أزله

@@ -86,6 +86,21 @@ describe('sale payload', () => {
       }),
     );
     expect(salePayloadSchema.safeParse(credit).success).toBe(true);
+    const cheque = buildSalePayload(
+      saleCart({
+        payments: [{ method: 'cheque', currency: 'SYP', amountMinor: 401500, reference: 'CHQ-77' }],
+        customerId: CUSTOMER,
+      }),
+    );
+    expect(salePayloadSchema.safeParse(cheque).success).toBe(true);
+    const anonymous = salePayloadSchema.safeParse({ ...cheque, customerId: null });
+    expect(anonymous.success).toBe(false);
+    expect(anonymous.error?.issues[0]?.message).toBe('a cheque sale needs its customer');
+    const noNumber = salePayloadSchema.safeParse({
+      ...cheque,
+      payments: [{ ...cheque.payments[0]!, reference: null }],
+    });
+    expect(noNumber.success).toBe(false);
     const free = buildSalePayload(
       saleCart({ lines: [{ ...saleCart().lines[1]!, priceMinor: 0 }], payments: [] }),
     );

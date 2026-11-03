@@ -25,6 +25,7 @@ import { customerRoutes } from './routes/customers';
 import { purchaseRoutes } from './routes/purchases';
 import { billingRoutes } from './routes/billing';
 import { promotionRoutes } from './routes/promotions';
+import { chequeRoutes } from './routes/cheques';
 import { staffRoutes } from './routes/staff';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
@@ -120,5 +121,6 @@ export async function buildApp({
   await app.register(purchaseRoutes);
   await app.register(billingRoutes);
   await app.register(promotionRoutes);
+  await app.register(chequeRoutes);
   return app;
 }

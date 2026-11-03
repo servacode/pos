@@ -9,6 +9,7 @@ export const PERMISSIONS = {
   'sale.refund': 'المرتجعات',
   'sale.void': 'إلغاء فاتورة في نفس الوردية',
   'sale.credit': 'البيع بالآجل على حساب زبون',
+  'sale.wholesale': 'البيع بسعر الجملة',
   'receipt.create': 'قبض دفعة من زبون',
   'customers.view': 'الزبائن وأرصدتهم وكشوفهم',
   'customers.manage': 'إضافة الزبائن وتعديلهم وحد الدين',
