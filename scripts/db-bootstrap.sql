@@ -34,3 +34,7 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'serva') \gexec
 
 SELECT 'CREATE DATABASE serva_test OWNER serva_owner'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'serva_test') \gexec
+
+-- The upgrade test (task M0-4) rebuilds this one from the previous schema on every run.
+SELECT 'CREATE DATABASE serva_upgrade_test OWNER serva_owner'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'serva_upgrade_test') \gexec

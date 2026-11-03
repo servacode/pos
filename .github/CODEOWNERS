@@ -39,6 +39,7 @@
 /apps/api/test/integrity.test.ts @servacode
 /apps/api/test/held-for-processing.test.ts @servacode
 /apps/api/test/integrity-service.test.ts @servacode
+/apps/api/test/upgrade/ @servacode
 
 # Backup and restore, CI and governance
 /scripts/local/ @servacode

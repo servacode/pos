@@ -12,7 +12,8 @@
     "integrity": "tsx src/scripts/integrity.ts",
     "lint": "eslint src test",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:upgrade": "vitest run --config vitest.upgrade.config.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
@@ -7,5 +7,7 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 20_000,
     hookTimeout: 30_000,
+    // The upgrade test builds its own database from an older schema: vitest.upgrade.config.ts
+    exclude: [...configDefaults.exclude, 'test/upgrade/**'],
   },
 });

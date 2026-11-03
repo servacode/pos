@@ -119,6 +119,14 @@ jobs:
         env:
           TZ: Asia/Damascus
       - run: pnpm test
+      # Task M0-4: a database at the previous schema, 2,000 invoices pushed through the server,
+      # then the latest migration; the integrity check passes and the fingerprints of the
+      # ledger and the stock are the same before and after. Its own database, rebuilt each run.
+      - name: Upgrade test — previous schema to this one, books unchanged
+        run: pnpm --filter @serva/api test:upgrade
+        env:
+          TEST_UPGRADE_DATABASE_URL: postgres://serva_app:serva_app@localhost:5432/serva_upgrade_test
+          TEST_UPGRADE_DATABASE_MIGRATION_URL: postgres://serva_owner:serva_owner@localhost:5432/serva_upgrade_test
       # The golden calculator is written independently of the product code, so it only
       # catches a mistake in that code while it keeps running. It was not in CI before.
       # openpyxl is only for the two tests that read back the generated sheets; the
