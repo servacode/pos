@@ -1,4 +1,5 @@
 import type {
+  ExpiryResponse,
   InventoryResponse,
   ProfitReport,
   PurchaseDetail,
@@ -50,3 +51,7 @@ export function moneyOf(text: string): number | null {
   if (!/^\d{1,12}(\.\d{1,2})?$/.test(clean)) return null;
   return Math.round(Number(clean) * 100);
 }
+
+/** `GET /v1/inventory/expiry?days=` (purchases.manage): batches on the shelf ending within `days` */
+export const listExpiry = (days: number) =>
+  apiFetch<ExpiryResponse>(`/v1/inventory/expiry?days=${days}`, { auth: true });

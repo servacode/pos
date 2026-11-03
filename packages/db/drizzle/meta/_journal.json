@@ -162,6 +162,13 @@
       "when": 1793711335282,
       "tag": "0022_service",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793712492115,
+      "tag": "0023_pharmacy",
+      "breakpoints": true
     }
   ]
 }

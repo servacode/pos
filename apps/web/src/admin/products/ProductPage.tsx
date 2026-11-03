@@ -61,6 +61,7 @@ const TOP_FIELDS = [
   'nameEn',
   'categoryId',
   'brand',
+  'genericName',
   'type',
   'unitId',
   'taxRateId',
@@ -395,6 +396,14 @@ export function ProductPage() {
                 value={draft.brand}
                 onChange={(event) => update({ brand: event.target.value })}
                 error={errors.brand}
+              />
+              <TextField
+                name="genericName"
+                label="الاسم العلمي (للأدوية، اختياري)"
+                hint="الكاشير يجد الدواء به أيضاً"
+                value={draft.genericName ?? ''}
+                onChange={(event) => update({ genericName: event.target.value })}
+                error={errors.genericName}
               />
               <Select
                 name="categoryId"

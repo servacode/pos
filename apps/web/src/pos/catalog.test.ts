@@ -39,6 +39,7 @@ function bigStore(count: number): CatalogSets {
       nameEn: null,
       categoryId: i % 2 ? ids.dairy : ids.grocery,
       brand: null,
+      genericName: null,
       type: 'stock',
       status: 'active',
       unitId: ids.piece,
@@ -55,6 +56,7 @@ function bigStore(count: number): CatalogSets {
       label: null,
       attributes: [],
       sortOrder: 0,
+      nearestExpiry: null,
       archived: false,
       version: 1,
     });

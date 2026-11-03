@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { CURRENCIES } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import type { Approval } from '@serva/core/contracts/documents';
-import { rateFor } from '@serva/core/sale';
+import { businessDateOf, rateFor } from '@serva/core/sale';
 import { promotionActive } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
 import { toLatinDigits } from '@serva/core/text';
@@ -226,6 +226,23 @@ export function SaleScreen(props: SaleScreenProps) {
       setCart(() => next);
       const added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
       setBump(added);
+      // 03 › الصيدليات: what is on the shelf may have expired, or soon will
+      if (item.nearestExpiry) {
+        const today = businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff);
+        const soon = businessDateOf(
+          Date.now() + 30 * 86_400_000,
+          settings.timezone,
+          settings.businessDayCutoff,
+        );
+        if (item.nearestExpiry < today) {
+          setNotice({
+            tone: 'warning',
+            text: `صلاحية «${item.name}» انتهت في ${item.nearestExpiry} حسب آخر استلام. تأكد من العلبة قبل البيع.`,
+          });
+        } else if (item.nearestExpiry <= soon) {
+          setNotice({ tone: 'info', text: `صلاحية «${item.name}» تنتهي في ${item.nearestExpiry}.` });
+        }
+      }
       if (item.unit?.allowsFraction && added !== null && weighedQty === undefined) {
         setSelected(added);
         setMode({ kind: 'line', lineNo: added, adjust: 'qty' });
@@ -233,7 +250,7 @@ export function SaleScreen(props: SaleScreenProps) {
         setMode({ kind: 'items' });
       }
     },
-    [ctx, multiplier, setCart, mode.kind, props],
+    [ctx, multiplier, setCart, mode.kind, props, settings.timezone, settings.businessDayCutoff],
   );
 
   const scan = useCallback(

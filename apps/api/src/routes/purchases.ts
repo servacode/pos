@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  expiryQuery,
   inventoryQuery,
   profitQuery,
   purchaseInput,
@@ -23,6 +24,7 @@ import {
   readPurchase,
   saveSupplier,
 } from '../services/purchases';
+import { expiryReport } from '../services/expiry';
 import { parseBody } from './validation';
 
 /** Suppliers, purchases, payments, stock value, counts and profit (contracts/purchases.ts). */
@@ -99,6 +101,10 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/inventory', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return inventory(app.db, request.auth, parseBody(inventoryQuery, request.query));
+  });
+  app.get('/v1/inventory/expiry', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return expiryReport(app.db, request.auth, parseBody(expiryQuery, request.query).days, app.clock.now());
   });
   app.post('/v1/stocktakes', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();

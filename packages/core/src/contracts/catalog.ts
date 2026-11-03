@@ -254,6 +254,8 @@ const productFields = {
   nameEn: optionalText(120, 'الاسم الإنجليزي طويل جداً'),
   categoryId: uuidSchema.nullable().default(null),
   brand: optionalText(60, 'اسم الماركة طويل جداً'),
+  /** «الاسم العلمي» (03 › الصيدليات): the till finds the medicine by it too */
+  genericName: optionalText(120, 'الاسم العلمي طويل جداً'),
   type: z.enum(PRODUCT_TYPES).default('stock'),
   /** Omitted: the store's «قطعة» */
   unitId: uuidSchema.optional(),
@@ -314,6 +316,7 @@ export const updateProductInput = z
     nameEn: patchText(120, 'الاسم الإنجليزي طويل جداً'),
     categoryId: uuidSchema.nullable().optional(),
     brand: patchText(60, 'اسم الماركة طويل جداً'),
+    genericName: patchText(120, 'الاسم العلمي طويل جداً'),
     type: z.enum(PRODUCT_TYPES).optional(),
     unitId: uuidSchema.optional(),
     taxRateId: uuidSchema.nullable().optional(),
@@ -397,6 +400,7 @@ export interface ProductDetail {
   nameEn: string | null;
   categoryId: string | null;
   brand: string | null;
+  genericName: string | null;
   type: ProductType;
   status: ProductStatus;
   unitId: string;
@@ -565,6 +569,8 @@ export interface ProductRow {
   nameEn: string | null;
   categoryId: string | null;
   brand: string | null;
+  /** «الاسم العلمي»; searched on the till */
+  genericName: string | null;
   type: ProductType;
   status: ProductStatus;
   unitId: string;
@@ -588,6 +594,8 @@ export interface VariantRow {
   attributes: { name: string; value: string }[];
   /** Display order inside the product (the matrix) */
   sortOrder: number;
+  /** The earliest expiry of what is on the shelf (services/expiry.ts); null when none was received */
+  nearestExpiry: string | null;
   archived: boolean;
   version: number;
 }

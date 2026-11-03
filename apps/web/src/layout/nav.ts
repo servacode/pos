@@ -56,6 +56,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { to: '/cheques', label: 'الشيكات', icon: CashIcon, permission: ['customers.view'] },
   { to: '/purchases', label: 'المشتريات', icon: CartIcon, permission: ['purchases.manage'] },
   { to: '/inventory', label: 'المخزون والأرباح', icon: TrendUpIcon, permission: ['cost.view'] },
+  { to: '/expiry', label: 'الصلاحية', icon: ClockIcon, permission: ['purchases.manage'] },
   {
     to: '/accounting',
     label: 'المحاسبة',
