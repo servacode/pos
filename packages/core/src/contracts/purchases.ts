@@ -101,6 +101,8 @@ export type PurchaseInput = z.output<typeof purchaseInput>;
 export interface PurchaseLineRow {
   lineNo: number;
   variantId: string;
+  /** The variant's product, for printing the line's labels */
+  productId: string;
   name: string;
   qty: number;
   costMinor: number;

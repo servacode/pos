@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import { useCallback, useEffect, useState } from 'react';
 import type { PurchasePayment, PurchaseRow, SupplierListResponse, SupplierRow } from '@serva/core';
 import {
@@ -89,6 +90,15 @@ export function PurchasesPage() {
       header: 'المبلغ',
       numeric: true,
       cell: (p) => <Money minor={p.totalMinor} currency={base} />,
+    },
+    {
+      key: 'labels',
+      header: '',
+      cell: (p) => (
+        <Link to={`/labels?purchase=${p.id}`} className="font-semibold text-brand-ink hover:underline">
+          الملصقات
+        </Link>
+      ),
     },
   ];
   const supplierColumns: DataColumn<SupplierRow>[] = [
