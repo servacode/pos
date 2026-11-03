@@ -23,6 +23,7 @@
 /apps/api/src/services/processors.ts @servacode
 /apps/api/src/services/sync-push.ts @servacode
 /apps/api/src/services/reports.ts @servacode
+/apps/api/src/services/integrity.ts @servacode
 
 # Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator
 /packages/db/drizzle/ @servacode
@@ -37,6 +38,7 @@
 /apps/api/test/posting-properties.test.ts @servacode
 /apps/api/test/integrity.test.ts @servacode
 /apps/api/test/held-for-processing.test.ts @servacode
+/apps/api/test/integrity-service.test.ts @servacode
 
 # Backup and restore, CI and governance
 /scripts/local/ @servacode
@@ -78,6 +80,8 @@
 /apps/api/test/accounting-fixtures.ts @servacode
 # the shared harness of the financial tests
 /apps/api/test/helpers.ts @servacode
+# the test databases the financial tests run against
+/apps/api/test/urls.ts @servacode
 # the devices the financial tests post from
 /apps/api/test/devices.ts @servacode
 # the staff the golden day posts as

@@ -19,5 +19,6 @@ apps/api/src/services/audit.ts
 apps/api/src/services/sync-state.ts
 apps/api/test/accounting-fixtures.ts
 apps/api/test/helpers.ts
+apps/api/test/urls.ts
 apps/api/test/devices.ts
 apps/api/test/staff.ts

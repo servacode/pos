@@ -9,6 +9,7 @@
     "build": "tsup",
     "start": "node dist/server.js",
     "seed": "tsx src/scripts/seed.ts",
+    "integrity": "tsx src/scripts/integrity.ts",
     "lint": "eslint src test",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
