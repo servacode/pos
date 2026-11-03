@@ -4,6 +4,8 @@ packages/core/src/pricing.ts
 packages/core/src/sale.ts
 packages/core/src/sale-return.ts
 packages/core/src/costing.ts
+packages/core/src/promotions.ts
+packages/core/src/scale.ts
 packages/core/src/currencies.ts
 packages/core/src/contracts/documents.ts
 packages/core/src/contracts/accounting.ts

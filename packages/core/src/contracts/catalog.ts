@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { CustomerRow } from './customers';
+import type { PromotionRow } from './promotions';
+import type { ScaleBarcodeConfig } from '../scale';
 import type { CurrencyCode } from '../currencies';
 import type { Permission } from '../permissions';
 import type { ShiftMode } from './documents';
@@ -100,7 +102,7 @@ export const INTERNAL_BARCODE_PREFIX = '29';
 
 /**
  * Barcode kinds: `standard` (printed by the maker), `internal` (made by the server: EAN-13 with
- * prefix 29, «ولّد باركوداً داخلياً»). Scale barcodes (prefix rules, weight or price) are phase 2.
+ * prefix 29, «ولّد باركوداً داخلياً»). Scale labels are read by scale.ts, not stored.
  */
 export const BARCODE_KINDS = ['standard', 'internal'] as const;
 export type BarcodeKind = (typeof BARCODE_KINDS)[number];
@@ -677,6 +679,8 @@ export interface SettingsRow {
   shiftMode: ShiftMode;
   /** Added in phase 1: «دقائق الخمول» (17 › PATCH /v1/settings/sales), the cashier signs out after it; 5 by default */
   idleMinutes: number;
+  /** «باركود الميزان» (scale.ts); null when the store's scales print no labels */
+  scaleBarcode: ScaleBarcodeConfig | null;
   version: number;
 }
 
@@ -745,4 +749,5 @@ export interface PullSetRows {
   user_roles: UserRoleRow;
   branches: BranchRow;
   customers: CustomerRow;
+  promotions: PromotionRow;
 }

@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { onboardingInput, storeCurrencyInput, storeProfileInput } from '@serva/core';
+import { onboardingInput, storeCurrencyInput, storeProfileInput, storeScaleInput } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
-import { readStore, updateCurrency, updateOnboarding, updateProfile } from '../services/store';
+import { readStore, updateCurrency, updateOnboarding, updateProfile, updateScale } from '../services/store';
 import { parseBody } from './validation';
 
 /** The store's settings and the start wizard (packages/core › contracts/store.ts). */
@@ -37,5 +37,10 @@ export async function storeRoutes(app: FastifyInstance): Promise<void> {
   app.put('/v1/store/onboarding', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return updateOnboarding(app.db, request.auth, parseBody(onboardingInput, request.body), app.clock.now());
+  });
+
+  app.put('/v1/store/scale', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updateScale(app.db, request.auth, parseBody(storeScaleInput, request.body), meta(request));
   });
 }

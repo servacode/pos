@@ -1,4 +1,10 @@
-import type { OnboardingInput, StoreCurrencyInput, StoreProfileInput, StoreResponse } from '@serva/core';
+import type {
+  OnboardingInput,
+  StoreCurrencyInput,
+  StoreProfileInput,
+  StoreResponse,
+  StoreScaleInput,
+} from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
 /** `GET /v1/store`: the store's settings (packages/core › contracts/store.ts) */
@@ -15,3 +21,7 @@ export const saveCurrency = (input: StoreCurrencyInput) =>
 /** `PUT /v1/store/onboarding`: the wizard's step, or that it is over */
 export const saveOnboarding = (input: OnboardingInput) =>
   apiFetch<StoreResponse>('/v1/store/onboarding', { method: 'PUT', body: input, auth: true });
+
+/** `PUT /v1/store/scale`: how the store's scales print their labels, or null for none (settings.manage) */
+export const saveScale = (input: StoreScaleInput) =>
+  apiFetch<StoreResponse>('/v1/store/scale', { method: 'PUT', body: input, auth: true });

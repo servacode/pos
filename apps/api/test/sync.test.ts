@@ -488,6 +488,7 @@ describe('GET /v1/sync/pull', () => {
       'exchange_rates',
       'prices',
       'products',
+      'promotions',
       'roles',
       'settings',
       'stock_levels',

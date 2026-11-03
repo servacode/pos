@@ -12,6 +12,7 @@ import { rateFor } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
 import { cn, displayNumber, formatQuantity, Money, useDigits } from '@serva/ui';
 import { clockText, dateText } from '../format';
+import { discountLabel } from '../print/lines';
 
 export type PaperWidth = 80 | 58;
 
@@ -289,7 +290,7 @@ export function Receipt({
               <span className="num">{amount(line.priced.grossMinor)}</span>
             </div>
             {line.priced.lineDiscountMinor > 0 ? (
-              <Row label={line.discount?.source === 'price_override' ? 'تعديل السعر' : 'خصم'}>
+              <Row label={discountLabel(line.discount)}>
                 <bdi dir="ltr">−</bdi>
                 {amount(line.priced.lineDiscountMinor)}
               </Row>

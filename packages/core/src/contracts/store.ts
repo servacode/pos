@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { SECTOR_KEYS, type SectorKey } from '../sectors';
 import { phoneSchema } from './auth';
 import type { CurrencyCode } from '../currencies';
+import { scaleBarcodeSchema, type ScaleBarcodeConfig } from '../scale';
 
 /**
  * The store's own settings (04 › معالج البداية، الإعدادات): what the receipt shows, the activity,
@@ -11,6 +12,7 @@ import type { CurrencyCode } from '../currencies';
  *   PUT /v1/store/profile        storeProfileInput  → StoreResponse
  *   PUT /v1/store/currency       storeCurrencyInput → StoreResponse
  *   PUT /v1/store/onboarding     onboardingInput    → StoreResponse
+ *   PUT /v1/store/scale          storeScaleInput    → StoreResponse
  */
 
 /** 0 النشاط · 1 معلومات المحل · 2 العملة · 3 ابدأ */
@@ -73,6 +75,11 @@ export const onboardingInput = z.object({
 });
 export type OnboardingInput = z.input<typeof onboardingInput>;
 
+/** «باركود الميزان»: how the store's scales print their labels; null turns scale labels off */
+export const storeScaleInput = z.object({ scaleBarcode: scaleBarcodeSchema.nullable() });
+export type StoreScaleInput = z.input<typeof storeScaleInput>;
+export type StoreScaleData = z.output<typeof storeScaleInput>;
+
 export interface StoreResponse {
   name: string;
   legalName: string | null;
@@ -88,4 +95,5 @@ export interface StoreResponse {
   /** Pounds for one dollar, the latest rate set; null when the dollar is off or never set */
   usdRate: string | null;
   onboarding: { step: number; done: boolean };
+  scaleBarcode: ScaleBarcodeConfig | null;
 }

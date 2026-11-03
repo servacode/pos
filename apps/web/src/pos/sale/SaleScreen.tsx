@@ -3,6 +3,8 @@ import { CURRENCIES } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import type { Approval } from '@serva/core/contracts/documents';
 import { rateFor } from '@serva/core/sale';
+import { promotionActive } from '@serva/core/promotions';
+import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
 import { toLatinDigits } from '@serva/core/text';
 import type { OutboxEntry } from '@serva/sync';
 import {
@@ -114,9 +116,21 @@ export function SaleScreen(props: SaleScreenProps) {
   const { session, catalog, staff, cart, setCart } = props;
   const digits = useDigits();
   const settings = catalog.settings!;
+  // The promotions running now, read again with every change to the cart so an hour's offer starts
+  // and stops on time.
+  const activePromotions = useMemo(() => {
+    const now = new Date();
+    return catalog.promotions.filter((p) => promotionActive(p, now, settings.timezone));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the cart is the clock's tick
+  }, [catalog.promotions, settings.timezone, cart]);
   const ctx = useMemo<PricingContext>(
-    () => ({ currency: settings.baseCurrency, taxInclusive: settings.taxInclusive, rates: catalog.rates }),
-    [settings.baseCurrency, settings.taxInclusive, catalog.rates],
+    () => ({
+      currency: settings.baseCurrency,
+      taxInclusive: settings.taxInclusive,
+      rates: catalog.rates,
+      promotions: activePromotions,
+    }),
+    [settings.baseCurrency, settings.taxInclusive, catalog.rates, activePromotions],
   );
   const rules = useMemo<ApprovalRules>(
     () => ({
@@ -164,7 +178,7 @@ export function SaleScreen(props: SaleScreenProps) {
 
   // ── Adding items ────────────────────────────────────────────────────────────────────────────
   const add = useCallback(
-    (item: CatalogItem, hit?: BarcodeHit | null) => {
+    (item: CatalogItem, hit?: BarcodeHit | null, weighedQty?: number) => {
       if (item.price.currency !== ctx.currency) {
         try {
           rateFor(ctx.rates, item.price.currency, ctx.currency);
@@ -176,7 +190,7 @@ export function SaleScreen(props: SaleScreenProps) {
           return;
         }
       }
-      const qty = (multiplier ?? 1) * 1000;
+      const qty = weighedQty ?? (multiplier ?? 1) * 1000;
       setMultiplier(null);
       setNotice(null);
       if (props.done) props.onNextSale();
@@ -187,7 +201,7 @@ export function SaleScreen(props: SaleScreenProps) {
       setCart(() => next);
       const added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
       setBump(added);
-      if (item.unit?.allowsFraction && added !== null) {
+      if (item.unit?.allowsFraction && added !== null && weighedQty === undefined) {
         setSelected(added);
         setMode({ kind: 'line', lineNo: added, adjust: 'qty' });
       } else if (mode.kind === 'pay' || mode.kind === 'done' || mode.kind === 'help') {
@@ -201,14 +215,43 @@ export function SaleScreen(props: SaleScreenProps) {
     (raw: string) => {
       const code = barcodeKey(raw);
       const hit = catalog.byBarcode.get(code);
-      if (hit) add(hit.item, hit);
-      else
+      if (hit) {
+        add(hit.item, hit);
+        return;
+      }
+      // A scale label: the item's number on the scale, then its weight or its price.
+      const reading = settings.scaleBarcode ? parseScaleBarcode(code, settings.scaleBarcode) : null;
+      const weighed = reading ? catalog.byBarcode.get(reading.itemCode) : undefined;
+      if (reading && weighed) {
+        if (reading.kind === 'weight') {
+          add(weighed.item, weighed, reading.qty);
+          return;
+        }
+        const { currency, priceMinor } = weighed.item.price;
+        let unitMinor = 0;
+        try {
+          unitMinor = convert(priceMinor, currency, ctx.currency, rateFor(ctx.rates, currency, ctx.currency));
+        } catch {
+          unitMinor = 0;
+        }
+        if (unitMinor > 0) {
+          add(weighed.item, weighed, qtyForPrice(reading.priceMinor, unitMinor));
+          return;
+        }
+      }
+      if (reading && !weighed) {
         setNotice({
           tone: 'warning',
-          text: `الباركود ${code} غير معروف على هذا الجهاز. ابحث عن الصنف باسمه.`,
+          text: `ملصق ميزان لصنف رقمه ${reading.itemCode}، ولا يوجد منتج بهذا الباركود. أضف الرقم باركوداً للمنتج.`,
         });
+        return;
+      }
+      setNotice({
+        tone: 'warning',
+        text: `الباركود ${code} غير معروف على هذا الجهاز. ابحث عن الصنف باسمه.`,
+      });
     },
-    [catalog, add],
+    [catalog, add, settings.scaleBarcode, ctx],
   );
 
   const keypadOpen = mode.kind === 'line' || mode.kind === 'invoice' || mode.kind === 'approve';
@@ -402,6 +445,12 @@ export function SaleScreen(props: SaleScreenProps) {
                 p && p.priced.lineDiscountMinor > 0 && line.adjustment?.kind === 'discount' ? (
                   <span key="d" className="text-info-ink">
                     خصم <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  </span>
+                ) : null,
+                p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
+                  <span key="o" className="text-success-ink">
+                    {p.discount.reason} −
+                    <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
                 bump === line.lineNo ? (
