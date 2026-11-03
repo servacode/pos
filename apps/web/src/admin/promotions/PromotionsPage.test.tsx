@@ -155,6 +155,7 @@ describe('«باركود الميزان» in the settings', () => {
       usdRate: null,
       onboarding: { step: 4, done: true },
       scaleBarcode: null,
+      service: null,
     };
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,

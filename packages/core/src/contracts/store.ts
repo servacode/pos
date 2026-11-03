@@ -13,6 +13,7 @@ import { scaleBarcodeSchema, type ScaleBarcodeConfig } from '../scale';
  *   PUT /v1/store/currency       storeCurrencyInput → StoreResponse
  *   PUT /v1/store/onboarding     onboardingInput    → StoreResponse
  *   PUT /v1/store/scale          storeScaleInput    → StoreResponse
+ *   PUT /v1/store/service        storeServiceInput  → StoreResponse
  */
 
 /** 0 النشاط · 1 معلومات المحل · 2 العملة · 3 ابدأ */
@@ -80,6 +81,25 @@ export const storeScaleInput = z.object({ scaleBarcode: scaleBarcodeSchema.nulla
 export type StoreScaleInput = z.input<typeof storeScaleInput>;
 export type StoreScaleData = z.output<typeof storeScaleInput>;
 
+/**
+ * «الصالة والمطبخ» (03 › المطاعم، المقاهي): what a restaurant or a café turns on at its tills.
+ * tables: the hall's tables by name, in order (none: no table board); orderNumbers: a number per
+ * order, printed big for the call («رقم الطلب»); kitchenTickets: «للمطبخ» prints what is new on the
+ * order without prices.
+ */
+export const serviceSettingsSchema = z.object({
+  tables: z
+    .array(z.string().trim().min(1, 'اسم الطاولة مطلوب').max(20, 'اسم الطاولة طويل'))
+    .max(200, '200 طاولة على الأكثر')
+    .refine((t) => new Set(t).size === t.length, 'اسم طاولة مكرر'),
+  orderNumbers: z.boolean(),
+  kitchenTickets: z.boolean(),
+});
+export type ServiceSettings = z.output<typeof serviceSettingsSchema>;
+export const storeServiceInput = z.object({ service: serviceSettingsSchema.nullable() });
+export type StoreServiceInput = z.input<typeof storeServiceInput>;
+export type StoreServiceData = z.output<typeof storeServiceInput>;
+
 export interface StoreResponse {
   name: string;
   legalName: string | null;
@@ -96,4 +116,5 @@ export interface StoreResponse {
   usdRate: string | null;
   onboarding: { step: number; done: boolean };
   scaleBarcode: ScaleBarcodeConfig | null;
+  service: ServiceSettings | null;
 }

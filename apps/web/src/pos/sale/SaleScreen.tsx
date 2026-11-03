@@ -41,8 +41,11 @@ import {
   invoiceNeed,
   lineNeed,
   pieceCount,
+  kitchenLines,
+  markSent,
   priceCart,
   setPriceTier,
+  type ItemChoice,
   removeLine,
   restoreLine,
   unitPriceOf,
@@ -56,6 +59,9 @@ import {
 } from './cart';
 import { useScanner } from './useScanner';
 import { PrintableQuote, type QuoteData } from '../receipt/Quote';
+import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
+import { ModifierPanel } from './ModifierPanel';
+import { TableBoard } from './TableBoard';
 
 const PaymentPanel = lazy(() => import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })));
 
@@ -66,7 +72,9 @@ export type SaleMode =
   | { kind: 'approve'; lineNo: number | null; need: ApprovalNeed }
   | { kind: 'pay' }
   | { kind: 'done' }
-  | { kind: 'help' };
+  | { kind: 'help' }
+  | { kind: 'choose'; item: CatalogItem; hit: BarcodeHit | null }
+  | { kind: 'tables' };
 
 export interface SaleScreenProps {
   statusBar: ReactNode;
@@ -79,6 +87,10 @@ export interface SaleScreenProps {
   heldCount: number;
   onHold: () => void;
   onResume: () => void;
+  /** The held orders, for the table board */
+  heldCarts?: readonly Cart[];
+  /** Opens a table's order, or starts one there (CashierApp keeps the held orders) */
+  onOpenTable?: (table: string) => void;
   /** The last sale's lines, for «كرّر آخر طلب» */
   lastLines: { variantId: string; barcode: string | null; qty: number }[];
   onSaved: (entry: OutboxEntry) => void;
@@ -151,6 +163,10 @@ export function SaleScreen(props: SaleScreenProps) {
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
   const [quote, setQuote] = useState<QuoteData | null>(null);
+  const [kitchen, setKitchen] = useState<KitchenData | null>(null);
+  const service = settings.service ?? null;
+  // A café with no tables serves takeaway unless told otherwise
+  const defaultOrderType = service && service.tables.length === 0 ? 'takeaway' : 'dine_in';
   const searchRef = useRef<HTMLInputElement>(null);
   const cartRef = useRef(cart);
   cartRef.current = cart;
@@ -182,7 +198,12 @@ export function SaleScreen(props: SaleScreenProps) {
 
   // ── Adding items ────────────────────────────────────────────────────────────────────────────
   const add = useCallback(
-    (item: CatalogItem, hit?: BarcodeHit | null, weighedQty?: number) => {
+    (item: CatalogItem, hit?: BarcodeHit | null, weighedQty?: number, choice?: ItemChoice) => {
+      // An item with modifiers asks for its choices first (beside the cart, not over it)
+      if (item.modifiers?.length && weighedQty === undefined && !choice) {
+        setMode({ kind: 'choose', item, hit: hit ?? null });
+        return;
+      }
       if (item.price.currency !== ctx.currency) {
         try {
           rateFor(ctx.rates, item.price.currency, ctx.currency);
@@ -200,7 +221,7 @@ export function SaleScreen(props: SaleScreenProps) {
       if (props.done) props.onNextSale();
       // From the latest cart, so scans arriving before the next render all count.
       const current = cartRef.current;
-      const next = addItem(current, item, hit, qty);
+      const next = addItem(current, item, hit, qty, choice ?? null);
       cartRef.current = next;
       setCart(() => next);
       const added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
@@ -273,6 +294,11 @@ export function SaleScreen(props: SaleScreenProps) {
     window.print();
     setQuote(null);
   }, [quote]);
+  useEffect(() => {
+    if (!kitchen) return;
+    window.print();
+    setKitchen(null);
+  }, [kitchen]);
   useEffect(() => {
     if (bump === null) return;
     const timer = setTimeout(() => setBump(null), 900);
@@ -468,6 +494,54 @@ export function SaleScreen(props: SaleScreenProps) {
           </span>
         ) : null}
       </div>
+      {service ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
+          <div role="group" aria-label="نوع الطلب" className="flex gap-1">
+            {(['dine_in', 'takeaway', 'delivery'] as const).map((type) => (
+              <Button
+                key={type}
+                size="sm"
+                variant={(cart.service?.orderType ?? defaultOrderType) === type ? 'primary' : 'ghost'}
+                aria-pressed={(cart.service?.orderType ?? defaultOrderType) === type}
+                onClick={() =>
+                  setCart((c) => ({
+                    ...c,
+                    service: {
+                      orderType: type,
+                      table: type === 'dine_in' ? (c.service?.table ?? null) : null,
+                    },
+                  }))
+                }
+              >
+                {ORDER_TYPE_TEXT[type]}
+              </Button>
+            ))}
+          </div>
+          <span className="flex-1" />
+          {service.tables.length > 0 ? (
+            <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'tables' })}>
+              {cart.service?.table ? `طاولة ${cart.service.table}` : 'الطاولات'}
+            </Button>
+          ) : null}
+          {service.kitchenTickets && kitchenLines(cart).length > 0 ? (
+            <Button
+              size="sm"
+              onClick={() => {
+                setKitchen({
+                  lines: kitchenLines(cart),
+                  orderType: cart.service?.orderType ?? defaultOrderType,
+                  table: cart.service?.table ?? null,
+                  at: Date.now(),
+                  cashierName: session.fullName,
+                });
+                setCart(markSent);
+              }}
+            >
+              للمطبخ
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {lineCount === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-ink-muted">
@@ -715,6 +789,7 @@ export function SaleScreen(props: SaleScreenProps) {
   return (
     <CashierShell statusBar={props.statusBar} cart={cartPanel} mainClassName="gap-3.5 p-4 xl:px-6">
       {quote ? <PrintableQuote data={quote} width={80} /> : null}
+      {kitchen ? <PrintableKitchenTicket data={kitchen} /> : null}
       {effectiveMode.kind === 'pay' && priced ? (
         <Suspense fallback={null}>
           <PaymentPanel
@@ -836,6 +911,36 @@ export function SaleScreen(props: SaleScreenProps) {
             onCancel={() => setMode({ kind: 'items' })}
           />
         </div>
+      ) : effectiveMode.kind === 'choose' ? (
+        <ModifierPanel
+          key={effectiveMode.item.variantId}
+          item={effectiveMode.item}
+          onAdd={(choice) => {
+            const { item, hit } = effectiveMode;
+            setMode({ kind: 'items' });
+            add(item, hit, undefined, choice);
+          }}
+          onCancel={() => setMode({ kind: 'items' })}
+        />
+      ) : effectiveMode.kind === 'tables' && service ? (
+        <TableBoard
+          tables={service.tables}
+          held={props.heldCarts ?? []}
+          current={cart}
+          currency={ctx.currency}
+          totalOf={(c) => {
+            try {
+              return c.lines.length > 0 ? priceCart(c, ctx).priced.totals.totalMinor : 0;
+            } catch {
+              return 0;
+            }
+          }}
+          onPick={(table) => {
+            setMode({ kind: 'items' });
+            props.onOpenTable?.(table);
+          }}
+          onClose={() => setMode({ kind: 'items' })}
+        />
       ) : effectiveMode.kind === 'help' ? (
         <section
           aria-label="دليل الاختصارات"

@@ -7,6 +7,7 @@ import type {
   StoreProfileData,
   StoreResponse,
   StoreScaleData,
+  StoreServiceData,
 } from '@serva/core';
 import {
   branches,
@@ -65,6 +66,7 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
     usdRate: enabled.includes('USD') ? await latestUsdRate(tx) : null,
     onboarding: { step: settings.onboardingStep, done: settings.onboardedAt !== null },
     scaleBarcode: settings.scaleBarcode ?? null,
+    service: settings.service ?? null,
   };
 }
 
@@ -208,6 +210,34 @@ export function updateScale(
         entity: 'tenant_settings',
         entityId: auth.tenantId,
         changes: changesOf(before, after, ['scaleBarcode']),
+      },
+      meta,
+    );
+    return after;
+  });
+}
+
+/** «الصالة والمطبخ»: the tables, order numbers and kitchen tickets every till uses after its next pull. */
+export function updateService(
+  db: Database,
+  auth: AccessClaims,
+  input: StoreServiceData,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'settings.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ service: input.service });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.service_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['service']),
       },
       meta,
     );

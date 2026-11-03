@@ -6,6 +6,7 @@ import {
   type BarcodeKind,
   type CreateProductInput,
   type CurrencyCode,
+  type ModifierGroup,
   type ProductDetail,
   type ProductType,
   type UpdateProductInput,
@@ -69,6 +70,8 @@ export interface ProductDraft {
   /** "" = بلا ضريبة */
   taxRateId: string;
   sellOnPos: boolean;
+  /** «الإضافات والخيارات» as edited */
+  modifiers?: ModifierGroup[];
   /** Empty for a simple product: one hidden variant without options. */
   axes: Axis[];
   variants: VariantDraft[];
@@ -185,6 +188,7 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     unitId: detail.unitId,
     taxRateId: detail.taxRateId ?? '',
     sellOnPos: detail.sellOnPos,
+    modifiers: detail.modifiers ?? [],
     axes: axesOf(variants),
     variants,
   };
@@ -324,6 +328,7 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       unitId: draft.unitId || undefined,
       taxRateId: draft.taxRateId || null,
       sellOnPos: draft.sellOnPos,
+      ...(draft.modifiers?.length ? { modifiers: draft.modifiers } : {}),
       variants: variants.map(fullVariant),
     },
     sent: { variants: variants.map((v) => ({ key: v.key, barcodes: v.barcodes.map((b) => b.key) })) },
@@ -387,6 +392,7 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   if (draft.unitId && draft.unitId !== original.unitId) body.unitId = draft.unitId;
   if ((draft.taxRateId || null) !== original.taxRateId) body.taxRateId = draft.taxRateId || null;
   if (draft.sellOnPos !== original.sellOnPos) body.sellOnPos = draft.sellOnPos;
+  if (!sameJson(draft.modifiers ?? [], original.modifiers ?? [])) body.modifiers = draft.modifiers ?? [];
 
   const sent: SentKeys = { variants: [] };
   const variants: VariantPatch[] = [];

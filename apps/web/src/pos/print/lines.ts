@@ -82,6 +82,7 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
   lines.push(...header(data, 'فاتورة مبيعات', data.doc.number, at));
+  lines.push(...serviceLines(sale));
   for (const l of sale.lines) {
     lines.push({ kind: 'text', text: l.name, bold: true });
     lines.push({
@@ -134,4 +135,23 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
 export function discountLabel(discount: { source: string; reason: string | null } | null): string {
   if (discount?.source === 'promotion') return discount.reason ?? 'عرض';
   return discount?.source === 'price_override' ? 'تعديل السعر' : 'خصم';
+}
+
+const ORDER_TYPES: Record<string, string> = { dine_in: 'صالة', takeaway: 'سفري', delivery: 'توصيل' };
+
+/** «رقم الطلب 17» big for the call, and the table or «سفري» (restaurants and cafés only). */
+export function serviceLines(sale: Pick<SalePayload, 'service'>): PrintLine[] {
+  const service = sale.service;
+  if (!service) return [];
+  const lines: PrintLine[] = [];
+  if (service.orderNo !== null) {
+    lines.push({ kind: 'center', text: `رقم الطلب ${service.orderNo}`, bold: true, big: true });
+  }
+  lines.push({
+    kind: 'center',
+    text: service.table ? `طاولة ${service.table}` : (ORDER_TYPES[service.orderType] ?? ''),
+    bold: true,
+  });
+  lines.push({ kind: 'rule' });
+  return lines;
 }

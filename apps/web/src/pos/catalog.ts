@@ -1,6 +1,7 @@
 import type { CurrencyCode } from '@serva/core';
 import type {
   BarcodeRow,
+  ModifierGroup,
   CategoryRow,
   ExchangeRateRow,
   PriceRow,
@@ -35,6 +36,8 @@ export interface CatalogItem {
   categoryId: string | null;
   /** categoryId and every category above it (promotions on a parent reach its children) */
   categoryPath?: readonly string[];
+  /** «الإضافات والخيارات»: the cashier picks them when the item goes into the cart */
+  modifiers?: readonly ModifierGroup[];
   unit: UnitRow | null;
   taxRate: TaxRateRow | null;
   price: {
@@ -161,6 +164,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       ),
       categoryId: product.categoryId,
       categoryPath: categoryPath(product.categoryId),
+      modifiers: product.modifiers ?? [],
       unit: units.get(product.unitId) ?? null,
       taxRate: product.taxRateId ? (taxes.get(product.taxRateId) ?? null) : null,
       price: {

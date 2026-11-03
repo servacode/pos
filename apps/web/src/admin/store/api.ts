@@ -4,6 +4,7 @@ import type {
   StoreProfileInput,
   StoreResponse,
   StoreScaleInput,
+  StoreServiceInput,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
@@ -25,3 +26,7 @@ export const saveOnboarding = (input: OnboardingInput) =>
 /** `PUT /v1/store/scale`: how the store's scales print their labels, or null for none (settings.manage) */
 export const saveScale = (input: StoreScaleInput) =>
   apiFetch<StoreResponse>('/v1/store/scale', { method: 'PUT', body: input, auth: true });
+
+/** `PUT /v1/store/service`: tables, order numbers and kitchen tickets, or null for none (settings.manage) */
+export const saveService = (input: StoreServiceInput) =>
+  apiFetch<StoreResponse>('/v1/store/service', { method: 'PUT', body: input, auth: true });

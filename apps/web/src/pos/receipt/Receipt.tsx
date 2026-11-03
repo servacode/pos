@@ -13,6 +13,7 @@ import type { SyncDocument } from '@serva/sync';
 import { cn, displayNumber, formatQuantity, Money, useDigits } from '@serva/ui';
 import { clockText, dateText } from '../format';
 import { discountLabel } from '../print/lines';
+import { ORDER_TYPE_TEXT } from './KitchenTicket';
 
 export type PaperWidth = 80 | 58;
 
@@ -278,6 +279,19 @@ export function Receipt({
         </span>
       </div>
       <Rule />
+      {sale.service ? (
+        <>
+          <div className="flex flex-col items-center font-bold">
+            {sale.service.orderNo !== null ? (
+              <span className="text-2xl">رقم الطلب {sale.service.orderNo}</span>
+            ) : null}
+            <span>
+              {sale.service.table ? `طاولة ${sale.service.table}` : ORDER_TYPE_TEXT[sale.service.orderType]}
+            </span>
+          </div>
+          <Rule />
+        </>
+      ) : null}
       <ul className="flex flex-col gap-1.5">
         {sale.lines.map((line) => (
           <li key={line.lineNo} className="flex flex-col">

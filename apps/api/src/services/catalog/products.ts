@@ -124,6 +124,7 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
     unitId: product.unitId,
     taxRateId: product.taxRateId,
     sellOnPos: product.sellOnPos,
+    modifiers: product.modifiers,
     archivedAt: iso(product.archivedAt),
     createdAt: product.createdAt.toISOString(),
     updatedAt: product.updatedAt.toISOString(),
@@ -468,6 +469,7 @@ export async function createProduct(
           unitId: input.unitId ?? (await pieceUnit(tx)),
           taxRateId: input.taxRateId,
           sellOnPos: input.sellOnPos,
+          modifiers: input.modifiers,
         })
         .returning({ id: products.id });
       const productId = product!.id;
@@ -572,6 +574,7 @@ export async function updateProduct(
         unitId: input.unitId,
         taxRateId: input.taxRateId,
         sellOnPos: input.sellOnPos,
+        modifiers: input.modifiers,
       };
       await tx
         .update(products)

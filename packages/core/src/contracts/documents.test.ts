@@ -93,6 +93,15 @@ describe('sale payload', () => {
       }),
     );
     expect(salePayloadSchema.safeParse(cheque).success).toBe(true);
+    // A restaurant's sale carries its order type, table and number; a shop's leaves it out
+    const served = buildSalePayload(saleCart({ service: { orderType: 'dine_in', table: '7', orderNo: 41 } }));
+    expect(served.service).toEqual({ orderType: 'dine_in', table: '7', orderNo: 41 });
+    expect(salePayloadSchema.safeParse(served).success).toBe(true);
+    expect('service' in validSale()).toBe(false);
+    expect(
+      salePayloadSchema.safeParse({ ...served, service: { orderType: 'drive', table: null, orderNo: null } })
+        .success,
+    ).toBe(false);
     const anonymous = salePayloadSchema.safeParse({ ...cheque, customerId: null });
     expect(anonymous.success).toBe(false);
     expect(anonymous.error?.issues[0]?.message).toBe('a cheque sale needs its customer');

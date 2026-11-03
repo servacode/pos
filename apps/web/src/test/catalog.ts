@@ -147,6 +147,7 @@ export function product(overrides: Partial<ProductDetail> = {}): ProductDetail {
     unitId: ids.piece,
     taxRateId: null,
     sellOnPos: true,
+    modifiers: [],
     archivedAt: null,
     createdAt: '2026-10-01T00:00:00.000Z',
     updatedAt: '2026-10-01T00:00:00.000Z',
