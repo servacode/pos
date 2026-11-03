@@ -50,6 +50,8 @@ export interface PaymentPanelProps {
   cashierId: string;
   /** «البيع بالآجل» (sale.credit): the credit method shows once a customer is picked */
   canCredit?: boolean;
+  /** «البائع» when it is not the cashier (03 › عمولة البائع) */
+  salespersonId?: string | null;
   /** A customer the owner marked «زبون جملة» was picked: the cart moves to the wholesale price */
   onWholesaleCustomer?: () => void;
   onBack: () => void;
@@ -76,6 +78,7 @@ export function PaymentPanel({
   cashierId,
   canCredit = false,
   onWholesaleCustomer,
+  salespersonId = null,
   onBack,
   onCompleted,
 }: PaymentPanelProps) {
@@ -176,6 +179,7 @@ export function PaymentPanel({
         cashSteps,
         customerId: customer?.id ?? null,
         customerName: customer?.name ?? null,
+        salespersonId,
         service,
       });
       const entry = await pos.save({

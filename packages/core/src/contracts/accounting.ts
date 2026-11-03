@@ -77,6 +77,8 @@ export interface DayReport {
     count: number;
   }[];
   byCashier: { userId: string; fullName: string; invoiceCount: number; totalMinor: number }[];
+  /** «حسب البائع» (03 › عمولة البائع): each invoice under its seller, the cashier when none was picked */
+  bySalesperson: { userId: string; fullName: string; invoiceCount: number; totalMinor: number }[];
   /**
    * Sales by department (03 › الأقسام): each line under its product's top-level category, tax
    * included and after discounts; categoryId null holds products without a category.
