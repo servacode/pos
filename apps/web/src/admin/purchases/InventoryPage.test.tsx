@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { InventoryResponse, MeResponse, StocktakeDetail } from '@serva/core';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
@@ -57,6 +57,54 @@ describe('«سجّل هدراً» (03 › الخضار والمخابز)', () =>
       branchId: 'b-1',
       note: 'هدر',
       lines: [{ variantId: 'v-1', countedQty: 10_000 }],
+    });
+  });
+});
+
+describe('counting the shelf by scanning (03 › الألبسة)', () => {
+  it('adds a piece for each scan and a whole pack for a pack code, then saves what was counted', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({ status: 200, body: stock }),
+      'GET /v1/barcodes/2900000000018': {
+        status: 200,
+        body: { productId: 'p', variantId: 'v-1', barcode: { code: '2900000000018', packQty: 1000 } },
+      },
+      'GET /v1/barcodes/6281000000001': {
+        status: 200,
+        body: { productId: 'p', variantId: 'v-1', barcode: { code: '6281000000001', packQty: 12_000 } },
+      },
+      'GET /v1/barcodes/999': { status: 404, body: { error: { code: 'not_found', message: 'لا' } } },
+      'POST /v1/stocktakes': {
+        status: 201,
+        body: {
+          id: 's-2',
+          number: 'STK-0002',
+          date: '2026-10-30',
+          branchId: 'b-1',
+          lines: [],
+          diffValueMinor: 0,
+          baseCurrency: 'SYP',
+        } satisfies StocktakeDetail,
+      },
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('button', { name: 'جرد الرفوف' }));
+    const field = screen.getByLabelText('امسح الباركود');
+    await user.type(field, '2900000000018{Enter}');
+    await user.type(field, '2900000000018{Enter}');
+    const form = screen.getByRole('form', { name: 'العدّ بالمسح' });
+    await vi.waitFor(() => expect(within(form).getByRole('status')).toHaveTextContent('بندورة: 2'));
+    await user.type(field, '6281000000001{Enter}');
+    await vi.waitFor(() => expect(within(form).getByRole('status')).toHaveTextContent('بندورة: 14'));
+    expect(screen.getByLabelText('المعدود من بندورة')).toHaveValue('14');
+    await user.type(field, '999{Enter}');
+    expect(await screen.findByText('لا صنف بالباركود 999.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل الجرد' }));
+    expect(await screen.findByText(/سُجّل الجرد STK-0002/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/stocktakes')[0]?.body).toMatchObject({
+      lines: [{ variantId: 'v-1', countedQty: 14_000 }],
     });
   });
 });

@@ -15,6 +15,7 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 
 const monthStart = () => `${today().slice(0, 8)}01`;
@@ -39,6 +40,10 @@ export function InventoryPage() {
   // «سجّل هدراً» (03 › الخضار والمخابز: تسجيل الهدر): what spoiled, out of stock at its cost
   const [wasteKey, setWasteKey] = useState('');
   const [wasteQty, setWasteQty] = useState('');
+  // Counting by scanning (03 › الألبسة: الجرد بالمسح): each scan adds one piece (or its pack)
+  const [scan, setScan] = useState('');
+  const [scanned, setScanned] = useState<{ variantId: string; name: string } | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -97,6 +102,25 @@ export function InventoryPage() {
         ]
       : []),
   ];
+
+  async function addScan() {
+    const code = scan.trim();
+    setScan('');
+    if (!code) return;
+    setScanError(null);
+    try {
+      const hit = await lookupBarcode(code);
+      const row = stock?.items.find((r) => r.variantId === hit.variantId);
+      setCounts((c) => ({
+        ...c,
+        [hit.variantId]: String(((qtyOf(c[hit.variantId] ?? '') ?? 0) + hit.barcode.packQty) / 1000),
+      }));
+      setScanned({ variantId: hit.variantId, name: row?.name ?? code });
+    } catch {
+      setScanned(null);
+      setScanError(`لا صنف بالباركود ${code}.`);
+    }
+  }
 
   async function saveCount() {
     const lines = Object.entries(counts)
@@ -168,7 +192,36 @@ export function InventoryPage() {
         </div>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {counting ? (
-          <Alert tone="info">اكتب ما عددته فعلاً لكل صنف عددته. ما تتركه فارغاً لا يُغيَّر.</Alert>
+          <>
+            <Alert tone="info">
+              امسح كل قطعة على الرف بقارئ الباركود فتُعدّ وحدها، أو اكتب ما عددته لكل صنف. ما تتركه فارغاً لا
+              يُغيَّر.
+            </Alert>
+            <form
+              aria-label="العدّ بالمسح"
+              className="flex flex-wrap items-end gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void addScan();
+              }}
+            >
+              <TextField
+                label="امسح الباركود"
+                dir="ltr"
+                autoFocus
+                autoComplete="off"
+                value={scan}
+                onChange={(e) => setScan(e.target.value.slice(0, 40))}
+                className="w-64"
+              />
+              {scanned ? (
+                <p role="status" className="pb-3 font-semibold text-ink">
+                  {scanned.name}: <bdi className="num">{counts[scanned.variantId] ?? ''}</bdi>
+                </p>
+              ) : null}
+              {scanError ? <p className="pb-3 font-semibold text-danger-ink">{scanError}</p> : null}
+            </form>
+          </>
         ) : null}
         {result ? (
           <Alert tone={result.diffValueMinor < 0 ? 'info' : 'success'}>
