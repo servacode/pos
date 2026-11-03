@@ -12,6 +12,8 @@
     "./sale": "./src/sale.ts",
     "./sale-return": "./src/sale-return.ts",
     "./costing": "./src/costing.ts",
+    "./scale": "./src/scale.ts",
+    "./promotions": "./src/promotions.ts",
     "./currencies": "./src/currencies.ts",
     "./text": "./src/text.ts",
     "./phone": "./src/phone.ts",

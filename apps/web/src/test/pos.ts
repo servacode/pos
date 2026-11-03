@@ -161,6 +161,7 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
         timezone: 'Asia/Damascus',
         businessDayCutoff: '00:00',
         shiftMode: 'per_cashier',
+        scaleBarcode: null,
         version: 1,
       },
     ],
@@ -223,6 +224,7 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
       },
       { id: ids.ummSamer, name: 'أم سامر', phone: null, creditLimitMinor: null, archived: false, version: 1 },
     ],
+    promotions: [],
     ...overrides,
   };
 }

@@ -53,6 +53,10 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/store/profile': 'signed-in',
   'PUT /v1/store/currency': 'signed-in',
   'PUT /v1/store/onboarding': 'signed-in',
+  'PUT /v1/store/scale': 'signed-in',
+  'GET /v1/promotions': 'signed-in',
+  'POST /v1/promotions': 'signed-in',
+  'PUT /v1/promotions/:id': 'signed-in',
   'POST /v1/device/staff-sessions': 'device',
   'POST /v1/sync/push': 'device',
   'GET /v1/sync/pull': 'device',
@@ -228,6 +232,24 @@ async function supplierOf(app: FastifyInstance, a: Stores['a']) {
 }
 
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  'PUT /v1/promotions/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: owner(a),
+      payload: { name: 'عرض أ', kind: 'percent', percentBp: 500, scope: 'all' },
+    });
+    const { id } = made.json<{ id: string }>();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/promotions/${id}`,
+      headers: owner(b),
+      payload: { version: 1, name: 'مسروق', kind: 'percent', percentBp: 9000, scope: 'all' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ name: string }[]>`select name from promotions where id = ${id}`;
+    expect(row!.name).toBe('عرض أ');
+  },
   'PUT /v1/suppliers/:id': async (app, { a, b }) => {
     const id = await supplierOf(app, a);
     const res = await app.inject({

@@ -10,6 +10,8 @@
 /packages/core/src/sale.ts @servacode
 /packages/core/src/sale-return.ts @servacode
 /packages/core/src/costing.ts @servacode
+/packages/core/src/promotions.ts @servacode
+/packages/core/src/scale.ts @servacode
 /packages/core/src/currencies.ts @servacode
 /packages/core/src/contracts/documents.ts @servacode
 /packages/core/src/contracts/accounting.ts @servacode

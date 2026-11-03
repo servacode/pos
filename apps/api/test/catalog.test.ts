@@ -196,6 +196,7 @@ describe('sync tables', () => {
       'exchange_rates',
       'prices',
       'products',
+      'promotions',
       'roles',
       'stock_levels',
       'tax_rates',

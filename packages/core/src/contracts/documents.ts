@@ -66,9 +66,11 @@ export type Approval = z.output<typeof approvalSchema>;
  * A discount as the cashier gave it (09 › sale_line_discounts). `manual` is a discount; a price
  * typed over the shelf price in the cart is `price_override`, an amount discount on the line
  * (12 › قواعد السلة: تعديل السعر في السلة خصم). Both count against the role's limit; over it,
- * `approval` says who allowed it. The shape is the pricing engine's Discount plus these fields.
+ * `approval` says who allowed it. `promotion` is an automatic promotion the owner set
+ * (promotions.ts), with its name as the reason; it never needs approval. The shape is the pricing
+ * engine's Discount plus these fields.
  */
-export const DISCOUNT_SOURCES = ['manual', 'price_override'] as const;
+export const DISCOUNT_SOURCES = ['manual', 'price_override', 'promotion'] as const;
 const discountMeta = {
   source: z.enum(DISCOUNT_SOURCES),
   reason: z.string().trim().min(1).max(200).nullable(),

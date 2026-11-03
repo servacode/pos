@@ -4,3 +4,8 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+
+# Advisories GHSA-5gmw-xhrv-c9v3 and its follow-up: tinypool before 2.1.2 (vitest's worker pool,
+# tests only). vitest 3 pins 1.x, which has no fix; 2.x keeps the API vitest uses.
+overrides:
+  tinypool: 2.2.0

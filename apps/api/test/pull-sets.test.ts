@@ -58,6 +58,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'businessDayCutoff',
     'shiftMode',
     'idleMinutes',
+    'scaleBarcode',
     'version',
   ],
   users: ['id', 'fullName', 'status', 'pinLength', 'pinVersion', 'version'],
@@ -65,6 +66,24 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
   user_roles: ['id', 'userId', 'roleId', 'branchId', 'version'],
   branches: ['id', 'code', 'name', 'address', 'phone', 'isActive', 'version'],
   customers: ['id', 'name', 'phone', 'creditLimitMinor', 'archived', 'version'],
+  promotions: [
+    'id',
+    'name',
+    'kind',
+    'percentBp',
+    'buyQty',
+    'getQty',
+    'scope',
+    'categoryIds',
+    'productIds',
+    'startsAt',
+    'endsAt',
+    'daysOfWeek',
+    'fromTime',
+    'toTime',
+    'archived',
+    'version',
+  ],
 };
 
 let app: FastifyInstance;
@@ -96,6 +115,13 @@ describe('catalog pull sets', () => {
       payload: { name: 'أبو خالد', phone: '0933111222', creditLimitMinor: 50_000 },
     });
     expect(added.statusCode, added.body).toBe(201);
+    const promo = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: { authorization: `Bearer ${body.accessToken}` },
+      payload: { name: 'خصم الأسبوع', kind: 'percent', percentBp: 1000, scope: 'all' },
+    });
+    expect(promo.statusCode, promo.body).toBe(201);
     const page = await pullAll((await createDevice(body.tenant.id)).authorization);
     expect(Object.keys(page.sets).sort()).toEqual(Object.keys(FIELDS).sort());
     for (const [set, fields] of Object.entries(FIELDS)) {

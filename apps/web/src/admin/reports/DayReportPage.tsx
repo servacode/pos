@@ -7,6 +7,7 @@ import {
   DataTable,
   displayNumber,
   EmptyState,
+  formatQuantity,
   Money,
   PrintIcon,
   SalesIcon,
@@ -203,6 +204,51 @@ function DayReportBody({ report }: { report: DayReport }) {
           rowKey={(row) => row.userId}
         />
       </Section>
+
+      {(report.byCategory ?? []).length > 0 ? (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section title="حسب القسم">
+            <DataTable
+              caption="المبيعات حسب القسم"
+              columns={[
+                { key: 'name', header: 'القسم', cell: (row) => row.name },
+                { key: 'lines', header: 'الأسطر', numeric: true, cell: (row) => row.lineCount },
+                {
+                  key: 'discount',
+                  header: 'الحسم',
+                  numeric: true,
+                  cell: (row) => <Money minor={row.discountMinor} currency={base} />,
+                },
+                {
+                  key: 'total',
+                  header: 'المبيعات',
+                  numeric: true,
+                  cell: (row) => <Money minor={row.totalMinor} currency={base} />,
+                },
+              ]}
+              rows={report.byCategory}
+              rowKey={(row) => row.categoryId ?? 'none'}
+            />
+          </Section>
+          <Section title="الأكثر مبيعاً">
+            <DataTable
+              caption="الأصناف الأكثر مبيعاً"
+              columns={[
+                { key: 'name', header: 'الصنف', cell: (row) => row.name },
+                { key: 'qty', header: 'الكمية', numeric: true, cell: (row) => formatQuantity(row.qty) },
+                {
+                  key: 'total',
+                  header: 'المبيعات',
+                  numeric: true,
+                  cell: (row) => <Money minor={row.totalMinor} currency={base} />,
+                },
+              ]}
+              rows={report.topProducts}
+              rowKey={(row) => row.productId}
+            />
+          </Section>
+        </div>
+      ) : null}
     </>
   );
 }

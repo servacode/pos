@@ -141,11 +141,75 @@ describe('GET /v1/reports/day', () => {
         { method: 'card', currency: 'SYP', amountMinor: 100_000, baseAmountMinor: 100_000, count: 1 },
       ],
       byCashier: [{ userId: store.userId, fullName: 'أحمد الخطيب', invoiceCount: 2, totalMinor: 363_750 }],
+      // The fixture's lines name no product of the catalog: all of it is «بلا تصنيف».
+      byCategory: [
+        { categoryId: null, name: 'بلا تصنيف', lineCount: 5, totalMinor: 363_750, discountMinor: 6_000 },
+      ],
+      topProducts: [
+        expect.objectContaining({ name: 'صنف 1', qty: 1000, totalMinor: 234_750 }),
+        expect.objectContaining({ name: 'شاي', totalMinor: 54_000 }),
+        expect.objectContaining({ name: 'لبن', totalMinor: 32_500 }),
+        expect.objectContaining({ name: 'سكر', totalMinor: 27_500 }),
+        expect.objectContaining({ name: 'ماء', qty: 3000, totalMinor: 15_000 }),
+      ],
       returns: { count: 0, totalMinor: 0, taxMinor: 0, byMethod: [] },
       netSalesMinor: 363_750,
       collections: { count: 0, totalMinor: 0, byMethod: [] },
       baseCurrency: 'SYP',
     });
+  });
+
+  it('sums each department under its top-level category, sub-categories included', async () => {
+    const store = await openStore(app);
+    const headers = bearer(store.accessToken);
+    const post = async (url: string, payload: Record<string, unknown>) =>
+      (await app.inject({ method: 'POST', url, headers, payload })).json<{ id: string }>();
+    const food = await post('/v1/categories', { name: 'مواد غذائية' });
+    const dairy = await post('/v1/categories', { name: 'ألبان', parentId: food.id });
+    const home = await post('/v1/categories', { name: 'أدوات منزلية' });
+    const product = async (nameAr: string, categoryId: string | null, priceMinor: number) => {
+      const p = await app.inject({
+        method: 'POST',
+        url: '/v1/products',
+        headers,
+        payload: { nameAr, categoryId, variants: [{ price: { currency: 'SYP', priceMinor } }] },
+      });
+      const body = p.json<{ id: string; variants: { id: string }[] }>();
+      return { productId: body.id, variantId: body.variants[0]!.id, name: nameAr };
+    };
+    const milk = await product('حليب', dairy.id, 10_000);
+    const rice = await product('رز', food.id, 20_000);
+    const bucket = await product('سطل', home.id, 30_000);
+    const loose = await product('كيس', null, 1_000);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const lines = [
+      cartLine(1, 10_000, { ...milk, qty: 2000 }),
+      cartLine(2, 20_000, { ...rice }),
+      cartLine(3, 30_000, {
+        ...bucket,
+        discount: { type: 'amount', minor: 5_000, source: 'promotion', reason: 'عرض', approval: null },
+      }),
+      cartLine(4, 1_000, { ...loose }),
+    ];
+    const payload = sale(store, open.id, {
+      lines,
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 66_000 }],
+    });
+    await push(app, store.device, [open, doc('sale', payload)]);
+    const report = (await get(store.accessToken, '/v1/reports/day?date=2026-10-30')).json<DayReport>();
+    expect(report.byCategory).toEqual([
+      { categoryId: food.id, name: 'مواد غذائية', lineCount: 2, totalMinor: 40_000, discountMinor: 0 },
+      { categoryId: home.id, name: 'أدوات منزلية', lineCount: 1, totalMinor: 25_000, discountMinor: 5_000 },
+      { categoryId: null, name: 'بلا تصنيف', lineCount: 1, totalMinor: 1_000, discountMinor: 0 },
+    ]);
+    expect(report.topProducts.map((p) => [p.name, p.qty, p.totalMinor])).toEqual([
+      ['سطل', 1000, 25_000],
+      // A tie keeps the older product first
+      ['حليب', 2000, 20_000],
+      ['رز', 1000, 20_000],
+      ['كيس', 1000, 1_000],
+    ]);
   });
 
   it('filters by branch, refuses another store’s branch (404), and anyone without report.view (403)', async () => {

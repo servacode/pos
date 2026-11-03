@@ -6,6 +6,7 @@ import type {
   StoreCurrencyData,
   StoreProfileData,
   StoreResponse,
+  StoreScaleData,
 } from '@serva/core';
 import {
   branches,
@@ -63,6 +64,7 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
     taxInclusive: settings.taxInclusive,
     usdRate: enabled.includes('USD') ? await latestUsdRate(tx) : null,
     onboarding: { step: settings.onboardingStep, done: settings.onboardedAt !== null },
+    scaleBarcode: settings.scaleBarcode ?? null,
   };
 }
 
@@ -182,6 +184,34 @@ export function updateOnboarding(
       ...(input.done ? { onboardedAt: now } : {}),
     });
     return read(tx, auth.tenantId);
+  });
+}
+
+/** «باركود الميزان»: every till reads scale labels the same way after its next pull. */
+export function updateScale(
+  db: Database,
+  auth: AccessClaims,
+  input: StoreScaleData,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'settings.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ scaleBarcode: input.scaleBarcode });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.scale_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['scaleBarcode']),
+      },
+      meta,
+    );
+    return after;
   });
 }
 

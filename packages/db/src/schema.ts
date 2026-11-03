@@ -344,6 +344,13 @@ export const tenantSettings = pgTable(
     onboardingStep: integer('onboarding_step').notNull().default(0),
     /** When the owner finished or skipped the wizard; null while it still shows */
     onboardedAt: timestamp('onboarded_at', { withTimezone: true }),
+    /** «باركود الميزان» (packages/core › scale.ts); null when the store reads no scale labels */
+    scaleBarcode: jsonb('scale_barcode').$type<{
+      prefixes: string[];
+      itemDigits: number;
+      valueKind: 'weight' | 'price';
+      valueDecimals: number;
+    }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1886,6 +1893,52 @@ export const journalLines = pgTable(
     foreignKey({ columns: [t.tenantId, t.accountId], foreignColumns: [accounts.tenantId, accounts.id] }),
     index('journal_lines_account_idx').on(t.tenantId, t.accountId),
     index('journal_lines_shift_idx').on(t.tenantId, t.shiftId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Automatic promotions (packages/core › promotions.ts): set on the dashboard, pulled by every till,
+ * applied there to each line. Stopping one archives it.
+ */
+export const promotions = pgTable(
+  'promotions',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(),
+    percentBp: integer('percent_bp'),
+    buyQty: integer('buy_qty'),
+    getQty: integer('get_qty'),
+    scope: text('scope').notNull(),
+    categoryIds: uuid('category_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    productIds: uuid('product_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    startsAt: timestamp('starts_at', { withTimezone: true }),
+    endsAt: timestamp('ends_at', { withTimezone: true }),
+    daysOfWeek: integer('days_of_week')
+      .array()
+      .notNull()
+      .default(sql`'{}'::integer[]`),
+    fromTime: text('from_time'),
+    toTime: text('to_time'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'promotions_pkey', columns: [t.tenantId, t.id] }),
+    index('promotions_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
   ],
 );

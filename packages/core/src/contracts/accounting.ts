@@ -77,6 +77,19 @@ export interface DayReport {
     count: number;
   }[];
   byCashier: { userId: string; fullName: string; invoiceCount: number; totalMinor: number }[];
+  /**
+   * Sales by department (03 › الأقسام): each line under its product's top-level category, tax
+   * included and after discounts; categoryId null holds products without a category.
+   */
+  byCategory: {
+    categoryId: string | null;
+    name: string;
+    lineCount: number;
+    totalMinor: number;
+    discountMinor: number;
+  }[];
+  /** The ten products sold for the most, tax included */
+  topProducts: { productId: string; name: string; qty: number; totalMinor: number }[];
   /** Sale returns of the day (08 › مرتجع مبيعات); the sales figures above are before them */
   returns: {
     count: number;

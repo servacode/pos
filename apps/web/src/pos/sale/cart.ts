@@ -3,6 +3,7 @@ import { convert, lineGross } from '@serva/core/money';
 import type { Approval, SaleLine } from '@serva/core/contracts/documents';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { PricedInvoice } from '@serva/core/pricing';
+import { bestPromotions, type PromotionRule } from '@serva/core/promotions';
 import {
   discountOverLimit,
   packPrice,
@@ -47,6 +48,8 @@ export interface CartLine {
   taxRateBp: number;
   adjustment: LineAdjustment | null;
   approval: Approval | null;
+  /** The product's category and those above it, for promotions on a category */
+  categoryPath?: readonly string[];
 }
 
 export interface Cart {
@@ -62,6 +65,8 @@ export interface PricingContext {
   currency: CurrencyCode;
   taxInclusive: boolean;
   rates: readonly TradeRate[];
+  /** The promotions running now (promotionActive): each line without a typed discount gets its best one */
+  promotions?: readonly PromotionRule[];
 }
 
 /** Adds an item, or one more of it when the same item (same pack) is already a plain line. */
@@ -98,6 +103,7 @@ export function addItem(cart: Cart, item: CatalogItem, hit?: BarcodeHit | null, 
     taxRateBp: item.taxRate?.rateBp ?? 0,
     adjustment: null,
     approval: null,
+    categoryPath: item.categoryPath ?? [],
   };
   return { ...cart, lines: [...cart.lines, line], nextLineNo: cart.nextLineNo + 1 };
 }
@@ -130,9 +136,39 @@ export function unitPriceOf(
   );
 }
 
+/** The best promotion running for a line, or null. A discount the cashier typed replaces it. */
+export function linePromotion(line: CartLine, ctx: PricingContext) {
+  if (line.adjustment || !ctx.promotions?.length) return null;
+  const best = bestPromotions(
+    [
+      {
+        lineNo: line.lineNo,
+        productId: line.productId,
+        categoryPath: line.categoryPath ?? [],
+        qty: line.qty,
+        unitPriceMinor: unitPriceOf(line, ctx),
+        weighed: line.weighed,
+      },
+    ],
+    ctx.promotions,
+  );
+  return best.get(line.lineNo) ?? null;
+}
+
 function lineDiscount(line: CartLine, ctx: PricingContext): SaleDiscount | null {
   const adj = line.adjustment;
-  if (!adj) return null;
+  if (!adj) {
+    const promo = linePromotion(line, ctx);
+    return promo
+      ? {
+          type: 'amount',
+          minor: promo.discountMinor,
+          source: 'promotion',
+          reason: promo.name,
+          approval: null,
+        }
+      : null;
+  }
   if (adj.kind === 'discount') {
     return { ...adj.discount, source: 'manual', reason: null, approval: line.approval };
   }

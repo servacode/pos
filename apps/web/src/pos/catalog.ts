@@ -13,6 +13,7 @@ import type {
 } from '@serva/core/contracts/catalog';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { CustomerRow } from '@serva/core/contracts/customers';
+import type { PromotionRow } from '@serva/core/contracts/promotions';
 import { normalizeArabic, toLatinDigits } from '@serva/core/text';
 import type { SyncStore } from '@serva/sync/client';
 import type { StaffSets } from './staff/staff';
@@ -32,6 +33,8 @@ export interface CatalogItem {
   name: string;
   searchKey: string;
   categoryId: string | null;
+  /** categoryId and every category above it (promotions on a parent reach its children) */
+  categoryPath?: readonly string[];
   unit: UnitRow | null;
   taxRate: TaxRateRow | null;
   price: { currency: CurrencyCode; priceMinor: number; minPriceMinor: number | null };
@@ -58,6 +61,8 @@ export interface Catalog {
   staff: StaffSets;
   /** The store's customers, archived ones left out, by name */
   customers: CustomerRow[];
+  /** Promotions not stopped; which run now is decided at each sale (promotionActive) */
+  promotions: PromotionRow[];
 }
 
 export type CatalogSets = { [K in keyof PullSetRows]: PullSetRows[K][] };
@@ -78,6 +83,7 @@ export const CATALOG_SETS = [
   'user_roles',
   'branches',
   'customers',
+  'promotions',
 ] as const satisfies readonly (keyof PullSetRows)[];
 
 export async function readCatalogSets(store: SyncStore): Promise<CatalogSets> {
@@ -116,6 +122,22 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
   const units = new Map(sets.units.map((u) => [u.id, u]));
   const taxes = new Map(sets.tax_rates.map((t) => [t.id, t]));
 
+  const categoryById = new Map(sets.categories.map((c) => [c.id, c]));
+  const pathOf = new Map<string, string[]>();
+  const categoryPath = (id: string | null): string[] => {
+    if (!id) return [];
+    const known = pathOf.get(id);
+    if (known) return known;
+    const path: string[] = [];
+    let at = categoryById.get(id);
+    while (at && !path.includes(at.id)) {
+      path.push(at.id);
+      at = at.parentId ? categoryById.get(at.parentId) : undefined;
+    }
+    pathOf.set(id, path);
+    return path;
+  };
+
   const items: CatalogItem[] = [];
   const byVariant = new Map<string, CatalogItem>();
   const variants = [...sets.variants].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -132,6 +154,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
         [name, product.nameEn, product.brand, variant.sku].filter(Boolean).join(' '),
       ),
       categoryId: product.categoryId,
+      categoryPath: categoryPath(product.categoryId),
       unit: units.get(product.unitId) ?? null,
       taxRate: product.taxRateId ? (taxes.get(product.taxRateId) ?? null) : null,
       price: { currency: price.currency, priceMinor: price.priceMinor, minPriceMinor: price.minPriceMinor },
@@ -147,7 +170,6 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     if (item) byBarcode.set(barcode.code, { item, barcode });
   }
 
-  const categoryById = new Map(sets.categories.map((c) => [c.id, c]));
   const rootOf = new Map<string, string>();
   for (const category of sets.categories) {
     let root = category;
@@ -179,6 +201,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     customers: (sets.customers ?? [])
       .filter((c) => !c.archived)
       .sort((a, b) => a.name.localeCompare(b.name, 'ar')),
+    promotions: (sets.promotions ?? []).filter((p) => !p.archived),
   };
 }
 

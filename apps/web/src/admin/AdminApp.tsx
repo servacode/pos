@@ -12,6 +12,9 @@ const DevicesPage = lazy(() => import('./devices/DevicesPage').then((m) => ({ de
 // The catalog screens, each its own chunk: the list, the card, the categories, and «رمز الدخول للكاشير».
 const ProductsPage = lazy(() => import('./products/ProductsPage').then((m) => ({ default: m.ProductsPage })));
 const ProductRoute = lazy(() => import('./products/ProductPage').then((m) => ({ default: m.ProductRoute })));
+const PromotionsPage = lazy(() =>
+  import('./promotions/PromotionsPage').then((m) => ({ default: m.PromotionsPage })),
+);
 const CategoriesPage = lazy(() =>
   import('./categories/CategoriesPage').then((m) => ({ default: m.CategoriesPage })),
 );
@@ -72,6 +75,7 @@ export function AdminApp() {
           <Route path="/products" element={page(<ProductsPage />)} />
           <Route path="/products/:id" element={page(<ProductRoute />)} />
           <Route path="/categories" element={page(<CategoriesPage />)} />
+          <Route path="/promotions" element={page(<PromotionsPage />)} />
           <Route path="/customers" element={page(<CustomersPage />)} />
           <Route path="/purchases" element={page(<PurchasesPage />)} />
           <Route path="/inventory" element={page(<InventoryPage />)} />

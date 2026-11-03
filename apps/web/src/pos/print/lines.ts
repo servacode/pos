@@ -90,7 +90,11 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       end: money(l.priced.grossMinor, base),
     });
     if (l.priced.lineDiscountMinor > 0) {
-      lines.push({ kind: 'pair', start: 'خصم', end: `−${money(l.priced.lineDiscountMinor, base)}` });
+      lines.push({
+        kind: 'pair',
+        start: discountLabel(l.discount),
+        end: `−${money(l.priced.lineDiscountMinor, base)}`,
+      });
     }
   }
   lines.push({ kind: 'rule' });
@@ -124,4 +128,10 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     });
   }
   return [...lines, ...footer(data)];
+}
+
+/** What a line's discount is called on the receipt: a promotion by its name. */
+export function discountLabel(discount: { source: string; reason: string | null } | null): string {
+  if (discount?.source === 'promotion') return discount.reason ?? 'عرض';
+  return discount?.source === 'price_override' ? 'تعديل السعر' : 'خصم';
 }

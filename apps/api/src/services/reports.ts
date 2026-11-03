@@ -170,6 +170,38 @@ export async function dayReport(
       from invoices i left join users u on u.id = i.cashier_id
       where ${where}
       group by i.cashier_id, u.full_name order by sum(i.total_minor) desc, i.cashier_id`);
+    const departments = await tx.execute<{
+      id: string | null;
+      name: string | null;
+      n: string;
+      total: string;
+      discount: string;
+    }>(sql`
+      with recursive tree as (
+        select c.id, c.id as root from categories c where c.parent_id is null
+        union all
+        select c.id, t.root from categories c join tree t on c.parent_id = t.id
+      )
+      select t.root as id, rc.name, count(*)::text as n, sum(l.total_minor)::text as total,
+             sum(l.discount_minor)::text as discount
+      from invoice_lines l
+      join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+      left join products p on p.tenant_id = l.tenant_id and p.id = l.product_id
+      left join tree t on t.id = p.category_id
+      left join categories rc on rc.tenant_id = l.tenant_id and rc.id = t.root
+      where ${where}
+      group by t.root, rc.name
+      order by sum(l.total_minor) desc, rc.name nulls last`);
+    const top = await tx.execute<{ id: string; name: string; qty: string; total: string }>(sql`
+      select l.product_id as id, min(coalesce(p.name_ar, l.name)) as name, sum(l.base_qty)::text as qty,
+             sum(l.total_minor)::text as total
+      from invoice_lines l
+      join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+      left join products p on p.tenant_id = l.tenant_id and p.id = l.product_id
+      where ${where}
+      group by l.product_id
+      order by sum(l.total_minor) desc, l.product_id
+      limit 10`);
     const total = num(totals?.total);
     const tax = num(totals?.tax);
     const returnsWhere = sql`r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}`;
@@ -215,6 +247,19 @@ export async function dayReport(
         fullName: c.name ?? '',
         invoiceCount: num(c.n),
         totalMinor: num(c.total),
+      })),
+      byCategory: departments.map((d) => ({
+        categoryId: d.id,
+        name: d.name ?? 'بلا تصنيف',
+        lineCount: num(d.n),
+        totalMinor: num(d.total),
+        discountMinor: num(d.discount),
+      })),
+      topProducts: top.map((t) => ({
+        productId: t.id,
+        name: t.name,
+        qty: num(t.qty),
+        totalMinor: num(t.total),
       })),
       returns: {
         count: num(returned?.n),

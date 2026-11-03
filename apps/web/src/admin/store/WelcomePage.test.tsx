@@ -29,6 +29,7 @@ function store(overrides: Partial<StoreResponse> = {}): StoreResponse {
     taxInclusive: true,
     usdRate: null,
     onboarding: { step: 0, done: false },
+    scaleBarcode: null,
     ...overrides,
   };
 }
