@@ -14,6 +14,9 @@ const ProductsPage = lazy(() => import('./products/ProductsPage').then((m) => ({
 const ProductRoute = lazy(() => import('./products/ProductPage').then((m) => ({ default: m.ProductRoute })));
 const LabelsPage = lazy(() => import('./labels/LabelsPage').then((m) => ({ default: m.LabelsPage })));
 const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ default: m.SerialsPage })));
+const MerchandisePage = lazy(() =>
+  import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
+);
 const ExpiryPage = lazy(() => import('./purchases/ExpiryPage').then((m) => ({ default: m.ExpiryPage })));
 const ChequesPage = lazy(() => import('./cheques/ChequesPage').then((m) => ({ default: m.ChequesPage })));
 const PromotionsPage = lazy(() =>
@@ -85,6 +88,7 @@ export function AdminApp() {
           <Route path="/purchases" element={page(<PurchasesPage />)} />
           <Route path="/inventory" element={page(<InventoryPage />)} />
           <Route path="/expiry" element={page(<ExpiryPage />)} />
+          <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
           <Route path="/serials" element={page(<SerialsPage />)} />
           <Route path="/labels" element={page(<LabelsPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />

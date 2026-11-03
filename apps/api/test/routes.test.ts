@@ -97,6 +97,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PATCH /v1/tax-rates/:id': 'signed-in',
   'GET /v1/accounts': 'signed-in',
   'GET /v1/reports/day': 'signed-in',
+  'GET /v1/reports/merchandise': 'signed-in',
   'GET /v1/shifts': 'signed-in',
   'GET /v1/shifts/:id': 'signed-in',
   'GET /v1/journal': 'signed-in',
