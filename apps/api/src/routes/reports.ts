@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   dayReportQuery,
+  merchandiseQuery,
   journalQuery,
   shiftListQuery,
   syncEvidenceQuery,
@@ -9,6 +10,7 @@ import {
   type AccountListResponse,
   type DayReport,
   type JournalPage,
+  type MerchandiseReport,
   type ShiftListResponse,
   type ShiftReport,
   type SyncEvidence,
@@ -26,6 +28,7 @@ import {
   syncEvidence,
   trialBalance,
 } from '../services/reports';
+import { merchandiseReport } from '../services/merchandise';
 import { parseBody } from './validation';
 
 const authOf = (request: FastifyRequest): AccessClaims => {
@@ -49,6 +52,10 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/v1/reports/day', signedIn, async (request): Promise<DayReport> =>
     dayReport(db, authOf(request), parseBody(dayReportQuery, request.query)),
+  );
+
+  app.get('/v1/reports/merchandise', signedIn, async (request): Promise<MerchandiseReport> =>
+    merchandiseReport(db, authOf(request), parseBody(merchandiseQuery, request.query), app.clock.now()),
   );
 
   app.get('/v1/shifts', signedIn, async (request): Promise<ShiftListResponse> =>
