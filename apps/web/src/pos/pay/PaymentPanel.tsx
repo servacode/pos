@@ -64,7 +64,7 @@ const VOUCHER_OPTION = (base: PayOption['currency']): PayOption => ({
   key: 'voucher',
   method: 'voucher',
   currency: base,
-  label: 'قسيمة استبدال',
+  label: 'قسيمة',
   rate: null,
 });
 

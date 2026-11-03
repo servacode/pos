@@ -5,6 +5,7 @@ import type { BranchRow, SettingsRow } from '@serva/core/contracts/catalog';
 import type {
   PaymentMethod,
   ReceiptPayload,
+  GiftVoucherPayload,
   ReturnPayload,
   SalePayload,
 } from '@serva/core/contracts/documents';
@@ -25,7 +26,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   transfer: 'تحويل',
   credit: 'آجل على الحساب',
   cheque: 'شيك',
-  voucher: 'قسيمة استبدال',
+  voucher: 'قسيمة',
 };
 
 export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base: CurrencyCode): string {
@@ -35,8 +36,8 @@ export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base:
 }
 
 export interface ReceiptData {
-  /** A sale receipt unless it says return or receipt (a customer's payment) */
-  kind?: 'sale' | 'return' | 'receipt';
+  /** A sale receipt unless it says return, receipt (a customer's payment) or gift (a gift voucher) */
+  kind?: 'sale' | 'return' | 'receipt' | 'gift';
   doc: Pick<SyncDocument, 'number' | 'deviceTime' | 'payload'>;
   settings: SettingsRow;
   branch: BranchRow | null;
@@ -245,6 +246,45 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
   );
 }
 
+/** A gift voucher (03 › الألبسة: قسيمة هدية): its amount, who it is for, its bars and its code. */
+function GiftVoucherSlip({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
+  const digits = useDigits();
+  const g = data.doc.payload as unknown as GiftVoucherPayload;
+  const at = Date.parse(data.doc.deviceTime);
+  return (
+    <div dir="rtl" lang="ar" aria-label={`قسيمة هدية ${width} مم`} className={slipClass(width)}>
+      <ReceiptHeader data={data} width={width} copy={copy} />
+      <Rule />
+      <section aria-label="قسيمة الهدية" className="flex flex-col items-center gap-1 text-center">
+        <span className="text-base font-bold">قسيمة هدية</span>
+        {g.forName ? <span className="font-bold">إلى {g.forName}</span> : null}
+        <Money minor={g.amountMinor} currency={g.currency} className="text-xl font-bold" />
+        {data.doc.number ? (
+          <>
+            <div className="h-12 w-full px-2">
+              <Bars code={data.doc.number} height={40} />
+            </div>
+            <bdi dir="ltr" className="num">
+              {data.doc.number}
+            </bdi>
+          </>
+        ) : null}
+        <span className="text-xs">{VOUCHER_NOTE}</span>
+        <span className="text-xs">
+          {dateText(at, digits)} ، {clockText(at, digits)}
+        </span>
+      </section>
+      <Rule />
+      <p className="text-center text-[10px]">
+        سيرفا ·{' '}
+        <span lang="en" dir="ltr">
+          Serva
+        </span>
+      </p>
+    </div>
+  );
+}
+
 /**
  * The sale receipt (21 › إيصال 80 مم; print/Receipt80): the store, the number and the moment, each
  * line with «quantity × price», the discounts, the total and its value in dollars, the payments,
@@ -263,6 +303,7 @@ export function Receipt({
   const digits = useDigits();
   if (data.kind === 'return') return <ReturnReceipt data={data} width={width} copy={copy} />;
   if (data.kind === 'receipt') return <PaymentVoucher data={data} width={width} copy={copy} />;
+  if (data.kind === 'gift') return <GiftVoucherSlip data={data} width={width} copy={copy} />;
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
   const at = Date.parse(data.doc.deviceTime);

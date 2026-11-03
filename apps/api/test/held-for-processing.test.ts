@@ -153,17 +153,18 @@ function processedDocs(store: Store, doc: ReturnType<typeof documents>) {
 }
 
 describe('which types are posted today', () => {
-  it('splits DOC_SERIES into the 7 types with a processor and the 15 held ones', () => {
+  it('splits DOC_SERIES into the 8 types with a processor and the 15 held ones', () => {
     expect(PROCESSED).toEqual([
       'cash_movement',
       'customer',
+      'gift_voucher',
       'receipt',
       'return',
       'sale',
       'shift_close',
       'shift_open',
     ]);
-    expect(DOC_TYPES).toHaveLength(22);
+    expect(DOC_TYPES).toHaveLength(23);
     // When a phase adds a processor this number drops: the held documents of that type are then
     // the catch-up of that phase (M1), never posted here on their own.
     expect(HELD).toHaveLength(15);

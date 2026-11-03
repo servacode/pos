@@ -197,6 +197,13 @@
       "when": 1793736103911,
       "tag": "0027_online_store",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793739282959,
+      "tag": "0028_gift_vouchers",
+      "breakpoints": true
     }
   ]
 }

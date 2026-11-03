@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type {
   CashMovementPayload,
   JournalSourceType,
+  GiftVoucherPayload,
   ReceiptPayload,
   ReturnPayload,
   SalePayload,
@@ -468,6 +469,47 @@ export async function postReceipt(tx: Transaction, source: SaleSource, r: Receip
     memo: `سند قبض ${source.number} من ${r.customerName}`,
     baseCurrency: r.currency,
     lines: receiptLines(r),
+  });
+}
+
+// ─── Gift voucher ────────────────────────────────────────────────────────────
+
+/** A gift voucher sold: the money in (the drawer of its shift, or its method's account), 2310 owed. */
+export function giftVoucherLines(g: GiftVoucherPayload, number: string): DraftLine[] {
+  const money: DraftLine =
+    g.method === 'cash'
+      ? {
+          account: { cash: '1110', currency: g.currency },
+          baseMinor: g.amountMinor,
+          currency: g.currency,
+          amountMinor: g.amountMinor,
+          rate: null,
+          shiftId: g.shiftId,
+        }
+      : baseLine(
+          { code: METHOD_ACCOUNTS[g.method] },
+          g.amountMinor,
+          g.currency,
+          [methodMemo[g.method], g.reference].filter(Boolean).join(' '),
+        );
+  return [money, baseLine({ code: '2310' }, -g.amountMinor, g.currency, `قسيمة هدية ${number}`)];
+}
+
+export async function postGiftVoucher(
+  tx: Transaction,
+  source: SaleSource,
+  g: GiftVoucherPayload,
+): Promise<void> {
+  await postEntry(tx, {
+    tenantId: source.tenantId,
+    branchId: source.branchId,
+    date: source.businessDate,
+    sourceType: 'gift_voucher',
+    sourceId: source.docId,
+    sourceNumber: source.number,
+    memo: `قسيمة هدية ${source.number}${g.forName ? ` إلى ${g.forName}` : ''}`,
+    baseCurrency: g.currency,
+    lines: giftVoucherLines(g, source.number),
   });
 }
 

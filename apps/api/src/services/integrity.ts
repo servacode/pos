@@ -224,11 +224,25 @@ async function hasTable(tx: Transaction, name: string): Promise<boolean> {
   return Boolean(row?.present);
 }
 
+/** For the check to run on an older schema too (the upgrade test runs it before and after). */
+async function hasColumn(tx: Transaction, table: string, column: string): Promise<boolean> {
+  const [row] = await tx.execute<{ present: boolean }>(sql`
+    select exists (select 1 from information_schema.columns
+                   where table_schema = current_schema() and table_name = ${table} and column_name = ${column}) as present`);
+  return Boolean(row?.present);
+}
+
 async function drawerLedger(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
   const paid = (await hasTable(tx, 'receipts'))
     ? sql`union all
       select r.shift_id, r.currency, r.amount_minor
       from receipts r where r.tenant_id = ${tenantId} and r.method = 'cash'`
+    : sql``;
+  // Gift vouchers sold for cash went into the drawer of their shift (03 › الألبسة: قسيمة هدية)
+  const gifts = (await hasColumn(tx, 'vouchers', 'shift_id'))
+    ? sql`union all
+      select v.shift_id, v.currency, v.amount_minor
+      from vouchers v where v.tenant_id = ${tenantId} and v.kind = 'gift' and v.method = 'cash'`
     : sql``;
   const refunds = (await hasReturns(tx))
     ? sql`union all
@@ -260,6 +274,7 @@ async function drawerLedger(tx: Transaction, tenantId: string): Promise<Integrit
       from cash_movements m where m.tenant_id = ${tenantId} and m.shift_id is not null
       ${refunds}
       ${paid}
+      ${gifts}
     ),
     docs as (select shift_id, currency, sum(amount) as amount from flows group by shift_id, currency),
     opening as (

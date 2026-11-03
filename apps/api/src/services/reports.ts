@@ -404,6 +404,9 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       select r.currency, 'refund', sum(r.total_minor)::text from sale_returns r
       where r.shift_id = ${id} and r.refund_method = 'cash' group by r.currency
       union all
+      select v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
+      where v.shift_id = ${id} and v.kind = 'gift' and v.method = 'cash' group by v.currency
+      union all
       select m.currency, m.kind, sum(m.amount_minor)::text from cash_movements m
       where m.shift_id = ${id} group by m.currency, m.kind`);
     const movements = await tx.execute<{

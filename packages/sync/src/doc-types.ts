@@ -12,6 +12,8 @@ export const DOC_SERIES = {
   exchange: null,
   quotation: 'QUO',
   receipt: 'RCV',
+  // A gift voucher sold at the till (03 › الألبسة: قسيمة هدية)
+  gift_voucher: 'GFT',
   cash_movement: 'CSH',
   shift_open: 'SFT',
   shift_close: null,

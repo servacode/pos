@@ -1,5 +1,10 @@
 import type { CurrencyCode } from '@serva/core/currencies';
-import type { ReceiptPayload, ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
+import type {
+  GiftVoucherPayload,
+  ReceiptPayload,
+  ReturnPayload,
+  SalePayload,
+} from '@serva/core/contracts/documents';
 import { formatMoney } from '@serva/core/money';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
@@ -86,6 +91,18 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       lines.push({ kind: 'center', text: VOUCHER_NOTE });
     }
     return [...lines, ...footer(data, false)];
+  }
+  if (data.kind === 'gift') {
+    const g = data.doc.payload as unknown as GiftVoucherPayload;
+    lines.push(...header(data, 'قسيمة هدية', data.doc.number, at));
+    if (g.forName) lines.push({ kind: 'center', text: `إلى ${g.forName}`, bold: true });
+    lines.push({ kind: 'center', text: money(g.amountMinor, g.currency), bold: true, big: true });
+    if (data.doc.number) {
+      lines.push({ kind: 'barcode', code: data.doc.number });
+      lines.push({ kind: 'center', text: data.doc.number });
+    }
+    lines.push({ kind: 'center', text: VOUCHER_NOTE });
+    return [...lines, ...footer(data)];
   }
   if (data.kind === 'receipt') {
     const r = data.doc.payload as unknown as ReceiptPayload;

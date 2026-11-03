@@ -1,6 +1,6 @@
 import type { CurrencyCode } from '@serva/core/currencies';
 import type { VoucherRow } from '@serva/core/contracts/catalog';
-import type { ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
+import type { GiftVoucherPayload, ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
 import type { OutboxEntry } from '@serva/sync';
 
 /** An exchange voucher as this till sees it, with what is left on it. */
@@ -49,6 +49,9 @@ export function tillVouchers(
         .filter((r) => r.method === 'voucher')
         .reduce((sum, r) => sum + r.amountMinor, 0);
       if (amountMinor > 0) issued.set(doc.number, { currency: ret.currency, amountMinor, redeemedMinor: 0 });
+    } else if (doc.type === 'gift_voucher' && doc.number && !issued.has(doc.number)) {
+      const g = doc.payload as unknown as GiftVoucherPayload;
+      issued.set(doc.number, { currency: g.currency, amountMinor: g.amountMinor, redeemedMinor: 0 });
     } else if (doc.type === 'sale') {
       for (const p of (doc.payload as unknown as SalePayload).payments ?? []) {
         if (p.method !== 'voucher' || !p.reference) continue;
