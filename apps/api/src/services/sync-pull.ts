@@ -18,6 +18,7 @@ import {
   userRoles,
   users,
   variants,
+  vouchers,
   withTenant,
   type Database,
   type Transaction,
@@ -267,6 +268,18 @@ const PULL_SETS: Record<string, PullSet> = {
       priceTier: customers.priceTier,
       archived: archivedFlag(customers.archivedAt),
       version: customers.version,
+    },
+  },
+  vouchers: {
+    table: vouchers,
+    id: vouchers.id,
+    tenantId: vouchers.tenantId,
+    columns: {
+      code: vouchers.code,
+      currency: vouchers.currency,
+      amountMinor: vouchers.amountMinor,
+      redeemedMinor: vouchers.redeemedMinor,
+      version: vouchers.version,
     },
   },
   promotions: {

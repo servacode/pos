@@ -258,6 +258,7 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
       },
     ],
     promotions: [],
+    vouchers: [],
     ...overrides,
   };
 }

@@ -84,6 +84,8 @@ export interface Cart {
   sent?: Record<number, number>;
   /** «سعر الجملة» (03 › الجملة): every line at its wholesale price where it has one */
   priceTier?: 'retail' | 'wholesale';
+  /** An exchange (03 › الملابس): the voucher of the return just saved, offered first at payment */
+  voucher?: string;
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
   invoiceApproval: Approval | null;
 }

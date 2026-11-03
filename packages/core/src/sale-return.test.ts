@@ -239,10 +239,12 @@ describe('a return', () => {
   });
 
   it('pays back the way it was paid, and cash for a mix', () => {
-    const paidBy = (method: 'wallet' | 'transfer') =>
+    const paidBy = (method: 'wallet' | 'transfer' | 'voucher') =>
       ({ ...aSale([line(1, 1_000)]), payments: [{ method }] }) as unknown as SalePayload;
     expect(defaultRefundMethod(paidBy('wallet'))).toBe('wallet');
     expect(defaultRefundMethod(paidBy('transfer'))).toBe('transfer');
+    // What a voucher paid goes back on a voucher, never as cash
+    expect(defaultRefundMethod(paidBy('voucher'))).toBe('voucher');
     const mixed = {
       ...aSale([line(1, 1_000)]),
       payments: [{ method: 'card' }, { method: 'cash' }],
@@ -257,6 +259,16 @@ describe('a return', () => {
       reference: 'X',
     });
     expect(cash.refunds[0]!.reference).toBeNull();
+    // A voucher refund carries none either: its code is the return's own number
+    const voucher = buildReturnPayload({
+      ...request(sale, [{ saleLineNo: 1, qty: 1000 }]),
+      refundMethod: 'voucher',
+      reference: 'X',
+    });
+    expect(voucher.refunds).toEqual([
+      { method: 'voucher', currency: 'SYP', amountMinor: 1_000, reference: null },
+    ]);
+    expect(returnPayloadSchema.safeParse(voucher).success).toBe(true);
     expect(
       buildReturnPayload(request(sale, [{ saleLineNo: 1, qty: 1000 }])).refunds[0]!.reference,
     ).toBeNull();

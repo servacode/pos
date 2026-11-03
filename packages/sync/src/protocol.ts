@@ -198,6 +198,10 @@ export const SYNC_FLAGS = [
   'unknown_serial',
   /** A serial number already sold by another sale */
   'serial_sold_twice',
+  /** A sale spent a voucher the server does not know (03 › قسيمة الاستبدال) */
+  'unknown_voucher',
+  /** A sale spent more than was left on a voucher */
+  'voucher_overdrawn',
   'posted_to_open_period',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,

@@ -1,3 +1,4 @@
+import { barcodeModules } from '../../lib/barcode';
 import { DOTS, toBits } from './escpos';
 import type { PrintLine } from './lines';
 
@@ -53,6 +54,18 @@ export function renderLines(
     if (line.kind === 'rule') {
       ctx.fillRect(pad, y + size / 2, width - pad * 2, 2);
       y += size;
+      continue;
+    }
+    if (line.kind === 'barcode') {
+      // Whole dots per bar, centred, so a scanner reads it at the printer's resolution
+      const { modules } = barcodeModules(line.code);
+      const bar = Math.max(1, Math.floor((width - pad * 2) / modules.length));
+      const left = Math.floor((width - bar * modules.length) / 2);
+      const tall = size * 3;
+      for (let i = 0; i < modules.length; i++) {
+        if (modules[i] === '1') ctx.fillRect(left + i * bar, y, bar, tall);
+      }
+      y += tall + Math.round(size * 0.4);
       continue;
     }
     if (line.kind === 'pair') {

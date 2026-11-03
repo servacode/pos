@@ -2037,3 +2037,32 @@ export const serials = pgTable(
     tenantIsolation(),
   ],
 );
+
+/**
+ * Exchange vouchers (03 › الملابس: قسيمة الاستبدال): a return refunded as a voucher makes one, its
+ * code the return's number; sales that spend it add to what was redeemed. Pulled by every till.
+ */
+export const vouchers = pgTable(
+  'vouchers',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    code: text('code').notNull(),
+    returnId: uuid('return_id').notNull(),
+    currency: text('currency').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    redeemedMinor: bigint('redeemed_minor', { mode: 'number' }).notNull().default(0),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'vouchers_pkey', columns: [t.tenantId, t.id] }),
+    unique('vouchers_code_unique').on(t.tenantId, t.code),
+    index('vouchers_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);

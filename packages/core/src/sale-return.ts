@@ -121,7 +121,7 @@ export function defaultRefundMethod(sale: SalePayload): RefundMethod {
   const methods = new Set(sale.payments.map((p) => p.method));
   if (methods.size === 1) {
     const [only] = [...methods];
-    if (only === 'card' || only === 'wallet' || only === 'transfer') return only;
+    if (only === 'card' || only === 'wallet' || only === 'transfer' || only === 'voucher') return only;
   }
   return 'cash';
 }
@@ -176,7 +176,8 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
     method,
     currency: sale.currency,
     amountMinor: totals.totalMinor,
-    reference: method === 'cash' ? null : (request.reference ?? null),
+    // A voucher's code is the return's own number, given when it is saved
+    reference: method === 'cash' || method === 'voucher' ? null : (request.reference ?? null),
   };
   return {
     saleId: request.saleId,

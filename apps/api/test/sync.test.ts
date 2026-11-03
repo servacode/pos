@@ -497,6 +497,7 @@ describe('GET /v1/sync/pull', () => {
       'user_roles',
       'users',
       'variants',
+      'vouchers',
     ]);
     expect(res.hasMore).toBe(false);
     expect(res.serverEpoch).toBe(1);

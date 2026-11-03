@@ -41,16 +41,30 @@ import { customerPayloadSchema, type CustomerPayload } from './customers';
 /**
  * Payment methods (09 › payments; 27 › الدفع عند الكاشير). `cheque` (03 › الجملة: الآجل والشيكات)
  * waits in 1160 «شيكات تحت التحصيل» until the owner marks it cashed or bounced; like credit it
- * needs the customer. Points and vouchers come later.
+ * needs the customer. `voucher` (03 › الملابس: قسيمة الاستبدال) spends an exchange voucher a
+ * return gave, by its code (the return's number), out of 2310. Points come later.
  */
-export const PAYMENT_METHODS = ['cash', 'card', 'wallet', 'transfer', 'credit', 'cheque'] as const;
+export const PAYMENT_METHODS = ['cash', 'card', 'wallet', 'transfer', 'credit', 'cheque', 'voucher'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /** Methods that settle the exact amount and never give change (10 › حساب الفاتورة, step 6). */
-export const NON_CASH_METHODS: readonly PaymentMethod[] = ['card', 'wallet', 'transfer', 'credit', 'cheque'];
+export const NON_CASH_METHODS: readonly PaymentMethod[] = [
+  'card',
+  'wallet',
+  'transfer',
+  'credit',
+  'cheque',
+  'voucher',
+];
 
 /** Methods whose reference is mandatory: approval code, wallet transaction, transfer or cheque number (27). */
-export const REFERENCE_METHODS: readonly PaymentMethod[] = ['card', 'wallet', 'transfer', 'cheque'];
+export const REFERENCE_METHODS: readonly PaymentMethod[] = [
+  'card',
+  'wallet',
+  'transfer',
+  'cheque',
+  'voucher',
+];
 
 /** Methods that put the amount on a named customer: credit (1200) and cheque (1160, party). */
 export const CUSTOMER_METHODS: readonly PaymentMethod[] = ['credit', 'cheque'];
@@ -644,7 +658,11 @@ export type CashMovementPayload = z.output<typeof cashMovementPayloadSchema>;
 // ─── Return (SRT) ────────────────────────────────────────────────────────────
 
 /** How a return is paid back (08 › مرتجع مبيعات): cash from the drawer, or to the card, wallet or transfer it came by */
-export const REFUND_METHODS = ['cash', 'card', 'wallet', 'transfer'] as const;
+/**
+ * How a return pays back. `voucher` (03 › الملابس: قسيمة الاستبدال) pays nothing out: the amount
+ * stays the customer's, on a voucher whose code is the return's own number (2310 until spent).
+ */
+export const REFUND_METHODS = ['cash', 'card', 'wallet', 'transfer', 'voucher'] as const;
 export type RefundMethod = (typeof REFUND_METHODS)[number];
 
 /** A returned line's share of its sale line, in the invoice currency (packages/core › sale-return.ts) */
@@ -684,7 +702,7 @@ export const refundSchema = z
     amountMinor: positiveMinorSchema,
     reference: z.string().trim().min(1).max(64).nullable(),
   })
-  .refine((r) => r.method === 'cash' || r.reference !== null, {
+  .refine((r) => r.method === 'cash' || r.method === 'voucher' || r.reference !== null, {
     path: ['reference'],
     message: 'a card, wallet or transfer refund needs its reference',
   });

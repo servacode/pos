@@ -205,6 +205,7 @@ describe('sync tables', () => {
       'user_roles',
       'users',
       'variants',
+      'vouchers',
     ]);
     expect(tables.filter((t) => !t.touch || !t.tombstone || !t.indexed)).toEqual([]);
   });

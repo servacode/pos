@@ -27,6 +27,7 @@ import {
   stockLevels,
   stockMovements,
   variants,
+  vouchers,
   type Transaction,
 } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
@@ -213,6 +214,8 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     },
     sale,
   );
+  // Vouchers spent (03 › قسيمة الاستبدال): never refused, flagged when unknown or overdrawn
+  flags.push(...(await redeemVouchers(tx, tenantId, sale)));
   // A credit sale over the customer's limit is accepted and flagged (08 › قاعدة 8)
   if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) {
     if (await overCreditLimit(tx, tenantId, sale.customerId)) flags.push('credit_limit_exceeded');
@@ -314,6 +317,19 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     ret.lines,
     (original?.payload as SalePayload | undefined)?.lines ?? null,
   );
+  const voucher = ret.refunds.find((r) => r.method === 'voucher');
+  if (voucher) {
+    await tx
+      .insert(vouchers)
+      .values({
+        tenantId,
+        code: doc.number!,
+        returnId: doc.id,
+        currency: voucher.currency,
+        amountMinor: voucher.amountMinor,
+      })
+      .onConflictDoNothing();
+  }
   await postReturn(
     tx,
     {
@@ -326,6 +342,22 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     ret,
   );
   return { flags };
+}
+
+/** A sale's voucher payments against the vouchers they name: their redeemed amount grows. */
+async function redeemVouchers(tx: Transaction, tenantId: string, sale: SalePayload): Promise<SyncFlag[]> {
+  const flags = new Set<SyncFlag>();
+  for (const p of sale.payments) {
+    if (p.method !== 'voucher' || !p.reference) continue;
+    const [row] = await tx
+      .update(vouchers)
+      .set({ redeemedMinor: sql`${vouchers.redeemedMinor} + ${p.baseAmountMinor}` })
+      .where(and(eq(vouchers.tenantId, tenantId), eq(vouchers.code, p.reference)))
+      .returning({ amount: vouchers.amountMinor, redeemed: vouchers.redeemedMinor });
+    if (!row) flags.add('unknown_voucher');
+    else if (row.redeemed > row.amount) flags.add('voucher_overdrawn');
+  }
+  return [...flags];
 }
 
 /** What a customer owes now: their 1200 lines, debit less credit, base currency. */

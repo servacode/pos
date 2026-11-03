@@ -29,6 +29,7 @@ import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker
 import { nextOrderNo } from '../sale/orders';
 import { digitOf } from '../PinScreen';
 import { usePos } from '../services';
+import { deviceDocuments } from '../shift/shift';
 import { pricingInput, type Cart, type PricingContext } from '../sale/cart';
 import {
   amountText,
@@ -40,6 +41,7 @@ import {
   tenderOf,
   type PayOption,
 } from './payment';
+import { findVoucher, tillVouchers } from './vouchers';
 
 export interface PaymentPanelProps {
   cart: Cart;
@@ -57,6 +59,14 @@ export interface PaymentPanelProps {
   onBack: () => void;
   onCompleted: (entry: OutboxEntry) => void;
 }
+
+const VOUCHER_OPTION = (base: PayOption['currency']): PayOption => ({
+  key: 'voucher',
+  method: 'voucher',
+  currency: base,
+  label: 'قسيمة استبدال',
+  rate: null,
+});
 
 interface Part {
   option: PayOption;
@@ -88,19 +98,40 @@ export function PaymentPanel({
   const base = ctx.currency;
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
   const [picking, setPicking] = useState(false);
+  // This till's own documents, for the vouchers it issued or spent that the server has not sent back
+  const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void deviceDocuments(pos.store).then((list) => alive && setEntries(list));
+    return () => {
+      alive = false;
+    };
+  }, [pos.store]);
+  const vouchers = useMemo(() => tillVouchers(catalog.vouchers, entries ?? []), [catalog.vouchers, entries]);
+  const hasVouchers = Boolean(cart.voucher) || [...vouchers.values()].some((v) => v.balanceMinor > 0);
   const options = useMemo(() => {
     const list = payOptions(base, settings.enabledCurrencies, catalog.rates, catalog.collectRates);
+    if (hasVouchers) list.push(VOUCHER_OPTION(base));
     if (customer && canCredit) {
       list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
       list.push({ key: 'cheque', method: 'cheque', currency: base, label: 'شيك', rate: null });
     }
     return list;
-  }, [base, settings.enabledCurrencies, catalog.rates, catalog.collectRates, customer, canCredit]);
-  const [option, setOption] = useState<PayOption>(options[0]!);
+  }, [
+    base,
+    settings.enabledCurrencies,
+    catalog.rates,
+    catalog.collectRates,
+    customer,
+    canCredit,
+    hasVouchers,
+  ]);
+  // An exchange opens on the voucher of the return just saved
+  const [option, setOption] = useState<PayOption>(cart.voucher ? VOUCHER_OPTION(base) : options[0]!);
   const [split, setSplit] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
   const [text, setText] = useState('');
-  const [reference, setReference] = useState('');
+  const [reference, setReference] = useState(cart.voucher ?? '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const referenceRef = useRef<HTMLInputElement>(null);
@@ -123,19 +154,65 @@ export function PaymentPanel({
   const before = settleWith(parts.map((p) => p.tender));
   const remainingBase = 'error' in before ? totalMinor : before.remainingMinor;
   const nonCash = option.method !== 'cash';
+  // A voucher pays what is left on it, less what this sale already took from it
+  const voucher = option.method === 'voucher' ? findVoucher(vouchers, reference) : null;
+  const voucherLeft = voucher
+    ? voucher.balanceMinor -
+      parts
+        .filter((p) => p.tender.method === 'voucher' && p.tender.reference === voucher.code)
+        .reduce((sum, p) => sum + p.tender.amountMinor, 0)
+    : 0;
   // Non-cash pays exactly what is left unless the cashier types less (a split).
-  const amount = typed ?? (nonCash ? remainingBase : null);
-  const current = amount && amount > 0 ? tenderOf(option, amount, reference) : null;
+  const amount =
+    typed ??
+    (option.method === 'voucher'
+      ? voucher
+        ? Math.min(remainingBase, Math.max(0, voucherLeft))
+        : null
+      : nonCash
+        ? remainingBase
+        : null);
+  const current = amount && amount > 0 ? tenderOf(option, amount, voucher ? voucher.code : reference) : null;
+  const voucherProblem =
+    option.method !== 'voucher' || reference.trim() === '' || entries === null
+      ? null
+      : !voucher
+        ? 'لا قسيمة بهذا الرقم على هذا الجهاز. تأكد من الرقم، أو انتظر وصولها إن صدرت من جهاز آخر.'
+        : voucherLeft <= 0
+          ? 'صُرفت هذه القسيمة كلها.'
+          : (amount ?? 0) > voucherLeft
+            ? 'المبلغ أكبر مما بقي على القسيمة.'
+            : null;
   const tenders = [...parts.map((p) => p.tender), ...(current ? [current] : [])];
   const settlement = settleWith(tenders);
   const needsReference =
     nonCash && option.method !== 'credit' && current !== null && current.reference === null;
   const onAccount = (method: string) => method === 'credit' || method === 'cheque';
   const canComplete =
-    !saving && !('error' in settlement) && settlement.covered && !needsReference && tenders.length > 0;
+    !saving &&
+    !('error' in settlement) &&
+    settlement.covered &&
+    !needsReference &&
+    !voucherProblem &&
+    tenders.length > 0;
 
   const dueHere = dueIn(option.currency, base, remainingBase, ctx.rates);
   const quick = option.method === 'cash' ? quickAmounts(dueHere, option.currency) : [];
+
+  // An exchange: once this till's documents are read, the voucher goes in as the first part when
+  // it does not cover the whole sale, and the cashier takes the rest by any method
+  const exchanged = useRef(false);
+  useEffect(() => {
+    if (exchanged.current || !cart.voucher || entries === null) return;
+    exchanged.current = true;
+    const found = findVoucher(vouchers, cart.voucher);
+    if (!found || found.balanceMinor <= 0 || found.balanceMinor >= totalMinor) return;
+    const voucherOption = VOUCHER_OPTION(base);
+    setSplit(true);
+    setParts([{ option: voucherOption, tender: tenderOf(voucherOption, found.balanceMinor, found.code) }]);
+    setOption(options[0]!);
+    setReference('');
+  }, [cart.voucher, entries, vouchers, totalMinor, base, options]);
 
   function pick(next: PayOption) {
     setOption(next);
@@ -146,7 +223,7 @@ export function PaymentPanel({
   }
 
   function addPart() {
-    if (!current) return;
+    if (!current || voucherProblem) return;
     setParts((list) => [...list, { option, tender: current }]);
     setText('');
     setReference('');
@@ -155,6 +232,7 @@ export function PaymentPanel({
   async function complete() {
     if (!canComplete) {
       if ('error' in settlement) setError(settlement.error);
+      else if (voucherProblem) setError(voucherProblem);
       else if (needsReference) setError(`اكتب ${REFERENCE_LABEL[option.method]}.`);
       return;
     }
@@ -400,15 +478,31 @@ export function PaymentPanel({
               . يظهر في كشف حسابه.
             </p>
           ) : option.method !== 'cash' ? (
-            <TextField
-              ref={referenceRef}
-              label={REFERENCE_LABEL[option.method] ?? 'المرجع'}
-              value={reference}
-              onChange={(event) => setReference(event.target.value.slice(0, 64))}
-              dir="ltr"
-              inputMode="numeric"
-              autoComplete="off"
-            />
+            <>
+              <TextField
+                ref={referenceRef}
+                label={REFERENCE_LABEL[option.method] ?? 'المرجع'}
+                hint={option.method === 'voucher' ? 'امسح باركود القسيمة أو اكتب آخر أرقامها' : undefined}
+                value={reference}
+                onChange={(event) => setReference(event.target.value.slice(0, 64))}
+                dir="ltr"
+                inputMode={option.method === 'voucher' ? 'text' : 'numeric'}
+                autoComplete="off"
+              />
+              {option.method === 'voucher' && voucher ? (
+                <p role="status" aria-label="رصيد القسيمة" className="text-sm text-ink">
+                  القسيمة{' '}
+                  <bdi dir="ltr" className="num font-semibold">
+                    {voucher.code}
+                  </bdi>{' '}
+                  · بقي عليها{' '}
+                  <Money minor={Math.max(0, voucherLeft)} currency={voucher.currency} className="font-bold" />
+                </p>
+              ) : null}
+              {voucherProblem ? (
+                <p className="text-sm font-semibold text-danger-ink">{voucherProblem}</p>
+              ) : null}
+            </>
           ) : (
             <div className="grid grid-cols-3 gap-2">
               {quick.map((value, index) => (
