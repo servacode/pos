@@ -89,6 +89,13 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PATCH /v1/products/:id/images/:imageId': 'signed-in',
   'DELETE /v1/products/:id/images/:imageId': 'signed-in',
   'GET /v1/images/:tenantId/:imageId': 'public',
+  'GET /v1/shop/:slug': 'public',
+  'GET /v1/shop/:slug/products/:id': 'public',
+  'POST /v1/shop/:slug/orders': 'public',
+  'GET /v1/online-store': 'signed-in',
+  'PUT /v1/online-store': 'signed-in',
+  'GET /v1/online-orders': 'signed-in',
+  'POST /v1/online-orders/:id/status': 'signed-in',
   'PATCH /v1/products/:id': 'signed-in',
   'POST /v1/products/:id/archive': 'signed-in',
   'POST /v1/products/:id/restore': 'signed-in',
@@ -284,7 +291,105 @@ const imageIdor =
     ]);
   };
 
+/** Both stores' shops on: A on «a-shop» with a product on its shelf, B on «b-shop» */
+async function twoShops(app: FastifyInstance, { a, b }: Stores) {
+  for (const [store, slug] of [
+    [a, 'a-shop'],
+    [b, 'b-shop'],
+  ] as const) {
+    const now = await app.inject({ method: 'GET', url: '/v1/online-store', headers: owner(store) });
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/v1/online-store',
+      headers: owner(store),
+      payload: {
+        version: now.json<{ version: number | null }>().version,
+        enabled: true,
+        slug,
+        whatsapp: '0933123456',
+        delivery: true,
+        pickup: true,
+        note: null,
+        showOutOfStock: true,
+      },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  }
+  return productOf(app, a);
+}
+
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  'GET /v1/shop/:slug': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    const b = await app.inject({ method: 'GET', url: '/v1/shop/b-shop' });
+    expect(b.statusCode).toBe(200);
+    expect(JSON.stringify(b.json())).not.toContain(product.id);
+    expect((await app.inject({ method: 'GET', url: '/v1/shop/no-such-shop' })).statusCode).toBe(404);
+  },
+  'GET /v1/shop/:slug/products/:id': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    expect(
+      (await app.inject({ method: 'GET', url: `/v1/shop/a-shop/products/${product.id}` })).statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: `/v1/shop/b-shop/products/${product.id}` })).statusCode,
+    ).toBe(404);
+  },
+  'POST /v1/shop/:slug/orders': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/shop/b-shop/orders',
+      payload: {
+        name: 'زبون',
+        phone: '0944555666',
+        fulfilment: 'pickup',
+        lines: [{ variantId: product.variants[0]!.id, qty: 1 }],
+      },
+    });
+    // A's piece is not B's: refused, and nothing is saved for B
+    expect(res.statusCode).toBe(400);
+    const box = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: owner(stores.b) });
+    expect(box.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'POST /v1/online-orders/:id/status': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    // A's shirt has no stock and the shop shows what ran out, but it cannot be ordered: use a service
+    const service = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: owner(stores.a),
+      payload: {
+        nameAr: 'تقصير',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 100 } }],
+      },
+    });
+    expect(service.statusCode, service.body).toBe(201);
+    const placed = await app.inject({
+      method: 'POST',
+      url: '/v1/shop/a-shop/orders',
+      payload: {
+        name: 'زبون',
+        phone: '0944555666',
+        fulfilment: 'pickup',
+        lines: [{ variantId: service.json<{ variants: { id: string }[] }>().variants[0]!.id, qty: 1 }],
+      },
+    });
+    expect(placed.statusCode, placed.body).toBe(201);
+    expect(product.id).toBeDefined();
+    const mine = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: owner(stores.a) });
+    const [target] = mine.json<{ items: { id: string; version: number; status: string }[] }>().items;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/online-orders/${target!.id}/status`,
+      headers: owner(stores.b),
+      payload: { status: 'rejected', version: target!.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const after = await app.inject({ method: 'GET', url: '/v1/online-orders', headers: owner(stores.a) });
+    expect(after.json<{ items: { status: string }[] }>().items[0]!.status).toBe('pending');
+  },
   'GET /v1/products/:id/images': imageIdor('GET', (p) => `/v1/products/${p}/images`),
   'POST /v1/products/:id/images': imageIdor(
     'POST',

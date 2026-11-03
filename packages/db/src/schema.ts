@@ -2126,3 +2126,80 @@ export const productImages = pgTable(
     tenantIsolation(),
   ],
 );
+
+/**
+ * The store's online shop (26 › المتجر الإلكتروني): its own link (`slug`, unique across the
+ * platform), off until the owner turns it on, the WhatsApp number orders go to, and how the goods
+ * reach the customer. Found by its link without sign-in through shop_find_by_slug().
+ */
+export const onlineStores = pgTable(
+  'online_stores',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references(() => tenants.id),
+    slug: text('slug').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    whatsapp: text('whatsapp'),
+    delivery: boolean('delivery').notNull().default(true),
+    pickup: boolean('pickup').notNull().default(true),
+    /** «التوصيل داخل المدينة خلال يوم، 10,000 ل.س» */
+    note: text('note'),
+    showOutOfStock: boolean('show_out_of_stock').notNull().default(false),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('online_stores_slug_unique').on(t.slug), tenantIsolation()],
+);
+
+/**
+ * An order from the online shop (26 › حياة الطلب): what the customer put in the cart at the
+ * server's prices, saved before WhatsApp opens, so it waits in the orders box even if the message
+ * is never sent. Numbered ONL-000001 per store.
+ */
+export const onlineOrders = pgTable(
+  'online_orders',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    seq: integer('seq').notNull(),
+    number: text('number').notNull(),
+    /** pending, accepted, rejected, done */
+    status: text('status').notNull().default('pending'),
+    /** whatsapp (the only one yet), shop */
+    source: text('source').notNull().default('whatsapp'),
+    customerName: text('customer_name').notNull(),
+    phone: text('phone').notNull(),
+    /** delivery or pickup */
+    fulfilment: text('fulfilment').notNull(),
+    address: text('address'),
+    note: text('note'),
+    currency: text('currency').notNull(),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    lines: jsonb('lines').$type<OnlineOrderLine[]>().notNull(),
+    decidedBy: uuid('decided_by'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'online_orders_pkey', columns: [t.tenantId, t.id] }),
+    unique('online_orders_seq_unique').on(t.tenantId, t.seq),
+    index('online_orders_status_idx').on(t.tenantId, t.status, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+export interface OnlineOrderLine {
+  variantId: string;
+  productId: string;
+  name: string;
+  label: string | null;
+  qty: number;
+  priceMinor: number;
+  totalMinor: number;
+}
