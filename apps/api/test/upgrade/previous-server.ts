@@ -21,6 +21,9 @@ const git = (...args: string[]) => execFileSync('git', args, { cwd: repoRoot, en
 
 /** The commit whose code wrote the books at the previous schema. */
 export function previousCommit(lastMigrationTag: string): string {
+  if (git('rev-parse', '--is-shallow-repository') === 'true') {
+    throw new Error('the upgrade test needs the history: clone with fetch-depth 0 (git fetch --unshallow)');
+  }
   const added = git(
     'log',
     '--diff-filter=A',
