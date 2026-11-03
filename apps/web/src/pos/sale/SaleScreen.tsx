@@ -1204,6 +1204,7 @@ export function SaleScreen(props: SaleScreenProps) {
                     priceMinor={item.price.priceMinor}
                     currency={item.price.currency}
                     weighed={item.unit?.allowsFraction ?? false}
+                    {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
                     selected={cart.lines.some((l) => l.variantId === item.variantId)}
                     onSelect={() => add(item)}
                     className="w-full"

@@ -81,6 +81,13 @@ export function LabelsPage() {
   useEffect(() => {
     const product = params.get('product');
     const purchase = params.get('purchase');
+    // After a price change (products/BulkPricesPage): every changed product, one label each piece
+    const several = (params.get('products') ?? '').split(',').filter(Boolean).slice(0, 200);
+    for (const id of several) {
+      getProduct(id)
+        .then((p) => addProduct(p))
+        .catch((e: unknown) => setError(errorMessage(e)));
+    }
     if (product) {
       getProduct(product)
         .then((p) => addProduct(p))

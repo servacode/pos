@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import type { MerchandiseReport, OptionSales } from '@serva/core';
+import type { Category, MerchandiseReport, OptionSales } from '@serva/core';
 import {
   Alert,
   Badge,
@@ -8,11 +8,14 @@ import {
   formatQuantity,
   Money,
   SegmentedControl,
+  Select,
   StatTile,
+  TextField,
   type DataColumn,
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
+import { listCategories } from '../catalog/api';
 
 type Slow = MerchandiseReport['slowMovers'][number];
 type Piece = MerchandiseReport['models'][number]['pieces'][number];
@@ -27,10 +30,29 @@ export function daysAgo(days: number, from: Date = new Date()): string {
   return d.toLocaleDateString('en-CA');
 }
 
-export const getMerchandise = (from: string, to: string, idleDays: number) =>
-  apiFetch<MerchandiseReport>(`/v1/reports/merchandise?from=${from}&to=${to}&idleDays=${idleDays}`, {
-    auth: true,
-  });
+export const getMerchandise = (from: string, to: string, idleDays: number, categoryId = '') =>
+  apiFetch<MerchandiseReport>(
+    `/v1/reports/merchandise?from=${from}&to=${to}&idleDays=${idleDays}${categoryId ? `&categoryId=${categoryId}` : ''}`,
+    { auth: true },
+  );
+
+const COMMISSION_KEY = 'serva-commission-percent';
+const readCommission = () => {
+  try {
+    return localStorage.getItem(COMMISSION_KEY) ?? '';
+  } catch {
+    return '';
+  }
+};
+
+/** A seller's commission: what they sold less what came back, times the percent typed. */
+export function commissionOf(totalMinor: number, returnedMinor: number, percentText: string): number | null {
+  const percent = Number(
+    percentText.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace('٫', '.'),
+  );
+  if (!percentText.trim() || !Number.isFinite(percent) || percent < 0 || percent > 100) return null;
+  return Math.round(((totalMinor - returnedMinor) * percent) / 100);
+}
 
 const returnRate = (r: OptionSales) =>
   r.soldQty === 0 ? null : Math.round((r.returnedQty / r.soldQty) * 100);
@@ -42,6 +64,14 @@ const returnRate = (r: OptionSales) =>
  */
 export function MerchandisePage() {
   const [period, setPeriod] = useState<keyof typeof PERIODS>('30');
+  const [departments, setDepartments] = useState<Category[]>([]);
+  const [department, setDepartment] = useState('');
+  const [commission, setCommission] = useState(readCommission);
+  useEffect(() => {
+    listCategories()
+      .then((r) => setDepartments(r.items.filter((c) => c.parentId === null && !c.archivedAt)))
+      .catch(() => setDepartments([]));
+  }, []);
   const [idle, setIdle] = useState<keyof typeof IDLE>('60');
   const [data, setData] = useState<MerchandiseReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,10 +79,10 @@ export function MerchandisePage() {
   const load = useCallback(() => {
     setError(null);
     setData(null);
-    getMerchandise(daysAgo(Number(period)), daysAgo(0), Number(idle))
+    getMerchandise(daysAgo(Number(period)), daysAgo(0), Number(idle), department)
       .then(setData)
       .catch((e: unknown) => setError(errorMessage(e)));
-  }, [period, idle]);
+  }, [period, idle, department]);
   useEffect(load, [load]);
 
   const base = data?.baseCurrency ?? 'SYP';
@@ -135,6 +165,21 @@ export function MerchandisePage() {
         </div>
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="flex flex-wrap gap-4">
+          {departments.length > 0 ? (
+            <Select
+              label="القسم"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="w-48"
+            >
+              <option value="">كل الأقسام</option>
+              {departments.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <SegmentedControl
             label="المبيعات خلال"
             value={period}
@@ -195,6 +240,69 @@ export function MerchandisePage() {
                 rowKey={(r) => r.variantId}
               />
             ))}
+          </section>
+        ) : null}
+
+        {data && data.bySeller.length > 0 ? (
+          <section aria-label="المبيعات حسب البائع" className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <h2 className="flex-1 text-xl font-bold text-ink">المبيعات حسب البائع والعمولة</h2>
+              <TextField
+                label="نسبة العمولة ٪"
+                dir="ltr"
+                inputMode="decimal"
+                value={commission}
+                onChange={(e) => {
+                  const next = e.target.value.slice(0, 6);
+                  setCommission(next);
+                  try {
+                    localStorage.setItem(COMMISSION_KEY, next);
+                  } catch {
+                    // A browser without storage keeps it until the page closes
+                  }
+                }}
+                className="w-36"
+              />
+            </div>
+            <DataTable
+              caption="البائعون"
+              columns={[
+                {
+                  key: 'name',
+                  header: 'البائع',
+                  cell: (r) => <span className="font-semibold">{r.fullName || '—'}</span>,
+                },
+                {
+                  key: 'n',
+                  header: 'الفواتير',
+                  numeric: true,
+                  cell: (r) => <span className="num">{r.invoiceCount}</span>,
+                },
+                {
+                  key: 'total',
+                  header: 'المبيع',
+                  numeric: true,
+                  cell: (r) => <Money minor={r.totalMinor} currency={base} />,
+                },
+                {
+                  key: 'back',
+                  header: 'رجع منه',
+                  numeric: true,
+                  cell: (r) => <Money minor={r.returnedMinor} currency={base} />,
+                },
+                {
+                  key: 'commission',
+                  header: 'العمولة',
+                  numeric: true,
+                  cell: (r) => {
+                    const c = commissionOf(r.totalMinor, r.returnedMinor, commission);
+                    return c === null ? '—' : <Money minor={c} currency={base} className="font-bold" />;
+                  },
+                },
+              ]}
+              rows={data.bySeller}
+              rowKey={(r) => r.userId}
+            />
           </section>
         ) : null}
 

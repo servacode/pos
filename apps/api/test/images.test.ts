@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import type { ProductDetail, ProductImage, ProductImagesResponse } from '@serva/core';
+import type { ProductDetail, ProductImage, ProductImagesResponse, VariantRow } from '@serva/core';
+import type { PullResponse } from '@serva/sync';
 import { sniffImage } from '../src/services/catalog/images';
 import { openStore, type Store } from './accounting-fixtures';
-import { closeAppDb, closeOwnerDb, makeApp, resetDatabase } from './helpers';
+import { closeAppDb, closeOwnerDb, makeApp, resetDatabase, settled } from './helpers';
 
 /**
  * Product pictures (03 › الألبسة: صور القطع): several per product, one per colour where the shop
@@ -133,6 +134,47 @@ describe('product pictures', () => {
     expect((await app.inject({ method: 'GET', url: `/v1/images/${a.tenantId}/not-an-id` })).statusCode).toBe(
       404,
     );
+  });
+
+  it('sends each till its piece’s colour picture, else the main one, again when the pictures change', async () => {
+    const store = await openStore(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: as(store),
+      payload: {
+        nameAr: 'قميص',
+        variants: ['أحمر', 'أبيض'].map((value) => ({
+          attributes: [{ name: 'اللون', value }],
+          price: { currency: 'SYP', priceMinor: 100_000 },
+        })),
+      },
+    });
+    const p = res.json<ProductDetail>();
+    const pull = async () => {
+      await settled();
+      const page = await app.inject({
+        method: 'GET',
+        url: '/v1/sync/pull',
+        headers: { authorization: store.device.authorization },
+      });
+      const rows = (page.json<PullResponse>().sets as unknown as { variants: { upserts: VariantRow[] } })
+        .variants.upserts;
+      return new Map(rows.map((v) => [v.id, v.imageUrl]));
+    };
+    const [red, white] = p.variants.map((v) => v.id) as [string, string];
+    expect((await pull()).get(red)).toBeNull();
+    const main = (await add(store, p.id, body(10))).json<ProductImage>();
+    const redPic = (await add(store, p.id, body(11, { optionValue: 'أحمر' }))).json<ProductImage>();
+    const after = await pull();
+    expect(after.get(red)).toBe(redPic.thumbUrl);
+    expect(after.get(white)).toBe(main.thumbUrl);
+    await app.inject({
+      method: 'DELETE',
+      url: `/v1/products/${p.id}/images/${redPic.id}`,
+      headers: as(store),
+    });
+    expect((await pull()).get(red)).toBe(main.thumbUrl);
   });
 
   it('knows a picture by its first bytes', () => {

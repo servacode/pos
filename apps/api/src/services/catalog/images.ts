@@ -53,6 +53,13 @@ async function requireProduct(tx: Transaction, tenantId: string, productId: stri
   if (!row) throw notFound(PRODUCT);
 }
 
+/** The tills pull a piece's picture with the piece: touching its pieces sends them again. */
+async function touchPieces(tx: Transaction, tenantId: string, productId: string) {
+  await tx.execute(
+    sql`update variants set updated_at = now() where tenant_id = ${tenantId} and product_id = ${productId}`,
+  );
+}
+
 async function listOf(tx: Transaction, tenantId: string, productId: string): Promise<ProductImage[]> {
   const rows = await tx
     .select({
@@ -160,6 +167,7 @@ export function addProductImage(
       },
       ctx.meta,
     );
+    await touchPieces(tx, tenantId, productId);
     return (await listOf(tx, tenantId, productId)).find((i) => i.id === row!.id)!;
   });
 }
@@ -190,6 +198,7 @@ export function updateProductImage(
       const items = await listOf(tx, tenantId, productId);
       throw items.some((i) => i.id === imageId) ? staleVersion() : notFound(IMAGE);
     }
+    await touchPieces(tx, tenantId, productId);
     return (await listOf(tx, tenantId, productId)).find((i) => i.id === imageId)!;
   });
 }
@@ -214,6 +223,7 @@ export function deleteProductImage(
       )
       .returning({ id: productImages.id });
     if (gone.length === 0) throw notFound(IMAGE);
+    await touchPieces(tx, tenantId, productId);
     await audit(
       tx,
       {
@@ -255,6 +265,7 @@ export function orderProductImages(
         .set({ sortOrder: index, updatedAt: sql`now()` })
         .where(and(eq(productImages.tenantId, tenantId), eq(productImages.id, id)));
     }
+    await touchPieces(tx, tenantId, productId);
     return { items: await listOf(tx, tenantId, productId) };
   });
 }

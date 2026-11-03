@@ -87,6 +87,7 @@ function product(
       attributes: [],
       sortOrder: 0,
       nearestExpiry: null,
+      imageUrl: null,
       archived: false,
       version: 1,
     } satisfies PullSetRows['variants'],

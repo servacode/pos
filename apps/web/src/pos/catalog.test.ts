@@ -59,6 +59,7 @@ function bigStore(count: number): CatalogSets {
       attributes: [],
       sortOrder: 0,
       nearestExpiry: null,
+      imageUrl: null,
       archived: false,
       version: 1,
     });
@@ -126,6 +127,16 @@ describe('the local catalog (15 › البحث في الأصناف)', () => {
     expect(names).not.toContain('شاي أحمر 400 غ');
     expect(names).not.toContain('لبنة 1 كغ');
     expect(names).not.toContain('سكر أبيض 1 كغ');
+  });
+
+  it('carries each piece’s picture to the grid (03 › الألبسة)', () => {
+    const sets = posSets();
+    sets.variants = sets.variants.map((v, i) =>
+      i === 0 ? { ...v, imageUrl: '/v1/images/t/u?size=thumb' } : v,
+    );
+    const catalog = buildCatalog(sets);
+    expect(catalog.byVariant.get(sets.variants[0]!.id)?.imageUrl).toBe('/v1/images/t/u?size=thumb');
+    expect(catalog.byVariant.get(sets.variants[1]!.id)?.imageUrl).toBeNull();
   });
 
   it('uses the newest rate in force, and the collect rate for payment when set', () => {

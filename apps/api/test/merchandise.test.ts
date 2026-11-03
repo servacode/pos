@@ -173,6 +173,33 @@ describe('the clothing report', () => {
     expect(r.slowMovers).toHaveLength(2);
     expect(r.slowValueMinor).toBe(80_000);
 
+    // The cashier sold it all: 3,000 sold, 1,000 came back
+    expect(r.bySeller).toEqual([
+      {
+        userId: store.userId,
+        fullName: expect.any(String),
+        invoiceCount: 1,
+        totalMinor: 300_000,
+        returnedMinor: 100_000,
+      },
+    ]);
+    // A department with none of these goods shows none of them
+    const kids = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/categories',
+        headers: as(store),
+        payload: { name: 'ولادي', parentId: null },
+      })
+    ).json<{ id: string }>();
+    const onlyKids = (
+      await report(store, `from=2026-10-01&to=2026-10-30&categoryId=${kids.id}`)
+    ).json<MerchandiseReport>();
+    expect(onlyKids.byOption).toEqual([]);
+    expect(onlyKids.models).toEqual([]);
+    expect(onlyKids.slowMovers).toEqual([]);
+    expect(onlyKids.bySeller).toHaveLength(1);
+
     // Within 150 days nothing has slept that long
     const longer = (
       await report(store, 'from=2026-10-01&to=2026-10-30&idleDays=150')

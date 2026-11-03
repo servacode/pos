@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z, type ZodType } from 'zod';
 import {
   barcodeCodeSchema,
+  bulkPriceInput,
   createCategoryInput,
   createProductInput,
   createTaxRateInput,
@@ -16,6 +17,7 @@ import {
   updateUnitInput,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
+import { bulkPrices } from '../services/catalog/bulk-prices';
 import {
   addProductImage,
   deleteProductImage,
@@ -159,6 +161,10 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
       .header('content-security-policy', "default-src 'none'")
       .send(image.body);
   });
+
+  app.post('/v1/prices/bulk', signedIn, async (request) =>
+    bulkPrices(db, parseCatalog(bulkPriceInput, request.body), ctxOf(request)),
+  );
 
   app.get('/v1/barcodes/:code', signedIn, async (request) => {
     const code = barcodeCodeSchema.safeParse((request.params as { code?: string }).code);

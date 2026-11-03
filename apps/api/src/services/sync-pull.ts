@@ -160,6 +160,16 @@ const PULL_SETS: Record<string, PullSet> = {
       attributes: variants.attributes,
       sortOrder: variants.sortOrder,
       nearestExpiry: variants.nearestExpiry,
+      // Its colour's picture (or any option value it has) first, else the product's main one
+      imageUrl: sql<string | null>`(
+        select '/v1/images/' || i.tenant_id || '/' || i.upload_id || '?size=thumb'
+        from product_images i
+        where i.tenant_id = ${variants.tenantId} and i.product_id = ${variants.productId}
+          and (i.option_value is null
+               or exists (select 1 from jsonb_array_elements(${variants.attributes}) a
+                          where a ->> 'value' = i.option_value))
+        order by (i.option_value is null), i.sort_order, i.created_at
+        limit 1)`,
       archived: archivedFlag(variants.archivedAt),
       version: variants.version,
     },
