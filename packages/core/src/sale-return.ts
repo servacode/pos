@@ -122,6 +122,8 @@ export function defaultRefundMethod(sale: SalePayload): RefundMethod {
   if (methods.size === 1) {
     const [only] = [...methods];
     if (only === 'card' || only === 'wallet' || only === 'transfer' || only === 'voucher') return only;
+    // What points paid goes back on a voucher, never as cash
+    if (only === 'points') return 'voucher';
   }
   return 'cash';
 }

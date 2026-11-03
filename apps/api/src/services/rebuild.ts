@@ -72,6 +72,10 @@ async function removeEffects(tx: Transaction, tenantId: string): Promise<void> {
   await tx.execute(sql`delete from receipts where tenant_id = ${tenantId} and id in ${docs}`);
   await tx.execute(sql`delete from vouchers where tenant_id = ${tenantId} and return_id in ${docs}`);
   await tx.execute(sql`delete from customers where tenant_id = ${tenantId} and created_by_doc in ${docs}`);
+  // Loyalty points are what the sales made them (03 › نقاط الولاء): back to zero, then replayed
+  await tx.execute(
+    sql`update customers set loyalty_points = 0 where tenant_id = ${tenantId} and loyalty_points <> 0`,
+  );
   await tx.execute(
     sql`delete from shifts where tenant_id = ${tenantId} and (id in ${docs} or close_doc_id in ${docs})`,
   );

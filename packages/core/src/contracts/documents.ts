@@ -44,7 +44,17 @@ import { customerPayloadSchema, type CustomerPayload } from './customers';
  * needs the customer. `voucher` (03 › الملابس: قسيمة الاستبدال) spends an exchange voucher a
  * return gave, by its code (the return's number), out of 2310. Points come later.
  */
-export const PAYMENT_METHODS = ['cash', 'card', 'wallet', 'transfer', 'credit', 'cheque', 'voucher'] as const;
+/** `points`: a customer's loyalty points spent at their value (03 › نقاط الولاء), posted to 6700 */
+export const PAYMENT_METHODS = [
+  'cash',
+  'card',
+  'wallet',
+  'transfer',
+  'credit',
+  'cheque',
+  'voucher',
+  'points',
+] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /** Methods that settle the exact amount and never give change (10 › حساب الفاتورة, step 6). */
@@ -55,6 +65,7 @@ export const NON_CASH_METHODS: readonly PaymentMethod[] = [
   'credit',
   'cheque',
   'voucher',
+  'points',
 ];
 
 /** Methods whose reference is mandatory: approval code, wallet transaction, transfer or cheque number (27). */
@@ -67,7 +78,7 @@ export const REFERENCE_METHODS: readonly PaymentMethod[] = [
 ];
 
 /** Methods that put the amount on a named customer: credit (1200) and cheque (1160, party). */
-export const CUSTOMER_METHODS: readonly PaymentMethod[] = ['credit', 'cheque'];
+export const CUSTOMER_METHODS: readonly PaymentMethod[] = ['credit', 'cheque', 'points'];
 
 /**
  * Who approved something over the role's limit (11 › ما يحتاج موافقة): `pin` is the manager's code

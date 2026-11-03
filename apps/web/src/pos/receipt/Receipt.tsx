@@ -27,6 +27,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   credit: 'آجل على الحساب',
   cheque: 'شيك',
   voucher: 'قسيمة',
+  points: 'نقاط الولاء',
 };
 
 export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base: CurrencyCode): string {

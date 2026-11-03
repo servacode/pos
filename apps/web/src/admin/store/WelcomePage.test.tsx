@@ -31,6 +31,7 @@ function store(overrides: Partial<StoreResponse> = {}): StoreResponse {
     onboarding: { step: 0, done: false },
     scaleBarcode: null,
     service: null,
+    loyalty: null,
     ...overrides,
   };
 }

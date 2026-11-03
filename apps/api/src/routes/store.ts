@@ -4,6 +4,7 @@ import {
   storeCurrencyInput,
   storeProfileInput,
   storeScaleInput,
+  storeLoyaltyInput,
   storeServiceInput,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
@@ -15,6 +16,7 @@ import {
   updateOnboarding,
   updateProfile,
   updateScale,
+  updateLoyalty,
   updateService,
 } from '../services/store';
 import { parseBody } from './validation';
@@ -60,5 +62,10 @@ export async function storeRoutes(app: FastifyInstance): Promise<void> {
   app.put('/v1/store/service', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return updateService(app.db, request.auth, parseBody(storeServiceInput, request.body), meta(request));
+  });
+
+  app.put('/v1/store/loyalty', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updateLoyalty(app.db, request.auth, parseBody(storeLoyaltyInput, request.body), meta(request));
   });
 }

@@ -109,9 +109,16 @@ export function PaymentPanel({
   }, [pos.store]);
   const vouchers = useMemo(() => tillVouchers(catalog.vouchers, entries ?? []), [catalog.vouchers, entries]);
   const hasVouchers = Boolean(cart.voucher) || [...vouchers.values()].some((v) => v.balanceMinor > 0);
+  // «نقاط الولاء» (03 › الألبسة): what the picked customer's points are worth, as last pulled
+  const loyalty = settings.loyalty ?? null;
+  const points = customer ? (catalog.customers.find((c) => c.id === customer.id)?.loyaltyPoints ?? 0) : 0;
+  const pointsWorth = loyalty ? points * loyalty.pointValueMinor : 0;
   const options = useMemo(() => {
     const list = payOptions(base, settings.enabledCurrencies, catalog.rates, catalog.collectRates);
     if (hasVouchers) list.push(VOUCHER_OPTION(base));
+    if (customer && loyalty && points > 0) {
+      list.push({ key: 'points', method: 'points', currency: base, label: `نقاط (${points})`, rate: null });
+    }
     if (customer && canCredit) {
       list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
       list.push({ key: 'cheque', method: 'cheque', currency: base, label: 'شيك', rate: null });
@@ -125,6 +132,8 @@ export function PaymentPanel({
     customer,
     canCredit,
     hasVouchers,
+    loyalty,
+    points,
   ]);
   // An exchange opens on the voucher of the return just saved
   const [option, setOption] = useState<PayOption>(cart.voucher ? VOUCHER_OPTION(base) : options[0]!);
@@ -154,6 +163,10 @@ export function PaymentPanel({
   const before = settleWith(parts.map((p) => p.tender));
   const remainingBase = 'error' in before ? totalMinor : before.remainingMinor;
   const nonCash = option.method !== 'cash';
+  // Points pay up to what they are worth, less what this sale already took from them
+  const pointsLeft =
+    pointsWorth -
+    parts.filter((p) => p.tender.method === 'points').reduce((sum, p) => sum + p.tender.amountMinor, 0);
   // A voucher pays what is left on it, less what this sale already took from it
   const voucher = option.method === 'voucher' ? findVoucher(vouchers, reference) : null;
   const voucherLeft = voucher
@@ -169,12 +182,17 @@ export function PaymentPanel({
       ? voucher
         ? Math.min(remainingBase, Math.max(0, voucherLeft))
         : null
-      : nonCash
-        ? remainingBase
-        : null);
+      : option.method === 'points'
+        ? Math.min(remainingBase, Math.max(0, pointsLeft))
+        : nonCash
+          ? remainingBase
+          : null);
   const current = amount && amount > 0 ? tenderOf(option, amount, voucher ? voucher.code : reference) : null;
+  const pointsProblem =
+    option.method === 'points' && (amount ?? 0) > pointsLeft ? 'المبلغ أكبر مما تساويه نقاط الزبون.' : null;
   const voucherProblem =
-    option.method !== 'voucher' || reference.trim() === '' || entries === null
+    pointsProblem ??
+    (option.method !== 'voucher' || reference.trim() === '' || entries === null
       ? null
       : !voucher
         ? 'لا قسيمة بهذا الرقم على هذا الجهاز. تأكد من الرقم، أو انتظر وصولها إن صدرت من جهاز آخر.'
@@ -182,12 +200,16 @@ export function PaymentPanel({
           ? 'صُرفت هذه القسيمة كلها.'
           : (amount ?? 0) > voucherLeft
             ? 'المبلغ أكبر مما بقي على القسيمة.'
-            : null;
+            : null);
   const tenders = [...parts.map((p) => p.tender), ...(current ? [current] : [])];
   const settlement = settleWith(tenders);
   const needsReference =
-    nonCash && option.method !== 'credit' && current !== null && current.reference === null;
-  const onAccount = (method: string) => method === 'credit' || method === 'cheque';
+    nonCash &&
+    option.method !== 'credit' &&
+    option.method !== 'points' &&
+    current !== null &&
+    current.reference === null;
+  const onAccount = (method: string) => method === 'credit' || method === 'cheque' || method === 'points';
   const canComplete =
     !saving &&
     !('error' in settlement) &&
@@ -476,6 +498,18 @@ export function PaymentPanel({
                 </>
               ) : null}
               . يظهر في كشف حسابه.
+            </p>
+          ) : option.method === 'points' ? (
+            <p
+              role="status"
+              aria-label="نقاط الزبون"
+              className="rounded-control bg-brand-soft p-3 text-sm text-ink"
+            >
+              لدى {customer?.name} <bdi className="num font-bold">{points}</bdi> نقطة تساوي{' '}
+              <Money minor={pointsWorth} currency={base} className="font-bold" />.
+              {pointsProblem ? (
+                <span className="block font-semibold text-danger-ink">{pointsProblem}</span>
+              ) : null}
             </p>
           ) : option.method !== 'cash' ? (
             <>

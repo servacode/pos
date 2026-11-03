@@ -61,6 +61,8 @@ export interface CustomerRow {
   phone: string | null;
   creditLimitMinor: number | null;
   priceTier: PriceTier;
+  /** «نقاط الولاء» earned and not yet spent, as the server last counted them */
+  loyaltyPoints: number;
   archived: boolean;
   version: number;
 }

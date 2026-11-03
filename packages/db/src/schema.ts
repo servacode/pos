@@ -353,6 +353,8 @@ export const tenantSettings = pgTable(
     }>(),
     /** «الصالة والمطبخ» (packages/core › contracts/store.ts ServiceSettings); null for a shop */
     service: jsonb('service').$type<{ tables: string[]; orderNumbers: boolean; kitchenTickets: boolean }>(),
+    /** «نقاط الولاء»: null, no points */
+    loyalty: jsonb('loyalty').$type<{ earnEveryMinor: number; pointValueMinor: number }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1491,6 +1493,8 @@ export const customers = pgTable(
     creditLimitMinor: bigint('credit_limit_minor', { mode: 'number' }),
     /** retail or wholesale: the price the till sells to them at */
     priceTier: text('price_tier').notNull().default('retail'),
+    /** «نقاط الولاء» earned less spent; kept by the sale processor, reset and replayed by the rebuild */
+    loyaltyPoints: integer('loyalty_points').notNull().default(0),
     /** The till document that created it, when a till did */
     createdByDoc: uuid('created_by_doc'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),

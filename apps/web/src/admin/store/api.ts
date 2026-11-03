@@ -2,6 +2,7 @@ import type {
   OnboardingInput,
   StoreCurrencyInput,
   StoreProfileInput,
+  StoreLoyaltyInput,
   StoreResponse,
   StoreScaleInput,
   StoreServiceInput,
@@ -30,3 +31,7 @@ export const saveScale = (input: StoreScaleInput) =>
 /** `PUT /v1/store/service`: tables, order numbers and kitchen tickets, or null for none (settings.manage) */
 export const saveService = (input: StoreServiceInput) =>
   apiFetch<StoreResponse>('/v1/store/service', { method: 'PUT', body: input, auth: true });
+
+/** `PUT /v1/store/loyalty`: the loyalty points' rates, or null for none (settings.manage) */
+export const saveLoyalty = (input: StoreLoyaltyInput) =>
+  apiFetch<StoreResponse>('/v1/store/loyalty', { method: 'PUT', body: input, auth: true });
