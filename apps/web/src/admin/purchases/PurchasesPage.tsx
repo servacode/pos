@@ -356,6 +356,12 @@ function PurchaseForm({
               : [...list, { ...v, qty: '', cost: '', batch: '', expiry: '' }],
           )
         }
+        onPickGrid={(picked) =>
+          setLines((list) => [
+            ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
+            ...picked.map((p) => ({ ...p, batch: '', expiry: '' })),
+          ])
+        }
       />
       {lines.length > 0 ? (
         <ul aria-label="أصناف الفاتورة" className="flex flex-col gap-2">
