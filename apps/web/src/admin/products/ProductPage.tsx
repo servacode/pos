@@ -46,6 +46,7 @@ import {
   type VariantDraft,
 } from './form';
 import { ModifiersEditor } from './ModifiersEditor';
+import { ImagesEditor } from './ImagesEditor';
 import { OptionsEditor } from './OptionsEditor';
 import { VariantBlock } from './VariantBlock';
 
@@ -520,6 +521,14 @@ export function ProductPage() {
           <Section title="المقاسات والألوان">
             <OptionsEditor axes={draft.axes} variantCount={liveVariants.length} onChange={setAxes} />
             {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
+          </Section>
+
+          <Section title="الصور">
+            <ImagesEditor
+              productId={product?.id ?? null}
+              optionValues={[...new Set(draft.axes.flatMap((a) => a.values))]}
+              disabled={!canManage}
+            />
           </Section>
 
           <Section title="السعر والباركود">

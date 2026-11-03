@@ -83,6 +83,12 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/products': 'signed-in',
   'GET /v1/products/:id': 'signed-in',
   'GET /v1/products/options': 'signed-in',
+  'GET /v1/products/:id/images': 'signed-in',
+  'POST /v1/products/:id/images': 'signed-in',
+  'POST /v1/products/:id/images/order': 'signed-in',
+  'PATCH /v1/products/:id/images/:imageId': 'signed-in',
+  'DELETE /v1/products/:id/images/:imageId': 'signed-in',
+  'GET /v1/images/:tenantId/:imageId': 'public',
   'PATCH /v1/products/:id': 'signed-in',
   'POST /v1/products/:id/archive': 'signed-in',
   'POST /v1/products/:id/restore': 'signed-in',
@@ -238,7 +244,79 @@ async function supplierOf(app: FastifyInstance, a: Stores['a']) {
   return made.json<{ id: string }>().id;
 }
 
+/** A product of store A with one picture */
+async function pictureOf(app: FastifyInstance, a: Stores['a']) {
+  const product = await productOf(app, a);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString('base64');
+  const res = await app.inject({
+    method: 'POST',
+    url: `/v1/products/${product.id}/images`,
+    headers: owner(a),
+    payload: { contentType: 'image/jpeg', data: jpeg, thumb: jpeg, width: 10, height: 10 },
+  });
+  expect(res.statusCode, res.body).toBe(201);
+  return { productId: product.id, image: res.json<{ id: string; uploadId: string; version: number }>() };
+}
+
+/** Store B reaches none of store A's pictures, and A's still has its one */
+const imageIdor =
+  (
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    path: (productId: string, imageId: string) => string,
+    payload?: (version: number, imageId: string) => unknown,
+  ) =>
+  async (app: FastifyInstance, { a, b }: Stores) => {
+    const { productId, image } = await pictureOf(app, a);
+    const res = await app.inject({
+      method,
+      url: path(productId, image.id),
+      headers: owner(b),
+      ...(payload ? { payload: payload(image.version, image.id) as Record<string, unknown> } : {}),
+    });
+    expect(res.statusCode, `${method} ${path(':id', ':imageId')}`).toBe(404);
+    const mine = await app.inject({
+      method: 'GET',
+      url: `/v1/products/${productId}/images`,
+      headers: owner(a),
+    });
+    expect(mine.json<{ items: { id: string; version: number }[] }>().items).toEqual([
+      expect.objectContaining({ id: image.id, version: image.version }),
+    ]);
+  };
+
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  'GET /v1/products/:id/images': imageIdor('GET', (p) => `/v1/products/${p}/images`),
+  'POST /v1/products/:id/images': imageIdor(
+    'POST',
+    (p) => `/v1/products/${p}/images`,
+    () => ({
+      contentType: 'image/jpeg',
+      data: Buffer.from([0xff, 0xd8, 0xff, 9]).toString('base64'),
+      thumb: Buffer.from([0xff, 0xd8, 0xff, 9]).toString('base64'),
+      width: 1,
+      height: 1,
+    }),
+  ),
+  'POST /v1/products/:id/images/order': imageIdor(
+    'POST',
+    (p) => `/v1/products/${p}/images/order`,
+    (_version, imageId) => ({ ids: [imageId] }),
+  ),
+  'PATCH /v1/products/:id/images/:imageId': imageIdor(
+    'PATCH',
+    (p, i) => `/v1/products/${p}/images/${i}`,
+    (version) => ({ version, optionValue: 'مسروق' }),
+  ),
+  'DELETE /v1/products/:id/images/:imageId': imageIdor('DELETE', (p, i) => `/v1/products/${p}/images/${i}`),
+  'GET /v1/images/:tenantId/:imageId': async (app, { a, b }) => {
+    const { image } = await pictureOf(app, a);
+    expect(
+      (await app.inject({ method: 'GET', url: `/v1/images/${a.tenantId}/${image.uploadId}` })).statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: `/v1/images/${b.tenantId}/${image.uploadId}` })).statusCode,
+    ).toBe(404);
+  },
   'PUT /v1/promotions/:id': async (app, { a, b }) => {
     const made = await app.inject({
       method: 'POST',

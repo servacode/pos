@@ -2066,3 +2066,63 @@ export const vouchers = pgTable(
     tenantIsolation(),
   ],
 );
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+
+/**
+ * Pictures a store uploads (09 › uploads; 03 › الألبسة: صور القطع). Resized in the browser before
+ * they come (the full picture at most 1600 px, a thumbnail at 400), checked by their first bytes,
+ * and kept in the database, so the daily backup and the restore carry them with everything else.
+ * Served by their id under the store's id, without sign-in: product pictures go on the shop's
+ * public pages, and an id cannot be guessed.
+ */
+export const uploads = pgTable(
+  'uploads',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    kind: text('kind').notNull(),
+    contentType: text('content_type').notNull(),
+    sha256: text('sha256').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    data: bytea('data').notNull(),
+    thumb: bytea('thumb').notNull(),
+    createdBy: uuid('created_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'uploads_pkey', columns: [t.tenantId, t.id] }),
+    index('uploads_sha256_idx').on(t.tenantId, t.sha256),
+    tenantIsolation(),
+  ],
+);
+
+/** A product's pictures, in order; one may belong to an option value (a colour) of its pieces. */
+export const productImages = pgTable(
+  'product_images',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    productId: uuid('product_id').notNull(),
+    uploadId: uuid('upload_id').notNull(),
+    /** «أحمر»: shown when that value is chosen; null for the product as a whole */
+    optionValue: text('option_value'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'product_images_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.productId], foreignColumns: [products.tenantId, products.id] }),
+    foreignKey({ columns: [t.tenantId, t.uploadId], foreignColumns: [uploads.tenantId, uploads.id] }),
+    unique('product_images_upload_unique').on(t.tenantId, t.productId, t.uploadId),
+    index('product_images_product_idx').on(t.tenantId, t.productId, t.sortOrder),
+    tenantIsolation(),
+  ],
+);
