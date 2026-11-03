@@ -889,3 +889,37 @@ export interface ProductImage {
 export interface ProductImagesResponse {
   items: ProductImage[];
 }
+
+// ─── Bulk price change (03 › الألبسة: تنزيلات آخر الموسم) ─────────────────────
+
+/**
+ *   POST /v1/prices/bulk   catalog.manage   bulkPriceInput → BulkPriceResult
+ *
+ * Every piece of a category and its sub-categories moves by a percent (−90% to +200%), rounded to
+ * `roundToMinor` in the store's currency (other currencies to their own minor unit). `apply: false`
+ * only shows what would change. The floor price moves by the same percent and never passes the
+ * new price; the wholesale price stays.
+ */
+export const bulkPriceInput = z.object({
+  categoryId: uuidSchema,
+  percentBp: z
+    .int()
+    .min(-9000)
+    .max(20000)
+    .refine((v) => v !== 0, 'اكتب نسبة غير الصفر'),
+  roundToMinor: z.int().min(1).max(10_000_000).default(1),
+  apply: z.boolean().default(false),
+});
+export type BulkPriceInput = z.input<typeof bulkPriceInput>;
+
+export interface BulkPriceResult {
+  applied: boolean;
+  items: {
+    productId: string;
+    variantId: string;
+    name: string;
+    currency: CurrencyCode;
+    oldMinor: number;
+    newMinor: number;
+  }[];
+}
