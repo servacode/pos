@@ -12,7 +12,6 @@ import {
   documents,
   makeProduct,
   movement,
-  openStore,
   push,
   sale,
   shiftClose,
@@ -21,8 +20,9 @@ import {
   type Store,
 } from '../accounting-fixtures';
 import { createDevice, type TestDevice } from '../devices';
-import { appDb, closeAppDb, closeOwnerDb, makeApp, ownerDb } from '../helpers';
-import { TEST_OWNER_URL } from '../urls';
+import { appDb, closeAppDb, closeOwnerDb, makeApp, ownerDb, storeInput } from '../helpers';
+import { TEST_APP_URL, TEST_OWNER_URL } from '../urls';
+import { previousCommit, startPreviousServer, type PreviousServer } from './previous-server';
 
 /**
  * Task M0-4: upgrading a store's server from the previous version of the schema (N−1) to this one
@@ -35,11 +35,10 @@ import { TEST_OWNER_URL } from '../urls';
  * fingerprints of the ledger and of the stock must be the same; every row must still be there, and
  * the upgraded server must go on taking sales.
  *
- * What it does not prove: the documents are written by this version's code against the older
- * schema, not by the older code. That is what a shop's server does in the minutes between the
- * new code starting and the migration finishing, and it is the only N−1 writer the repository
- * holds. A migration that removes or renames something today's code writes would fail here at
- * N−1, and so be noticed before it ships.
+ * The books at N−1 are written by the previous version's own code (previous-server.ts: the
+ * commit before the latest migration, started from the repository's history), as a shop's server
+ * holds them when the update arrives. The new code meets the database only once it is migrated,
+ * as deploy/local/compose.yml runs it.
  */
 
 const INVOICES = 2_000;
@@ -62,8 +61,10 @@ const COUNTED_TABLES = [
 ] as const;
 
 let app: FastifyInstance | undefined;
+let previousServer: PreviousServer | undefined;
 let previousFolder: string | undefined;
 afterAll(async () => {
+  await previousServer?.stop();
   await app?.close();
   await closeAppDb();
   await closeOwnerDb();
@@ -101,6 +102,27 @@ async function rebuildAt(folder: string): Promise<string[]> {
     await sql.end();
   }
   return runMigrations(TEST_OWNER_URL, { migrationsFolder: folder });
+}
+
+/** A store signed up on `on`, with the code its test mode shows, and its first till. */
+async function openStoreOn(on: FastifyInstance, phone: string): Promise<Store> {
+  const input = storeInput({ phone });
+  const start = await on.inject({ method: 'POST', url: '/v1/auth/register', payload: input });
+  if (start.statusCode !== 202) throw new Error(`register failed: ${start.statusCode} ${start.body}`);
+  const { registrationId, testCode } = start.json<{ registrationId: string; testCode: string }>();
+  const res = await on.inject({
+    method: 'POST',
+    url: '/v1/auth/register/verify',
+    payload: { registrationId, code: testCode, password: input.password },
+  });
+  if (res.statusCode !== 201) throw new Error(`register/verify failed: ${res.statusCode} ${res.body}`);
+  const body = res.json<{ tenant: { id: string }; user: { id: string }; accessToken: string }>();
+  return {
+    tenantId: body.tenant.id,
+    userId: body.user.id,
+    accessToken: body.accessToken,
+    device: await createDevice(body.tenant.id),
+  };
 }
 
 const report = (tenantId: string): Promise<IntegrityReport> =>
@@ -236,13 +258,18 @@ describe('upgrade from the previous schema (N−1 → N)', () => {
     // A store at N−1, as a shop's server would hold it: plans seeded, four tills, stock.
     await ownerDb()`insert into plans (code, name, sort_order, limits, features)
       values ('basic', 'الأساسية', 1, '{}', '{}') on conflict do nothing`;
-    app = await makeApp();
-    const store = await openStore(app, '0955555555');
+    // The previous version writes the day, as the shop's server did before the update.
+    previousServer = await startPreviousServer(previousCommit(previous.last), {
+      DATABASE_URL: TEST_APP_URL,
+      JWT_SECRET: 'test-secret-that-is-definitely-long-enough-123',
+    });
+    const old = previousServer.app;
+    const store = await openStoreOn(old, '0955555555');
     const tills = [store.device];
     for (let i = 1; i < TILLS; i++) tills.push(await createDevice(store.tenantId));
     const products = [];
     for (const [i, price] of PRICES.entries())
-      products.push(await makeProduct(app, store, `صنف ${i}`, price));
+      products.push(await makeProduct(old, store, `صنف ${i}`, price));
     for (const p of products) {
       await ownerDb()`insert into stock_levels (tenant_id, branch_id, variant_id, qty)
         values (${store.tenantId}, ${store.device.branchId}, ${p.variantId}, 100000000)`;
@@ -252,7 +279,7 @@ describe('upgrade from the previous schema (N−1 → N)', () => {
     for (const [t, device] of tills.entries()) {
       const docs = tillDay(store, device, products, t);
       for (let i = 0; i < docs.length; i += BATCH) {
-        const res = await push(app, device, docs.slice(i, i + BATCH));
+        const res = await push(old, device, docs.slice(i, i + BATCH));
         const refused = res.results.filter((r) => r.status === 'rejected' || r.status === 'quarantined');
         expect(refused, JSON.stringify(refused.slice(0, 3))).toEqual([]);
       }
@@ -265,7 +292,9 @@ describe('upgrade from the previous schema (N−1 → N)', () => {
     expect(rowsBefore.invoices).toBe(INVOICES);
     expect(rowsBefore.journal_entries).toBeGreaterThan(INVOICES);
 
-    // The upgrade itself.
+    // The upgrade itself: the old server stops, the migration runs, the new server starts.
+    await previousServer.stop();
+    previousServer = undefined;
     const applied = await runMigrations(TEST_OWNER_URL);
     expect(applied).toEqual([previous.last]);
     const upgraded = Date.now();
@@ -278,6 +307,7 @@ describe('upgrade from the previous schema (N−1 → N)', () => {
     expect(await counts()).toEqual(rowsBefore);
 
     // The upgraded server still takes a sale, and its books stay whole.
+    app = await makeApp();
     const till = await createDevice(store.tenantId);
     const doc = documents(till, '2026-10-31');
     const open = doc('shift_open', shiftOpen(store.userId));

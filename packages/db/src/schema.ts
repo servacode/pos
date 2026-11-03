@@ -252,6 +252,10 @@ export const tenantSettings = pgTable(
     shiftMode: text('shift_mode').notNull().default('per_cashier'),
     /** «دقائق الخمول»: a cashier device signs its user out after this many idle minutes */
     idleMinutes: integer('idle_minutes').notNull().default(5),
+    /** The start wizard (04 › معالج البداية): the step the owner is on, so they resume there */
+    onboardingStep: integer('onboarding_step').notNull().default(0),
+    /** When the owner finished or skipped the wizard; null while it still shows */
+    onboardedAt: timestamp('onboarded_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

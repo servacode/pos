@@ -91,6 +91,7 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
         daysLeft: daysLeft(periodEnd, now),
       },
       branches: branchRows,
+      onboarding: { step: settings.onboardingStep, done: settings.onboardedAt !== null },
     };
   });
 }

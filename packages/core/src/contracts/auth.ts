@@ -145,6 +145,8 @@ export interface MeResponse {
     daysLeft: number | null;
   };
   branches: { id: string; code: string; name: string }[];
+  /** The start wizard (04 › معالج البداية): the step to resume at, and whether it is over */
+  onboarding: { step: number; done: boolean };
 }
 
 export type { SystemRoleKey };
