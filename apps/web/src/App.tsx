@@ -9,6 +9,7 @@ import { useTestMode } from './lib/testMode';
 // from the server. Neither loads the other's code.
 const PosApp = lazy(() => import('./pos/PosApp').then((m) => ({ default: m.PosApp })));
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })));
+const ShopApp = lazy(() => import('./shop/ShopApp').then((m) => ({ default: m.ShopApp })));
 const PlatformApp = lazy(() => import('./platform/PlatformApp').then((m) => ({ default: m.PlatformApp })));
 
 // The component gallery (tab 14 › معرض المكوّنات) exists in dev builds only: in a production build
@@ -37,6 +38,8 @@ export function App() {
           <Route path="/pos/*" element={<PosApp />} />
           <Route path="/link" element={<PairingLink />} />
           <Route path="/platform/*" element={<PlatformApp />} />
+          {/* A store's online shop: public, no sign-in (26 › المتجر الإلكتروني) */}
+          <Route path="/shop/:slug/*" element={<ShopApp />} />
           <Route path="*" element={<AdminApp />} />
         </Routes>
       </Suspense>
