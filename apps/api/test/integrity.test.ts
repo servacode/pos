@@ -19,6 +19,10 @@ import {
 import { createDevice, type TestDevice } from './devices';
 import { withTenant } from '@serva/db';
 import { checkIntegrity } from '../src/services/integrity';
+import { DOCUMENT_PROCESSORS } from '../src/services/processors';
+import { checkRebuild } from '../src/services/rebuild';
+import { createDb } from '@serva/db';
+import { TEST_OWNER_URL } from './urls';
 import { appDb, closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 
 /**
@@ -35,7 +39,9 @@ let app: FastifyInstance;
 beforeAll(async () => {
   app = await makeApp();
 });
+const owner = createDb(TEST_OWNER_URL, { max: 1 });
 afterAll(async () => {
+  await owner.client.end();
   await app.close();
   await closeAppDb();
   await closeOwnerDb();
@@ -289,6 +295,16 @@ async function integrityCheck(store: Store, shiftIds: string[]) {
   const report = await withTenant(appDb().db, store.tenantId, (tx) => checkIntegrity(tx, store.tenantId));
   expect(report.checks.flatMap((c) => c.problems)).toEqual([]);
   expect(report.ok).toBe(true);
+
+  // 6. Rebuilt from its documents alone, in the canonical order, the books are the same (M1-7).
+  const rebuild = await checkRebuild(owner.db, {
+    tenantId: store.tenantId,
+    processors: DOCUMENT_PROCESSORS,
+    now: new Date('2026-10-30T12:00:00.000Z'),
+  });
+  expect(rebuild.failed).toEqual([]);
+  expect(rebuild.rebuilt).toEqual(rebuild.live);
+  expect(rebuild.same).toBe(true);
   return trial;
 }
 

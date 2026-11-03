@@ -67,7 +67,7 @@ async function processSale({ tx, device, doc }: DocumentContext) {
           products,
           and(eq(products.tenantId, variants.tenantId), eq(products.id, variants.productId)),
         )
-        .where(and(inArray(variants.id, ids), eq(products.type, 'stock')))
+        .where(and(eq(variants.tenantId, tenantId), inArray(variants.id, ids), eq(products.type, 'stock')))
     ).map((v) => v.id),
   );
   let negative = false;

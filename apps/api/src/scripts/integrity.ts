@@ -7,6 +7,9 @@
  *   pnpm --filter @serva/api integrity                 every store
  *   pnpm --filter @serva/api integrity --store=236961  one store, by its 6-digit code
  *   pnpm --filter @serva/api integrity --json          the full report as JSON
+ *   pnpm --filter @serva/api integrity --rebuild       also rebuild each store from its documents
+ *                                                      (M1-7): the books must come out the same.
+ *                                                      Locks the store tables for a few seconds.
  *
  * Exit code 0 when every check passed, 1 when a problem was found, 2 when it could not run.
  * Two servers holding the same documents print the same fingerprints (after a restore or an
@@ -17,6 +20,8 @@ import { resolve } from 'node:path';
 import { asc, eq, sql } from 'drizzle-orm';
 import { createDb, tenants } from '@serva/db';
 import { checkIntegrity, type IntegrityReport } from '../services/integrity';
+import { DOCUMENT_PROCESSORS } from '../services/processors';
+import { checkRebuild, type RebuildReport } from '../services/rebuild';
 
 const CHECK_NAMES: Record<string, string> = {
   entries_balanced: 'كل قيد متوازن',
@@ -28,6 +33,7 @@ const CHECK_NAMES: Record<string, string> = {
 
 const args = process.argv.slice(2);
 const json = args.includes('--json');
+const withRebuild = args.includes('--rebuild');
 const storeCode = args.find((a) => a.startsWith('--store='))?.slice('--store='.length);
 
 const envFile = [resolve('.env'), resolve('../../.env')].find((f) => existsSync(f));
@@ -51,14 +57,23 @@ try {
     process.exit(2);
   }
 
-  const reports: (IntegrityReport & { storeCode: string; name: string })[] = [];
+  const reports: (IntegrityReport & { storeCode: string; name: string; rebuild?: RebuildReport })[] = [];
   for (const store of stores) {
     const report = await db.transaction(async (tx) => {
       // One consistent snapshot per store, and a guarantee that nothing is written.
       await tx.execute(sql`set transaction isolation level repeatable read, read only`);
       return checkIntegrity(tx, store.id);
     });
-    reports.push({ ...report, storeCode: store.code, name: store.name });
+    const rebuild = withRebuild
+      ? await checkRebuild(db, { tenantId: store.id, processors: DOCUMENT_PROCESSORS, now: new Date() })
+      : undefined;
+    reports.push({
+      ...report,
+      ok: report.ok && (rebuild?.same ?? true),
+      storeCode: store.code,
+      name: store.name,
+      ...(rebuild ? { rebuild } : {}),
+    });
   }
 
   if (json) {
@@ -70,6 +85,12 @@ try {
       for (const c of r.checks) {
         console.log(`  ${c.ok ? '✔' : '✘'} ${CHECK_NAMES[c.name] ?? c.name}`);
         for (const p of c.problems) console.log(`      - ${p}`);
+      }
+      if (r.rebuild) {
+        console.log(
+          `  ${r.rebuild.same ? '✔' : '✘'} إعادة البناء من ${r.rebuild.replayed} مستنداً تعطي الدفاتر نفسها` +
+            (r.rebuild.failed.length ? ` (فشل ${r.rebuild.failed.length})` : ''),
+        );
       }
       console.log(`  بصمة الدفتر:  ${r.ledger.hash} (${r.ledger.rows} قيداً)`);
       console.log(`  بصمة المخزون: ${r.stock.hash} (${r.stock.rows} سطراً)`);

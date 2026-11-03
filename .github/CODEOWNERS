@@ -25,11 +25,13 @@
 /apps/api/src/services/reports.ts @servacode
 /apps/api/src/services/integrity.ts @servacode
 /apps/api/src/services/reprocess.ts @servacode
+/apps/api/src/services/rebuild.ts @servacode
 
 # Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator
 /packages/db/drizzle/ @servacode
 /packages/db/src/schema.ts @servacode
 /packages/db/src/migrate.ts @servacode
+/packages/db/src/maintenance.ts @servacode
 /scripts/db-bootstrap.sql @servacode
 
 # Independent oracles: never edited to match the system
@@ -42,6 +44,7 @@
 /apps/api/test/integrity-service.test.ts @servacode
 /apps/api/test/restore-counters.test.ts @servacode
 /apps/api/test/reprocess.test.ts @servacode
+/apps/api/test/rebuild.test.ts @servacode
 /apps/api/test/upgrade/ @servacode
 /apps/api/test/drill/ @servacode
 
@@ -81,6 +84,8 @@
 /apps/api/src/services/audit.ts @servacode
 # push cursors and deduplication state
 /apps/api/src/services/sync-state.ts @servacode
+# the database connection and withTenant(), which the maintenance steps sit beside
+/packages/db/src/client.ts @servacode
 # what the posting tests assert against
 /apps/api/test/accounting-fixtures.ts @servacode
 # the shared harness of the financial tests
