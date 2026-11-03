@@ -4,7 +4,7 @@ import type { MeResponse, MerchandiseReport } from '@serva/core';
 import { mockFetch } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
-import { daysAgo } from './MerchandisePage';
+import { daysAgo, shareOf } from './MerchandisePage';
 
 function owner(): MeResponse {
   const base = makeMe();
@@ -52,6 +52,24 @@ const report = (idleDays: number, withCost: boolean): MerchandiseReport => ({
     },
   ],
   slowValueMinor: withCost ? 300_000 : null,
+  byDepartment: [
+    {
+      categoryId: 'c-men',
+      name: 'رجالي',
+      soldQty: 30_000,
+      totalMinor: 3_200_000,
+      returnedQty: 1000,
+      returnedMinor: 200_000,
+    },
+    {
+      categoryId: 'c-kids',
+      name: 'ولادي',
+      soldQty: 10_000,
+      totalMinor: 1_000_000,
+      returnedQty: 0,
+      returnedMinor: 0,
+    },
+  ],
   bySeller: [
     { userId: 'u-1', fullName: 'رنا', invoiceCount: 12, totalMinor: 5_400_000, returnedMinor: 400_000 },
   ],
@@ -97,6 +115,13 @@ describe('«حركة الأصناف»', () => {
     );
     expect(slow).toHaveTextContent('لم يُبع');
     expect(screen.getByText('رأس مال نائم فيها')).toBeInTheDocument();
+
+    // Men's 30,000 net of 40,000 in all
+    const departments = screen.getByRole('table', { name: 'المبيعات حسب القسم' });
+    expect(within(departments).getAllByRole('row')[1]).toHaveTextContent('رجالي');
+    expect(within(departments).getAllByRole('row')[1]).toHaveTextContent('75٪');
+    expect(within(departments).getAllByRole('row')[2]).toHaveTextContent('25٪');
+    expect(shareOf(0, [])).toBe('—');
 
     // 5% of what Rana sold less what came back: 5% of 50,000
     await user.type(screen.getByLabelText('نسبة العمولة ٪'), '5');

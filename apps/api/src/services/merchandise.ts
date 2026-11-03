@@ -247,6 +247,40 @@ export function merchandiseReport(
       from sold s left join back b on b.id = s.id left join users u on u.id = s.id
       order by s.total desc, s.id`);
 
+    const departments = await tx.execute<{
+      id: string | null;
+      name: string | null;
+      sold: string;
+      total: string;
+      back: string;
+      back_total: string;
+    }>(sql`
+      with recursive roots as (
+        select id, id as root from categories where parent_id is null
+        union all select c.id, r.root from categories c join roots r on c.parent_id = r.id
+      ),
+      moves as (
+        select p.category_id, l.base_qty as sold, l.total_minor as total, 0 as back, 0 as back_total
+        from invoice_lines l
+        join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+        join products p on p.id = l.product_id
+        where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`)}
+        union all
+        select p.category_id, 0, 0, rl.base_qty, rl.total_minor
+        from sale_return_lines rl
+        join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+        join variants v on v.id = rl.variant_id
+        join products p on p.id = v.product_id
+        where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
+      )
+      select ro.root as id, min(c.name) as name, sum(m.sold)::text as sold, sum(m.total)::text as total,
+             sum(m.back)::text as back, sum(m.back_total)::text as back_total
+      from moves m
+      left join roots ro on ro.id = m.category_id
+      left join categories c on c.id = ro.root
+      group by ro.root
+      order by sum(m.total) desc, ro.root`);
+
     const slowMovers = slow.map((r) => ({
       variantId: r.variant_id,
       productId: r.product_id,
@@ -280,6 +314,14 @@ export function merchandiseReport(
       })),
       slowMovers,
       slowValueMinor: canCost ? slowMovers.reduce((n, r) => n + (r.valueMinor ?? 0), 0) : null,
+      byDepartment: departments.map((d) => ({
+        categoryId: d.id,
+        name: d.name ?? 'بلا قسم',
+        soldQty: num(d.sold),
+        totalMinor: num(d.total),
+        returnedQty: num(d.back),
+        returnedMinor: num(d.back_total),
+      })),
       bySeller: sellers.map((r) => ({
         userId: r.id,
         fullName: r.name ?? '',
