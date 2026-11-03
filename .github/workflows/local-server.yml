@@ -37,6 +37,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
+          cache: pnpm
+
+      # The drill's tills and the integrity check (task M0-7) run from here, like a till on the LAN
+      - run: pnpm install --frozen-lockfile
 
       - name: Tools
         run: |
@@ -61,6 +65,12 @@ jobs:
       - name: Seed test data
         run: bash scripts/local/ci-checks.sh seed
 
+      # Task M0-7: a real working day goes into the backup, not only reference rows.
+      - name: A working day — a store through sign-up, two tills linked by the owner, their sales
+        run: |
+          bash scripts/local/ci-checks.sh day seed
+          bash scripts/local/ci-checks.sh books at-backup
+
       - name: Back up (encrypted, checksummed, with manifest)
         run: pnpm local:backup --label ci
 
@@ -73,12 +83,33 @@ jobs:
       - name: Redeploy on the running server (pre-deploy backup, migrations already applied)
         run: pnpm local:deploy
 
+      - name: The tills sell on after the backup (sales and both closes the backup does not hold)
+        run: |
+          bash scripts/local/ci-checks.sh day after-backup
+          bash scripts/local/ci-checks.sh books full
+          bash scripts/local/ci-checks.sh other-books at-backup full
+
       - name: Lose data, then restore the backup on the live server
         run: |
           docker compose -f deploy/local/compose.yml exec -T -u postgres postgres psql -v ON_ERROR_STOP=1 -d serva \
-            -c "delete from branches" -c "delete from tenant_settings" -c "delete from sync_tombstones" -c "delete from tenants where name like 'متجر الاختبار %'"
+            -c "delete from branches where tenant_id in (select id from tenants where name like 'متجر الاختبار %')" \
+            -c "delete from tenant_settings where tenant_id in (select id from tenants where name like 'متجر الاختبار %')" \
+            -c "delete from sync_tombstones" -c "delete from tenants where name like 'متجر الاختبار %'"
           pnpm local:restore "$(ls deploy/local/backups/*-ci.dump.enc | tail -n 1)" --replace-live --yes
           bash scripts/local/ci-checks.sh fixture-present
+          bash scripts/local/ci-checks.sh books restored
+          bash scripts/local/ci-checks.sh same-books at-backup restored
+
+      # The restore raised the sync epoch. Each till sends again everything it holds: what the
+      # backup had comes back as duplicates, what it lost is taken again, and the books end up
+      # exactly as they were before the loss.
+      - name: Both tills resend after the restore — the books are whole again
+        run: |
+          start=$SECONDS
+          bash scripts/local/ci-checks.sh day resend
+          bash scripts/local/ci-checks.sh books resent
+          bash scripts/local/ci-checks.sh same-books full resent
+          echo "From the end of the restore to identical books: $((SECONDS - start)) s"
 
       - name: Sign up a store with the on-screen test code (two-step API, test mode)
         run: bash scripts/local/ci-checks.sh signup

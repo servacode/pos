@@ -25,6 +25,7 @@ apps/api/test/posting-properties.test.ts
 apps/api/test/integrity.test.ts
 apps/api/test/integrity-service.test.ts
 apps/api/test/upgrade/
+apps/api/test/drill/
 apps/api/test/held-for-processing.test.ts
 scripts/local/
 scripts/ci/
