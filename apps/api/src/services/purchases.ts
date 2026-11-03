@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   stockIn,
   stockBack,
@@ -31,6 +31,7 @@ import {
   stocktakes,
   supplierPayments,
   suppliers,
+  variants,
   withTenant,
   type Database,
   type Transaction,
@@ -220,6 +221,20 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
     .from(purchaseLines)
     .where(eq(purchaseLines.purchaseId, id))
     .orderBy(asc(purchaseLines.lineNo));
+  const owners = new Map(
+    (lines.length
+      ? await tx
+          .select({ id: variants.id, productId: variants.productId })
+          .from(variants)
+          .where(
+            inArray(
+              variants.id,
+              lines.map((l) => l.variantId),
+            ),
+          )
+      : []
+    ).map((v) => [v.id, v.productId]),
+  );
   const numbers = await tx
     .select({ variantId: serials.variantId, serial: serials.serial })
     .from(serials)
@@ -239,6 +254,7 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
     lines: lines.map((l) => ({
       lineNo: l.lineNo,
       variantId: l.variantId,
+      productId: owners.get(l.variantId) ?? '',
       name: l.name,
       qty: l.qty,
       costMinor: l.costMinor,

@@ -12,6 +12,7 @@ const DevicesPage = lazy(() => import('./devices/DevicesPage').then((m) => ({ de
 // The catalog screens, each its own chunk: the list, the card, the categories, and «رمز الدخول للكاشير».
 const ProductsPage = lazy(() => import('./products/ProductsPage').then((m) => ({ default: m.ProductsPage })));
 const ProductRoute = lazy(() => import('./products/ProductPage').then((m) => ({ default: m.ProductRoute })));
+const LabelsPage = lazy(() => import('./labels/LabelsPage').then((m) => ({ default: m.LabelsPage })));
 const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ default: m.SerialsPage })));
 const ExpiryPage = lazy(() => import('./purchases/ExpiryPage').then((m) => ({ default: m.ExpiryPage })));
 const ChequesPage = lazy(() => import('./cheques/ChequesPage').then((m) => ({ default: m.ChequesPage })));
@@ -85,6 +86,7 @@ export function AdminApp() {
           <Route path="/inventory" element={page(<InventoryPage />)} />
           <Route path="/expiry" element={page(<ExpiryPage />)} />
           <Route path="/serials" element={page(<SerialsPage />)} />
+          <Route path="/labels" element={page(<LabelsPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />
           <Route path="/me/pin" element={page(<PinPage />)} />
           <Route path="/welcome" element={page(<WelcomePage />)} />

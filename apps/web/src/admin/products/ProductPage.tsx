@@ -345,6 +345,14 @@ export function ProductPage() {
             </div>
             {canManage ? (
               <div className="flex flex-wrap gap-2 max-sm:w-full">
+                {product && !archived ? (
+                  <Link
+                    to={`/labels?product=${product.id}`}
+                    className="inline-flex min-h-10 items-center rounded-control px-3 font-semibold text-brand-ink hover:bg-surface-muted"
+                  >
+                    اطبع الملصقات
+                  </Link>
+                ) : null}
                 {product ? (
                   archived ? (
                     <Button

@@ -96,7 +96,11 @@ describe('batches and expiry', () => {
     expect(med.product.genericName).toBe('باراسيتامول');
     // An old batch already past its date, then a newer one
     const first = await receive(store, s.id, med.variantId, '2026-10-20', 10, 'A-01', '2026-10-25');
-    expect(first.lines[0]).toMatchObject({ batchNo: 'A-01', expiryDate: '2026-10-25' });
+    expect(first.lines[0]).toMatchObject({
+      productId: med.productId,
+      batchNo: 'A-01',
+      expiryDate: '2026-10-25',
+    });
     await receive(store, s.id, med.variantId, '2026-10-28', 5, 'B-07', '2026-11-15');
 
     let sets = await pull(store);

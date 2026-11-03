@@ -60,3 +60,6 @@ export const listExpiry = (days: number) =>
 /** `GET /v1/serials?q=` (catalog.manage): a piece by its serial number or IMEI */
 export const findSerials = (q: string) =>
   apiFetch<{ items: SerialRow[] }>(`/v1/serials${q ? `?q=${encodeURIComponent(q)}` : ''}`, { auth: true });
+
+/** `GET /v1/purchases/{id}` (purchases.manage): one purchase with its lines */
+export const getPurchase = (id: string) => apiFetch<PurchaseDetail>(`/v1/purchases/${id}`, { auth: true });

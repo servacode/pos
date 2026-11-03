@@ -48,7 +48,16 @@ describe('AppShell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['الرئيسية', 'المنتجات', 'التصنيفات', 'العروض', 'الأرقام التسلسلية', 'الأجهزة', 'شاشة الدليل']);
+    ).toEqual([
+      'الرئيسية',
+      'المنتجات',
+      'التصنيفات',
+      'العروض',
+      'طباعة الملصقات',
+      'الأرقام التسلسلية',
+      'الأجهزة',
+      'شاشة الدليل',
+    ]);
   });
 
   it('gives the owner with the report and accounting keys every report, in the menu order', async () => {
@@ -71,6 +80,7 @@ describe('AppShell', () => {
       'المنتجات',
       'التصنيفات',
       'العروض',
+      'طباعة الملصقات',
       'الأرقام التسلسلية',
       'المحاسبة',
       'الأجهزة',
