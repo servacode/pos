@@ -8,6 +8,12 @@
 #   ci-checks.sh fixture-present the fixture rows are in the live database (after --replace-live)
 #   ci-checks.sh signup          opens a store through the real two-step sign-up, typing the code the
 #                                test mode shows on screen; a registered number gets a code that fails
+#   ci-checks.sh day <step>      the working day of the restore drill (task M0-7), through the API:
+#                                seed | after-backup | resend (apps/api/test/drill/restore-drill.ts)
+#   ci-checks.sh books <name>    runs the integrity check on the live database (it must pass) and
+#                                keeps its fingerprints as <name>
+#   ci-checks.sh same-books <a> <b> | other-books <a> <b>
+#                                the drill store's ledger and stock fingerprints match, or differ
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/local/lib.sh
@@ -172,11 +178,67 @@ signup() {
   ok "A registered number gets a code that verification refuses (no account found out)"
 }
 
+# The drill's own files: what the tills keep between steps, and the fingerprints taken on the way
+DRILL_DIR="${SERVA_DRILL_DIR:-${RUNNER_TEMP:-/tmp}/serva-drill}"
+
+day() {
+  local step="${1:?usage: ci-checks.sh day seed|after-backup|resend}"
+  mkdir -p "$DRILL_DIR"
+  [[ -s "$CA_EXPORT" ]] || export_ca
+  API_BASE="https://localhost:${SERVA_HTTPS_PORT:-443}" NODE_EXTRA_CA_CERTS="$CA_EXPORT" \
+    pnpm --silent --filter @serva/api exec tsx test/drill/restore-drill.ts "$step" "$DRILL_DIR/tills.json"
+}
+
+books() {
+  local name="${1:?usage: ci-checks.sh books <name>}"
+  mkdir -p "$DRILL_DIR"
+  local status=0
+  DATABASE_MIGRATION_URL="postgres://serva_owner:${SERVA_OWNER_PASSWORD}@127.0.0.1:${SERVA_PG_PORT:-5433}/serva" \
+    pnpm --silent --filter @serva/api integrity --json > "$DRILL_DIR/$name.json" || status=$?
+  if ((status != 0)); then
+    cat "$DRILL_DIR/$name.json"
+    die "The integrity check of the live books FAILED ($name)"
+  fi
+  ok "Integrity check passed on every store ($name): $(drill_books "$name")"
+}
+
+# drill_books <name>: "ledger <hash> (<n> entries), stock <hash>" of the drill store in <name>.json
+drill_books() {
+  # shellcheck disable=SC2016 # JavaScript, not shell
+  node -e '
+    const report = require(process.argv[1]);
+    const tills = require(process.argv[2]);
+    const store = report.stores.find((s) => s.tenantId === tills.tenantId);
+    if (!store) { console.log("no drill store"); process.exit(0); }
+    console.log(`ledger ${store.ledger.hash.slice(0, 16)}… (${store.ledger.rows} entries), stock ${store.stock.hash.slice(0, 16)}…`);
+  ' "$DRILL_DIR/$1.json" "$DRILL_DIR/tills.json"
+}
+
+compare_books() { # compare_books <same|other> <a> <b>
+  local want="$1" a="$2" b="$3" result
+  result="$(node -e '
+    const [a, b, tills] = process.argv.slice(1).map((f) => require(f));
+    const pick = (r) => r.stores.find((s) => s.tenantId === tills.tenantId);
+    const x = pick(a), y = pick(b);
+    if (!x || !y) { console.log("missing"); process.exit(0); }
+    console.log(x.ledger.hash === y.ledger.hash && x.stock.hash === y.stock.hash ? "same" : "other");
+  ' "$DRILL_DIR/$a.json" "$DRILL_DIR/$b.json" "$DRILL_DIR/tills.json")"
+  [[ "$result" == "$want" ]] ||
+    die "The drill store's books are '$result' between $a ($(drill_books "$a")) and $b ($(drill_books "$b")); expected '$want'"
+  if [[ "$want" == same ]]; then ok "Same books in $a and $b: $(drill_books "$b")"; else
+    ok "The books of $a and $b differ, as they must ($(drill_books "$a") / $(drill_books "$b"))"
+  fi
+}
+
 case "${1:-}" in
   hardening) hardening ;;
   seed) seed ;;
   negative) negative "${2:-}" ;;
   fixture-present) fixture_present ;;
   signup) signup ;;
-  *) die "Usage: ci-checks.sh hardening | seed | negative <backup.dump.enc> | fixture-present | signup" ;;
+  day) day "${2:-}" ;;
+  books) books "${2:-}" ;;
+  same-books) compare_books same "${2:?}" "${3:?}" ;;
+  other-books) compare_books other "${2:?}" "${3:?}" ;;
+  *) die "Usage: ci-checks.sh hardening | seed | negative <file> | fixture-present | signup | day <step> | books <name> | same-books <a> <b> | other-books <a> <b>" ;;
 esac
