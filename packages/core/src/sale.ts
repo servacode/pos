@@ -7,6 +7,7 @@ import type {
   SaleLine,
   SalePayload,
   SalePayment,
+  ServiceInfo,
 } from './contracts/documents';
 import type { TradeRate } from './contracts/common';
 import { convert, lineGross, roundDiv, sumMinor } from './money';
@@ -111,6 +112,8 @@ export interface SaleCart
   customerId?: string | null;
   customerName?: string | null;
   note?: string | null;
+  /** Restaurants and cafés: order type, table and order number; left out of a shop's sale */
+  service?: ServiceInfo | null;
 }
 
 /** The rate pairing `currency` with the invoice currency, or undefined for the invoice currency itself. */
@@ -379,6 +382,7 @@ export function buildSalePayload(cart: SaleCart): SalePayload {
     change: settlement.change,
     cashRounding: settlement.cashRounding,
     note: cart.note ?? null,
+    ...(cart.service ? { service: cart.service } : {}),
   };
 }
 

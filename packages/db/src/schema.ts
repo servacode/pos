@@ -351,6 +351,8 @@ export const tenantSettings = pgTable(
       valueKind: 'weight' | 'price';
       valueDecimals: number;
     }>(),
+    /** «الصالة والمطبخ» (packages/core › contracts/store.ts ServiceSettings); null for a shop */
+    service: jsonb('service').$type<{ tables: string[]; orderNumbers: boolean; kitchenTickets: boolean }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -942,6 +944,18 @@ export const products = pgTable(
     unitId: uuid('unit_id').notNull(),
     taxRateId: uuid('tax_rate_id'),
     sellOnPos: boolean('sell_on_pos').notNull().default(true),
+    /** «الإضافات والخيارات» (contracts/catalog.ts ModifierGroup[]) */
+    modifiers: jsonb('modifiers')
+      .$type<
+        {
+          name: string;
+          multiple: boolean;
+          required: boolean;
+          options: { name: string; priceMinor: number }[];
+        }[]
+      >()
+      .notNull()
+      .default([]),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),

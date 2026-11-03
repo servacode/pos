@@ -238,6 +238,32 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     setDone(null);
   }
 
+  /**
+   * «الطاولات»: a table with an open order brings it back (the order being taken is held first);
+   * a free one takes the order being taken when it has no table yet, or starts a new one there.
+   */
+  function openTable(table: string) {
+    const current = cartRef.current;
+    if (current.service?.table === table) return;
+    let rest = held;
+    if (current.lines.length > 0 && !current.service?.table) {
+      const mine = rest.find((c) => c.service?.table === table);
+      if (!mine) {
+        setCartState({ ...current, service: { orderType: 'dine_in', table } });
+        return;
+      }
+    }
+    if (current.lines.length > 0) rest = [...rest, current];
+    const index = rest.findIndex((c) => c.service?.table === table);
+    const next =
+      index >= 0 ? rest[index]! : { ...EMPTY_CART, service: { orderType: 'dine_in' as const, table } };
+    if (index >= 0) rest = rest.filter((_, i) => i !== index);
+    setHeld(rest);
+    void pos.local.set(HELD_KEY, rest);
+    setCartState(next);
+    setDone(null);
+  }
+
   function reprint() {
     if (!lastSale) return;
     setMenuOpen(false);
@@ -447,6 +473,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         heldCount={held.length}
         onHold={hold}
         onResume={resume}
+        heldCarts={held}
+        onOpenTable={openTable}
         lastLines={
           last ? last.lines.map((l) => ({ variantId: l.variantId, barcode: l.barcode, qty: l.qty })) : []
         }

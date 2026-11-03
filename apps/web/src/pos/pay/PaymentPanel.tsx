@@ -26,6 +26,7 @@ import {
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
 import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
+import { nextOrderNo } from '../sale/orders';
 import { digitOf } from '../PinScreen';
 import { usePos } from '../services';
 import { pricingInput, type Cart, type PricingContext } from '../sale/cart';
@@ -157,6 +158,16 @@ export function PaymentPanel({
     setSaving(true);
     setError(null);
     try {
+      const now = pos.now();
+      const businessDate = businessDateOf(now, settings.timezone, settings.businessDayCutoff);
+      const service = settings.service
+        ? {
+            orderType:
+              cart.service?.orderType ?? (settings.service.tables.length === 0 ? 'takeaway' : 'dine_in'),
+            table: cart.service?.table ?? null,
+            orderNo: settings.service.orderNumbers ? await nextOrderNo(pos.local, businessDate) : null,
+          }
+        : null;
       const payload = buildSalePayload({
         ...pricingInput(cart, ctx),
         shiftId,
@@ -165,12 +176,12 @@ export function PaymentPanel({
         cashSteps,
         customerId: customer?.id ?? null,
         customerName: customer?.name ?? null,
+        service,
       });
-      const now = pos.now();
       const entry = await pos.save({
         type: 'sale',
         payload: payload as unknown as Record<string, unknown>,
-        businessDate: businessDateOf(now, settings.timezone, settings.businessDayCutoff),
+        businessDate,
         engineVersion: PRICING_ENGINE_VERSION,
       });
       onCompleted(entry);

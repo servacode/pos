@@ -1,6 +1,6 @@
 import type { CurrencyCode } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
-import type { Approval, SaleLine } from '@serva/core/contracts/documents';
+import type { Approval, OrderType, SaleLine } from '@serva/core/contracts/documents';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { PricedInvoice } from '@serva/core/pricing';
 import { bestPromotions, type PromotionRule } from '@serva/core/promotions';
@@ -50,14 +50,35 @@ export interface CartLine {
   approval: Approval | null;
   /** The product's category and those above it, for promotions on a category */
   categoryPath?: readonly string[];
+  /** The choices picked from the product's modifiers, each with what it adds to one unit */
+  choices?: readonly Choice[];
+  /** «بدون بصل»: a note for the kitchen, printed with the line */
+  note?: string | null;
   /** One pack at the shelf price and at the wholesale price (null: none), in priceCurrency */
   retailPriceMinor?: number;
   wholesalePriceMinor?: number | null;
 }
 
+/** One choice of a modifier group: «الحجم: كبير» adding its price to one unit */
+export interface Choice {
+  group: string;
+  name: string;
+  priceMinor: number;
+}
+
+/** What the item, its choices and its note add up to: the line it goes on, if any */
+export interface ItemChoice {
+  choices: readonly Choice[];
+  note: string | null;
+}
+
 export interface Cart {
   lines: CartLine[];
   nextLineNo: number;
+  /** Restaurants and cafés: how the order is served and its table (03 › المطاعم) */
+  service?: { orderType: OrderType; table: string | null };
+  /** Quantity of each line already printed for the kitchen, so «للمطبخ» prints only what is new */
+  sent?: Record<number, number>;
   /** «سعر الجملة» (03 › الجملة): every line at its wholesale price where it has one */
   priceTier?: 'retail' | 'wholesale';
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
@@ -74,30 +95,52 @@ export interface PricingContext {
   promotions?: readonly PromotionRule[];
 }
 
-/** Adds an item, or one more of it when the same item (same pack) is already a plain line. */
-export function addItem(cart: Cart, item: CatalogItem, hit?: BarcodeHit | null, qty = 1000): Cart {
+const choiceKey = (choices: readonly Choice[] | undefined, note: string | null | undefined) =>
+  JSON.stringify([(choices ?? []).map((c) => [c.group, c.name]), note ?? null]);
+
+/** The line's name with its choices and note: «قهوة · كبير · سكر زيادة · بدون هيل» */
+export function choiceName(name: string, choice: ItemChoice | null | undefined): string {
+  if (!choice) return name;
+  return [name, ...choice.choices.map((c) => c.name), ...(choice.note ? [choice.note] : [])].join(' · ');
+}
+
+/**
+ * Adds an item, or one more of it when the same item (same pack, same choices) is already a plain
+ * line. Choices add their prices to one unit; a pack adds them for each unit in it.
+ */
+export function addItem(
+  cart: Cart,
+  item: CatalogItem,
+  hit?: BarcodeHit | null,
+  qty = 1000,
+  choice?: ItemChoice | null,
+): Cart {
   const packQty = hit?.barcode.packQty ?? 1000;
   const weighed = item.unit?.allowsFraction ?? false;
+  const key = choiceKey(choice?.choices, choice?.note);
   const same = cart.lines.find(
     (line) =>
       line.variantId === item.variantId &&
       line.packQty === packQty &&
       line.adjustment === null &&
-      !line.weighed,
+      !line.weighed &&
+      choiceKey(line.choices, line.note) === key,
   );
   if (same && !weighed) {
     return { ...cart, lines: cart.lines.map((l) => (l === same ? { ...l, qty: l.qty + qty } : l)) };
   }
-  const retail = hit
-    ? packPrice(item.price.priceMinor, packQty, hit.barcode.packPriceMinor)
-    : item.price.priceMinor;
+  const extra = (choice?.choices ?? []).reduce((sum, c) => sum + c.priceMinor, 0);
+  const extraPerPack = extra === 0 ? 0 : lineGross(extra, packQty);
+  const retail =
+    (hit ? packPrice(item.price.priceMinor, packQty, hit.barcode.packPriceMinor) : item.price.priceMinor) +
+    extraPerPack;
   const wholesaleUnit = item.price.wholesalePriceMinor ?? null;
-  const wholesale = wholesaleUnit === null ? null : packPrice(wholesaleUnit, packQty, null);
+  const wholesale = wholesaleUnit === null ? null : packPrice(wholesaleUnit, packQty, null) + extraPerPack;
   const line: CartLine = {
     lineNo: cart.nextLineNo,
     variantId: item.variantId,
     productId: item.productId,
-    name: hit?.barcode.packName ? `${item.name} · ${hit.barcode.packName}` : item.name,
+    name: choiceName(hit?.barcode.packName ? `${item.name} · ${hit.barcode.packName}` : item.name, choice),
     unitSymbol: weighed ? (item.unit?.symbol ?? null) : null,
     weighed,
     barcode: hit?.barcode.code ?? null,
@@ -114,6 +157,7 @@ export function addItem(cart: Cart, item: CatalogItem, hit?: BarcodeHit | null, 
     adjustment: null,
     approval: null,
     categoryPath: item.categoryPath ?? [],
+    ...(choice ? { choices: choice.choices, note: choice.note } : {}),
   };
   return { ...cart, lines: [...cart.lines, line], nextLineNo: cart.nextLineNo + 1 };
 }
@@ -290,4 +334,19 @@ export function pieceCount(cart: Cart): number {
     (sum, line) => sum + (line.weighed ? 1 : Math.round((line.qty * line.packQty) / 1_000_000)),
     0,
   );
+}
+
+/** What the kitchen has not seen yet: each line's quantity beyond what was already sent. */
+export function kitchenLines(
+  cart: Cart,
+): { lineNo: number; name: string; qty: number; unit: string | null }[] {
+  return cart.lines.flatMap((line) => {
+    const left = line.qty - (cart.sent?.[line.lineNo] ?? 0);
+    return left > 0 ? [{ lineNo: line.lineNo, name: line.name, qty: left, unit: line.unitSymbol }] : [];
+  });
+}
+
+/** Everything on the order is now with the kitchen. */
+export function markSent(cart: Cart): Cart {
+  return { ...cart, sent: Object.fromEntries(cart.lines.map((l) => [l.lineNo, l.qty])) };
 }

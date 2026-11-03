@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { CustomerRow } from './customers';
 import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
+import type { ServiceSettings } from './store';
 import type { CurrencyCode } from '../currencies';
 import type { Permission } from '../permissions';
 import type { ShiftMode } from './documents';
@@ -209,6 +210,32 @@ function checkVariantOptions(
   });
 }
 
+// ─── Modifiers ────────────────────────────────────────────────────────────────
+
+/**
+ * «الإضافات والخيارات» (03 › المطاعم، المقاهي): groups of choices the cashier picks when a product
+ * is added — «الحجم: صغير، وسط +5، كبير +10», «إضافات: جبنة +3، بدون بصل». A choice's price is
+ * added to one unit's price, in the variant's price currency. The line's name carries the choices,
+ * so the sale, the kitchen ticket and the receipt print them without anything else.
+ */
+export const modifierOptionSchema = z.object({
+  name: nameSchema('اسم الخيار', 40),
+  priceMinor: nonNegativeMinorSchema.default(0),
+});
+export const modifierGroupSchema = z.object({
+  name: nameSchema('اسم المجموعة', 30),
+  /** Several choices at once (الإضافات), or one (الحجم) */
+  multiple: z.boolean().default(false),
+  /** One choice at least before the item goes into the cart */
+  required: z.boolean().default(false),
+  options: z
+    .array(modifierOptionSchema)
+    .min(1, 'أضف خياراً واحداً على الأقل')
+    .max(20, '20 خياراً على الأكثر'),
+});
+export type ModifierGroup = z.output<typeof modifierGroupSchema>;
+export const modifiersSchema = z.array(modifierGroupSchema).max(8, 'ثماني مجموعات على الأكثر');
+
 // ─── Products ─────────────────────────────────────────────────────────────────
 
 /** 09 › products: النوع. Kits, meals and modifiers come with their phases. */
@@ -234,6 +261,7 @@ const productFields = {
   taxRateId: uuidSchema.nullable().default(null),
   /** «يُباع على الكاشير»: false hides it from cashier devices (it stays in the pull, flagged) */
   sellOnPos: z.boolean().default(true),
+  modifiers: modifiersSchema.default([]),
 };
 
 /** POST /v1/products: the product with its variants, barcodes and prices in one request (17). */
@@ -290,6 +318,7 @@ export const updateProductInput = z
     unitId: uuidSchema.optional(),
     taxRateId: uuidSchema.nullable().optional(),
     sellOnPos: z.boolean().optional(),
+    modifiers: modifiersSchema.optional(),
     variants: z.array(updateVariantInput).max(300, '300 متغيّر على الأكثر').optional(),
   })
   .superRefine((product, ctx) => {
@@ -373,6 +402,7 @@ export interface ProductDetail {
   unitId: string;
   taxRateId: string | null;
   sellOnPos: boolean;
+  modifiers: ModifierGroup[];
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -540,6 +570,8 @@ export interface ProductRow {
   unitId: string;
   taxRateId: string | null;
   sellOnPos: boolean;
+  /** «الإضافات والخيارات»; empty for most products */
+  modifiers: ModifierGroup[];
   archived: boolean;
   version: number;
 }
@@ -687,6 +719,8 @@ export interface SettingsRow {
   idleMinutes: number;
   /** «باركود الميزان» (scale.ts); null when the store's scales print no labels */
   scaleBarcode: ScaleBarcodeConfig | null;
+  /** «الصالة والمطبخ» (contracts/store.ts ServiceSettings); null for a shop without them */
+  service: ServiceSettings | null;
   version: number;
 }
 

@@ -54,6 +54,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/store/currency': 'signed-in',
   'PUT /v1/store/onboarding': 'signed-in',
   'PUT /v1/store/scale': 'signed-in',
+  'PUT /v1/store/service': 'signed-in',
   'GET /v1/promotions': 'signed-in',
   'POST /v1/promotions': 'signed-in',
   'PUT /v1/promotions/:id': 'signed-in',

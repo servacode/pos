@@ -89,6 +89,17 @@ export const documentDiscountSchema = z.discriminatedUnion('type', [
 ]);
 export type DocumentDiscount = z.output<typeof documentDiscountSchema>;
 
+/** «صالة، سفري، توصيل» (03 › المطاعم) */
+export const ORDER_TYPES = ['dine_in', 'takeaway', 'delivery'] as const;
+export type OrderType = (typeof ORDER_TYPES)[number];
+export const serviceInfoSchema = z.object({
+  orderType: z.enum(ORDER_TYPES),
+  table: z.string().trim().min(1).max(20).nullable(),
+  /** The day's order number on this till, for the call; null when the store does not number orders */
+  orderNo: z.int().min(1).max(9999).nullable(),
+});
+export type ServiceInfo = z.output<typeof serviceInfoSchema>;
+
 /** The engine's result for one line (pricing.ts PricedLine without lineNo), as the device computed it. */
 export const pricedLineSchema = z.object({
   grossMinor: nonNegativeMinorSchema,
@@ -277,6 +288,11 @@ export const salePayloadSchema = z
     change: saleChangeSchema.nullable(),
     cashRounding: cashRoundingSchema.nullable(),
     note: z.string().trim().min(1).max(500).nullable(),
+    /**
+     * Restaurants and cafés (03 › المطاعم: أنواع الطلب): how the order was served, its table, and its
+     * number for the call. Added in contract v1 as optional: a shop's sale leaves it out.
+     */
+    service: serviceInfoSchema.nullable().optional(),
   })
   .superRefine((sale, ctx) => {
     const issue = (path: (string | number)[], message: string) =>

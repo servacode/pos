@@ -44,6 +44,7 @@ function bigStore(count: number): CatalogSets {
       unitId: ids.piece,
       taxRateId: null,
       sellOnPos: true,
+      modifiers: [],
       archived: false,
       version: 1,
     });

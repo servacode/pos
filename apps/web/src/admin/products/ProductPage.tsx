@@ -45,6 +45,7 @@ import {
   type ProductDraft,
   type VariantDraft,
 } from './form';
+import { ModifiersEditor } from './ModifiersEditor';
 import { OptionsEditor } from './OptionsEditor';
 import { VariantBlock } from './VariantBlock';
 
@@ -55,7 +56,17 @@ interface Lookups {
 }
 
 /** The order the fields are focused in when several are wrong. */
-const TOP_FIELDS = ['nameAr', 'nameEn', 'categoryId', 'brand', 'type', 'unitId', 'taxRateId', 'sellOnPos'];
+const TOP_FIELDS = [
+  'nameAr',
+  'nameEn',
+  'categoryId',
+  'brand',
+  'type',
+  'unitId',
+  'taxRateId',
+  'sellOnPos',
+  'modifiers',
+];
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();
@@ -458,6 +469,16 @@ export function ProductPage() {
                 onCheckedChange={(sellOnPos) => update({ sellOnPos })}
               />
             </div>
+          </Section>
+
+          <Section title="الإضافات والخيارات (للمطاعم والمقاهي)">
+            <ModifiersEditor
+              groups={draft.modifiers ?? []}
+              currency={liveVariants[0]?.currency ?? 'SYP'}
+              disabled={!canManage}
+              onChange={(modifiers) => update({ modifiers })}
+            />
+            {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
           </Section>
 
           <Section title="المقاسات والألوان">
