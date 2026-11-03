@@ -14,6 +14,7 @@ export const APPEND_ONLY_TABLES = [
   'invoice_lines',
   'invoice_payments',
   'stock_movements',
+  'sale_return_lines',
 ] as const;
 
 /** Lifts the append-only guard of these tables for this transaction (table owner only). */

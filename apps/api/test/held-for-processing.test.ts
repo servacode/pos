@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { buildReturnPayload } from '@serva/core';
 import { DOC_TYPES, payloadHash, type DocType, type PushResponse, type SyncDocument } from '@serva/sync';
 import { DOCUMENT_PROCESSORS } from '../src/services/processors';
 import type { SyncProcessors } from '../src/services/sync-push';
@@ -113,24 +114,38 @@ function balancedShift(store: Store, doc: ReturnType<typeof documents>) {
 /** One valid document of each processed type, in an order the processors accept. */
 function processedDocs(store: Store, doc: ReturnType<typeof documents>) {
   const open = doc('shift_open', shiftOpen(store.userId));
+  const golden = goldenFirstSale(store, open.id);
+  const sold = doc('sale', golden);
   return [
     open,
-    doc('sale', goldenFirstSale(store, open.id)),
+    sold,
     doc('cash_movement', movement(store.userId, open.id, 'pay_in', 50_000)),
     doc(
       'shift_close',
       shiftClose(store.userId, open.id, [{ currency: 'SYP', opening: 100_000, counted: 150_000 }]),
     ),
+    doc(
+      'return',
+      buildReturnPayload({
+        sale: golden,
+        saleId: sold.id,
+        saleNumber: sold.number!,
+        shiftId: open.id,
+        cashierId: store.userId,
+        reason: 'تالف',
+        picks: [{ saleLineNo: 3, qty: 1000 }],
+      }),
+    ),
   ];
 }
 
 describe('which types are posted today', () => {
-  it('splits DOC_SERIES into the 4 types with a processor and the 18 held ones', () => {
-    expect(PROCESSED).toEqual(['cash_movement', 'sale', 'shift_close', 'shift_open']);
+  it('splits DOC_SERIES into the 5 types with a processor and the 17 held ones', () => {
+    expect(PROCESSED).toEqual(['cash_movement', 'return', 'sale', 'shift_close', 'shift_open']);
     expect(DOC_TYPES).toHaveLength(22);
     // When a phase adds a processor this number drops: the held documents of that type are then
     // the catch-up of that phase (M1), never posted here on their own.
-    expect(HELD).toHaveLength(18);
+    expect(HELD).toHaveLength(17);
   });
 });
 
@@ -226,7 +241,7 @@ describe('waiting for a document of another device (pending_link)', () => {
     const store = await openStore(app);
     const other = { ...store, device: await createDevice(store.tenantId) };
     const missing = documents(other.device)('customer', { name: 'زبون' });
-    const ret = dependingOn(documents(store.device)('return', { total: 500 }), [missing.id]);
+    const ret = dependingOn(documents(store.device)('trade_in', { total: 500 }), [missing.id]);
 
     await push(app, store, [ret]);
     expect((await inbox(store.tenantId)).get(ret.id)).toMatchObject({
@@ -290,7 +305,7 @@ describe('an interrupted push', () => {
     const doc = documents(store.device);
     const open = doc('shift_open', shiftOpen(store.userId));
     const sold = doc('sale', goldenFirstSale(store, open.id));
-    const held = doc('return', { total: 500 });
+    const held = doc('trade_in', { total: 500 });
 
     let fail = true;
     const flaky = await appWith({
@@ -387,7 +402,7 @@ describe('what the merchant sees', () => {
       headers: { authorization: `Bearer ${store.accessToken}` },
     });
     expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toMatchObject({ sent: 22, accepted: 22, heldForProcessing: 18 });
+    expect(res.json()).toMatchObject({ sent: 22, accepted: 22, heldForProcessing: 17 });
   });
 });
 
@@ -411,8 +426,9 @@ describe('migration 0013: the rows stored before this change', () => {
   it('turns the old rows into exactly what the new code stores, and processes nothing', async () => {
     const store = await openStore(app);
     const doc = documents(store.device);
+    // 0013 knew the four processors of its day; a return was held then.
     const docs = [
-      ...processedDocs(store, doc),
+      ...processedDocs(store, doc).slice(0, 4),
       ...balancedShift(store, doc),
       ...HELD.map((type) => doc(type, { total: 1500 })),
       doc('sale', { not: 'a sale' }), // rejected

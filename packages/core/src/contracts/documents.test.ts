@@ -404,17 +404,19 @@ describe('cash_movement payload', () => {
 });
 
 describe('validateDocumentPayload', () => {
-  it('checks the four phase-1 types and passes the others unchecked', () => {
+  it('checks the types it knows and passes the others unchecked', () => {
     expect(Object.keys(DOCUMENT_PAYLOAD_SCHEMAS)).toEqual([
       'sale',
       'shift_open',
       'shift_close',
       'cash_movement',
+      'return',
     ]);
     expect(hasPayloadSchema('sale')).toBe(true);
-    expect(hasPayloadSchema('return')).toBe(false);
+    expect(hasPayloadSchema('return')).toBe(true);
+    expect(hasPayloadSchema('purchase')).toBe(false);
     expect(hasPayloadSchema('toString')).toBe(false);
-    expect(validateDocumentPayload('return', { anything: true })).toEqual({ ok: true, checked: false });
+    expect(validateDocumentPayload('purchase', { anything: true })).toEqual({ ok: true, checked: false });
   });
 
   it('answers invalid_payload with dotted paths, at most 20 issues', () => {

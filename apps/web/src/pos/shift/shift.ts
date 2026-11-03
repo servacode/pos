@@ -7,6 +7,7 @@ import type {
   CashMovementKind,
   CashMovementPayload,
   PaymentMethod,
+  ReturnPayload,
   SalePayload,
   ShiftClosePayload,
   ShiftCloseCash,
@@ -133,8 +134,17 @@ export async function deviceDocuments(store: SyncStore): Promise<OutboxEntry[]> 
 
 type Terms = Pick<
   ShiftCloseCash,
-  'cashInMinor' | 'changeOutMinor' | 'payInMinor' | 'payOutMinor' | 'dropsMinor'
+  'cashInMinor' | 'changeOutMinor' | 'refundsMinor' | 'payInMinor' | 'payOutMinor' | 'dropsMinor'
 >;
+
+const NO_TERMS: Terms = {
+  cashInMinor: 0,
+  changeOutMinor: 0,
+  refundsMinor: 0,
+  payInMinor: 0,
+  payOutMinor: 0,
+  dropsMinor: 0,
+};
 
 export interface ShiftActivity {
   saleCount: number;
@@ -149,7 +159,7 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   const termsOf = (currency: Code) => {
     let t = terms.get(currency);
     if (!t) {
-      t = { cashInMinor: 0, changeOutMinor: 0, payInMinor: 0, payOutMinor: 0, dropsMinor: 0 };
+      t = { ...NO_TERMS };
       terms.set(currency, t);
     }
     return t;
@@ -185,6 +195,11 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
         row.amountMinor -= sale.change.amountMinor;
         byMethod.set(key, row);
       }
+    } else if (doc.type === 'return') {
+      // Cash paid back for goods returned comes out of this drawer
+      for (const r of (payload as unknown as ReturnPayload).refunds) {
+        if (r.method === 'cash') termsOf(r.currency).refundsMinor += r.amountMinor;
+      }
     } else if (doc.type === 'cash_movement') {
       const move = payload as unknown as CashMovementPayload;
       const t = termsOf(move.currency);
@@ -205,9 +220,15 @@ export function closeDrawer(
   terms: Terms | undefined,
   counted: DrawerCount,
 ): ShiftCloseCash {
-  const t = terms ?? { cashInMinor: 0, changeOutMinor: 0, payInMinor: 0, payOutMinor: 0, dropsMinor: 0 };
+  const t = terms ?? NO_TERMS;
   const expectedMinor =
-    openingMinor + t.cashInMinor + t.payInMinor - t.changeOutMinor - t.payOutMinor - t.dropsMinor;
+    openingMinor +
+    t.cashInMinor +
+    t.payInMinor -
+    t.changeOutMinor -
+    t.refundsMinor -
+    t.payOutMinor -
+    t.dropsMinor;
   const countedMinor = countTotal(counted);
   const differenceMinor = countedMinor - expectedMinor;
   const rate = rateFor(rates, currency, baseCurrency) ?? null;
@@ -218,7 +239,7 @@ export function closeDrawer(
     openingMinor,
     cashInMinor: t.cashInMinor,
     changeOutMinor: t.changeOutMinor,
-    refundsMinor: 0,
+    refundsMinor: t.refundsMinor,
     receiptsMinor: 0,
     payInMinor: t.payInMinor,
     fxInMinor: 0,

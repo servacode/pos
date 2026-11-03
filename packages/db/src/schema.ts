@@ -1266,6 +1266,88 @@ export const cashMovements = pgTable(
   ],
 );
 
+/**
+ * A sale return (RET, 08 › مرتجع مبيعات): goods back at the prices the sale charged, the money paid
+ * back in the sale's currency. The sale is named, not a foreign key: a return may arrive before
+ * the sale it returns (another device's), and is never refused for it.
+ */
+export const saleReturns = pgTable(
+  'sale_returns',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    number: text('number').notNull(),
+    businessDate: date('business_date').notNull(),
+    deviceTime: timestamp('device_time', { withTimezone: true }).notNull(),
+    saleId: uuid('sale_id').notNull(),
+    saleNumber: text('sale_number').notNull(),
+    shiftId: uuid('shift_id').notNull(),
+    shiftLinked: boolean('shift_linked').notNull().default(false),
+    cashierId: uuid('cashier_id').notNull(),
+    currency: text('currency').notNull(),
+    reason: text('reason').notNull(),
+    grossExTaxMinor: bigint('gross_ex_tax_minor', { mode: 'number' }).notNull(),
+    discountExTaxMinor: bigint('discount_ex_tax_minor', { mode: 'number' }).notNull(),
+    taxMinor: bigint('tax_minor', { mode: 'number' }).notNull(),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    /** cash, card, wallet, transfer; null when nothing was paid back */
+    refundMethod: text('refund_method'),
+    refundReference: text('refund_reference'),
+    approval: jsonb('approval'),
+    flags: text('flags')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    payload: jsonb('payload').notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'sale_returns_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    index('sale_returns_sale_idx').on(t.tenantId, t.saleId),
+    index('sale_returns_shift_idx').on(t.tenantId, t.shiftId),
+    index('sale_returns_business_date_idx').on(t.tenantId, t.branchId, t.businessDate),
+    tenantIsolation(),
+  ],
+);
+
+export const saleReturnLines = pgTable(
+  'sale_return_lines',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    returnId: uuid('return_id').notNull(),
+    lineNo: integer('line_no').notNull(),
+    saleLineNo: integer('sale_line_no').notNull(),
+    productId: uuid('product_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    name: text('name').notNull(),
+    qty: bigint('qty', { mode: 'number' }).notNull(),
+    baseQty: bigint('base_qty', { mode: 'number' }).notNull(),
+    taxRateId: uuid('tax_rate_id'),
+    grossExTaxMinor: bigint('gross_ex_tax_minor', { mode: 'number' }).notNull(),
+    discountExTaxMinor: bigint('discount_ex_tax_minor', { mode: 'number' }).notNull(),
+    taxMinor: bigint('tax_minor', { mode: 'number' }).notNull(),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'sale_return_lines_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.returnId], foreignColumns: [saleReturns.tenantId, saleReturns.id] }),
+    unique('sale_return_lines_line_unique').on(t.tenantId, t.returnId, t.lineNo),
+    tenantIsolation(),
+  ],
+);
+
 // ─── Accounting (09 › المحاسبة; 10 › دليل الحسابات الافتراضي، القيود التلقائية) ──────
 
 /**

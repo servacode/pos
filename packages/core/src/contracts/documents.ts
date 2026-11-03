@@ -608,6 +608,104 @@ export const cashMovementPayloadSchema = z
   });
 export type CashMovementPayload = z.output<typeof cashMovementPayloadSchema>;
 
+// ─── Return (SRT) ────────────────────────────────────────────────────────────
+
+/** How a return is paid back (08 › مرتجع مبيعات): cash from the drawer, or to the card, wallet or transfer it came by */
+export const REFUND_METHODS = ['cash', 'card', 'wallet', 'transfer'] as const;
+export type RefundMethod = (typeof REFUND_METHODS)[number];
+
+/** A returned line's share of its sale line, in the invoice currency (packages/core › sale-return.ts) */
+export const returnAmountsSchema = z
+  .object({
+    grossExTaxMinor: nonNegativeMinorSchema,
+    discountExTaxMinor: nonNegativeMinorSchema,
+    taxMinor: nonNegativeMinorSchema,
+    totalMinor: nonNegativeMinorSchema,
+  })
+  .refine((a) => a.totalMinor === a.grossExTaxMinor - a.discountExTaxMinor + a.taxMinor, {
+    path: ['totalMinor'],
+    message: 'totalMinor must be grossExTax − discountExTax + tax',
+  });
+
+export const returnLineSchema = z.object({
+  lineNo: z.int().min(1),
+  /** The sale line it comes back from */
+  saleLineNo: z.int().min(1),
+  productId: uuidSchema,
+  variantId: uuidSchema,
+  name: z.string().trim().min(1).max(200),
+  /** Packs returned, thousandths, at most what was sold on that line */
+  qty: qtySchema,
+  /** Stock back in, base units */
+  baseQty: z.int().nonnegative(),
+  taxRateId: uuidSchema.nullable(),
+  refund: returnAmountsSchema,
+});
+export type ReturnLine = z.output<typeof returnLineSchema>;
+
+export const refundSchema = z
+  .object({
+    method: z.enum(REFUND_METHODS),
+    /** The invoice currency: a return is paid back at the sale's own prices */
+    currency: currencyCodeSchema,
+    amountMinor: positiveMinorSchema,
+    reference: z.string().trim().min(1).max(64).nullable(),
+  })
+  .refine((r) => r.method === 'cash' || r.reference !== null, {
+    path: ['reference'],
+    message: 'a card, wallet or transfer refund needs its reference',
+  });
+export type Refund = z.output<typeof refundSchema>;
+
+/**
+ * `return` (SRT): goods coming back from one sale (08 › مرتجع مبيعات، قواعد ثابتة 5), at the prices
+ * that sale charged, paid back in its currency. Build it with buildReturnPayload()
+ * (packages/core › sale-return.ts). Checked here: the totals are the lines' sum and the refunds pay
+ * exactly the total. Whether the qty is still returnable is the server's to check against every
+ * earlier return (flag over_return), since another till may have taken one back.
+ */
+export const returnPayloadSchema = z
+  .object({
+    saleId: uuidSchema,
+    saleNumber: z.string().min(1).max(40),
+    /** The shift whose drawer pays the cash back: the id of its shift_open document */
+    shiftId: uuidSchema,
+    cashierId: userId,
+    currency: currencyCodeSchema,
+    reason: z.string().trim().min(1).max(200),
+    lines: z.array(returnLineSchema).min(1).max(1000),
+    totals: returnAmountsSchema,
+    /** Empty when nothing is paid back (goods that cost nothing on the sale) */
+    refunds: z.array(refundSchema).max(10),
+    /** The manager who allowed it, when the cashier may not refund alone */
+    approval: approvalSchema.nullable(),
+  })
+  .superRefine((r, ctx) => {
+    const issue = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: 'custom', path, message });
+    const lineNos = new Set<number>();
+    const saleLines = new Set<number>();
+    r.lines.forEach((l, i) => {
+      if (lineNos.has(l.lineNo)) issue(['lines', i, 'lineNo'], 'lineNo must be unique');
+      if (saleLines.has(l.saleLineNo)) issue(['lines', i, 'saleLineNo'], 'one line per sale line');
+      lineNos.add(l.lineNo);
+      saleLines.add(l.saleLineNo);
+    });
+    for (const key of ['grossExTaxMinor', 'discountExTaxMinor', 'taxMinor', 'totalMinor'] as const) {
+      if (bigSum(r.lines.map((l) => l.refund[key])) !== BigInt(r.totals[key])) {
+        issue(['totals', key], `${key} must be the sum of the lines`);
+      }
+    }
+    r.refunds.forEach((f, i) => {
+      if (f.currency !== r.currency)
+        issue(['refunds', i, 'currency'], 'a refund is paid in the invoice currency');
+    });
+    if (bigSum(r.refunds.map((f) => f.amountMinor)) !== BigInt(r.totals.totalMinor)) {
+      issue(['refunds'], 'the refunds must pay back exactly the total');
+    }
+  });
+export type ReturnPayload = z.output<typeof returnPayloadSchema>;
+
 // ─── Validation entry point ──────────────────────────────────────────────────
 
 /** The payload schema of each document type that has one in this contract version. */
@@ -616,6 +714,7 @@ export const DOCUMENT_PAYLOAD_SCHEMAS = {
   shift_open: shiftOpenPayloadSchema,
   shift_close: shiftClosePayloadSchema,
   cash_movement: cashMovementPayloadSchema,
+  return: returnPayloadSchema,
 } as const;
 export type PayloadDocType = keyof typeof DOCUMENT_PAYLOAD_SCHEMAS;
 export interface DocumentPayloads {
@@ -623,6 +722,7 @@ export interface DocumentPayloads {
   shift_open: ShiftOpenPayload;
   shift_close: ShiftClosePayload;
   cash_movement: CashMovementPayload;
+  return: ReturnPayload;
 }
 
 /** The push result code of a document whose payload breaks its schema (stored as rejected). */
