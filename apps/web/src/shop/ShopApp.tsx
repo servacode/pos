@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Route, Routes, useNavigate, useParams } from 'react-router';
-import type { ShopHome, ShopOrderPlaced, ShopProduct } from '@serva/core';
+import type { ShopCodeSent, ShopHome, ShopOrderPlaced, ShopOrderTrack, ShopProduct } from '@serva/core';
 import {
   Alert,
   Button,
@@ -17,10 +17,11 @@ import { canPick, cartCount, cartTotal, MAX_QTY, useShopCart, variantFor } from 
 import { openWhatsApp } from './open';
 
 /**
- * The store's online shop (26 › المتجر الإلكتروني), first step: its goods with their pictures,
- * sizes and colours on the shelf, a cart kept on the customer's phone, and «اطلب عبر واتساب»:
- * the order is saved for the store, then WhatsApp opens on the store's number with it written out.
- * No sign-in, no app to install; made for a phone first.
+ * The store's online shop (26 › المتجر الإلكتروني): its goods with their pictures, sizes and
+ * colours on the shelf, a cart kept on the customer's phone, and the order: «اطلب عبر واتساب»
+ * (saved for the store, then WhatsApp opens on the store's number with it written out) or, when the
+ * store takes orders in the shop itself, a code to the customer's phone confirms it. Each order has
+ * its page for the customer to follow. No sign-in, no app to install; made for a phone first.
  */
 export function ShopApp() {
   const { slug = '' } = useParams();
@@ -71,6 +72,7 @@ export function ShopApp() {
           <Route index element={<Catalogue home={home} base={base} />} />
           <Route path="p/:id" element={<ProductView home={home} slug={slug} base={base} cart={cart} />} />
           <Route path="cart" element={<CartView home={home} slug={slug} base={base} cart={cart} />} />
+          <Route path="o/:token" element={<TrackView slug={slug} base={base} />} />
         </Routes>
       </main>
     </div>
@@ -78,6 +80,8 @@ export function ShopApp() {
 }
 
 type Cart = ReturnType<typeof useShopCart>;
+
+const digitsOf = (text: string) => [...text].filter((ch) => ch >= '0' && ch <= '9').join('');
 
 function Catalogue({ home, base }: { home: ShopHome; base: string }) {
   const [category, setCategory] = useState<string | null>(null);
@@ -335,6 +339,9 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [placed, setPlaced] = useState<ShopOrderPlaced | null>(null);
+  const [challenge, setChallenge] = useState<ShopCodeSent | null>(null);
+  const [code, setCode] = useState('');
+  const byCode = store.orderMode === 'shop';
 
   if (placed) {
     return (
@@ -361,8 +368,14 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             </a>
           </>
         ) : (
-          <p className="text-ink-muted">سيتواصل معك المحل على رقمك.</p>
+          <p className="text-ink-muted">وصل طلبك إلى المحل، وسيؤكده لك على رقمك.</p>
         )}
+        <Link
+          to={placed.trackPath}
+          className="inline-flex min-h-11 items-center rounded-full border-2 border-brand px-6 font-semibold text-brand-ink"
+        >
+          تابع طلبك
+        </Link>
         <Link to={base} className="text-sm font-semibold text-brand-ink">
           عد إلى المتجر
         </Link>
@@ -385,6 +398,27 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
     );
   }
 
+  /** «من المتجر مباشرة»: a code to the phone first, typed back with the order */
+  async function askCode() {
+    setSending(true);
+    setError(null);
+    setFields({});
+    try {
+      setChallenge(
+        await apiFetch<ShopCodeSent>(`/v1/shop/${encodeURIComponent(slug)}/orders/code`, {
+          method: 'POST',
+          body: { phone },
+        }),
+      );
+      setCode('');
+    } catch (e) {
+      setError(errorMessage(e));
+      setFields(e instanceof ApiError ? (e.fields ?? {}) : {});
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function send() {
     setSending(true);
     setError(null);
@@ -399,6 +433,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           address: fulfilment === 'delivery' ? address : null,
           note: note || null,
           lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
+          ...(byCode && challenge ? { challengeId: challenge.challengeId, code } : {}),
         },
       });
       cart.clear();
@@ -472,7 +507,11 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           dir="ltr"
           inputMode="tel"
           value={phone}
-          onChange={(e) => setPhone(e.target.value.slice(0, 20))}
+          onChange={(e) => {
+            setPhone(e.target.value.slice(0, 20));
+            // A code belongs to its number: a new number asks again
+            setChallenge(null);
+          }}
           error={fields.phone}
         />
         {store.delivery && store.pickup ? (
@@ -510,19 +549,122 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           value={note}
           onChange={(e) => setNote(e.target.value.slice(0, 300))}
         />
+        {byCode && challenge ? (
+          <TextField
+            label="رمز التأكيد"
+            dir="ltr"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={code}
+            onChange={(e) => setCode(digitsOf(e.target.value).slice(0, 6))}
+            error={fields.code}
+            hint={
+              challenge.testCode
+                ? `وضع التجربة: الرمز ${challenge.testCode}`
+                : 'أرسلنا رمزاً من 6 أرقام إلى جوالك.'
+            }
+          />
+        ) : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <Button
-          size="lg"
-          loading={sending}
-          disabled={!name.trim() || !phone.trim()}
-          onClick={() => void send()}
-        >
-          {store.whatsapp ? 'اطلب عبر واتساب' : 'أرسل الطلب'}
-        </Button>
+        {byCode && !challenge ? (
+          <Button
+            size="lg"
+            loading={sending}
+            disabled={!name.trim() || !phone.trim()}
+            onClick={() => void askCode()}
+          >
+            أرسل رمز التأكيد
+          </Button>
+        ) : (
+          <Button
+            size="lg"
+            loading={sending}
+            disabled={!name.trim() || !phone.trim() || (byCode && code.length < 6)}
+            onClick={() => void send()}
+          >
+            {byCode ? 'أكّد الطلب' : store.whatsapp ? 'اطلب عبر واتساب' : 'أرسل الطلب'}
+          </Button>
+        )}
+        {byCode && challenge ? (
+          <Button variant="ghost" disabled={sending} onClick={() => void askCode()}>
+            لم يصلك؟ أرسل رمزاً جديداً
+          </Button>
+        ) : null}
         <p className="text-xs text-ink-muted">
-          يُحفظ طلبك عند المحل، ثم يفتح واتساب برسالة جاهزة فيها القطع والمجموع. اضغط «إرسال» هناك.
+          {byCode
+            ? 'نرسل رمزاً إلى جوالك لنتأكد أن الرقم لك، ثم يصل طلبك إلى المحل مباشرة.'
+            : 'يُحفظ طلبك عند المحل، ثم يفتح واتساب برسالة جاهزة فيها القطع والمجموع. اضغط «إرسال» هناك.'}
         </p>
       </section>
     </div>
+  );
+}
+
+const TRACK_STEPS: Record<ShopOrderTrack['status'], { title: string; text: string }> = {
+  pending: { title: 'بانتظار تأكيد المحل', text: 'وصل طلبك، وسيراجعه المحل قريباً.' },
+  accepted: { title: 'أكّد المحل طلبك', text: 'قطعك محجوزة لك ويجري تجهيزها.' },
+  done: { title: 'تمّ التسليم', text: 'شكراً لك! نتمنى أن تعجبك قطعك.' },
+  rejected: { title: 'اعتذر المحل عن الطلب', text: 'تواصل مع المحل لتعرف السبب أو اطلب قطعاً أخرى.' },
+};
+
+/** The customer's page for one order, by the unguessable link given when it was placed. */
+function TrackView({ slug, base }: { slug: string; base: string }) {
+  const { token = '' } = useParams();
+  const [order, setOrder] = useState<ShopOrderTrack | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiFetch<ShopOrderTrack>(`/v1/shop/${encodeURIComponent(slug)}/orders/${encodeURIComponent(token)}`)
+      .then((o) => alive && setOrder(o))
+      .catch((e: unknown) => alive && setError(errorMessage(e)));
+    return () => {
+      alive = false;
+    };
+  }, [slug, token]);
+
+  if (error) return <EmptyState icon={StoreIcon} title="الطلب غير موجود" description={error} />;
+  if (!order) return <FullScreenLoader />;
+  const step = TRACK_STEPS[order.status];
+  return (
+    <section aria-label="طلبك" className="flex flex-col gap-4 rounded-card bg-surface p-5">
+      <h1 className="text-xl font-bold">
+        طلبك{' '}
+        <bdi dir="ltr" className="num">
+          {order.number}
+        </bdi>
+      </h1>
+      <div
+        role="status"
+        className={cn(
+          'rounded-control p-4',
+          order.status === 'rejected' ? 'bg-danger-soft text-danger-ink' : 'bg-brand-soft text-brand-ink',
+        )}
+      >
+        <p className="font-bold">{step.title}</p>
+        <p className="text-sm">{step.text}</p>
+      </div>
+      <ul className="flex flex-col divide-y divide-line">
+        {order.lines.map((l, i) => (
+          <li key={i} className="flex items-center justify-between gap-3 py-2">
+            <span>
+              {l.name}
+              {l.label ? <span className="text-ink-muted"> · {l.label}</span> : null}
+              <span className="num text-ink-muted"> × {l.qty}</span>
+            </span>
+            <Money minor={l.totalMinor} currency={order.currency} />
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-center justify-between border-t border-line pt-3">
+        <span className="font-semibold">
+          المجموع · {order.fulfilment === 'delivery' ? 'توصيل' : 'استلام من المحل'}
+        </span>
+        <Money minor={order.totalMinor} currency={order.currency} className="text-lg font-bold" />
+      </div>
+      <Link to={base} className="text-sm font-semibold text-brand-ink">
+        عد إلى المتجر
+      </Link>
+    </section>
   );
 }

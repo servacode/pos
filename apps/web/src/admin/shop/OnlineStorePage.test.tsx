@@ -22,6 +22,7 @@ const settings: OnlineStoreSettings = {
   pickup: true,
   note: null,
   showOutOfStock: false,
+  orderMode: 'whatsapp',
 };
 
 const order = (status: OnlineOrder['status']): OnlineOrder => ({
@@ -29,6 +30,7 @@ const order = (status: OnlineOrder['status']): OnlineOrder => ({
   number: 'ONL-000001',
   status,
   source: 'whatsapp',
+  depositCode: null,
   customerName: 'ريم',
   phone: '+963944555666',
   fulfilment: 'delivery',

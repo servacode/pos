@@ -281,6 +281,7 @@ export function PaymentPanel({
         customerName: customer?.name ?? null,
         salespersonId,
         service,
+        onlineOrderId: cart.onlineOrder?.id ?? null,
       });
       const entry = await pos.save({
         type: 'sale',

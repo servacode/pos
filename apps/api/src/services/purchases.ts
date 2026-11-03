@@ -21,6 +21,9 @@ import {
   type SupplierListResponse,
   type SupplierPaymentInput,
   type SupplierPaymentRow,
+  type SupplierReturnDetail,
+  type supplierReturnInput,
+  type SupplierReturnRow,
   type SupplierRow,
 } from '@serva/core';
 import {
@@ -34,6 +37,7 @@ import {
   stocktakes,
   transfers,
   supplierPayments,
+  supplierReturns,
   suppliers,
   variants,
   withTenant,
@@ -41,6 +45,7 @@ import {
   type Transaction,
 } from '@serva/db';
 import { createUuidV7 } from '@serva/sync';
+import type { z } from 'zod';
 import { requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
@@ -276,7 +281,7 @@ async function moveStock(
   tenantId: string,
   branchId: string,
   docId: string,
-  kind: 'purchase' | 'stocktake' | 'transfer',
+  kind: 'purchase' | 'stocktake' | 'transfer' | 'supplier_return',
   date: string,
   lines: { lineNo: number; variantId: string; qty: number }[],
 ): Promise<void> {
@@ -863,6 +868,196 @@ export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items
         toBranch: r.to_name,
         pieces: Number(r.pieces),
         valueMinor: Number(r.value),
+      })),
+    };
+  });
+}
+
+// ─── Returns to the supplier (09 › purchase returns) ─────────────────────────
+
+/**
+ * Pieces sent back to their supplier: out of the branch at its average cost, and what the supplier
+ * credits for them off its balance (Dr 2100) or paid back (Dr the drawer or the bank), Cr 1300 at
+ * cost; what was credited above or below cost is cost of sales (5100). A branch cannot send back
+ * more than it holds.
+ */
+export async function createSupplierReturn(
+  db: Database,
+  auth: AccessClaims,
+  input: z.output<typeof supplierReturnInput>,
+  meta: RequestMeta,
+): Promise<SupplierReturnDetail> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
+    if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
+    const branchId = await branchOf(tx, input.branchId);
+    const names = await stockedVariants(
+      tx,
+      input.lines.map((l) => l.variantId),
+    );
+    const missing = input.lines.findIndex((l) => !names.has(l.variantId));
+    if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
+    await costPending(tx, auth.tenantId);
+
+    const keys = input.lines.map((l) => stockKey(branchId, l.variantId));
+    const values = await loadValues(tx, auth.tenantId, keys);
+    const held = new Map(
+      (
+        await tx
+          .select({ variantId: stockLevels.variantId, qty: stockLevels.qty })
+          .from(stockLevels)
+          .where(
+            and(
+              eq(stockLevels.branchId, branchId),
+              inArray(
+                stockLevels.variantId,
+                input.lines.map((l) => l.variantId),
+              ),
+            ),
+          )
+      ).map((r) => [r.variantId, r.qty]),
+    );
+    const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
+    const lines: SupplierReturnDetail['lines'] = [];
+    for (const [index, l] of input.lines.entries()) {
+      const onHand = held.get(l.variantId) ?? 0;
+      if (l.qty > onHand) {
+        throw invalid({ [`lines.${index}.qty`]: `في الفرع ${onHand / 1000} فقط من هذا الصنف` });
+      }
+      const key = stockKey(branchId, l.variantId);
+      const out = stockOut(values.get(key) ?? empty, l.qty);
+      values.set(key, out.after);
+      const costMinor = Math.max(0, out.costMinor);
+      lines.push({
+        variantId: l.variantId,
+        name: names.get(l.variantId)!,
+        qty: l.qty,
+        amountMinor: l.amountMinor ?? costMinor,
+        costMinor,
+      });
+    }
+    await saveValues(tx, auth.tenantId, values);
+
+    const id = newId();
+    const number = await nextNumber(tx, auth.tenantId, 'PRT', input.date);
+    const amountMinor = lines.reduce((sum, l) => sum + l.amountMinor, 0);
+    const costMinor = lines.reduce((sum, l) => sum + l.costMinor, 0);
+    await tx.insert(supplierReturns).values({
+      tenantId: auth.tenantId,
+      id,
+      number,
+      branchId,
+      supplierId: supplier.id,
+      businessDate: input.date,
+      refund: input.refund,
+      reference: input.reference ?? null,
+      note: input.note ?? null,
+      lines,
+      amountMinor,
+      costMinor,
+      createdBy: auth.userId,
+    });
+    await moveStock(
+      tx,
+      auth.tenantId,
+      branchId,
+      id,
+      'supplier_return',
+      input.date,
+      input.lines.map((l, i) => ({ lineNo: i + 1, variantId: l.variantId, qty: -l.qty })),
+    );
+    await refreshExpiry(
+      tx,
+      input.lines.map((l) => l.variantId),
+    );
+
+    const currency = await baseCurrency(tx);
+    const line = (account: DraftLine['account'], baseMinor: number, extra: Partial<DraftLine> = {}) =>
+      ({ account, baseMinor, currency, amountMinor: baseMinor, rate: null, ...extra }) as DraftLine;
+    const back =
+      input.refund === 'credit'
+        ? line({ code: '2100' }, amountMinor, {
+            party: { type: 'supplier', id: supplier.id },
+            memo: supplier.name,
+          })
+        : line(PAY_ACCOUNT(input.refund, currency), amountMinor);
+    const difference = costMinor - amountMinor;
+    await postEntry(tx, {
+      tenantId: auth.tenantId,
+      branchId,
+      date: input.date,
+      sourceType: 'supplier_return',
+      sourceId: id,
+      sourceNumber: number,
+      memo: `مرتجع إلى ${supplier.name} ${number}${input.reference ? ` (${input.reference})` : ''}`,
+      baseCurrency: currency,
+      lines: [
+        ...(amountMinor !== 0 ? [back] : []),
+        line({ code: '1300' }, -costMinor),
+        ...(difference !== 0 ? [line({ code: '5100' }, difference, { memo: 'فرق كلفة مرتجع المورد' })] : []),
+      ],
+    });
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'supplier_return.create',
+        entity: 'supplier_return',
+        entityId: id,
+        changes: { number: [null, number], amountMinor: [null, amountMinor] },
+      },
+      meta,
+    );
+    return {
+      id,
+      number,
+      date: input.date,
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+      branchId,
+      refund: input.refund,
+      reference: input.reference ?? null,
+      lines,
+      amountMinor,
+      costMinor,
+      baseCurrency: currency,
+    };
+  });
+}
+
+export function listSupplierReturns(
+  db: Database,
+  auth: AccessClaims,
+): Promise<{ items: SupplierReturnRow[] }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const rows = await tx.execute<{
+      id: string;
+      number: string;
+      date: string;
+      supplier_name: string;
+      refund: SupplierReturnRow['refund'];
+      pieces: string;
+      amount: string;
+    }>(sql`
+      select r.id, r.number, r.business_date::text as date, s.name as supplier_name, r.refund,
+             coalesce((select sum((l ->> 'qty')::bigint) from jsonb_array_elements(r.lines) l), 0)::text as pieces,
+             r.amount_minor::text as amount
+      from supplier_returns r
+      join suppliers s on s.tenant_id = r.tenant_id and s.id = r.supplier_id
+      order by r.business_date desc, r.created_at desc
+      limit 200`);
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        number: r.number,
+        date: r.date,
+        supplierName: r.supplier_name,
+        refund: r.refund,
+        pieces: Number(r.pieces),
+        amountMinor: Number(r.amount),
       })),
     };
   });

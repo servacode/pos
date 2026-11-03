@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { CustomerRow } from './customers';
+import type { OnlineOrderRow } from './shop';
 import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
 import type { LoyaltySettings, ServiceSettings } from './store';
@@ -837,6 +838,7 @@ export interface PullSetRows {
   customers: CustomerRow;
   promotions: PromotionRow;
   vouchers: VoucherRow;
+  online_orders: OnlineOrderRow;
 }
 
 // ─── Product pictures (03 › الألبسة: صور القطع) ───────────────────────────────

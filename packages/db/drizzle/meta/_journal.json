@@ -218,6 +218,27 @@
       "when": 1793743284657,
       "tag": "0030_transfers",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793744273814,
+      "tag": "0031_shop_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793745442942,
+      "tag": "0032_supplier_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793746070327,
+      "tag": "0033_holds",
+      "breakpoints": true
     }
   ]
 }

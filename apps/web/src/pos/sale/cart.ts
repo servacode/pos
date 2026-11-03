@@ -86,6 +86,8 @@ export interface Cart {
   priceTier?: 'retail' | 'wholesale';
   /** An exchange (03 › الملابس): the voucher of the return just saved, offered first at payment */
   voucher?: string;
+  /** An online shop order opened at the till (26 › حياة الطلب): the sale closes it */
+  onlineOrder?: { id: string; number: string; customerName: string };
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
   invoiceApproval: Approval | null;
 }

@@ -194,6 +194,7 @@ describe('sync tables', () => {
       'categories',
       'customers',
       'exchange_rates',
+      'online_orders',
       'prices',
       'products',
       'promotions',

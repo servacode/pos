@@ -47,6 +47,7 @@ import {
   priceCart,
   setPriceTier,
   type ItemChoice,
+  EMPTY_CART,
   removeLine,
   restoreLine,
   unitPriceOf,
@@ -64,6 +65,10 @@ import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
 import { TableBoard } from './TableBoard';
+import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
+import { HoldPanel } from './HoldPanel';
+import { OnlineOrdersPanel } from './OnlineOrdersPanel';
+import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
 
 const PaymentPanel = lazy(() => import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })));
@@ -78,6 +83,8 @@ export type SaleMode =
   | { kind: 'help' }
   | { kind: 'choose'; item: CatalogItem; hit: BarcodeHit | null }
   | { kind: 'tables' }
+  | { kind: 'online' }
+  | { kind: 'hold' }
   | { kind: 'serial'; lineNo: number };
 
 export interface SaleScreenProps {
@@ -103,6 +110,8 @@ export interface SaleScreenProps {
   onNextSale: () => void;
   /** Keyboard actions that belong to the cashier app (menu, lock) */
   extraShortcuts?: (event: KeyboardEvent) => boolean;
+  /** Prints a hold's deposit voucher (CashierApp's printer) */
+  onPrintDeposit?: (saved: SavedGiftVoucher) => void;
 }
 
 const SELLER_KEY = 'salesperson';
@@ -182,6 +191,18 @@ export function SaleScreen(props: SaleScreenProps) {
       alive = false;
     };
   }, [pos.local, staff]);
+  // Online orders this till sold, until the next pull says they are done
+  const [soldOnline, setSoldOnline] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void pos.local.get<string[]>(ONLINE_SOLD_KEY).then((ids) => {
+      if (alive && ids) setSoldOnline(ids);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [pos.local]);
+  const waitingOnline = waitingOrders(catalog.onlineOrders, soldOnline);
   const service = settings.service ?? null;
   // A café with no tables serves takeaway unless told otherwise
   const defaultOrderType = service && service.tables.length === 0 ? 'takeaway' : 'dine_in';
@@ -545,6 +566,16 @@ export function SaleScreen(props: SaleScreenProps) {
             عرض سعر
           </Button>
         ) : null}
+        {priced && !cart.onlineOrder ? (
+          <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'hold' })}>
+            احجز
+          </Button>
+        ) : null}
+        {waitingOnline.length > 0 ? (
+          <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'online' })}>
+            طلبات المتجر ({waitingOnline.length})
+          </Button>
+        ) : null}
         {props.heldCount > 0 ? (
           <span className="rounded-full bg-warning-soft px-3 py-1 text-xs font-semibold text-warning-ink">
             {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
@@ -597,6 +628,27 @@ export function SaleScreen(props: SaleScreenProps) {
               للمطبخ
             </Button>
           ) : null}
+        </div>
+      ) : null}
+      {cart.onlineOrder ? (
+        <div
+          role="status"
+          className="flex items-center gap-2 border-b border-line bg-brand-soft px-4 py-2 text-sm text-brand-ink"
+        >
+          <span className="flex-1">
+            طلب المتجر{' '}
+            <bdi dir="ltr" className="num font-semibold">
+              {cart.onlineOrder.number}
+            </bdi>{' '}
+            · {cart.onlineOrder.customerName}: يُغلق عند الدفع
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setCart((c) => ({ ...c, onlineOrder: undefined }))}
+          >
+            افصل الطلب
+          </Button>
         </div>
       ) : null}
       {cart.voucher ? (
@@ -892,6 +944,12 @@ export function SaleScreen(props: SaleScreenProps) {
             onCompleted={(entry) => {
               setMode({ kind: 'items' });
               setSelected(null);
+              const order = cart.onlineOrder;
+              if (order) {
+                const ids = [...soldOnline.filter((id) => id !== order.id).slice(-49), order.id];
+                setSoldOnline(ids);
+                void pos.local.set(ONLINE_SOLD_KEY, ids);
+              }
               props.onSaved(entry);
             }}
           />
@@ -1023,6 +1081,50 @@ export function SaleScreen(props: SaleScreenProps) {
             add(item, hit, undefined, choice);
           }}
           onCancel={() => setMode({ kind: 'items' })}
+        />
+      ) : effectiveMode.kind === 'hold' && priced ? (
+        <HoldPanel
+          cart={cart}
+          totalMinor={totalMinor}
+          currency={ctx.currency}
+          shiftId={props.shiftId}
+          cashierId={session.userId}
+          timezone={settings.timezone}
+          cutoff={settings.businessDayCutoff}
+          onPrintDeposit={props.onPrintDeposit}
+          onClose={() => setMode({ kind: 'items' })}
+          onDone={(hold) => {
+            setCart(() => EMPTY_CART);
+            setSelected(null);
+            setMode({ kind: 'items' });
+            setNotice({
+              tone: 'info',
+              text: hold.depositCode
+                ? `حُجز ${hold.number}. العربون بالقسيمة ${hold.depositCode} ويُخصم عند الاستلام.`
+                : `حُجز ${hold.number}. يجده الكاشير في «طلبات المتجر» عند الاستلام.`,
+            });
+          }}
+        />
+      ) : effectiveMode.kind === 'online' ? (
+        <OnlineOrdersPanel
+          orders={waitingOnline}
+          onClose={() => setMode({ kind: 'items' })}
+          onOpen={(order) => {
+            if (cart.lines.length > 0) {
+              setNotice({ tone: 'warning', text: 'أنهِ الفاتورة الحالية أو علّقها، ثم افتح الطلب.' });
+              setMode({ kind: 'items' });
+              return;
+            }
+            const { cart: opened, missing } = orderCart(order, catalog);
+            setCart(() => opened);
+            setMode({ kind: 'items' });
+            if (props.done) props.onNextSale();
+            setNotice(
+              missing.length > 0
+                ? { tone: 'warning', text: `غير موجود على هذا الجهاز: ${missing.join('، ')}. أضفه يدوياً.` }
+                : { tone: 'info', text: `فُتح طلب المتجر ${order.number} للزبون ${order.customerName}.` },
+            );
+          }}
         />
       ) : effectiveMode.kind === 'tables' && service ? (
         <TableBoard

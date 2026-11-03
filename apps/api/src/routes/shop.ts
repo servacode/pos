@@ -1,21 +1,27 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  holdInput,
   onlineOrderListQuery,
   onlineOrderStatusInput,
   onlineStoreInput,
+  shopCodeInput,
   shopOrderInput,
   uuidSchema,
 } from '@serva/core';
+import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import {
   getOnlineStore,
   listOnlineOrders,
+  placeHold,
   placeShopOrder,
+  requestShopCode,
   saveOnlineStore,
   setOnlineOrderStatus,
   shopHome,
+  shopOrderTrack,
   shopProduct,
 } from '../services/shop';
 import { parseBody } from './validation';
@@ -44,13 +50,34 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
     { config: { rateLimit: { max: 10, timeWindow: 60_000 } } },
     async (request, reply) => {
       const placed = await placeShopOrder(
-        app.db,
+        app,
         slugOf(request.params),
         parseBody(shopOrderInput, request.body),
       );
       return reply.status(201).send(placed);
     },
   );
+  // A code costs a message: a few a minute from one address
+  app.post(
+    '/v1/shop/:slug/orders/code',
+    { config: { rateLimit: { max: 5, timeWindow: 60_000 } } },
+    async (request) =>
+      requestShopCode(app, slugOf(request.params), parseBody(shopCodeInput, request.body), meta(request)),
+  );
+  app.get('/v1/shop/:slug/orders/:token', async (request) =>
+    shopOrderTrack(
+      app.db,
+      slugOf(request.params),
+      String((request.params as { token?: string }).token ?? '').slice(0, 64),
+    ),
+  );
+
+  // ─── The till: «احجز» ────────────────────────────────────────────────────
+  app.post('/v1/device/holds', { onRequest: requireDevice() }, async (request, reply) => {
+    if (!request.device) throw unauthorized();
+    const placed = await placeHold(app.db, request.device, parseBody(holdInput, request.body));
+    return reply.status(201).send(placed);
+  });
 
   // ─── The dashboard ───────────────────────────────────────────────────────
   app.get('/v1/online-store', { preHandler: requireAuth }, async (request) => {

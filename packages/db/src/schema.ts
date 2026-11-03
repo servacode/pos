@@ -1777,6 +1777,40 @@ export const transfers = pgTable(
   ],
 );
 
+/**
+ * Returns to the supplier (09 › purchase returns): pieces sent back out of a branch at its average
+ * cost, credited by the supplier off its balance or paid back. One journal entry (source
+ * 'supplier_return'); `lines` keeps what each line cost and what was credited for it.
+ */
+export const supplierReturns = pgTable(
+  'supplier_returns',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** credit | cash | bank */
+    refund: text('refund').notNull(),
+    reference: text('reference'),
+    note: text('note'),
+    lines: jsonb('lines').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    costMinor: bigint('cost_minor', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'supplier_returns_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    tenantIsolation(),
+  ],
+);
+
 // ─── Accounting (09 › المحاسبة; 10 › دليل الحسابات الافتراضي، القيود التلقائية) ──────
 
 /**
@@ -2187,6 +2221,8 @@ export const onlineStores = pgTable(
     /** «التوصيل داخل المدينة خلال يوم، 10,000 ل.س» */
     note: text('note'),
     showOutOfStock: boolean('show_out_of_stock').notNull().default(false),
+    /** whatsapp: «اطلب عبر واتساب»; shop: the order is placed in the shop, the phone confirmed by a code */
+    orderMode: text('order_mode').notNull().default('whatsapp'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2221,16 +2257,29 @@ export const onlineOrders = pgTable(
     currency: text('currency').notNull(),
     totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
     lines: jsonb('lines').$type<OnlineOrderLine[]>().notNull(),
+    /** The customer's own page for the order: /shop/{slug}/o/{trackToken} */
+    trackToken: text('track_token')
+      .notNull()
+      .default(sql`replace(gen_random_uuid()::text, '-', '')`),
+    /** Where its pieces are held once accepted (the store's main branch) */
+    branchId: uuid('branch_id'),
+    /** The sale that delivered it, from the till */
+    saleId: uuid('sale_id'),
+    /** A hold's deposit (source 'hold'): the code of the voucher it was paid as */
+    depositCode: text('deposit_code'),
     decidedBy: uuid('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    changeXid: changeXid(),
   },
   (t) => [
     primaryKey({ name: 'online_orders_pkey', columns: [t.tenantId, t.id] }),
     unique('online_orders_seq_unique').on(t.tenantId, t.seq),
     index('online_orders_status_idx').on(t.tenantId, t.status, t.createdAt),
+    unique('online_orders_track_unique').on(t.tenantId, t.trackToken),
+    index('online_orders_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
   ],
 );

@@ -13,6 +13,7 @@ import type {
   VariantRow,
   VoucherRow,
 } from '@serva/core/contracts/catalog';
+import type { OnlineOrderRow } from '@serva/core/contracts/shop';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { CustomerRow } from '@serva/core/contracts/customers';
 import type { PromotionRow } from '@serva/core/contracts/promotions';
@@ -82,6 +83,8 @@ export interface Catalog {
   promotions: PromotionRow[];
   /** Exchange vouchers, as last pulled (pay/vouchers.ts adds this till's own) */
   vouchers: VoucherRow[];
+  /** Online shop orders the store accepted, waiting to be sold here (26 › حياة الطلب) */
+  onlineOrders: OnlineOrderRow[];
 }
 
 export type CatalogSets = { [K in keyof PullSetRows]: PullSetRows[K][] };
@@ -104,6 +107,7 @@ export const CATALOG_SETS = [
   'customers',
   'promotions',
   'vouchers',
+  'online_orders',
 ] as const satisfies readonly (keyof PullSetRows)[];
 
 export async function readCatalogSets(store: SyncStore): Promise<CatalogSets> {
@@ -233,6 +237,9 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       .sort((a, b) => a.name.localeCompare(b.name, 'ar')),
     promotions: (sets.promotions ?? []).filter((p) => !p.archived),
     vouchers: sets.vouchers ?? [],
+    onlineOrders: (sets.online_orders ?? [])
+      .filter((o) => o.status === 'accepted')
+      .sort((a, b) => a.number.localeCompare(b.number)),
   };
 }
 

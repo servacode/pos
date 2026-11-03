@@ -6,6 +6,7 @@ import {
   categories,
   customers,
   exchangeRates,
+  onlineOrders,
   prices,
   products,
   promotions,
@@ -315,6 +316,29 @@ const PULL_SETS: Record<string, PullSet> = {
       archived: archivedFlag(promotions.archivedAt),
       version: promotions.version,
     },
+  },
+  // Orders from the online shop for the till to sell (26 › حياة الطلب): accepted ones, and the ones
+  // decided lately so a till sees an order it holds leave. Never a pending one.
+  online_orders: {
+    table: onlineOrders,
+    id: onlineOrders.id,
+    tenantId: onlineOrders.tenantId,
+    columns: {
+      number: onlineOrders.number,
+      status: onlineOrders.status,
+      customerName: onlineOrders.customerName,
+      phone: onlineOrders.phone,
+      fulfilment: onlineOrders.fulfilment,
+      address: onlineOrders.address,
+      note: onlineOrders.note,
+      currency: onlineOrders.currency,
+      totalMinor: onlineOrders.totalMinor,
+      lines: onlineOrders.lines,
+      depositCode: onlineOrders.depositCode,
+      version: onlineOrders.version,
+    },
+    scope: () =>
+      sql`${onlineOrders.status} <> 'pending' and (${onlineOrders.status} = 'accepted' or ${onlineOrders.decidedAt} > now() - interval '30 days')`,
   },
 };
 

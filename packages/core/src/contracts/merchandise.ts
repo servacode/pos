@@ -66,6 +66,19 @@ export interface MerchandiseReport {
    * Each seller's sales in the period (03 › عمولة البائع): the salesperson named on the sale, else
    * its cashier; net of what came back from those sales. Not narrowed by category.
    */
+  /**
+   * Each department's sales in the period (رجالي، نسائي، ولادي: the top-level categories, each with
+   * its sub-categories), net of what came back; categoryId null for goods with no category. Not
+   * narrowed by category. The biggest first.
+   */
+  byDepartment: {
+    categoryId: string | null;
+    name: string;
+    soldQty: number;
+    totalMinor: number;
+    returnedQty: number;
+    returnedMinor: number;
+  }[];
   bySeller: {
     userId: string;
     fullName: string;

@@ -62,6 +62,16 @@ const returnRate = (r: OptionSales) =>
  * sell and which come back, each model's pieces with what is left of them, and what has slept on
  * the shelf, so the next order buys what sells and the sleeping pieces go on sale.
  */
+/** A department's net sales as a share of all departments', «42٪»; «—» when nothing sold */
+export function shareOf(
+  netMinor: number,
+  all: readonly { totalMinor: number; returnedMinor: number }[],
+): string {
+  const total = all.reduce((n, d) => n + d.totalMinor - d.returnedMinor, 0);
+  if (total <= 0) return '—';
+  return `${Math.round((netMinor / total) * 100)}٪`;
+}
+
 export function MerchandisePage() {
   const [period, setPeriod] = useState<keyof typeof PERIODS>('30');
   const [departments, setDepartments] = useState<Category[]>([]);
@@ -212,6 +222,47 @@ export function MerchandisePage() {
             />
           ) : null}
         </div>
+
+        {data && data.byDepartment.length > 0 ? (
+          <DataTable
+            caption="المبيعات حسب القسم"
+            columns={[
+              {
+                key: 'name',
+                header: 'القسم',
+                cell: (r) => <span className="font-semibold">{r.name}</span>,
+              },
+              {
+                key: 'sold',
+                header: 'القطع',
+                numeric: true,
+                cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+              },
+              {
+                key: 'total',
+                header: 'المبيع',
+                numeric: true,
+                cell: (r) => <Money minor={r.totalMinor} currency={base} />,
+              },
+              {
+                key: 'back',
+                header: 'رجع منه',
+                numeric: true,
+                cell: (r) => <Money minor={r.returnedMinor} currency={base} />,
+              },
+              {
+                key: 'share',
+                header: 'النصيب',
+                numeric: true,
+                cell: (r) => (
+                  <span className="num">{shareOf(r.totalMinor - r.returnedMinor, data.byDepartment)}</span>
+                ),
+              },
+            ]}
+            rows={data.byDepartment}
+            rowKey={(r) => r.categoryId ?? 'none'}
+          />
+        ) : null}
 
         {data && data.byOption.length === 0 ? (
           <Alert tone="info">

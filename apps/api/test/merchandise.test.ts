@@ -9,7 +9,7 @@ import {
 } from '@serva/core';
 import { optionOrder } from '../src/services/merchandise';
 import { cartLine, documents, openStore, push, sale, shiftOpen, type Store } from './accounting-fixtures';
-import { closeAppDb, closeOwnerDb, makeApp, resetDatabase } from './helpers';
+import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 
 /**
  * Clothing reports (03 › الألبسة): sales by size and colour net of what came back, the models with
@@ -183,6 +183,17 @@ describe('the clothing report', () => {
         returnedMinor: 100_000,
       },
     ]);
+    // No category yet: one line for goods without a department
+    expect(r.byDepartment).toEqual([
+      {
+        categoryId: null,
+        name: 'بلا قسم',
+        soldQty: 3 * PIECE,
+        totalMinor: 300_000,
+        returnedQty: PIECE,
+        returnedMinor: 100_000,
+      },
+    ]);
     // A department with none of these goods shows none of them
     const kids = (
       await app.inject({
@@ -199,6 +210,26 @@ describe('the clothing report', () => {
     expect(onlyKids.models).toEqual([]);
     expect(onlyKids.slowMovers).toEqual([]);
     expect(onlyKids.bySeller).toHaveLength(1);
+
+    // The shirts move into «ولادي › قمصان»: the whole period counts under «ولادي»
+    const shirts = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/categories',
+        headers: as(store),
+        payload: { name: 'قمصان', parentId: kids.id },
+      })
+    ).json<{ id: string }>();
+    await ownerDb()`update products set category_id = ${shirts.id} where id = ${shirt.id}`;
+    const byDept = (await report(store, 'from=2026-10-01&to=2026-10-30')).json<MerchandiseReport>();
+    expect(byDept.byDepartment).toEqual([
+      expect.objectContaining({
+        categoryId: kids.id,
+        name: 'ولادي',
+        totalMinor: 300_000,
+        returnedMinor: 100_000,
+      }),
+    ]);
 
     // Within 150 days nothing has slept that long
     const longer = (

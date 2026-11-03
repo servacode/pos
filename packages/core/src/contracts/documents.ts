@@ -323,6 +323,11 @@ export const salePayloadSchema = z
      * number for the call. Added in contract v1 as optional: a shop's sale leaves it out.
      */
     service: serviceInfoSchema.nullable().optional(),
+    /**
+     * An order from the online shop sold at the till (26 › حياة الطلب): the sale closes it. Added in
+     * contract v1 as optional: an ordinary sale leaves it out.
+     */
+    onlineOrderId: uuidSchema.nullable().optional(),
   })
   .superRefine((sale, ctx) => {
     const issue = (path: (string | number)[], message: string) =>
