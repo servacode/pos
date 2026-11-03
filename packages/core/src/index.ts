@@ -14,6 +14,7 @@ export * from './contracts/store';
 export * from './contracts/accounting';
 export * from './contracts/customers';
 export * from './contracts/purchases';
+export * from './contracts/billing';
 export * from './money';
 export * from './pricing';
 export * from './sale';

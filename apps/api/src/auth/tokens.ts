@@ -8,7 +8,7 @@ const ISSUER = 'serva-pos';
  * another. Only the store gate exists today; device, platform, agent and accountant gates add
  * their realm here (their keys derive the same way, with no new secret to manage).
  */
-export const REALMS = { store: 'serva-store' } as const;
+export const REALMS = { store: 'serva-store', platform: 'serva-platform' } as const;
 export type Realm = keyof typeof REALMS;
 
 interface SigningKey {
@@ -96,6 +96,55 @@ export async function verifyAccessToken(
       return null;
     }
     return { userId: payload.sub, tenantId: payload.tid, sessionId: payload.sid };
+  } catch {
+    return null;
+  }
+}
+
+/** The platform team's sign-in (07 › لوحة مدير المنصة): its own realm, a short session, no refresh. */
+export interface PlatformClaims {
+  platformUserId: string;
+  role: 'super_admin' | 'support' | 'accountant';
+}
+
+export const PLATFORM_TOKEN_TTL_SECONDS = 8 * 60 * 60;
+
+export function signPlatformToken(claims: PlatformClaims, keys: TokenKeys, now: Date): Promise<string> {
+  const issuedAt = Math.floor(now.getTime() / 1000);
+  const { kid, key } = keys.signingKey('platform');
+  return new SignJWT({ role: claims.role })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT', kid })
+    .setSubject(claims.platformUserId)
+    .setIssuer(ISSUER)
+    .setAudience(REALMS.platform)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(issuedAt + PLATFORM_TOKEN_TTL_SECONDS)
+    .sign(key);
+}
+
+export async function verifyPlatformToken(
+  token: string,
+  keys: TokenKeys,
+  now: Date,
+): Promise<PlatformClaims | null> {
+  try {
+    const { kid } = decodeProtectedHeader(token);
+    const key = typeof kid === 'string' ? keys.verificationKey('platform', kid) : undefined;
+    if (!key) return null;
+    const { payload } = await jwtVerify(token, key, {
+      issuer: ISSUER,
+      audience: REALMS.platform,
+      algorithms: ['HS256'],
+      currentDate: now,
+    });
+    const role = payload.role;
+    if (
+      typeof payload.sub !== 'string' ||
+      (role !== 'super_admin' && role !== 'support' && role !== 'accountant')
+    ) {
+      return null;
+    }
+    return { platformUserId: payload.sub, role };
   } catch {
     return null;
   }

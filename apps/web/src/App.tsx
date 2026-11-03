@@ -9,6 +9,7 @@ import { useTestMode } from './lib/testMode';
 // from the server. Neither loads the other's code.
 const PosApp = lazy(() => import('./pos/PosApp').then((m) => ({ default: m.PosApp })));
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })));
+const PlatformApp = lazy(() => import('./platform/PlatformApp').then((m) => ({ default: m.PlatformApp })));
 
 // The component gallery (tab 14 › معرض المكوّنات) exists in dev builds only: in a production build
 // import.meta.env.DEV is false, so this import is dead code and no chunk is emitted for it.
@@ -35,6 +36,7 @@ export function App() {
           {UiGallery ? <Route path="/dev/ui" element={<UiGallery />} /> : null}
           <Route path="/pos/*" element={<PosApp />} />
           <Route path="/link" element={<PairingLink />} />
+          <Route path="/platform/*" element={<PlatformApp />} />
           <Route path="*" element={<AdminApp />} />
         </Routes>
       </Suspense>

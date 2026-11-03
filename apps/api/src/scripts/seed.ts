@@ -9,6 +9,7 @@
  */
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { and, eq, isNull } from 'drizzle-orm';
 import { createDb, plans, platformUsers, type PlanLimits } from '@serva/db';
 import { hashSecret } from '../auth/passwords';
 import { demoStore, seedDemoCatalog } from './demo-catalog';
@@ -26,49 +27,63 @@ if (!url) {
   process.exit(1);
 }
 
-const paidPlans: { code: string; name: string; sortOrder: number; limits: PlanLimits; features: string[] }[] =
-  [
-    {
-      code: 'basic',
-      name: 'الأساسية',
-      sortOrder: 1,
-      limits: { branches: 1, registers: 1, users: 3, products: 2000 },
-      features: ['sales', 'inventory', 'customers', 'credit'],
-    },
-    {
-      code: 'pro',
-      name: 'الاحترافية',
-      sortOrder: 2,
-      limits: { branches: 3, registers: 5, users: 15, products: null },
-      features: [
-        'sales',
-        'inventory',
-        'customers',
-        'credit',
-        'purchases',
-        'transfers',
-        'promotions',
-        'accounting_reports',
-      ],
-    },
-    {
-      code: 'enterprise',
-      name: 'المؤسسات',
-      sortOrder: 3,
-      limits: { branches: null, registers: null, users: null, products: null },
-      features: [
-        'sales',
-        'inventory',
-        'customers',
-        'credit',
-        'purchases',
-        'transfers',
-        'promotions',
-        'accounting_reports',
-        'api',
-      ],
-    },
-  ];
+const paidPlans: {
+  code: string;
+  name: string;
+  sortOrder: number;
+  /** Dollar cents (07 › الأسعار), editable in the platform panel */
+  priceMonthlyMinor: number;
+  priceYearlyMinor: number;
+  limits: PlanLimits;
+  features: string[];
+}[] = [
+  {
+    code: 'basic',
+    name: 'الأساسية',
+    sortOrder: 1,
+    priceMonthlyMinor: 1000,
+    priceYearlyMinor: 10000,
+    limits: { branches: 1, registers: 1, users: 3, products: 2000 },
+    features: ['sales', 'inventory', 'customers', 'credit'],
+  },
+  {
+    code: 'pro',
+    name: 'الاحترافية',
+    sortOrder: 2,
+    priceMonthlyMinor: 2500,
+    priceYearlyMinor: 25000,
+    limits: { branches: 3, registers: 5, users: 15, products: null },
+    features: [
+      'sales',
+      'inventory',
+      'customers',
+      'credit',
+      'purchases',
+      'transfers',
+      'promotions',
+      'accounting_reports',
+    ],
+  },
+  {
+    code: 'enterprise',
+    name: 'المؤسسات',
+    sortOrder: 3,
+    priceMonthlyMinor: 5000,
+    priceYearlyMinor: 50000,
+    limits: { branches: null, registers: null, users: null, products: null },
+    features: [
+      'sales',
+      'inventory',
+      'customers',
+      'credit',
+      'purchases',
+      'transfers',
+      'promotions',
+      'accounting_reports',
+      'api',
+    ],
+  },
+];
 
 const { db, client } = createDb(url, { max: 1, timeouts: false, applicationName: 'serva-seed' });
 try {
@@ -77,6 +92,11 @@ try {
       .insert(plans)
       .values({ ...plan, isFree: false, isDefault: false, trialDays: null, currency: 'USD' })
       .onConflictDoNothing({ target: plans.code });
+    // A plan seeded before prices existed gets them; a price set in the panel is kept
+    await db
+      .update(plans)
+      .set({ priceMonthlyMinor: plan.priceMonthlyMinor, priceYearlyMinor: plan.priceYearlyMinor })
+      .where(and(eq(plans.code, plan.code), isNull(plans.priceMonthlyMinor)));
   }
   console.log(`Plans ready (${paidPlans.length} paid + the free plan from migrations).`);
 

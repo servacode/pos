@@ -12,7 +12,7 @@ import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabas
  * Device routes take no id: the store comes from the device token alone, and each gets a probe
  * that another store's device can neither see nor touch this store's data.
  */
-const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation'> = {
+const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 'platform'> = {
   'GET /health': 'public',
   'GET /v1/meta': 'public',
   'POST /v1/auth/register': 'public',
@@ -37,6 +37,19 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation'> =
   'GET /v1/inventory': 'signed-in',
   'POST /v1/stocktakes': 'signed-in',
   'GET /v1/reports/profit': 'signed-in',
+  'GET /v1/subscription': 'signed-in',
+  'POST /v1/subscription/invoices': 'signed-in',
+  'POST /v1/subscription/payments': 'signed-in',
+  'POST /v1/platform/login': 'public',
+  'GET /v1/platform/stores': 'platform',
+  'PUT /v1/platform/stores/:id/subscription': 'platform',
+  'GET /v1/platform/payments': 'platform',
+  'POST /v1/platform/payments/:id/confirm': 'platform',
+  'POST /v1/platform/payments/:id/reject': 'platform',
+  'GET /v1/platform/plans': 'platform',
+  'PUT /v1/platform/plans/:code': 'platform',
+  'GET /v1/platform/settings': 'platform',
+  'PUT /v1/platform/settings': 'platform',
   'PUT /v1/store/profile': 'signed-in',
   'PUT /v1/store/currency': 'signed-in',
   'PUT /v1/store/onboarding': 'signed-in',
@@ -518,6 +531,18 @@ describe('route registry', () => {
     }
   });
 
+  it('platform routes refuse a missing token, a forged one and a store owner’s token', async () => {
+    const { body } = await registerStore(app);
+    for (const [route, access] of Object.entries(ROUTES)) {
+      if (access !== 'platform') continue;
+      const [method, url] = route.split(' ') as ['GET', string];
+      for (const authorization of [undefined, 'Bearer forged', `Bearer ${body.accessToken}`]) {
+        const res = await app.inject({ method, url, headers: authorization ? { authorization } : {} });
+        expect(res.statusCode, `${route} ${authorization ?? 'no token'}`).toBe(401);
+      }
+    }
+  });
+
   it('every device route has a cross-store probe', () => {
     const deviceRoutes = Object.entries(ROUTES)
       .filter(([, access]) => access === 'device')
@@ -531,7 +556,8 @@ describe('route registry', () => {
   });
 
   it('every route with an id in its path has an IDOR probe', () => {
-    const withIds = registeredRoutes().filter((r) => r.includes(':'));
+    // The platform panel sees every store by design: it has its own sign-in instead (above)
+    const withIds = registeredRoutes().filter((r) => r.includes(':') && !r.includes('/v1/platform/'));
     expect(withIds.sort()).toEqual(Object.keys(IDOR_PROBES).sort());
   });
 

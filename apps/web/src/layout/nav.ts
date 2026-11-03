@@ -62,6 +62,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { to: '/devices', label: 'الأجهزة', icon: DeviceIcon, permission: ['devices.view'] },
   { to: '/evidence', label: 'شاشة الدليل', icon: ShieldCheckIcon, permission: EVIDENCE_ACCESS },
   { to: '/settings', label: 'إعدادات المتجر', icon: SettingsIcon, permission: ['settings.manage'] },
+  { to: '/subscription', label: 'الاشتراك', icon: ShieldCheckIcon, permission: ['subscription.manage'] },
 ];
 
 export function navFor(me: Pick<MeResponse, 'user' | 'settings'>): NavEntry[] {
