@@ -21,6 +21,7 @@ const ShiftOpenScreen = lazy(() =>
 const ShiftCloseScreen = lazy(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.ShiftCloseScreen })),
 );
+const ReturnScreen = lazy(() => import('./return/ReturnScreen').then((m) => ({ default: m.ReturnScreen })));
 const CashMovementScreen = lazy(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.CashMovementScreen })),
 );
@@ -38,7 +39,7 @@ interface LastSale {
   cashierName: string;
 }
 
-type View = 'sale' | 'close' | 'cash';
+type View = 'sale' | 'close' | 'cash' | 'return';
 
 export interface CashierAppProps {
   session: StaffSession;
@@ -211,6 +212,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       setView('cash');
       return true;
     }
+    if (event.code === 'KeyR' && shift) {
+      event.preventDefault();
+      setView('return');
+      return true;
+    }
     if (event.code === 'KeyL') {
       event.preventDefault();
       lock();
@@ -264,6 +270,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             >
               {(
                 [
+                  shift ? { label: 'مرتجع', key: 'Alt+R', action: () => setView('return') } : null,
                   shift ? { label: 'حركات الدرج', key: 'Alt+7', action: () => setView('cash') } : null,
                   lastSale ? { label: 'إيصال آخر فاتورة', key: null, action: reprint } : null,
                   { label: 'اقفل الشاشة', key: 'Alt+L', action: lock },
@@ -321,6 +328,17 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 setView('sale');
                 onSignOut();
               }}
+            />
+          ) : view === 'return' ? (
+            <ReturnScreen
+              session={session}
+              catalog={catalog}
+              staff={staff}
+              shift={shift}
+              onBack={() => setView('sale')}
+              onPrint={(doc) =>
+                setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'return' }, copy: false })
+              }
             />
           ) : (
             <CashMovementScreen

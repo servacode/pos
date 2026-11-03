@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { convert } from '@serva/core/money';
 import type { BranchRow, SettingsRow } from '@serva/core/contracts/catalog';
-import type { PaymentMethod, SalePayload } from '@serva/core/contracts/documents';
+import type { PaymentMethod, ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
 import { rateFor } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
 import { cn, displayNumber, formatQuantity, Money, useDigits } from '@serva/ui';
@@ -25,6 +25,8 @@ export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base:
 }
 
 export interface ReceiptData {
+  /** A sale receipt unless it says return */
+  kind?: 'sale' | 'return';
   doc: Pick<SyncDocument, 'number' | 'deviceTime' | 'payload'>;
   settings: SettingsRow;
   branch: BranchRow | null;
@@ -53,43 +55,10 @@ function Row({
 
 const Rule = () => <hr className="border-0 border-t border-dashed border-ink" />;
 
-/**
- * The sale receipt (21 › إيصال 80 مم; print/Receipt80): the store, the number and the moment, each
- * line with «quantity × price», the discounts, the total and its value in dollars, the payments,
- * the change, and the store's footer. Everything comes from the saved document and `settings`, so
- * a reprint is the same receipt, marked «نسخة».
- */
-export function Receipt({
-  data,
-  width = 80,
-  copy = false,
-}: {
-  data: ReceiptData;
-  width?: PaperWidth;
-  copy?: boolean;
-}) {
-  const digits = useDigits();
-  const sale = data.doc.payload as unknown as SalePayload;
-  const base = sale.currency;
-  const at = Date.parse(data.doc.deviceTime);
-  const foreignRate = sale.exchangeRates[0];
-  const foreign = foreignRate ? (foreignRate.unit === base ? foreignRate.quote : foreignRate.unit) : null;
-  const t = sale.totals;
-  const pieces = sale.lines.reduce((n, l) => n + (l.unitName ? 1 : Math.round(l.baseQty / 1000)), 0);
-  const amount = (minor: number, currency: CurrencyCode = base) => (
-    <Money minor={minor} currency={currency} symbol={currency !== base} />
-  );
-
+/** The store, its branch, phone and tax number: the top of every slip */
+function ReceiptHeader({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
   return (
-    <div
-      dir="rtl"
-      lang="ar"
-      aria-label={`إيصال ${width} مم`}
-      className={cn(
-        'flex flex-col gap-2 bg-surface px-1 py-3 font-semibold text-ink',
-        width === 80 ? 'w-[72mm] text-[13px]/[1.55]' : 'w-[48mm] text-[11px]/[1.5]',
-      )}
-    >
+    <>
       {copy ? <p className="self-center border-2 border-ink px-3 text-base font-bold">نسخة</p> : null}
       <div className="flex flex-col items-center text-center">
         <span className={cn('font-bold', width === 80 ? 'text-xl' : 'text-base')}>
@@ -115,6 +84,133 @@ export function Receipt({
           </span>
         ) : null}
       </div>
+    </>
+  );
+}
+
+const slipClass = (width: PaperWidth) =>
+  cn(
+    'flex flex-col gap-2 bg-surface px-1 py-3 font-semibold text-ink',
+    width === 80 ? 'w-[72mm] text-[13px]/[1.55]' : 'w-[48mm] text-[11px]/[1.5]',
+  );
+
+const REFUND_LABEL: Record<ReturnPayload['refunds'][number]['method'], string> = {
+  cash: 'رُدّ نقداً',
+  card: 'رُدّ إلى البطاقة',
+  wallet: 'رُدّ إلى شام كاش',
+  transfer: 'رُدّ بتحويل',
+};
+
+/** The return slip (08 › مرتجع مبيعات): what came back, from which invoice, and what was paid back. */
+function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
+  const digits = useDigits();
+  const ret = data.doc.payload as unknown as ReturnPayload;
+  const at = Date.parse(data.doc.deviceTime);
+  const amount = (minor: number) => <Money minor={minor} currency={ret.currency} symbol={false} />;
+  return (
+    <div dir="rtl" lang="ar" aria-label={`إيصال مرتجع ${width} مم`} className={slipClass(width)}>
+      <ReceiptHeader data={data} width={width} copy={copy} />
+      <Rule />
+      <div className="flex flex-col items-center">
+        <span>مرتجع مبيعات</span>
+        <bdi dir="ltr" className="num font-bold">
+          {data.doc.number}
+        </bdi>
+        <span>
+          عن الفاتورة{' '}
+          <bdi dir="ltr" className="num">
+            {ret.saleNumber}
+          </bdi>
+        </span>
+        <span>
+          {dateText(at, digits)} ، {clockText(at, digits)}
+        </span>
+        <span>
+          الكاشير: {data.cashierName} · {data.deviceName}
+        </span>
+      </div>
+      <Rule />
+      <ul className="flex flex-col gap-1.5">
+        {ret.lines.map((line) => (
+          <li key={line.lineNo} className="flex flex-col">
+            <span className="font-bold">{line.name}</span>
+            <div className="flex justify-between gap-2">
+              <bdi dir="rtl" className="num">
+                {formatQuantity(line.qty, digits)}
+              </bdi>
+              <span className="num">{amount(line.refund.totalMinor)}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <Rule />
+      {ret.totals.taxMinor > 0 ? <Row label="منها ضريبة">{amount(ret.totals.taxMinor)}</Row> : null}
+      <Row label="المبلغ المردود" strong>
+        <Money minor={ret.totals.totalMinor} currency={ret.currency} />
+      </Row>
+      {ret.refunds.map((r, i) => (
+        <div key={i} className="flex flex-col">
+          <Row label={REFUND_LABEL[r.method]}>
+            <Money minor={r.amountMinor} currency={r.currency} />
+          </Row>
+          {r.reference ? (
+            <Row label={<span className="text-xs">المرجع</span>}>
+              <bdi dir="ltr">{r.reference}</bdi>
+            </Row>
+          ) : null}
+        </div>
+      ))}
+      <Row label={<span className="text-xs">السبب</span>}>{ret.reason}</Row>
+      <Rule />
+      <p className="text-center text-[10px]">
+        سيرفا ·{' '}
+        <span lang="en" dir="ltr">
+          Serva
+        </span>
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The sale receipt (21 › إيصال 80 مم; print/Receipt80): the store, the number and the moment, each
+ * line with «quantity × price», the discounts, the total and its value in dollars, the payments,
+ * the change, and the store's footer. Everything comes from the saved document and `settings`, so
+ * a reprint is the same receipt, marked «نسخة».
+ */
+export function Receipt({
+  data,
+  width = 80,
+  copy = false,
+}: {
+  data: ReceiptData;
+  width?: PaperWidth;
+  copy?: boolean;
+}) {
+  const digits = useDigits();
+  if (data.kind === 'return') return <ReturnReceipt data={data} width={width} copy={copy} />;
+  const sale = data.doc.payload as unknown as SalePayload;
+  const base = sale.currency;
+  const at = Date.parse(data.doc.deviceTime);
+  const foreignRate = sale.exchangeRates[0];
+  const foreign = foreignRate ? (foreignRate.unit === base ? foreignRate.quote : foreignRate.unit) : null;
+  const t = sale.totals;
+  const pieces = sale.lines.reduce((n, l) => n + (l.unitName ? 1 : Math.round(l.baseQty / 1000)), 0);
+  const amount = (minor: number, currency: CurrencyCode = base) => (
+    <Money minor={minor} currency={currency} symbol={currency !== base} />
+  );
+
+  return (
+    <div
+      dir="rtl"
+      lang="ar"
+      aria-label={`إيصال ${width} مم`}
+      className={cn(
+        'flex flex-col gap-2 bg-surface px-1 py-3 font-semibold text-ink',
+        width === 80 ? 'w-[72mm] text-[13px]/[1.55]' : 'w-[48mm] text-[11px]/[1.5]',
+      )}
+    >
+      <ReceiptHeader data={data} width={width} copy={copy} />
       <Rule />
       <div className="flex flex-col items-center">
         <span>فاتورة مبيعات</span>

@@ -85,7 +85,7 @@ async function client(): Promise<Client> {
 
 const newId = createUuidV7();
 const sale = (total: number, deps: string[] = []): NewDocument => ({
-  type: deps.length ? 'return' : 'sale',
+  type: deps.length ? 'trade_in' : 'sale',
   payload: deps.length ? { total, lines: [{ lineNo: 1, qty: 1000, price: total }] } : salePayload(total),
   deps,
   businessDate: '2026-10-30',

@@ -264,7 +264,11 @@ describe('protocol schemas', () => {
     expect(rejection?.code).toBe('invalid_payload');
     expect(rejection?.issues.map((i) => i.path)).toContain('shiftId');
     // Types without a payload schema yet are stored as they arrive.
-    expect(documentPayloadRejection({ type: 'return', payload: { total: 500 } })).toBeNull();
+    expect(documentPayloadRejection({ type: 'trade_in', payload: { total: 500 } })).toBeNull();
+    // A return is checked like a sale.
+    expect(documentPayloadRejection({ type: 'return', payload: { total: 500 } })?.code).toBe(
+      'invalid_payload',
+    );
   });
 
   it('limit a push to 50 documents', () => {

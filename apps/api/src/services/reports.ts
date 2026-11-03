@@ -9,6 +9,7 @@ import type {
   JournalPage,
   JournalSourceType,
   PaymentMethod,
+  RefundMethod,
   ShiftCurrencyReport,
   ShiftListResponse,
   ShiftReport,
@@ -171,6 +172,22 @@ export async function dayReport(
       group by i.cashier_id, u.full_name order by sum(i.total_minor) desc, i.cashier_id`);
     const total = num(totals?.total);
     const tax = num(totals?.tax);
+    const returnsWhere = sql`r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}`;
+    const [returned] = await tx.execute<{ n: string; total: string; tax: string }>(sql`
+      select count(*)::text as n, coalesce(sum(r.total_minor), 0)::text as total,
+             coalesce(sum(r.tax_minor), 0)::text as tax
+      from sale_returns r where ${returnsWhere}`);
+    const refunds = await tx.execute<{
+      method: RefundMethod;
+      currency: CurrencyCode;
+      amount: string;
+      n: string;
+    }>(sql`
+      select r.refund_method as method, r.currency, sum(r.total_minor)::text as amount, count(*)::text as n
+      from sale_returns r where ${returnsWhere} and r.refund_method is not null
+      group by r.refund_method, r.currency
+      order by array_position(array['cash', 'card', 'wallet', 'transfer'], r.refund_method), r.currency`);
+    const returnsTotal = num(returned?.total);
     return {
       date: query.date,
       branchId: query.branchId ?? null,
@@ -189,6 +206,18 @@ export async function dayReport(
         invoiceCount: num(c.n),
         totalMinor: num(c.total),
       })),
+      returns: {
+        count: num(returned?.n),
+        totalMinor: returnsTotal,
+        taxMinor: num(returned?.tax),
+        byMethod: refunds.map((r) => ({
+          method: r.method,
+          currency: r.currency,
+          amountMinor: num(r.amount),
+          count: num(r.n),
+        })),
+      },
+      netSalesMinor: total - returnsTotal,
       baseCurrency: await baseCurrencyOf(tx),
     };
   });
@@ -208,6 +237,8 @@ type ShiftRow = {
   status: 'open' | 'closed';
   sales_count: string;
   sales_total: string;
+  returns_count: string;
+  returns_total: string;
   opening: { currency: CurrencyCode; amountMinor: number }[] | null;
   closing: {
     cash: { currency: CurrencyCode; openingMinor: number; countedMinor: number }[];
@@ -219,7 +250,9 @@ async function shiftRows(tx: Transaction, where: SQL): Promise<ShiftRow[]> {
     select s.id, s.number, s.branch_id, d.code as device_code, s.opened_by, u.full_name as opened_by_name,
            s.opened_at, s.closed_at, s.status, s.opening, s.closing,
            (select count(*) from invoices i where i.shift_id = s.id)::text as sales_count,
-           (select coalesce(sum(i.total_minor), 0) from invoices i where i.shift_id = s.id)::text as sales_total
+           (select coalesce(sum(i.total_minor), 0) from invoices i where i.shift_id = s.id)::text as sales_total,
+           (select count(*) from sale_returns r where r.shift_id = s.id)::text as returns_count,
+           (select coalesce(sum(r.total_minor), 0) from sale_returns r where r.shift_id = s.id)::text as returns_total
     from shifts s
     join devices d on d.id = s.device_id
     left join users u on u.id = s.opened_by
@@ -238,6 +271,8 @@ const summaryOf = (r: ShiftRow): ShiftSummary => ({
   status: r.status,
   salesCount: num(r.sales_count),
   salesTotalMinor: num(r.sales_total),
+  returnsCount: num(r.returns_count),
+  returnsTotalMinor: num(r.returns_total),
 });
 
 export async function listShifts(
@@ -284,6 +319,9 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       from invoices i where ${ofShift} and jsonb_typeof(i.payload -> 'change') = 'object'
       group by i.payload -> 'change' ->> 'currency'
       union all
+      select r.currency, 'refund', sum(r.total_minor)::text from sale_returns r
+      where r.shift_id = ${id} and r.refund_method = 'cash' group by r.currency
+      union all
       select m.currency, m.kind, sum(m.amount_minor)::text from cash_movements m
       where m.shift_id = ${id} group by m.currency, m.kind`);
     const movements = await tx.execute<{
@@ -314,6 +352,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
           openingMinor: 0,
           cashSalesMinor: 0,
           changeGivenMinor: 0,
+          refundsMinor: 0,
           payInMinor: 0,
           payOutMinor: 0,
           dropsMinor: 0,
@@ -334,6 +373,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       const amount = num(f.amount);
       if (f.kind === 'cash_in') d.cashSalesMinor += amount;
       else if (f.kind === 'change') d.changeGivenMinor += amount;
+      else if (f.kind === 'refund') d.refundsMinor += amount;
       else if (f.kind === 'pay_in') d.payInMinor += amount;
       else if (f.kind === 'pay_out' || f.kind === 'expense') d.payOutMinor += amount;
       else if (f.kind === 'safe_drop') d.dropsMinor += amount;
@@ -341,7 +381,13 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
     for (const c of row.closing?.cash ?? []) drawer(c.currency).countedMinor = c.countedMinor;
     for (const d of currencies.values()) {
       const expected =
-        d.openingMinor + d.cashSalesMinor - d.changeGivenMinor + d.payInMinor - d.payOutMinor - d.dropsMinor;
+        d.openingMinor +
+        d.cashSalesMinor -
+        d.changeGivenMinor -
+        d.refundsMinor +
+        d.payInMinor -
+        d.payOutMinor -
+        d.dropsMinor;
       d.expectedMinor = seesDifference ? expected : null;
       d.differenceMinor = seesDifference && d.countedMinor !== null ? d.countedMinor - expected : null;
     }

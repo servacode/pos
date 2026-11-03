@@ -75,6 +75,16 @@ function Breakdown({ report }: { report: DayReport }) {
       <Line label="مجموع الفواتير" strong>
         <Money minor={report.totalMinor} currency={base} />
       </Line>
+      {report.returns.count > 0 ? (
+        <>
+          <Line label={`المرتجعات (${report.returns.count})`}>
+            <Money minor={-report.returns.totalMinor} currency={base} />
+          </Line>
+          <Line label="صافي المبيعات بعد المرتجعات" strong>
+            <Money minor={report.netSalesMinor} currency={base} />
+          </Line>
+        </>
+      ) : null}
       <Line label="تقريب النقد">
         <Money minor={report.cashRoundingMinor} currency={base} />
       </Line>

@@ -72,7 +72,12 @@ async function store(phone = '0911111111') {
 function deviceDocs(device: Pick<TestDevice, 'code'>, branchCode = '001') {
   let seq = 0;
   const counters = new Map<string, number>();
-  const series: Partial<Record<DocType, string>> = { sale: 'INV', return: 'SRT', receipt: 'RCV' };
+  const series: Partial<Record<DocType, string>> = {
+    sale: 'INV',
+    return: 'SRT',
+    receipt: 'RCV',
+    trade_in: 'TRI',
+  };
   return (
     type: DocType = 'sale',
     payload: Record<string, unknown> = type === 'sale' ? salePayload(1500) : { total: 1500 },
@@ -287,10 +292,10 @@ describe('POST /v1/sync/push', () => {
     const device = await createDevice(tenantId);
     const doc = deviceDocs(device);
     const sale = doc();
-    const ret = doc('return', { total: 500 }, [sale.id]);
+    const ret = doc('trade_in', { total: 500 }, [sale.id]);
     const later = [doc(), doc()];
 
-    // The return arrives before its sale in the request body: the server still sees the sale first.
+    // The trade-in naming the sale arrives before it in the request body: the server still sees the sale first.
     const res = await pushOk(device, [ret, sale]);
     expect(res.results.map((r) => [r.id, r.status])).toEqual([
       [sale.id, 'accepted'],
@@ -306,14 +311,14 @@ describe('POST /v1/sync/push', () => {
     ]);
   });
 
-  it('accepts a return for another device’s sale that has not arrived (pending_link) and links it when it does', async () => {
+  it('accepts a document naming another device’s sale that has not arrived (pending_link) and links it when it does', async () => {
     const { tenantId } = await store();
     const a = await createDevice(tenantId);
     const b = await createDevice(tenantId);
     const sale = deviceDocs(a)();
-    const ret = deviceDocs(b)('return', { total: 500 }, [sale.id]);
+    const ret = deviceDocs(b)('trade_in', { total: 500 }, [sale.id]);
 
-    // No processor posts a return yet (task M0-3): linked or not, it is held, never shown clean.
+    // No processor posts a trade-in yet (task M0-3): linked or not, it is held, never shown clean.
     const early = await pushOk(b, [ret]);
     expect(early.results[0]).toMatchObject({
       status: 'pending_link',
@@ -380,12 +385,12 @@ describe('POST /v1/sync/push', () => {
     const { tenantId } = await store();
     const device = await createDevice(tenantId);
     const doc = deviceDocs(device);
-    await pushOk(device, [doc(), doc(), doc('return', { total: 1 })], { lastIssued: { INV: 5, SRT: 1 } });
+    await pushOk(device, [doc(), doc(), doc('trade_in', { total: 1 })], { lastIssued: { INV: 5, TRI: 1 } });
     const rows = await ownerDb()<{ series: string; last_announced: number; last_received: number }[]>`
       select series, last_announced, last_received from doc_sequences where device_id = ${device.deviceId} order by series`;
     expect(rows).toEqual([
       { series: 'INV', last_announced: 5, last_received: 2 },
-      { series: 'SRT', last_announced: 1, last_received: 1 },
+      { series: 'TRI', last_announced: 1, last_received: 1 },
     ]);
     const [seen] = await ownerDb()<{ app_version: string; last_sync_at: Date; clock_offset_ms: number }[]>`
       select app_version, last_sync_at, clock_offset_ms from devices where id = ${device.deviceId}`;
@@ -427,8 +432,8 @@ describe('POST /v1/sync/push', () => {
     const deviceB = await createDevice(b.tenantId);
     const doc = deviceDocs(deviceA)();
     await pushOk(deviceA, [doc]);
-    // A return in store B naming store A's sale does not find it.
-    const ret = deviceDocs(deviceB)('return', { total: 1 }, [doc.id]);
+    // A document in store B naming store A's sale does not find it.
+    const ret = deviceDocs(deviceB)('trade_in', { total: 1 }, [doc.id]);
     expect((await pushOk(deviceB, [ret])).results[0]!.status).toBe('pending_link');
     expect(await inbox(b.tenantId)).toHaveLength(1);
     expect(await inbox(a.tenantId)).toHaveLength(1);

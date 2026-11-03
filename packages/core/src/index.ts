@@ -15,3 +15,4 @@ export * from './contracts/accounting';
 export * from './money';
 export * from './pricing';
 export * from './sale';
+export * from './sale-return';

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { CurrencyCode } from '../currencies';
-import type { PaymentMethod } from './documents';
+import type { PaymentMethod, RefundMethod } from './documents';
 import { isoDateSchema, listPageQuery, uuidSchema, type TradeRate } from './common';
 
 /**
@@ -77,6 +77,16 @@ export interface DayReport {
     count: number;
   }[];
   byCashier: { userId: string; fullName: string; invoiceCount: number; totalMinor: number }[];
+  /** Sale returns of the day (08 › مرتجع مبيعات); the sales figures above are before them */
+  returns: {
+    count: number;
+    totalMinor: number;
+    taxMinor: number;
+    /** What was paid back, by method and currency */
+    byMethod: { method: RefundMethod; currency: CurrencyCode; amountMinor: number; count: number }[];
+  };
+  /** Sales less returns, tax included */
+  netSalesMinor: number;
   baseCurrency: CurrencyCode;
 }
 
@@ -100,6 +110,8 @@ export interface ShiftSummary {
   status: 'open' | 'closed';
   salesCount: number;
   salesTotalMinor: number;
+  returnsCount: number;
+  returnsTotalMinor: number;
 }
 
 export interface ShiftListResponse {
@@ -112,6 +124,8 @@ export interface ShiftCurrencyReport {
   openingMinor: number;
   cashSalesMinor: number;
   changeGivenMinor: number;
+  /** Cash paid back for returns from this drawer */
+  refundsMinor: number;
   payInMinor: number;
   payOutMinor: number;
   dropsMinor: number;
@@ -147,7 +161,14 @@ export const journalQuery = z.object({
 });
 
 /** What an entry was posted from; every automatic entry has its document (10: لا قيد آلي بلا مستند). */
-export const JOURNAL_SOURCE_TYPES = ['sale', 'shift_close', 'cash_movement', 'manual', 'reversal'] as const;
+export const JOURNAL_SOURCE_TYPES = [
+  'sale',
+  'return',
+  'shift_close',
+  'cash_movement',
+  'manual',
+  'reversal',
+] as const;
 export type JournalSourceType = (typeof JOURNAL_SOURCE_TYPES)[number];
 
 export interface JournalLine {

@@ -23,9 +23,13 @@ import type { Transaction } from '@serva/db';
  *                      what the documents say went in and out of it; and after the close, by the
  *                      counted amount less the expected one as the server works it out
  *   day_report_ledger  (reconciliation 4) per branch and day, the day report read from the
- *                      invoices equals the sale entries: net sales (4100−4200−4300), tax (22xx),
- *                      tips (2550), cash rounding (6400), and each payment method
- *                      (1110 drawers, 1140 card, 1150 wallet, 1130 transfer, 1200 credit)
+ *                      invoices less the returns equals the sale and return entries: net sales
+ *                      (4100−4200−4300), tax (22xx), tips (2550), cash rounding (6400), and each
+ *                      payment method (1110 drawers, 1140 card, 1150 wallet, 1130 transfer,
+ *                      1200 credit)
+ *
+ * Returns (sale_returns, migration 0016) count where the table exists: the check also runs on a
+ * database one migration behind (the upgrade test).
  *
  * Every query names the store explicitly, so the result is the same under row-level security
  * (withTenant) and under the owner role that bypasses it (the command line tool).
@@ -200,7 +204,20 @@ async function stockMovements(tx: Transaction, tenantId: string): Promise<Integr
   );
 }
 
+/** Whether the database holds sale returns yet (migration 0016). */
+async function hasReturns(tx: Transaction): Promise<boolean> {
+  const [row] = await tx.execute<{ present: boolean }>(
+    sql`select to_regclass('sale_returns') is not null as present`,
+  );
+  return Boolean(row?.present);
+}
+
 async function drawerLedger(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
+  const refunds = (await hasReturns(tx))
+    ? sql`union all
+      select r.shift_id, r.currency, -r.total_minor
+      from sale_returns r where r.tenant_id = ${tenantId} and r.refund_method = 'cash'`
+    : sql``;
   // What went in and out of each drawer by the documents, and the close's counted amount less the
   // expected one; against the drawer accounts (children of 1110) by shift. The float itself is not
   // on the books (posting.ts), so it is part of the expected amount and not of the comparison.
@@ -224,6 +241,7 @@ async function drawerLedger(tx: Transaction, tenantId: string): Promise<Integrit
       union all
       select m.shift_id, m.currency, case when m.kind = 'pay_in' then m.amount_minor else -m.amount_minor end
       from cash_movements m where m.tenant_id = ${tenantId} and m.shift_id is not null
+      ${refunds}
     ),
     docs as (select shift_id, currency, sum(amount) as amount from flows group by shift_id, currency),
     opening as (
@@ -296,6 +314,14 @@ const MEASURES: Record<string, string> = {
 };
 
 async function dayReportLedger(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
+  const returned = (await hasReturns(tx))
+    ? sql`union all
+      select branch_id, business_date, 'net', -(total_minor - tax_minor)
+      from sale_returns where tenant_id = ${tenantId}
+      union all select branch_id, business_date, 'tax', -tax_minor from sale_returns where tenant_id = ${tenantId}
+      union all select branch_id, business_date, 'pay:' || refund_method, -total_minor
+      from sale_returns where tenant_id = ${tenantId} and refund_method is not null`
+    : sql``;
   const rows = await tx.execute<{
     branch: string;
     day: string;
@@ -317,6 +343,7 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
       select i.branch_id, i.business_date, 'pay:' || p.method, p.base_amount_minor
       from invoice_payments p join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
       where p.tenant_id = ${tenantId}
+      ${returned}
     ) x group by branch_id, business_date, measure
     union all
     select 'ledger', e.branch_id, e.entry_date::text, m.measure,
@@ -340,7 +367,7 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
       end as measure,
       a.code in ('4100', '4200', '4300', '2200', '2210', '2220', '2550', '6400') as credit_side
     ) m
-    where l.tenant_id = ${tenantId} and e.source_type = 'sale'
+    where l.tenant_id = ${tenantId} and e.source_type in ('sale', 'return')
     group by e.branch_id, e.entry_date, m.measure`);
   const sides = new Map<string, { documents: number; ledger: number }>();
   for (const r of rows) {

@@ -187,6 +187,7 @@ export function posSets(overrides: Partial<CatalogSets> = {}): CatalogSets {
           'shift.close_own',
           'shift.close_any',
           'shift.view_difference',
+          'sale.refund',
         ],
         maxDiscountBp: 10000,
         version: 1,

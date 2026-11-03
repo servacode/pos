@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type {
   CashMovementPayload,
   JournalSourceType,
+  ReturnPayload,
   SalePayload,
   ShiftClosePayload,
   TradeRate,
@@ -30,6 +31,10 @@ import {
  *   Cost of sales is not posted per sale: 10 › الكلفة والربح makes it one daily entry per branch
  *   (5100/1300) from the daily weighted average, which needs purchase costs (phase 2). With no
  *   cost known, nothing is invented here.
+ * - return: the sale's lines turned around, for what came back.
+ *     Dr 4100 sales ex tax before discount, the tax account of each rate
+ *     Cr 4200 discounts ex tax, and the money paid back: 1110 drawer of the shift (cash),
+ *        1140 card, 1150 wallet, 1130 transfer
  * - cash_movement: pay_in 1110 ← 1120; pay_out and safe_drop 1120 ← 1110; expense 61xx ← 1110.
  * - shift_close: per drawer currency, the counted difference: a shortage Dr 6200 (or 1250 when the
  *   owner charges it to the cashier) Cr 1110; a surplus Dr 1110 Cr 6200.
@@ -302,20 +307,28 @@ export function saleLines(sale: SalePayload, taxAccountOf: (taxRateId: string) =
   return lines;
 }
 
-export async function postSale(tx: Transaction, source: SaleSource, sale: SalePayload): Promise<void> {
-  const rateIds = [
-    ...new Set(sale.lines.flatMap((l) => (l.taxRateId && l.priced.taxMinor ? [l.taxRateId] : []))),
-  ];
+/** Which liability account each of these tax rates posts to; an unknown rate posts to 2200. */
+async function taxAccounts(
+  tx: Transaction,
+  tenantId: string,
+  rateIds: string[],
+): Promise<(taxRateId: string) => string> {
   const kinds = new Map<string, string>();
   if (rateIds.length > 0) {
     const rows = await tx
       .select({ id: taxRates.id, kind: taxRates.kind })
       .from(taxRates)
-      .where(and(eq(taxRates.tenantId, source.tenantId), inArray(taxRates.id, rateIds)));
+      .where(and(eq(taxRates.tenantId, tenantId), inArray(taxRates.id, rateIds)));
     for (const row of rows) kinds.set(row.id, row.kind);
   }
   // A rate the server does not know (deleted, another store's) still owes tax: the general account.
-  const taxAccountOf = (id: string) => TAX_ACCOUNTS[kinds.get(id) ?? 'sales'] ?? '2200';
+  return (id: string) => TAX_ACCOUNTS[kinds.get(id) ?? 'sales'] ?? '2200';
+}
+
+export async function postSale(tx: Transaction, source: SaleSource, sale: SalePayload): Promise<void> {
+  const rateIds = [
+    ...new Set(sale.lines.flatMap((l) => (l.taxRateId && l.priced.taxMinor ? [l.taxRateId] : []))),
+  ];
   await postEntry(tx, {
     tenantId: source.tenantId,
     branchId: source.branchId,
@@ -325,7 +338,69 @@ export async function postSale(tx: Transaction, source: SaleSource, sale: SalePa
     sourceNumber: source.number,
     memo: `فاتورة مبيعات ${source.number}`,
     baseCurrency: sale.currency,
-    lines: saleLines(sale, taxAccountOf),
+    lines: saleLines(sale, await taxAccounts(tx, source.tenantId, rateIds)),
+  });
+}
+
+// ─── Return ──────────────────────────────────────────────────────────────────
+
+/** The lines of a return's entry (exported for the property tests). */
+export function returnLines(ret: ReturnPayload, taxAccountOf: (taxRateId: string) => string): DraftLine[] {
+  const base = ret.currency;
+  let gross = 0;
+  let discount = 0;
+  const tax = new Map<string, number>();
+  for (const line of ret.lines) {
+    gross += line.refund.grossExTaxMinor;
+    discount += line.refund.discountExTaxMinor;
+    if (line.refund.taxMinor !== 0) {
+      const code = line.taxRateId ? taxAccountOf(line.taxRateId) : '2200';
+      tax.set(code, (tax.get(code) ?? 0) + line.refund.taxMinor);
+    }
+  }
+  const lines: DraftLine[] = [baseLine({ code: '4100' }, gross, base)];
+  for (const [code, amount] of [...tax.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(baseLine({ code }, amount, base));
+  }
+  lines.push(baseLine({ code: '4200' }, -discount, base));
+  for (const r of ret.refunds) {
+    if (r.method === 'cash') {
+      lines.push({
+        account: { cash: '1110', currency: r.currency },
+        baseMinor: -r.amountMinor,
+        currency: r.currency,
+        amountMinor: -r.amountMinor,
+        rate: null,
+        shiftId: ret.shiftId,
+      });
+    } else {
+      lines.push({
+        ...baseLine(
+          { code: METHOD_ACCOUNTS[r.method] },
+          -r.amountMinor,
+          r.currency,
+          [methodMemo[r.method], r.reference].filter(Boolean).join(' '),
+        ),
+      });
+    }
+  }
+  return lines;
+}
+
+export async function postReturn(tx: Transaction, source: SaleSource, ret: ReturnPayload): Promise<void> {
+  const rateIds = [
+    ...new Set(ret.lines.flatMap((l) => (l.taxRateId && l.refund.taxMinor ? [l.taxRateId] : []))),
+  ];
+  await postEntry(tx, {
+    tenantId: source.tenantId,
+    branchId: source.branchId,
+    date: source.businessDate,
+    sourceType: 'return',
+    sourceId: source.docId,
+    sourceNumber: source.number,
+    memo: `مرتجع مبيعات ${source.number} عن الفاتورة ${ret.saleNumber}`,
+    baseCurrency: ret.currency,
+    lines: returnLines(ret, await taxAccounts(tx, source.tenantId, rateIds)),
   });
 }
 

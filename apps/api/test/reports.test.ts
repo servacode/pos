@@ -141,6 +141,8 @@ describe('GET /v1/reports/day', () => {
         { method: 'card', currency: 'SYP', amountMinor: 100_000, baseAmountMinor: 100_000, count: 1 },
       ],
       byCashier: [{ userId: store.userId, fullName: 'أحمد الخطيب', invoiceCount: 2, totalMinor: 363_750 }],
+      returns: { count: 0, totalMinor: 0, taxMinor: 0, byMethod: [] },
+      netSalesMinor: 363_750,
       baseCurrency: 'SYP',
     });
   });
@@ -202,6 +204,8 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
         status: 'closed',
         salesCount: 2,
         salesTotalMinor: 363_750,
+        returnsCount: 0,
+        returnsTotalMinor: 0,
       },
     ]);
     expect(
@@ -222,6 +226,7 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
         openingMinor: 100_000,
         cashSalesMinor: 170_000,
         changeGivenMinor: 8_000 + change,
+        refundsMinor: 0,
         payInMinor: 50_000,
         payOutMinor: 15_000,
         dropsMinor: 100_000,
@@ -234,6 +239,7 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
         openingMinor: 2_000,
         cashSalesMinor: 900,
         changeGivenMinor: 0,
+        refundsMinor: 0,
         payInMinor: 0,
         payOutMinor: 0,
         dropsMinor: 0,

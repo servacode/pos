@@ -81,6 +81,8 @@ export function dayReport(overrides: Partial<DayReport> = {}): DayReport {
       { userId: 'u-1', fullName: 'سامر', invoiceCount: 2, totalMinor: 900_000 },
       { userId: 'u-2', fullName: 'لينا', invoiceCount: 1, totalMinor: 384_500 },
     ],
+    returns: { count: 0, totalMinor: 0, taxMinor: 0, byMethod: [] },
+    netSalesMinor: 1_284_500,
     baseCurrency: 'SYP',
     ...overrides,
   };
@@ -98,6 +100,8 @@ export function shiftSummary(overrides: Partial<ShiftSummary> = {}): ShiftSummar
     status: 'closed',
     salesCount: 138,
     salesTotalMinor: 41_280_000,
+    returnsCount: 0,
+    returnsTotalMinor: 0,
     ...overrides,
   };
 }
@@ -111,6 +115,7 @@ export function shiftReport(overrides: Partial<ShiftReport> = {}): ShiftReport {
         openingMinor: 2_500_000,
         cashSalesMinor: 26_840_000,
         changeGivenMinor: 120_000,
+        refundsMinor: 0,
         payInMinor: 1_200_000,
         payOutMinor: 150_000,
         dropsMinor: 15_000_000,
@@ -123,6 +128,7 @@ export function shiftReport(overrides: Partial<ShiftReport> = {}): ShiftReport {
         openingMinor: 5_000,
         cashSalesMinor: 41_000,
         changeGivenMinor: 0,
+        refundsMinor: 0,
         payInMinor: 0,
         payOutMinor: 0,
         dropsMinor: 0,

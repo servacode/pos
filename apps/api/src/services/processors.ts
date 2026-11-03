@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import {
   cashMovementPayloadSchema,
+  returnPayloadSchema,
   salePayloadSchema,
   shiftClosePayloadSchema,
   shiftOpenPayloadSchema,
@@ -13,6 +14,8 @@ import {
   invoicePayments,
   invoices,
   products,
+  saleReturnLines,
+  saleReturns,
   shifts,
   stockLevels,
   stockMovements,
@@ -20,7 +23,7 @@ import {
   type Transaction,
 } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
-import { postCashMovement, postSale, postShiftClose } from './posting';
+import { postCashMovement, postReturn, postSale, postShiftClose } from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
 
 /**
@@ -46,18 +49,21 @@ async function shiftOpened(tx: Transaction, shiftId: string): Promise<boolean> {
   return Boolean(row);
 }
 
-/** A sale: the invoice, its lines and payments, and stock out of the device's branch. */
-async function processSale({ tx, device, doc }: DocumentContext) {
-  const sale = salePayloadSchema.parse(doc.payload);
-  const flags: SyncFlag[] = [];
-  if (verifySalePayload(sale).length > 0) flags.push('totals_mismatch');
-  flags.push(
-    ...offlineApproval([sale.invoiceDiscount?.approval, ...sale.lines.map((l) => l.discount?.approval)]),
-  );
-
+/**
+ * Moves stock for the stocked variants this store knows (services and unknown ids move nothing),
+ * `sign` × baseQty per line, once per document and line. Answers whether any level went negative.
+ */
+async function moveStock(
+  tx: Transaction,
+  device: DocumentContext['device'],
+  doc: DocumentContext['doc'],
+  kind: 'sale' | 'return',
+  lines: readonly { lineNo: number; variantId: string; baseQty: number }[],
+  sign: 1 | -1,
+): Promise<boolean> {
   const { tenantId } = device;
-  // Stock moves for stocked variants this store knows; services and unknown ids move nothing.
-  const ids = [...new Set(sale.lines.map((l) => l.variantId))];
+  const ids = [...new Set(lines.map((l) => l.variantId))];
+  if (ids.length === 0) return false;
   const stocked = new Set(
     (
       await tx
@@ -71,16 +77,17 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     ).map((v) => v.id),
   );
   let negative = false;
-  for (const line of sale.lines) {
+  for (const line of lines) {
     if (!stocked.has(line.variantId) || line.baseQty === 0) continue;
+    const qty = sign * line.baseQty;
     const [moved] = await tx
       .insert(stockMovements)
       .values({
         tenantId,
         branchId: device.branchId,
         variantId: line.variantId,
-        qty: -line.baseQty,
-        kind: 'sale',
+        qty,
+        kind,
         docId: doc.id,
         lineNo: line.lineNo,
         businessDate: doc.businessDate,
@@ -90,7 +97,7 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     if (!moved) continue;
     const [level] = await tx
       .insert(stockLevels)
-      .values({ tenantId, branchId: device.branchId, variantId: line.variantId, qty: -line.baseQty })
+      .values({ tenantId, branchId: device.branchId, variantId: line.variantId, qty })
       .onConflictDoUpdate({
         target: [stockLevels.tenantId, stockLevels.branchId, stockLevels.variantId],
         set: { qty: sql`${stockLevels.qty} + excluded.qty` },
@@ -98,7 +105,20 @@ async function processSale({ tx, device, doc }: DocumentContext) {
       .returning({ qty: stockLevels.qty });
     if (level!.qty < 0) negative = true;
   }
-  if (negative) flags.push('negative_stock');
+  return negative;
+}
+
+/** A sale: the invoice, its lines and payments, and stock out of the device's branch. */
+async function processSale({ tx, device, doc }: DocumentContext) {
+  const sale = salePayloadSchema.parse(doc.payload);
+  const flags: SyncFlag[] = [];
+  if (verifySalePayload(sale).length > 0) flags.push('totals_mismatch');
+  flags.push(
+    ...offlineApproval([sale.invoiceDiscount?.approval, ...sale.lines.map((l) => l.discount?.approval)]),
+  );
+
+  const { tenantId } = device;
+  if (await moveStock(tx, device, doc, 'sale', sale.lines, -1)) flags.push('negative_stock');
 
   const [inserted] = await tx
     .insert(invoices)
@@ -188,7 +208,104 @@ async function processSale({ tx, device, doc }: DocumentContext) {
   return { flags };
 }
 
-/** Sales and movements that named this shift before it arrived are linked to it now. */
+/**
+ * A return (RET): its lines back into stock, and the money out of the drawer or back to the card.
+ * Never refused: a return over what is left of its sale line (the sale here, less the returns
+ * already stored) is accepted and flagged over_return for the owner to look at; one whose sale has
+ * not arrived yet is stored as it came (sync › pending_link), and the integrity check looks again.
+ */
+async function processReturn({ tx, device, doc }: DocumentContext) {
+  const ret = returnPayloadSchema.parse(doc.payload);
+  const { tenantId } = device;
+  const flags: SyncFlag[] = [...offlineApproval([ret.approval])];
+
+  const sold = await tx
+    .select({ lineNo: invoiceLines.lineNo, qty: invoiceLines.qty })
+    .from(invoiceLines)
+    .where(and(eq(invoiceLines.tenantId, tenantId), eq(invoiceLines.invoiceId, ret.saleId)));
+  if (sold.length > 0) {
+    const earlier = await tx
+      .select({
+        saleLineNo: saleReturnLines.saleLineNo,
+        qty: sql<number>`sum(${saleReturnLines.qty})::bigint`,
+      })
+      .from(saleReturnLines)
+      .innerJoin(
+        saleReturns,
+        and(eq(saleReturns.tenantId, saleReturnLines.tenantId), eq(saleReturns.id, saleReturnLines.returnId)),
+      )
+      .where(and(eq(saleReturns.tenantId, tenantId), eq(saleReturns.saleId, ret.saleId)))
+      .groupBy(saleReturnLines.saleLineNo);
+    const left = new Map(sold.map((l) => [l.lineNo, l.qty]));
+    for (const e of earlier) left.set(e.saleLineNo, (left.get(e.saleLineNo) ?? 0) - Number(e.qty));
+    if (ret.lines.some((l) => l.qty > (left.get(l.saleLineNo) ?? 0))) flags.push('over_return');
+  }
+
+  const [inserted] = await tx
+    .insert(saleReturns)
+    .values({
+      tenantId,
+      id: doc.id,
+      branchId: device.branchId,
+      deviceId: device.deviceId,
+      number: doc.number!,
+      businessDate: doc.businessDate,
+      deviceTime: new Date(doc.deviceTime),
+      saleId: ret.saleId,
+      saleNumber: ret.saleNumber,
+      shiftId: ret.shiftId,
+      shiftLinked: await shiftOpened(tx, ret.shiftId),
+      cashierId: ret.cashierId,
+      currency: ret.currency,
+      reason: ret.reason,
+      grossExTaxMinor: ret.totals.grossExTaxMinor,
+      discountExTaxMinor: ret.totals.discountExTaxMinor,
+      taxMinor: ret.totals.taxMinor,
+      totalMinor: ret.totals.totalMinor,
+      refundMethod: ret.refunds[0]?.method ?? null,
+      refundReference: ret.refunds[0]?.reference ?? null,
+      approval: ret.approval,
+      flags,
+      payload: doc.payload,
+    })
+    .onConflictDoNothing()
+    .returning({ id: saleReturns.id });
+  if (!inserted) return { flags };
+
+  await tx.insert(saleReturnLines).values(
+    ret.lines.map((l) => ({
+      tenantId,
+      returnId: doc.id,
+      lineNo: l.lineNo,
+      saleLineNo: l.saleLineNo,
+      productId: l.productId,
+      variantId: l.variantId,
+      name: l.name,
+      qty: l.qty,
+      baseQty: l.baseQty,
+      taxRateId: l.taxRateId,
+      grossExTaxMinor: l.refund.grossExTaxMinor,
+      discountExTaxMinor: l.refund.discountExTaxMinor,
+      taxMinor: l.refund.taxMinor,
+      totalMinor: l.refund.totalMinor,
+    })),
+  );
+  await moveStock(tx, device, doc, 'return', ret.lines, 1);
+  await postReturn(
+    tx,
+    {
+      tenantId,
+      branchId: device.branchId,
+      docId: doc.id,
+      number: doc.number!,
+      businessDate: doc.businessDate,
+    },
+    ret,
+  );
+  return { flags };
+}
+
+/** Sales, returns and movements that named this shift before it arrived are linked to it now. */
 async function linkToShift(tx: Transaction, shiftId: string): Promise<void> {
   await tx
     .update(invoices)
@@ -198,6 +315,10 @@ async function linkToShift(tx: Transaction, shiftId: string): Promise<void> {
     .update(cashMovements)
     .set({ shiftLinked: true })
     .where(and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.shiftLinked, false)));
+  await tx
+    .update(saleReturns)
+    .set({ shiftLinked: true })
+    .where(and(eq(saleReturns.shiftId, shiftId), eq(saleReturns.shiftLinked, false)));
 }
 
 /** shift_open: the shift's id is the document's; a close that came first keeps its status. */
@@ -317,6 +438,7 @@ async function processCashMovement({ tx, device, doc }: DocumentContext) {
 /** The processors the server runs (app.ts registers them unless a test passes its own). */
 export const DOCUMENT_PROCESSORS: SyncProcessors = {
   sale: processSale,
+  return: processReturn,
   shift_open: processShiftOpen,
   shift_close: processShiftClose,
   cash_movement: processCashMovement,
