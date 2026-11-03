@@ -114,6 +114,14 @@ jobs:
           bash scripts/local/ci-checks.sh no-reused-numbers full resent
           echo "From the end of the restore to identical books: $((SECONDS - start)) s"
 
+      # Task M0-6 (ADR-0014): every backup copied off-site and verified there; the key in three
+      # parts, any two of which open the off-site copy, one alone none.
+      - name: Off-site copy, and the backup key in three parts (any two restore it)
+        run: bash scripts/local/ci-checks.sh offsite-and-key
+
+      - name: The daily backup schedule installs once and removes cleanly
+        run: bash scripts/local/ci-checks.sh schedule
+
       - name: Sign up a store with the on-screen test code (two-step API, test mode)
         run: bash scripts/local/ci-checks.sh signup
 

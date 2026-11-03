@@ -60,15 +60,18 @@
 
 إن كان Node.js وpnpm مثبتين استعمل العمود الأول. وإن لم يكونا مثبتين فالعمود الثاني يعمل بنفس الطريقة.
 
-| ماذا تريد                                 | الأمر                       | أو دون pnpm                            |
-| ----------------------------------------- | --------------------------- | -------------------------------------- |
-| أول تشغيل، أو نشر نسخة جديدة من الكود     | `pnpm local:deploy`         | `bash scripts/local/deploy.sh`         |
-| تشغيل الخادم                              | `pnpm local:up`             | `bash scripts/local/up.sh`             |
-| إيقاف الخادم (البيانات تبقى)              | `pnpm local:down`           | `bash scripts/local/down.sh`           |
-| نسخة احتياطية الآن                        | `pnpm local:backup`         | `bash scripts/local/backup.sh`         |
-| تمرين استعادة لآخر نسخة (لا يمس البيانات) | `pnpm local:restore latest` | `bash scripts/local/restore.sh latest` |
-| فحص أن كل شيء يعمل                        | `pnpm local:smoke`          | `bash scripts/local/smoke.sh`          |
-| عرض السجلات عند مشكلة                     | `pnpm local:logs`           | `bash scripts/local/logs.sh`           |
+| ماذا تريد                                 | الأمر                                    | أو دون pnpm                              |
+| ----------------------------------------- | ---------------------------------------- | ---------------------------------------- |
+| أول تشغيل، أو نشر نسخة جديدة من الكود     | `pnpm local:deploy`                      | `bash scripts/local/deploy.sh`           |
+| تشغيل الخادم                              | `pnpm local:up`                          | `bash scripts/local/up.sh`               |
+| إيقاف الخادم (البيانات تبقى)              | `pnpm local:down`                        | `bash scripts/local/down.sh`             |
+| نسخة احتياطية الآن                        | `pnpm local:backup`                      | `bash scripts/local/backup.sh`           |
+| تمرين استعادة لآخر نسخة (لا يمس البيانات) | `pnpm local:restore latest`              | `bash scripts/local/restore.sh latest`   |
+| فحص أن كل شيء يعمل                        | `pnpm local:smoke`                       | `bash scripts/local/smoke.sh`            |
+| فحص سلامة الدفاتر (قراءة فقط)             | `pnpm local:integrity`                   | `bash scripts/local/integrity.sh`        |
+| جدولة النسخ اليومي، وحالته                | `pnpm local:schedule install` / `status` | `bash scripts/local/schedule.sh install` |
+| تقسيم مفتاح النسخ إلى ثلاثة أجزاء         | `pnpm local:key split`                   | `bash scripts/local/key.sh split`        |
+| عرض السجلات عند مشكلة                     | `pnpm local:logs`                        | `bash scripts/local/logs.sh`             |
 
 لتحديث الكود ثم نشره: `git pull` ثم `pnpm local:deploy`. أمر النشر يأخذ نسخة احتياطية أولاً، ثم يبني ويحدّث قاعدة البيانات ويعيد التشغيل، ثم يفحص الخادم. وإن فشل أي فحص يكتب **DEPLOY FAILED** أو **SMOKE TEST FAILED** بالأحمر.
 
@@ -136,19 +139,57 @@ On devices on the same Wi-Fi:
 - `pnpm local:backup` يصنع نسخة مشفّرة باسم فيه التاريخ والوقت في `deploy/local/backups`، ومعها ملف بصمة وملف «manifest» فيه عدد الصفوف في كل جدول.
 - يبقى آخر 14 نسخة، ويحذف الأقدم آلياً. لتغيير العدد عدّل `SERVA_BACKUP_KEEP` في `.env`.
 - النشر يصنع نسخة قبل أي تحديث، اسمها ينتهي بـ `pre-deploy`.
-- **انسخ مجلد `deploy/local/backups` مرة في الأسبوع إلى قرص خارجي أو فلاشة.** النسخة الموجودة على نفس الكمبيوتر لا تحمي من تلف قرصه.
 
-### نسخة آلية كل ليلة
+### نسخة خارج المحل (ضرورية)
 
-- **لينكس:** اكتب `crontab -e` وأضف السطر:
+النسخة الموجودة على نفس الكمبيوتر لا تحمي من حريق أو سرقة أو تلف القرص. لذلك ضع في
+`deploy/local/.env` مجلداً خارج هذا القرص، أو مجلداً تزامنه خدمة سحابية:
 
-  ```
-  30 23 * * * cd ~/serva-pos && bash scripts/local/backup.sh >> ~/serva-backup.log 2>&1
-  ```
+```
+SERVA_OFFSITE_DIR=/mnt/d/serva-offsite                     # قرص خارجي (ويندوز: D:)
+SERVA_OFFSITE_DIR=/mnt/c/Users/<اسمك>/Google Drive/serva   # مجلد Google Drive أو OneDrive
+```
 
-- **ويندوز:** افتح «Task Scheduler» ← Create Basic Task ← يومياً الساعة 11:30 مساءً ← Start a program:
-  - البرنامج: `wsl.exe`
-  - الوسائط: `-d Ubuntu -- bash -lc "cd ~/serva-pos && bash scripts/local/backup.sh >> ~/serva-backup.log 2>&1"`
+بعدها كل نسخة تُنسخ إلى هناك تلقائياً، وتُقارن بصمتها في المكان الجديد، ويبقى آخر 30 نسخة
+(`SERVA_OFFSITE_KEEP`). النسخة مشفرة، فالمجلد السحابي لا يرى البيانات. وإن فشل النسخ
+(القرص غير موصول مثلاً) يكتب **OFF-SITE COPY FAILED** وتبقى النسخة المحلية.
+
+### نسخة آلية كل يوم
+
+```bash
+pnpm local:schedule install    # كل يوم الساعة 02:17 (غيّرها بـ SERVA_BACKUP_TIME في .env)
+pnpm local:schedule status     # آخر نسخة وآخر نسخة خارج المحل، وعمر كل منهما
+pnpm local:schedule remove
+```
+
+`status` يحذّر إن مرّ على آخر نسخة، أو آخر نسخة خارج المحل، أكثر من 26 ساعة. السجل في
+`deploy/local/backups/daily.log`. ويجب أن يكون الكمبيوتر يعمل في ذلك الوقت.
+
+**على ويندوز:** cron داخل WSL لا يعمل إلا وWSL يعمل. أسهل طريقة: افتح «Task Scheduler» ←
+Create Basic Task ← يومياً ← Start a program:
+
+- البرنامج: `wsl.exe`
+- الوسائط: `-d Ubuntu -- bash -lc "cd ~/serva-pos && bash scripts/local/backup.sh --label daily >> deploy/local/backups/daily.log 2>&1"`
+
+### مفتاح النسخ بثلاثة أجزاء (أي جزأين يكفيان)
+
+كل النسخ مشفرة بكلمة سر النسخ (`SERVA_BACKUP_PASSPHRASE`). من دونها لا تُفتح أي نسخة. ولكي
+لا تضيع، ولا يملكها شخص واحد، قسّمها:
+
+```bash
+pnpm local:key split
+```
+
+يطبع ثلاثة أجزاء، ولا يكتب شيئاً على القرص:
+
+1. **جزء المالك:** في مدير كلمات السر أو على الجوال، لا على هذا الكمبيوتر.
+2. **جزء سيرفا:** يُرسل إلى دعم سيرفا ليحفظه لك.
+3. **جزء الورق:** يُطبع ويوضع في ظرف مختوم بعيداً عن المحل.
+
+**أي جزأين يعيدان المفتاح، وجزء واحد لا يكفي ولا يكشف عنه شيئاً.** فإن غابت سيرفا يكفي
+جزء المالك مع الورقة. وفي آخر كل جزء رمز تدقيق قصير يكشف أي خطأ في النسخ باليد قبل
+استعماله. هذا مختبَر في CI: كل زوج من الأجزاء الثلاثة يستعيد نسخة خارج المحل، وجزء واحد
+وحده يُرفض.
 
 ## تمرين الاستعادة (مرة في الأسبوع)
 
@@ -174,8 +215,15 @@ pnpm local:restore deploy/local/backups/<اسم النسخة>.dump.enc --replace
 ### على كمبيوتر جديد
 
 1. ثبّت كما في «التثبيت أول مرة»، ثم شغّل `pnpm local:up`.
-2. افتح `deploy/local/.env` وضع كلمة سر النسخ الاحتياطي القديمة مكان قيمة `SERVA_BACKUP_PASSPHRASE`.
-3. انسخ ملفات النسخة الثلاثة (`.dump.enc` و`.dump.enc.sha256` و`.manifest`) إلى `deploy/local/backups/`.
+2. أعد مفتاح النسخ القديم بأي جزأين من أجزائه الثلاثة:
+
+   ```bash
+   pnpm local:key combine --set-env "<الجزء الأول>" "<الجزء الثاني>"
+   ```
+
+   أو افتح `deploy/local/.env` وضع كلمة سر النسخ القديمة مكان قيمة `SERVA_BACKUP_PASSPHRASE`.
+
+3. انسخ ملفات النسخة الثلاثة (`.dump.enc` و`.dump.enc.sha256` و`.manifest`) من مجلد النسخ خارج المحل إلى `deploy/local/backups/`.
 4. شغّل `pnpm local:restore deploy/local/backups/<اسم النسخة>.dump.enc --replace-live`.
 
 سيحتاج كل مستخدم أن يسجّل الدخول من جديد.

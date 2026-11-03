@@ -2,3 +2,4 @@
 .env
 backups/
 serva-local-ca.crt
+.env.before-key-*

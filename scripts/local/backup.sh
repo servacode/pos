@@ -7,6 +7,12 @@
 #                                              per table, all from the same snapshot as the dump
 # Keeps the newest SERVA_BACKUP_KEEP backups (default 14) and deletes older ones.
 #
+# Off-site (task M0-6, ADR-0014): with SERVA_OFFSITE_DIR set (an external disk, or a folder a
+# cloud service keeps in sync, e.g. Google Drive or OneDrive), the three files are copied there,
+# their checksum verified at the destination, and the newest SERVA_OFFSITE_KEEP (default 30) kept.
+# The copy is encrypted like the original: the folder never sees the data in clear. A failed copy
+# fails the backup (exit 1), so a scheduled run reports it, but the local backup is kept.
+#
 # This is the local-server tool. The hosted server uses pgBackRest with continuous archiving and an
 # off-site copy (tab 16 › النسخ الاحتياطي والاستعادة).
 set -euo pipefail
@@ -101,3 +107,37 @@ done
 size="$(du -h "$BACKUP_DIR/$name.dump.enc" | cut -f1)"
 ok "Backup saved in $((SECONDS - started))s: $BACKUP_DIR/$name.dump.enc ($size, $tables tables, $rows rows)"
 echo "   Test it any time with: pnpm local:restore $BACKUP_DIR/$name.dump.enc"
+
+# ─── Off-site copy ──────────────────────────────────────────────────────────────────────────────
+offsite="${SERVA_OFFSITE_DIR:-}"
+if [[ -z "$offsite" ]]; then
+  warn "No off-site copy: SERVA_OFFSITE_DIR is not set (docs/local-server.md). A fire or a theft would take the backups with the computer."
+  exit 0
+fi
+[[ "$offsite" == /* ]] || offsite="$ROOT_DIR/$offsite"
+if ! mkdir -p "$offsite" 2> /dev/null || [[ ! -w "$offsite" ]]; then
+  die "OFF-SITE COPY FAILED: cannot write to $offsite (is the disk plugged in, the folder synced?). The local backup is saved."
+fi
+case "$(cd "$offsite" && pwd -P)/" in
+  "$(cd "$BACKUP_DIR" && pwd -P)/"*) die "SERVA_OFFSITE_DIR is inside the backup folder: that is not off-site." ;;
+esac
+for ext in dump.enc dump.enc.sha256 manifest; do
+  cp "$BACKUP_DIR/$name.$ext" "$offsite/$name.$ext.partial" ||
+    die "OFF-SITE COPY FAILED while writing $offsite (disk full?). The local backup is saved."
+done
+if [[ "$(sha256sum < "$offsite/$name.dump.enc.partial" | cut -d' ' -f1)" != "$enc_sha" ]]; then
+  rm -f "$offsite/$name".*.partial
+  die "OFF-SITE COPY FAILED: the copy in $offsite does not match the backup. The local backup is saved."
+fi
+for ext in dump.enc dump.enc.sha256 manifest; do mv "$offsite/$name.$ext.partial" "$offsite/$name.$ext"; done
+printf '%s %s\n' "$stamp" "$offsite/$name.dump.enc" > "$BACKUP_DIR/last-offsite"
+
+offsite_keep="${SERVA_OFFSITE_KEEP:-30}"
+[[ "$offsite_keep" =~ ^[0-9]+$ && "$offsite_keep" -ge 1 ]] || offsite_keep=30
+mapfile -t old < <(find "$offsite" -maxdepth 1 -name 'serva-*.dump.enc' -printf '%f\n' | LC_ALL=C sort -r | tail -n +"$((offsite_keep + 1))")
+for file in "${old[@]}"; do
+  base="${file%.dump.enc}"
+  [[ "$base" == "$name" ]] && continue
+  rm -f "$offsite/$base.dump.enc" "$offsite/$base.dump.enc.sha256" "$offsite/$base.manifest"
+done
+ok "Off-site copy verified: $offsite/$name.dump.enc"

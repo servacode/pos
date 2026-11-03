@@ -17,6 +17,10 @@
 #   ci-checks.sh numbers <name>  keeps the drill store's entry numbers and what each one posts
 #   ci-checks.sh no-reused-numbers <a> <b>
 #                                no entry number posts one document in <a> and another in <b> (M0-8)
+#   ci-checks.sh offsite-and-key a backup copied off-site and verified there; the key split in
+#                                three; each pair of parts restores the off-site copy, one part
+#                                alone cannot open it (M0-6, ADR-0014)
+#   ci-checks.sh schedule        the daily backup line goes into crontab once, and out again
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/local/lib.sh
@@ -255,6 +259,51 @@ $clashes"
   ok "No entry number means two documents between $a and $b; $moved re-posted entries took new numbers"
 }
 
+offsite_and_key() {
+  local offsite="$DRILL_DIR/offsite" copy parts key pair a b
+  rm -rf "$offsite"
+  SERVA_OFFSITE_DIR="$offsite" bash "$SCRIPT_DIR/backup.sh" --label offsite > "$DRILL_DIR/offsite.log" 2>&1 || {
+    cat "$DRILL_DIR/offsite.log"
+    die "The backup with an off-site copy failed"
+  }
+  grep -q 'Off-site copy verified' "$DRILL_DIR/offsite.log" || die "No off-site copy was reported"
+  copy="$(find "$offsite" -maxdepth 1 -name 'serva-*-offsite.dump.enc' | head -n 1)"
+  [[ -n "$copy" ]] || die "No backup arrived in the off-site folder"
+  (cd "$offsite" && sha256sum --status -c "$(basename "$copy").sha256") || die "The off-site copy fails its checksum"
+  ok "Off-site copy made and verified: $(basename "$copy")"
+
+  # The off-site folder alone is not enough: the key travels separately, in three parts
+  parts="$(node "$SCRIPT_DIR/key-split.mjs" split | tr -d '\n' | grep -oE 'SK1-[0-9a-f]{8}-[1-3]-[0-9a-f ]+-[0-9a-f]{6}' | tr -d ' ')"
+  mapfile -t parts <<< "$parts"
+  ((${#parts[@]} == 3)) || die "Expected three key parts, got ${#parts[@]}"
+  for pair in "0 1" "0 2" "1 2"; do
+    read -r a b <<< "$pair"
+    key="$(node "$SCRIPT_DIR/key-split.mjs" combine "${parts[$a]}" "${parts[$b]}")"
+    SERVA_BACKUP_PASSPHRASE="$key" bash "$SCRIPT_DIR/restore.sh" "$copy" > "$DRILL_DIR/key-$a$b.log" 2>&1 || {
+      cat "$DRILL_DIR/key-$a$b.log"
+      die "Parts $((a + 1)) and $((b + 1)) did not restore the off-site copy"
+    }
+    ok "Parts $((a + 1)) and $((b + 1)) restore the off-site copy (drill PASSED)"
+  done
+  for a in 0 1 2; do
+    if node "$SCRIPT_DIR/key-split.mjs" combine "${parts[$a]}" > /dev/null 2>&1; then
+      die "Part $((a + 1)) alone gave a key"
+    fi
+  done
+  ok "No single part gives the key"
+}
+
+schedule_check() {
+  bash "$SCRIPT_DIR/schedule.sh" install
+  bash "$SCRIPT_DIR/schedule.sh" install
+  [[ "$(crontab -l | grep -c 'serva-daily-backup')" == 1 ]] || die "Installing twice must leave one line"
+  crontab -l | grep -q 'scripts/local/backup.sh --label daily' || die "The cron line does not run the backup"
+  bash "$SCRIPT_DIR/schedule.sh" status || true
+  bash "$SCRIPT_DIR/schedule.sh" remove
+  if crontab -l 2> /dev/null | grep -q 'serva-daily-backup'; then die "remove left the line"; fi
+  ok "The daily backup is scheduled once, and removed cleanly"
+}
+
 case "${1:-}" in
   hardening) hardening ;;
   seed) seed ;;
@@ -267,5 +316,7 @@ case "${1:-}" in
   other-books) compare_books other "${2:?}" "${3:?}" ;;
   numbers) numbers "${2:-}" ;;
   no-reused-numbers) no_reused_numbers "${2:-}" "${3:-}" ;;
+  offsite-and-key) offsite_and_key ;;
+  schedule) schedule_check ;;
   *) die "Usage: ci-checks.sh hardening | seed | negative <file> | fixture-present | signup | day <step> | books <name> | same-books <a> <b> | other-books <a> <b>" ;;
 esac

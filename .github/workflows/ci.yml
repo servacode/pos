@@ -112,6 +112,8 @@ jobs:
       - run: pnpm format:check
       - name: Financial kernel paths exist and have code owners (ADR-0001)
         run: node scripts/ci/check-codeowners.mjs
+      - name: The backup key in three parts — every pair opens, one part alone cannot (ADR-0014)
+        run: node --test scripts/local/key-split.test.mjs
       - run: pnpm lint
       - run: pnpm typecheck
       - name: Test in Asia/Damascus time (the main run below is in UTC)

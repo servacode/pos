@@ -26,7 +26,10 @@
     "local:smoke": "bash scripts/local/smoke.sh",
     "local:logs": "bash scripts/local/logs.sh",
     "local:backup": "bash scripts/local/backup.sh",
-    "local:restore": "bash scripts/local/restore.sh"
+    "local:restore": "bash scripts/local/restore.sh",
+    "local:key": "bash scripts/local/key.sh",
+    "local:schedule": "bash scripts/local/schedule.sh",
+    "local:integrity": "bash scripts/local/integrity.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
