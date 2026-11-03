@@ -411,6 +411,8 @@ describe('validateDocumentPayload', () => {
       'shift_close',
       'cash_movement',
       'return',
+      'receipt',
+      'customer',
     ]);
     expect(hasPayloadSchema('sale')).toBe(true);
     expect(hasPayloadSchema('return')).toBe(true);

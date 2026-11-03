@@ -4,6 +4,7 @@ import {
   barcodes,
   branches,
   categories,
+  customers,
   exchangeRates,
   prices,
   products,
@@ -244,6 +245,18 @@ const PULL_SETS: Record<string, PullSet> = {
       maxRate: exchangeRates.maxRate,
       effectiveAt: exchangeRates.effectiveAt,
       version: exchangeRates.version,
+    },
+  },
+  customers: {
+    table: customers,
+    id: customers.id,
+    tenantId: customers.tenantId,
+    columns: {
+      name: customers.name,
+      phone: customers.phone,
+      creditLimitMinor: customers.creditLimitMinor,
+      archived: archivedFlag(customers.archivedAt),
+      version: customers.version,
     },
   },
 };

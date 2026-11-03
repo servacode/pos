@@ -206,13 +206,22 @@ async function stockMovements(tx: Transaction, tenantId: string): Promise<Integr
 
 /** Whether the database holds sale returns yet (migration 0016). */
 async function hasReturns(tx: Transaction): Promise<boolean> {
+  return hasTable(tx, 'sale_returns');
+}
+
+async function hasTable(tx: Transaction, name: string): Promise<boolean> {
   const [row] = await tx.execute<{ present: boolean }>(
-    sql`select to_regclass('sale_returns') is not null as present`,
+    sql`select to_regclass(${name}) is not null as present`,
   );
   return Boolean(row?.present);
 }
 
 async function drawerLedger(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
+  const paid = (await hasTable(tx, 'receipts'))
+    ? sql`union all
+      select r.shift_id, r.currency, r.amount_minor
+      from receipts r where r.tenant_id = ${tenantId} and r.method = 'cash'`
+    : sql``;
   const refunds = (await hasReturns(tx))
     ? sql`union all
       select r.shift_id, r.currency, -r.total_minor
@@ -242,6 +251,7 @@ async function drawerLedger(tx: Transaction, tenantId: string): Promise<Integrit
       select m.shift_id, m.currency, case when m.kind = 'pay_in' then m.amount_minor else -m.amount_minor end
       from cash_movements m where m.tenant_id = ${tenantId} and m.shift_id is not null
       ${refunds}
+      ${paid}
     ),
     docs as (select shift_id, currency, sum(amount) as amount from flows group by shift_id, currency),
     opening as (

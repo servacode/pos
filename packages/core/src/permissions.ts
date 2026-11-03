@@ -8,6 +8,10 @@ export const PERMISSIONS = {
   'sale.discount_over_limit': 'خصم فوق الحد',
   'sale.refund': 'المرتجعات',
   'sale.void': 'إلغاء فاتورة في نفس الوردية',
+  'sale.credit': 'البيع بالآجل على حساب زبون',
+  'receipt.create': 'قبض دفعة من زبون',
+  'customers.view': 'الزبائن وأرصدتهم وكشوفهم',
+  'customers.manage': 'إضافة الزبائن وتعديلهم وحد الدين',
   'drawer.open_no_sale': 'فتح الدرج دون بيع',
   'cash.move': 'إيداع أو سحب نقد من الدرج',
   'shift.close_own': 'إغلاق ورديته',
@@ -65,7 +69,7 @@ export const DEFAULT_ROLES: readonly RoleTemplate[] = [
   {
     key: 'cashier',
     nameAr: 'كاشير',
-    permissions: ['sale.create', 'sale.discount', 'shift.close_own'],
+    permissions: ['sale.create', 'sale.discount', 'shift.close_own', 'receipt.create'],
     maxDiscountBp: 1000,
   },
 ];

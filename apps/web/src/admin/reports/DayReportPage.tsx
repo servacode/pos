@@ -85,6 +85,11 @@ function Breakdown({ report }: { report: DayReport }) {
           </Line>
         </>
       ) : null}
+      {report.collections.count > 0 ? (
+        <Line label={`دفعات من الزبائن (${report.collections.count})`}>
+          <Money minor={report.collections.totalMinor} currency={base} />
+        </Line>
+      ) : null}
       <Line label="تقريب النقد">
         <Money minor={report.cashRoundingMinor} currency={base} />
       </Line>

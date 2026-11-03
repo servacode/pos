@@ -143,6 +143,7 @@ describe('GET /v1/reports/day', () => {
       byCashier: [{ userId: store.userId, fullName: 'أحمد الخطيب', invoiceCount: 2, totalMinor: 363_750 }],
       returns: { count: 0, totalMinor: 0, taxMinor: 0, byMethod: [] },
       netSalesMinor: 363_750,
+      collections: { count: 0, totalMinor: 0, byMethod: [] },
       baseCurrency: 'SYP',
     });
   });
@@ -227,6 +228,7 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
         cashSalesMinor: 170_000,
         changeGivenMinor: 8_000 + change,
         refundsMinor: 0,
+        receiptsMinor: 0,
         payInMinor: 50_000,
         payOutMinor: 15_000,
         dropsMinor: 100_000,
@@ -240,6 +242,7 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
         cashSalesMinor: 900,
         changeGivenMinor: 0,
         refundsMinor: 0,
+        receiptsMinor: 0,
         payInMinor: 0,
         payOutMinor: 0,
         dropsMinor: 0,

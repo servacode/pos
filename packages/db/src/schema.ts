@@ -1348,6 +1348,82 @@ export const saleReturnLines = pgTable(
   ],
 );
 
+/**
+ * The store's customers (09 › customers). Every till pulls them; a till may add one (the
+ * `customer` document, whose id becomes the customer's). What a customer owes is not stored here:
+ * it is the sum of the 1200 journal lines that name them (party_type customer).
+ */
+export const customers = pgTable(
+  'customers',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    phone: text('phone'),
+    taxNumber: text('tax_number'),
+    address: text('address'),
+    notes: text('notes'),
+    /** Base currency; null is no limit */
+    creditLimitMinor: bigint('credit_limit_minor', { mode: 'number' }),
+    /** The till document that created it, when a till did */
+    createdByDoc: uuid('created_by_doc'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'customers_pkey', columns: [t.tenantId, t.id] }),
+    index('customers_phone_idx').on(t.tenantId, t.phone),
+    index('customers_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/** A payment a customer made toward what they owe (RCV, 08 › سند قبض), stored once from its document. */
+export const receipts = pgTable(
+  'receipts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    deviceId: uuid('device_id').notNull(),
+    number: text('number').notNull(),
+    businessDate: date('business_date').notNull(),
+    deviceTime: timestamp('device_time', { withTimezone: true }).notNull(),
+    customerId: uuid('customer_id').notNull(),
+    shiftId: uuid('shift_id').notNull(),
+    shiftLinked: boolean('shift_linked').notNull().default(false),
+    cashierId: uuid('cashier_id').notNull(),
+    currency: text('currency').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    method: text('method').notNull(),
+    reference: text('reference'),
+    flags: text('flags')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    payload: jsonb('payload').notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'receipts_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    index('receipts_customer_idx').on(t.tenantId, t.customerId),
+    index('receipts_shift_idx').on(t.tenantId, t.shiftId),
+    index('receipts_business_date_idx').on(t.tenantId, t.branchId, t.businessDate),
+    tenantIsolation(),
+  ],
+);
+
 // ─── Accounting (09 › المحاسبة; 10 › دليل الحسابات الافتراضي، القيود التلقائية) ──────
 
 /**

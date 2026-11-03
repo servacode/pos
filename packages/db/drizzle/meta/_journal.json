@@ -120,6 +120,13 @@
       "when": 1793691930107,
       "tag": "0016_sale_returns",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793694780899,
+      "tag": "0017_customers",
+      "breakpoints": true
     }
   ]
 }

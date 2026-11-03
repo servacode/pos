@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type {
   CashMovementPayload,
   JournalSourceType,
+  ReceiptPayload,
   ReturnPayload,
   SalePayload,
   ShiftClosePayload,
@@ -35,6 +36,8 @@ import {
  *     Dr 4100 sales ex tax before discount, the tax account of each rate
  *     Cr 4200 discounts ex tax, and the money paid back: 1110 drawer of the shift (cash),
  *        1140 card, 1150 wallet, 1130 transfer
+ * - receipt: a customer's payment. Dr 1110 drawer of the shift (cash), 1140 card, 1150 wallet,
+ *   1130 transfer; Cr 1200 for the customer (party).
  * - cash_movement: pay_in 1110 ← 1120; pay_out and safe_drop 1120 ← 1110; expense 61xx ← 1110.
  * - shift_close: per drawer currency, the counted difference: a shortage Dr 6200 (or 1250 when the
  *   owner charges it to the cashier) Cr 1110; a surplus Dr 1110 Cr 6200.
@@ -401,6 +404,49 @@ export async function postReturn(tx: Transaction, source: SaleSource, ret: Retur
     memo: `مرتجع مبيعات ${source.number} عن الفاتورة ${ret.saleNumber}`,
     baseCurrency: ret.currency,
     lines: returnLines(ret, await taxAccounts(tx, source.tenantId, rateIds)),
+  });
+}
+
+// ─── Receipt ─────────────────────────────────────────────────────────────────
+
+/** The lines of a customer's payment (exported for the property tests). */
+export function receiptLines(r: ReceiptPayload): DraftLine[] {
+  const money: DraftLine =
+    r.method === 'cash'
+      ? {
+          account: { cash: '1110', currency: r.currency },
+          baseMinor: r.amountMinor,
+          currency: r.currency,
+          amountMinor: r.amountMinor,
+          rate: null,
+          shiftId: r.shiftId,
+        }
+      : baseLine(
+          { code: METHOD_ACCOUNTS[r.method] },
+          r.amountMinor,
+          r.currency,
+          [methodMemo[r.method], r.reference].filter(Boolean).join(' '),
+        );
+  return [
+    money,
+    {
+      ...baseLine({ code: '1200' }, -r.amountMinor, r.currency, r.customerName),
+      party: { type: 'customer', id: r.customerId },
+    },
+  ];
+}
+
+export async function postReceipt(tx: Transaction, source: SaleSource, r: ReceiptPayload): Promise<void> {
+  await postEntry(tx, {
+    tenantId: source.tenantId,
+    branchId: source.branchId,
+    date: source.businessDate,
+    sourceType: 'receipt',
+    sourceId: source.docId,
+    sourceNumber: source.number,
+    memo: `سند قبض ${source.number} من ${r.customerName}`,
+    baseCurrency: r.currency,
+    lines: receiptLines(r),
   });
 }
 

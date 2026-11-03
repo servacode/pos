@@ -64,6 +64,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
   roles: ['id', 'key', 'name', 'permissions', 'maxDiscountBp', 'version'],
   user_roles: ['id', 'userId', 'roleId', 'branchId', 'version'],
   branches: ['id', 'code', 'name', 'address', 'phone', 'isActive', 'version'],
+  customers: ['id', 'name', 'phone', 'creditLimitMinor', 'archived', 'version'],
 };
 
 let app: FastifyInstance;
@@ -88,6 +89,13 @@ describe('catalog pull sets', () => {
   it('every row of every set has exactly its contract fields', async () => {
     const { body } = await registerStore(app);
     await seedCatalog(app, body.tenant.id, body.accessToken);
+    const added = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: { authorization: `Bearer ${body.accessToken}` },
+      payload: { name: 'أبو خالد', phone: '0933111222', creditLimitMinor: 50_000 },
+    });
+    expect(added.statusCode, added.body).toBe(201);
     const page = await pullAll((await createDevice(body.tenant.id)).authorization);
     expect(Object.keys(page.sets).sort()).toEqual(Object.keys(FIELDS).sort());
     for (const [set, fields] of Object.entries(FIELDS)) {

@@ -208,6 +208,7 @@ describe('POST /v1/device/staff-sessions', () => {
     expect(ok.json<StaffSessionResponse>().permissions).toEqual([
       'sale.create',
       'sale.discount',
+      'receipt.create',
       'shift.close_own',
     ]);
   });

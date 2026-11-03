@@ -11,8 +11,8 @@ import type { SyncProcessors } from './sync-push';
  *
  * 1. In one transaction, the fingerprints of the live books are taken (services/integrity.ts).
  * 2. Everything the documents produced is removed: their invoices and lines and payments, returns
- *    and their lines, drawer movements, shifts, stock movements (stock levels go back to what other movements make) and
- *    journal entries. Rows that no document produced stay.
+ *    and their lines, customer payments, customers a till added, drawer movements, shifts, stock
+ *    movements (stock levels go back to what other movements make) and journal entries. Rows that no document produced stay.
  * 3. Every document the server posted (processed_at set) is run again through its processor, in
  *    the canonical order of ADR-0015: business date, device time, document id. Not the order they
  *    arrived in, which the books must not depend on.
@@ -68,6 +68,8 @@ async function removeEffects(tx: Transaction, tenantId: string): Promise<void> {
   await tx.execute(sql`delete from cash_movements where tenant_id = ${tenantId} and id in ${docs}`);
   await tx.execute(sql`delete from sale_return_lines where tenant_id = ${tenantId} and return_id in ${docs}`);
   await tx.execute(sql`delete from sale_returns where tenant_id = ${tenantId} and id in ${docs}`);
+  await tx.execute(sql`delete from receipts where tenant_id = ${tenantId} and id in ${docs}`);
+  await tx.execute(sql`delete from customers where tenant_id = ${tenantId} and created_by_doc in ${docs}`);
   await tx.execute(
     sql`delete from shifts where tenant_id = ${tenantId} and (id in ${docs} or close_doc_id in ${docs})`,
   );

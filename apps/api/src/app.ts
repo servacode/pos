@@ -21,6 +21,7 @@ import { healthRoutes } from './routes/health';
 import { meRoutes } from './routes/me';
 import { reportRoutes } from './routes/reports';
 import { storeRoutes } from './routes/store';
+import { customerRoutes } from './routes/customers';
 import { staffRoutes } from './routes/staff';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
@@ -112,5 +113,6 @@ export async function buildApp({
   await app.register(staffRoutes);
   await app.register(reportRoutes);
   await app.register(storeRoutes);
+  await app.register(customerRoutes);
   return app;
 }

@@ -25,6 +25,7 @@ import {
   useDigits,
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
+import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
 import { digitOf } from '../PinScreen';
 import { usePos } from '../services';
 import { pricingInput, type Cart, type PricingContext } from '../sale/cart';
@@ -46,6 +47,8 @@ export interface PaymentPanelProps {
   catalog: Catalog;
   shiftId: string;
   cashierId: string;
+  /** «البيع بالآجل» (sale.credit): the credit method shows once a customer is picked */
+  canCredit?: boolean;
   onBack: () => void;
   onCompleted: (entry: OutboxEntry) => void;
 }
@@ -68,6 +71,7 @@ export function PaymentPanel({
   catalog,
   shiftId,
   cashierId,
+  canCredit = false,
   onBack,
   onCompleted,
 }: PaymentPanelProps) {
@@ -75,10 +79,15 @@ export function PaymentPanel({
   const digits = useDigits();
   const settings = catalog.settings!;
   const base = ctx.currency;
-  const options = useMemo(
-    () => payOptions(base, settings.enabledCurrencies, catalog.rates, catalog.collectRates),
-    [base, settings.enabledCurrencies, catalog.rates, catalog.collectRates],
-  );
+  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  const [picking, setPicking] = useState(false);
+  const options = useMemo(() => {
+    const list = payOptions(base, settings.enabledCurrencies, catalog.rates, catalog.collectRates);
+    if (customer && canCredit) {
+      list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
+    }
+    return list;
+  }, [base, settings.enabledCurrencies, catalog.rates, catalog.collectRates, customer, canCredit]);
   const [option, setOption] = useState<PayOption>(options[0]!);
   const [split, setSplit] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
@@ -111,7 +120,8 @@ export function PaymentPanel({
   const current = amount && amount > 0 ? tenderOf(option, amount, reference) : null;
   const tenders = [...parts.map((p) => p.tender), ...(current ? [current] : [])];
   const settlement = settleWith(tenders);
-  const needsReference = nonCash && current !== null && current.reference === null;
+  const needsReference =
+    nonCash && option.method !== 'credit' && current !== null && current.reference === null;
   const canComplete =
     !saving && !('error' in settlement) && settlement.covered && !needsReference && tenders.length > 0;
 
@@ -148,6 +158,8 @@ export function PaymentPanel({
         cashierId,
         payments: tenders,
         cashSteps,
+        customerId: customer?.id ?? null,
+        customerName: customer?.name ?? null,
       });
       const now = pos.now();
       const entry = await pos.save({
@@ -165,9 +177,12 @@ export function PaymentPanel({
 
   const completeRef = useRef(complete);
   completeRef.current = complete;
+  // While the customer picker is open, its own fields take the keys
+  const pickingRef = useRef(picking);
+  pickingRef.current = picking;
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || pickingRef.current) return;
       if (event.key === 'Escape') {
         onBack();
         return;
@@ -251,6 +266,38 @@ export function PaymentPanel({
               </button>
             ))}
           </div>
+          {picking ? (
+            <CustomerPicker
+              catalog={catalog}
+              createdBy={cashierId}
+              onPicked={(picked) => {
+                setCustomer(picked);
+                setPicking(false);
+              }}
+              onCancel={() => setPicking(false)}
+            />
+          ) : customer ? (
+            <div className="flex items-center gap-2 rounded-control border border-line px-3 py-2">
+              <span className="flex flex-1 flex-col">
+                <span className="text-xs text-ink-muted">الزبون</span>
+                <span className="font-semibold text-ink">{customer.name}</span>
+              </span>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setCustomer(null);
+                  setParts((list) => list.filter((p) => p.option.method !== 'credit'));
+                  if (option.method === 'credit') pick(options[0]!);
+                }}
+              >
+                أزله
+              </Button>
+            </div>
+          ) : (
+            <Button variant="secondary" onClick={() => setPicking(true)}>
+              {canCredit ? 'اختر الزبون (للبيع بالآجل)' : 'اختر الزبون'}
+            </Button>
+          )}
           <div
             role="group"
             aria-label="طريقة التقسيم"
@@ -317,7 +364,18 @@ export function PaymentPanel({
               <span className="text-lg text-ink-muted">{CURRENCIES[option.currency].symbolAr}</span>
             </span>
           </div>
-          {option.method !== 'cash' ? (
+          {option.method === 'credit' ? (
+            <p className="rounded-control bg-warning-soft/60 p-3 text-sm text-ink">
+              يُسجَّل المبلغ ديناً على {customer?.name}
+              {customer?.creditLimitMinor !== null && customer?.creditLimitMinor !== undefined ? (
+                <>
+                  {' '}
+                  · حد الدين <Money minor={customer.creditLimitMinor} currency={base} />
+                </>
+              ) : null}
+              . يظهر في كشف حسابه.
+            </p>
+          ) : option.method !== 'cash' ? (
             <TextField
               ref={referenceRef}
               label={REFERENCE_LABEL[option.method] ?? 'المرجع'}

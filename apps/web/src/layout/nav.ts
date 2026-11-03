@@ -1,6 +1,7 @@
 import type { MeResponse } from '@serva/core';
 import {
   CategoriesIcon,
+  CustomersIcon,
   ClockIcon,
   DeviceIcon,
   HomeIcon,
@@ -46,6 +47,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { to: '/shifts', label: 'الورديات', icon: ClockIcon, permission: SHIFTS_ACCESS },
   { to: '/products', label: 'المنتجات', icon: ProductsIcon, permission: ['catalog.manage'] },
   { to: '/categories', label: 'التصنيفات', icon: CategoriesIcon, permission: ['catalog.manage'] },
+  { to: '/customers', label: 'الزبائن', icon: CustomersIcon, permission: ['customers.view'] },
   {
     to: '/accounting',
     label: 'المحاسبة',

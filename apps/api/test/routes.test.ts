@@ -23,6 +23,10 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation'> =
   'GET /v1/me': 'signed-in',
   'PUT /v1/me/pin': 'signed-in',
   'GET /v1/store': 'signed-in',
+  'GET /v1/customers': 'signed-in',
+  'POST /v1/customers': 'signed-in',
+  'GET /v1/customers/:id': 'signed-in',
+  'PUT /v1/customers/:id': 'signed-in',
   'PUT /v1/store/profile': 'signed-in',
   'PUT /v1/store/currency': 'signed-in',
   'PUT /v1/store/onboarding': 'signed-in',
@@ -167,7 +171,31 @@ const makeReference =
     (await app.inject({ method: 'POST', url, headers: owner(a), payload })).json<{ id: string }>();
 
 /** Routes with an id in the path, each with a probe using another store's record. */
+/** Store B's owner on store A's customer: 404, and the customer is untouched. */
+function customerIdor(method: 'GET' | 'PUT') {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: owner(a),
+      payload: { name: 'زبون أ' },
+    });
+    const id = made.json<{ id: string }>().id;
+    const res = await app.inject({
+      method,
+      url: `/v1/customers/${id}`,
+      headers: owner(b),
+      ...(method === 'PUT' ? { payload: { name: 'مسروق' } } : {}),
+    });
+    expect(res.statusCode, `${method} /v1/customers/:id`).toBe(404);
+    const [row] = await ownerDb()<{ name: string }[]>`select name from customers where id = ${id}`;
+    expect(row!.name).toBe('زبون أ');
+  };
+}
+
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  'GET /v1/customers/:id': customerIdor('GET'),
+  'PUT /v1/customers/:id': customerIdor('PUT'),
   'GET /v1/products/:id': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}`),
   'PATCH /v1/products/:id': catalogIdor('products', productOf, 'PATCH', (id) => `/v1/products/${id}`),
   'POST /v1/products/:id/archive': catalogIdor(
@@ -262,7 +290,7 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     const body: SyncDocumentBody = {
       id: createUuidV7()(),
       seq: 1,
-      type: 'customer',
+      type: 'cart_event',
       number: null,
       deviceTime: '2026-10-30T09:00:00.000Z',
       businessDate: '2026-10-30',

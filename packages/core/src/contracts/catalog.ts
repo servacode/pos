@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { CustomerRow } from './customers';
 import type { CurrencyCode } from '../currencies';
 import type { Permission } from '../permissions';
 import type { ShiftMode } from './documents';
@@ -743,4 +744,5 @@ export interface PullSetRows {
   roles: RoleRow;
   user_roles: UserRoleRow;
   branches: BranchRow;
+  customers: CustomerRow;
 }
