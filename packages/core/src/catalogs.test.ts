@@ -22,7 +22,7 @@ describe('default roles', () => {
     expect(role('owner')?.permissions).toEqual(ALL_PERMISSIONS);
   });
 
-  it('keeps users, WhatsApp, the subscription and linking devices with the owner only', () => {
+  it('keeps users, WhatsApp, the subscription, linking devices and the store settings with the owner only', () => {
     const manager = role('manager')?.permissions ?? [];
     expect(manager).not.toContain('users.manage');
     expect(manager).not.toContain('whatsapp.manage');
@@ -34,7 +34,8 @@ describe('default roles', () => {
     expect(manager).toContain('report.view');
     expect(manager).toContain('accounting.view');
     expect(role('cashier')?.permissions).not.toContain('report.view');
-    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 4);
+    expect(manager).not.toContain('settings.manage');
+    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 5);
   });
 
   it('limits the cashier to selling with a 10% discount', () => {

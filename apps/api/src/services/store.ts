@@ -137,12 +137,10 @@ export function updateCurrency(
     await requirePermission(tx, auth.userId, 'settings.manage');
     const before = await read(tx, auth.tenantId);
     const enabled: CurrencyCode[] = input.usdEnabled ? ['SYP', 'USD'] : ['SYP'];
-    await tx
-      .update(tenantSettings)
-      .set({
-        enabledCurrencies: enabled,
-        ...(input.taxInclusive !== undefined ? { taxInclusive: input.taxInclusive } : {}),
-      });
+    await tx.update(tenantSettings).set({
+      enabledCurrencies: enabled,
+      ...(input.taxInclusive !== undefined ? { taxInclusive: input.taxInclusive } : {}),
+    });
     // A new rate is a new row from now on: sales already made keep the rate they carried.
     if (input.usdEnabled && input.usdRate && input.usdRate !== (await latestUsdRate(tx))) {
       await tx.insert(exchangeRates).values({
