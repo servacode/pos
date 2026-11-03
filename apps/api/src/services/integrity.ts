@@ -145,12 +145,20 @@ async function entriesBalanced(tx: Transaction, tenantId: string): Promise<Integ
 async function journalNumbering(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
   // Every number of each year from 1 to the last one is an entry or lies in a range a restore
   // skipped on purpose (counter_jumps, task M0-8), and never both. Any other gap is a lost entry.
+  // A database from before migration 0014 has no such table, and so no recorded jump: the check
+  // still runs there (an old backup, or the upgrade test at the previous schema).
+  const [hasJumps] = await tx.execute<{ present: boolean }>(
+    sql`select to_regclass('counter_jumps') is not null as present`,
+  );
+  const jumps = hasJumps?.present
+    ? sql`select year, from_number, to_number, 'jump' from counter_jumps
+          where tenant_id = ${tenantId} and counter = 'journal'`
+    : sql`select null::integer, null::integer, null::integer, 'jump' where false`;
   const rows = await tx.execute<{ year: number; problem: string; low: number; high: number }>(sql`
     with taken as (
       select year, seq as low, seq as high, 'entry' as what from journal_entries where tenant_id = ${tenantId}
       union all
-      select year, from_number, to_number, 'jump' from counter_jumps
-      where tenant_id = ${tenantId} and counter = 'journal'
+      ${jumps}
     ),
     ordered as (
       select year, low, high,
