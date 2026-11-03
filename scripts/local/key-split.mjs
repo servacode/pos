@@ -39,15 +39,15 @@ const div = (a, b) => {
 };
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
-export const keyId = (secret) => sha256(Buffer.from(secret, 'utf8')).slice(0, 8);
+export const keyId = (key) => sha256(Buffer.from(key, 'utf8')).slice(0, 8);
 const checkOf = (id, n, data) => sha256(`SK1-${id}-${n}-${data}`).slice(0, 6);
 
-/** Three parts of `secret` (a string); any THRESHOLD of them give it back. */
-export function split(secret, random = randomBytes) {
-  const bytes = Buffer.from(secret, 'utf8');
+/** Three parts of `key` (a string); any THRESHOLD of them give it back. */
+export function split(key, random = randomBytes) {
+  const bytes = Buffer.from(key, 'utf8');
   if (bytes.length === 0) throw new Error('The key is empty.');
-  const id = keyId(secret);
-  // One random polynomial per byte: f(x) = secret + c1·x (+ c2·x² … for a higher threshold)
+  const id = keyId(key);
+  // One random polynomial per byte: f(x) = key + c1·x (+ c2·x² … for a higher threshold)
   const coefficients = Array.from({ length: THRESHOLD - 1 }, () => random(bytes.length));
   const parts = [];
   for (let n = 1; n <= PARTS; n++) {
@@ -98,10 +98,9 @@ export function combine(texts) {
     }
     out[i] = value;
   }
-  const secret = out.toString('utf8');
-  if (keyId(secret) !== used[0].id)
-    throw new Error('The parts do not give back the key they were made from.');
-  return secret;
+  const key = out.toString('utf8');
+  if (keyId(key) !== used[0].id) throw new Error('The parts do not give back the key they were made from.');
+  return key;
 }
 
 /** The paper copy of a part: the data in groups of four, easy to read and type. */
@@ -113,15 +112,15 @@ export const forPaper = (part) => {
 function main(argv) {
   const [command, ...rest] = argv;
   if (command === 'split') {
-    const secret = process.env.SERVA_BACKUP_PASSPHRASE ?? '';
-    if (secret.length < 16) throw new Error('SERVA_BACKUP_PASSPHRASE is missing or too short.');
-    const parts = split(secret);
+    const key = process.env.SERVA_BACKUP_PASSPHRASE ?? '';
+    if (key.length < 16) throw new Error('SERVA_BACKUP_PASSPHRASE is missing or too short.');
+    const parts = split(key);
     const roles = [
       'Part 1, the owner: keep it in your password manager or phone (not on the server computer).',
       'Part 2, Serva: give it to Serva support, who keep it for you.',
       'Part 3, paper: print it, put it in a sealed envelope, keep it away from the shop.',
     ];
-    console.log(`Backup key ${keyId(secret)}: three parts, any two open the backups, one alone cannot.\n`);
+    console.log(`Backup key ${keyId(key)}: three parts, any two open the backups, one alone cannot.\n`);
     parts.forEach((p, i) => console.log(`${roles[i]}\n${i === 2 ? forPaper(p) : p}\n`));
     return;
   }
