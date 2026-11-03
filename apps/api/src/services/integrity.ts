@@ -16,7 +16,8 @@ import type { Transaction } from '@serva/db';
  *
  * Checks:
  *   entries_balanced   every entry: Σ debit = Σ credit = its total, two lines at least
- *   journal_numbering  each year's entry numbers run 1…n with no gap
+ *   journal_numbering  each year's entry numbers run 1…n with no gap, but for the ranges a
+ *                      restore skipped on purpose (counter_jumps, task M0-8)
  *   stock_movements    (reconciliation 2) every stock level = Σ of its movements
  *   drawer_ledger      (reconciliation 3) per shift and currency, the drawer's account moved by
  *                      what the documents say went in and out of it; and after the close, by the
@@ -142,14 +143,34 @@ async function entriesBalanced(tx: Transaction, tenantId: string): Promise<Integ
 }
 
 async function journalNumbering(tx: Transaction, tenantId: string): Promise<IntegrityCheck> {
-  const rows = await tx.execute<{ year: number; n: number; low: number; high: number }>(sql`
-    select year, count(*)::int as n, min(seq)::int as low, max(seq)::int as high
-    from journal_entries where tenant_id = ${tenantId}
-    group by year having min(seq) <> 1 or max(seq) <> count(*)
-    order by year`);
+  // Every number of each year from 1 to the last one is an entry or lies in a range a restore
+  // skipped on purpose (counter_jumps, task M0-8), and never both. Any other gap is a lost entry.
+  const rows = await tx.execute<{ year: number; problem: string; low: number; high: number }>(sql`
+    with taken as (
+      select year, seq as low, seq as high, 'entry' as what from journal_entries where tenant_id = ${tenantId}
+      union all
+      select year, from_number, to_number, 'jump' from counter_jumps
+      where tenant_id = ${tenantId} and counter = 'journal'
+    ),
+    ordered as (
+      select year, low, high,
+             max(high) over (partition by year order by low, high
+                             rows between unbounded preceding and 1 preceding) as previous
+      from taken
+    )
+    select year, 'gap' as problem, coalesce(previous, 0) + 1 as low, low - 1 as high
+    from ordered where low > coalesce(previous, 0) + 1
+    union all
+    select year, 'overlap', low, least(high, previous)
+    from ordered where previous is not null and low <= previous
+    order by 1, 3`);
   return check(
     'journal_numbering',
-    rows.map((r) => `سنة ${r.year}: ${r.n} قيداً بأرقام من ${r.low} إلى ${r.high}`),
+    rows.map((r) =>
+      r.problem === 'gap'
+        ? `سنة ${r.year}: لا قيد بالأرقام من ${r.low} إلى ${r.high}`
+        : `سنة ${r.year}: الأرقام من ${r.low} إلى ${r.high} مستعملة مرتين (قيد وقفزة استعادة، أو قيدان)`,
+    ),
   );
 }
 

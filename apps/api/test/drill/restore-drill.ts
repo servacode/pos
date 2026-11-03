@@ -58,6 +58,10 @@ interface Till {
 
 interface State {
   phone: string;
+  password: string;
+  branchId: string;
+  /** Code of a till linked after the backup: the restore forgets it, the till keeps using it */
+  forgottenTillCode?: string;
   tenantId: string;
   userId: string;
   products: { productId: string; variantId: string; name: string; priceMinor: number }[];
@@ -231,20 +235,7 @@ async function seed(file: string) {
   // 3. Two tills, linked by the owner signing in on each.
   const tills: Till[] = [];
   for (const name of ['كاشير التمرين 1', 'كاشير التمرين 2']) {
-    const { device } = await call<{ device: ActivatedDevice }>(
-      'POST',
-      '/v1/devices/activate',
-      {
-        method: 'owner',
-        branchId: branch.id,
-        name,
-        kind: 'cashier',
-        platform: 'browser',
-        publicKey: devicePublicKey(),
-        appVersion: '1.0.0',
-      },
-      owner,
-    );
+    const device = await linkTill(owner, branch.id, name);
     tills.push({
       name,
       token: device.token,
@@ -255,7 +246,15 @@ async function seed(file: string) {
     });
   }
 
-  const state: State = { phone, tenantId: opened.tenant.id, userId: opened.user.id, products, tills };
+  const state: State = {
+    phone,
+    password,
+    branchId: branch.id,
+    tenantId: opened.tenant.id,
+    userId: opened.user.id,
+    products,
+    tills,
+  };
 
   // 4. Each till opens its shift, sells, pays an expense; all of it reaches the server.
   for (const [t, till] of tills.entries()) {
@@ -277,6 +276,33 @@ async function seed(file: string) {
   writeFileSync(file, JSON.stringify(state));
   const sent = tills.reduce((n, t) => n + t.sentBeforeBackup, 0);
   console.log(`✔ Store ${phone}, ${tills.length} tills linked by the owner, ${sent} documents accepted`);
+}
+
+/** The owner signs in on a till: linked at once (method owner). */
+async function linkTill(owner: string, branchId: string, name: string): Promise<ActivatedDevice> {
+  const { device } = await call<{ device: ActivatedDevice }>(
+    'POST',
+    '/v1/devices/activate',
+    {
+      method: 'owner',
+      branchId,
+      name,
+      kind: 'cashier',
+      platform: 'browser',
+      publicKey: devicePublicKey(),
+      appVersion: '1.0.0',
+    },
+    owner,
+  );
+  return device;
+}
+
+async function signIn(state: State): Promise<string> {
+  const { accessToken } = await call<{ accessToken: string }>('POST', '/v1/auth/login', {
+    phone: state.phone,
+    password: state.password,
+  });
+  return `Bearer ${accessToken}`;
 }
 
 function movement(state: State, shiftId: string, kind: CashMovementPayload['kind'], amountMinor: number) {
@@ -367,8 +393,13 @@ async function afterBackup(file: string) {
     expectStatuses(`${till.name} after the backup`, await push(till, fresh), ['accepted']);
     sent += fresh.length;
   }
+  // A third till is linked after the backup: the restored server will not know it.
+  const third = await linkTill(await signIn(state), state.branchId, 'كاشير بعد النسخة');
+  state.forgottenTillCode = third.deviceCode;
   writeFileSync(file, JSON.stringify(state));
-  console.log(`✔ ${sent} documents made after the backup (sales and both closes) accepted`);
+  console.log(
+    `✔ ${sent} documents made after the backup (sales and both closes) accepted; a third till linked as ${third.deviceCode}`,
+  );
 }
 
 async function resend(file: string) {
@@ -387,6 +418,17 @@ async function resend(file: string) {
         `and taken them again now; it accepted ${tally.get('accepted') ?? 0}`,
     );
   }
+  // Task M0-8: a till linked now must not take the code of the till the restore forgot.
+  const next = await linkTill(await signIn(state), state.branchId, 'كاشير بعد الاستعادة');
+  if (state.forgottenTillCode && Number(next.deviceCode) <= Number(state.forgottenTillCode)) {
+    throw new Error(
+      `A till linked after the restore took code ${next.deviceCode}; the till linked after the backup ` +
+        `still uses ${state.forgottenTillCode}: their invoice numbers would collide`,
+    );
+  }
+  console.log(
+    `✔ A till linked after the restore took code ${next.deviceCode}, past the forgotten ${state.forgottenTillCode}`,
+  );
   console.log(
     `✔ Both tills resent everything in ${((Date.now() - started) / 1000).toFixed(1)} s: ` +
       `${tally.get('duplicate') ?? 0} already on the restored server, ${lost} lost by the restore and taken again`,

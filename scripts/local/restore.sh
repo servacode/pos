@@ -249,6 +249,14 @@ if psql_live -d serva -tA -c "SELECT to_regprocedure('server_epoch_bump()') IS N
   psql_live -d serva -c "SELECT server_epoch_bump()" > /dev/null || finish_fail "could not start a new sync epoch"
   check pass "New sync epoch started: devices will resend and download again"
 fi
+# Task M0-8: entry numbers and device codes given after the backup are forgotten by the restored
+# database; skip past them so no number is handed out twice (recorded in counter_jumps).
+if psql_live -d serva -tA -c "SELECT to_regprocedure('restore_counters_jump(integer,integer)') IS NOT NULL" | grep -q t; then
+  psql_live -d serva -c "SELECT restore_counters_jump()" > /dev/null || finish_fail "could not move the counters past the restore"
+  check pass "Entry numbers and device codes moved past anything given after the backup (no number reused)"
+else
+  checks+=("WARN  This backup predates restore_counters_jump(): entry numbers and device codes were not moved")
+fi
 dc up -d --wait --wait-timeout "${SERVA_WAIT_TIMEOUT:-300}" || finish_fail "the server did not start on the restored data"
 after_up
 bash "$SCRIPT_DIR/smoke.sh" || finish_fail "the smoke test failed after the restore"

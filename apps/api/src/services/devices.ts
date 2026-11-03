@@ -91,7 +91,9 @@ const wrongState = (message: string) => new AppError(409, 'conflict', message);
 
 /**
  * The next 3-digit code of the branch (15 › الترقيم دون اتصال): one more than the highest ever
- * given there, so a code is never reused, even after a revoke. 000 is the server's.
+ * given there, so a code is never reused, even after a revoke. 000 is the server's. After a
+ * restore, also past the codes it skipped (counter_jumps, task M0-8): a till linked after the
+ * backup still holds one of them.
  */
 async function reserveCode(tx: Transaction, branchId: string): Promise<string> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`devices:code:${branchId}`}, 0))`);
@@ -99,7 +101,9 @@ async function reserveCode(tx: Transaction, branchId: string): Promise<string> {
     .select({ max: sql<string | null>`max(${devices.code})` })
     .from(devices)
     .where(eq(devices.branchId, branchId));
-  const next = Number(row?.max ?? '000') + 1;
+  const [jumped] = await tx.execute<{ top: number | null }>(sql`
+    select max(to_number) as top from counter_jumps where counter = 'device_code' and branch_id = ${branchId}`);
+  const next = Math.max(Number(row?.max ?? '000'), Number(jumped?.top ?? 0)) + 1;
   if (next > 999) throw wrongState('نفدت أرقام الأجهزة في هذا الفرع. تواصل مع الدعم.');
   return String(next).padStart(3, '0');
 }

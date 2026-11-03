@@ -14,6 +14,9 @@
 #                                keeps its fingerprints as <name>
 #   ci-checks.sh same-books <a> <b> | other-books <a> <b>
 #                                the drill store's ledger and stock fingerprints match, or differ
+#   ci-checks.sh numbers <name>  keeps the drill store's entry numbers and what each one posts
+#   ci-checks.sh no-reused-numbers <a> <b>
+#                                no entry number posts one document in <a> and another in <b> (M0-8)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/local/lib.sh
@@ -230,6 +233,28 @@ compare_books() { # compare_books <same|other> <a> <b>
   fi
 }
 
+drill_tenant() { node -e 'console.log(require(process.argv[1]).tenantId)' "$DRILL_DIR/tills.json"; }
+
+numbers() {
+  local name="${1:?usage: ci-checks.sh numbers <name>}"
+  psql_live -c "select number || ' ' || source_type || ':' || source_id || ':' || kind from journal_entries
+                where tenant_id = '$(drill_tenant)' order by number" > "$DRILL_DIR/$name.numbers"
+  ok "$(wc -l < "$DRILL_DIR/$name.numbers") entry numbers kept ($name)"
+}
+
+no_reused_numbers() {
+  local a="${1:?}" b="${2:?}" clashes moved
+  # The same number, another document: the number now means something else
+  clashes="$(join -j 1 <(LC_ALL=C sort "$DRILL_DIR/$a.numbers") <(LC_ALL=C sort "$DRILL_DIR/$b.numbers") |
+    awk '$2 != $3' | head -n 5)"
+  [[ -z "$clashes" ]] || die "Entry numbers reused for other documents between $a and $b:
+$clashes"
+  # Documents whose entry got another number: those the restore lost and the tills brought back
+  moved="$(join -1 2 -2 2 <(awk '{print $1, $2}' "$DRILL_DIR/$a.numbers" | LC_ALL=C sort -k2) \
+    <(awk '{print $1, $2}' "$DRILL_DIR/$b.numbers" | LC_ALL=C sort -k2) | awk '$2 != $3' | wc -l)"
+  ok "No entry number means two documents between $a and $b; $moved re-posted entries took new numbers"
+}
+
 case "${1:-}" in
   hardening) hardening ;;
   seed) seed ;;
@@ -240,5 +265,7 @@ case "${1:-}" in
   books) books "${2:-}" ;;
   same-books) compare_books same "${2:?}" "${3:?}" ;;
   other-books) compare_books other "${2:?}" "${3:?}" ;;
+  numbers) numbers "${2:-}" ;;
+  no-reused-numbers) no_reused_numbers "${2:-}" "${3:-}" ;;
   *) die "Usage: ci-checks.sh hardening | seed | negative <file> | fixture-present | signup | day <step> | books <name> | same-books <a> <b> | other-books <a> <b>" ;;
 esac
