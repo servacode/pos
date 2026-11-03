@@ -85,7 +85,7 @@ export function makeApp(
 }
 
 /** Reference tables filled by migrations; every other table is emptied between tests. */
-const SEEDED_TABLES = new Set(['plans', 'server_state']);
+const SEEDED_TABLES = new Set(['plans', 'server_state', 'platform_settings']);
 
 let owner: postgres.Sql | undefined;
 /** Connection as the owner role (not subject to row-level security). Closed by closeOwnerDb(). */

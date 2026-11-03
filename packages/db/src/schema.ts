@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgPolicy,
   pgTable,
@@ -219,6 +220,93 @@ export const subscriptions = pgTable(
   (t) => [
     primaryKey({ name: 'subscriptions_pkey', columns: [t.tenantId, t.id] }),
     unique('subscriptions_tenant_unique').on(t.tenantId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * The platform's own settings (07 › فوترة الاشتراكات): how stores pay (Sham Cash account, transfer
+ * details…) and the weekly pound rate a dollar price is shown at. One row; stores read it, the
+ * platform panel writes it through platform_settings_save().
+ */
+export const platformSettings = pgTable('platform_settings', {
+  id: integer('id').primaryKey().default(1),
+  /** [{ key, label, account, beneficiary, instructions, enabled }] */
+  paymentMethods: jsonb('payment_methods').notNull().default([]),
+  /** Pounds per dollar for subscription invoices, set weekly */
+  sypPerUsd: numeric('syp_per_usd').notNull().default('13000'),
+  version: version(),
+  updatedAt: updatedAt(),
+});
+
+/** What the platform team did, by whom and when (07 › حماية لوحتك). */
+export const platformAuditLogs = pgTable('platform_audit_logs', {
+  id: platformId(),
+  platformUserId: uuid('platform_user_id'),
+  action: text('action').notNull(),
+  /** The store it was about, when it was about one */
+  storeId: uuid('store_id'),
+  details: jsonb('details').notNull().default({}),
+  createdAt: createdAt(),
+});
+
+/** A store's subscription invoice (SUB-2026-000001): a debt to the platform, never in the store's books. */
+export const subscriptionInvoices = pgTable(
+  'subscription_invoices',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id),
+    billingCycle: billingCycle('billing_cycle').notNull(),
+    usdMinor: bigint('usd_minor', { mode: 'number' }).notNull(),
+    sypMinor: bigint('syp_minor', { mode: 'number' }).notNull(),
+    sypPerUsd: numeric('syp_per_usd').notNull(),
+    /** open, paid, cancelled */
+    status: text('status').notNull().default('open'),
+    createdAt: createdAt(),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ name: 'subscription_invoices_pkey', columns: [t.tenantId, t.id] }),
+    unique('subscription_invoices_number_unique').on(t.number),
+    tenantIsolation(),
+  ],
+);
+
+/** A payment a store reported for an invoice (SBP-…), waiting for the platform to confirm it. */
+export const subscriptionPayments = pgTable(
+  'subscription_payments',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    invoiceId: uuid('invoice_id').notNull(),
+    method: text('method').notNull(),
+    transactionRef: text('transaction_ref').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    currency: text('currency').notNull(),
+    /** pending, confirmed, rejected */
+    status: text('status').notNull().default('pending'),
+    submittedBy: uuid('submitted_by').notNull(),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull(),
+    decidedBy: uuid('decided_by'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    reason: text('reason'),
+  },
+  (t) => [
+    primaryKey({ name: 'subscription_payments_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [subscriptionInvoices.tenantId, subscriptionInvoices.id],
+    }),
+    unique('subscription_payments_number_unique').on(t.number),
     tenantIsolation(),
   ],
 );
