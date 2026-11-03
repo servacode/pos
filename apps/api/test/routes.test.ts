@@ -36,6 +36,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/supplier-payments': 'signed-in',
   'GET /v1/inventory': 'signed-in',
   'GET /v1/inventory/expiry': 'signed-in',
+  'GET /v1/serials': 'signed-in',
   'POST /v1/stocktakes': 'signed-in',
   'GET /v1/reports/profit': 'signed-in',
   'GET /v1/subscription': 'signed-in',

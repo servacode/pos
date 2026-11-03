@@ -40,6 +40,8 @@ function bigStore(count: number): CatalogSets {
       categoryId: i % 2 ? ids.dairy : ids.grocery,
       brand: null,
       genericName: null,
+      tracksSerial: false,
+      warrantyMonths: null,
       type: 'stock',
       status: 'active',
       unitId: ids.piece,

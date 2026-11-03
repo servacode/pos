@@ -54,6 +54,9 @@ export interface CartLine {
   choices?: readonly Choice[];
   /** «بدون بصل»: a note for the kitchen, printed with the line */
   note?: string | null;
+  /** The product sells each piece by its serial number or IMEI: one per piece before payment */
+  tracksSerial?: boolean;
+  serials?: readonly string[];
   /** One pack at the shelf price and at the wholesale price (null: none), in priceCurrency */
   retailPriceMinor?: number;
   wholesalePriceMinor?: number | null;
@@ -118,8 +121,10 @@ export function addItem(
   const packQty = hit?.barcode.packQty ?? 1000;
   const weighed = item.unit?.allowsFraction ?? false;
   const key = choiceKey(choice?.choices, choice?.note);
+  // A piece with a serial number is a line of its own, so each carries its number
   const same = cart.lines.find(
     (line) =>
+      !item.tracksSerial &&
       line.variantId === item.variantId &&
       line.packQty === packQty &&
       line.adjustment === null &&
@@ -140,7 +145,12 @@ export function addItem(
     lineNo: cart.nextLineNo,
     variantId: item.variantId,
     productId: item.productId,
-    name: choiceName(hit?.barcode.packName ? `${item.name} · ${hit.barcode.packName}` : item.name, choice),
+    name: choiceName(
+      [item.name, hit?.barcode.packName, item.warrantyMonths ? `كفالة ${item.warrantyMonths} شهراً` : null]
+        .filter(Boolean)
+        .join(' · '),
+      choice,
+    ),
     unitSymbol: weighed ? (item.unit?.symbol ?? null) : null,
     weighed,
     barcode: hit?.barcode.code ?? null,
@@ -158,6 +168,7 @@ export function addItem(
     approval: null,
     categoryPath: item.categoryPath ?? [],
     ...(choice ? { choices: choice.choices, note: choice.note } : {}),
+    ...(item.tracksSerial ? { tracksSerial: true, serials: [] } : {}),
   };
   return { ...cart, lines: [...cart.lines, line], nextLineNo: cart.nextLineNo + 1 };
 }
@@ -265,6 +276,7 @@ export function pricingInput(cart: Cart, ctx: PricingContext): SalePricingInput 
     taxRateId: line.taxRateId,
     taxRateBp: line.taxRateBp,
     discount: lineDiscount(line, ctx),
+    ...(line.serials?.length ? { serials: line.serials } : {}),
   }));
   return {
     currency: ctx.currency,
@@ -349,4 +361,12 @@ export function kitchenLines(
 /** Everything on the order is now with the kitchen. */
 export function markSent(cart: Cart): Cart {
   return { ...cart, sent: Object.fromEntries(cart.lines.map((l) => [l.lineNo, l.qty])) };
+}
+
+/** Pieces of a line, whole: what a line with serial numbers needs one number each for. */
+const piecesOf = (line: CartLine) => Math.round((line.qty * line.packQty) / 1_000_000);
+
+/** Lines of serial-numbered products still missing numbers (03 › الإلكترونيات). */
+export function missingSerials(cart: Cart): CartLine[] {
+  return cart.lines.filter((l) => l.tracksSerial && (l.serials?.length ?? 0) !== piecesOf(l));
 }

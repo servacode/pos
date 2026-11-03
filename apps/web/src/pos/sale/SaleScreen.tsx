@@ -43,6 +43,7 @@ import {
   pieceCount,
   kitchenLines,
   markSent,
+  missingSerials,
   priceCart,
   setPriceTier,
   type ItemChoice,
@@ -62,6 +63,7 @@ import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
 import { TableBoard } from './TableBoard';
+import { SerialPanel } from './SerialPanel';
 
 const PaymentPanel = lazy(() => import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })));
 
@@ -74,7 +76,8 @@ export type SaleMode =
   | { kind: 'done' }
   | { kind: 'help' }
   | { kind: 'choose'; item: CatalogItem; hit: BarcodeHit | null }
-  | { kind: 'tables' };
+  | { kind: 'tables' }
+  | { kind: 'serial'; lineNo: number };
 
 export interface SaleScreenProps {
   statusBar: ReactNode;
@@ -190,7 +193,8 @@ export function SaleScreen(props: SaleScreenProps) {
   }, [cart, priced, ctx, rules]);
   const invoiceNeeds = priced ? invoiceNeed(cart, priced.priced, rules) : null;
   const totalMinor = priced?.priced.totals.totalMinor ?? 0;
-  const blocked = needs.size > 0 || invoiceNeeds !== null;
+  const unnumbered = missingSerials(cart);
+  const blocked = needs.size > 0 || invoiceNeeds !== null || unnumbered.length > 0;
   const canPay = cart.lines.length > 0 && priced !== null && !blocked;
 
   const showDone = props.done !== null && cart.lines.length === 0;
@@ -243,7 +247,10 @@ export function SaleScreen(props: SaleScreenProps) {
           setNotice({ tone: 'info', text: `صلاحية «${item.name}» تنتهي في ${item.nearestExpiry}.` });
         }
       }
-      if (item.unit?.allowsFraction && added !== null && weighedQty === undefined) {
+      if (item.tracksSerial && added !== null) {
+        setSelected(added);
+        setMode({ kind: 'serial', lineNo: added });
+      } else if (item.unit?.allowsFraction && added !== null && weighedQty === undefined) {
         setSelected(added);
         setMode({ kind: 'line', lineNo: added, adjust: 'qty' });
       } else if (mode.kind === 'pay' || mode.kind === 'done' || mode.kind === 'help') {
@@ -296,7 +303,8 @@ export function SaleScreen(props: SaleScreenProps) {
     [catalog, add, settings.scaleBarcode, ctx],
   );
 
-  const keypadOpen = mode.kind === 'line' || mode.kind === 'invoice' || mode.kind === 'approve';
+  const keypadOpen =
+    mode.kind === 'line' || mode.kind === 'invoice' || mode.kind === 'approve' || mode.kind === 'serial';
   // While paying, amounts are typed and confirmed with Enter: only a full barcode counts as a scan.
   useScanner({
     enabled: !keypadOpen,
@@ -578,6 +586,18 @@ export function SaleScreen(props: SaleScreenProps) {
                   <span key="d" className="text-info-ink">
                     خصم <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
+                ) : null,
+                line.tracksSerial ? (
+                  <button
+                    key="s"
+                    type="button"
+                    className={
+                      (line.serials?.length ?? 0) > 0 ? 'text-ink-muted' : 'font-semibold text-danger-ink'
+                    }
+                    onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
+                  >
+                    {line.serials?.length ? `IMEI ${line.serials.join('، ')}` : 'اكتب الرقم التسلسلي'}
+                  </button>
                 ) : null,
                 p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
                   <span key="o" className="text-success-ink">
@@ -928,6 +948,21 @@ export function SaleScreen(props: SaleScreenProps) {
             onCancel={() => setMode({ kind: 'items' })}
           />
         </div>
+      ) : effectiveMode.kind === 'serial' && lineOf(effectiveMode.lineNo) ? (
+        <SerialPanel
+          key={effectiveMode.lineNo}
+          line={lineOf(effectiveMode.lineNo)!}
+          taken={
+            new Set(
+              cart.lines.filter((l) => l.lineNo !== effectiveMode.lineNo).flatMap((l) => l.serials ?? []),
+            )
+          }
+          onSave={(serials) => {
+            setCart((c) => updateLine(c, effectiveMode.lineNo, { serials }));
+            setMode({ kind: 'items' });
+          }}
+          onCancel={() => setMode({ kind: 'items' })}
+        />
       ) : effectiveMode.kind === 'choose' ? (
         <ModifierPanel
           key={effectiveMode.item.variantId}

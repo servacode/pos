@@ -310,6 +310,11 @@ export function Receipt({
                 {amount(line.priced.lineDiscountMinor)}
               </Row>
             ) : null}
+            {line.serials?.length ? (
+              <bdi dir="ltr" className="num text-start">
+                IMEI {line.serials.join('، ')}
+              </bdi>
+            ) : null}
           </li>
         ))}
       </ul>

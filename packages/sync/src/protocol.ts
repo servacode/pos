@@ -194,6 +194,10 @@ export const SYNC_FLAGS = [
   'credit_limit_exceeded',
   'over_return',
   'duplicate_customer',
+  /** A sold serial number the store never received (03 › الإلكترونيات) */
+  'unknown_serial',
+  /** A serial number already sold by another sale */
+  'serial_sold_twice',
   'posted_to_open_period',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,

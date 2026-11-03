@@ -25,3 +25,4 @@ apps/api/test/devices.ts
 apps/api/test/staff.ts
 packages/core/src/contracts/customers.ts
 apps/api/src/services/expiry.ts
+apps/api/src/services/serials.ts

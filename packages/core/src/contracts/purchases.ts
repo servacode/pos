@@ -61,6 +61,12 @@ export interface SupplierListResponse {
 export const PURCHASE_PAYMENTS = ['credit', 'cash', 'bank'] as const;
 export type PurchasePayment = (typeof PURCHASE_PAYMENTS)[number];
 
+/** A serial number or IMEI as scanned: spaces dropped, Latin letters and digits */
+export const serialSchema = z
+  .string()
+  .transform((v) => v.replace(/\s+/g, '').toUpperCase())
+  .pipe(z.string().min(3, 'الرقم قصير').max(40, 'الرقم طويل'));
+
 export const purchaseLineInput = z.object({
   variantId: uuidSchema,
   /** Base units bought, thousandths (12.5 kg is 12500) */
@@ -71,6 +77,8 @@ export const purchaseLineInput = z.object({
   batchNo: optionalText(40, 'رقم الدفعة طويل'),
   /** «تاريخ الانتهاء» of what came in */
   expiryDate: isoDateSchema.nullable().optional(),
+  /** The pieces' serial numbers or IMEIs (03 › الإلكترونيات): one per piece of a product that tracks them */
+  serials: z.array(serialSchema).max(1000).optional(),
 });
 
 export const purchaseInput = z
@@ -98,6 +106,7 @@ export interface PurchaseLineRow {
   costMinor: number;
   batchNo: string | null;
   expiryDate: string | null;
+  serials: string[];
 }
 
 export interface PurchaseRow {
@@ -228,6 +237,23 @@ export interface ExpiryRow {
 export interface ExpiryResponse {
   items: ExpiryRow[];
   today: string;
+}
+
+// ─── Serial numbers ───────────────────────────────────────────────────────────
+
+/** GET /v1/serials?q= (catalog.manage): a piece by its number, or the last ones received */
+export const serialQuery = z.object({ q: z.string().trim().max(40).optional() });
+
+export interface SerialRow {
+  serial: string;
+  variantId: string;
+  name: string;
+  status: 'in_stock' | 'sold';
+  purchaseNumber: string | null;
+  receivedOn: string | null;
+  saleNumber: string | null;
+  soldOn: string | null;
+  warrantyUntil: string | null;
 }
 
 export const profitQuery = z.object({

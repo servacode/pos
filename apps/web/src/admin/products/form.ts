@@ -65,6 +65,9 @@ export interface ProductDraft {
   brand: string;
   /** «الاسم العلمي» (pharmacies); "" = none */
   genericName?: string;
+  /** «له رقم تسلسلي أو IMEI» and «الكفالة» in months as typed ("" = none) */
+  tracksSerial?: boolean;
+  warranty?: string;
   /** "" = بلا تصنيف */
   categoryId: string;
   type: ProductType;
@@ -186,6 +189,8 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     nameEn: detail.nameEn ?? '',
     brand: detail.brand ?? '',
     genericName: detail.genericName ?? '',
+    tracksSerial: detail.tracksSerial ?? false,
+    warranty: detail.warrantyMonths ? String(detail.warrantyMonths) : '',
     categoryId: detail.categoryId ?? '',
     type: detail.type,
     unitId: detail.unitId,
@@ -286,6 +291,12 @@ export interface Built<T> {
 
 const textOrNull = (value: string) => value.trim() || null;
 
+/** «12» months of warranty; "" or not a whole number between 1 and 120 is none */
+function warrantyOf(text: string | undefined): number | null {
+  const n = Number((text ?? '').replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).trim());
+  return Number.isInteger(n) && n >= 1 && n <= 120 ? n : null;
+}
+
 function barcodeInput(barcode: BarcodeDraft): BarcodeInput {
   const pack = {
     packQty: qtyFromText(barcode.packCount) ?? 1000,
@@ -327,6 +338,8 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       nameEn: textOrNull(draft.nameEn),
       brand: textOrNull(draft.brand),
       ...(textOrNull(draft.genericName ?? '') ? { genericName: textOrNull(draft.genericName ?? '') } : {}),
+      ...(draft.tracksSerial ? { tracksSerial: true } : {}),
+      ...(warrantyOf(draft.warranty) !== null ? { warrantyMonths: warrantyOf(draft.warranty) } : {}),
       categoryId: draft.categoryId || null,
       type: draft.type,
       unitId: draft.unitId || undefined,
@@ -391,6 +404,12 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   if (nameAr !== original.nameAr) body.nameAr = nameAr;
   if (textOrNull(draft.nameEn) !== original.nameEn) body.nameEn = textOrNull(draft.nameEn);
   if (textOrNull(draft.brand) !== original.brand) body.brand = textOrNull(draft.brand);
+  if ((draft.tracksSerial ?? false) !== (original.tracksSerial ?? false)) {
+    body.tracksSerial = draft.tracksSerial ?? false;
+  }
+  if (warrantyOf(draft.warranty) !== (original.warrantyMonths ?? null)) {
+    body.warrantyMonths = warrantyOf(draft.warranty);
+  }
   if (textOrNull(draft.genericName ?? '') !== (original.genericName ?? null)) {
     body.genericName = textOrNull(draft.genericName ?? '');
   }

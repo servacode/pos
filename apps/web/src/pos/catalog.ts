@@ -40,6 +40,9 @@ export interface CatalogItem {
   modifiers?: readonly ModifierGroup[];
   /** The earliest expiry of what is on the shelf, «2026-12-31»; null when none was received */
   nearestExpiry?: string | null;
+  /** Each piece is sold by its serial number or IMEI (03 › الإلكترونيات) */
+  tracksSerial?: boolean;
+  warrantyMonths?: number | null;
   unit: UnitRow | null;
   taxRate: TaxRateRow | null;
   price: {
@@ -168,6 +171,8 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       categoryPath: categoryPath(product.categoryId),
       modifiers: product.modifiers ?? [],
       nearestExpiry: variant.nearestExpiry ?? null,
+      tracksSerial: product.tracksSerial ?? false,
+      warrantyMonths: product.warrantyMonths ?? null,
       unit: units.get(product.unitId) ?? null,
       taxRate: product.taxRateId ? (taxes.get(product.taxRateId) ?? null) : null,
       price: {
