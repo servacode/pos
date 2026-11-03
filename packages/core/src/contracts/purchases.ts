@@ -276,3 +276,48 @@ export interface ProfitReport {
   stockLossMinor: number;
   baseCurrency: CurrencyCode;
 }
+
+// ─── Transfers between branches (09 › transfers) ──────────────────────────────
+
+/**
+ *   GET  /v1/transfers    inventory.adjust   → { items: TransferRow[] }
+ *   POST /v1/transfers    inventory.adjust   transferInput → TransferDetail (201)
+ *
+ * Goods sent from one branch to another, in one step: out of the sending branch at its average
+ * cost, into the receiving one at that same value. Each branch's books move with its stock: the
+ * sender Dr 1900 (جاري الفروع) / Cr 1300, the receiver Dr 1300 / Cr 1900.
+ */
+export const transferInput = z
+  .object({
+    fromBranchId: uuidSchema,
+    toBranchId: uuidSchema,
+    date: isoDateSchema,
+    note: optionalText(200, 'الملاحظة طويلة'),
+    lines: z
+      .array(z.object({ variantId: uuidSchema, qty: z.int().positive('الكمية أكبر من الصفر') }))
+      .min(1, 'أضف صنفاً واحداً على الأقل')
+      .max(2000),
+  })
+  .refine((t) => t.fromBranchId !== t.toBranchId, { path: ['toBranchId'], message: 'اختر فرعاً آخر' });
+export type TransferInput = z.input<typeof transferInput>;
+
+export interface TransferDetail {
+  id: string;
+  number: string;
+  date: string;
+  fromBranchId: string;
+  toBranchId: string;
+  lines: { variantId: string; name: string; qty: number; valueMinor: number }[];
+  valueMinor: number;
+  baseCurrency: CurrencyCode;
+}
+
+export interface TransferRow {
+  id: string;
+  number: string;
+  date: string;
+  fromBranch: string;
+  toBranch: string;
+  pieces: number;
+  valueMinor: number;
+}

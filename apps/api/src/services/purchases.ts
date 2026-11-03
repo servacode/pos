@@ -12,6 +12,9 @@ import {
   type PurchaseRow,
   type StocktakeDetail,
   type StocktakeInput,
+  type TransferDetail,
+  type TransferInput,
+  type TransferRow,
   type StocktakeLineRow,
   type StockValue,
   type SupplierInput,
@@ -29,6 +32,7 @@ import {
   stockLevels,
   stockMovements,
   stocktakes,
+  transfers,
   supplierPayments,
   suppliers,
   variants,
@@ -272,7 +276,7 @@ async function moveStock(
   tenantId: string,
   branchId: string,
   docId: string,
-  kind: 'purchase' | 'stocktake',
+  kind: 'purchase' | 'stocktake' | 'transfer',
   date: string,
   lines: { lineNo: number; variantId: string; qty: number }[],
 ): Promise<void> {
@@ -700,6 +704,167 @@ export async function createStocktake(
       meta,
     );
     return { id, number, date: input.date, branchId, lines: rows, diffValueMinor, baseCurrency: currency };
+  });
+}
+
+/**
+ * A transfer between branches (09 › transfers): every line out of the sender at its average cost
+ * and into the receiver at that value, in one transaction. A line more than the sender has is
+ * sent all the same (stock may go below nothing, as at the till) and costed as a sale would be.
+ */
+export async function createTransfer(
+  db: Database,
+  auth: AccessClaims,
+  input: TransferInput,
+  meta: RequestMeta,
+): Promise<TransferDetail> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'inventory.adjust');
+    const from = await branchOf(tx, input.fromBranchId);
+    const to = await branchOf(tx, input.toBranchId);
+    const names = await stockedVariants(
+      tx,
+      input.lines.map((l) => l.variantId),
+    );
+    const missing = input.lines.findIndex((l) => !names.has(l.variantId));
+    if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
+    await costPending(tx, auth.tenantId);
+
+    const keys: StockKey[] = input.lines.flatMap((l) => [
+      stockKey(from, l.variantId),
+      stockKey(to, l.variantId),
+    ]);
+    const values = await loadValues(tx, auth.tenantId, keys);
+    const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
+    const lines: TransferDetail['lines'] = [];
+    let costDiff = 0;
+    for (const l of input.lines) {
+      const outKey = stockKey(from, l.variantId);
+      const inKey = stockKey(to, l.variantId);
+      const out = stockOut(values.get(outKey) ?? empty, l.qty);
+      values.set(outKey, out.after);
+      const into = stockIn(values.get(inKey) ?? empty, l.qty, Math.max(0, out.costMinor));
+      values.set(inKey, into.after);
+      costDiff += into.costMinor;
+      lines.push({
+        variantId: l.variantId,
+        name: names.get(l.variantId)!,
+        qty: l.qty,
+        valueMinor: out.costMinor,
+      });
+    }
+    await saveValues(tx, auth.tenantId, values);
+
+    const id = newId();
+    const inId = newId();
+    const number = await nextNumber(tx, auth.tenantId, 'TRF', input.date);
+    const valueMinor = lines.reduce((sum, l) => sum + l.valueMinor, 0);
+    await tx.insert(transfers).values({
+      tenantId: auth.tenantId,
+      id,
+      inId,
+      number,
+      fromBranchId: from,
+      toBranchId: to,
+      businessDate: input.date,
+      note: input.note ?? null,
+      lines,
+      valueMinor,
+      createdBy: auth.userId,
+    });
+    const moves = (sign: 1 | -1) =>
+      input.lines.map((l, i) => ({ lineNo: i + 1, variantId: l.variantId, qty: sign * l.qty }));
+    await moveStock(tx, auth.tenantId, from, id, 'transfer', input.date, moves(-1));
+    await moveStock(tx, auth.tenantId, to, inId, 'transfer', input.date, moves(1));
+    await refreshExpiry(
+      tx,
+      input.lines.map((l) => l.variantId),
+    );
+    const currency = await baseCurrency(tx);
+    const memo = `تحويل ${number}${input.note ? `: ${input.note}` : ''}`;
+    // The sender: Dr 1900 / Cr 1300; the receiver: Dr 1300 / Cr 1900 (and what its oversold
+    // pieces really cost against cost of sales, as a purchase does)
+    await postEntry(tx, {
+      tenantId: auth.tenantId,
+      branchId: from,
+      date: input.date,
+      sourceType: 'transfer',
+      sourceId: id,
+      sourceNumber: number,
+      memo,
+      baseCurrency: currency,
+      lines: costLines(valueMinor, currency, '1900'),
+    });
+    await postEntry(tx, {
+      tenantId: auth.tenantId,
+      branchId: to,
+      date: input.date,
+      sourceType: 'transfer',
+      sourceId: inId,
+      sourceNumber: number,
+      memo,
+      baseCurrency: currency,
+      lines: [
+        ...costLines(-valueMinor, currency, '1900'),
+        ...(costDiff !== 0 ? costLines(costDiff, currency) : []),
+      ],
+    });
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'transfer.create',
+        entity: 'transfer',
+        entityId: id,
+        changes: { number: [null, number], valueMinor: [null, valueMinor] },
+      },
+      meta,
+    );
+    return {
+      id,
+      number,
+      date: input.date,
+      fromBranchId: from,
+      toBranchId: to,
+      lines,
+      valueMinor,
+      baseCurrency: currency,
+    };
+  });
+}
+
+export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items: TransferRow[] }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'inventory.adjust');
+    const rows = await tx.execute<{
+      id: string;
+      number: string;
+      date: string;
+      from_name: string;
+      to_name: string;
+      pieces: string;
+      value: string;
+    }>(sql`
+      select t.id, t.number, t.business_date::text as date, f.name as from_name, d.name as to_name,
+             coalesce((select sum((l ->> 'qty')::bigint) from jsonb_array_elements(t.lines) l), 0)::text as pieces,
+             t.value_minor::text as value
+      from transfers t
+      join branches f on f.id = t.from_branch_id
+      join branches d on d.id = t.to_branch_id
+      order by t.business_date desc, t.created_at desc
+      limit 200`);
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        number: r.number,
+        date: r.date,
+        fromBranch: r.from_name,
+        toBranch: r.to_name,
+        pieces: Number(r.pieces),
+        valueMinor: Number(r.value),
+      })),
+    };
   });
 }
 

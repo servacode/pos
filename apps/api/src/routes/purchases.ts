@@ -8,6 +8,7 @@ import {
   stocktakeInput,
   supplierInput,
   supplierPaymentInput,
+  transferInput,
   uuidSchema,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
@@ -16,9 +17,11 @@ import { clientIp } from '../http/client-ip';
 import {
   createPurchase,
   createStocktake,
+  createTransfer,
   inventory,
   listPurchases,
   listSuppliers,
+  listTransfers,
   paySupplier,
   profitReport,
   readPurchase,
@@ -115,6 +118,19 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       meta(request),
     );
     return reply.code(201).send(done);
+  });
+
+  app.get('/v1/transfers', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listTransfers(app.db, request.auth);
+  });
+  app.post('/v1/transfers', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    return reply
+      .code(201)
+      .send(
+        await createTransfer(app.db, request.auth, parseBody(transferInput, request.body), meta(request)),
+      );
   });
 
   app.get('/v1/reports/profit', opts, async (request) => {
