@@ -55,7 +55,12 @@ export function InventoryPage() {
       key: 'qty',
       header: 'الكمية',
       numeric: true,
-      cell: (r) => <span className="num">{formatQuantity(r.qty, digits)}</span>,
+      // A shelf sold below nothing reads «−1», not «1-»
+      cell: (r) => (
+        <bdi dir="ltr" className="num">
+          {formatQuantity(r.qty, digits)}
+        </bdi>
+      ),
     },
     {
       key: 'unit',
@@ -155,7 +160,6 @@ export function InventoryPage() {
                 value={<Money minor={profit.costOfSalesMinor} currency={base} />}
               />
               <StatTile
-                hero
                 label="مجمل الربح"
                 value={<Money minor={profit.grossProfitMinor} currency={base} />}
                 footnote={

@@ -29,6 +29,7 @@ const CHECK_NAMES: Record<string, string> = {
   stock_movements: 'المخزون = مجموع حركاته',
   drawer_ledger: 'الصندوق في الدفتر = حركة الدرج حسب المستندات',
   day_report_ledger: 'تقرير اليوم = الدفتر',
+  stock_value_ledger: 'قيمة المخزون بالكلفة = حساب المخزون 1300',
 };
 
 const args = process.argv.slice(2);
