@@ -1,0 +1,18 @@
+{
+  "name": "serva-whatsapp-otp-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sends Serva sign-up codes over WhatsApp (OTP_DELIVERY=gateway). Unofficial: a dedicated number only.",
+  "scripts": {
+    "start": "node index.mjs",
+    "test": "node --test server.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "qrcode-terminal": "0.12.0"
+  }
+}
