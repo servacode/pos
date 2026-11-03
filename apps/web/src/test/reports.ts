@@ -81,6 +81,10 @@ export function dayReport(overrides: Partial<DayReport> = {}): DayReport {
       { userId: 'u-1', fullName: 'سامر', invoiceCount: 2, totalMinor: 900_000 },
       { userId: 'u-2', fullName: 'لينا', invoiceCount: 1, totalMinor: 384_500 },
     ],
+    bySalesperson: [
+      { userId: 'u-1', fullName: 'سامر', invoiceCount: 2, totalMinor: 900_000 },
+      { userId: 'u-2', fullName: 'لينا', invoiceCount: 1, totalMinor: 384_500 },
+    ],
     byCategory: [
       { categoryId: 'c-1', name: 'مواد غذائية', lineCount: 5, totalMinor: 984_500, discountMinor: 50_000 },
       { categoryId: null, name: 'بلا تصنيف', lineCount: 1, totalMinor: 300_000, discountMinor: 0 },

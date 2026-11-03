@@ -59,6 +59,7 @@ import {
   type PricingContext,
 } from './cart';
 import { useScanner } from './useScanner';
+import { usePos } from '../services';
 import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
@@ -103,6 +104,8 @@ export interface SaleScreenProps {
   /** Keyboard actions that belong to the cashier app (menu, lock) */
   extraShortcuts?: (event: KeyboardEvent) => boolean;
 }
+
+const SELLER_KEY = 'salesperson';
 
 const SHORTCUTS: [string, string][] = [
   ['ابحث أو امسح', 'F2 أو /'],
@@ -167,6 +170,18 @@ export function SaleScreen(props: SaleScreenProps) {
   const [bump, setBump] = useState<number | null>(null);
   const [quote, setQuote] = useState<QuoteData | null>(null);
   const [kitchen, setKitchen] = useState<KitchenData | null>(null);
+  // «البائع» (03 › الملابس: عمولة البائع): the last one picked on this device stays picked
+  const pos = usePos();
+  const [seller, setSeller] = useState<string>(session.userId);
+  useEffect(() => {
+    let alive = true;
+    void pos.local.get<string>(SELLER_KEY).then((id) => {
+      if (alive && id && staff.some((m) => m.id === id)) setSeller(id);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [pos.local, staff]);
   const service = settings.service ?? null;
   // A café with no tables serves takeaway unless told otherwise
   const defaultOrderType = service && service.tables.length === 0 ? 'takeaway' : 'dine_in';
@@ -482,6 +497,23 @@ export function SaleScreen(props: SaleScreenProps) {
           {lineCount === 0 ? 'فاتورة جديدة' : 'الفاتورة الحالية'}
         </span>
         <span className="flex-1" />
+        {staff.length > 1 ? (
+          <select
+            aria-label="البائع"
+            value={seller}
+            onChange={(e) => {
+              setSeller(e.target.value);
+              void pos.local.set(SELLER_KEY, e.target.value);
+            }}
+            className="h-10 max-w-36 rounded-control border border-line-control bg-surface px-2 text-sm text-ink"
+          >
+            {staff.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.fullName}
+              </option>
+            ))}
+          </select>
+        ) : null}
         {session.permissions.has('sale.wholesale') || cart.priceTier === 'wholesale' ? (
           <Button
             size="sm"
@@ -837,6 +869,7 @@ export function SaleScreen(props: SaleScreenProps) {
             shiftId={props.shiftId}
             cashierId={session.userId}
             canCredit={session.permissions.has('sale.credit')}
+            salespersonId={seller !== session.userId ? seller : null}
             onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
             onBack={() => setMode({ kind: 'items' })}
             onCompleted={(entry) => {

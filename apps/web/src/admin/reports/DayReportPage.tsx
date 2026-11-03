@@ -205,6 +205,19 @@ function DayReportBody({ report }: { report: DayReport }) {
         />
       </Section>
 
+      {(report.bySalesperson ?? []).some(
+        (s) => !report.byCashier.some((c) => c.userId === s.userId && c.totalMinor === s.totalMinor),
+      ) ? (
+        <Section title="حسب البائع">
+          <DataTable
+            caption="المبيعات حسب البائع"
+            columns={cashierColumns(base)}
+            rows={report.bySalesperson}
+            rowKey={(row) => row.userId}
+          />
+        </Section>
+      ) : null}
+
       {(report.byCategory ?? []).length > 0 ? (
         <div className="grid gap-6 lg:grid-cols-2">
           <Section title="حسب القسم">

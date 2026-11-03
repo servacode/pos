@@ -6,6 +6,7 @@ import {
   DataTable,
   formatQuantity,
   Money,
+  Select,
   StatTile,
   TextField,
   useDigits,
@@ -35,6 +36,9 @@ export function InventoryPage() {
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [result, setResult] = useState<StocktakeDetail | null>(null);
   const [saving, setSaving] = useState(false);
+  // «سجّل هدراً» (03 › الخضار والمخابز: تسجيل الهدر): what spoiled, out of stock at its cost
+  const [wasteKey, setWasteKey] = useState('');
+  const [wasteQty, setWasteQty] = useState('');
 
   const load = useCallback(() => {
     setError(null);
@@ -112,6 +116,34 @@ export function InventoryPage() {
     }
   }
 
+  async function saveWaste() {
+    const row = stock?.items.find((r) => `${r.branchId}:${r.variantId}` === wasteKey);
+    const qty = qtyOf(wasteQty);
+    if (!row || !qty || qty <= 0) {
+      setError('اختر الصنف واكتب كمية الهدر.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      setResult(
+        await createStocktake({
+          branchId: row.branchId,
+          date: today(),
+          note: 'هدر',
+          lines: [{ variantId: row.variantId, countedQty: Math.max(0, row.qty - qty) }],
+        }),
+      );
+      setWasteKey('');
+      setWasteQty('');
+      load();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <AppShell>
       <title>المخزون والأرباح · Serva POS</title>
@@ -173,6 +205,41 @@ export function InventoryPage() {
             </>
           ) : null}
         </div>
+        {canCount && !counting && (stock?.items.length ?? 0) > 0 ? (
+          <form
+            aria-label="سجّل هدراً"
+            className="flex flex-wrap items-end gap-3 rounded-card border border-line bg-surface p-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveWaste();
+            }}
+          >
+            <Select
+              label="الصنف التالف"
+              value={wasteKey}
+              onChange={(e) => setWasteKey(e.target.value)}
+              className="min-w-56 flex-1"
+            >
+              <option value="">اختر الصنف</option>
+              {(stock?.items ?? []).map((r) => (
+                <option key={`${r.branchId}:${r.variantId}`} value={`${r.branchId}:${r.variantId}`}>
+                  {r.name}
+                </option>
+              ))}
+            </Select>
+            <TextField
+              label="كمية الهدر"
+              inputMode="decimal"
+              dir="ltr"
+              value={wasteQty}
+              onChange={(e) => setWasteQty(e.target.value)}
+              className="w-36"
+            />
+            <Button type="submit" variant="secondary" loading={saving}>
+              سجّل الهدر
+            </Button>
+          </form>
+        ) : null}
         <DataTable
           caption="المخزون"
           columns={columns}

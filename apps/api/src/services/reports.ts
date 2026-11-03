@@ -171,6 +171,13 @@ export async function dayReport(
       from invoices i left join users u on u.id = i.cashier_id
       where ${where}
       group by i.cashier_id, u.full_name order by sum(i.total_minor) desc, i.cashier_id`);
+    const sellers = await tx.execute<{ id: string; name: string | null; n: string; total: string }>(sql`
+      select coalesce(i.salesperson_id, i.cashier_id) as id, u.full_name as name, count(*)::text as n,
+             sum(i.total_minor)::text as total
+      from invoices i left join users u on u.id = coalesce(i.salesperson_id, i.cashier_id)
+      where ${where}
+      group by coalesce(i.salesperson_id, i.cashier_id), u.full_name
+      order by sum(i.total_minor) desc, 1`);
     const departments = await tx.execute<{
       id: string | null;
       name: string | null;
@@ -244,6 +251,12 @@ export async function dayReport(
       cashRoundingMinor: num(totals?.rounding),
       byMethod: await paymentsByMethod(tx, where),
       byCashier: cashiers.map((c) => ({
+        userId: c.id,
+        fullName: c.name ?? '',
+        invoiceCount: num(c.n),
+        totalMinor: num(c.total),
+      })),
+      bySalesperson: sellers.map((c) => ({
         userId: c.id,
         fullName: c.name ?? '',
         invoiceCount: num(c.n),

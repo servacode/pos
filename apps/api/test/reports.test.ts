@@ -141,6 +141,9 @@ describe('GET /v1/reports/day', () => {
         { method: 'card', currency: 'SYP', amountMinor: 100_000, baseAmountMinor: 100_000, count: 1 },
       ],
       byCashier: [{ userId: store.userId, fullName: 'أحمد الخطيب', invoiceCount: 2, totalMinor: 363_750 }],
+      bySalesperson: [
+        { userId: store.userId, fullName: 'أحمد الخطيب', invoiceCount: 2, totalMinor: 363_750 },
+      ],
       // The fixture's lines name no product of the catalog: all of it is «بلا تصنيف».
       byCategory: [
         { categoryId: null, name: 'بلا تصنيف', lineCount: 5, totalMinor: 363_750, discountMinor: 6_000 },
@@ -209,6 +212,33 @@ describe('GET /v1/reports/day', () => {
       ['حليب', 2000, 20_000],
       ['رز', 1000, 20_000],
       ['كيس', 1000, 1_000],
+    ]);
+  });
+
+  it('sums each seller’s invoices, the cashier’s own when no seller was picked', async () => {
+    const store = await openStore(app);
+    const seller = await staffUser(app, await asTestStore(store), 'cashier', '0933444555', {
+      fullName: 'لينا',
+    });
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const mine = sale(store, open.id, {
+      lines: [cartLine(1, 10_000)],
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 10_000 }],
+    });
+    const hers = sale(store, open.id, {
+      lines: [cartLine(1, 30_000)],
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 30_000 }],
+      salespersonId: seller.userId,
+    });
+    await push(app, store.device, [open, doc('sale', mine), doc('sale', hers)]);
+    const report = (await get(store.accessToken, '/v1/reports/day?date=2026-10-30')).json<DayReport>();
+    expect(report.bySalesperson).toEqual([
+      { userId: seller.userId, fullName: 'لينا', invoiceCount: 1, totalMinor: 30_000 },
+      { userId: store.userId, fullName: 'أحمد الخطيب', invoiceCount: 1, totalMinor: 10_000 },
+    ]);
+    expect(report.byCashier).toEqual([
+      { userId: store.userId, fullName: 'أحمد الخطيب', invoiceCount: 2, totalMinor: 40_000 },
     ]);
   });
 
