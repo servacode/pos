@@ -617,6 +617,8 @@ export interface VariantRow {
   sortOrder: number;
   /** The earliest expiry of what is on the shelf (services/expiry.ts); null when none was received */
   nearestExpiry: string | null;
+  /** The thumbnail shown on the till: the picture of this piece's colour, else the main one */
+  imageUrl: string | null;
   archived: boolean;
   version: number;
 }

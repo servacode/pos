@@ -37,6 +37,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'attributes',
     'sortOrder',
     'nearestExpiry',
+    'imageUrl',
     'archived',
     'version',
   ],
