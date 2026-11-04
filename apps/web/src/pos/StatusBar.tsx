@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Avatar, CashierStatusBar, ConnectionPill, Logo, useDigits } from '@serva/ui';
+import { Avatar, CashierStatusBar, ConnectionPill, Logo, useDigits, WarningIcon } from '@serva/ui';
 import type { LocalDevice } from '../offline/device';
 import { clockText } from './format';
 
@@ -60,8 +60,13 @@ export function StatusBar({ device, persisted, online, outbox, user, lastInvoice
       <span className="flex-1" />
       {persisted === false ? (
         // Tab 15 › ما يراه الكاشير: the browser may wipe this device's data.
-        <span role="alert" className="truncate text-sm font-semibold text-danger-ink">
-          هذا المتصفح قد يمسح البيانات، ثبّت التطبيق
+        <span
+          role="alert"
+          title="هذا المتصفح قد يمسح البيانات، ثبّت التطبيق"
+          className="inline-flex min-h-8 min-w-0 items-center gap-1.5 rounded-full bg-warning-soft px-3 text-sm font-semibold text-warning-ink"
+        >
+          <WarningIcon size={16} className="shrink-0" />
+          <span className="truncate">هذا المتصفح قد يمسح البيانات، ثبّت التطبيق</span>
         </span>
       ) : null}
       {lastInvoice}

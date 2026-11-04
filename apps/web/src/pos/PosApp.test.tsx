@@ -182,7 +182,7 @@ describe('device record', () => {
     ).toBeNull();
   });
 
-  it('warns in red when the browser refuses to keep the data', async () => {
+  it('warns when the browser refuses to keep the data', async () => {
     await linkDevice();
     const persist = vi.fn(async () => false);
     Object.defineProperty(navigator, 'storage', {
