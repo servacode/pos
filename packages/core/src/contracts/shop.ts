@@ -55,7 +55,12 @@ export const onlineStoreInput = z.object({
    */
   deliveryFeeMinor: nonNegativeMinorSchema.default(0),
   deliveryAreas: z
-    .array(z.object({ name: z.string().trim().min(1, 'اكتب اسم المنطقة').max(40), feeMinor: nonNegativeMinorSchema }))
+    .array(
+      z.object({
+        name: z.string().trim().min(1, 'اكتب اسم المنطقة').max(40),
+        feeMinor: nonNegativeMinorSchema,
+      }),
+    )
     .max(40)
     .refine((a) => new Set(a.map((x) => x.name)).size === a.length, 'كل منطقة مرة واحدة')
     .default([]),

@@ -2227,7 +2227,10 @@ export const onlineStores = pgTable(
     orderMode: text('order_mode').notNull().default('whatsapp'),
     /** «أجرة التوصيل»: flat, or per area when areas are set; for the courier, not a sale */
     deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
-    deliveryAreas: jsonb('delivery_areas').$type<{ name: string; feeMinor: number }[]>().notNull().default([]),
+    deliveryAreas: jsonb('delivery_areas')
+      .$type<{ name: string; feeMinor: number }[]>()
+      .notNull()
+      .default([]),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
