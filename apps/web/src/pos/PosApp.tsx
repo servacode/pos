@@ -12,6 +12,8 @@ import { useOnline } from './useOnline';
 
 // Linking runs once per device: its screens load only on a device that is not linked yet.
 const DeviceLink = lazy(() => import('./link/DeviceLink').then((m) => ({ default: m.DeviceLink })));
+// A suspended device: rare, so loaded only then.
+const DeviceRevoked = lazy(() => import('./link/DeviceRevoked').then((m) => ({ default: m.DeviceRevoked })));
 // Who works and their code: loaded as soon as the device is known (a local file, no network).
 const StaffSignIn = lazy(() => import('./staff/StaffSignIn').then((m) => ({ default: m.StaffSignIn })));
 // The sale screen and everything after the sign-in.
@@ -42,7 +44,16 @@ export function useOutboxStatus(pos: PosServices, tick: number): OutboxStatus | 
  * Who works on this device: the sign-in, then the sale screen. Everything comes from the device
  * database through `services`, so it opens the same with or without internet; tests pass fakes.
  */
-export function PosSession({ services, persisted }: { services: PosServices; persisted: boolean | null }) {
+export function PosSession({
+  services,
+  persisted,
+  onRevoked,
+}: {
+  services: PosServices;
+  persisted: boolean | null;
+  /** The server said this device is suspended */
+  onRevoked?: () => void;
+}) {
   const online = useOnline();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [session, setSession] = useState<StaffSession | null>(null);
@@ -106,7 +117,7 @@ export function PosSession({ services, persisted }: { services: PosServices; per
           >
             {catalog ? (
               <Suspense fallback={null}>
-                <StaffSignIn staff={staff} onSignedIn={setSession} />
+                <StaffSignIn staff={staff} onSignedIn={setSession} onRevoked={onRevoked} />
               </Suspense>
             ) : null}
           </CashierShell>
@@ -122,8 +133,16 @@ export function PosSession({ services, persisted }: { services: PosServices; per
  * same with or without internet. An activated device then syncs in the background.
  */
 export function PosApp() {
-  const { loading, device, persisted, sync, reload, engineSave } = useDevice();
+  const { loading, device, persisted, sync, reload, engineSave, forget } = useDevice();
   const online = useOnline();
+  // Suspended: the sync loops were told so, or a sign-in was refused for it.
+  const [refusedAsRevoked, setRefusedAsRevoked] = useState(false);
+  const revoked = Boolean(device) && (sync?.stopped === 'revoked' || refusedAsRevoked);
+  const markRevoked = useCallback(() => setRefusedAsRevoked(true), []);
+  const forgetDevice = useCallback(async () => {
+    await forget();
+    setRefusedAsRevoked(false);
+  }, [forget]);
 
   const local = useMemo(() => (device ? dexieLocal(deviceStore().db) : null), [device]);
   const services = useMemo<PosServices | null>(() => {
@@ -147,8 +166,22 @@ export function PosApp() {
         <Route
           index
           element={
-            loading ? null : services ? (
-              <PosSession services={services} persisted={persisted} />
+            loading ? null : revoked ? (
+              <CashierShell
+                statusBar={<StatusBar device={device} persisted={persisted} online={online} />}
+                mainClassName="grid place-items-center p-6 lg:px-14 lg:py-8"
+              >
+                <Suspense fallback={null}>
+                  <DeviceRevoked
+                    deviceName={device?.deviceName ?? null}
+                    pending={sync?.pending ?? null}
+                    online={online}
+                    onForget={forgetDevice}
+                  />
+                </Suspense>
+              </CashierShell>
+            ) : services ? (
+              <PosSession services={services} persisted={persisted} onRevoked={markRevoked} />
             ) : (
               <CashierShell
                 statusBar={<StatusBar device={null} persisted={persisted} online={online} />}

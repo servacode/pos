@@ -82,7 +82,9 @@ export type CodeCheck =
   /** Offline, and this person never signed in online on this device (with their current code) */
   | { ok: false; reason: 'never_online' }
   /** The server refused this person on this device (not this branch, disabled) */
-  | { ok: false; reason: 'refused' };
+  | { ok: false; reason: 'refused' }
+  /** The owner suspended this device: nobody signs in on it until it is linked again */
+  | { ok: false; reason: 'revoked' };
 
 export interface SignInDeps {
   local: LocalStore;
@@ -142,7 +144,9 @@ export async function checkCode(deps: SignInDeps, member: StaffMember, typed: st
       await recordServerLock(deps.local, member.id, until);
       return { ok: false, reason: 'locked', lockedUntil: until };
     }
-    if (answer.kind === 'refused') return { ok: false, reason: 'refused' };
+    if (answer.kind === 'refused') {
+      return { ok: false, reason: answer.code === 'device_revoked' ? 'revoked' : 'refused' };
+    }
     // No answer: check on the device, as when offline.
   }
 

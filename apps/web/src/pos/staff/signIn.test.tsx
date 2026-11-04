@@ -179,6 +179,26 @@ describe('the device verifier and lockout (16 › تخمين رمز PIN)', () =>
     expect((await readLockout(local, ids.samer)).lockedUntil).toBe(125_000);
   });
 
+  it('tells a suspended device (403 device_revoked) apart from another refusal', async () => {
+    const answer = (code: string) =>
+      vi.fn(async () => new Response(JSON.stringify({ error: { code } }), { status: 403 }));
+    const deps = (fetch: ReturnType<typeof answer>) => ({
+      local: memoryLocal(),
+      token: 'sdt_x',
+      online: true,
+      now: () => 5_000,
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    });
+    expect(await checkCode(deps(answer('device_revoked')), member(), '2580')).toEqual({
+      ok: false,
+      reason: 'revoked',
+    });
+    expect(await checkCode(deps(answer('forbidden')), member(), '2580')).toEqual({
+      ok: false,
+      reason: 'refused',
+    });
+  });
+
   it('checks offline when the server does not answer', async () => {
     const local = memoryLocal();
     await rememberPin(local, ids.samer, 1, '2580', {

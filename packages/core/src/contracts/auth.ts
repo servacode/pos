@@ -92,9 +92,37 @@ export const verifyRegistrationInput = z.object({
 export type VerifyRegistrationInput = z.input<typeof verifyRegistrationInput>;
 export type VerifyRegistrationData = z.output<typeof verifyRegistrationInput>;
 
+/**
+ * «نسيت كلمة السر», step 1: POST /v1/auth/password/forgot. The answer is the same whether or not the
+ * number has an account, so it cannot be used to find out who is registered.
+ */
+export const forgotPasswordInput = z.object({ phone: phoneSchema });
+export type ForgotPasswordInput = z.input<typeof forgotPasswordInput>;
+
+export interface ForgotPasswordResponse {
+  resetId: string;
+  /** Seconds the code stays valid */
+  expiresIn: number;
+  /** The local server's test mode only: the code, shown on screen */
+  testCode?: string;
+}
+
+/** Step 2: POST /v1/auth/password/reset → 204. Every session of that account is ended. */
+export const resetPasswordInput = z.object({
+  resetId: z.uuid('اطلب رمزاً جديداً'),
+  code: registrationCodeSchema,
+  password: passwordSchema,
+});
+export type ResetPasswordInput = z.input<typeof resetPasswordInput>;
+/** The client's second screen: the code and the new password (the id is kept from step 1). */
+export const resetPasswordFormInput = resetPasswordInput.omit({ resetId: true });
+export type ResetPasswordData = z.output<typeof resetPasswordInput>;
+
 export const loginInput = z.object({
   phone: phoneSchema,
   password: z.string('كلمة السر مطلوبة').min(1, 'كلمة السر مطلوبة').max(128),
+  /** «تذكّرني»: false ends the session when the browser closes */
+  remember: z.boolean().default(true),
 });
 
 export type LoginInput = z.input<typeof loginInput>;

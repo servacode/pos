@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OutboxEntry } from '@serva/sync';
 import type { DeviceRecord, NewDocument, SyncEngine, SyncState } from '@serva/sync/client';
-import { deviceStore } from './database';
+import { deviceStore, resetDeviceStore } from './database';
 import { loadDevice } from './device';
 import { checkStorage, startSync } from './sync';
 
@@ -15,6 +15,11 @@ export interface DeviceState {
   reload: () => void;
   /** The sync loops' save (sent within seconds), or null while the device has no loops */
   engineSave: ((input: NewDocument) => Promise<OutboxEntry>) | null;
+  /**
+   * A suspended device: stops its loops and deletes everything it keeps, so it opens on the link
+   * screen. Called once what it held was sent (or the owner chose to drop it).
+   */
+  forget: () => Promise<void>;
 }
 
 /**
@@ -23,7 +28,7 @@ export interface DeviceState {
  * paint of the login code, so it opens the same with or without internet.
  */
 export function useDevice(): DeviceState {
-  const [state, setState] = useState<Omit<DeviceState, 'reload' | 'engineSave'>>({
+  const [state, setState] = useState<Omit<DeviceState, 'reload' | 'engineSave' | 'forget'>>({
     loading: true,
     device: null,
     persisted: null,
@@ -60,5 +65,14 @@ export function useDevice(): DeviceState {
     };
   }, [generation]);
 
-  return { ...state, reload, engineSave: hasEngine ? engineSave : null };
+  const forget = useCallback(async () => {
+    engine.current?.stop();
+    engine.current = null;
+    setHasEngine(false);
+    await resetDeviceStore();
+    setState({ loading: true, device: null, persisted: null, sync: null });
+    reload();
+  }, [reload]);
+
+  return { ...state, reload, forget, engineSave: hasEngine ? engineSave : null };
 }

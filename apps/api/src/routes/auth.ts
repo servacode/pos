@@ -1,8 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { eq, sql } from 'drizzle-orm';
 import {
+  forgotPasswordInput,
   loginInput,
   registerStoreInput,
+  resetPasswordInput,
   verifyRegistrationInput,
   type AuthResponse,
   type RefreshResponse,
@@ -20,11 +22,14 @@ import {
   type IssuedSession,
   type SessionPolicy,
 } from '../services/sessions';
+import { completePasswordReset, startPasswordReset } from '../services/password-reset';
 import { completeRegistration, startRegistration } from '../services/registration';
 import type { RequestMeta } from '../types';
 import { parseBody } from './validation';
 
 export const REFRESH_COOKIE = 'serva_rt';
+/** Set when «تذكّرني» was left off: the refresh cookie then lasts until the browser closes. */
+export const SESSION_ONLY_COOKIE = 'serva_so';
 const COOKIE_PATH = '/v1/auth';
 
 const metaOf = (request: FastifyRequest): RequestMeta => ({
@@ -40,21 +45,26 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   };
   const authLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MINUTE, timeWindow: 60_000 } };
 
-  const setRefreshCookie = (reply: FastifyReply, session: IssuedSession) =>
+  const cookieOptions = {
+    httpOnly: true,
+    secure: env.COOKIE_SECURE,
+    sameSite: 'strict',
+    path: COOKIE_PATH,
+  } as const;
+  // remember = false: no expiry, so the browser drops the cookie when it closes; the marker cookie
+  // keeps that choice across refreshes.
+  const setRefreshCookie = (reply: FastifyReply, session: IssuedSession, remember = true) => {
     reply.setCookie(REFRESH_COOKIE, session.refreshToken, {
-      httpOnly: true,
-      secure: env.COOKIE_SECURE,
-      sameSite: 'strict',
-      path: COOKIE_PATH,
-      expires: session.expiresAt,
+      ...cookieOptions,
+      ...(remember ? { expires: session.expiresAt } : {}),
     });
-  const clearRefreshCookie = (reply: FastifyReply) =>
-    reply.clearCookie(REFRESH_COOKIE, {
-      httpOnly: true,
-      secure: env.COOKIE_SECURE,
-      sameSite: 'strict',
-      path: COOKIE_PATH,
-    });
+    if (remember) reply.clearCookie(SESSION_ONLY_COOKIE, cookieOptions);
+    else reply.setCookie(SESSION_ONLY_COOKIE, '1', cookieOptions);
+  };
+  const clearRefreshCookie = (reply: FastifyReply) => {
+    reply.clearCookie(REFRESH_COOKIE, cookieOptions);
+    reply.clearCookie(SESSION_ONLY_COOKIE, cookieOptions);
+  };
   const accessTokenFor = (session: IssuedSession) =>
     signAccessToken(
       { userId: session.userId, tenantId: session.tenantId, sessionId: session.sessionId },
@@ -84,6 +94,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       tenant: result.tenant,
     };
     return reply.status(201).send(body);
+  });
+
+  // «نسيت كلمة السر», step 1: always «we sent a code if this number has an account» (202).
+  app.post('/v1/auth/password/forgot', { config: authLimit }, async (request, reply) => {
+    const data = parseBody(forgotPasswordInput, request.body);
+    await enforceLimits(request, reply, 3_600_000, [
+      { key: `reset:phone:${data.phone}`, max: env.REGISTER_PHONE_LIMIT_PER_HOUR },
+    ]);
+    return reply.status(202).send(await startPasswordReset(app, data.phone, metaOf(request)));
+  });
+
+  // Step 2: the code proves the phone; the new password replaces the old and every session ends.
+  app.post('/v1/auth/password/reset', { config: authLimit }, async (request, reply) => {
+    const data = parseBody(resetPasswordInput, request.body);
+    const ended = await completePasswordReset(app, data, metaOf(request));
+    for (const sessionId of ended) app.sessionGate.forget(sessionId);
+    clearRefreshCookie(reply);
+    return reply.status(204).send();
   });
 
   app.post('/v1/auth/login', { config: authLimit }, async (request, reply) => {
@@ -128,7 +156,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return { session, tenantName: tenant?.name ?? '' };
     });
 
-    setRefreshCookie(reply, session);
+    setRefreshCookie(reply, session, data.remember);
     const body: AuthResponse = {
       accessToken: await accessTokenFor(session),
       expiresIn: env.ACCESS_TOKEN_TTL_SECONDS,
@@ -154,7 +182,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         clearRefreshCookie(reply);
         throw unauthorized();
       }
-      setRefreshCookie(reply, result.session);
+      setRefreshCookie(reply, result.session, request.cookies[SESSION_ONLY_COOKIE] !== '1');
       const body: RefreshResponse = {
         accessToken: await accessTokenFor(result.session),
         expiresIn: env.ACCESS_TOKEN_TTL_SECONDS,

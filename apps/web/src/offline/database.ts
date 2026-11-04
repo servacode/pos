@@ -12,7 +12,10 @@ export function deviceStore(): DexieSyncStore {
   return store;
 }
 
-/** Tests: close and delete the database so the next test starts from an empty device. */
+/**
+ * Closes and deletes the device database: a suspended device starting over (and tests, so each
+ * starts from an empty device).
+ */
 export async function resetDeviceStore(): Promise<void> {
   if (!store) return;
   const { db } = store;

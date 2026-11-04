@@ -4,6 +4,7 @@ import { FullScreenLoader } from '@serva/ui';
 import { AuthProvider } from '../auth/AuthProvider';
 import { GuestOnly, RequireAuth } from '../auth/guards';
 import { HomePage } from '../pages/HomePage';
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
 
@@ -90,6 +91,7 @@ export function AdminApp() {
         <Route element={<GuestOnly />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         </Route>
         <Route element={<RequireAuth />}>
           <Route path="/" element={<HomePage />} />

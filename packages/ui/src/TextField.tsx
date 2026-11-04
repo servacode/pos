@@ -12,6 +12,11 @@ export interface TextFieldProps extends Omit<ComponentProps<'input'>, 'size'> {
   startAdornment?: ReactNode;
   endAdornment?: ReactNode;
   inputClassName?: string;
+  /**
+   * «filled»: the sign-in pages' look: taller, a soft shadow, and a brand border with a halo on
+   * focus. The default outlined field serves every other screen.
+   */
+  appearance?: 'outlined' | 'filled';
 }
 
 /** Names, addresses and notes (tab 14 › حقل النص): label above, hint or error below. */
@@ -28,8 +33,10 @@ export function TextField({
   inputClassName,
   disabled,
   readOnly,
+  appearance = 'outlined',
   ...inputProps
 }: TextFieldProps) {
+  const filled = appearance === 'filled';
   const density = useDensity();
   const autoId = useId();
   const inputId = id ?? autoId;
@@ -45,10 +52,14 @@ export function TextField({
       </label>
       <div
         className={cn(
-          'flex items-center rounded-control border bg-surface ring-inset transition-[border-color,box-shadow] duration-120',
-          error
-            ? 'border-danger ring-1 ring-danger'
-            : 'border-line-control focus-within:border-ring focus-within:ring-1 focus-within:ring-ring',
+          'flex items-center rounded-control border transition-[border-color,box-shadow,background-color] duration-120',
+          filled
+            ? error
+              ? 'border-danger bg-surface ring-4 ring-danger-soft'
+              : 'border-line-control bg-surface shadow-e1 hover:border-ink-subtle focus-within:border-brand focus-within:ring-4 focus-within:ring-brand-soft focus-within:hover:border-brand'
+            : error
+              ? 'border-danger bg-surface ring-1 ring-danger ring-inset'
+              : 'border-line-control bg-surface ring-inset focus-within:border-ring focus-within:ring-1 focus-within:ring-ring',
           disabled && 'cursor-not-allowed opacity-50',
           readOnly && !error && 'bg-surface-muted',
         )}
@@ -62,10 +73,12 @@ export function TextField({
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
           className={cn(
-            CONTROL_HEIGHT[density],
+            filled ? 'min-h-14' : CONTROL_HEIGHT[density],
             'w-full min-w-0 flex-1 rounded-control bg-transparent px-3.5 text-base text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed',
             density === 'touch' && 'text-lg',
             dir === 'ltr' && 'text-right',
+            // The browser's saved-password fill paints its own colour: keep the field's surface.
+            'autofill:shadow-[inset_0_0_0_1000px_var(--color-surface)] autofill:[-webkit-text-fill-color:var(--color-ink)]',
             inputClassName,
           )}
           {...inputProps}

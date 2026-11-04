@@ -17,6 +17,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/meta': 'public',
   'POST /v1/auth/register': 'public',
   'POST /v1/auth/register/verify': 'public',
+  'POST /v1/auth/password/forgot': 'public',
+  'POST /v1/auth/password/reset': 'public',
   'POST /v1/auth/login': 'public',
   'POST /v1/auth/refresh': 'public',
   'POST /v1/auth/logout': 'public',

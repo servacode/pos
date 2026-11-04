@@ -8,11 +8,12 @@ import {
   type RegisterResponse,
   type RegisterStoreData,
 } from '@serva/core';
-import { Alert, Button, PasswordField, TextField, TextLink } from '@serva/ui';
+import { Alert, Button, LockIcon, PasswordField, PhoneIcon, TextField, TextLink, UserIcon } from '@serva/ui';
 import { useAuth } from '../auth/useAuth';
 import { AuthLayout } from '../layout/AuthLayout';
 import { apiFetch, setAccessToken } from '../lib/api';
 import { useForm } from '../lib/useForm';
+import { FieldIcon, StepBadge, TestCodeBox, authField, codeInputClass } from './authParts';
 
 interface RegisterValues {
   phone: string;
@@ -79,8 +80,10 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
 
   return (
     <AuthLayout
+      pageTitle="افتح متجرك · Serva POS"
+      eyebrow={<StepBadge step={1} of={2} label="معلوماتك" />}
       title="افتح متجرك خلال دقيقة"
-      subtitle="ثلاث معلومات وتبدأ. يمكنك تعديل كل شيء لاحقاً."
+      subtitle="ثلاث معلومات وتبدأ، مجاناً. يمكنك تعديل كل شيء لاحقاً."
       footer={
         <>
           لديك حساب؟{' '}
@@ -90,11 +93,11 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
         </>
       }
     >
-      <title>افتح متجرك · Serva POS</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
 
         <TextField
+          {...authField}
           name="phone"
           label="رقم الجوال"
           type="tel"
@@ -103,26 +106,43 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
           autoComplete="tel"
           placeholder="09xxxxxxxx"
           hint="سنرسل إليه رمز تحقق، وتدخل به لاحقاً."
+          startAdornment={
+            <FieldIcon>
+              <PhoneIcon />
+            </FieldIcon>
+          }
           value={values.phone}
           onChange={(e) => setValue('phone', e.target.value)}
           error={errors.phone}
         />
 
         <TextField
+          {...authField}
           name="fullName"
           label="اسمك"
           placeholder="الاسم الكامل"
           autoComplete="name"
+          startAdornment={
+            <FieldIcon>
+              <UserIcon />
+            </FieldIcon>
+          }
           value={values.fullName}
           onChange={(e) => setValue('fullName', e.target.value)}
           error={errors.fullName}
         />
 
         <PasswordField
+          {...authField}
           name="password"
           label="كلمة السر"
           autoComplete="new-password"
           hint="8 أحرف على الأقل."
+          startAdornment={
+            <FieldIcon>
+              <LockIcon />
+            </FieldIcon>
+          }
           value={values.password}
           onChange={(e) => setValue('password', e.target.value)}
           error={errors.password}
@@ -130,6 +150,7 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
 
         {showAgentCode ? (
           <TextField
+            {...authField}
             name="agentCode"
             label="كود الوكيل (اختياري)"
             dir="ltr"
@@ -184,6 +205,8 @@ function CodeStep({ pending, onChangeNumber }: { pending: PendingCode; onChangeN
 
   return (
     <AuthLayout
+      pageTitle="رمز التحقق · Serva POS"
+      eyebrow={<StepBadge step={2} of={2} label="تأكيد الجوال" />}
       title="أدخل رمز التحقق"
       // The number is isolated (LRI…PDI) so it keeps its order inside the Arabic sentence.
       subtitle={`أرسلنا رمزاً إلى \u2066${pending.phone}\u2069. يُنشأ متجرك بعد تأكيده.`}
@@ -197,14 +220,15 @@ function CodeStep({ pending, onChangeNumber }: { pending: PendingCode; onChangeN
         </button>
       }
     >
-      <title>رمز التحقق · Serva POS</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         {pending.testCode ? (
           <TestCodeBox code={pending.testCode} onFill={() => setValue('code', pending.testCode ?? '')} />
         ) : null}
         <TextField
+          {...authField}
           name="code"
+          inputClassName={codeInputClass}
           label="رمز التحقق"
           dir="ltr"
           inputMode="numeric"
@@ -221,28 +245,5 @@ function CodeStep({ pending, onChangeNumber }: { pending: PendingCode; onChangeN
         </Button>
       </form>
     </AuthLayout>
-  );
-}
-
-/**
- * The local server's test mode: there is no SMS there, so the code is shown here, clearly marked
- * as a test, with a button that types it in.
- */
-function TestCodeBox({ code, onFill }: { code: string; onFill: () => void }) {
-  // "123 456", isolated (LRI…PDI) so the digits keep their order inside the Arabic sentence.
-  const spaced = `⁦${code.slice(0, 3)} ${code.slice(3)}⁩`;
-  return (
-    <div
-      role="note"
-      aria-label="وضع التجربة"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-warning/40 bg-warning-soft px-4 py-3 text-warning-ink"
-    >
-      <p className="font-semibold">
-        وضع التجربة — الرمز: <span className="text-lg tabular-nums">{spaced}</span>
-      </p>
-      <Button type="button" variant="secondary" size="md" onClick={onFill}>
-        املأ الرمز
-      </Button>
-    </div>
   );
 }

@@ -6,6 +6,7 @@ import { checkCode, type CodeCheck, type StaffMember, type StaffSession } from '
 
 export const NEVER_ONLINE_TEXT =
   'لم تدخل على هذا الجهاز من قبل. أول دخول يحتاج الإنترنت، وبعده يفتح دون إنترنت.';
+export const REVOKED_TEXT = 'أُوقف هذا الجهاز من حساب المالك. اربطه من جديد ليعمل.';
 export const REFUSED_TEXT = 'هذا الاسم لا يدخل على هذا الجهاز. اطلب من المدير مراجعة دورك في الفرع.';
 
 /** What the pad shows after a code was checked. */
@@ -21,6 +22,8 @@ export function statusOf(result: Exclude<CodeCheck, { ok: true }>): PinStatus {
       return { kind: 'message', text: NEVER_ONLINE_TEXT };
     case 'refused':
       return { kind: 'message', text: REFUSED_TEXT };
+    case 'revoked':
+      return { kind: 'message', text: REVOKED_TEXT };
   }
 }
 
@@ -37,9 +40,12 @@ function greeting(now: number): string {
 export function StaffSignIn({
   staff,
   onSignedIn,
+  onRevoked,
 }: {
   staff: readonly StaffMember[];
   onSignedIn: (session: StaffSession) => void;
+  /** The server said this device is suspended */
+  onRevoked?: () => void;
 }) {
   const pos = usePos();
   const [picked, setPicked] = useState<StaffMember | null>(staff.length === 1 ? staff[0]! : null);
@@ -72,6 +78,8 @@ export function StaffSignIn({
     if (result.ok) {
       setStatus({ kind: 'idle' });
       onSignedIn(result.session);
+    } else if (result.reason === 'revoked' && onRevoked) {
+      onRevoked();
     } else {
       setStatus(statusOf(result));
     }
