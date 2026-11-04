@@ -1037,6 +1037,8 @@ export const prices = pgTable(
     minPriceMinor: bigint('min_price_minor', { mode: 'number' }),
     /** «سعر الجملة» of one unit in the price's currency; null: wholesale sells at the shelf price */
     wholesalePriceMinor: bigint('wholesale_price_minor', { mode: 'number' }),
+    /** The price before a markdown, struck through on labels and in the shop; null: none */
+    wasPriceMinor: bigint('was_price_minor', { mode: 'number' }),
     priceChangedAt: timestamp('price_changed_at', { withTimezone: true }).notNull().defaultNow(),
     version: version(),
     createdAt: createdAt(),

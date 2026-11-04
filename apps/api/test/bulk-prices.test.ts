@@ -81,6 +81,7 @@ describe('bulk price change', () => {
           currency: 'SYP',
           oldMinor: 4_500_000,
           newMinor: 3_150_000,
+          wasMinor: 4_500_000,
         },
         {
           productId: shirt.id,
@@ -89,6 +90,7 @@ describe('bulk price change', () => {
           currency: 'SYP',
           oldMinor: 4_600_000,
           newMinor: 3_200_000,
+          wasMinor: 4_600_000,
         },
       ],
     });
@@ -117,6 +119,45 @@ describe('bulk price change', () => {
       await app.inject({ method: 'GET', url: `/v1/products/${coat.id}`, headers: as(store) })
     ).json<ProductDetail>();
     expect(coatNow.variants[0]!.price.priceMinor).toBe(9_000_000);
+    // The price before the markdown stays, struck through on the labels
+    expect(read.variants.map((v) => v.wasPriceMinor)).toEqual([4_500_000, 4_600_000]);
+    expect(coatNow.variants[0]!.wasPriceMinor).toBeNull();
+
+    // A second markdown keeps the first price struck through
+    await bulk(store, { categoryId: summer.id, percentBp: -1000, roundToMinor: 50_000, apply: true });
+    read = (
+      await app.inject({ method: 'GET', url: `/v1/products/${shirt.id}`, headers: as(store) })
+    ).json<ProductDetail>();
+    expect(read.variants.map((v) => [v.price.priceMinor, v.wasPriceMinor])).toEqual([
+      [2_850_000, 4_500_000],
+      [2_900_000, 4_600_000],
+    ]);
+
+    // «أنهِ التنزيل»: back at the old prices, nothing struck through
+    const ended = await bulk(store, { categoryId: summer.id, mode: 'restore', apply: true });
+    expect(ended.statusCode, ended.body).toBe(200);
+    expect(ended.json<BulkPriceResult>().items.map((i) => [i.oldMinor, i.newMinor, i.wasMinor])).toEqual([
+      [2_850_000, 4_500_000, null],
+      [2_900_000, 4_600_000, null],
+    ]);
+    read = (
+      await app.inject({ method: 'GET', url: `/v1/products/${shirt.id}`, headers: as(store) })
+    ).json<ProductDetail>();
+    expect(read.variants.map((v) => [v.price.priceMinor, v.wasPriceMinor])).toEqual([
+      [4_500_000, null],
+      [4_600_000, null],
+    ]);
+  });
+
+  it('marks down without a struck price when asked', async () => {
+    const store = await openStore(app);
+    const summer = await category(store, 'صيفي');
+    const shirt = await product(store, 'قميص', summer.id, [4_500_000]);
+    await bulk(store, { categoryId: summer.id, percentBp: -2000, markWas: false, apply: true });
+    const read = (
+      await app.inject({ method: 'GET', url: `/v1/products/${shirt.id}`, headers: as(store) })
+    ).json<ProductDetail>();
+    expect([read.variants[0]!.price.priceMinor, read.variants[0]!.wasPriceMinor]).toEqual([3_600_000, null]);
   });
 
   it('refuses no percent, too much off, and an unknown category', async () => {

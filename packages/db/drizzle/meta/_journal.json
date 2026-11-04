@@ -239,6 +239,13 @@
       "when": 1793746070327,
       "tag": "0033_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793769517377,
+      "tag": "0034_was_price",
+      "breakpoints": true
     }
   ]
 }

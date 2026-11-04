@@ -38,6 +38,7 @@ export function itemsOf(
       name: p.nameAr,
       options: v.attributes.length ? v.attributes.map((a) => a.value).join(' · ') : null,
       priceMinor: v.price.priceMinor,
+      wasMinor: v.wasPriceMinor,
       currency: v.price.currency,
       code,
       copies: copies(v.id),

@@ -391,6 +391,8 @@ export interface VariantDetail {
   price: PriceView;
   minPriceMinor: number | null;
   wholesalePriceMinor: number | null;
+  /** The price before a markdown, printed struck through (03 › الألبسة: ملصق قبل وبعد); null: none */
+  wasPriceMinor: number | null;
   minStockQty: number | null;
   /** When the price last changed (for «تغيّر سعرها») */
   priceChangedAt: string;
@@ -905,17 +907,24 @@ export interface ProductImagesResponse {
  * `roundToMinor` in the store's currency (other currencies to their own minor unit). `apply: false`
  * only shows what would change. The floor price moves by the same percent and never passes the
  * new price; the wholesale price stays.
+ *
+ * A markdown keeps the price before it (`wasPriceMinor`, the first one if marked down twice), printed
+ * struck through on the labels and shown in the shop (03 › الألبسة: ملصق قبل وبعد); `markWas: false`
+ * marks it down without. `mode: 'restore'` ends the markdown: each piece back at its kept price.
  */
-export const bulkPriceInput = z.object({
-  categoryId: uuidSchema,
-  percentBp: z
-    .int()
-    .min(-9000)
-    .max(20000)
-    .refine((v) => v !== 0, 'اكتب نسبة غير الصفر'),
-  roundToMinor: z.int().min(1).max(10_000_000).default(1),
-  apply: z.boolean().default(false),
-});
+export const bulkPriceInput = z
+  .object({
+    categoryId: uuidSchema,
+    mode: z.enum(['move', 'restore']).default('move'),
+    percentBp: z.int().min(-9000).max(20000).default(0),
+    roundToMinor: z.int().min(1).max(10_000_000).default(1),
+    markWas: z.boolean().default(true),
+    apply: z.boolean().default(false),
+  })
+  .refine((v) => v.mode === 'restore' || v.percentBp !== 0, {
+    path: ['percentBp'],
+    message: 'اكتب نسبة غير الصفر',
+  });
 export type BulkPriceInput = z.input<typeof bulkPriceInput>;
 
 export interface BulkPriceResult {
@@ -927,5 +936,7 @@ export interface BulkPriceResult {
     currency: CurrencyCode;
     oldMinor: number;
     newMinor: number;
+    /** The price printed struck through after the change; null: none */
+    wasMinor: number | null;
   }[];
 }

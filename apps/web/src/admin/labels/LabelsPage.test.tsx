@@ -1,10 +1,12 @@
-import { screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MeResponse, ProductDetail, PurchaseDetail } from '@serva/core';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
 import { product, variant } from '../../test/catalog';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
+import { Label } from './Label';
+import { itemsOf } from './LabelsPage';
 
 let print: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -116,5 +118,26 @@ describe('«طباعة الملصقات»', () => {
     renderApp('/labels?purchase=pur-1');
     expect(await screen.findByRole('button', { name: 'اطبع 6 ملصقاً' })).toBeEnabled();
     expect(within(screen.getByRole('list', { name: 'الملصقات' })).getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('prints the price before a markdown struck through beside the new one', () => {
+    const marked = product({
+      id: 'p-shirt',
+      nameAr: 'قميص كتان',
+      variants: [
+        variant({
+          id: 'v-m',
+          attributes: [{ name: 'المقاس', value: 'M' }],
+          price: { currency: 'SYP', priceMinor: 3_150_000 },
+          wasPriceMinor: 4_500_000,
+          barcodes: [code('b-m', '2900000000018')],
+        }),
+      ],
+    });
+    const { items } = itemsOf(marked, () => 1);
+    expect(items[0]).toMatchObject({ priceMinor: 3_150_000, wasMinor: 4_500_000 });
+    render(<Label item={items[0]!} store="نور" showStore={false} />);
+    expect(screen.getByLabelText('السعر قبل التنزيل')).toHaveTextContent('45,000');
+    expect(screen.getByText(/31,500/)).toBeInTheDocument();
   });
 });
