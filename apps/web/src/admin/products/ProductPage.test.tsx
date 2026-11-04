@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { Permission } from '@serva/core';
+import type { MeResponse, Permission } from '@serva/core';
 import { catalogMe, ids, lookupRoutes, product, shownText, variant } from '../../test/catalog';
 import { apiError, mockFetch, type MockReply, type MockRequest } from '../../test/fetchMock';
 import { signedInRefresh } from '../../test/fixtures';
@@ -11,10 +11,16 @@ type Routes = Record<string, MockReply | ((request: MockRequest) => MockReply | 
 
 const productPath = `/v1/products/${ids.milk}`;
 
-function openCard(path: string, routes: Routes = {}, permissions?: Permission[]) {
+function openCard(
+  path: string,
+  routes: Routes = {},
+  permissions?: Permission[],
+  sectors?: MeResponse['tenant']['sectors'],
+) {
+  const me = catalogMe(permissions);
   const mock = mockFetch({
     'POST /v1/auth/refresh': signedInRefresh,
-    'GET /v1/me': { status: 200, body: catalogMe(permissions) },
+    'GET /v1/me': { status: 200, body: sectors ? { ...me, tenant: { ...me.tenant, sectors } } : me },
     ...lookupRoutes,
     [`GET ${productPath}`]: { status: 200, body: product() },
     ...routes,
@@ -23,6 +29,24 @@ function openCard(path: string, routes: Routes = {}, permissions?: Permission[])
 }
 
 const notFound = apiError(404, 'not_found', 'لا يوجد.');
+
+describe('the fields each business type uses', () => {
+  it('shows a clothing shop no scientific name, weight, IMEI or kitchen extras', async () => {
+    openCard('/products/new', {}, undefined, ['clothing']);
+    expect(await screen.findByRole('heading', { name: 'منتج جديد', level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'المقاسات والألوان' })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/الاسم العلمي/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'يُباع بالوزن' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'له رقم تسلسلي أو IMEI' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /الإضافات والخيارات/ })).not.toBeInTheDocument();
+  });
+
+  it('shows a pharmacy the scientific name, and an electronics shop the IMEI', async () => {
+    openCard('/products/new', {}, undefined, ['pharmacy', 'electronics']);
+    expect(await screen.findByLabelText(/الاسم العلمي/)).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'له رقم تسلسلي أو IMEI' })).toBeInTheDocument();
+  });
+});
 
 describe('a new product', () => {
   it('saves the name, category, price and barcodes in one request, then opens the saved card', async () => {

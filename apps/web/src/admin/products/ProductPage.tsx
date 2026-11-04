@@ -45,6 +45,8 @@ import {
   type ProductDraft,
   type VariantDraft,
 } from './form';
+import type { SectorKey } from '@serva/core';
+import { MODIFIER_SECTORS, SERIAL_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors';
 import { ModifiersEditor } from './ModifiersEditor';
 import { ImagesEditor } from './ImagesEditor';
 import { OptionsEditor } from './OptionsEditor';
@@ -128,6 +130,7 @@ export function ProductPage() {
   const { id = null } = useParams();
   const productId = id === 'new' ? null : id;
   const me = useMe();
+  const fits = (sectors: readonly SectorKey[]) => storeSells(me.tenant.sectors, sectors);
   const navigate = useNavigate();
   const location = useLocation();
   const [search] = useSearchParams();
@@ -409,14 +412,16 @@ export function ProductPage() {
                 onChange={(event) => update({ brand: event.target.value })}
                 error={errors.brand}
               />
-              <TextField
-                name="genericName"
-                label="الاسم العلمي (للأدوية، اختياري)"
-                hint="الكاشير يجد الدواء به أيضاً"
-                value={draft.genericName ?? ''}
-                onChange={(event) => update({ genericName: event.target.value })}
-                error={errors.genericName}
-              />
+              {fits(['pharmacy']) || draft.genericName ? (
+                <TextField
+                  name="genericName"
+                  label="الاسم العلمي (للأدوية، اختياري)"
+                  hint="الكاشير يجد الدواء به أيضاً"
+                  value={draft.genericName ?? ''}
+                  onChange={(event) => update({ genericName: event.target.value })}
+                  error={errors.genericName}
+                />
+              ) : null}
               <Select
                 name="categoryId"
                 label="التصنيف"
@@ -472,16 +477,18 @@ export function ProductPage() {
                     </option>
                   ))}
               </Select>
-              <Switch
-                label="يُباع بالوزن"
-                description="الكمية على الكاشير بالكيلو، مثل 0.250"
-                checked={unit?.allowsFraction ?? false}
-                disabled={!canManage || !fractionUnit(!(unit?.allowsFraction ?? false))}
-                onCheckedChange={(checked) => {
-                  const next = fractionUnit(checked);
-                  if (next) update({ unitId: next.id });
-                }}
-              />
+              {fits(WEIGHED_SECTORS) || unit?.allowsFraction ? (
+                <Switch
+                  label="يُباع بالوزن"
+                  description="الكمية على الكاشير بالكيلو، مثل 0.250"
+                  checked={unit?.allowsFraction ?? false}
+                  disabled={!canManage || !fractionUnit(!(unit?.allowsFraction ?? false))}
+                  onCheckedChange={(checked) => {
+                    const next = fractionUnit(checked);
+                    if (next) update({ unitId: next.id });
+                  }}
+                />
+              ) : null}
               <Switch
                 label="يُباع على الكاشير"
                 description="أطفئه ليختفي من شاشة البيع ويبقى في المخزون."
@@ -489,35 +496,41 @@ export function ProductPage() {
                 disabled={!canManage}
                 onCheckedChange={(sellOnPos) => update({ sellOnPos })}
               />
-              <Switch
-                label="له رقم تسلسلي أو IMEI"
-                description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
-                checked={draft.tracksSerial ?? false}
-                disabled={!canManage}
-                onCheckedChange={(tracksSerial) => update({ tracksSerial })}
-              />
-              <TextField
-                name="warrantyMonths"
-                label="الكفالة بالأشهر (اختياري)"
-                inputMode="numeric"
-                dir="ltr"
-                value={draft.warranty ?? ''}
-                disabled={!canManage}
-                onChange={(event) => update({ warranty: event.target.value })}
-                error={errors.warrantyMonths}
-              />
+              {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
+                <>
+                  <Switch
+                    label="له رقم تسلسلي أو IMEI"
+                    description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
+                    checked={draft.tracksSerial ?? false}
+                    disabled={!canManage}
+                    onCheckedChange={(tracksSerial) => update({ tracksSerial })}
+                  />
+                  <TextField
+                    name="warrantyMonths"
+                    label="الكفالة بالأشهر (اختياري)"
+                    inputMode="numeric"
+                    dir="ltr"
+                    value={draft.warranty ?? ''}
+                    disabled={!canManage}
+                    onChange={(event) => update({ warranty: event.target.value })}
+                    error={errors.warrantyMonths}
+                  />
+                </>
+              ) : null}
             </div>
           </Section>
 
-          <Section title="الإضافات والخيارات (للمطاعم والمقاهي)">
-            <ModifiersEditor
-              groups={draft.modifiers ?? []}
-              currency={liveVariants[0]?.currency ?? 'SYP'}
-              disabled={!canManage}
-              onChange={(modifiers) => update({ modifiers })}
-            />
-            {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
-          </Section>
+          {fits(MODIFIER_SECTORS) || (draft.modifiers?.length ?? 0) > 0 ? (
+            <Section title="الإضافات والخيارات (للمطاعم والمقاهي)">
+              <ModifiersEditor
+                groups={draft.modifiers ?? []}
+                currency={liveVariants[0]?.currency ?? 'SYP'}
+                disabled={!canManage}
+                onChange={(modifiers) => update({ modifiers })}
+              />
+              {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
+            </Section>
+          ) : null}
 
           <Section title="المقاسات والألوان">
             <OptionsEditor axes={draft.axes} variantCount={liveVariants.length} onChange={setAxes} />

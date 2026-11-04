@@ -36,6 +36,7 @@ import {
   SHIFTS_ACCESS,
   type AccessRule,
 } from '../admin/reports/access';
+import { CHEQUE_SECTORS, EXPIRY_SECTORS, SERIAL_SECTORS, storeSells } from '../lib/sectors';
 
 export interface NavEntry {
   to: string;
@@ -66,28 +67,6 @@ export const NAV_GROUPS: readonly { key: NavGroupKey; label?: string }[] = [
   { key: 'stock', label: 'البضاعة' },
   { key: 'reports', label: 'التقارير والحسابات' },
   { key: 'settings', label: 'الإعدادات' },
-];
-
-// Business types that keep stock with expiry dates, serial numbers, or that take cheques.
-const EXPIRY_SECTORS: readonly SectorKey[] = [
-  'supermarket',
-  'pharmacy',
-  'bakery',
-  'cosmetics',
-  'produce',
-  'wholesale',
-  'restaurant',
-  'cafe',
-  'general',
-];
-const SERIAL_SECTORS: readonly SectorKey[] = ['electronics', 'building_materials', 'general'];
-const CHEQUE_SECTORS: readonly SectorKey[] = [
-  'wholesale',
-  'building_materials',
-  'electronics',
-  'supermarket',
-  'pharmacy',
-  'general',
 ];
 
 /**
@@ -232,8 +211,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { group: NavGroupKey })[] = [
 ];
 
 function fitsSectors(entry: NavEntry, sectors: readonly SectorKey[] | undefined): boolean {
-  if (!entry.sectors || !sectors || sectors.length === 0) return true;
-  return entry.sectors.some((sector) => sectors.includes(sector));
+  return !entry.sectors || storeSells(sectors, entry.sectors);
 }
 
 type NavMe = Pick<MeResponse, 'user' | 'settings'> & { tenant?: { sectors?: readonly SectorKey[] } };
