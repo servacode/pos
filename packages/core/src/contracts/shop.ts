@@ -86,6 +86,10 @@ export interface ShopProductCard {
   priceMinor: number;
   /** Above priceMinor when the pieces cost differently */
   maxPriceMinor: number;
+  /** The cheapest piece's price before its markdown or offer, struck through; null: none */
+  wasPriceMinor: number | null;
+  /** The running offer's name («تنزيلات الصيف −30٪»); null: none */
+  offer: string | null;
   available: boolean;
 }
 
@@ -107,9 +111,14 @@ export interface ShopProduct {
     id: string;
     label: string | null;
     attributes: { name: string; value: string }[];
+    /** After a running percent offer, as the order is priced */
     priceMinor: number;
+    /** Before the markdown or offer, struck through; null: none */
+    wasPriceMinor: number | null;
     available: boolean;
   }[];
+  /** The running offer's name on any of its pieces; null: none */
+  offer: string | null;
 }
 
 export const MAX_ORDER_LINES = 30;

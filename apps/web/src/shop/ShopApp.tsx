@@ -138,10 +138,22 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                   </div>
                 )}
                 <span className="flex flex-1 flex-col gap-1 p-2">
+                  {p.offer ? (
+                    <span className="w-fit rounded-full bg-danger-soft px-2 text-xs font-bold text-danger-ink">
+                      {p.offer}
+                    </span>
+                  ) : null}
                   <span className="line-clamp-2 font-semibold">{p.name}</span>
-                  <span className="text-sm">
-                    {p.maxPriceMinor > p.priceMinor ? 'من ' : ''}
-                    <Money minor={p.priceMinor} currency={p.currency} className="font-bold" />
+                  <span className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                    <span>
+                      {p.maxPriceMinor > p.priceMinor ? 'من ' : ''}
+                      <Money minor={p.priceMinor} currency={p.currency} className="font-bold" />
+                    </span>
+                    {p.wasPriceMinor ? (
+                      <s aria-label="السعر قبل التنزيل" className="text-xs text-ink-muted">
+                        <Money minor={p.wasPriceMinor} currency={p.currency} />
+                      </s>
+                    ) : null}
                   </span>
                   {!p.available ? <span className="text-xs font-semibold text-danger-ink">نفد</span> : null}
                 </span>
@@ -191,7 +203,9 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
   const images = product.images;
   const matching = images.findIndex((i) => i.optionValue && Object.values(chosen).includes(i.optionValue));
   const main = images[matching >= 0 && shown === 0 ? matching : shown] ?? images[0];
-  const price = variant?.priceMinor ?? Math.min(...product.variants.map((v) => v.priceMinor));
+  const cheapest = product.variants.reduce((a, b) => (b.priceMinor < a.priceMinor ? b : a));
+  const price = variant?.priceMinor ?? cheapest.priceMinor;
+  const was = (variant ?? cheapest).wasPriceMinor;
 
   return (
     <article aria-label={product.name} className="flex flex-col gap-4 md:grid md:grid-cols-2">
@@ -225,7 +239,19 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
       </div>
       <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-bold">{product.name}</h1>
-        <Money minor={price} currency={product.currency} className="text-2xl font-bold" />
+        {product.offer ? (
+          <span className="w-fit rounded-full bg-danger-soft px-3 py-1 text-sm font-bold text-danger-ink">
+            {product.offer}
+          </span>
+        ) : null}
+        <span className="flex flex-wrap items-baseline gap-3">
+          <Money minor={price} currency={product.currency} className="text-2xl font-bold" />
+          {was ? (
+            <s aria-label="السعر قبل التنزيل" className="text-lg text-ink-muted">
+              <Money minor={was} currency={product.currency} />
+            </s>
+          ) : null}
+        </span>
         {product.options.map((option) => (
           <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-2">
             <span className="font-semibold">{option.name}</span>

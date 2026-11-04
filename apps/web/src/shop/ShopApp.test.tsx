@@ -33,6 +33,8 @@ const HOME: ShopHome = {
       currency: 'SYP',
       priceMinor: 450_000,
       maxPriceMinor: 460_000,
+      wasPriceMinor: 600_000,
+      offer: 'تنزيلات الصيف',
       available: true,
     },
     {
@@ -43,6 +45,8 @@ const HOME: ShopHome = {
       currency: 'SYP',
       priceMinor: 200_000,
       maxPriceMinor: 200_000,
+      wasPriceMinor: null,
+      offer: null,
       available: true,
     },
   ],
@@ -66,10 +70,32 @@ const SHIRT: ShopProduct = {
     { name: 'اللون', values: ['أبيض', 'أزرق'] },
   ],
   variants: [
-    { id: 'v-mw', label: 'M · أبيض', attributes: attrs('M', 'أبيض'), priceMinor: 450_000, available: true },
-    { id: 'v-lw', label: 'L · أبيض', attributes: attrs('L', 'أبيض'), priceMinor: 460_000, available: true },
-    { id: 'v-mb', label: 'M · أزرق', attributes: attrs('M', 'أزرق'), priceMinor: 450_000, available: false },
+    {
+      id: 'v-mw',
+      label: 'M · أبيض',
+      attributes: attrs('M', 'أبيض'),
+      priceMinor: 450_000,
+      wasPriceMinor: null,
+      available: true,
+    },
+    {
+      id: 'v-lw',
+      label: 'L · أبيض',
+      attributes: attrs('L', 'أبيض'),
+      priceMinor: 460_000,
+      wasPriceMinor: null,
+      available: true,
+    },
+    {
+      id: 'v-mb',
+      label: 'M · أزرق',
+      attributes: attrs('M', 'أزرق'),
+      priceMinor: 450_000,
+      wasPriceMinor: null,
+      available: false,
+    },
   ],
+  offer: null,
 };
 
 beforeEach(() => {
@@ -114,6 +140,9 @@ describe('the online shop', () => {
     await user.click(screen.getByRole('button', { name: 'رجالي' }));
     expect(within(grid).getAllByRole('listitem')).toHaveLength(1);
     expect(grid).toHaveTextContent('من');
+    // The offer and the price before it, struck through
+    expect(grid).toHaveTextContent('تنزيلات الصيف');
+    expect(within(grid).getByLabelText('السعر قبل التنزيل')).toHaveTextContent('6,000');
     await user.click(within(grid).getByRole('link', { name: /قميص كتان/ }));
 
     const page = await screen.findByRole('article', { name: 'قميص كتان' });

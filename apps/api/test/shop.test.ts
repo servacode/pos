@@ -177,6 +177,8 @@ describe('the online shop', () => {
         currency: 'SYP',
         priceMinor: 450_000,
         maxPriceMinor: 460_000,
+        wasPriceMinor: null,
+        offer: null,
         available: true,
       },
     ]);
@@ -300,5 +302,34 @@ describe('the online shop', () => {
       payload: { status: 'rejected', version: mine.items[0]!.version },
     });
     expect(steal.statusCode).toBe(404);
+  });
+
+  it('shows a markdown and a running percent offer struck through, and orders at the offer price', async () => {
+    const store = await openStore(app);
+    const { shirt, l } = await goods(store);
+    await openShop(store);
+    // 20% off everything while it runs
+    const promo = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: as(store),
+      payload: { name: 'تنزيلات الشتاء', kind: 'percent', percentBp: 2000, scope: 'all' },
+    });
+    expect(promo.statusCode, promo.body).toBe(201);
+    const home = (await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' })).json<ShopHome>();
+    expect(home.products[0]).toMatchObject({
+      priceMinor: 360_000,
+      wasPriceMinor: 450_000,
+      offer: 'تنزيلات الشتاء',
+    });
+    const page = (
+      await app.inject({ method: 'GET', url: `/v1/shop/nour-fashion/products/${shirt.id}` })
+    ).json<ShopProduct>();
+    expect(page.offer).toBe('تنزيلات الشتاء');
+    expect(page.variants.map((v) => [v.priceMinor, v.wasPriceMinor])).toEqual([[368_000, 460_000]]);
+    // The order is priced as the shop showed it
+    const res = await order('nour-fashion', [{ variantId: l, qty: 1 }]);
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json<ShopOrderPlaced>().totalMinor).toBe(368_000);
   });
 });

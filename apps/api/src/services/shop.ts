@@ -2,11 +2,14 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import {
   convert,
   formatMoney,
+  promotionActive,
+  promotionDiscount,
   rateFor,
   stripBidiControls,
   type CurrencyCode,
   type OnlineOrder,
   type OnlineStoreSettings,
+  type PromotionRule,
   type HoldPlaced,
   type ShopCodeSent,
   type ShopHome,
@@ -106,6 +109,104 @@ function inBase(
   return rate ? convert(minor, currency, base, rate) : null;
 }
 
+interface Priced {
+  priceMinor: number;
+  wasPriceMinor: number | null;
+  offer: string | null;
+}
+
+/**
+ * The shop's price of a piece (03 › الألبسة: العروض في المتجر): in the store's currency, less the
+ * best percent offer running now on it (as the till would take it off), with the price before the
+ * markdown or the offer to strike through. Buy-and-get offers stay for the till.
+ */
+async function pricerOf(
+  tx: Transaction,
+  base: CurrencyCode,
+): Promise<
+  (row: {
+    productId: string;
+    categoryId: string | null;
+    currency: string;
+    price: string;
+    was: string | null;
+  }) => Priced | null
+> {
+  const rates = await ratesOf(tx);
+  const [tenant] = await tx.execute<{ timezone: string | null }>(sql`select timezone from tenants limit 1`);
+  const rows = await tx.execute<{
+    id: string;
+    name: string;
+    percent_bp: number | null;
+    scope: string;
+    category_ids: string[] | null;
+    product_ids: string[] | null;
+    starts_at: string | null;
+    ends_at: string | null;
+    days_of_week: number[] | null;
+    from_time: string | null;
+    to_time: string | null;
+  }>(sql`
+    select id, name, percent_bp, scope, category_ids, product_ids,
+           to_char(starts_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as starts_at,
+           to_char(ends_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as ends_at,
+           days_of_week, from_time, to_time
+    from promotions where archived_at is null and kind = 'percent'`);
+  const now = new Date();
+  const rules: PromotionRule[] = rows
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      kind: 'percent' as const,
+      percentBp: r.percent_bp,
+      buyQty: null,
+      getQty: null,
+      scope: r.scope as PromotionRule['scope'],
+      categoryIds: r.category_ids ?? [],
+      productIds: r.product_ids ?? [],
+      startsAt: r.starts_at,
+      endsAt: r.ends_at,
+      daysOfWeek: r.days_of_week ?? [],
+      fromTime: r.from_time,
+      toTime: r.to_time,
+      archived: false,
+    }))
+    .filter((r) => promotionActive(r, now, tenant?.timezone ?? 'Asia/Damascus'));
+  const parent = new Map<string, string | null>();
+  if (rules.some((r) => r.scope === 'categories')) {
+    const cats = await tx.execute<{ id: string; parent_id: string | null }>(
+      sql`select id, parent_id from categories`,
+    );
+    for (const c of cats) parent.set(c.id, c.parent_id);
+  }
+  const pathOf = (id: string | null): string[] => {
+    const path: string[] = [];
+    for (let at = id; at && path.length < 10; at = parent.get(at) ?? null) path.push(at);
+    return path;
+  };
+  return (row) => {
+    const price = inBase(Number(row.price), row.currency as CurrencyCode, base, rates);
+    if (price === null) return null;
+    const keptRaw =
+      row.was === null ? null : inBase(Number(row.was), row.currency as CurrencyCode, base, rates);
+    const kept = keptRaw !== null && keptRaw > price ? keptRaw : null;
+    let best: { off: number; name: string } | null = null;
+    for (const rule of rules) {
+      const off = promotionDiscount(rule, {
+        lineNo: 1,
+        productId: row.productId,
+        categoryPath: pathOf(row.categoryId),
+        qty: 1000,
+        unitPriceMinor: price,
+        weighed: false,
+      });
+      if (off > 0 && (!best || off > best.off)) best = { off, name: rule.name };
+    }
+    if (!best) return { priceMinor: price, wasPriceMinor: kept, offer: null };
+    return { priceMinor: price - best.off, wasPriceMinor: kept ?? price, offer: best.name };
+  };
+}
+
 const sellable = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos`;
 const liveVariant = sql`v.archived_at is null`;
 /** Pieces held by accepted orders not sold yet, in stock units (a thousandth of a piece) */
@@ -120,18 +221,19 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
     withTenant(db, tenantId, async (tx) => {
       const store = await storeOf(tx, tenantId);
       const base = store.base as CurrencyCode;
-      const rates = await ratesOf(tx);
+      const priceOf = await pricerOf(tx, base);
       const rows = await tx.execute<{
         id: string;
         name: string;
         category_id: string | null;
         currency: string;
         price: string;
+        was: string | null;
         available: boolean;
         upload_id: string | null;
       }>(sql`
         select p.id, p.name_ar as name, p.category_id, pr.currency, pr.price_minor::text as price,
-               ${availableSql} as available,
+               pr.was_price_minor::text as was, ${availableSql} as available,
                (select i.upload_id from product_images i where i.product_id = p.id
                 order by i.sort_order, i.created_at limit 1) as upload_id
         from products p
@@ -142,8 +244,9 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         limit 5000`);
       const byProduct = new Map<string, ShopHome['products'][number]>();
       for (const r of rows) {
-        const price = inBase(Number(r.price), r.currency as CurrencyCode, base, rates);
-        if (price === null) continue;
+        const priced = priceOf({ productId: r.id, categoryId: r.category_id, ...r });
+        if (priced === null) continue;
+        const price = priced.priceMinor;
         const card = byProduct.get(r.id);
         if (!card) {
           byProduct.set(r.id, {
@@ -154,11 +257,18 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
             currency: base,
             priceMinor: price,
             maxPriceMinor: price,
+            wasPriceMinor: priced.wasPriceMinor,
+            offer: priced.offer,
             available: r.available,
           });
         } else {
-          card.priceMinor = Math.min(card.priceMinor, price);
+          // The card shows the cheapest piece, and what that one was before
+          if (price < card.priceMinor) {
+            card.priceMinor = price;
+            card.wasPriceMinor = priced.wasPriceMinor;
+          }
           card.maxPriceMinor = Math.max(card.maxPriceMinor, price);
+          card.offer ??= priced.offer;
           card.available ||= r.available;
         }
       }
@@ -201,7 +311,7 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
     withTenant(db, tenantId, async (tx) => {
       const store = await storeOf(tx, tenantId);
       const base = store.base as CurrencyCode;
-      const rates = await ratesOf(tx);
+      const priceOf = await pricerOf(tx, base);
       const rows = await tx.execute<{
         product_name: string;
         category_id: string | null;
@@ -210,25 +320,29 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
         attributes: { name: string; value: string }[];
         currency: string;
         price: string;
+        was: string | null;
         available: boolean;
       }>(sql`
         select p.name_ar as product_name, p.category_id, v.id, v.label, v.attributes, pr.currency,
-               pr.price_minor::text as price, ${availableSql} as available
+               pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available
         from products p
         join variants v on v.product_id = p.id and ${liveVariant}
         join prices pr on pr.id = v.id
         where p.id = ${productId} and ${sellable}
         order by v.sort_order, v.id`);
       if (rows.length === 0) throw notFound('هذا الصنف غير موجود.');
+      let offer: string | null = null;
       const variants = rows.flatMap((r) => {
-        const price = inBase(Number(r.price), r.currency as CurrencyCode, base, rates);
-        if (price === null || (!r.available && !store.show_out_of_stock)) return [];
+        const priced = priceOf({ productId, categoryId: r.category_id, ...r });
+        if (priced === null || (!r.available && !store.show_out_of_stock)) return [];
+        offer ??= priced.offer;
         return [
           {
             id: r.id,
             label: r.label,
             attributes: r.attributes ?? [],
-            priceMinor: price,
+            priceMinor: priced.priceMinor,
+            wasPriceMinor: priced.wasPriceMinor,
             available: r.available,
           },
         ];
@@ -257,6 +371,7 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
         })),
         options,
         variants,
+        offer,
       };
     }),
   );
@@ -273,19 +388,21 @@ async function priceLines(
   input: { variantId: string; qty: number }[],
   needOnShelf: boolean,
 ): Promise<OnlineOrderLine[]> {
-  const rates = await ratesOf(tx);
+  const priceOf = await pricerOf(tx, base);
   const ids = [...new Set(input.map((l) => l.variantId))];
   const rows = await tx.execute<{
     id: string;
     product_id: string;
+    category_id: string | null;
     name: string;
     label: string | null;
     currency: string;
     price: string;
+    was: string | null;
     available: boolean;
   }>(sql`
-    select v.id, p.id as product_id, p.name_ar as name, v.label, pr.currency,
-           pr.price_minor::text as price, ${availableSql} as available
+    select v.id, p.id as product_id, p.category_id, p.name_ar as name, v.label, pr.currency,
+           pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available
     from variants v
     join products p on p.id = v.product_id
     join prices pr on pr.id = v.id
@@ -297,7 +414,10 @@ async function priceLines(
   const lines: OnlineOrderLine[] = [];
   for (const [index, line] of input.entries()) {
     const row = known.get(line.variantId);
-    const price = row ? inBase(Number(row.price), row.currency as CurrencyCode, base, rates) : null;
+    // The price the shop showed, its offer taken off
+    const price = row
+      ? (priceOf({ productId: row.product_id, categoryId: row.category_id, ...row })?.priceMinor ?? null)
+      : null;
     if (!row || price === null || (needOnShelf && !row.available)) {
       throw fieldError(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
     }
