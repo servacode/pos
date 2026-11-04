@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { cn } from './cn';
-import { TrendDownIcon, TrendUpIcon } from './icons';
+import { TrendDownIcon, TrendUpIcon, type Icon } from './icons';
 
 export interface CardProps extends ComponentProps<'div'> {
   /** Hover lift for a card that opens something (kit .card.is-click). */
@@ -25,23 +25,47 @@ export function Card({ className, interactive = false, selected = false, ...rest
   );
 }
 
-/** A card's title row: the title at the start, an action at the end. */
+/** A card's title row: an optional icon, the title and a line under it, and an action at the end. */
 export function CardHeader({
   title,
+  description,
+  icon: HeaderIcon,
   action,
   className,
 }: {
   title: ReactNode;
+  description?: ReactNode;
+  icon?: Icon;
   action?: ReactNode;
   className?: string;
 }) {
   return (
-    <div className={cn('mb-3 flex items-center justify-between gap-3', className)}>
-      <h3 className="text-lg font-semibold text-ink">{title}</h3>
+    <div className={cn('mb-4 flex items-start justify-between gap-3', className)}>
+      <div className="flex min-w-0 items-start gap-3">
+        {HeaderIcon ? (
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
+            <HeaderIcon />
+          </span>
+        ) : null}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h3 className="text-lg font-semibold text-ink">{title}</h3>
+          {description ? <p className="text-sm text-ink-muted">{description}</p> : null}
+        </div>
+      </div>
       {action}
     </div>
   );
 }
+
+export type StatTone = 'brand' | 'info' | 'warning' | 'danger' | 'neutral';
+
+const STAT_TONES: Record<StatTone, string> = {
+  brand: 'bg-brand-soft text-brand-ink',
+  info: 'bg-info-soft text-info-ink',
+  warning: 'bg-warning-soft text-warning-ink',
+  danger: 'bg-danger-soft text-danger-ink',
+  neutral: 'bg-surface-muted text-ink-muted',
+};
 
 export interface StatTileProps {
   label: ReactNode;
@@ -53,6 +77,9 @@ export interface StatTileProps {
   footnote?: ReactNode;
   /** The hero tile at the top of the dashboard: a bigger number (tab 14 › لوحات المؤشرات). */
   hero?: boolean;
+  /** A glyph in a soft chip at the tile's end, coloured by `tone` */
+  icon?: Icon;
+  tone?: StatTone;
   className?: string;
 }
 
@@ -60,12 +87,28 @@ export interface StatTileProps {
  * A KPI on the owner's dashboard (tab 14 › بطاقة المؤشر): the label, the number in equal-width
  * digits, and the change with an arrow, a colour and words, never colour alone.
  */
-export function StatTile({ label, value, trend, footnote, hero = false, className }: StatTileProps) {
+export function StatTile({
+  label,
+  value,
+  trend,
+  footnote,
+  hero = false,
+  icon: TileIcon,
+  tone = 'brand',
+  className,
+}: StatTileProps) {
   const TrendIcon = trend?.direction === 'down' ? TrendDownIcon : TrendUpIcon;
   return (
     <Card className={cn('flex flex-col gap-1', className)}>
-      <p className="text-sm font-semibold text-ink-muted">{label}</p>
-      <p className={cn('num font-bold text-ink', hero ? 'text-total' : 'text-kpi')}>{value}</p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-semibold text-ink-muted">{label}</p>
+        {TileIcon ? (
+          <span className={cn('-mt-1 grid size-10 shrink-0 place-items-center rounded-xl', STAT_TONES[tone])}>
+            <TileIcon />
+          </span>
+        ) : null}
+      </div>
+      <p className={cn('num font-bold tracking-tight text-ink', hero ? 'text-total' : 'text-kpi')}>{value}</p>
       {footnote ? <p className="text-sm text-ink-muted">{footnote}</p> : null}
       {trend ? (
         <p className="flex flex-wrap items-center gap-x-2 text-[0.8125rem]">

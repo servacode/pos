@@ -60,7 +60,8 @@ export { Badge, ConnectionPill, StatusChip, STATUSES, type BadgeTone, type Statu
 export { Alert } from './Alert';
 export { Banner, type BannerProps, type BannerTone } from './Banner';
 export { TestModeRibbon, type TestModeRibbonProps } from './TestModeRibbon';
-export { Card, CardHeader, StatTile, type CardProps, type StatTileProps } from './Card';
+export { Card, CardHeader, StatTile, type CardProps, type StatTileProps, type StatTone } from './Card';
+export { PageHeader, type PageHeaderProps } from './PageHeader';
 export { DataTable, type DataColumn, type DataTableProps } from './DataTable';
 export { Tabs, type TabItem, type TabsProps } from './Tabs';
 export { Dialog, Sheet, type DialogProps, type SheetProps } from './Dialog';

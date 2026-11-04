@@ -57,6 +57,21 @@ import {
   Wifi,
   WifiOff,
   X,
+  Boxes,
+  Calculator,
+  CalendarClock,
+  ChevronUp,
+  CreditCard,
+  Globe,
+  Hash,
+  LayoutDashboard,
+  MessageCircle,
+  PackageX,
+  Sparkles,
+  Tags,
+  Truck,
+  Wallet,
+  ArrowUpRight,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react';
@@ -171,3 +186,21 @@ export const LinkIcon = defineIcon(Link);
 export const SendIcon = defineIcon(Send);
 export const EditIcon = defineIcon(Pencil);
 export const ShieldCheckIcon = defineIcon(ShieldCheck);
+
+// The admin menu: one glyph per screen, so no two entries look alike.
+export const DashboardIcon = defineIcon(LayoutDashboard);
+export const InventoryIcon = defineIcon(Boxes);
+export const AccountingIcon = defineIcon(Calculator);
+export const ExpiryIcon = defineIcon(CalendarClock);
+export const SubscriptionIcon = defineIcon(CreditCard);
+export const OnlineStoreIcon = defineIcon(Globe);
+export const SerialIcon = defineIcon(Hash);
+export const MessagesIcon = defineIcon(MessageCircle);
+export const SupplierReturnIcon = defineIcon(PackageX);
+export const SparklesIcon = defineIcon(Sparkles);
+export const PricesIcon = defineIcon(Tags);
+export const TransferIcon = defineIcon(Truck);
+export const WalletIcon = defineIcon(Wallet);
+export const CollapseIcon = defineIcon(ChevronUp);
+/** «افتح»: an arrow out of a card toward its page; mirrored in RTL. */
+export const OpenIcon = defineIcon(ArrowUpRight, { directional: true });
