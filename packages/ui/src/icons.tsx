@@ -2,9 +2,12 @@ import type { ReactNode } from 'react';
 import {
   Archive,
   ArrowLeft,
+  ArrowLeftRight,
   Banknote,
   Barcode,
   Bell,
+  BookOpen,
+  CalendarClock,
   Camera,
   ChartColumn,
   Check,
@@ -12,38 +15,51 @@ import {
   ChevronLeft,
   CircleAlert,
   CircleCheck,
+  ClipboardList,
   Clock,
+  CreditCard,
   Delete,
   Ellipsis,
   Eye,
   EyeOff,
   FolderTree,
   Gift,
+  Hash,
   House,
+  ImageOff,
   Inbox,
   Info,
   KeyRound,
+  Landmark,
+  LayoutGrid,
   Link,
   LockKeyhole,
   LogOut,
+  Megaphone,
   Menu,
   Minus,
   Monitor,
   MonitorSmartphone,
   Package,
+  PackageOpen,
+  PanelRight,
   Pencil,
+  Percent,
   Plus,
   Printer,
   QrCode,
   Receipt,
   RefreshCw,
   Scale,
+  Scissors,
   Search,
   Send,
   Settings,
   ShieldCheck,
+  Shirt,
   ShoppingCart,
   Smartphone,
+  Sparkles,
   Store,
   Tablet,
   Tag,
@@ -51,9 +67,11 @@ import {
   TrendingDown,
   TrendingUp,
   TriangleAlert,
+  Truck,
   Undo2,
   User,
   Users,
+  Warehouse,
   Wifi,
   WifiOff,
   X,
@@ -171,3 +189,23 @@ export const LinkIcon = defineIcon(Link);
 export const SendIcon = defineIcon(Send);
 export const EditIcon = defineIcon(Pencil);
 export const ShieldCheckIcon = defineIcon(ShieldCheck);
+
+// Menu and dashboard glyphs (هوية 2): every menu item has its own picture.
+export const TransferIcon = defineIcon(ArrowLeftRight);
+export const CalendarIcon = defineIcon(CalendarClock);
+export const SerialIcon = defineIcon(Hash);
+export const ChequeIcon = defineIcon(Landmark);
+export const MegaphoneIcon = defineIcon(Megaphone);
+export const StockIcon = defineIcon(Warehouse);
+export const PercentIcon = defineIcon(Percent);
+export const ScissorsIcon = defineIcon(Scissors);
+export const TruckIcon = defineIcon(Truck);
+export const BookIcon = defineIcon(BookOpen);
+export const CardIcon = defineIcon(CreditCard);
+export const ListIcon = defineIcon(ClipboardList);
+export const GridIcon = defineIcon(LayoutGrid);
+export const SparklesIcon = defineIcon(Sparkles);
+export const ShirtIcon = defineIcon(Shirt);
+export const NoImageIcon = defineIcon(ImageOff);
+export const PackageOpenIcon = defineIcon(PackageOpen);
+export const PanelIcon = defineIcon(PanelRight);

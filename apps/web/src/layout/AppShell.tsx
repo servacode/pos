@@ -1,11 +1,28 @@
 import { useState, type ReactNode } from 'react';
 import { Link, NavLink } from 'react-router';
-import { AdminShell, Button, KeyIcon, Logo, LogoMark, LogoutIcon, cn, navItemClass } from '@serva/ui';
+import { sectorLabel } from '@serva/core';
+import {
+  AdminShell,
+  Button,
+  KeyIcon,
+  Logo,
+  LogoMark,
+  LogoutIcon,
+  NavGroup,
+  cn,
+  navItemClass,
+} from '@serva/ui';
 import { useAuth, useMe } from '../auth/useAuth';
-import { navFor, type NavEntry } from './nav';
+import { navGroupsFor, type NavEntry, type NavGroupKey } from './nav';
 
-// The menu lists only screens that exist and that the user may open (nav.ts).
-function Sidebar({ planName, entries }: { planName: string; entries: NavEntry[] }) {
+// The menu lists only screens that exist and that the user may open (nav.ts), in groups.
+function Sidebar({
+  planName,
+  groups,
+}: {
+  planName: string;
+  groups: { key: NavGroupKey; label?: string; entries: NavEntry[] }[];
+}) {
   return (
     <>
       <Link
@@ -15,23 +32,35 @@ function Sidebar({ planName, entries }: { planName: string; entries: NavEntry[] 
       >
         <Logo />
       </Link>
-      <nav aria-label="القائمة الرئيسية">
-        <ul className="flex flex-col gap-1">
-          {entries.map(({ to, label, icon: EntryIcon, end }) => (
-            <li key={to}>
-              <NavLink to={to} end={end} className={({ isActive }) => navItemClass(isActive)}>
-                <EntryIcon size={24} />
-                {label}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
+      <nav aria-label="القائمة الرئيسية" className="flex flex-col">
+        {groups.map((group) => (
+          <NavGroup key={group.key} label={group.label}>
+            {group.entries.map(({ to, label, icon: EntryIcon, end }) => (
+              <li key={to}>
+                <NavLink to={to} end={end} className={({ isActive }) => navItemClass(isActive)}>
+                  <EntryIcon size={20} />
+                  {label}
+                </NavLink>
+              </li>
+            ))}
+          </NavGroup>
+        ))}
       </nav>
-      <p className="mt-auto rounded-control bg-surface-muted px-3 py-2 text-sm text-ink-muted">
+      <p className="mt-auto rounded-control border border-line bg-canvas px-3 py-2.5 text-sm text-ink-muted">
         باقتك: <span className="font-semibold text-ink">{planName}</span>
       </p>
     </>
   );
+}
+
+/** The first letters of the store's first two words, for the top bar's round badge. */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join('');
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -47,12 +76,25 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <AdminShell
-      sidebar={<Sidebar planName={me.subscription.planName} entries={navFor(me)} />}
+      sidebar={<Sidebar planName={me.subscription.planName} groups={navGroupsFor(me)} />}
       topBar={
         <>
           <LogoMark className="lg:hidden" />
+          <span
+            aria-hidden="true"
+            className="hidden size-10 shrink-0 place-items-center rounded-full bg-brand-soft font-bold text-brand-ink sm:grid"
+          >
+            {initials(me.tenant.name)}
+          </span>
           <div className="flex min-w-0 flex-1 flex-col">
-            <p className="truncate font-bold text-ink lg:text-lg">{me.tenant.name}</p>
+            <p className="truncate font-bold text-ink">
+              {me.tenant.name}
+              {me.tenant.sectors[0] ? (
+                <span className="ms-2 hidden rounded-full bg-surface-muted px-2 py-0.5 align-middle text-xs font-semibold text-ink-muted md:inline">
+                  {sectorLabel(me.tenant.sectors[0])}
+                </span>
+              ) : null}
+            </p>
             <p className="truncate text-sm text-ink-muted">
               {me.user.fullName}
               {role ? <span className="text-ink-subtle"> · {role}</span> : null}

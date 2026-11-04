@@ -52,10 +52,10 @@
   --text-display: 3.5rem;
   --text-display--line-height: calc(64 / 56);
 
-  /* Radii, tab 14 › الزوايا: 8 small, 14 fields and buttons, 20 cards and dialogs. */
+  /* Radii (هوية 2): 8 small, 10 fields and buttons, 16 cards and dialogs. */
   --radius-small: 0.5rem;
-  --radius-control: 0.875rem;
-  --radius-card: 1.25rem;
+  --radius-control: 0.625rem;
+  --radius-card: 1rem;
 
   /* Motion, tab 14 › الحركة: durations are used as duration-80/120/200/320/600. */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
@@ -116,79 +116,79 @@
 @theme static {
   --color-*: initial;
 
-  --color-canvas: oklch(0.9815 0.005 165.01);
+  --color-canvas: oklch(0.9789 0.0029 264.54);
   --color-surface: oklch(1 0 0);
-  --color-surface-muted: oklch(0.9618 0.0075 164.94);
-  --color-surface-total: oklch(0.9703 0.0124 164.8);
-  --color-line: oklch(0.9147 0.0101 164.85);
-  --color-line-control: oklch(0.6511 0.0127 161.86);
-  --color-ink: oklch(0.2547 0.0203 168.96);
-  --color-ink-muted: oklch(0.4708 0.0208 169.3);
-  --color-ink-subtle: oklch(0.53 0.0164 168.76);
+  --color-surface-muted: oklch(0.9665 0.0045 258.32);
+  --color-surface-total: oklch(0.9683 0.0109 167.8);
+  --color-line: oklch(0.9427 0.0058 264.53);
+  --color-line-control: oklch(0.6408 0.0202 258.37);
+  --color-ink: oklch(0.2099 0.0341 263.44);
+  --color-ink-muted: oklch(0.4422 0.0355 257.79);
+  --color-ink-subtle: oklch(0.5045 0.0298 261.06);
 
-  --color-brand: oklch(0.5331 0.1172 161.82);
-  --color-brand-hover: oklch(0.4729 0.1029 162.54);
-  --color-on-brand: oklch(0.9899 0.0099 164.88);
-  --color-brand-soft: oklch(0.959 0.033 165.16);
-  --color-brand-ink: oklch(0.4234 0.0907 163.65);
-  --color-ring: oklch(0.6203 0.1304 162.9);
+  --color-brand: oklch(0.5212 0.1058 165.17);
+  --color-brand-hover: oklch(0.4414 0.0887 165.57);
+  --color-on-brand: oklch(1 0 0);
+  --color-brand-soft: oklch(0.9645 0.0118 170.27);
+  --color-brand-ink: oklch(0.4414 0.0887 165.57);
+  --color-ring: oklch(0.5924 0.1209 164.51);
 
-  --color-success: oklch(0.5331 0.1172 161.82);
-  --color-success-soft: oklch(0.959 0.033 165.16);
-  --color-success-ink: oklch(0.4234 0.0907 163.65);
-  --color-warning: oklch(0.5693 0.1284 64.39);
-  --color-warning-soft: oklch(0.9652 0.0449 90.39);
-  --color-warning-ink: oklch(0.4589 0.0998 64.94);
-  --color-danger: oklch(0.5598 0.1896 24.92);
+  --color-success: oklch(0.5212 0.1058 165.17);
+  --color-success-soft: oklch(0.9788 0.0221 160.24);
+  --color-success-ink: oklch(0.4987 0.1168 157.07);
+  --color-warning: oklch(0.5394 0.1562 42.99);
+  --color-warning-soft: oklch(0.9849 0.0204 91.58);
+  --color-warning-ink: oklch(0.4615 0.1337 40.94);
+  --color-danger: oklch(0.5758 0.2088 29.48);
   --color-on-danger: oklch(1 0 0);
-  --color-danger-soft: oklch(0.9645 0.0174 21.81);
-  --color-danger-ink: oklch(0.4693 0.1593 25.11);
-  --color-info: oklch(0.5201 0.13 245.04);
-  --color-info-soft: oklch(0.962 0.0208 236.75);
-  --color-info-ink: oklch(0.4308 0.1004 245.13);
+  --color-danger-soft: oklch(0.9725 0.0119 23.7);
+  --color-danger-ink: oklch(0.5003 0.1821 29.51);
+  --color-info: oklch(0.572 0.2076 258.93);
+  --color-info-soft: oklch(0.9744 0.0134 240.95);
+  --color-info-ink: oklch(0.5093 0.1955 260.89);
 
   /* tab 14 › overlay: black at 40% (light) and 60% (dark), behind dialogs and sheets. */
   --color-overlay: oklch(0 0 0 / 0.4);
 
   --shadow-*: initial;
-  --shadow-e1: 0 1px 2px rgb(25 38 33 / 0.06);
-  --shadow-e2: 0 4px 12px rgb(25 38 33 / 0.1);
-  --shadow-e3: 0 12px 32px rgb(25 38 33 / 0.16);
+  --shadow-e1: 0 1px 2px rgb(16 24 40 / 0.05);
+  --shadow-e2: 0 4px 8px -2px rgb(16 24 40 / 0.1), 0 2px 4px -2px rgb(16 24 40 / 0.06);
+  --shadow-e3: 0 20px 24px -4px rgb(16 24 40 / 0.12), 0 8px 8px -4px rgb(16 24 40 / 0.04);
 }
 
 @layer base {
   :root {
     @variant dark {
-      --color-canvas: oklch(0.1741 0.0115 175.47);
-      --color-surface: oklch(0.216 0.0153 165.97);
-      --color-surface-muted: oklch(0.2546 0.014 172.88);
-      --color-surface-total: oklch(0.2451 0.0296 165.33);
-      --color-line: oklch(0.2996 0.0135 173.2);
-      --color-line-control: oklch(0.5195 0.0165 168.74);
-      --color-ink: oklch(0.9545 0.005 165.01);
-      --color-ink-muted: oklch(0.7598 0.0141 167.04);
-      --color-ink-subtle: oklch(0.647 0.0137 164.58);
+      --color-canvas: oklch(0.179 0.0261 266.47);
+      --color-surface: oklch(0.2224 0.0229 265.58);
+      --color-surface-muted: oklch(0.2603 0.022 265.75);
+      --color-surface-total: oklch(0.2616 0.0358 167.9);
+      --color-line: oklch(0.3086 0.0232 264.15);
+      --color-line-control: oklch(0.551 0.0234 264.36);
+      --color-ink: oklch(0.9704 0.0013 286.38);
+      --color-ink-muted: oklch(0.8546 0.0043 271.36);
+      --color-ink-subtle: oklch(0.7249 0.0106 267.33);
 
-      --color-brand: oklch(0.7191 0.1395 163.11);
-      --color-brand-hover: oklch(0.7795 0.1299 162.87);
-      --color-on-brand: oklch(0.2009 0.0414 166.54);
-      --color-brand-soft: oklch(0.2896 0.0502 165.22);
-      --color-brand-ink: oklch(0.8506 0.1007 162.9);
-      --color-ring: oklch(0.7403 0.1402 162.92);
+      --color-brand: oklch(0.7216 0.1403 163.32);
+      --color-brand-hover: oklch(0.7872 0.1254 165.29);
+      --color-on-brand: oklch(0.241 0.0438 166.93);
+      --color-brand-soft: oklch(0.2633 0.04 167.93);
+      --color-brand-ink: oklch(0.8308 0.1179 165.34);
+      --color-ring: oklch(0.7216 0.1403 163.32);
 
-      --color-success: oklch(0.7191 0.1395 163.11);
-      --color-success-soft: oklch(0.2896 0.0502 165.22);
-      --color-success-ink: oklch(0.8506 0.1007 162.9);
-      --color-warning: oklch(0.8012 0.1401 80.03);
-      --color-warning-soft: oklch(0.3005 0.0602 75.86);
-      --color-warning-ink: oklch(0.8804 0.1005 85.13);
-      --color-danger: oklch(0.7005 0.1697 24.93);
-      --color-on-danger: oklch(0.202 0.0523 26.53);
-      --color-danger-soft: oklch(0.281 0.0597 26.19);
-      --color-danger-ink: oklch(0.8448 0.0849 25.25);
-      --color-info: oklch(0.7186 0.1099 240.06);
-      --color-info-soft: oklch(0.2798 0.0504 245.38);
-      --color-info-ink: oklch(0.8503 0.0698 238.92);
+      --color-success: oklch(0.7216 0.1403 163.32);
+      --color-success-soft: oklch(0.2633 0.04 167.93);
+      --color-success-ink: oklch(0.8308 0.1179 165.34);
+      --color-warning: oklch(0.7469 0.1701 62.11);
+      --color-warning-soft: oklch(0.2406 0.0397 71.84);
+      --color-warning-ink: oklch(0.8594 0.1499 84.74);
+      --color-danger: oklch(0.7086 0.1699 26.47);
+      --color-on-danger: oklch(0.2019 0.0557 28.68);
+      --color-danger-soft: oklch(0.2123 0.0471 25.97);
+      --color-danger-ink: oklch(0.8014 0.1094 24.57);
+      --color-info: oklch(0.7363 0.1418 245.85);
+      --color-info-soft: oklch(0.2576 0.0612 253.43);
+      --color-info-ink: oklch(0.8784 0.0652 242.31);
 
       --color-overlay: oklch(0 0 0 / 0.6);
 
