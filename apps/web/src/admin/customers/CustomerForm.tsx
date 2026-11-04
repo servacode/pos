@@ -33,6 +33,7 @@ export function CustomerForm({
       : '',
   );
   const [wholesale, setWholesale] = useState(customer?.priceTier === 'wholesale');
+  const [noMessages, setNoMessages] = useState(customer?.noMessages ?? false);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -54,6 +55,7 @@ export function CustomerForm({
       notes,
       creditLimitMinor,
       priceTier: wholesale ? ('wholesale' as const) : ('retail' as const),
+      noMessages,
     };
     try {
       onSaved(customer ? await updateCustomer(customer.id, input) : await createCustomer(input));
@@ -122,6 +124,12 @@ export function CustomerForm({
         description="عند اختياره على الكاشير تتحوّل الفاتورة إلى سعر الجملة"
         checked={wholesale}
         onCheckedChange={setWholesale}
+      />
+      <Switch
+        label="لا يريد رسائل"
+        description="لا تصله رسائل المحل على واتساب (العروض والتشكيلات الجديدة)"
+        checked={noMessages}
+        onCheckedChange={setNoMessages}
       />
       <div className="flex gap-3">
         <Button type="submit" loading={saving}>

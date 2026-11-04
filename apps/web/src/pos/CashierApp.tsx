@@ -33,6 +33,9 @@ const ReceiptScreen = lazy(() =>
 const GiftVoucherScreen = lazy(() =>
   import('./customers/GiftVoucherScreen').then((m) => ({ default: m.GiftVoucherScreen })),
 );
+const AlterationsScreen = lazy(() =>
+  import('./alterations/AlterationsScreen').then((m) => ({ default: m.AlterationsScreen })),
+);
 const CashMovementScreen = lazy(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.CashMovementScreen })),
 );
@@ -62,7 +65,7 @@ interface LastSale {
   cashierName: string;
 }
 
-type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt' | 'gift' | 'printer';
+type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt' | 'gift' | 'alterations' | 'printer';
 
 export interface CashierAppProps {
   session: StaffSession;
@@ -345,6 +348,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                   shift && session.permissions.has('sale.create')
                     ? { label: 'قسيمة هدية', key: null, action: () => setView('gift') }
                     : null,
+                  { label: 'التعديلات', key: null, action: () => setView('alterations') },
                   shift ? { label: 'حركات الدرج', key: 'Alt+7', action: () => setView('cash') } : null,
                   lastSale ? { label: 'إيصال آخر فاتورة', key: null, action: reprint } : null,
                   { label: 'الطابعة', key: null, action: () => setView('printer') },
@@ -439,6 +443,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'receipt' }, copy: false })
               }
             />
+          ) : view === 'alterations' ? (
+            <AlterationsScreen catalog={catalog} onBack={() => setView('sale')} />
           ) : view === 'gift' ? (
             <GiftVoucherScreen
               session={session}

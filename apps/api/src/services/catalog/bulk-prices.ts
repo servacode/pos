@@ -40,6 +40,7 @@ export function bulkPrices(
       currency: string;
       price: string;
       min_price: string | null;
+      was: string | null;
     }>(sql`
       with recursive tree as (
         select id from categories where id = ${input.categoryId}
@@ -47,36 +48,61 @@ export function bulkPrices(
         select c.id from categories c join tree t on c.parent_id = t.id
       )
       select p.id as product_id, v.id as variant_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
-             pr.currency, pr.price_minor::text as price, pr.min_price_minor::text as min_price
+             pr.currency, pr.price_minor::text as price, pr.min_price_minor::text as min_price,
+             pr.was_price_minor::text as was
       from products p
       join variants v on v.product_id = p.id and v.archived_at is null
       join prices pr on pr.id = v.id
       where p.category_id in (select id from tree) and p.archived_at is null
       order by p.name_ar, v.sort_order, v.id
       limit 5000`);
-    const items = rows.map((r) => {
+    const items = rows.flatMap((r) => {
       const step = r.currency === base ? input.roundToMinor : 1;
       const oldMinor = Number(r.price);
+      const kept = r.was === null ? null : Number(r.was);
+      if (input.mode === 'restore') {
+        // Ending the markdown: back at the kept price; a piece never marked down stays
+        if (kept === null) return [];
+        const min = r.min_price === null ? null : Math.min(kept, Number(r.min_price));
+        return [
+          {
+            productId: r.product_id,
+            variantId: r.variant_id,
+            name: r.name,
+            currency: r.currency as CurrencyCode,
+            oldMinor,
+            newMinor: kept,
+            wasMinor: null,
+            min,
+          },
+        ];
+      }
       const newMinor = movedPrice(oldMinor, input.percentBp, step);
       const min =
         r.min_price === null
           ? null
           : Math.min(newMinor, movedPrice(Number(r.min_price), input.percentBp, step));
-      return {
-        productId: r.product_id,
-        variantId: r.variant_id,
-        name: r.name,
-        currency: r.currency as CurrencyCode,
-        oldMinor,
-        newMinor,
-        min,
-      };
+      // Marked down: the first price before the markdowns stays struck through; at or above it, none
+      const was = newMinor < oldMinor && input.markWas ? (kept ?? oldMinor) : kept;
+      return [
+        {
+          productId: r.product_id,
+          variantId: r.variant_id,
+          name: r.name,
+          currency: r.currency as CurrencyCode,
+          oldMinor,
+          newMinor,
+          wasMinor: was !== null && was > newMinor ? was : null,
+          min,
+        },
+      ];
     });
     const changed = items.filter((i) => i.newMinor !== i.oldMinor);
     if (input.apply && changed.length > 0) {
       for (const i of changed) {
         await tx.execute(sql`
           update prices set price_minor = ${i.newMinor}, min_price_minor = ${i.min},
+                 was_price_minor = ${i.wasMinor},
                  price_changed_at = ${ctx.now.toISOString()}::timestamptz, updated_at = now()
           where id = ${i.variantId}`);
       }
@@ -96,7 +122,12 @@ export function bulkPrices(
           action: 'prices.bulk_changed',
           entity: 'category',
           entityId: input.categoryId,
-          data: { percentBp: input.percentBp, roundToMinor: input.roundToMinor, pieces: changed.length },
+          data: {
+            mode: input.mode,
+            percentBp: input.percentBp,
+            roundToMinor: input.roundToMinor,
+            pieces: changed.length,
+          },
         },
         ctx.meta,
       );

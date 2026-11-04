@@ -48,6 +48,13 @@ export function OnlineOrdersPanel({
                 </span>
                 <span className="text-sm text-ink-muted">
                   {o.fulfilment === 'delivery' ? `توصيل إلى ${o.address ?? ''}` : 'استلام من المحل'}
+                  {o.deliveryFeeMinor > 0 ? (
+                    <>
+                      {' '}
+                      · أجرة التوصيل{' '}
+                      <Money minor={o.deliveryFeeMinor} currency={o.currency as CurrencyCode} /> للمندوب
+                    </>
+                  ) : null}
                   {o.note ? ` · ${o.note}` : ''}
                 </span>
                 {o.depositCode ? (

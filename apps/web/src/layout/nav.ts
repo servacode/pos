@@ -59,6 +59,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { to: '/prices', label: 'تغيير الأسعار', icon: TrendUpIcon, permission: ['catalog.manage'] },
   { to: '/labels', label: 'طباعة الملصقات', icon: PrintIcon, permission: ['catalog.manage'] },
   { to: '/customers', label: 'الزبائن', icon: CustomersIcon, permission: ['customers.view'] },
+  { to: '/messages', label: 'رسائل للزبائن', icon: CustomersIcon, permission: ['customers.manage'] },
   { to: '/cheques', label: 'الشيكات', icon: CashIcon, permission: ['customers.view'] },
   {
     to: '/online-store',

@@ -357,6 +357,49 @@ export function MerchandisePage() {
           </section>
         ) : null}
 
+        {data && data.lowStock.length > 0 ? (
+          <DataTable
+            caption="قرّب يخلص"
+            columns={[
+              {
+                key: 'name',
+                header: 'القطعة',
+                cell: (r) => (
+                  <Link to={`/products/${r.productId}`} className="font-semibold text-brand-ink underline">
+                    {r.label ? `${r.name} ${r.label}` : r.name}
+                  </Link>
+                ),
+              },
+              {
+                key: 'stock',
+                header: 'بقي',
+                numeric: true,
+                cell: (r) => (
+                  <span className={r.stockQty <= 0 ? 'num font-bold text-danger-ink' : 'num font-bold'}>
+                    {r.stockQty <= 0 ? 'نفد' : r.stockQty / 1000}
+                  </span>
+                ),
+              },
+              {
+                key: 'sold',
+                header: 'بيع في المدة',
+                numeric: true,
+                cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+              },
+              {
+                key: 'min',
+                header: 'الحد الأدنى',
+                numeric: true,
+                cell: (r) => (
+                  <span className="num">{r.minStockQty === null ? '—' : r.minStockQty / 1000}</span>
+                ),
+              },
+            ]}
+            rows={data.lowStock}
+            rowKey={(r) => r.variantId}
+          />
+        ) : null}
+
         <DataTable
           caption="القطع الراكدة"
           columns={slowColumns}

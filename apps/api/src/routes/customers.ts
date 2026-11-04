@@ -3,7 +3,15 @@ import { customerInput, customerListQuery, uuidSchema } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
-import { createCustomer, listCustomers, readCustomer, updateCustomer } from '../services/customers';
+import { requireDevice } from '../auth/device-guard';
+import {
+  createCustomer,
+  customerPurchases,
+  customerPurchasesForDevice,
+  listCustomers,
+  readCustomer,
+  updateCustomer,
+} from '../services/customers';
 import { parseBody } from './validation';
 
 /** Customers and their balances (packages/core › contracts/customers.ts). */
@@ -38,6 +46,15 @@ export async function customerRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/customers/:id', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return readCustomer(app.db, request.auth, idOf(request.params));
+  });
+
+  app.get('/v1/customers/:id/purchases', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return customerPurchases(app.db, request.auth, idOf(request.params));
+  });
+  app.get('/v1/device/customers/:id/purchases', { onRequest: requireDevice() }, async (request) => {
+    if (!request.device) throw unauthorized();
+    return customerPurchasesForDevice(app.db, request.device, idOf(request.params));
   });
 
   app.put('/v1/customers/:id', { preHandler: requireAuth }, async (request) => {

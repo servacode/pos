@@ -231,6 +231,16 @@ describe('the clothing report', () => {
       }),
     ]);
 
+    // «قرّب يخلص»: M white sold 2 and has 3 left; the jacket is under the minimum its owner set
+    await ownerDb()`update variants set min_stock_qty = 5000 where id = ${jacket.variants[0]!.id}`;
+    const low = (await report(store, 'from=2026-10-01&to=2026-10-30&lowQty=3')).json<MerchandiseReport>();
+    expect(low.lowStock.map((x) => [x.variantId, x.stockQty, x.soldQty, x.minStockQty])).toEqual([
+      [mWhite, 3 * PIECE, 2 * PIECE, null],
+      [jacket.variants[0]!.id, 3 * PIECE, 0, 5 * PIECE],
+    ]);
+    // At the default of 2 pieces, M white is not short yet
+    expect(r.lowStock.map((x) => x.variantId)).not.toContain(mWhite);
+
     // Within 150 days nothing has slept that long
     const longer = (
       await report(store, 'from=2026-10-01&to=2026-10-30&idleDays=150')

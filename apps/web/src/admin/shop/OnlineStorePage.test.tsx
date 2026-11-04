@@ -23,6 +23,8 @@ const settings: OnlineStoreSettings = {
   note: null,
   showOutOfStock: false,
   orderMode: 'whatsapp',
+  deliveryFeeMinor: 0,
+  deliveryAreas: [],
 };
 
 const order = (status: OnlineOrder['status']): OnlineOrder => ({
@@ -31,6 +33,8 @@ const order = (status: OnlineOrder['status']): OnlineOrder => ({
   status,
   source: 'whatsapp',
   depositCode: null,
+  deliveryFeeMinor: 0,
+  deliveryArea: null,
   customerName: 'ريم',
   phone: '+963944555666',
   fulfilment: 'delivery',

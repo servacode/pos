@@ -23,6 +23,8 @@ import { reportRoutes } from './routes/reports';
 import { storeRoutes } from './routes/store';
 import { customerRoutes } from './routes/customers';
 import { purchaseRoutes } from './routes/purchases';
+import { alterationRoutes } from './routes/alterations';
+import { broadcastRoutes } from './routes/broadcasts';
 import { shopRoutes } from './routes/shop';
 import { billingRoutes } from './routes/billing';
 import { promotionRoutes } from './routes/promotions';
@@ -122,6 +124,8 @@ export async function buildApp({
   await app.register(customerRoutes);
   await app.register(purchaseRoutes);
   await app.register(shopRoutes);
+  await app.register(alterationRoutes);
+  await app.register(broadcastRoutes);
   await app.register(billingRoutes);
   await app.register(promotionRoutes);
   await app.register(chequeRoutes);

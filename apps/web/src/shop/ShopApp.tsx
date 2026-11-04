@@ -9,6 +9,7 @@ import {
   EmptyState,
   FullScreenLoader,
   Money,
+  Select,
   StoreIcon,
   TextField,
 } from '@serva/ui';
@@ -138,10 +139,22 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                   </div>
                 )}
                 <span className="flex flex-1 flex-col gap-1 p-2">
+                  {p.offer ? (
+                    <span className="w-fit rounded-full bg-danger-soft px-2 text-xs font-bold text-danger-ink">
+                      {p.offer}
+                    </span>
+                  ) : null}
                   <span className="line-clamp-2 font-semibold">{p.name}</span>
-                  <span className="text-sm">
-                    {p.maxPriceMinor > p.priceMinor ? 'من ' : ''}
-                    <Money minor={p.priceMinor} currency={p.currency} className="font-bold" />
+                  <span className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                    <span>
+                      {p.maxPriceMinor > p.priceMinor ? 'من ' : ''}
+                      <Money minor={p.priceMinor} currency={p.currency} className="font-bold" />
+                    </span>
+                    {p.wasPriceMinor ? (
+                      <s aria-label="السعر قبل التنزيل" className="text-xs text-ink-muted">
+                        <Money minor={p.wasPriceMinor} currency={p.currency} />
+                      </s>
+                    ) : null}
                   </span>
                   {!p.available ? <span className="text-xs font-semibold text-danger-ink">نفد</span> : null}
                 </span>
@@ -191,7 +204,9 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
   const images = product.images;
   const matching = images.findIndex((i) => i.optionValue && Object.values(chosen).includes(i.optionValue));
   const main = images[matching >= 0 && shown === 0 ? matching : shown] ?? images[0];
-  const price = variant?.priceMinor ?? Math.min(...product.variants.map((v) => v.priceMinor));
+  const cheapest = product.variants.reduce((a, b) => (b.priceMinor < a.priceMinor ? b : a));
+  const price = variant?.priceMinor ?? cheapest.priceMinor;
+  const was = (variant ?? cheapest).wasPriceMinor;
 
   return (
     <article aria-label={product.name} className="flex flex-col gap-4 md:grid md:grid-cols-2">
@@ -225,7 +240,19 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
       </div>
       <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-bold">{product.name}</h1>
-        <Money minor={price} currency={product.currency} className="text-2xl font-bold" />
+        {product.offer ? (
+          <span className="w-fit rounded-full bg-danger-soft px-3 py-1 text-sm font-bold text-danger-ink">
+            {product.offer}
+          </span>
+        ) : null}
+        <span className="flex flex-wrap items-baseline gap-3">
+          <Money minor={price} currency={product.currency} className="text-2xl font-bold" />
+          {was ? (
+            <s aria-label="السعر قبل التنزيل" className="text-lg text-ink-muted">
+              <Money minor={was} currency={product.currency} />
+            </s>
+          ) : null}
+        </span>
         {product.options.map((option) => (
           <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-2">
             <span className="font-semibold">{option.name}</span>
@@ -334,6 +361,15 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [phone, setPhone] = useState('');
   const [fulfilment, setFulfilment] = useState<'delivery' | 'pickup'>(store.delivery ? 'delivery' : 'pickup');
   const [address, setAddress] = useState('');
+  const [area, setArea] = useState('');
+  // The courier's fee: the picked area's when the store charges by area, else the flat one
+  const byArea = store.deliveryAreas.length > 0;
+  const fee =
+    fulfilment !== 'delivery'
+      ? 0
+      : byArea
+        ? (store.deliveryAreas.find((a) => a.name === area)?.feeMinor ?? 0)
+        : store.deliveryFeeMinor;
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -356,6 +392,12 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             {placed.number}
           </bdi>{' '}
           · <Money minor={placed.totalMinor} currency={placed.currency} className="font-bold" />
+          {placed.deliveryFeeMinor > 0 ? (
+            <>
+              {' '}
+              + أجرة التوصيل <Money minor={placed.deliveryFeeMinor} currency={placed.currency} />
+            </>
+          ) : null}
         </p>
         {placed.whatsappUrl ? (
           <>
@@ -431,6 +473,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           phone,
           fulfilment,
           address: fulfilment === 'delivery' ? address : null,
+          area: fulfilment === 'delivery' && byArea ? area || null : null,
           note: note || null,
           lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
           ...(byCode && challenge ? { challengeId: challenge.challengeId, code } : {}),
@@ -493,6 +536,18 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           <span className="font-semibold">المجموع</span>
           <Money minor={cartTotal(cart.lines)} currency={store.currency} className="text-xl font-bold" />
         </div>
+        {fee > 0 ? (
+          <>
+            <div className="flex items-center justify-between text-sm text-ink-muted">
+              <span>أجرة التوصيل (للمندوب)</span>
+              <Money minor={fee} currency={store.currency} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-semibold">الإجمالي</span>
+              <Money minor={cartTotal(cart.lines) + fee} currency={store.currency} className="font-bold" />
+            </div>
+          </>
+        ) : null}
       </section>
       <section aria-label="إتمام الطلب" className="flex flex-col gap-3 rounded-card bg-surface p-4">
         <h2 className="text-xl font-bold">بياناتك</h2>
@@ -536,6 +591,21 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             {store.delivery ? 'التوصيل إلى عنوانك' : 'الاستلام من المحل'}
           </p>
         )}
+        {fulfilment === 'delivery' && byArea ? (
+          <Select
+            label="منطقة التوصيل"
+            value={area}
+            onChange={(e) => setArea(e.target.value)}
+            error={fields.area}
+          >
+            <option value="">اختر منطقتك</option>
+            {store.deliveryAreas.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        ) : null}
         {fulfilment === 'delivery' ? (
           <TextField
             label="العنوان"
@@ -662,6 +732,12 @@ function TrackView({ slug, base }: { slug: string; base: string }) {
         </span>
         <Money minor={order.totalMinor} currency={order.currency} className="text-lg font-bold" />
       </div>
+      {order.deliveryFeeMinor > 0 ? (
+        <div className="flex items-center justify-between text-sm text-ink-muted">
+          <span>أجرة التوصيل (للمندوب)</span>
+          <Money minor={order.deliveryFeeMinor} currency={order.currency} />
+        </div>
+      ) : null}
       <Link to={base} className="text-sm font-semibold text-brand-ink">
         عد إلى المتجر
       </Link>

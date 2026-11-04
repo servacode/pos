@@ -19,6 +19,8 @@ export * from './contracts/promotions';
 export * from './contracts/cheques';
 export * from './contracts/merchandise';
 export * from './contracts/shop';
+export * from './contracts/alterations';
+export * from './contracts/broadcasts';
 export * from './money';
 export * from './pricing';
 export * from './sale';

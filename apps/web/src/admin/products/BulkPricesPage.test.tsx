@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { BulkPriceResult } from '@serva/core';
 import { catalogMe } from '../../test/catalog';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
@@ -17,6 +17,7 @@ const items = (applied: boolean): BulkPriceResult => ({
       currency: 'SYP',
       oldMinor: 4_500_000,
       newMinor: 3_150_000,
+      wasMinor: 4_500_000,
     },
     {
       productId: 'p-1',
@@ -25,6 +26,7 @@ const items = (applied: boolean): BulkPriceResult => ({
       currency: 'SYP',
       oldMinor: 4_600_000,
       newMinor: 3_200_000,
+      wasMinor: 4_600_000,
     },
   ],
 });
@@ -63,16 +65,28 @@ describe('«تغيير الأسعار»', () => {
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('31,500');
     expect(requestsTo('POST', '/v1/prices/bulk')[0]!.body).toEqual({
       categoryId: 'c-shirts',
+      mode: 'move',
       percentBp: -3000,
       roundToMinor: 50_000,
+      markWas: true,
       apply: false,
     });
+    // The old price, struck through on the labels
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('45,000');
     await user.click(screen.getByRole('button', { name: 'طبّق على 2 قطعة' }));
     expect(await screen.findByRole('link', { name: 'اطبع ملصقات الأسعار الجديدة' })).toHaveAttribute(
       'href',
       '/labels?products=p-1',
     );
     expect(requestsTo('POST', '/v1/prices/bulk')[1]!.body).toMatchObject({ apply: true });
+
+    // «أنهِ التنزيل»: no percent asked, the restore sent
+    await user.click(screen.getByRole('radio', { name: 'أنهِ التنزيل' }));
+    expect(screen.queryByLabelText('النسبة ٪')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'اعرض الأسعار الجديدة' }));
+    await vi.waitFor(() =>
+      expect(requestsTo('POST', '/v1/prices/bulk')[2]!.body).toMatchObject({ mode: 'restore', percentBp: 0 }),
+    );
   });
 
   it('reads a percent as typed, and refuses zero or too much', () => {

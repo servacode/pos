@@ -40,6 +40,9 @@ const CategoriesPage = lazy(() =>
 // The start wizard and «إعدادات المتجر» (04)
 const WelcomePage = lazy(() => import('./store/WelcomePage').then((m) => ({ default: m.WelcomePage })));
 const SettingsPage = lazy(() => import('./store/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const BroadcastsPage = lazy(() =>
+  import('./customers/BroadcastsPage').then((m) => ({ default: m.BroadcastsPage })),
+);
 const CustomersPage = lazy(() =>
   import('./customers/CustomersPage').then((m) => ({ default: m.CustomersPage })),
 );
@@ -97,6 +100,7 @@ export function AdminApp() {
           <Route path="/promotions" element={page(<PromotionsPage />)} />
           <Route path="/cheques" element={page(<ChequesPage />)} />
           <Route path="/customers" element={page(<CustomersPage />)} />
+          <Route path="/messages" element={page(<BroadcastsPage />)} />
           <Route path="/purchases" element={page(<PurchasesPage />)} />
           <Route path="/inventory" element={page(<InventoryPage />)} />
           <Route path="/expiry" element={page(<ExpiryPage />)} />

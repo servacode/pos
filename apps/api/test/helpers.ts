@@ -23,6 +23,7 @@ export function testEnv(overrides: Record<string, string> = {}) {
     DATABASE_URL: TEST_APP_URL,
     JWT_SECRET: 'test-secret-that-is-definitely-long-enough-123',
     LOG_LEVEL: 'silent',
+    BROADCAST_DELAY_MS: '0',
     // Every test request comes from 127.0.0.1; limits get their own tests.
     RATE_LIMIT_PER_MINUTE: '100000',
     AUTH_RATE_LIMIT_PER_MINUTE: '1000',

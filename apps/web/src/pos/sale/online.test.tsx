@@ -27,6 +27,8 @@ const order = (over: Partial<OnlineOrderRow> = {}): OnlineOrderRow => ({
   currency: 'SYP',
   totalMinor: 50_000,
   depositCode: null,
+  deliveryFeeMinor: 0,
+  deliveryArea: null,
   lines: [
     {
       variantId: PRODUCTS.oil.variant.id,

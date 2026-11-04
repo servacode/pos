@@ -9,6 +9,8 @@ export interface LabelItem {
   /** «M · أحمر»; null for a simple product */
   options: string | null;
   priceMinor: number;
+  /** The price before a markdown, printed struck through beside the new one; null: none */
+  wasMinor?: number | null;
   currency: CurrencyCode;
   code: string;
   copies: number;
@@ -46,8 +48,15 @@ export function Label({ item, store, showStore }: { item: LabelItem; store: stri
       {showStore ? <span className="w-full truncate font-semibold">{store}</span> : null}
       <span className="w-full truncate font-bold">{item.name}</span>
       {item.options ? <span className="w-full truncate">{item.options}</span> : null}
-      <span className="font-bold" style={{ fontSize: '3.6mm' }}>
-        {formatMoney(item.priceMinor, item.currency)}
+      <span className="flex items-baseline justify-center gap-[1.5mm]">
+        {item.wasMinor && item.wasMinor > item.priceMinor ? (
+          <s aria-label="السعر قبل التنزيل" style={{ fontSize: '2.8mm' }}>
+            {formatMoney(item.wasMinor, item.currency)}
+          </s>
+        ) : null}
+        <span className="font-bold" style={{ fontSize: '3.6mm' }}>
+          {formatMoney(item.priceMinor, item.currency)}
+        </span>
       </span>
       <div className="w-full flex-1" style={{ minHeight: '5mm', maxHeight: '11mm' }}>
         <Bars code={item.code} height={40} />

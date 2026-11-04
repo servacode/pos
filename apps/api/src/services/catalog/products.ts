@@ -100,6 +100,8 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
     price: { currency: price.currency as CurrencyCode, priceMinor: price.priceMinor },
     minPriceMinor: price.minPriceMinor,
     wholesalePriceMinor: price.wholesalePriceMinor,
+    wasPriceMinor:
+      price.wasPriceMinor !== null && price.wasPriceMinor > price.priceMinor ? price.wasPriceMinor : null,
     minStockQty: variant.minStockQty,
     priceChangedAt: price.priceChangedAt.toISOString(),
     archivedAt: iso(variant.archivedAt),
@@ -638,6 +640,11 @@ export async function updateProduct(
               .update(prices)
               .set({ ...priceNext, ...(moved ? { priceChangedAt: ctx.now } : {}) })
               .where(eq(prices.id, variantId));
+            // A price typed back up to (or past) the struck one ends that markdown
+            if (moved) {
+              await tx.execute(sql`update prices set was_price_minor = null
+                where id = ${variantId} and was_price_minor <= price_minor`);
+            }
           }
           variantChanges.push({ id: variantId, ...variantDiff, ...priceDiff });
         } else {

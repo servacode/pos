@@ -1,4 +1,4 @@
-import type { CustomerDetail, CustomerInput, CustomerListResponse } from '@serva/core';
+import type { CustomerDetail, CustomerInput, CustomerListResponse, CustomerPurchases } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
 /** `GET /v1/customers`: every customer with what they owe (customers.view) */
@@ -20,3 +20,7 @@ export const createCustomer = (input: Partial<CustomerInput>) =>
 /** `PUT /v1/customers/{id}` (customers.manage) */
 export const updateCustomer = (id: string, input: Partial<CustomerInput>) =>
   apiFetch<CustomerDetail>(`/v1/customers/${id}`, { method: 'PUT', body: input, auth: true });
+
+/** `GET /v1/customers/{id}/purchases`: the sizes they buy most and their latest invoices */
+export const getPurchases = (id: string) =>
+  apiFetch<CustomerPurchases>(`/v1/customers/${id}/purchases`, { auth: true });

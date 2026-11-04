@@ -239,6 +239,34 @@
       "when": 1793746070327,
       "tag": "0033_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793769517377,
+      "tag": "0034_was_price",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793769972634,
+      "tag": "0035_delivery_fees",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793770386807,
+      "tag": "0036_alterations",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793770634275,
+      "tag": "0037_broadcasts",
+      "breakpoints": true
     }
   ]
 }

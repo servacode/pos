@@ -18,6 +18,8 @@ const HOME: ShopHome = {
     pickup: true,
     note: 'التوصيل خلال يوم',
     orderMode: 'whatsapp',
+    deliveryFeeMinor: 0,
+    deliveryAreas: [],
   },
   categories: [
     { id: 'c-men', name: 'رجالي', parentId: null },
@@ -33,6 +35,8 @@ const HOME: ShopHome = {
       currency: 'SYP',
       priceMinor: 450_000,
       maxPriceMinor: 460_000,
+      wasPriceMinor: 600_000,
+      offer: 'تنزيلات الصيف',
       available: true,
     },
     {
@@ -43,6 +47,8 @@ const HOME: ShopHome = {
       currency: 'SYP',
       priceMinor: 200_000,
       maxPriceMinor: 200_000,
+      wasPriceMinor: null,
+      offer: null,
       available: true,
     },
   ],
@@ -66,10 +72,32 @@ const SHIRT: ShopProduct = {
     { name: 'اللون', values: ['أبيض', 'أزرق'] },
   ],
   variants: [
-    { id: 'v-mw', label: 'M · أبيض', attributes: attrs('M', 'أبيض'), priceMinor: 450_000, available: true },
-    { id: 'v-lw', label: 'L · أبيض', attributes: attrs('L', 'أبيض'), priceMinor: 460_000, available: true },
-    { id: 'v-mb', label: 'M · أزرق', attributes: attrs('M', 'أزرق'), priceMinor: 450_000, available: false },
+    {
+      id: 'v-mw',
+      label: 'M · أبيض',
+      attributes: attrs('M', 'أبيض'),
+      priceMinor: 450_000,
+      wasPriceMinor: null,
+      available: true,
+    },
+    {
+      id: 'v-lw',
+      label: 'L · أبيض',
+      attributes: attrs('L', 'أبيض'),
+      priceMinor: 460_000,
+      wasPriceMinor: null,
+      available: true,
+    },
+    {
+      id: 'v-mb',
+      label: 'M · أزرق',
+      attributes: attrs('M', 'أزرق'),
+      priceMinor: 450_000,
+      wasPriceMinor: null,
+      available: false,
+    },
   ],
+  offer: null,
 };
 
 beforeEach(() => {
@@ -88,6 +116,7 @@ describe('the online shop', () => {
           phone: '0944555666',
           fulfilment: 'delivery',
           address: 'المزة',
+          area: null,
           note: null,
           lines: [
             { variantId: 'v-lw', qty: 2 },
@@ -114,6 +143,9 @@ describe('the online shop', () => {
     await user.click(screen.getByRole('button', { name: 'رجالي' }));
     expect(within(grid).getAllByRole('listitem')).toHaveLength(1);
     expect(grid).toHaveTextContent('من');
+    // The offer and the price before it, struck through
+    expect(grid).toHaveTextContent('تنزيلات الصيف');
+    expect(within(grid).getByLabelText('السعر قبل التنزيل')).toHaveTextContent('6,000');
     await user.click(within(grid).getByRole('link', { name: /قميص كتان/ }));
 
     const page = await screen.findByRole('article', { name: 'قميص كتان' });
@@ -221,6 +253,62 @@ describe('the online shop', () => {
     const page = await screen.findByRole('region', { name: 'طلبك' });
     expect(page).toHaveTextContent('ONL-000008');
     expect(within(page).getByRole('status')).toHaveTextContent('أكّد المحل طلبك');
+  });
+
+  it('asks the delivery area and adds its fee for the courier on top', async () => {
+    localStorage.setItem(
+      'serva-shop-cart:nour',
+      JSON.stringify([
+        {
+          variantId: 'v-lw',
+          productId: 'p-shirt',
+          name: 'قميص كتان',
+          label: 'L · أبيض',
+          imageUrl: null,
+          priceMinor: 460_000,
+          qty: 1,
+        },
+      ]),
+    );
+    const { requestsTo } = mockFetch({
+      'GET /v1/shop/nour': {
+        status: 200,
+        body: {
+          ...HOME,
+          store: {
+            ...HOME.store,
+            deliveryAreas: [
+              { name: 'المزة', feeMinor: 5_000 },
+              { name: 'دمر', feeMinor: 10_000 },
+            ],
+          },
+        },
+      },
+      'POST /v1/shop/nour/orders': {
+        status: 201,
+        body: {
+          trackPath: '/shop/nour/o/t1',
+          number: 'ONL-000009',
+          currency: 'SYP',
+          totalMinor: 460_000,
+          deliveryFeeMinor: 10_000,
+          message: 'طلب',
+          whatsappUrl: 'https://wa.me/963933123456?text=x',
+        },
+      },
+    });
+    const { user } = renderApp('/shop/nour/cart');
+    const cart = await screen.findByRole('region', { name: 'السلة' });
+    await user.selectOptions(screen.getByLabelText('منطقة التوصيل'), 'دمر');
+    expect(cart).toHaveTextContent('أجرة التوصيل (للمندوب)');
+    expect(cart).toHaveTextContent('100');
+    expect(cart).toHaveTextContent('4,700');
+    await user.type(screen.getByLabelText('الاسم'), 'ريم');
+    await user.type(screen.getByLabelText('رقم الجوال'), '0944555666');
+    await user.type(screen.getByLabelText('العنوان'), 'دمر البلد');
+    await user.click(screen.getByRole('button', { name: 'اطلب عبر واتساب' }));
+    expect(await screen.findByRole('region', { name: 'وصل طلبك' })).toHaveTextContent('أجرة التوصيل');
+    expect(requestsTo('POST', '/v1/shop/nour/orders')[0]!.body).toMatchObject({ area: 'دمر' });
   });
 
   it('says so when the link is not a shop', async () => {

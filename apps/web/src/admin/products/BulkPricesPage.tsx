@@ -2,7 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { BulkPriceResult, Category } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
-import { Alert, Button, DataTable, Money, Select, TextField, type DataColumn } from '@serva/ui';
+import {
+  Alert,
+  Button,
+  DataTable,
+  Money,
+  SegmentedControl,
+  Select,
+  Switch,
+  TextField,
+  type DataColumn,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
@@ -12,8 +22,14 @@ type Row = BulkPriceResult['items'][number];
 
 const ROUNDING = [1, 100, 500, 1000, 5000] as const;
 
-const runBulk = (body: { categoryId: string; percentBp: number; roundToMinor: number; apply: boolean }) =>
-  apiFetch<BulkPriceResult>('/v1/prices/bulk', { method: 'POST', body, auth: true });
+const runBulk = (body: {
+  categoryId: string;
+  mode: 'move' | 'restore';
+  percentBp: number;
+  roundToMinor: number;
+  markWas: boolean;
+  apply: boolean;
+}) => apiFetch<BulkPriceResult>('/v1/prices/bulk', { method: 'POST', body, auth: true });
 
 /** «−30» or «15» (Arabic digits too) to basis points; null while unusable. */
 export function percentOf(text: string): number | null {
@@ -42,6 +58,8 @@ export function BulkPricesPage() {
   const [categoryId, setCategoryId] = useState('');
   const [percent, setPercent] = useState('-30');
   const [round, setRound] = useState<(typeof ROUNDING)[number]>(500);
+  const [mode, setMode] = useState<'move' | 'restore'>('move');
+  const [markWas, setMarkWas] = useState(true);
   const [result, setResult] = useState<BulkPriceResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,11 +89,20 @@ export function BulkPricesPage() {
 
   const bp = percentOf(percent);
   async function run(apply: boolean) {
-    if (!categoryId || bp === null) return;
+    if (!categoryId || (mode === 'move' && bp === null)) return;
     setBusy(true);
     setError(null);
     try {
-      setResult(await runBulk({ categoryId, percentBp: bp, roundToMinor: round * unit, apply }));
+      setResult(
+        await runBulk({
+          categoryId,
+          mode,
+          percentBp: mode === 'move' ? bp! : 0,
+          roundToMinor: round * unit,
+          markWas,
+          apply,
+        }),
+      );
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -98,6 +125,19 @@ export function BulkPricesPage() {
       numeric: true,
       cell: (r) => <Money minor={r.newMinor} currency={r.currency} className="font-bold" />,
     },
+    {
+      key: 'was',
+      header: 'مشطوباً على الملصق',
+      numeric: true,
+      cell: (r) =>
+        r.wasMinor === null ? (
+          '—'
+        ) : (
+          <s>
+            <Money minor={r.wasMinor} currency={r.currency} />
+          </s>
+        ),
+    },
   ];
   const labels = `/labels?products=${[...new Set(changed.map((i) => i.productId))].join(',')}`;
 
@@ -113,6 +153,23 @@ export function BulkPricesPage() {
           </p>
         </div>
         {error ? <Alert tone="error">{error}</Alert> : null}
+        <SegmentedControl
+          label="العملية"
+          value={mode}
+          onValueChange={(m) => {
+            setMode(m);
+            setResult(null);
+          }}
+          options={[
+            { value: 'move', label: 'تنزيل أو رفع بنسبة' },
+            { value: 'restore', label: 'أنهِ التنزيل' },
+          ]}
+        />
+        {mode === 'restore' ? (
+          <p className="text-ink-muted">
+            ترجع كل قطعة منزّلة في التصنيف إلى سعرها قبل التنزيل، ويختفي السعر المشطوب.
+          </p>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-3">
           <Select
             label="التصنيف"
@@ -129,37 +186,52 @@ export function BulkPricesPage() {
               </option>
             ))}
           </Select>
-          <TextField
-            label="النسبة ٪"
-            hint="بالسالب للتنزيل: −30"
-            dir="ltr"
-            inputMode="decimal"
-            value={percent}
-            onChange={(e) => {
-              setPercent(e.target.value.slice(0, 8));
-              setResult(null);
-            }}
-            error={percent && bp === null ? 'من −90 إلى 200، غير الصفر' : undefined}
-          />
-          <Select
-            label="التقريب"
-            value={String(round)}
-            onChange={(e) => {
-              setRound(Number(e.target.value) as (typeof ROUNDING)[number]);
-              setResult(null);
-            }}
-          >
-            {ROUNDING.map((r) => (
-              <option key={r} value={r}>
-                {r === 1 ? 'دون تقريب' : `لأقرب ${r.toLocaleString('en')}`}
-              </option>
-            ))}
-          </Select>
+          {mode === 'move' ? (
+            <TextField
+              label="النسبة ٪"
+              hint="بالسالب للتنزيل: −30"
+              dir="ltr"
+              inputMode="decimal"
+              value={percent}
+              onChange={(e) => {
+                setPercent(e.target.value.slice(0, 8));
+                setResult(null);
+              }}
+              error={percent && bp === null ? 'من −90 إلى 200، غير الصفر' : undefined}
+            />
+          ) : null}
+          {mode === 'move' ? (
+            <Select
+              label="التقريب"
+              value={String(round)}
+              onChange={(e) => {
+                setRound(Number(e.target.value) as (typeof ROUNDING)[number]);
+                setResult(null);
+              }}
+            >
+              {ROUNDING.map((r) => (
+                <option key={r} value={r}>
+                  {r === 1 ? 'دون تقريب' : `لأقرب ${r.toLocaleString('en')}`}
+                </option>
+              ))}
+            </Select>
+          ) : null}
         </div>
+        {mode === 'move' && bp !== null && bp < 0 ? (
+          <Switch
+            label="اطبع السعر القديم مشطوباً"
+            description="يظهر السعر قبل التنزيل مشطوباً على الملصق وفي المتجر الإلكتروني."
+            checked={markWas}
+            onCheckedChange={(v) => {
+              setMarkWas(v);
+              setResult(null);
+            }}
+          />
+        ) : null}
         <div className="flex flex-wrap gap-3">
           <Button
             variant="secondary"
-            disabled={!categoryId || bp === null}
+            disabled={!categoryId || (mode === 'move' && bp === null)}
             loading={busy && !result}
             onClick={() => void run(false)}
           >
