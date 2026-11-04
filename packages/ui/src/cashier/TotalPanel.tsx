@@ -31,7 +31,7 @@ export function TotalPanel({
 }: TotalPanelProps) {
   const [showRate, setShowRate] = useState(false);
   return (
-    <div className="flex flex-col gap-3 border-t border-line bg-surface-total p-4">
+    <div className="m-3 mt-0 flex flex-col gap-3 rounded-[1.25rem] bg-surface-total p-4">
       {breakdown.length > 0 ? (
         <dl className="flex flex-col gap-1 text-ink-muted">
           {breakdown.map((line, index) => (

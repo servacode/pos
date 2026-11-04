@@ -23,22 +23,25 @@ export function AdminShell({ sidebar, topBar, children, contentClassName, framed
     <div
       className={cn(
         framed ? 'h-full overflow-auto' : 'min-h-dvh',
-        'lg:grid lg:grid-cols-[16.5rem_minmax(0,1fr)]',
+        'bg-canvas lg:grid lg:grid-cols-[17.5rem_minmax(0,1fr)]',
       )}
     >
-      <aside
-        className={cn(
-          framed ? 'h-full' : 'h-dvh',
-          'sticky top-0 hidden flex-col gap-4 overflow-y-auto border-e border-line bg-surface px-3 py-4 lg:flex',
-        )}
-      >
-        {sidebar}
+      {/* هوية 3: the sidebar floats as a white panel on the grey page. */}
+      <aside className={cn(framed ? 'h-full' : 'h-dvh', 'sticky top-0 hidden p-3 lg:block')}>
+        <div className="flex h-full flex-col gap-4 overflow-y-auto rounded-[1.5rem] bg-surface px-3 py-4 shadow-e1 ring-1 ring-line/70">
+          {sidebar}
+        </div>
       </aside>
       <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-10 border-b border-line bg-surface/90 backdrop-blur">
-          <div className="flex min-h-16 items-center gap-3 px-4 py-2 sm:px-6 lg:px-8">{topBar}</div>
+        <header className="sticky top-0 z-10 bg-canvas/85 backdrop-blur-md">
+          <div className="flex min-h-18 items-center gap-3 px-4 py-3 sm:px-6 lg:ps-3 lg:pe-8">{topBar}</div>
         </header>
-        <main className={cn('mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8', contentClassName)}>
+        <main
+          className={cn(
+            'mx-auto w-full max-w-7xl flex-1 px-4 pt-2 pb-10 sm:px-6 lg:ps-3 lg:pe-8',
+            contentClassName,
+          )}
+        >
           {children}
         </main>
       </div>
@@ -49,9 +52,9 @@ export function AdminShell({ sidebar, topBar, children, contentClassName, framed
 /** A sidebar link's look; for a router NavLink: `className={({ isActive }) => navItemClass(isActive)}`. */
 export function navItemClass(active: boolean): string {
   return cn(
-    'flex min-h-12 items-center gap-3 rounded-control px-3 text-[0.9375rem] transition-colors duration-120',
+    'flex min-h-12 items-center gap-3 rounded-2xl px-3.5 text-[0.9375rem] transition-[background-color,color,box-shadow] duration-120',
     active
-      ? 'bg-brand-soft font-semibold text-brand-ink'
+      ? 'bg-brand font-semibold text-on-brand shadow-[0_4px_12px_-2px_color-mix(in_oklab,var(--color-brand)_45%,transparent)]'
       : 'font-medium text-ink-muted hover:bg-surface-muted hover:text-ink',
   );
 }
@@ -79,7 +82,12 @@ export function NavItem<C extends ElementType = 'a'>({
       {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {count ? (
-        <span className="num min-w-5.5 rounded-full bg-brand px-1.5 text-center text-xs/5.5 font-bold text-on-brand">
+        <span
+          className={cn(
+            'num min-w-5.5 rounded-full px-1.5 text-center text-xs/5.5 font-bold',
+            active ? 'bg-on-brand text-brand-ink' : 'bg-brand text-on-brand',
+          )}
+        >
           {count}
         </span>
       ) : null}

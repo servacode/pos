@@ -8,26 +8,29 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dang
 export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg' | 'pay';
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-brand text-on-brand shadow-e1 hover:bg-brand-hover',
-  secondary: 'border border-line-control bg-surface text-ink shadow-e1 hover:bg-surface-muted',
-  ghost: 'text-ink hover:bg-surface-muted',
+  primary:
+    'bg-brand text-on-brand shadow-[0_1px_2px_rgb(16_24_40/0.08),0_4px_12px_-2px_color-mix(in_oklab,var(--color-brand)_40%,transparent)] hover:bg-brand-hover',
+  secondary:
+    'border border-line-control/60 bg-surface text-ink shadow-e1 hover:border-line-control hover:bg-surface-muted',
+  ghost: 'text-ink-muted hover:bg-surface-muted hover:text-ink',
   danger: 'bg-danger text-on-danger hover:opacity-90',
   'danger-soft': 'bg-danger-soft text-danger-ink hover:opacity-90',
 };
 
+// هوية 3: every button is a pill; the pay button a big rounded bar.
 const SIZES: Record<ButtonSize, string> = {
-  xs: 'min-h-8 rounded-small px-3 text-sm',
-  sm: 'min-h-10 rounded-control px-3.5 text-sm',
-  md: 'min-h-12 rounded-control px-5 text-base',
-  lg: 'min-h-14 rounded-control px-6 text-lg',
-  pay: 'min-h-18 w-full justify-between rounded-control px-6 text-xl font-bold',
+  xs: 'min-h-8 rounded-full px-3.5 text-sm',
+  sm: 'min-h-10 rounded-full px-4 text-sm',
+  md: 'min-h-12 rounded-full px-6 text-base',
+  lg: 'min-h-14 rounded-full px-7 text-lg',
+  pay: 'min-h-18 w-full justify-between rounded-[1.25rem] px-6 text-xl font-bold',
 };
 
 const ICON_SIZES: Record<Exclude<ButtonSize, 'pay'>, string> = {
-  xs: 'size-8 rounded-small',
-  sm: 'size-10 rounded-control',
-  md: 'size-12 rounded-control',
-  lg: 'size-14 rounded-control',
+  xs: 'size-8 rounded-full',
+  sm: 'size-10 rounded-full',
+  md: 'size-12 rounded-full',
+  lg: 'size-14 rounded-full',
 };
 
 const DEFAULT_SIZE: Record<Density, Exclude<ButtonSize, 'pay'>> = {

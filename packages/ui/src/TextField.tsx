@@ -40,15 +40,15 @@ export function TextField({
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      <label htmlFor={inputId} className={cn('text-sm font-semibold text-ink', hideLabel && 'sr-only')}>
+      <label htmlFor={inputId} className={cn('text-sm font-medium text-ink-muted', hideLabel && 'sr-only')}>
         {label}
       </label>
       <div
         className={cn(
-          'flex items-center rounded-control border bg-surface ring-inset transition-[border-color,box-shadow] duration-120',
+          'flex items-center rounded-control border bg-surface shadow-e1 transition-[border-color,box-shadow] duration-120',
           error
-            ? 'border-danger ring-1 ring-danger'
-            : 'border-line-control focus-within:border-ring focus-within:ring-1 focus-within:ring-ring',
+            ? 'border-danger ring-4 ring-danger/15'
+            : 'border-line-control/50 hover:border-line-control focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15',
           disabled && 'cursor-not-allowed opacity-50',
           readOnly && !error && 'bg-surface-muted',
         )}

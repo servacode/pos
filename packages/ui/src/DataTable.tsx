@@ -111,7 +111,7 @@ export function DataTable<Row>({
         key={rowKey(row)}
         className={cn(
           ROW_HEIGHT[density],
-          'border-b border-line transition-colors duration-120 last:border-0 hover:bg-canvas',
+          'border-b border-line/70 transition-colors duration-120 last:border-0 hover:bg-brand-soft/40',
         )}
       >
         {columns.map((column) => (
@@ -124,16 +124,16 @@ export function DataTable<Row>({
   }
 
   return (
-    <div className={cn('overflow-x-auto rounded-card border border-line bg-surface shadow-e1', className)}>
+    <div className={cn('overflow-x-auto rounded-card bg-surface shadow-e1 ring-1 ring-line/70', className)}>
       <table aria-busy={loading || undefined} className={cn('w-full border-collapse', cellText)}>
         <caption className="sr-only">{caption}</caption>
         <thead>
-          <tr className={cn(density === 'dense' ? 'h-8' : 'h-11', 'border-b border-line bg-surface-muted')}>
+          <tr className={cn(density === 'dense' ? 'h-8' : 'h-12', 'border-b border-line')}>
             {columns.map((column) => (
               <th
                 key={column.key}
                 scope="col"
-                className={cn(cellClass(column), 'text-xs font-semibold whitespace-nowrap text-ink-muted')}
+                className={cn(cellClass(column), 'text-xs font-medium whitespace-nowrap text-ink-subtle')}
               >
                 {column.header}
               </th>

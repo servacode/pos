@@ -52,10 +52,10 @@
   --text-display: 3.5rem;
   --text-display--line-height: calc(64 / 56);
 
-  /* Radii (هوية 2): 8 small, 10 fields and buttons, 16 cards and dialogs. */
+  /* Radii (هوية 2): 8 small, 12 fields, 20 cards and dialogs; buttons and chips are pills. */
   --radius-small: 0.5rem;
-  --radius-control: 0.625rem;
-  --radius-card: 1rem;
+  --radius-control: 0.75rem;
+  --radius-card: 1.25rem;
 
   /* Motion, tab 14 › الحركة: durations are used as duration-80/120/200/320/600. */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
@@ -116,7 +116,7 @@
 @theme static {
   --color-*: initial;
 
-  --color-canvas: oklch(0.9789 0.0029 264.54);
+  --color-canvas: oklch(0.967 0.0029 264.54);
   --color-surface: oklch(1 0 0);
   --color-surface-muted: oklch(0.9665 0.0045 258.32);
   --color-surface-total: oklch(0.9683 0.0109 167.8);
@@ -151,8 +151,8 @@
   --color-overlay: oklch(0 0 0 / 0.4);
 
   --shadow-*: initial;
-  --shadow-e1: 0 1px 2px rgb(16 24 40 / 0.05);
-  --shadow-e2: 0 4px 8px -2px rgb(16 24 40 / 0.1), 0 2px 4px -2px rgb(16 24 40 / 0.06);
+  --shadow-e1: 0 1px 3px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-e2: 0 12px 24px -6px rgb(16 24 40 / 0.1), 0 4px 8px -4px rgb(16 24 40 / 0.06);
   --shadow-e3: 0 20px 24px -4px rgb(16 24 40 / 0.12), 0 8px 8px -4px rgb(16 24 40 / 0.04);
 }
 

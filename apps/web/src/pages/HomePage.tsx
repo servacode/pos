@@ -9,6 +9,8 @@ import {
   cn,
   formatQuantity,
   GiftIcon,
+  IconChip,
+  InboxIcon,
   Money,
   NextIcon,
   PrintIcon,
@@ -16,6 +18,7 @@ import {
   SalesIcon,
   Skeleton,
   StoreIcon,
+  TrendUpIcon,
   WarningIcon,
 } from '@serva/ui';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
@@ -42,7 +45,7 @@ function TrialBanner({ me }: { me: MeResponse }) {
   return (
     <div
       className={cn(
-        'flex items-center gap-4 rounded-card border px-4 py-4 sm:px-5',
+        'flex items-center gap-4 rounded-card border px-4 py-4 shadow-e1 sm:px-5',
         endingSoon
           ? 'border-warning-ink/20 bg-warning-soft text-warning-ink'
           : 'border-brand/20 bg-brand-soft text-brand-ink',
@@ -76,8 +79,26 @@ function Greeting({ me }: { me: MeResponse }) {
   );
 }
 
+/** A card's title with its picture in a soft square (هوية 3). */
+function SectionTitle({
+  icon,
+  tone = 'brand',
+  children,
+}: {
+  icon: ReactNode;
+  tone?: 'brand' | 'warning' | 'danger' | 'neutral';
+  children: ReactNode;
+}) {
+  return (
+    <h2 className="flex items-center gap-3 text-lg font-bold text-ink">
+      <IconChip tone={tone}>{icon}</IconChip>
+      {children}
+    </h2>
+  );
+}
+
 const quickActionClass =
-  'inline-flex min-h-12 items-center gap-2 rounded-control px-4 font-semibold transition-colors duration-120';
+  'inline-flex min-h-12 items-center gap-2 rounded-full px-5 font-semibold transition-colors duration-120';
 
 function QuickActions({ me }: { me: MeResponse }) {
   const canCatalog = holdsAny(me, ['catalog.manage']);
@@ -88,7 +109,7 @@ function QuickActions({ me }: { me: MeResponse }) {
           to="/products/new"
           className={cn(
             quickActionClass,
-            'border border-line-control bg-surface text-ink shadow-e1 hover:bg-surface-muted',
+            'border border-line-control/60 bg-surface text-ink shadow-e1 hover:bg-surface-muted',
           )}
         >
           <AddIcon />
@@ -100,7 +121,7 @@ function QuickActions({ me }: { me: MeResponse }) {
           to="/labels"
           className={cn(
             quickActionClass,
-            'border border-line-control bg-surface text-ink shadow-e1 hover:bg-surface-muted',
+            'border border-line-control/60 bg-surface text-ink shadow-e1 hover:bg-surface-muted',
           )}
         >
           <PrintIcon />
@@ -125,7 +146,7 @@ function TodaySales({ report }: { report: DayState }) {
   return (
     <section
       aria-label="مبيعات اليوم"
-      className="flex flex-col gap-5 rounded-card bg-brand p-6 text-on-brand shadow-e2 sm:p-7"
+      className="relative flex flex-col gap-5 overflow-hidden rounded-[1.75rem] bg-brand bg-[radial-gradient(120%_120%_at_0%_0%,color-mix(in_oklab,var(--color-brand-hover)_80%,transparent),transparent_60%)] p-6 text-on-brand shadow-e2 sm:p-8"
     >
       <div className="flex items-center justify-between gap-3">
         <p className="flex items-center gap-2 font-semibold opacity-90">
@@ -148,11 +169,11 @@ function TodaySales({ report }: { report: DayState }) {
             <Money minor={data.totalMinor} currency={data.baseCurrency} />
           </p>
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className="rounded-control bg-on-brand/10 px-4 py-3">
+            <div className="rounded-2xl bg-on-brand/10 px-4 py-3 ring-1 ring-on-brand/10">
               <dt className="text-sm opacity-85">الفواتير</dt>
               <dd className="num text-xl font-bold">{data.invoiceCount}</dd>
             </div>
-            <div className="rounded-control bg-on-brand/10 px-4 py-3">
+            <div className="rounded-2xl bg-on-brand/10 px-4 py-3 ring-1 ring-on-brand/10">
               <dt className="text-sm opacity-85">متوسط الفاتورة</dt>
               <dd className="text-xl font-bold">
                 <Money
@@ -161,7 +182,7 @@ function TodaySales({ report }: { report: DayState }) {
                 />
               </dd>
             </div>
-            <div className="col-span-2 rounded-control bg-on-brand/10 px-4 py-3 sm:col-span-1">
+            <div className="col-span-2 rounded-2xl bg-on-brand/10 px-4 py-3 ring-1 ring-on-brand/10 sm:col-span-1">
               <dt className="text-sm opacity-85">الخصومات</dt>
               <dd className="text-xl font-bold">
                 <Money minor={data.discountMinor} currency={data.baseCurrency} />
@@ -180,7 +201,7 @@ function TopProducts({ report }: { report: DayState }) {
   const top = report.data?.topProducts.slice(0, 5) ?? [];
   return (
     <Card className="flex flex-col gap-4">
-      <h2 className="text-lg font-bold text-ink">الأكثر مبيعاً اليوم</h2>
+      <SectionTitle icon={<TrendUpIcon size={20} />}>الأكثر مبيعاً اليوم</SectionTitle>
       {report.loading ? (
         <Skeleton className="h-24" />
       ) : top.length === 0 ? (
@@ -217,7 +238,9 @@ function Waiting() {
   const online = count - holds;
   return (
     <Card className="flex flex-col gap-3">
-      <h2 className="text-lg font-bold text-ink">ينتظرك</h2>
+      <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
+        ينتظرك
+      </SectionTitle>
       {orders.loading ? (
         <Skeleton className="h-14" />
       ) : count === 0 ? (
@@ -258,7 +281,7 @@ function WaitingRow({
       <Link
         to={to}
         className={cn(
-          'flex min-h-14 items-center gap-3 rounded-control px-3 font-semibold transition-opacity duration-120 hover:opacity-90',
+          'flex min-h-14 items-center gap-3 rounded-2xl px-3 font-semibold transition-opacity duration-120 hover:opacity-90',
           tone === 'warning' ? 'bg-warning-soft text-warning-ink' : 'bg-brand-soft text-brand-ink',
         )}
       >
@@ -277,7 +300,9 @@ function RunningLow() {
   return (
     <Card className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-bold text-ink">قرّب يخلص</h2>
+        <SectionTitle icon={<WarningIcon size={20} />} tone="danger">
+          قرّب يخلص
+        </SectionTitle>
         <Link to="/reports/merchandise" className="text-sm font-semibold text-brand-ink hover:underline">
           كل القائمة
         </Link>
@@ -329,7 +354,9 @@ function StoreCard({ me }: { me: MeResponse }) {
   const base = CURRENCIES[me.settings.baseCurrency];
   return (
     <Card className="flex flex-col gap-5">
-      <h2 className="text-lg font-bold text-ink">متجرك</h2>
+      <SectionTitle icon={<StoreIcon size={20} />} tone="neutral">
+        متجرك
+      </SectionTitle>
       <dl className="flex flex-col gap-5">
         <InfoRow label="نشاط المتجر">
           <ul className="flex flex-wrap gap-2" aria-label="نشاط المتجر">

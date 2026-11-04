@@ -4,11 +4,7 @@ import { DensityProvider } from '../context';
 
 /** The cashier's status bar (kit .cash-status): 44 px, above every layer (z 60). */
 export function CashierStatusBar({ children }: { children: ReactNode }) {
-  return (
-    <header className="relative z-60 flex h-11 items-center gap-3 border-b border-line bg-surface px-4">
-      {children}
-    </header>
-  );
+  return <header className="relative z-60 flex h-14 items-center gap-3 bg-canvas px-4">{children}</header>;
 }
 
 export interface CashierShellProps {
@@ -44,11 +40,15 @@ export function CashierShell({
       >
         {statusBar}
         {cart ? (
-          <div className="grid min-h-0 grid-cols-[minmax(0,26.25rem)_minmax(0,1fr)]">
-            <aside aria-label="السلة" className="flex min-h-0 flex-col border-e border-line bg-surface">
+          <div className="grid min-h-0 grid-cols-[minmax(0,26.25rem)_minmax(0,1fr)] gap-3 px-3 pb-3">
+            {/* هوية 3: the cart floats as a white panel beside the items. */}
+            <aside
+              aria-label="السلة"
+              className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] bg-surface shadow-e1 ring-1 ring-line/70"
+            >
               {cart}
             </aside>
-            <main className={cn('flex min-h-0 flex-col gap-3 overflow-y-auto p-4', mainClassName)}>
+            <main className={cn('flex min-h-0 flex-col gap-3 overflow-y-auto p-1', mainClassName)}>
               {children}
             </main>
           </div>

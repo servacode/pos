@@ -17,7 +17,7 @@ describe('Button', () => {
   });
 
   it.each([
-    ['secondary', 'border-line-control'],
+    ['secondary', 'border-line-control/60'],
     ['ghost', 'hover:bg-surface-muted'],
     ['danger', 'bg-danger'],
     ['danger-soft', 'bg-danger-soft'],

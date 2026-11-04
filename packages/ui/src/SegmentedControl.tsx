@@ -52,7 +52,7 @@ export function SegmentedControl<V extends string>({
       role="radiogroup"
       aria-label={label}
       className={cn(
-        'gap-1 rounded-xl bg-surface-muted p-1',
+        'gap-1 rounded-full bg-surface-muted p-1 ring-1 ring-line/60',
         fullWidth ? 'grid auto-cols-fr grid-flow-col' : 'inline-flex',
         className,
       )}
@@ -79,8 +79,8 @@ export function SegmentedControl<V extends string>({
             }}
             className={cn(
               density === 'touch' ? 'min-h-12 px-4 text-base' : 'min-h-10 px-3.5 text-sm',
-              'rounded-[0.625rem] font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard disabled:cursor-not-allowed disabled:opacity-50',
-              on ? 'bg-surface text-ink shadow-e2' : 'text-ink-muted hover:text-ink',
+              'rounded-full font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard disabled:cursor-not-allowed disabled:opacity-50',
+              on ? 'bg-surface text-ink shadow-e1' : 'text-ink-muted hover:text-ink',
             )}
           >
             {option.label}

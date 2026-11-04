@@ -522,9 +522,11 @@ export function SaleScreen(props: SaleScreenProps) {
 
   const cartPanel = (
     <>
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-4">
-        <CartIcon size={20} className="text-ink-muted" />
-        <span className="font-semibold text-ink">
+      <div className="flex h-16 shrink-0 items-center gap-3 px-4">
+        <span className="grid size-10 place-items-center rounded-xl bg-brand-soft text-brand-ink">
+          <CartIcon size={20} />
+        </span>
+        <span className="text-lg font-bold text-ink">
           {lineCount === 0 ? 'فاتورة جديدة' : 'الفاتورة الحالية'}
         </span>
         <span className="flex-1" />
@@ -686,7 +688,7 @@ export function SaleScreen(props: SaleScreenProps) {
             <span>امسح الباركود أو اختر صنفاً من الشبكة.</span>
           </div>
         ) : (
-          <ul aria-label="أسطر الفاتورة">
+          <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-1.5 px-3 pb-3">
             {cart.lines.map((line, i) => {
               const p = priced?.lines[i];
               const need = needs.get(line.lineNo);
@@ -843,7 +845,7 @@ export function SaleScreen(props: SaleScreenProps) {
           </button>
         </div>
       ) : null}
-      <div className="flex shrink-0 flex-col gap-3 border-t border-line bg-surface-total p-4">
+      <div className="m-3 mt-0 flex shrink-0 flex-col gap-3 rounded-[1.25rem] bg-surface-total p-4">
         {totals && totals.discountMinor > 0 ? (
           <dl className="flex flex-col gap-0.5 text-sm">
             <div className="flex justify-between text-ink-muted">
@@ -1204,7 +1206,7 @@ export function SaleScreen(props: SaleScreenProps) {
       ) : (
         <>
           <div className="flex shrink-0 gap-3">
-            <label className="flex h-14 min-w-0 flex-1 items-center gap-2.5 rounded-control border border-line-control bg-surface px-4 focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+            <label className="flex h-14 min-w-0 flex-1 items-center gap-2.5 rounded-full border border-line-control/50 bg-surface px-5 shadow-e1 transition-[border-color,box-shadow] duration-120 focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15">
               <SearchIcon size={20} className="text-ink-muted" />
               <span className="sr-only">ابحث أو امسح الباركود</span>
               <input
@@ -1292,10 +1294,10 @@ export function SaleScreen(props: SaleScreenProps) {
                       setQuery('');
                     }}
                     className={cn(
-                      'min-h-12 shrink-0 rounded-full border px-4 font-semibold whitespace-nowrap',
+                      'min-h-12 shrink-0 rounded-full px-5 font-semibold whitespace-nowrap transition-colors duration-120',
                       on
-                        ? 'border-brand bg-brand-soft text-brand-ink'
-                        : 'border-line bg-surface text-ink hover:border-line-control',
+                        ? 'bg-ink text-surface shadow-e1'
+                        : 'bg-surface text-ink-muted shadow-e1 ring-1 ring-line/70 hover:text-ink',
                     )}
                   >
                     {c.name}

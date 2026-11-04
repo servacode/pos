@@ -61,7 +61,7 @@ function ToastView({ toast, onDone }: { toast: ToastItem; onDone: (id: number) =
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
-      className="pointer-events-auto flex min-h-12 items-center gap-2.5 rounded-control bg-ink ps-4 pe-1.5 text-sm font-semibold text-surface shadow-e2 motion-safe:animate-rise"
+      className="pointer-events-auto flex min-h-12 items-center gap-2.5 rounded-full bg-ink ps-5 pe-1.5 text-sm font-semibold text-surface shadow-e2 motion-safe:animate-rise"
     >
       <ToneIcon />
       <span className="flex-1 py-3">{toast.message}</span>
