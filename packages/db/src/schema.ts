@@ -2225,6 +2225,9 @@ export const onlineStores = pgTable(
     showOutOfStock: boolean('show_out_of_stock').notNull().default(false),
     /** whatsapp: «اطلب عبر واتساب»; shop: the order is placed in the shop, the phone confirmed by a code */
     orderMode: text('order_mode').notNull().default('whatsapp'),
+    /** «أجرة التوصيل»: flat, or per area when areas are set; for the courier, not a sale */
+    deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
+    deliveryAreas: jsonb('delivery_areas').$type<{ name: string; feeMinor: number }[]>().notNull().default([]),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2269,6 +2272,9 @@ export const onlineOrders = pgTable(
     saleId: uuid('sale_id'),
     /** A hold's deposit (source 'hold'): the code of the voucher it was paid as */
     depositCode: text('deposit_code'),
+    /** For the courier, on top of the pieces; 0 for a pickup */
+    deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
+    deliveryArea: text('delivery_area'),
     decidedBy: uuid('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     version: version(),

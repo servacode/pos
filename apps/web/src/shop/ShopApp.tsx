@@ -9,6 +9,7 @@ import {
   EmptyState,
   FullScreenLoader,
   Money,
+  Select,
   StoreIcon,
   TextField,
 } from '@serva/ui';
@@ -360,6 +361,15 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [phone, setPhone] = useState('');
   const [fulfilment, setFulfilment] = useState<'delivery' | 'pickup'>(store.delivery ? 'delivery' : 'pickup');
   const [address, setAddress] = useState('');
+  const [area, setArea] = useState('');
+  // The courier's fee: the picked area's when the store charges by area, else the flat one
+  const byArea = store.deliveryAreas.length > 0;
+  const fee =
+    fulfilment !== 'delivery'
+      ? 0
+      : byArea
+        ? (store.deliveryAreas.find((a) => a.name === area)?.feeMinor ?? 0)
+        : store.deliveryFeeMinor;
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -382,6 +392,12 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             {placed.number}
           </bdi>{' '}
           · <Money minor={placed.totalMinor} currency={placed.currency} className="font-bold" />
+          {placed.deliveryFeeMinor > 0 ? (
+            <>
+              {' '}
+              + أجرة التوصيل <Money minor={placed.deliveryFeeMinor} currency={placed.currency} />
+            </>
+          ) : null}
         </p>
         {placed.whatsappUrl ? (
           <>
@@ -457,6 +473,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           phone,
           fulfilment,
           address: fulfilment === 'delivery' ? address : null,
+          area: fulfilment === 'delivery' && byArea ? area || null : null,
           note: note || null,
           lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
           ...(byCode && challenge ? { challengeId: challenge.challengeId, code } : {}),
@@ -519,6 +536,18 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           <span className="font-semibold">المجموع</span>
           <Money minor={cartTotal(cart.lines)} currency={store.currency} className="text-xl font-bold" />
         </div>
+        {fee > 0 ? (
+          <>
+            <div className="flex items-center justify-between text-sm text-ink-muted">
+              <span>أجرة التوصيل (للمندوب)</span>
+              <Money minor={fee} currency={store.currency} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-semibold">الإجمالي</span>
+              <Money minor={cartTotal(cart.lines) + fee} currency={store.currency} className="font-bold" />
+            </div>
+          </>
+        ) : null}
       </section>
       <section aria-label="إتمام الطلب" className="flex flex-col gap-3 rounded-card bg-surface p-4">
         <h2 className="text-xl font-bold">بياناتك</h2>
@@ -562,6 +591,21 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             {store.delivery ? 'التوصيل إلى عنوانك' : 'الاستلام من المحل'}
           </p>
         )}
+        {fulfilment === 'delivery' && byArea ? (
+          <Select
+            label="منطقة التوصيل"
+            value={area}
+            onChange={(e) => setArea(e.target.value)}
+            error={fields.area}
+          >
+            <option value="">اختر منطقتك</option>
+            {store.deliveryAreas.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        ) : null}
         {fulfilment === 'delivery' ? (
           <TextField
             label="العنوان"
@@ -688,6 +732,12 @@ function TrackView({ slug, base }: { slug: string; base: string }) {
         </span>
         <Money minor={order.totalMinor} currency={order.currency} className="text-lg font-bold" />
       </div>
+      {order.deliveryFeeMinor > 0 ? (
+        <div className="flex items-center justify-between text-sm text-ink-muted">
+          <span>أجرة التوصيل (للمندوب)</span>
+          <Money minor={order.deliveryFeeMinor} currency={order.currency} />
+        </div>
+      ) : null}
       <Link to={base} className="text-sm font-semibold text-brand-ink">
         عد إلى المتجر
       </Link>

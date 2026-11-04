@@ -335,6 +335,8 @@ const PULL_SETS: Record<string, PullSet> = {
       totalMinor: onlineOrders.totalMinor,
       lines: onlineOrders.lines,
       depositCode: onlineOrders.depositCode,
+      deliveryFeeMinor: onlineOrders.deliveryFeeMinor,
+      deliveryArea: onlineOrders.deliveryArea,
       version: onlineOrders.version,
     },
     scope: () =>

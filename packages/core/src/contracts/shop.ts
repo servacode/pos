@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { CurrencyCode } from '../currencies';
 import { phoneSchema } from './auth';
-import { uuidSchema, versionSchema } from './common';
+import { nonNegativeMinorSchema, uuidSchema, versionSchema } from './common';
 
 /**
  * The online shop (26 › المتجر الإلكتروني), first step: the store's own link shows its goods, the
@@ -49,6 +49,16 @@ export const onlineStoreInput = z.object({
   showOutOfStock: z.boolean(),
   /** whatsapp: «اطلب عبر واتساب»; shop: placed in the shop, the phone confirmed by a code */
   orderMode: z.enum(['whatsapp', 'shop']).default('whatsapp'),
+  /**
+   * «أجرة التوصيل» (03 › الألبسة): added to a delivered order for the customer to pay the courier, not
+   * a sale of the store. With areas, the customer picks one and pays its fee; otherwise the flat fee.
+   */
+  deliveryFeeMinor: nonNegativeMinorSchema.default(0),
+  deliveryAreas: z
+    .array(z.object({ name: z.string().trim().min(1, 'اكتب اسم المنطقة').max(40), feeMinor: nonNegativeMinorSchema }))
+    .max(40)
+    .refine((a) => new Set(a.map((x) => x.name)).size === a.length, 'كل منطقة مرة واحدة')
+    .default([]),
 });
 export type OnlineStoreInput = z.input<typeof onlineStoreInput>;
 
@@ -63,6 +73,13 @@ export interface OnlineStoreSettings {
   note: string | null;
   showOutOfStock: boolean;
   orderMode: 'whatsapp' | 'shop';
+  deliveryFeeMinor: number;
+  deliveryAreas: DeliveryArea[];
+}
+
+export interface DeliveryArea {
+  name: string;
+  feeMinor: number;
 }
 
 export interface ShopStore {
@@ -75,6 +92,8 @@ export interface ShopStore {
   pickup: boolean;
   note: string | null;
   orderMode: 'whatsapp' | 'shop';
+  deliveryFeeMinor: number;
+  deliveryAreas: DeliveryArea[];
 }
 
 export interface ShopProductCard {
@@ -128,6 +147,8 @@ export const shopOrderInput = z.object({
   phone: phoneSchema,
   fulfilment: z.enum(['delivery', 'pickup']),
   address: z.string().trim().max(300).nullable().default(null),
+  /** The delivery area, when the store charges by area */
+  area: z.string().trim().max(40).nullable().default(null),
   note: z.string().trim().max(300).nullable().default(null),
   lines: z
     .array(z.object({ variantId: uuidSchema, qty: z.int().min(1).max(50) }))
@@ -156,7 +177,9 @@ export interface ShopOrderTrack {
   status: OnlineOrderStatus;
   fulfilment: 'delivery' | 'pickup';
   currency: CurrencyCode;
+  /** The pieces; the delivery fee is on top, for the courier */
   totalMinor: number;
+  deliveryFeeMinor: number;
   lines: { name: string; label: string | null; qty: number; totalMinor: number }[];
   createdAt: string;
 }
@@ -166,7 +189,10 @@ export interface ShopOrderPlaced {
   trackPath: string;
   number: string;
   currency: CurrencyCode;
+  /** The pieces */
   totalMinor: number;
+  /** For the courier, on top of the pieces */
+  deliveryFeeMinor: number;
   /** The text WhatsApp opens with */
   message: string;
   /** https://wa.me/<number>?text=…, or null when the store has no WhatsApp number */
@@ -191,6 +217,9 @@ export interface OnlineOrder {
   totalMinor: number;
   /** A hold's deposit: the code of the voucher the customer paid it as, spent at pickup */
   depositCode: string | null;
+  /** For the courier, on top of totalMinor; 0 for a pickup */
+  deliveryFeeMinor: number;
+  deliveryArea: string | null;
   lines: {
     variantId: string;
     productId: string;
@@ -228,6 +257,8 @@ export interface OnlineOrderRow {
   totalMinor: number;
   lines: OnlineOrder['lines'];
   depositCode: string | null;
+  deliveryFeeMinor: number;
+  deliveryArea: string | null;
   version: number;
 }
 

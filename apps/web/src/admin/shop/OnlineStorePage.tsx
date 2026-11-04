@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { OnlineOrder, OnlineOrderStatus, OnlineStoreInput, OnlineStoreSettings } from '@serva/core';
+import type {
+  DeliveryArea,
+  OnlineOrder,
+  OnlineOrderStatus,
+  OnlineStoreInput,
+  OnlineStoreSettings,
+} from '@serva/core';
+import { CURRENCIES } from '@serva/core/currencies';
 import { Alert, Badge, Button, Card, Money, SegmentedControl, Switch, TextField } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { useMe } from '../../auth/useAuth';
@@ -42,6 +49,115 @@ export function OnlineStorePage() {
         {permissions.has('customers.view') ? <OrdersCard /> : null}
       </div>
     </AppShell>
+  );
+}
+
+/** «1,500» (Arabic digits too) to minor units of a currency with `decimals`; null while unusable */
+export function minorOf(text: string, decimals: number): number | null {
+  const clean = [...text.trim()]
+    .map((ch) => {
+      const arabic = '٠١٢٣٤٥٦٧٨٩'.indexOf(ch);
+      return arabic >= 0 ? String(arabic) : ch === '٫' ? '.' : ch;
+    })
+    .filter((ch) => ch !== ',' && ch !== ' ')
+    .join('');
+  if (clean === '') return 0;
+  const n = Number(clean);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 10 ** decimals);
+}
+
+/**
+ * «أجرة التوصيل»: one fee for every delivery, or a fee per area that the customer picks in the
+ * cart. It is for the courier, on top of the pieces; not a sale of the store.
+ */
+function DeliveryFees({
+  feeMinor,
+  areas,
+  onChange,
+  error,
+}: {
+  feeMinor: number;
+  areas: DeliveryArea[];
+  onChange: (feeMinor: number, areas: DeliveryArea[]) => void;
+  error?: string;
+}) {
+  const me = useMe();
+  const base = me.settings.baseCurrency;
+  const decimals = CURRENCIES[base].decimals;
+  const text = (minor: number) => (minor === 0 ? '' : String(minor / 10 ** decimals));
+  const [flat, setFlat] = useState(text(feeMinor));
+  const [rows, setRows] = useState(areas.map((a) => ({ name: a.name, fee: text(a.feeMinor) })));
+  const push = (nextFlat: string, nextRows: { name: string; fee: string }[]) => {
+    onChange(
+      minorOf(nextFlat, decimals) ?? 0,
+      nextRows
+        .filter((r) => r.name.trim())
+        .map((r) => ({ name: r.name.trim(), feeMinor: minorOf(r.fee, decimals) ?? 0 })),
+    );
+  };
+  return (
+    <fieldset className="flex flex-col gap-3 rounded-control border border-line p-3">
+      <legend className="px-1 font-semibold">أجرة التوصيل</legend>
+      <p className="text-sm text-ink-muted">
+        تُضاف على الطلب ويدفعها الزبون للمندوب، ولا تُسجَّل مبيعاً للمحل. أضف مناطق إن اختلفت الأجرة بينها.
+      </p>
+      {rows.length === 0 ? (
+        <TextField
+          label="الأجرة لكل توصيل"
+          hint="فارغ: بلا أجرة"
+          dir="ltr"
+          inputMode="decimal"
+          value={flat}
+          onChange={(e) => {
+            setFlat(e.target.value.slice(0, 12));
+            push(e.target.value, rows);
+          }}
+          className="w-48"
+        />
+      ) : null}
+      {rows.map((r, i) => (
+        <div key={i} className="flex flex-wrap items-end gap-3">
+          <TextField
+            label={`المنطقة ${i + 1}`}
+            value={r.name}
+            onChange={(e) => {
+              const next = rows.map((x, j) => (j === i ? { ...x, name: e.target.value.slice(0, 40) } : x));
+              setRows(next);
+              push(flat, next);
+            }}
+          />
+          <TextField
+            label={`أجرة المنطقة ${i + 1}`}
+            dir="ltr"
+            inputMode="decimal"
+            value={r.fee}
+            onChange={(e) => {
+              const next = rows.map((x, j) => (j === i ? { ...x, fee: e.target.value.slice(0, 12) } : x));
+              setRows(next);
+              push(flat, next);
+            }}
+            className="w-40"
+          />
+          <Button
+            variant="ghost"
+            onClick={() => {
+              const next = rows.filter((_, j) => j !== i);
+              setRows(next);
+              push(flat, next);
+            }}
+          >
+            احذف
+          </Button>
+        </div>
+      ))}
+      {error ? <p className="text-sm text-danger-ink">{error}</p> : null}
+      <div>
+        <Button variant="secondary" onClick={() => setRows([...rows, { name: '', fee: '' }])}>
+          أضف منطقة
+        </Button>
+      </div>
+    </fieldset>
   );
 }
 
@@ -121,6 +237,14 @@ function SettingsCard() {
         error={fields.whatsapp}
       />
       <Switch label="توصيل" checked={form.delivery} onCheckedChange={(delivery) => set({ delivery })} />
+      {form.delivery ? (
+        <DeliveryFees
+          feeMinor={form.deliveryFeeMinor}
+          areas={form.deliveryAreas}
+          onChange={(deliveryFeeMinor, deliveryAreas) => set({ deliveryFeeMinor, deliveryAreas })}
+          error={fields.deliveryAreas ?? fields.deliveryFeeMinor}
+        />
+      ) : null}
       <Switch label="استلام من المحل" checked={form.pickup} onCheckedChange={(pickup) => set({ pickup })} />
       {fields.delivery ? <p className="text-sm text-danger-ink">{fields.delivery}</p> : null}
       <TextField
@@ -228,6 +352,13 @@ function OrdersCard() {
                 {o.phone}
               </a>{' '}
               · {o.fulfilment === 'delivery' ? `توصيل إلى ${o.address ?? ''}` : 'استلام من المحل'}
+              {o.deliveryFeeMinor > 0 ? (
+                <>
+                  {' '}
+                  · أجرة التوصيل{o.deliveryArea ? ` (${o.deliveryArea})` : ''}{' '}
+                  <Money minor={o.deliveryFeeMinor} currency={o.currency} /> للمندوب
+                </>
+              ) : null}
             </p>
             <ul className="text-sm text-ink-muted">
               {o.lines.map((l) => (

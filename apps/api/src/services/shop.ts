@@ -79,9 +79,12 @@ async function storeOf(tx: Transaction, tenantId: string) {
     note: string | null;
     show_out_of_stock: boolean;
     order_mode: 'whatsapp' | 'shop';
+    delivery_fee_minor: string;
+    delivery_areas: { name: string; feeMinor: number }[];
   }>(sql`
     select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
-           o.show_out_of_stock, o.order_mode
+           o.show_out_of_stock, o.order_mode, o.delivery_fee_minor::text as delivery_fee_minor,
+           o.delivery_areas
     from online_stores o
     join tenants t on t.id = o.tenant_id
     join tenant_settings s on s.tenant_id = o.tenant_id
@@ -296,6 +299,8 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           pickup: store.pickup,
           note: store.note,
           orderMode: store.order_mode,
+          deliveryFeeMinor: Number(store.delivery_fee_minor),
+          deliveryAreas: store.delivery_areas,
         },
         categories: categories
           .filter((c) => shown.has(c.id))
@@ -460,6 +465,8 @@ export function orderMessage(order: {
   note: string | null;
   currency: CurrencyCode;
   totalMinor: number;
+  deliveryFeeMinor: number;
+  deliveryArea: string | null;
   lines: OnlineOrderLine[];
 }): string {
   return [
@@ -473,6 +480,12 @@ export function orderMessage(order: {
     ),
     '',
     `المجموع: ${money(order.totalMinor, order.currency)}`,
+    ...(order.deliveryFeeMinor > 0
+      ? [
+          `أجرة التوصيل${order.deliveryArea ? ` (${order.deliveryArea})` : ''}: ${money(order.deliveryFeeMinor, order.currency)}`,
+          `الإجمالي: ${money(order.totalMinor + order.deliveryFeeMinor, order.currency)}`,
+        ]
+      : []),
     order.fulfilment === 'delivery' ? `التوصيل إلى: ${order.address ?? '—'}` : 'الاستلام من المحل',
     ...(order.note ? [`ملاحظة: ${order.note}`] : []),
   ].join('\n');
@@ -559,6 +572,19 @@ export function placeShopOrder(
         throw fieldError('fulfilment', 'هذا المحل يوصّل فقط.');
       if (input.fulfilment === 'delivery' && !input.address)
         throw fieldError('address', 'اكتب عنوان التوصيل');
+      // The courier's fee: the area's when the store charges by area, else the flat one
+      let deliveryFeeMinor = 0;
+      let deliveryArea: string | null = null;
+      if (input.fulfilment === 'delivery') {
+        if (store.delivery_areas.length > 0) {
+          const area = store.delivery_areas.find((a) => a.name === input.area);
+          if (!area) throw fieldError('area', 'اختر منطقة التوصيل');
+          deliveryFeeMinor = area.feeMinor;
+          deliveryArea = area.name;
+        } else {
+          deliveryFeeMinor = Number(store.delivery_fee_minor);
+        }
+      }
       const lines = await priceLines(tx, base, input.lines, true);
       const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
       const { seq, number } = await nextOrderNumber(tx, tenantId);
@@ -571,6 +597,8 @@ export function placeShopOrder(
         note: input.note,
         currency: base,
         totalMinor,
+        deliveryFeeMinor,
+        deliveryArea,
         lines,
       };
       const [made] = await tx
@@ -583,6 +611,7 @@ export function placeShopOrder(
         number,
         currency: base,
         totalMinor,
+        deliveryFeeMinor,
         message,
         whatsappUrl:
           mode === 'whatsapp' && store.whatsapp
@@ -659,6 +688,7 @@ export function shopOrderTrack(db: Database, slug: string, token: string): Promi
         fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
         currency: row.currency as CurrencyCode,
         totalMinor: row.totalMinor,
+        deliveryFeeMinor: row.deliveryFeeMinor,
         lines: row.lines.map((l) => ({ name: l.name, label: l.label, qty: l.qty, totalMinor: l.totalMinor })),
         createdAt: row.createdAt.toISOString(),
       };
@@ -678,6 +708,8 @@ const DEFAULTS = (slug: string): OnlineStoreSettings => ({
   note: null,
   showOutOfStock: false,
   orderMode: 'whatsapp',
+  deliveryFeeMinor: 0,
+  deliveryAreas: [],
 });
 
 export function getOnlineStore(db: Database, auth: AccessClaims): Promise<OnlineStoreSettings> {
@@ -700,6 +732,8 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       note: row.note,
       showOutOfStock: row.showOutOfStock,
       orderMode: row.orderMode as OnlineStoreSettings['orderMode'],
+      deliveryFeeMinor: row.deliveryFeeMinor,
+      deliveryAreas: row.deliveryAreas,
     };
   });
 }
@@ -726,6 +760,8 @@ export async function saveOnlineStore(
         note: input.note || null,
         showOutOfStock: input.showOutOfStock,
         orderMode: input.orderMode,
+        deliveryFeeMinor: input.deliveryFeeMinor,
+        deliveryAreas: input.deliveryAreas,
       };
       if (input.version === null) {
         const made = await tx
@@ -765,6 +801,8 @@ const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   status: r.status as OnlineOrder['status'],
   source: r.source as OnlineOrder['source'],
   depositCode: r.depositCode,
+  deliveryFeeMinor: r.deliveryFeeMinor,
+  deliveryArea: r.deliveryArea,
   customerName: r.customerName,
   phone: r.phone,
   fulfilment: r.fulfilment as OnlineOrder['fulfilment'],

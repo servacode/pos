@@ -332,4 +332,42 @@ describe('the online shop', () => {
     expect(res.statusCode, res.body).toBe(201);
     expect(res.json<ShopOrderPlaced>().totalMinor).toBe(368_000);
   });
+
+  it('adds the courier’s fee to a delivered order: flat, or by the area the customer picks', async () => {
+    const store = await openStore(app);
+    const { l } = await goods(store);
+    await openShop(store, { deliveryFeeMinor: 5_000 });
+    let home = (await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' })).json<ShopHome>();
+    expect(home.store).toMatchObject({ deliveryFeeMinor: 5_000, deliveryAreas: [] });
+    const flat = (await order('nour-fashion', [{ variantId: l, qty: 1 }])).json<ShopOrderPlaced>();
+    expect([flat.totalMinor, flat.deliveryFeeMinor]).toEqual([460_000, 5_000]);
+    expect(flat.message).toContain('أجرة التوصيل');
+    expect(flat.message).toContain('الإجمالي');
+    // Picked up: no fee
+    const pickup = (
+      await order('nour-fashion', [{ variantId: l, qty: 1 }], { fulfilment: 'pickup', address: null })
+    ).json<ShopOrderPlaced>();
+    expect(pickup.deliveryFeeMinor).toBe(0);
+
+    // By area
+    await openShop(store, {
+      version: 1,
+      deliveryAreas: [
+        { name: 'المزة', feeMinor: 5_000 },
+        { name: 'دمر', feeMinor: 10_000 },
+      ],
+    });
+    home = (await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' })).json<ShopHome>();
+    expect(home.store.deliveryAreas).toHaveLength(2);
+    const noArea = await order('nour-fashion', [{ variantId: l, qty: 1 }]);
+    expect(noArea.json()).toMatchObject({ error: { fields: { area: expect.any(String) } } });
+    const far = (
+      await order('nour-fashion', [{ variantId: l, qty: 1 }], { area: 'دمر' })
+    ).json<ShopOrderPlaced>();
+    expect(far.deliveryFeeMinor).toBe(10_000);
+    const box = (await app.inject({ method: 'GET', url: '/v1/online-orders', headers: as(store) })).json<{
+      items: OnlineOrder[];
+    }>();
+    expect(box.items[0]).toMatchObject({ deliveryFeeMinor: 10_000, deliveryArea: 'دمر' });
+  });
 });
