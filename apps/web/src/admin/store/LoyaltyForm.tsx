@@ -94,8 +94,13 @@ export function LoyaltyForm({
         ) : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
         {saved ? <Alert tone="success">حُفظ، ويصل إلى أجهزة الكاشير مع أول اتصال.</Alert> : null}
-        <div>
-          <Button type="submit" loading={saving} disabled={enabled && (!earnEveryMinor || !pointValueMinor)}>
+        <div className="flex justify-end border-t border-line pt-4">
+          <Button
+            type="submit"
+            size="lg"
+            loading={saving}
+            disabled={enabled && (!earnEveryMinor || !pointValueMinor)}
+          >
             احفظ
           </Button>
         </div>

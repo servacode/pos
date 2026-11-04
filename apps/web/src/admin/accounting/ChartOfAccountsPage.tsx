@@ -1,12 +1,30 @@
 import { useMemo, useState } from 'react';
 import { normalizeArabic } from '@serva/core';
-import { Badge, Button, Card, cn, EmptyState, ExpandIcon, ReportsIcon, SearchField } from '@serva/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  cn,
+  EmptyState,
+  ExpandIcon,
+  ReportsIcon,
+  SearchField,
+  type BadgeTone,
+} from '@serva/ui';
 import { listAccounts } from '../reports/api';
 import type { AccountRow } from '../reports/contracts';
 import { ACCOUNT_TYPE_LABEL, currencyName, normalSide } from '../reports/labels';
 import { ReportError, ReportLoading } from '../reports/parts';
 import { useReport } from '../reports/useReport';
 import { AccountingLayout } from './AccountingLayout';
+
+const TYPE_TONE: Record<AccountRow['type'], BadgeTone> = {
+  asset: 'info',
+  liability: 'warning',
+  equity: 'brand',
+  revenue: 'success',
+  expense: 'danger',
+};
 
 export interface AccountNode {
   account: AccountRow;
@@ -91,8 +109,8 @@ function AccountTree({ accounts }: { accounts: AccountRow[] }) {
     });
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="flex flex-col gap-4">
+      <Card className="flex flex-wrap items-end justify-between gap-3">
         <SearchField
           label="ابحث في الحسابات"
           placeholder="ابحث بالرمز أو الاسم"
@@ -108,8 +126,8 @@ function AccountTree({ accounts }: { accounts: AccountRow[] }) {
             اطوِ الكل
           </Button>
         </div>
-      </div>
-      <div className="overflow-x-auto rounded-card border border-line bg-surface">
+      </Card>
+      <div className="overflow-x-auto rounded-card border border-line bg-surface shadow-e1">
         <table aria-label="شجرة الحسابات" className="w-full border-collapse text-sm">
           <thead>
             <tr className="h-11 border-b border-line bg-surface-muted text-[0.8125rem] text-ink-muted">
@@ -168,7 +186,9 @@ function AccountTree({ accounts }: { accounts: AccountRow[] }) {
                       {account.isSystem ? <Badge>من النظام</Badge> : null}
                     </div>
                   </td>
-                  <td className="px-3 text-ink-muted">{ACCOUNT_TYPE_LABEL[account.type]}</td>
+                  <td className="px-3">
+                    <Badge tone={TYPE_TONE[account.type]}>{ACCOUNT_TYPE_LABEL[account.type]}</Badge>
+                  </td>
                   <td className="px-3 text-ink-muted">
                     {account.isGroup ? 'تجميعي' : normalSide(account.type) === 'debit' ? 'مدين' : 'دائن'}
                   </td>
@@ -181,7 +201,7 @@ function AccountTree({ accounts }: { accounts: AccountRow[] }) {
           </tbody>
         </table>
       </div>
-      <p className="text-sm text-ink-muted">
+      <p className="px-1 text-sm text-ink-muted">
         الدليل الافتراضي من سجل الترقيم، وأرقامه ثابتة. حسابات النظام تتحرك من المستندات وحدها.
       </p>
     </div>

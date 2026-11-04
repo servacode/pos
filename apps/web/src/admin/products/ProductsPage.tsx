@@ -13,6 +13,7 @@ import {
   IconButton,
   Money,
   MoneyField,
+  PageHeader,
   ProductsIcon,
   SearchField,
   SegmentedControl,
@@ -342,28 +343,32 @@ export function ProductsPage() {
     <AppShell>
       <title>المنتجات · Serva POS</title>
       <div className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-ink">المنتجات</h1>
-            <p className="text-ink-muted">
+        <PageHeader
+          icon={ProductsIcon}
+          title="المنتجات"
+          description={
+            <>
               ابحث بالاسم أو امسح الباركود.{' '}
               <Link to="/categories" className={textLinkClass}>
                 التصنيفات
               </Link>
-            </p>
-          </div>
-          {canManage ? (
-            <Link
-              to="/products/new"
-              className="inline-flex min-h-12 items-center gap-2 rounded-control bg-brand px-5 font-semibold text-on-brand hover:bg-brand-hover max-sm:w-full max-sm:justify-center"
-            >
-              <AddIcon />
-              أضف منتجاً
-            </Link>
-          ) : null}
-        </div>
+            </>
+          }
+          actions={
+            canManage ? (
+              <Link
+                to="/products/new"
+                className="inline-flex min-h-12 items-center gap-2 rounded-control bg-brand px-5 font-semibold text-on-brand shadow-e1 hover:bg-brand-hover max-sm:w-full max-sm:justify-center"
+              >
+                <AddIcon />
+                أضف منتجاً
+              </Link>
+            ) : null
+          }
+          className="mb-0"
+        />
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+        <div className="flex flex-col gap-3 rounded-card border border-line bg-surface p-3 shadow-e1 sm:p-4 lg:flex-row lg:items-end">
           <SearchField
             label="ابحث بالاسم أو الباركود"
             value={filters.q}
@@ -422,6 +427,13 @@ export function ProductsPage() {
           </Alert>
         ) : null}
 
+        {items && items.length > 0 ? (
+          <p className="px-1 text-sm text-ink-muted">
+            يعرض <span className="num font-semibold text-ink">{items.length}</span> منتجاً
+            {nextCursor ? ' والمزيد بعدها' : ''}
+          </p>
+        ) : null}
+
         <DataTable
           caption="المنتجات"
           columns={columns}
@@ -471,7 +483,7 @@ export function ProductsPage() {
           </div>
         ) : null}
 
-        <p className="flex items-center gap-2 text-sm text-ink-muted">
+        <p className="flex items-center gap-2 rounded-control bg-surface-muted px-4 py-3 text-sm text-ink-muted">
           <BarcodeIcon />
           امسح باركوداً في أي وقت لتفتح منتجه.
         </p>

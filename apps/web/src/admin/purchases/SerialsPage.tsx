@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { SerialRow } from '@serva/core';
-import { Alert, Badge, DataTable, SearchField, type DataColumn } from '@serva/ui';
+import {
+  Alert,
+  Badge,
+  Card,
+  CardHeader,
+  DataTable,
+  PageHeader,
+  SearchField,
+  SerialIcon,
+  type DataColumn,
+} from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { findSerials } from './api';
@@ -54,17 +64,27 @@ export function SerialsPage() {
     <AppShell>
       <title>الأرقام التسلسلية · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">الأرقام التسلسلية</h1>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        <SearchField label="ابحث بالرقم التسلسلي أو IMEI" value={q} onValueChange={setQ} />
-        <DataTable
-          caption="الأجهزة بأرقامها"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(r) => r.serial}
-          loading={!items && !error}
-          empty="لا رقم مطابق. الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
+        <PageHeader
+          className="mb-0"
+          icon={SerialIcon}
+          title="الأرقام التسلسلية"
+          description="ابحث عن جهاز برقمه: في المحل أم مباع، وكفالته"
         />
+        {error ? <Alert tone="error">{error}</Alert> : null}
+        <Card>
+          <SearchField label="ابحث بالرقم التسلسلي أو IMEI" value={q} onValueChange={setQ} />
+        </Card>
+        <Card>
+          <CardHeader icon={SerialIcon} title="الأجهزة بأرقامها" />
+          <DataTable
+            caption="الأجهزة بأرقامها"
+            columns={columns}
+            rows={items ?? []}
+            rowKey={(r) => r.serial}
+            loading={!items && !error}
+            empty="لا رقم مطابق. الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
+          />
+        </Card>
       </div>
     </AppShell>
   );

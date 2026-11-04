@@ -49,7 +49,7 @@ describe('«شاشة الدليل»', () => {
       ['رُفض', '0'],
       ['محجوز للمراجعة', '0'],
     ] as const) {
-      expect(screen.getByText(label).nextElementSibling).toHaveTextContent(value);
+      expect(screen.getByText(label).parentElement?.nextElementSibling).toHaveTextContent(value);
     }
     const rows = within(screen.getByRole('table')).getAllByRole('row').map(text);
     expect(rows).toEqual([

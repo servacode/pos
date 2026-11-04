@@ -6,39 +6,45 @@ import {
   Card,
   EmptyState,
   LockIcon,
+  PageHeader,
   RetryIcon,
   Select,
   SkeletonText,
   TextField,
+  type Icon,
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { holdsAny, type AccessRule } from './access';
 
-/** The page title row (kit .page-head): the path, the title and its line, the page's actions. */
+/** The page title row: the path above, the title with its icon and line, the page's actions. */
 export function PageHead({
   crumbs,
   title,
   subtitle,
   actions,
+  icon,
 }: {
   crumbs?: readonly string[];
   title: string;
   subtitle?: ReactNode;
   actions?: ReactNode;
+  icon?: Icon;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 print:hidden">
-      <div className="flex min-w-0 flex-col gap-1">
-        {crumbs && crumbs.length > 0 ? (
-          <nav aria-label="المسار" className="text-sm text-ink-muted">
+    <PageHeader
+      className="mb-0 print:hidden"
+      title={title}
+      description={subtitle}
+      icon={icon}
+      eyebrow={
+        crumbs && crumbs.length > 0 ? (
+          <nav aria-label="المسار" className="text-ink-muted">
             {crumbs.join(' / ')}
           </nav>
-        ) : null}
-        <h1 className="text-2xl font-bold text-ink">{title}</h1>
-        {subtitle ? <p className="text-ink-muted">{subtitle}</p> : null}
-      </div>
-      {actions ? <div className="flex flex-wrap items-center gap-3">{actions}</div> : null}
-    </div>
+        ) : undefined
+      }
+      actions={actions}
+    />
   );
 }
 
@@ -161,26 +167,43 @@ export function DayField({
   );
 }
 
-/** A card with a title, for a report's sections. */
+/** A card with a title (and optionally an icon and a line under it), for a report's sections. */
 export function Section({
   title,
   action,
   children,
   className,
+  icon: SectionIcon,
+  description,
 }: {
   title: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  icon?: Icon;
+  description?: ReactNode;
 }) {
   const id = useId();
   return (
     <section aria-labelledby={id} className={className}>
-      <Card className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id={id} className="text-lg font-semibold text-ink">
-            {title}
-          </h2>
+      <Card className="flex h-full flex-col gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            {SectionIcon ? (
+              <span
+                aria-hidden="true"
+                className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink"
+              >
+                <SectionIcon />
+              </span>
+            ) : null}
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <h2 id={id} className="text-lg font-semibold text-ink">
+                {title}
+              </h2>
+              {description ? <p className="text-sm text-ink-muted">{description}</p> : null}
+            </div>
+          </div>
           {action}
         </div>
         {children}

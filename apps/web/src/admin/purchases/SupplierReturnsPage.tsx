@@ -5,7 +5,20 @@ import type {
   SupplierReturnInput,
   SupplierReturnRow,
 } from '@serva/core';
-import { Alert, Button, DataTable, Money, Select, TextField, type DataColumn } from '@serva/ui';
+import {
+  AddIcon,
+  Alert,
+  Button,
+  Card,
+  CardHeader,
+  DataTable,
+  Money,
+  PageHeader,
+  Select,
+  SupplierReturnIcon,
+  TextField,
+  type DataColumn,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, ApiError, errorMessage } from '../../lib/api';
@@ -139,11 +152,22 @@ export function SupplierReturnsPage() {
     <AppShell>
       <title>مرتجع إلى المورد · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">مرتجع إلى المورد</h1>
+        <PageHeader
+          className="mb-0"
+          icon={SupplierReturnIcon}
+          title="مرتجع إلى المورد"
+          description="أعد قطعاً إلى مورّدها، واسترد قيمتها من رصيده أو نقداً"
+        />
         <section
           aria-label="مرتجع جديد"
-          className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+          className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
         >
+          <CardHeader
+            className="mb-0"
+            icon={AddIcon}
+            title="مرتجع جديد"
+            description="اختر المورد ثم القطع المرتجعة"
+          />
           {error ? <Alert tone="error">{error}</Alert> : null}
           {done ? (
             <Alert tone="success">
@@ -253,14 +277,17 @@ export function SupplierReturnsPage() {
             </Button>
           </div>
         </section>
-        <DataTable
-          caption="المرتجعات إلى الموردين"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(r) => r.id}
-          loading={!items && !error}
-          empty="لا مرتجعات بعد."
-        />
+        <Card>
+          <CardHeader icon={SupplierReturnIcon} title="المرتجعات السابقة" />
+          <DataTable
+            caption="المرتجعات إلى الموردين"
+            columns={columns}
+            rows={items ?? []}
+            rowKey={(r) => r.id}
+            loading={!items && !error}
+            empty="لا مرتجعات بعد."
+          />
+        </Card>
       </div>
     </AppShell>
   );

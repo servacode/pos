@@ -136,36 +136,38 @@ export function ProfileForm({
               error={errors.sectors}
             />
           ) : null}
-          <TextField
-            name="address"
-            label="العنوان"
-            value={values.address}
-            onChange={(e) => setValue('address', e.target.value)}
-            error={errors.address}
-          />
-          <TextField
-            name="phone"
-            label="هاتف المحل"
-            inputMode="tel"
-            dir="ltr"
-            value={values.phone}
-            onChange={(e) => setValue('phone', e.target.value)}
-            error={errors.phone}
-          />
-          <TextField
-            name="legalName"
-            label="الاسم التجاري (اختياري)"
-            value={values.legalName}
-            onChange={(e) => setValue('legalName', e.target.value)}
-            error={errors.legalName}
-          />
-          <TextField
-            name="taxNumber"
-            label="الرقم الضريبي (إن وُجد)"
-            value={values.taxNumber}
-            onChange={(e) => setValue('taxNumber', e.target.value)}
-            error={errors.taxNumber}
-          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextField
+              name="address"
+              label="العنوان"
+              value={values.address}
+              onChange={(e) => setValue('address', e.target.value)}
+              error={errors.address}
+            />
+            <TextField
+              name="phone"
+              label="هاتف المحل"
+              inputMode="tel"
+              dir="ltr"
+              value={values.phone}
+              onChange={(e) => setValue('phone', e.target.value)}
+              error={errors.phone}
+            />
+            <TextField
+              name="legalName"
+              label="الاسم التجاري (اختياري)"
+              value={values.legalName}
+              onChange={(e) => setValue('legalName', e.target.value)}
+              error={errors.legalName}
+            />
+            <TextField
+              name="taxNumber"
+              label="الرقم الضريبي (إن وُجد)"
+              value={values.taxNumber}
+              onChange={(e) => setValue('taxNumber', e.target.value)}
+              error={errors.taxNumber}
+            />
+          </div>
           <TextField
             name="receiptFooter"
             label="سطر أسفل الفاتورة"
@@ -174,12 +176,17 @@ export function ProfileForm({
             onChange={(e) => setValue('receiptFooter', e.target.value)}
             error={errors.receiptFooter}
           />
-          <Button type="submit" size="lg" loading={submitting}>
-            {submitLabel}
-          </Button>
+          <div className="flex justify-end border-t border-line pt-4">
+            <Button type="submit" size="lg" loading={submitting} className="max-sm:w-full">
+              {submitLabel}
+            </Button>
+          </div>
         </form>
       </Card>
-      <ReceiptPreview values={values} />
+      <div className="flex flex-col gap-2 lg:sticky lg:top-6 lg:self-start">
+        <p className="text-sm font-semibold text-ink-muted">كيف تظهر على الفاتورة</p>
+        <ReceiptPreview values={values} />
+      </div>
     </div>
   );
 }
@@ -227,7 +234,7 @@ export function CurrencyForm({
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         {saved ? <Alert tone="success">حُفظت العملة وسعر الصرف.</Alert> : null}
-        <p className="text-ink">
+        <p className="rounded-control bg-surface-muted px-4 py-3 text-ink">
           العملة الأساسية <strong>الليرة السورية</strong>: بها تُحسب الحسابات والتقارير.
         </p>
         <Switch
@@ -249,15 +256,19 @@ export function CurrencyForm({
             error={errors.usdRate}
           />
         ) : null}
-        <Switch
-          label="أسعار الرفوف تشمل الضريبة"
-          description="الشائع في سوريا. إن أطفأته تُضاف الضريبة فوق السعر عند البيع"
-          checked={values.taxInclusive}
-          onCheckedChange={(checked) => setValue('taxInclusive', checked)}
-        />
-        <Button type="submit" size="lg" loading={submitting}>
-          {submitLabel}
-        </Button>
+        <div className="border-t border-line pt-5">
+          <Switch
+            label="أسعار الرفوف تشمل الضريبة"
+            description="الشائع في سوريا. إن أطفأته تُضاف الضريبة فوق السعر عند البيع"
+            checked={values.taxInclusive}
+            onCheckedChange={(checked) => setValue('taxInclusive', checked)}
+          />
+        </div>
+        <div className="flex justify-end border-t border-line pt-4">
+          <Button type="submit" size="lg" loading={submitting} className="max-sm:w-full">
+            {submitLabel}
+          </Button>
+        </div>
       </form>
     </Card>
   );

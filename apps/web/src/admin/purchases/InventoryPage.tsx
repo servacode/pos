@@ -2,8 +2,17 @@ import { useCallback, useEffect, useState } from 'react';
 import type { InventoryResponse, InventoryRow, ProfitReport, StocktakeDetail } from '@serva/core';
 import {
   Alert,
+  Badge,
   Button,
+  Card,
+  CardHeader,
+  CashIcon,
   DataTable,
+  InventoryIcon,
+  PageHeader,
+  TrendUpIcon,
+  WalletIcon,
+  WarningIcon,
   formatQuantity,
   Money,
   Select,
@@ -59,7 +68,16 @@ export function InventoryPage() {
 
   const base = stock?.baseCurrency ?? 'SYP';
   const columns: DataColumn<InventoryRow>[] = [
-    { key: 'name', header: 'الصنف', cell: (r) => <span className="font-semibold">{r.name}</span> },
+    {
+      key: 'name',
+      header: 'الصنف',
+      cell: (r) => (
+        <span className="inline-flex items-center gap-2 font-semibold">
+          {r.name}
+          {r.qty <= 0 ? <Badge tone="warning">{r.qty < 0 ? 'بالسالب' : 'نفد'}</Badge> : null}
+        </span>
+      ),
+    },
     {
       key: 'qty',
       header: 'الكمية',
@@ -172,24 +190,31 @@ export function InventoryPage() {
     <AppShell>
       <title>المخزون والأرباح · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex items-center gap-3">
-          <h1 className="flex-1 text-2xl font-bold text-ink">المخزون والأرباح</h1>
-          {canCount && !counting ? (
-            <Button variant="secondary" onClick={() => setCounting(true)}>
-              جرد الرفوف
-            </Button>
-          ) : null}
-          {counting ? (
+        <PageHeader
+          className="mb-0"
+          icon={InventoryIcon}
+          title="المخزون والأرباح"
+          description="قيمة بضاعتك بالكلفة، وربح هذا الشهر"
+          actions={
             <>
-              <Button onClick={() => void saveCount()} loading={saving}>
-                سجّل الجرد
-              </Button>
-              <Button variant="ghost" onClick={() => setCounting(false)}>
-                إلغاء
-              </Button>
+              {canCount && !counting ? (
+                <Button variant="secondary" onClick={() => setCounting(true)}>
+                  جرد الرفوف
+                </Button>
+              ) : null}
+              {counting ? (
+                <>
+                  <Button onClick={() => void saveCount()} loading={saving}>
+                    سجّل الجرد
+                  </Button>
+                  <Button variant="ghost" onClick={() => setCounting(false)}>
+                    إلغاء
+                  </Button>
+                </>
+              ) : null}
             </>
-          ) : null}
-        </div>
+          }
+        />
         {error ? <Alert tone="error">{error}</Alert> : null}
         {counting ? (
           <>
@@ -232,20 +257,27 @@ export function InventoryPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
             label="قيمة المخزون بالكلفة"
+            icon={InventoryIcon}
             value={<Money minor={stock?.totalValueMinor ?? 0} currency={base} />}
           />
           {profit ? (
             <>
               <StatTile
                 label="صافي المبيعات هذا الشهر"
+                icon={CashIcon}
+                tone="info"
                 value={<Money minor={profit.netSalesMinor} currency={base} />}
               />
               <StatTile
                 label="كلفة المبيعات"
+                icon={WalletIcon}
+                tone="neutral"
                 value={<Money minor={profit.costOfSalesMinor} currency={base} />}
               />
               <StatTile
                 label="مجمل الربح"
+                icon={profit.stockLossMinor ? WarningIcon : TrendUpIcon}
+                tone={profit.stockLossMinor ? 'warning' : 'brand'}
                 value={<Money minor={profit.grossProfitMinor} currency={base} />}
                 footnote={
                   profit.stockLossMinor ? (
@@ -261,7 +293,7 @@ export function InventoryPage() {
         {canCount && !counting && (stock?.items.length ?? 0) > 0 ? (
           <form
             aria-label="سجّل هدراً"
-            className="flex flex-wrap items-end gap-3 rounded-card border border-line bg-surface p-4"
+            className="flex flex-wrap items-end gap-3 rounded-card border border-line bg-surface p-4 shadow-e1 sm:p-5"
             onSubmit={(e) => {
               e.preventDefault();
               void saveWaste();
@@ -293,14 +325,17 @@ export function InventoryPage() {
             </Button>
           </form>
         ) : null}
-        <DataTable
-          caption="المخزون"
-          columns={columns}
-          rows={stock?.items ?? []}
-          rowKey={(r) => `${r.branchId}:${r.variantId}`}
-          loading={!stock && !error}
-          empty="لا مخزون بعد. سجّل فاتورة شراء فيدخل المخزون بكلفته."
-        />
+        <Card>
+          <CardHeader icon={InventoryIcon} title="المخزون" description="الكمية وقيمتها بكلفة الوحدة" />
+          <DataTable
+            caption="المخزون"
+            columns={columns}
+            rows={stock?.items ?? []}
+            rowKey={(r) => `${r.branchId}:${r.variantId}`}
+            loading={!stock && !error}
+            empty="لا مخزون بعد. سجّل فاتورة شراء فيدخل المخزون بكلفته."
+          />
+        </Card>
       </div>
     </AppShell>
   );

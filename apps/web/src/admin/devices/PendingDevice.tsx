@@ -19,7 +19,7 @@ export function PendingDevice({ device, busy, canDecide, onDecide }: PendingDevi
   return (
     <article
       aria-label={`طلب ربط: ${device.name}`}
-      className="flex flex-col gap-3 rounded-card border-2 border-warning bg-surface p-4"
+      className="flex flex-col gap-3 rounded-card border-2 border-warning bg-warning-soft p-4 shadow-e1"
     >
       <div className="flex items-start gap-3">
         <span className="grid size-10 shrink-0 place-items-center rounded-control bg-info-soft text-info-ink">

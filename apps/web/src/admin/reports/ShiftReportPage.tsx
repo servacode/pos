@@ -5,12 +5,18 @@ import {
   BackIcon,
   Button,
   Card,
+  CashIcon,
+  ClockIcon,
   cn,
   DataTable,
   displayNumber,
   Money,
   PrintIcon,
+  SalesIcon,
+  StatTile,
+  TransferIcon,
   useDigits,
+  WalletIcon,
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
@@ -158,7 +164,7 @@ function movementColumns(me: MeResponse, digits: 'latn' | 'arab'): DataColumn<Sh
 function MetaItem({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <dt className="text-sm text-ink-muted">{label}</dt>
+      <dt className="text-sm font-semibold text-ink-muted">{label}</dt>
       <dd className="font-semibold text-ink">{children}</dd>
     </div>
   );
@@ -372,6 +378,7 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
     <>
       <PageHead
         crumbs={['البيع', 'الورديات']}
+        icon={ClockIcon}
         title={report.status === 'closed' ? 'تقرير إغلاق الوردية' : 'تقرير الوردية'}
         subtitle={
           <>
@@ -393,28 +400,37 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
         }
       />
 
-      <Card>
-        <dl className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          <MetaItem label="الحالة">
-            <ShiftStatus status={report.status} />
-          </MetaItem>
-          <MetaItem label="الجهاز">
-            <bdi className="num">{report.deviceCode}</bdi>
-          </MetaItem>
-          <MetaItem label="فُتحت">
-            {report.openedAt ? zonedDateTime(report.openedAt, tz, digits) : '—'}
-          </MetaItem>
-          <MetaItem label="أُغلقت">
-            {report.closedAt ? zonedDateTime(report.closedAt, tz, digits) : 'ما زالت مفتوحة'}
-          </MetaItem>
-          <MetaItem label="الفواتير">{displayNumber(String(report.salesCount), digits)}</MetaItem>
-          <MetaItem label="المبيعات">
-            <Money minor={report.salesTotalMinor} currency={base} />
-          </MetaItem>
-        </dl>
-      </Card>
+      <div className="grid gap-4 lg:grid-cols-4">
+        <Card className="sm:col-span-2">
+          <dl className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+            <MetaItem label="الحالة">
+              <ShiftStatus status={report.status} />
+            </MetaItem>
+            <MetaItem label="الجهاز">
+              <bdi className="num">{report.deviceCode}</bdi>
+            </MetaItem>
+            <MetaItem label="فُتحت">
+              {report.openedAt ? zonedDateTime(report.openedAt, tz, digits) : '—'}
+            </MetaItem>
+            <MetaItem label="أُغلقت">
+              {report.closedAt ? zonedDateTime(report.closedAt, tz, digits) : 'ما زالت مفتوحة'}
+            </MetaItem>
+          </dl>
+        </Card>
+        <StatTile
+          label="الفواتير"
+          icon={SalesIcon}
+          tone="info"
+          value={displayNumber(String(report.salesCount), digits)}
+        />
+        <StatTile
+          label="المبيعات"
+          icon={CashIcon}
+          value={<Money minor={report.salesTotalMinor} currency={base} />}
+        />
+      </div>
 
-      <Section title="النقد لكل عملة">
+      <Section title="النقد لكل عملة" icon={CashIcon} description="من الرصيد الافتتاحي إلى المعدود في الدرج">
         <CashTable report={report} withDifference={withDifference} />
         {withDifference ? null : (
           <p className="text-sm text-ink-muted">
@@ -424,8 +440,9 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
       </Section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="المبيعات حسب الطريقة والعملة">
+        <Section title="المبيعات حسب الطريقة والعملة" icon={WalletIcon}>
           <DataTable
+            className="shadow-none"
             caption="المبيعات حسب الطريقة والعملة"
             columns={methodColumns}
             rows={report.byMethod}
@@ -433,8 +450,9 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
           />
           <p className="text-sm text-ink-muted">البطاقة وشام كاش تُطابقان لاحقاً مع الكشف، لا من الدرج.</p>
         </Section>
-        <Section title="الإيداع والسحب من الدرج">
+        <Section title="الإيداع والسحب من الدرج" icon={TransferIcon}>
           <DataTable
+            className="shadow-none"
             caption="الإيداع والسحب من الدرج"
             columns={movementColumns(me, digits)}
             rows={report.movements}
@@ -472,7 +490,7 @@ export function ShiftReportPage() {
     <ReportScreen me={me} access={SHIFTS_ACCESS} title="تقرير الوردية">
       <Link
         to="/shifts"
-        className="inline-flex min-h-11 items-center gap-2 self-start font-semibold text-brand-ink print:hidden"
+        className="inline-flex min-h-11 items-center gap-2 self-start rounded-control font-semibold text-brand-ink hover:underline print:hidden"
       >
         <BackIcon size={16} />
         كل الورديات

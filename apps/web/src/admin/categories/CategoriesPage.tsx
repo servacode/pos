@@ -14,6 +14,7 @@ import {
   EmptyState,
   IconButton,
   NumberField,
+  PageHeader,
   RetryIcon,
   Select,
   SkeletonText,
@@ -152,11 +153,16 @@ function CategoryRow({
   const archived = category.archivedAt !== null;
   return (
     <li
-      className="flex min-h-14 flex-wrap items-center gap-2 border-b border-line px-4 py-2 last:border-0"
+      className="flex min-h-16 flex-wrap items-center gap-2 border-b border-line px-4 py-2 transition-colors last:border-0 hover:bg-brand-soft/35"
       style={{ paddingInlineStart: `${1 + depth * 1.5}rem` }}
     >
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-center gap-2">
+          {depth > 0 ? (
+            <span aria-hidden="true" className="text-ink-subtle">
+              ↳
+            </span>
+          ) : null}
           <Link
             to={`/products?category=${category.id}`}
             className={archived ? 'font-semibold text-ink-muted' : 'font-semibold text-ink'}
@@ -246,26 +252,30 @@ export function CategoriesPage() {
     <AppShell>
       <title>التصنيفات · Serva POS</title>
       <div className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-ink">التصنيفات</h1>
-            <p className="text-ink-muted">
+        <PageHeader
+          className="mb-0"
+          icon={CategoriesIcon}
+          title="التصنيفات"
+          description={
+            <>
               تجمع منتجاتك على شاشة البيع وفي التقارير.{' '}
               <Link to="/products" className={textLinkClass}>
                 المنتجات
               </Link>
-            </p>
-          </div>
-          {canManage ? (
-            <Button
-              icon={<AddIcon />}
-              onClick={() => setEditing({ mode: 'new', parentId: '' })}
-              className="max-sm:w-full"
-            >
-              أضف تصنيفاً
-            </Button>
-          ) : null}
-        </div>
+            </>
+          }
+          actions={
+            canManage ? (
+              <Button
+                icon={<AddIcon />}
+                onClick={() => setEditing({ mode: 'new', parentId: '' })}
+                className="max-sm:w-full"
+              >
+                أضف تصنيفاً
+              </Button>
+            ) : null
+          }
+        />
 
         {actionError ? <Alert tone="error">{actionError}</Alert> : null}
 
@@ -305,7 +315,7 @@ export function CategoriesPage() {
         {tree.length > 0 ? (
           <ul
             aria-label="التصنيفات"
-            className="flex flex-col rounded-card border border-line bg-surface shadow-e1"
+            className="flex flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e1"
           >
             {tree.map((node) => (
               <CategoryRow

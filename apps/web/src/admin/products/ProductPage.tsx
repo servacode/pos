@@ -7,7 +7,13 @@ import {
   Badge,
   Button,
   Card,
+  CategoriesIcon,
   Dialog,
+  InventoryIcon,
+  OfferIcon,
+  PageHeader,
+  PricesIcon,
+  ProductsIcon,
   RetryIcon,
   Select,
   SkeletonText,
@@ -16,6 +22,7 @@ import {
   UndoIcon,
   formatQuantity,
   textLinkClass,
+  type Icon,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
@@ -73,14 +80,37 @@ const TOP_FIELDS = [
   'modifiers',
 ];
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+  title,
+  description,
+  icon: SectionIcon,
+  children,
+}: {
+  title: string;
+  description?: string;
+  icon?: Icon;
+  children: ReactNode;
+}) {
   const id = useId();
   return (
     <Card className="flex flex-col gap-4">
-      <section aria-labelledby={id} className="flex flex-col gap-4">
-        <h2 id={id} className="text-lg font-bold text-ink">
-          {title}
-        </h2>
+      <section aria-labelledby={id} className="flex flex-col gap-5">
+        <div className="flex items-start gap-3">
+          {SectionIcon ? (
+            <span
+              aria-hidden="true"
+              className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink"
+            >
+              <SectionIcon />
+            </span>
+          ) : null}
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <h2 id={id} className="text-lg font-semibold text-ink">
+              {title}
+            </h2>
+            {description ? <p className="text-sm text-ink-muted">{description}</p> : null}
+          </div>
+        </div>
         {children}
       </section>
     </Card>
@@ -333,20 +363,31 @@ export function ProductPage() {
     <AppShell>
       <title>{`${title} · Serva POS`}</title>
       <form ref={formRef} noValidate onSubmit={save} className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <nav aria-label="مسار الصفحة" className="text-sm">
-            <Link to="/products" className={textLinkClass}>
-              المنتجات
-            </Link>
-          </nav>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold text-ink">{title}</h1>
-              {product?.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
-              {archived ? <Badge>مؤرشف</Badge> : null}
-            </div>
-            {canManage ? (
-              <div className="flex flex-wrap gap-2 max-sm:w-full">
+        <PageHeader
+          className="mb-0"
+          icon={ProductsIcon}
+          eyebrow={
+            <nav aria-label="مسار الصفحة">
+              <Link to="/products" className={textLinkClass}>
+                المنتجات
+              </Link>
+            </nav>
+          }
+          title={title}
+          description={
+            product ? (
+              <span className="flex flex-wrap items-center gap-2">
+                <span>بطاقة المنتج: بياناته وأسعاره ومخزونه.</span>
+                {product.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
+                {archived ? <Badge>مؤرشف</Badge> : null}
+              </span>
+            ) : (
+              'أدخل بيانات المنتج وسعره وباركوده.'
+            )
+          }
+          actions={
+            canManage ? (
+              <>
                 {product && !archived ? (
                   <Link
                     to={`/labels?product=${product.id}`}
@@ -371,20 +412,24 @@ export function ProductPage() {
                     </Button>
                   )
                 ) : null}
-                <Button type="submit" loading={saving} className="max-sm:flex-1">
+                <Button type="submit" loading={saving}>
                   احفظ
                 </Button>
-              </div>
-            ) : null}
-          </div>
-        </div>
+              </>
+            ) : null
+          }
+        />
 
         {notice ? <Alert tone="success">{notice}</Alert> : null}
         {conflict ? <Alert tone="error">{conflict}</Alert> : null}
         {formError ? <Alert tone="error">{formError}</Alert> : null}
 
         <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-5">
-          <Section title="الأساسي">
+          <Section
+            title="الأساسي"
+            description="الاسم والتصنيف والوحدة والضريبة وخيارات البيع."
+            icon={ProductsIcon}
+          >
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField
                 name="nameAr"
@@ -509,7 +554,11 @@ export function ProductPage() {
             </div>
           </Section>
 
-          <Section title="الإضافات والخيارات (للمطاعم والمقاهي)">
+          <Section
+            title="الإضافات والخيارات (للمطاعم والمقاهي)"
+            description="مجموعات إضافات يختارها الزبون عند الطلب."
+            icon={OfferIcon}
+          >
             <ModifiersEditor
               groups={draft.modifiers ?? []}
               currency={liveVariants[0]?.currency ?? 'SYP'}
@@ -519,12 +568,16 @@ export function ProductPage() {
             {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
           </Section>
 
-          <Section title="المقاسات والألوان">
+          <Section
+            title="المقاسات والألوان"
+            description="حدّد ما يتنوّع به المنتج لتتولّد المتغيّرات."
+            icon={CategoriesIcon}
+          >
             <OptionsEditor axes={draft.axes} variantCount={liveVariants.length} onChange={setAxes} />
             {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
           </Section>
 
-          <Section title="الصور">
+          <Section title="الصور" description="صور المنتج للعرض." icon={ProductsIcon}>
             <ImagesEditor
               productId={product?.id ?? null}
               optionValues={[...new Set(draft.axes.flatMap((a) => a.values))]}
@@ -532,7 +585,7 @@ export function ProductPage() {
             />
           </Section>
 
-          <Section title="السعر والباركود">
+          <Section title="السعر والباركود" description="سعر كل متغيّر وباركوداته." icon={PricesIcon}>
             {liveVariants.map((variant) => (
               <VariantBlock
                 key={variant.key}
@@ -557,7 +610,11 @@ export function ProductPage() {
         </fieldset>
 
         {product && draft.type === 'stock' ? (
-          <Section title="في كل الفروع">
+          <Section
+            title="في كل الفروع"
+            description="المخزون الحالي في كل فرع وحدّ التنبيه."
+            icon={InventoryIcon}
+          >
             <StockByBranch product={product} numberFormat={me.settings.numberFormat} />
             <StockGrid product={product} numberFormat={me.settings.numberFormat} />
           </Section>

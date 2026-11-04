@@ -3,7 +3,12 @@ import type { ExpiryResponse, ExpiryRow } from '@serva/core';
 import {
   Alert,
   Badge,
+  Card,
+  CardHeader,
   DataTable,
+  ExpiryIcon,
+  PageHeader,
+  WarningIcon,
   formatQuantity,
   SegmentedControl,
   StatTile,
@@ -32,6 +37,9 @@ export function ExpiryPage() {
   useEffect(load, [load]);
 
   const items = data?.items ?? [];
+  const expired = items.filter((r) => r.daysLeft < 0).length;
+  const week = items.filter((r) => r.daysLeft >= 0 && r.daysLeft <= 7).length;
+  const month = items.filter((r) => r.daysLeft >= 0 && r.daysLeft <= 30).length;
   const columns: DataColumn<ExpiryRow>[] = [
     { key: 'name', header: 'الصنف', cell: (r) => r.name },
     { key: 'batch', header: 'الدفعة', cell: (r) => r.batchNo ?? '—' },
@@ -64,13 +72,31 @@ export function ExpiryPage() {
     <AppShell>
       <title>الصلاحية · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">الصلاحية</h1>
+        <PageHeader
+          className="mb-0"
+          icon={ExpiryIcon}
+          title="الصلاحية"
+          description="الدفعات المنتهية والقريبة من الانتهاء، الأقرب أولاً"
+        />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <StatTile label="منتهية" value={items.filter((r) => r.daysLeft < 0).length} />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatTile
+            label="منتهية"
+            icon={WarningIcon}
+            tone={expired > 0 ? 'danger' : 'neutral'}
+            value={expired}
+          />
+          <StatTile
+            label="تنتهي خلال 7 أيام"
+            icon={ExpiryIcon}
+            tone={week > 0 ? 'warning' : 'neutral'}
+            value={week}
+          />
           <StatTile
             label="تنتهي خلال 30 يوماً"
-            value={items.filter((r) => r.daysLeft >= 0 && r.daysLeft <= 30).length}
+            icon={ExpiryIcon}
+            tone={month > 0 ? 'warning' : 'neutral'}
+            value={month}
           />
         </div>
         <SegmentedControl
@@ -83,15 +109,18 @@ export function ExpiryPage() {
             { value: '180', label: '6 أشهر' },
           ]}
         />
-        <DataTable
-          caption="الدفعات حسب الصلاحية"
-          columns={columns}
-          rows={items}
-          rowKey={(r) => `${r.purchaseNumber}-${r.variantId}`}
-          loading={!data && !error}
-          {...(error ? { onRetry: load } : {})}
-          empty="لا شيء ينتهي في هذه المدة. اكتب الدفعة وتاريخ الانتهاء في فاتورة الشراء ليظهر هنا."
-        />
+        <Card>
+          <CardHeader icon={ExpiryIcon} title="الدفعات حسب الصلاحية" description="مرتبة من الأقرب انتهاءً" />
+          <DataTable
+            caption="الدفعات حسب الصلاحية"
+            columns={columns}
+            rows={items}
+            rowKey={(r) => `${r.purchaseNumber}-${r.variantId}`}
+            loading={!data && !error}
+            {...(error ? { onRetry: load } : {})}
+            empty="لا شيء ينتهي في هذه المدة. اكتب الدفعة وتاريخ الانتهاء في فاتورة الشراء ليظهر هنا."
+          />
+        </Card>
       </div>
     </AppShell>
   );

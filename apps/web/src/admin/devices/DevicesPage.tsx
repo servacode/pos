@@ -4,14 +4,19 @@ import {
   Alert,
   Button,
   Card,
+  Badge,
+  CheckCircleIcon,
   DeviceIcon,
   Dialog,
   EmptyState,
   InfoIcon,
   LinkIcon,
   LockIcon,
+  PageHeader,
+  QrCodeIcon,
   RetryIcon,
   SkeletonText,
+  StatTile,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
@@ -114,24 +119,53 @@ export function DevicesPage() {
 
   const listed = devices?.filter((d) => d.status === 'active' || d.status === 'revoked') ?? [];
   const groups = groupByBranch(listed, me.branches);
+  const activeCount = listed.filter((d) => d.status === 'active').length;
+  const missingTotal = listed.reduce((sum, d) => sum + (d.missingDocuments ?? 0), 0);
 
   return (
     <AppShell>
       <title>الأجهزة · Serva POS</title>
       <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-ink">الأجهزة</h1>
-            <p className="text-ink-muted">أجهزة الكاشير والجوالات المربوطة بمتجرك، في كل فرع.</p>
-          </div>
-          {isOwner ? (
-            <Button icon={<LinkIcon />} onClick={() => setPairing(true)} className="max-sm:w-full">
-              اربط جهازاً جديداً
-            </Button>
-          ) : null}
-        </div>
+        <PageHeader
+          className="mb-0"
+          icon={DeviceIcon}
+          title="الأجهزة"
+          description="أجهزة الكاشير والجوالات المربوطة بمتجرك، في كل فرع."
+          actions={
+            isOwner ? (
+              <Button icon={<LinkIcon />} onClick={() => setPairing(true)} className="max-sm:w-full">
+                اربط جهازاً جديداً
+              </Button>
+            ) : null
+          }
+        />
 
         {actionError ? <Alert tone="error">{actionError}</Alert> : null}
+
+        {listed.length > 0 ? (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatTile
+              label="أجهزة نشطة"
+              value={activeCount}
+              icon={CheckCircleIcon}
+              tone="brand"
+              footnote={`من ${listed.length} مربوطة`}
+            />
+            <StatTile
+              label="أجهزة موقوفة"
+              value={listed.length - activeCount}
+              icon={LockIcon}
+              tone={listed.length - activeCount > 0 ? 'danger' : 'neutral'}
+            />
+            <StatTile
+              label="مستندات لم تصل"
+              value={missingTotal}
+              icon={InfoIcon}
+              tone={missingTotal > 0 ? 'warning' : 'neutral'}
+              footnote={missingTotal > 0 ? 'أعلنت عنها الأجهزة ولم تصل' : 'كل ما أرسلته الأجهزة وصل'}
+            />
+          </div>
+        ) : null}
 
         {pending.length > 0 ? (
           <section aria-labelledby="pending-title" className="flex flex-col gap-3">
@@ -187,10 +221,15 @@ export function DevicesPage() {
 
         {groups.map((group) => (
           <section key={group.id} aria-labelledby={`branch-${group.id}`} className="flex flex-col gap-3">
-            <h2 id={`branch-${group.id}`} className="text-lg font-semibold text-ink">
-              {group.name}
-            </h2>
-            <ul className="flex flex-col rounded-card border border-line bg-surface shadow-e1">
+            <div className="flex items-center gap-2">
+              <h2 id={`branch-${group.id}`} className="text-lg font-semibold text-ink">
+                {group.name}
+              </h2>
+              <Badge>
+                <bdi className="num">{group.devices.length}</bdi>
+              </Badge>
+            </div>
+            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {group.devices.map((device) => (
                 <DeviceRow
                   key={device.id}
@@ -204,6 +243,22 @@ export function DevicesPage() {
             </ul>
           </section>
         ))}
+
+        {isOwner && groups.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setPairing(true)}
+            className="flex min-h-24 items-center gap-4 rounded-card border-2 border-dashed border-line-control bg-surface p-5 text-start transition-colors hover:border-brand hover:bg-brand-soft"
+          >
+            <span className="grid size-12 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
+              <QrCodeIcon size={24} />
+            </span>
+            <span className="flex flex-col gap-0.5">
+              <span className="font-semibold text-ink">جهاز آخر؟ اربطه برمز أو بالكاميرا</span>
+              <span className="text-sm text-ink-muted">كاشير أو جوال مندوب أو شاشة مطبخ، في أي فرع.</span>
+            </span>
+          </button>
+        ) : null}
 
         {groups.length > 0 ? (
           <p className="flex items-start gap-2 text-sm text-ink-muted">

@@ -4,9 +4,12 @@ import {
   Alert,
   Badge,
   Button,
+  CheckCircleIcon,
   DataTable,
   Money,
+  PageHeader,
   SegmentedControl,
+  WalletIcon,
   StatTile,
   type DataColumn,
 } from '@serva/ui';
@@ -75,7 +78,11 @@ export function ChequesPage() {
 
   const columns: DataColumn<Cheque>[] = [
     { key: 'date', header: 'التاريخ', cell: (c) => <bdi className="num">{c.date}</bdi> },
-    { key: 'customer', header: 'الزبون', cell: (c) => c.customerName ?? '—' },
+    {
+      key: 'customer',
+      header: 'الزبون',
+      cell: (c) => <span className="font-semibold">{c.customerName ?? '—'}</span>,
+    },
     { key: 'reference', header: 'رقم الشيك', cell: (c) => c.reference ?? '—' },
     {
       key: 'doc',
@@ -126,37 +133,48 @@ export function ChequesPage() {
   return (
     <AppShell>
       <title>الشيكات · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">الشيكات</h1>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        <Alert tone="info">
-          «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد واحد في
-          الدفاتر.
-        </Alert>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <StatTile label="تحت التحصيل" value={<Money minor={pendingTotal} currency={base} />} />
-          <StatTile label="عدد الشيكات" value={items?.length ?? 0} />
+      <div className="mx-auto flex w-full max-w-6xl flex-col">
+        <PageHeader
+          title="الشيكات"
+          description="الشيكات التي قبلها الكاشير، حتى تحصّلها أو تعيدها."
+          icon={WalletIcon}
+        />
+        <div className="flex flex-col gap-6">
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          <Alert tone="info">
+            «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد واحد في
+            الدفاتر.
+          </Alert>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <StatTile
+              label="تحت التحصيل"
+              icon={WalletIcon}
+              tone="warning"
+              value={<Money minor={pendingTotal} currency={base} />}
+            />
+            <StatTile label="عدد الشيكات" icon={CheckCircleIcon} tone="info" value={items?.length ?? 0} />
+          </div>
+          <SegmentedControl
+            label="اعرض"
+            value={filter}
+            onValueChange={setFilter}
+            options={[
+              { value: 'pending', label: 'تحت التحصيل' },
+              { value: 'cleared', label: 'المحصّلة' },
+              { value: 'bounced', label: 'المرتجعة' },
+              { value: 'all', label: 'الكل' },
+            ]}
+          />
+          <DataTable
+            caption="الشيكات"
+            columns={columns}
+            rows={items ?? []}
+            rowKey={(c) => `${c.sourceType}-${c.sourceId}-${c.paymentNo}`}
+            loading={!items && !error}
+            {...(error ? { onRetry: load } : {})}
+            empty="لا شيكات هنا. الكاشير يقبل الشيك من «الدفع» بعد اختيار الزبون."
+          />
         </div>
-        <SegmentedControl
-          label="اعرض"
-          value={filter}
-          onValueChange={setFilter}
-          options={[
-            { value: 'pending', label: 'تحت التحصيل' },
-            { value: 'cleared', label: 'المحصّلة' },
-            { value: 'bounced', label: 'المرتجعة' },
-            { value: 'all', label: 'الكل' },
-          ]}
-        />
-        <DataTable
-          caption="الشيكات"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(c) => `${c.sourceType}-${c.sourceId}-${c.paymentNo}`}
-          loading={!items && !error}
-          {...(error ? { onRetry: load } : {})}
-          empty="لا شيكات هنا. الكاشير يقبل الشيك من «الدفع» بعد اختيار الزبون."
-        />
       </div>
     </AppShell>
   );

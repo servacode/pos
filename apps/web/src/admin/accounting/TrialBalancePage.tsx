@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   CheckCircleIcon,
+  cn,
   DataTable,
   EmptyState,
   Money,
@@ -106,18 +107,33 @@ export function TrialBalancePage() {
         </Button>
       }
     >
-      <Card className="flex flex-wrap items-end gap-4">
+      <Card className="flex flex-wrap items-end gap-4 print:hidden">
         <DayField label="من" value={from} max={to} onChange={setFrom} />
         <DayField label="إلى" value={to} max={today} onChange={setTo} />
         <BranchSelect me={me} value={branchId} onChange={setBranchId} />
       </Card>
       {data ? (
-        <div className="flex flex-wrap items-center gap-3">
+        <Card
+          className={cn(
+            'flex flex-wrap items-center gap-x-6 gap-y-3 border-s-4',
+            data.balanced ? 'border-s-success' : 'border-s-danger',
+          )}
+        >
           <BalancedBadge report={data} />
-          <span className="text-sm text-ink-muted">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <span className="flex items-center gap-2 text-ink-muted">
+              إجمالي المدين
+              <Money minor={data.totals.debitMinor} currency={base} className="font-bold text-ink" />
+            </span>
+            <span className="flex items-center gap-2 text-ink-muted">
+              إجمالي الدائن
+              <Money minor={data.totals.creditMinor} currency={base} className="font-bold text-ink" />
+            </span>
+          </div>
+          <span className="text-sm text-ink-muted sm:ms-auto">
             من {dayText(data.from, digits)} إلى {dayText(data.to, digits)} · «عليه» رصيد مدين و«له» رصيد دائن
           </span>
-        </div>
+        </Card>
       ) : null}
       <DataTable
         caption="ميزان المراجعة"

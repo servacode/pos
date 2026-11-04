@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { TransferDetail, TransferInput, TransferRow } from '@serva/core';
-import { Alert, Button, DataTable, Money, Select, TextField, type DataColumn } from '@serva/ui';
+import {
+  AddIcon,
+  Alert,
+  Button,
+  Card,
+  CardHeader,
+  DataTable,
+  Money,
+  PageHeader,
+  Select,
+  TextField,
+  TransferIcon,
+  type DataColumn,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
@@ -99,14 +112,25 @@ export function TransfersPage() {
     <AppShell>
       <title>التحويل بين الفروع · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">التحويل بين الفروع</h1>
+        <PageHeader
+          className="mb-0"
+          icon={TransferIcon}
+          title="التحويل بين الفروع"
+          description="انقل بضاعة من فرع إلى آخر، وتتحرك مخازن الفرعين معاً"
+        />
         {branches.length < 2 ? (
           <Alert tone="info">للمحل فرع واحد. التحويل يظهر حين يكون لك فرعان أو أكثر.</Alert>
         ) : (
           <section
             aria-label="تحويل جديد"
-            className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+            className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
           >
+            <CardHeader
+              className="mb-0"
+              icon={AddIcon}
+              title="تحويل جديد"
+              description="اختر الفرعين ثم الأصناف والكميات"
+            />
             {error ? <Alert tone="error">{error}</Alert> : null}
             {done ? (
               <Alert tone="success">
@@ -178,14 +202,17 @@ export function TransfersPage() {
             </div>
           </section>
         )}
-        <DataTable
-          caption="التحويلات"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(r) => r.id}
-          loading={!items && !error}
-          empty="لا تحويلات بعد."
-        />
+        <Card>
+          <CardHeader icon={TransferIcon} title="التحويلات السابقة" />
+          <DataTable
+            caption="التحويلات"
+            columns={columns}
+            rows={items ?? []}
+            rowKey={(r) => r.id}
+            loading={!items && !error}
+            empty="لا تحويلات بعد."
+          />
+        </Card>
       </div>
     </AppShell>
   );

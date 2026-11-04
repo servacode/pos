@@ -5,8 +5,12 @@ import { CURRENCIES } from '@serva/core/currencies';
 import {
   Alert,
   Button,
+  Card,
+  CardHeader,
   DataTable,
   Money,
+  PageHeader,
+  PricesIcon,
   SegmentedControl,
   Select,
   Switch,
@@ -144,105 +148,112 @@ export function BulkPricesPage() {
   return (
     <AppShell>
       <title>تغيير الأسعار · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold text-ink">تغيير الأسعار</h1>
-          <p className="text-ink-muted">
-            تنزيلات آخر الموسم أو رفع الأسعار: كل قطع التصنيف وتصنيفاته الفرعية بنسبة واحدة، مقرّبة، وتُعرض
-            قبل تطبيقها.
-          </p>
-        </div>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        <SegmentedControl
-          label="العملية"
-          value={mode}
-          onValueChange={(m) => {
-            setMode(m);
-            setResult(null);
-          }}
-          options={[
-            { value: 'move', label: 'تنزيل أو رفع بنسبة' },
-            { value: 'restore', label: 'أنهِ التنزيل' },
-          ]}
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <PageHeader
+          className="mb-0"
+          icon={PricesIcon}
+          title="تغيير الأسعار"
+          description="تنزيلات آخر الموسم أو رفع الأسعار: كل قطع التصنيف وتصنيفاته الفرعية بنسبة واحدة، مقرّبة، وتُعرض قبل تطبيقها."
         />
-        {mode === 'restore' ? (
-          <p className="text-ink-muted">
-            ترجع كل قطعة منزّلة في التصنيف إلى سعرها قبل التنزيل، ويختفي السعر المشطوب.
-          </p>
-        ) : null}
-        <div className="grid gap-4 md:grid-cols-3">
-          <Select
-            label="التصنيف"
-            value={categoryId}
-            onChange={(e) => {
-              setCategoryId(e.target.value);
+        {error ? <Alert tone="error">{error}</Alert> : null}
+        <Card className="flex flex-col gap-5">
+          <CardHeader
+            className="mb-0"
+            icon={PricesIcon}
+            title="ما الذي تريد تغييره؟"
+            description="اختر العملية والتصنيف، ثم اعرض النتيجة قبل التطبيق."
+          />
+          <SegmentedControl
+            label="العملية"
+            value={mode}
+            onValueChange={(m) => {
+              setMode(m);
               setResult(null);
             }}
-          >
-            <option value="">اختر التصنيف</option>
-            {named.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-          {mode === 'move' ? (
-            <TextField
-              label="النسبة ٪"
-              hint="بالسالب للتنزيل: −30"
-              dir="ltr"
-              inputMode="decimal"
-              value={percent}
-              onChange={(e) => {
-                setPercent(e.target.value.slice(0, 8));
-                setResult(null);
-              }}
-              error={percent && bp === null ? 'من −90 إلى 200، غير الصفر' : undefined}
-            />
+            options={[
+              { value: 'move', label: 'تنزيل أو رفع بنسبة' },
+              { value: 'restore', label: 'أنهِ التنزيل' },
+            ]}
+          />
+          {mode === 'restore' ? (
+            <p className="rounded-control bg-surface-muted px-4 py-3 text-ink-muted">
+              ترجع كل قطعة منزّلة في التصنيف إلى سعرها قبل التنزيل، ويختفي السعر المشطوب.
+            </p>
           ) : null}
-          {mode === 'move' ? (
+          <div className="grid gap-4 md:grid-cols-3">
             <Select
-              label="التقريب"
-              value={String(round)}
+              label="التصنيف"
+              value={categoryId}
               onChange={(e) => {
-                setRound(Number(e.target.value) as (typeof ROUNDING)[number]);
+                setCategoryId(e.target.value);
                 setResult(null);
               }}
             >
-              {ROUNDING.map((r) => (
-                <option key={r} value={r}>
-                  {r === 1 ? 'دون تقريب' : `لأقرب ${r.toLocaleString('en')}`}
+              <option value="">اختر التصنيف</option>
+              {named.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
                 </option>
               ))}
             </Select>
+            {mode === 'move' ? (
+              <TextField
+                label="النسبة ٪"
+                hint="بالسالب للتنزيل: −30"
+                dir="ltr"
+                inputMode="decimal"
+                value={percent}
+                onChange={(e) => {
+                  setPercent(e.target.value.slice(0, 8));
+                  setResult(null);
+                }}
+                error={percent && bp === null ? 'من −90 إلى 200، غير الصفر' : undefined}
+              />
+            ) : null}
+            {mode === 'move' ? (
+              <Select
+                label="التقريب"
+                value={String(round)}
+                onChange={(e) => {
+                  setRound(Number(e.target.value) as (typeof ROUNDING)[number]);
+                  setResult(null);
+                }}
+              >
+                {ROUNDING.map((r) => (
+                  <option key={r} value={r}>
+                    {r === 1 ? 'دون تقريب' : `لأقرب ${r.toLocaleString('en')}`}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
+          </div>
+          {mode === 'move' && bp !== null && bp < 0 ? (
+            <Switch
+              label="اطبع السعر القديم مشطوباً"
+              description="يظهر السعر قبل التنزيل مشطوباً على الملصق وفي المتجر الإلكتروني."
+              checked={markWas}
+              onCheckedChange={(v) => {
+                setMarkWas(v);
+                setResult(null);
+              }}
+            />
           ) : null}
-        </div>
-        {mode === 'move' && bp !== null && bp < 0 ? (
-          <Switch
-            label="اطبع السعر القديم مشطوباً"
-            description="يظهر السعر قبل التنزيل مشطوباً على الملصق وفي المتجر الإلكتروني."
-            checked={markWas}
-            onCheckedChange={(v) => {
-              setMarkWas(v);
-              setResult(null);
-            }}
-          />
-        ) : null}
-        <div className="flex flex-wrap gap-3">
-          <Button
-            variant="secondary"
-            disabled={!categoryId || (mode === 'move' && bp === null)}
-            loading={busy && !result}
-            onClick={() => void run(false)}
-          >
-            اعرض الأسعار الجديدة
-          </Button>
-          {result && !result.applied && changed.length > 0 ? (
-            <Button loading={busy} onClick={() => void run(true)}>
-              طبّق على {changed.length} قطعة
+          <div className="flex flex-wrap gap-3 border-t border-line pt-5">
+            <Button
+              variant="secondary"
+              disabled={!categoryId || (mode === 'move' && bp === null)}
+              loading={busy && !result}
+              onClick={() => void run(false)}
+            >
+              اعرض الأسعار الجديدة
             </Button>
-          ) : null}
-        </div>
+            {result && !result.applied && changed.length > 0 ? (
+              <Button loading={busy} onClick={() => void run(true)}>
+                طبّق على {changed.length} قطعة
+              </Button>
+            ) : null}
+          </div>
+        </Card>
         {result?.applied ? (
           <Alert tone="success">
             تغيّرت أسعار {changed.length} قطعة، وتصل إلى أجهزة الكاشير مع أول اتصال.{' '}

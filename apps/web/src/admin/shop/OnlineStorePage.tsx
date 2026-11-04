@@ -7,7 +7,24 @@ import type {
   OnlineStoreSettings,
 } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
-import { Alert, Badge, Button, Card, Money, SegmentedControl, Switch, TextField } from '@serva/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  CartIcon,
+  LinkIcon,
+  Money,
+  OnlineStoreIcon,
+  OpenIcon,
+  PageHeader,
+  PhoneIcon,
+  SegmentedControl,
+  SettingsIcon,
+  Switch,
+  TextField,
+} from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
@@ -43,10 +60,16 @@ export function OnlineStorePage() {
   return (
     <AppShell>
       <title>المتجر الإلكتروني · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">المتجر الإلكتروني</h1>
-        {permissions.has('settings.manage') ? <SettingsCard /> : null}
-        {permissions.has('customers.view') ? <OrdersCard /> : null}
+      <div className="mx-auto flex w-full max-w-5xl flex-col">
+        <PageHeader
+          title="المتجر الإلكتروني"
+          description="بضاعتك على رابط خاص بمحلك، والطلبات تصلك هنا."
+          icon={OnlineStoreIcon}
+        />
+        <div className="flex flex-col gap-6">
+          {permissions.has('settings.manage') ? <SettingsCard /> : null}
+          {permissions.has('customers.view') ? <OrdersCard /> : null}
+        </div>
       </div>
     </AppShell>
   );
@@ -97,7 +120,7 @@ function DeliveryFees({
     );
   };
   return (
-    <fieldset className="flex flex-col gap-3 rounded-control border border-line p-3">
+    <fieldset className="flex flex-col gap-3 rounded-control border border-line bg-canvas p-4">
       <legend className="px-1 font-semibold">أجرة التوصيل</legend>
       <p className="text-sm text-ink-muted">
         تُضاف على الطلب ويدفعها الزبون للمندوب، ولا تُسجَّل مبيعاً للمحل. أضف مناطق إن اختلفت الأجرة بينها.
@@ -198,67 +221,103 @@ function SettingsCard() {
   }
 
   return (
-    <Card className="flex flex-col gap-4">
-      <h2 className="text-xl font-bold text-ink">الإعداد</h2>
-      <Switch
-        label="المتجر مفعّل"
-        description="بضاعتك بصورها وأسعارها ومقاساتها المتوفرة على رابط خاص بمحلك، والطلب يصلك على واتساب."
-        checked={form.enabled}
-        onCheckedChange={(enabled) => set({ enabled })}
-      />
-      <TextField
-        label="رابط المتجر"
-        hint={link}
-        dir="ltr"
-        value={form.slug}
-        onChange={(e) => set({ slug: e.target.value.toLowerCase().slice(0, 40) })}
-        error={fields.slug}
-      />
-      <SegmentedControl
-        label="كيف يصلك الطلب"
-        value={form.orderMode}
-        onValueChange={(orderMode) => set({ orderMode })}
-        options={[
-          { value: 'whatsapp', label: 'رسالة واتساب' },
-          { value: 'shop', label: 'من المتجر مباشرة' },
-        ]}
-      />
-      <p className="text-sm text-ink-muted">
-        {form.orderMode === 'shop'
-          ? 'يتأكد الزبون من رقمه برمز يصله، ويصل الطلب هنا مباشرة. اقبله فتُحجز قطعه ويظهر على الكاشير ليبيعه.'
-          : 'يُحفظ الطلب هنا ويفتح واتساب عند الزبون برسالة جاهزة إلى رقمك.'}
-      </p>
-      <TextField
-        label={form.orderMode === 'shop' ? 'رقم واتساب المحل (اختياري)' : 'رقم واتساب الطلبات'}
-        dir="ltr"
-        inputMode="tel"
-        value={form.whatsapp ?? ''}
-        onChange={(e) => set({ whatsapp: e.target.value || null })}
-        error={fields.whatsapp}
-      />
-      <Switch label="توصيل" checked={form.delivery} onCheckedChange={(delivery) => set({ delivery })} />
-      {form.delivery ? (
-        <DeliveryFees
-          feeMinor={form.deliveryFeeMinor}
-          areas={form.deliveryAreas}
-          onChange={(deliveryFeeMinor, deliveryAreas) => set({ deliveryFeeMinor, deliveryAreas })}
-          error={fields.deliveryAreas ?? fields.deliveryFeeMinor}
+    <section aria-label="الإعداد" className="flex flex-col gap-6">
+      <Card className="flex flex-col gap-4">
+        <CardHeader
+          icon={LinkIcon}
+          title="الرابط والتفعيل"
+          description="شارك الرابط مع زبائنك على واتساب وفيسبوك."
+          className="mb-0"
         />
-      ) : null}
-      <Switch label="استلام من المحل" checked={form.pickup} onCheckedChange={(pickup) => set({ pickup })} />
-      {fields.delivery ? <p className="text-sm text-danger-ink">{fields.delivery}</p> : null}
-      <TextField
-        label="ملاحظة تظهر في أعلى المتجر (اختياري)"
-        placeholder="التوصيل داخل المدينة خلال يوم"
-        value={form.note ?? ''}
-        onChange={(e) => set({ note: e.target.value.slice(0, 300) || null })}
-      />
-      <Switch
-        label="اعرض القطع التي نفدت"
-        description="تظهر بكلمة «نفد» ولا تُطلب. مطفأ: تختفي حتى تصل من جديد."
-        checked={form.showOutOfStock}
-        onCheckedChange={(showOutOfStock) => set({ showOutOfStock })}
-      />
+        <Switch
+          label="المتجر مفعّل"
+          description="بضاعتك بصورها وأسعارها ومقاساتها المتوفرة على رابط خاص بمحلك، والطلب يصلك على واتساب."
+          checked={form.enabled}
+          onCheckedChange={(enabled) => set({ enabled })}
+        />
+        <TextField
+          label="رابط المتجر"
+          hint={link}
+          dir="ltr"
+          value={form.slug}
+          onChange={(e) => set({ slug: e.target.value.toLowerCase().slice(0, 40) })}
+          error={fields.slug}
+        />
+        {form.enabled ? (
+          <a
+            href={link}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex min-h-11 items-center gap-2 self-start rounded-control bg-brand-soft px-4 font-semibold text-brand-ink hover:underline"
+          >
+            <OpenIcon size={20} />
+            <bdi dir="ltr" className="num">
+              {link}
+            </bdi>
+          </a>
+        ) : null}
+      </Card>
+      <Card className="flex flex-col gap-4">
+        <CardHeader
+          icon={PhoneIcon}
+          title="الطلبات والتسليم"
+          description="كيف يصلك الطلب، وكيف يستلمه الزبون."
+          className="mb-0"
+        />
+        <SegmentedControl
+          label="كيف يصلك الطلب"
+          value={form.orderMode}
+          onValueChange={(orderMode) => set({ orderMode })}
+          options={[
+            { value: 'whatsapp', label: 'رسالة واتساب' },
+            { value: 'shop', label: 'من المتجر مباشرة' },
+          ]}
+        />
+        <p className="text-sm text-ink-muted">
+          {form.orderMode === 'shop'
+            ? 'يتأكد الزبون من رقمه برمز يصله، ويصل الطلب هنا مباشرة. اقبله فتُحجز قطعه ويظهر على الكاشير ليبيعه.'
+            : 'يُحفظ الطلب هنا ويفتح واتساب عند الزبون برسالة جاهزة إلى رقمك.'}
+        </p>
+        <TextField
+          label={form.orderMode === 'shop' ? 'رقم واتساب المحل (اختياري)' : 'رقم واتساب الطلبات'}
+          dir="ltr"
+          inputMode="tel"
+          value={form.whatsapp ?? ''}
+          onChange={(e) => set({ whatsapp: e.target.value || null })}
+          error={fields.whatsapp}
+        />
+        <Switch label="توصيل" checked={form.delivery} onCheckedChange={(delivery) => set({ delivery })} />
+        {form.delivery ? (
+          <DeliveryFees
+            feeMinor={form.deliveryFeeMinor}
+            areas={form.deliveryAreas}
+            onChange={(deliveryFeeMinor, deliveryAreas) => set({ deliveryFeeMinor, deliveryAreas })}
+            error={fields.deliveryAreas ?? fields.deliveryFeeMinor}
+          />
+        ) : null}
+        <Switch label="استلام من المحل" checked={form.pickup} onCheckedChange={(pickup) => set({ pickup })} />
+        {fields.delivery ? <p className="text-sm text-danger-ink">{fields.delivery}</p> : null}
+      </Card>
+      <Card className="flex flex-col gap-4">
+        <CardHeader
+          icon={SettingsIcon}
+          title="العرض"
+          description="ما يراه الزبون في أعلى المتجر وبين القطع."
+          className="mb-0"
+        />
+        <TextField
+          label="ملاحظة تظهر في أعلى المتجر (اختياري)"
+          placeholder="التوصيل داخل المدينة خلال يوم"
+          value={form.note ?? ''}
+          onChange={(e) => set({ note: e.target.value.slice(0, 300) || null })}
+        />
+        <Switch
+          label="اعرض القطع التي نفدت"
+          description="تظهر بكلمة «نفد» ولا تُطلب. مطفأ: تختفي حتى تصل من جديد."
+          checked={form.showOutOfStock}
+          onCheckedChange={(showOutOfStock) => set({ showOutOfStock })}
+        />
+      </Card>
       {error ? <Alert tone="error">{error}</Alert> : null}
       {saved ? (
         <Alert tone="success">
@@ -277,7 +336,7 @@ function SettingsCard() {
           احفظ
         </Button>
       </div>
-    </Card>
+    </section>
   );
 }
 
@@ -304,7 +363,12 @@ function OrdersCard() {
 
   return (
     <Card className="flex flex-col gap-4">
-      <h2 className="text-xl font-bold text-ink">الطلبات</h2>
+      <CardHeader
+        icon={CartIcon}
+        title="الطلبات"
+        description="اقبل الطلب فتُحجز قطعه، أو ارفضه."
+        className="mb-0"
+      />
       <SegmentedControl
         label="الحالة"
         value={status}
@@ -316,13 +380,17 @@ function OrdersCard() {
         ]}
       />
       {error ? <Alert tone="error">{error}</Alert> : null}
-      {items && items.length === 0 ? <p className="text-ink-muted">لا طلبات هنا.</p> : null}
+      {items && items.length === 0 ? (
+        <p className="rounded-control border border-dashed border-line px-6 py-8 text-center text-ink-muted">
+          لا طلبات هنا.
+        </p>
+      ) : null}
       <ul aria-label="طلبات المتجر" className="flex flex-col gap-3">
         {(items ?? []).map((o) => (
           <li
             key={o.id}
             aria-label={`الطلب ${o.number}`}
-            className="flex flex-col gap-2 rounded-control border border-line p-3"
+            className="flex flex-col gap-2 rounded-card border border-line bg-surface p-4 shadow-e1"
           >
             <div className="flex flex-wrap items-center gap-2">
               <bdi dir="ltr" className="num font-bold">

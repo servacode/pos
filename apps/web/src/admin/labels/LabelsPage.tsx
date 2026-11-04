@@ -1,7 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { ProductDetail, ProductListItem } from '@serva/core';
-import { Alert, Button, SearchField, Select, Switch, TextField } from '@serva/ui';
+import {
+  Alert,
+  BarcodeIcon,
+  Button,
+  Card,
+  CardHeader,
+  PageHeader,
+  PrintIcon,
+  ProductsIcon,
+  SearchField,
+  Select,
+  Switch,
+  TextField,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
@@ -166,7 +179,17 @@ export function LabelsPage() {
     <AppShell>
       <title>طباعة الملصقات · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">طباعة الملصقات</h1>
+        <PageHeader
+          className="mb-0"
+          icon={PrintIcon}
+          title="طباعة الملصقات"
+          description="ملصق لكل قطعة بسعرها وباركودها، لطابعة الملصقات أو ورق A4."
+          actions={
+            <Button size="lg" icon={<PrintIcon />} disabled={total === 0} onClick={() => setPrinting(true)}>
+              اطبع {total} ملصقاً
+            </Button>
+          }
+        />
         {error ? <Alert tone="error">{error}</Alert> : null}
         {noCode.map((p) => (
           <Alert key={p.id} tone="info">
@@ -178,8 +201,14 @@ export function LabelsPage() {
             </span>
           </Alert>
         ))}
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="flex flex-col gap-3">
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <Card className="flex flex-col gap-4">
+            <CardHeader
+              className="mb-0"
+              icon={ProductsIcon}
+              title="ماذا تطبع؟"
+              description="أضف منتجاً بكل قطعه، واختر الورق."
+            />
             <SearchField label="أضف منتجاً بكل قطعه" value={q} onValueChange={setQ} />
             {found.length > 0 ? (
               <ul aria-label="نتائج البحث" className="flex flex-wrap gap-2">
@@ -219,21 +248,33 @@ export function LabelsPage() {
               ))}
             </Select>
             <Switch label="اسم المحل على الملصق" checked={showStore} onCheckedChange={setShowStore} />
-          </div>
-          {sample ? (
-            <figure className="flex flex-col items-center gap-2">
-              <div
-                className="border border-line shadow-sm"
-                style={{
-                  width: `${LABEL_LAYOUTS[layout].width}mm`,
-                  height: `${LABEL_LAYOUTS[layout].height}mm`,
-                }}
-              >
-                <Label item={sample} store={me.tenant.name} showStore={showStore} />
-              </div>
-              <figcaption className="text-sm text-ink-muted">معاينة بالحجم الحقيقي</figcaption>
-            </figure>
-          ) : null}
+          </Card>
+          <Card className="flex flex-col gap-4 lg:min-w-72">
+            <CardHeader
+              className="mb-0"
+              icon={BarcodeIcon}
+              title="المعاينة"
+              description="كما سيخرج على الورق."
+            />
+            {sample ? (
+              <figure className="flex flex-col items-center gap-2 rounded-control bg-surface-muted p-4">
+                <div
+                  className="border border-line bg-surface shadow-e1"
+                  style={{
+                    width: `${LABEL_LAYOUTS[layout].width}mm`,
+                    height: `${LABEL_LAYOUTS[layout].height}mm`,
+                  }}
+                >
+                  <Label item={sample} store={me.tenant.name} showStore={showStore} />
+                </div>
+                <figcaption className="text-sm text-ink-muted">معاينة بالحجم الحقيقي</figcaption>
+              </figure>
+            ) : (
+              <p className="rounded-control bg-surface-muted px-4 py-8 text-center text-sm text-ink-muted">
+                تظهر المعاينة بعد إضافة أول منتج.
+              </p>
+            )}
+          </Card>
         </div>
         {items.length > 0 ? (
           <ul aria-label="الملصقات" className="flex flex-col gap-2">
@@ -284,11 +325,6 @@ export function LabelsPage() {
             ابحث عن منتج لتضيف كل قطعه، أو افتح هذه الصفحة من بطاقة منتج أو من فاتورة شراء.
           </Alert>
         )}
-        <div className="flex items-center gap-3">
-          <Button size="lg" disabled={total === 0} onClick={() => setPrinting(true)}>
-            اطبع {total} ملصقاً
-          </Button>
-        </div>
       </div>
       {printing ? (
         <PrintableLabels items={items} layout={layout} store={me.tenant.name} showStore={showStore} />

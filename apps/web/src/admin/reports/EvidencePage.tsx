@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react';
 import type { DeviceSummary } from '@serva/core';
 import {
+  AlertCircleIcon,
   Badge,
   Banner,
   Card,
+  CheckCircleIcon,
+  ClockIcon,
   DataTable,
   displayNumber,
   EmptyState,
+  LockIcon,
+  SendIcon,
   ShieldCheckIcon,
   StatTile,
+  TransferIcon,
   useDigits,
   Select,
   type DataColumn,
@@ -105,19 +111,32 @@ function EvidenceBody({ evidence }: { evidence: SyncEvidence }) {
         </Banner>
       )}
       <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="أُرسل" value={n(evidence.sent)} />
-        <StatTile label="قُبل" value={n(evidence.accepted)} />
+        <StatTile label="أُرسل" icon={SendIcon} tone="info" value={n(evidence.sent)} />
+        <StatTile label="قُبل" icon={CheckCircleIcon} value={n(evidence.accepted)} />
         <StatTile
           label="محجوز للمعالجة"
+          icon={ClockIcon}
+          tone="warning"
           value={n(evidence.heldForProcessing)}
           footnote="وصل ومحفوظ، ولم يدخل الحسابات بعد"
         />
-        <StatTile label="مكرر" value={n(evidence.duplicate)} footnote="وصل مرة ثانية ولم يُحسب" />
-        <StatTile label="رُفض" value={n(evidence.rejected)} />
-        <StatTile label="محجوز للمراجعة" value={n(evidence.quarantined)} />
+        <StatTile
+          label="مكرر"
+          icon={TransferIcon}
+          tone="neutral"
+          value={n(evidence.duplicate)}
+          footnote="وصل مرة ثانية ولم يُحسب"
+        />
+        <StatTile label="رُفض" icon={AlertCircleIcon} tone="danger" value={n(evidence.rejected)} />
+        <StatTile label="محجوز للمراجعة" icon={LockIcon} tone="warning" value={n(evidence.quarantined)} />
       </div>
-      <Section title="آخر رقم أعلنه الجهاز وآخر رقم وصل">
+      <Section
+        title="آخر رقم أعلنه الجهاز وآخر رقم وصل"
+        icon={ShieldCheckIcon}
+        description="كل سلسلة ترقيم على حدة: هل وصل كل ما أعلنه الجهاز؟"
+      >
         <DataTable
+          className="shadow-none"
           caption="آخر رقم أعلنه الجهاز وآخر رقم وصل لكل سلسلة"
           columns={columns}
           rows={rows}
@@ -168,6 +187,7 @@ export function EvidencePage() {
     <ReportScreen me={me} access={EVIDENCE_ACCESS} title="شاشة الدليل">
       <PageHead
         crumbs={['المتجر', 'الأجهزة']}
+        icon={ShieldCheckIcon}
         title="شاشة الدليل"
         subtitle="ما لا تراه بعينك، بالأرقام: هل وصل كل ما باعه الجهاز، مرة واحدة؟"
       />

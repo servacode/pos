@@ -213,7 +213,7 @@ export function JournalPage() {
 
   return (
     <AccountingLayout title="القيود">
-      <Card className="flex flex-wrap items-end gap-4">
+      <Card className="flex flex-wrap items-end gap-4 print:hidden">
         <DayField label="من" value={from} max={to} onChange={setFrom} />
         <DayField label="إلى" value={to} max={today} onChange={setTo} />
         <BranchSelect me={me} value={branchId} onChange={setBranchId} />

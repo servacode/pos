@@ -1,7 +1,20 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import type { CurrencyCode } from '@serva/core';
-import { Badge, Card, ClockIcon, DataTable, EmptyState, Money, useDigits, type DataColumn } from '@serva/ui';
+import {
+  Badge,
+  Card,
+  CashIcon,
+  ClockIcon,
+  DataTable,
+  displayNumber,
+  EmptyState,
+  Money,
+  SalesIcon,
+  StatTile,
+  useDigits,
+  type DataColumn,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay, zonedClock } from '../../lib/dates';
 import { SHIFTS_ACCESS } from './access';
@@ -33,6 +46,7 @@ export function ShiftsPage() {
   const rows = data?.items ?? [];
   const salesTotal = rows.reduce((sum, row) => sum + row.salesTotalMinor, 0);
   const salesCount = rows.reduce((sum, row) => sum + row.salesCount, 0);
+  const openCount = rows.filter((row) => row.status === 'open').length;
 
   const columns: DataColumn<ShiftSummary>[] = [
     {
@@ -75,11 +89,46 @@ export function ShiftsPage() {
 
   return (
     <ReportScreen me={me} access={SHIFTS_ACCESS} title="الورديات">
-      <PageHead crumbs={['البيع', 'المبيعات']} title="الورديات" subtitle="سجل الورديات وتقارير إغلاقها" />
+      <PageHead
+        crumbs={['البيع', 'المبيعات']}
+        icon={ClockIcon}
+        title="الورديات"
+        subtitle="سجل الورديات وتقارير إغلاقها"
+      />
       <Card className="flex flex-wrap items-end gap-4">
         <BranchSelect me={me} value={branchId} onChange={setBranchId} />
         <DayField label="اليوم" value={date} max={today} onChange={setDate} />
       </Card>
+      {data && rows.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatTile
+            label="الورديات"
+            icon={ClockIcon}
+            value={<span className="num">{displayNumber(String(rows.length), digits)}</span>}
+            footnote={
+              openCount > 0 ? (
+                <>
+                  منها <bdi className="num">{displayNumber(String(openCount), digits)}</bdi> مفتوحة الآن
+                </>
+              ) : (
+                'كلها مغلقة'
+              )
+            }
+          />
+          <StatTile
+            label="مبيعات الورديات"
+            icon={CashIcon}
+            tone="info"
+            value={<Money minor={salesTotal} currency={base} />}
+          />
+          <StatTile
+            label="عدد الفواتير"
+            icon={SalesIcon}
+            tone="neutral"
+            value={<span className="num">{displayNumber(String(salesCount), digits)}</span>}
+          />
+        </div>
+      ) : null}
       <DataTable
         caption={`ورديات ${dayText(date, digits)}`}
         columns={columns}

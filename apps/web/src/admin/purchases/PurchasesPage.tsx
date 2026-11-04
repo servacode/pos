@@ -3,13 +3,21 @@ import { useCallback, useEffect, useState } from 'react';
 import type { PurchasePayment, PurchaseRow, SupplierListResponse, SupplierRow } from '@serva/core';
 import {
   Alert,
+  Avatar,
+  Badge,
   Button,
+  Card,
+  CardHeader,
   cn,
   DataTable,
   DeleteIcon,
+  CartIcon,
   Money,
   Select,
   StatTile,
+  WalletIcon,
+  CustomersIcon,
+  PageHeader,
   TextField,
   type DataColumn,
 } from '@serva/ui';
@@ -101,48 +109,35 @@ export function PurchasesPage() {
       ),
     },
   ];
-  const supplierColumns: DataColumn<SupplierRow>[] = [
-    { key: 'name', header: 'المورد', cell: (s) => <span className="font-semibold">{s.name}</span> },
-    {
-      key: 'phone',
-      header: 'الجوال',
-      cell: (s) =>
-        s.phone ? (
-          <bdi dir="ltr" className="num">
-            {s.phone}
-          </bdi>
-        ) : (
-          '—'
-        ),
-    },
-    {
-      key: 'balance',
-      header: 'له علينا',
-      numeric: true,
-      cell: (s) => <Money minor={s.balanceMinor} currency={base} className="font-semibold" />,
-    },
-  ];
-
   return (
     <AppShell>
       <title>المشتريات · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="flex-1 text-2xl font-bold text-ink">المشتريات والموردون</h1>
-          {mode === 'list' ? (
-            <>
-              <Button onClick={() => setMode('buy')} disabled={!suppliers?.items.length}>
-                فاتورة شراء
-              </Button>
-              <Button variant="secondary" onClick={() => setMode('pay')} disabled={!suppliers?.items.length}>
-                دفعة لمورد
-              </Button>
-              <Button variant="secondary" onClick={() => setMode('supplier')}>
-                مورد جديد
-              </Button>
-            </>
-          ) : null}
-        </div>
+        <PageHeader
+          className="mb-0"
+          icon={CartIcon}
+          title="المشتريات والموردون"
+          description="فواتير الشراء، وما علينا لكل مورد"
+          actions={
+            mode === 'list' ? (
+              <>
+                <Button onClick={() => setMode('buy')} disabled={!suppliers?.items.length}>
+                  فاتورة شراء
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setMode('pay')}
+                  disabled={!suppliers?.items.length}
+                >
+                  دفعة لمورد
+                </Button>
+                <Button variant="secondary" onClick={() => setMode('supplier')}>
+                  مورد جديد
+                </Button>
+              </>
+            ) : null
+          }
+        />
         {error ? <Alert tone="error">{error}</Alert> : null}
         {notice && mode === 'list' ? <Alert tone="success">{notice}</Alert> : null}
         {suppliers && suppliers.items.length === 0 && mode === 'list' ? (
@@ -165,29 +160,65 @@ export function PurchasesPage() {
             onCancel={() => setMode('list')}
           />
         ) : null}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <StatTile
             label="المستحق للموردين"
+            icon={WalletIcon}
+            tone={(suppliers?.totalOwedMinor ?? 0) > 0 ? 'warning' : 'neutral'}
             value={<Money minor={suppliers?.totalOwedMinor ?? 0} currency={base} />}
           />
-          <StatTile label="عدد الفواتير" value={purchases?.length ?? 0} />
+          <StatTile label="عدد الفواتير" icon={CartIcon} tone="info" value={purchases?.length ?? 0} />
+          <StatTile
+            label="عدد الموردين"
+            icon={CustomersIcon}
+            tone="neutral"
+            value={suppliers?.items.length ?? 0}
+          />
         </div>
-        <DataTable
-          caption="الموردون"
-          columns={supplierColumns}
-          rows={suppliers?.items ?? []}
-          rowKey={(s) => s.id}
-          loading={!suppliers && !error}
-          empty="لا موردين بعد."
-        />
-        <DataTable
-          caption="فواتير الشراء"
-          columns={purchaseColumns}
-          rows={purchases ?? []}
-          rowKey={(p) => p.id}
-          loading={!purchases && !error}
-          empty="لا فواتير شراء بعد."
-        />
+        <Card>
+          <CardHeader icon={CustomersIcon} title="الموردون" description="وما علينا لكل واحد منهم" />
+          {!suppliers && !error ? (
+            <p className="text-ink-muted">جارٍ التحميل…</p>
+          ) : suppliers && suppliers.items.length > 0 ? (
+            <ul aria-label="الموردون" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {suppliers.items.map((sup) => (
+                <li
+                  key={sup.id}
+                  className="flex items-center gap-3 rounded-control border border-line bg-surface-muted/50 p-3"
+                >
+                  <Avatar name={sup.name} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-semibold text-ink">{sup.name}</span>
+                    {sup.phone ? (
+                      <bdi dir="ltr" className="num text-xs text-ink-muted">
+                        {sup.phone}
+                      </bdi>
+                    ) : (
+                      <span className="text-xs text-ink-subtle">—</span>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <Money minor={sup.balanceMinor} currency={base} className="font-semibold" />
+                    {sup.balanceMinor > 0 ? <Badge tone="warning">له علينا</Badge> : <Badge>مسدّد</Badge>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-ink-muted">لا موردين بعد.</p>
+          )}
+        </Card>
+        <Card>
+          <CardHeader icon={CartIcon} title="فواتير الشراء" description="الأحدث أولاً" />
+          <DataTable
+            caption="فواتير الشراء"
+            columns={purchaseColumns}
+            rows={purchases ?? []}
+            rowKey={(p) => p.id}
+            loading={!purchases && !error}
+            empty="لا فواتير شراء بعد."
+          />
+        </Card>
       </div>
     </AppShell>
   );
@@ -221,7 +252,7 @@ function SupplierForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: ()
   return (
     <form
       aria-label="مورد جديد"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
       onSubmit={(e) => {
         e.preventDefault();
         void s.run(() => createSupplier({ name, phone })).then((r) => r && onSaved());
@@ -277,7 +308,7 @@ function PurchaseForm({
   return (
     <form
       aria-label="فاتورة شراء"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
       onSubmit={(e) => {
         e.preventDefault();
         if (!ready) return;
@@ -475,7 +506,7 @@ function PaymentForm({
   return (
     <form
       aria-label="دفعة لمورد"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
       onSubmit={(e) => {
         e.preventDefault();
         if (!minor) return;

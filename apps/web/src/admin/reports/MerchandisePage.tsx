@@ -2,9 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { Category, MerchandiseReport, OptionSales } from '@serva/core';
 import {
+  ArchiveIcon,
   Alert,
   Badge,
+  CategoriesIcon,
+  Card,
+  CustomersIcon,
   DataTable,
+  InventoryIcon,
+  ProductsIcon,
+  ReportsIcon,
+  WalletIcon,
+  WarningIcon,
   formatQuantity,
   Money,
   SegmentedControl,
@@ -16,6 +25,7 @@ import {
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { listCategories } from '../catalog/api';
+import { PageHead, Section } from './parts';
 
 type Slow = MerchandiseReport['slowMovers'][number];
 type Piece = MerchandiseReport['models'][number]['pieces'][number];
@@ -166,15 +176,14 @@ export function MerchandisePage() {
   return (
     <AppShell>
       <title>حركة الأصناف · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold text-ink">حركة الأصناف</h1>
-          <p className="text-ink-muted">
-            ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف.
-          </p>
-        </div>
+      <div className="flex flex-col gap-6">
+        <PageHead
+          icon={ReportsIcon}
+          title="حركة الأصناف"
+          subtitle="ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف."
+        />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <div className="flex flex-wrap gap-4">
+        <Card className="flex flex-wrap items-end gap-x-6 gap-y-4">
           {departments.length > 0 ? (
             <Select
               label="القسم"
@@ -208,15 +217,19 @@ export function MerchandisePage() {
               label: IDLE[value],
             }))}
           />
-        </div>
+        </Card>
         <div className="grid gap-4 sm:grid-cols-2">
           <StatTile
             label="قطع راكدة"
+            icon={ArchiveIcon}
+            tone="warning"
             value={<span className="num">{data ? data.slowMovers.length : '—'}</span>}
           />
           {data?.slowValueMinor !== null && data?.slowValueMinor !== undefined ? (
             <StatTile
               label="رأس مال نائم فيها"
+              icon={WalletIcon}
+              tone="danger"
               value={<Money minor={data.slowValueMinor} currency={base} />}
               footnote="بكلفة الشراء"
             />
@@ -224,44 +237,47 @@ export function MerchandisePage() {
         </div>
 
         {data && data.byDepartment.length > 0 ? (
-          <DataTable
-            caption="المبيعات حسب القسم"
-            columns={[
-              {
-                key: 'name',
-                header: 'القسم',
-                cell: (r) => <span className="font-semibold">{r.name}</span>,
-              },
-              {
-                key: 'sold',
-                header: 'القطع',
-                numeric: true,
-                cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
-              },
-              {
-                key: 'total',
-                header: 'المبيع',
-                numeric: true,
-                cell: (r) => <Money minor={r.totalMinor} currency={base} />,
-              },
-              {
-                key: 'back',
-                header: 'رجع منه',
-                numeric: true,
-                cell: (r) => <Money minor={r.returnedMinor} currency={base} />,
-              },
-              {
-                key: 'share',
-                header: 'النصيب',
-                numeric: true,
-                cell: (r) => (
-                  <span className="num">{shareOf(r.totalMinor - r.returnedMinor, data.byDepartment)}</span>
-                ),
-              },
-            ]}
-            rows={data.byDepartment}
-            rowKey={(r) => r.categoryId ?? 'none'}
-          />
+          <Section title="حسب القسم" icon={CategoriesIcon} description="نصيب كل قسم من صافي المبيعات">
+            <DataTable
+              className="shadow-none"
+              caption="المبيعات حسب القسم"
+              columns={[
+                {
+                  key: 'name',
+                  header: 'القسم',
+                  cell: (r) => <span className="font-semibold">{r.name}</span>,
+                },
+                {
+                  key: 'sold',
+                  header: 'القطع',
+                  numeric: true,
+                  cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+                },
+                {
+                  key: 'total',
+                  header: 'المبيع',
+                  numeric: true,
+                  cell: (r) => <Money minor={r.totalMinor} currency={base} />,
+                },
+                {
+                  key: 'back',
+                  header: 'رجع منه',
+                  numeric: true,
+                  cell: (r) => <Money minor={r.returnedMinor} currency={base} />,
+                },
+                {
+                  key: 'share',
+                  header: 'النصيب',
+                  numeric: true,
+                  cell: (r) => (
+                    <span className="num">{shareOf(r.totalMinor - r.returnedMinor, data.byDepartment)}</span>
+                  ),
+                },
+              ]}
+              rows={data.byDepartment}
+              rowKey={(r) => r.categoryId ?? 'none'}
+            />
+          </Section>
         ) : null}
 
         {data && data.byOption.length === 0 ? (
@@ -269,35 +285,53 @@ export function MerchandisePage() {
             لا مبيعات لقطع لها مقاس أو لون في هذه المدة. أضف «المقاسات والألوان» في بطاقة المنتج.
           </Alert>
         ) : null}
-        {data?.byOption.map((group) => (
-          <DataTable
-            key={group.name}
-            caption={`المبيعات حسب ${group.name}`}
-            columns={optionColumns}
-            rows={group.values}
-            rowKey={(r) => r.value}
-          />
-        ))}
+        {data && data.byOption.length > 0 ? (
+          <div className="grid gap-6 lg:grid-cols-2">
+            {data.byOption.map((group) => (
+              <Section
+                key={group.name}
+                title={`حسب ${group.name}`}
+                icon={ProductsIcon}
+                description="ما بيع وما رجع من كل قيمة"
+              >
+                <DataTable
+                  className="shadow-none"
+                  caption={`المبيعات حسب ${group.name}`}
+                  columns={optionColumns}
+                  rows={group.values}
+                  rowKey={(r) => r.value}
+                />
+              </Section>
+            ))}
+          </div>
+        ) : null}
 
         {data && data.models.length > 0 ? (
           <section aria-label="الموديلات الأكثر مبيعاً" className="flex flex-col gap-4">
             <h2 className="text-xl font-bold text-ink">الموديلات الأكثر مبيعاً</h2>
-            {data.models.map((m) => (
-              <DataTable
-                key={m.productId}
-                caption={m.name}
-                columns={pieceColumns}
-                rows={m.pieces}
-                rowKey={(r) => r.variantId}
-              />
-            ))}
+            <div className="grid gap-6 lg:grid-cols-2">
+              {data.models.map((m) => (
+                <Card key={m.productId} className="flex flex-col gap-3">
+                  <p className="font-semibold text-ink">{m.name}</p>
+                  <DataTable
+                    className="shadow-none"
+                    caption={m.name}
+                    columns={pieceColumns}
+                    rows={m.pieces}
+                    rowKey={(r) => r.variantId}
+                  />
+                </Card>
+              ))}
+            </div>
           </section>
         ) : null}
 
         {data && data.bySeller.length > 0 ? (
-          <section aria-label="المبيعات حسب البائع" className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <h2 className="flex-1 text-xl font-bold text-ink">المبيعات حسب البائع والعمولة</h2>
+          <Section
+            title="المبيعات حسب البائع والعمولة"
+            icon={CustomersIcon}
+            description="صافي ما باع كل بائع بعد المرتجعات"
+            action={
               <TextField
                 label="نسبة العمولة ٪"
                 dir="ltr"
@@ -314,8 +348,10 @@ export function MerchandisePage() {
                 }}
                 className="w-36"
               />
-            </div>
+            }
+          >
             <DataTable
+              className="shadow-none"
               caption="البائعون"
               columns={[
                 {
@@ -354,61 +390,67 @@ export function MerchandisePage() {
               rows={data.bySeller}
               rowKey={(r) => r.userId}
             />
-          </section>
+          </Section>
         ) : null}
 
         {data && data.lowStock.length > 0 ? (
-          <DataTable
-            caption="قرّب يخلص"
-            columns={[
-              {
-                key: 'name',
-                header: 'القطعة',
-                cell: (r) => (
-                  <Link to={`/products/${r.productId}`} className="font-semibold text-brand-ink underline">
-                    {r.label ? `${r.name} ${r.label}` : r.name}
-                  </Link>
-                ),
-              },
-              {
-                key: 'stock',
-                header: 'بقي',
-                numeric: true,
-                cell: (r) => (
-                  <span className={r.stockQty <= 0 ? 'num font-bold text-danger-ink' : 'num font-bold'}>
-                    {r.stockQty <= 0 ? 'نفد' : r.stockQty / 1000}
-                  </span>
-                ),
-              },
-              {
-                key: 'sold',
-                header: 'بيع في المدة',
-                numeric: true,
-                cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
-              },
-              {
-                key: 'min',
-                header: 'الحد الأدنى',
-                numeric: true,
-                cell: (r) => (
-                  <span className="num">{r.minStockQty === null ? '—' : r.minStockQty / 1000}</span>
-                ),
-              },
-            ]}
-            rows={data.lowStock}
-            rowKey={(r) => r.variantId}
-          />
+          <Section title="قرّب يخلص" icon={WarningIcon} description="قطع قاربت على النفاد">
+            <DataTable
+              className="shadow-none"
+              caption="قرّب يخلص"
+              columns={[
+                {
+                  key: 'name',
+                  header: 'القطعة',
+                  cell: (r) => (
+                    <Link to={`/products/${r.productId}`} className="font-semibold text-brand-ink underline">
+                      {r.label ? `${r.name} ${r.label}` : r.name}
+                    </Link>
+                  ),
+                },
+                {
+                  key: 'stock',
+                  header: 'بقي',
+                  numeric: true,
+                  cell: (r) => (
+                    <span className={r.stockQty <= 0 ? 'num font-bold text-danger-ink' : 'num font-bold'}>
+                      {r.stockQty <= 0 ? 'نفد' : r.stockQty / 1000}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'sold',
+                  header: 'بيع في المدة',
+                  numeric: true,
+                  cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+                },
+                {
+                  key: 'min',
+                  header: 'الحد الأدنى',
+                  numeric: true,
+                  cell: (r) => (
+                    <span className="num">{r.minStockQty === null ? '—' : r.minStockQty / 1000}</span>
+                  ),
+                },
+              ]}
+              rows={data.lowStock}
+              rowKey={(r) => r.variantId}
+            />
+          </Section>
         ) : null}
 
-        <DataTable
-          caption="القطع الراكدة"
-          columns={slowColumns}
-          rows={data?.slowMovers ?? []}
-          rowKey={(r) => r.variantId}
-          loading={!data && !error}
-          {...(error ? { onRetry: load } : {})}
-          empty="لا قطع راكدة: كل ما على الرف بيع منه شيء أو وصل حديثاً."
-        />
+        <Section title="القطع الراكدة" icon={InventoryIcon} description="ما نام على الرف ولم يتحرك">
+          <DataTable
+            className="shadow-none"
+            caption="القطع الراكدة"
+            columns={slowColumns}
+            rows={data?.slowMovers ?? []}
+            rowKey={(r) => r.variantId}
+            loading={!data && !error}
+            {...(error ? { onRetry: load } : {})}
+            empty="لا قطع راكدة: كل ما على الرف بيع منه شيء أو وصل حديثاً."
+          />
+        </Section>
       </div>
     </AppShell>
   );

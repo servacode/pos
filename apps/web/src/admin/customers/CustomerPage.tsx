@@ -3,11 +3,21 @@ import { Link, useParams } from 'react-router';
 import type { CustomerDetail, CustomerPurchases, StatementLine } from '@serva/core';
 import {
   Alert,
+  Avatar,
   BackIcon,
+  Badge,
   Button,
+  Card,
+  CardHeader,
+  CartIcon,
+  CashIcon,
   DataTable,
+  EditIcon,
   FullScreenLoader,
   Money,
+  PageHeader,
+  PhoneIcon,
+  ReportsIcon,
   StatTile,
   type DataColumn,
 } from '@serva/ui';
@@ -94,128 +104,159 @@ export function CustomerPage() {
   return (
     <AppShell>
       <title>{`${customer?.name ?? 'زبون'} · Serva POS`}</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex items-center gap-4">
-          <Link to="/customers" className="inline-flex items-center gap-1 font-semibold text-brand-ink">
-            <BackIcon size={16} /> الزبائن
-          </Link>
-          <h1 className="flex-1 text-2xl font-bold text-ink">{customer?.name ?? ''}</h1>
-          {customer && canManage && !editing ? (
+      <div className="mx-auto flex w-full max-w-6xl flex-col">
+        <PageHeader
+          title={customer?.name ?? 'زبون'}
+          description="كشف حساب الزبون ومشترياته."
+          icon={CashIcon}
+          eyebrow={
+            <Link to="/customers" className="inline-flex items-center gap-1 font-semibold text-brand-ink">
+              <BackIcon size={16} /> الزبائن
+            </Link>
+          }
+          actions={
+            customer && canManage && !editing ? (
+              <>
+                <Button variant="secondary" icon={<EditIcon />} onClick={() => setEditing(true)}>
+                  عدّل
+                </Button>
+                <Button variant="ghost" onClick={() => void archive(!customer.archived)}>
+                  {customer.archived ? 'أرجعه' : 'أرشفه'}
+                </Button>
+              </>
+            ) : null
+          }
+        />
+        <div className="flex flex-col gap-6">
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          {!customer && !error ? <FullScreenLoader /> : null}
+          {customer && editing ? (
+            <CustomerForm
+              customer={customer}
+              onSaved={(c) => {
+                setCustomer(c);
+                setEditing(false);
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          ) : null}
+          {customer ? (
             <>
-              <Button variant="secondary" onClick={() => setEditing(true)}>
-                عدّل
-              </Button>
-              <Button variant="ghost" onClick={() => void archive(!customer.archived)}>
-                {customer.archived ? 'أرجعه' : 'أرشفه'}
-              </Button>
+              {customer.archived ? (
+                <Alert tone="info">هذا الزبون مؤرشف: لا يظهر على أجهزة الكاشير.</Alert>
+              ) : null}
+              <Card className="flex flex-col gap-5 lg:flex-row lg:items-center">
+                <div className="flex min-w-0 flex-1 items-center gap-4">
+                  <Avatar name={customer.name} size="md" className="size-16 text-xl" />
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <p className="truncate text-lg font-bold text-ink">{customer.name}</p>
+                    <p className="flex items-center gap-1.5 text-ink-muted">
+                      <PhoneIcon size={16} />
+                      {customer.phone ? (
+                        <bdi dir="ltr" className="num">
+                          {customer.phone}
+                        </bdi>
+                      ) : (
+                        '—'
+                      )}
+                    </p>
+                    {customer.archived ? <Badge className="self-start">مؤرشف</Badge> : null}
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:w-3/5">
+                  <StatTile
+                    hero
+                    className="shadow-none"
+                    icon={CashIcon}
+                    label={customer.balanceMinor >= 0 ? 'عليه' : 'له عند المتجر'}
+                    value={<Money minor={Math.abs(customer.balanceMinor)} currency={base} />}
+                  />
+                  <StatTile
+                    className="shadow-none"
+                    icon={ReportsIcon}
+                    tone="info"
+                    label="حد الدين"
+                    value={
+                      customer.creditLimitMinor === null ? (
+                        'بلا حد'
+                      ) : (
+                        <Money minor={customer.creditLimitMinor} currency={base} />
+                      )
+                    }
+                  />
+                </div>
+              </Card>
+              {purchases ? (
+                <section aria-label="مشترياته" className="flex flex-col gap-4">
+                  <Card>
+                    <CardHeader
+                      icon={CartIcon}
+                      title="مشترياته"
+                      description={
+                        <>
+                          <span className="num">{purchases.pieces / 1000}</span> قطعة بـ{' '}
+                          <Money minor={purchases.spentMinor} currency={base} /> بعد المرتجعات.
+                        </>
+                      }
+                    />
+                    {purchases.sizes.length > 0 ? (
+                      <div className="flex flex-col gap-2">
+                        {purchases.sizes.map((s) => (
+                          <p key={s.name} className="flex flex-wrap items-center gap-2">
+                            <span className="font-semibold">{s.name}: </span>
+                            {s.values.map((v) => `${v.value} (${v.qty / 1000})`).join('، ')}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                  </Card>
+                  <DataTable
+                    caption="آخر الفواتير"
+                    columns={[
+                      {
+                        key: 'number',
+                        header: 'الفاتورة',
+                        cell: (r) => (
+                          <bdi dir="ltr" className="num font-semibold">
+                            {r.number}
+                          </bdi>
+                        ),
+                      },
+                      { key: 'date', header: 'التاريخ', cell: (r) => <span className="num">{r.date}</span> },
+                      {
+                        key: 'lines',
+                        header: 'القطع',
+                        cell: (r) =>
+                          r.lines
+                            .map(
+                              (l) =>
+                                `${l.name} ×${l.qty / 1000}${l.returnedQty > 0 ? ` (رجع ${l.returnedQty / 1000})` : ''}`,
+                            )
+                            .join('، '),
+                      },
+                      {
+                        key: 'total',
+                        header: 'المبلغ',
+                        numeric: true,
+                        cell: (r) => <Money minor={r.totalMinor} currency={r.currency} />,
+                      },
+                    ]}
+                    rows={purchases.invoices}
+                    rowKey={(r) => r.id}
+                    empty="لم يشترِ شيئاً بعد."
+                  />
+                </section>
+              ) : null}
+              <DataTable
+                caption="كشف الحساب"
+                columns={columns}
+                rows={customer.statement}
+                rowKey={(l) => `${l.sourceId}:${l.balanceMinor}:${l.debitMinor}:${l.creditMinor}`}
+                empty="لا حركة على حساب هذا الزبون بعد."
+              />
             </>
           ) : null}
         </div>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        {!customer && !error ? <FullScreenLoader /> : null}
-        {customer && editing ? (
-          <CustomerForm
-            customer={customer}
-            onSaved={(c) => {
-              setCustomer(c);
-              setEditing(false);
-            }}
-            onCancel={() => setEditing(false)}
-          />
-        ) : null}
-        {customer ? (
-          <>
-            {customer.archived ? (
-              <Alert tone="info">هذا الزبون مؤرشف: لا يظهر على أجهزة الكاشير.</Alert>
-            ) : null}
-            <div className="grid gap-4 sm:grid-cols-3">
-              <StatTile
-                hero
-                label={customer.balanceMinor >= 0 ? 'عليه' : 'له عند المتجر'}
-                value={<Money minor={Math.abs(customer.balanceMinor)} currency={base} />}
-              />
-              <StatTile
-                label="حد الدين"
-                value={
-                  customer.creditLimitMinor === null ? (
-                    'بلا حد'
-                  ) : (
-                    <Money minor={customer.creditLimitMinor} currency={base} />
-                  )
-                }
-              />
-              <StatTile
-                label="الجوال"
-                value={
-                  customer.phone ? (
-                    <bdi dir="ltr" className="num">
-                      {customer.phone}
-                    </bdi>
-                  ) : (
-                    '—'
-                  )
-                }
-              />
-            </div>
-            {purchases ? (
-              <section aria-label="مشترياته" className="flex flex-col gap-3">
-                <h2 className="text-xl font-bold text-ink">مشترياته</h2>
-                <p className="text-ink-muted">
-                  <span className="num">{purchases.pieces / 1000}</span> قطعة بـ{' '}
-                  <Money minor={purchases.spentMinor} currency={base} /> بعد المرتجعات.
-                </p>
-                {purchases.sizes.map((s) => (
-                  <p key={s.name}>
-                    <span className="font-semibold">{s.name}: </span>
-                    {s.values.map((v) => `${v.value} (${v.qty / 1000})`).join('، ')}
-                  </p>
-                ))}
-                <DataTable
-                  caption="آخر الفواتير"
-                  columns={[
-                    {
-                      key: 'number',
-                      header: 'الفاتورة',
-                      cell: (r) => (
-                        <bdi dir="ltr" className="num font-semibold">
-                          {r.number}
-                        </bdi>
-                      ),
-                    },
-                    { key: 'date', header: 'التاريخ', cell: (r) => <span className="num">{r.date}</span> },
-                    {
-                      key: 'lines',
-                      header: 'القطع',
-                      cell: (r) =>
-                        r.lines
-                          .map(
-                            (l) =>
-                              `${l.name} ×${l.qty / 1000}${l.returnedQty > 0 ? ` (رجع ${l.returnedQty / 1000})` : ''}`,
-                          )
-                          .join('، '),
-                    },
-                    {
-                      key: 'total',
-                      header: 'المبلغ',
-                      numeric: true,
-                      cell: (r) => <Money minor={r.totalMinor} currency={r.currency} />,
-                    },
-                  ]}
-                  rows={purchases.invoices}
-                  rowKey={(r) => r.id}
-                  empty="لم يشترِ شيئاً بعد."
-                />
-              </section>
-            ) : null}
-            <DataTable
-              caption="كشف الحساب"
-              columns={columns}
-              rows={customer.statement}
-              rowKey={(l) => `${l.sourceId}:${l.balanceMinor}:${l.debitMinor}:${l.creditMinor}`}
-              empty="لا حركة على حساب هذا الزبون بعد."
-            />
-          </>
-        ) : null}
       </div>
     </AppShell>
   );

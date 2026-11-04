@@ -5,11 +5,14 @@ import {
   Alert,
   Button,
   Card,
+  CheckIcon,
+  cn,
   DeviceIcon,
   FullScreenLoader,
   KeyIcon,
   ProductsIcon,
   ProgressBar,
+  SparklesIcon,
   type Icon,
 } from '@serva/ui';
 import { useAuth } from '../../auth/useAuth';
@@ -101,18 +104,48 @@ export function WelcomePage() {
   return (
     <AppShell>
       <title>أهلاً بك · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-ink-muted">
-            الخطوة <span className="num">{step + 1}</span> من <span className="num">{ONBOARDING_STEPS}</span>
-          </p>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <div className="flex flex-col gap-3 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6">
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
+              <SparklesIcon />
+            </span>
+            <p className="text-sm font-semibold text-ink-muted">
+              الخطوة <span className="num">{step + 1}</span> من{' '}
+              <span className="num">{ONBOARDING_STEPS}</span>
+            </p>
+          </div>
+          <ol aria-hidden="true" className="grid grid-cols-4 gap-2">
+            {TITLES.map((title, i) => (
+              <li key={title} className="flex flex-col items-center gap-1.5 text-center">
+                <span
+                  className={cn(
+                    'grid size-8 place-items-center rounded-full text-sm font-bold',
+                    i < step && 'bg-brand text-on-brand',
+                    i === step && 'bg-brand-soft text-brand-ink ring-2 ring-brand',
+                    i > step && 'bg-surface-muted text-ink-muted',
+                  )}
+                >
+                  {i < step ? <CheckIcon size={16} /> : <span className="num">{i + 1}</span>}
+                </span>
+                <span
+                  className={cn(
+                    'hidden text-xs sm:block',
+                    i === step ? 'font-semibold text-ink' : 'text-ink-muted',
+                  )}
+                >
+                  {title}
+                </span>
+              </li>
+            ))}
+          </ol>
           <ProgressBar
             label="تقدّم الإعداد"
             value={step + 1}
             max={ONBOARDING_STEPS}
             valueText={`الخطوة ${step + 1} من ${ONBOARDING_STEPS}`}
           />
-          <h1 className="text-2xl font-bold text-ink">{TITLES[step]}</h1>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-ink">{TITLES[step]}</h1>
         </div>
         {error ? <Alert tone="error">{error}</Alert> : null}
 
@@ -219,9 +252,9 @@ function NextStep({
     <li>
       <Link
         to={to}
-        className="flex items-center gap-3 rounded-control border border-line p-3 hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-ring"
+        className="flex items-center gap-3 rounded-card border border-line bg-surface p-4 shadow-e1 transition-[border-color,box-shadow] hover:border-line-control hover:shadow-e2 focus-visible:outline-2 focus-visible:outline-ring"
       >
-        <span className="grid size-10 place-items-center rounded-full bg-brand-soft text-brand-ink">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
           <StepIcon />
         </span>
         <span className="flex flex-col">

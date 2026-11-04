@@ -114,9 +114,11 @@ export function ServiceForm({
             />
           </>
         ) : null}
-        <Button type="submit" size="lg" loading={saving}>
-          احفظ
-        </Button>
+        <div className="flex justify-end border-t border-line pt-4">
+          <Button type="submit" size="lg" loading={saving} className="max-sm:w-full">
+            احفظ
+          </Button>
+        </div>
       </form>
     </Card>
   );

@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Broadcast, BroadcastAudience, Category } from '@serva/core';
-import { Alert, Badge, Button, Card, Select } from '@serva/ui';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  ClockIcon,
+  MessagesIcon,
+  PageHeader,
+  Select,
+  SendIcon,
+} from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { listCategories } from '../catalog/api';
@@ -96,97 +107,112 @@ export function BroadcastsPage() {
   return (
     <AppShell>
       <title>رسائل للزبائن · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">رسائل للزبائن</h1>
-        <Card className="flex flex-col gap-4">
-          <p className="text-ink-muted">
-            رسالة على واتساب لزبائنك: «وصلت التشكيلة الشتوية» أو «تنزيلات 30٪». تُرسل واحدة كل ثانيتين حتى لا
-            يُعدّ رقمك مزعجاً، ومعها سطر يقول كيف يوقفها الزبون. من علّمته «لا يريد رسائل» لا تصله.
-          </p>
-          {error ? <Alert tone="error">{error}</Alert> : null}
-          <label className="flex flex-col gap-1">
-            <span className="font-semibold">الرسالة</span>
-            <textarea
-              aria-label="الرسالة"
-              value={text}
-              onChange={(e) => setText(e.target.value.slice(0, 700))}
-              rows={4}
-              placeholder="وصلت التشكيلة الشتوية! مرّوا علينا، أو اطلبوا من متجرنا."
-              className="rounded-control border border-line-control bg-surface p-3 text-ink"
+      <div className="mx-auto flex w-full max-w-5xl flex-col">
+        <PageHeader
+          title="رسائل للزبائن"
+          description="رسالة واتساب لزبائنك: تنزيلات، أو وصول بضاعة جديدة."
+          icon={MessagesIcon}
+        />
+        <div className="flex flex-col gap-6">
+          <Card className="flex flex-col gap-4">
+            <CardHeader
+              icon={SendIcon}
+              title="رسالة جديدة"
+              description="تُرسل واحدة كل ثانيتين حتى لا يُعدّ رقمك مزعجاً، ومعها سطر يقول كيف يوقفها الزبون. من علّمته «لا يريد رسائل» لا تصله."
+              className="mb-0"
             />
-            <span className="text-xs text-ink-muted">
-              <span className="num">{text.length}</span> / 700
-            </span>
-          </label>
-          <div className="grid gap-4 md:grid-cols-3">
-            <Select label="لمن" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
-              <option value="all">كل الزبائن</option>
-              <option value="category">من اشترى من قسم</option>
-              <option value="recent">من اشترى مؤخراً</option>
-            </Select>
-            {kind === 'category' ? (
-              <Select label="القسم" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                <option value="">اختر القسم</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+            {error ? <Alert tone="error">{error}</Alert> : null}
+            <label className="flex flex-col gap-1.5">
+              <span className="font-semibold">الرسالة</span>
+              <textarea
+                aria-label="الرسالة"
+                value={text}
+                onChange={(e) => setText(e.target.value.slice(0, 700))}
+                rows={4}
+                placeholder="وصلت التشكيلة الشتوية! مرّوا علينا، أو اطلبوا من متجرنا."
+                className="rounded-control border border-line-control bg-surface p-3 text-ink focus-visible:outline-2 focus-visible:outline-brand"
+              />
+              <span className="text-xs text-ink-muted">
+                <span className="num">{text.length}</span> / 700
+              </span>
+            </label>
+            <div className="grid gap-4 md:grid-cols-3">
+              <Select label="لمن" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
+                <option value="all">كل الزبائن</option>
+                <option value="category">من اشترى من قسم</option>
+                <option value="recent">من اشترى مؤخراً</option>
               </Select>
-            ) : null}
-            {kind === 'recent' ? (
-              <Select label="في آخر" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
-                {[30, 60, 90, 180, 365].map((d) => (
-                  <option key={d} value={d}>
-                    {d} يوماً
-                  </option>
-                ))}
-              </Select>
-            ) : null}
-          </div>
-          <p role="status" className="font-semibold">
-            {count === null
-              ? '…'
-              : count === 0
-                ? 'لا زبائن بأرقام جوال في هذا الاختيار.'
-                : `تصل إلى ${count} زبون.`}
-          </p>
-          <div>
-            <Button
-              loading={sending}
-              disabled={!audience || text.trim().length < 5 || !count || busy}
-              onClick={() => void go()}
-            >
-              أرسل
-            </Button>
-            {busy ? <span className="ms-3 text-sm text-ink-muted">رسالة سابقة ما زالت تُرسل.</span> : null}
-          </div>
-        </Card>
-        <section aria-label="الرسائل السابقة" className="flex flex-col gap-2">
-          <h2 className="text-xl font-bold text-ink">الرسائل السابقة</h2>
-          {items && items.length === 0 ? <p className="text-ink-muted">لم تُرسل رسائل بعد.</p> : null}
-          <ul className="flex flex-col gap-2">
-            {(items ?? []).map((b) => (
-              <li
-                key={b.id}
-                className="flex flex-col gap-1 rounded-control border border-line bg-surface p-3"
+              {kind === 'category' ? (
+                <Select label="القسم" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                  <option value="">اختر القسم</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+              {kind === 'recent' ? (
+                <Select label="في آخر" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
+                  {[30, 60, 90, 180, 365].map((d) => (
+                    <option key={d} value={d}>
+                      {d} يوماً
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+            </div>
+            <p role="status" className="rounded-control bg-brand-soft px-4 py-3 font-semibold text-brand-ink">
+              {count === null
+                ? '…'
+                : count === 0
+                  ? 'لا زبائن بأرقام جوال في هذا الاختيار.'
+                  : `تصل إلى ${count} زبون.`}
+            </p>
+            <div>
+              <Button
+                loading={sending}
+                disabled={!audience || text.trim().length < 5 || !count || busy}
+                onClick={() => void go()}
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={b.status === 'done' ? 'success' : 'warning'}>
-                    {b.status === 'done' ? 'أُرسلت' : 'تُرسل الآن'}
-                  </Badge>
-                  <span className="text-sm text-ink-muted">{AUDIENCE_TEXT(b.audience, names)}</span>
-                  <span className="flex-1" />
-                  <span className="num text-sm">
-                    {b.sent} / {b.total}
-                    {b.failed > 0 ? ` · لم تصل ${b.failed}` : ''}
-                  </span>
-                </div>
-                <p className="line-clamp-2 whitespace-pre-line text-sm">{b.text}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
+                أرسل
+              </Button>
+              {busy ? <span className="ms-3 text-sm text-ink-muted">رسالة سابقة ما زالت تُرسل.</span> : null}
+            </div>
+          </Card>
+          <section aria-label="الرسائل السابقة" className="flex flex-col gap-3">
+            <h2 className="flex items-center gap-2 text-xl font-bold text-ink">
+              <ClockIcon size={20} className="text-ink-muted" />
+              الرسائل السابقة
+            </h2>
+            {items && items.length === 0 ? (
+              <p className="rounded-card border border-dashed border-line bg-surface px-6 py-8 text-center text-ink-muted">
+                لم تُرسل رسائل بعد.
+              </p>
+            ) : null}
+            <ul className="flex flex-col gap-3">
+              {(items ?? []).map((b) => (
+                <li
+                  key={b.id}
+                  className="flex flex-col gap-2 rounded-card border border-line bg-surface p-4 shadow-e1"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={b.status === 'done' ? 'success' : 'warning'}>
+                      {b.status === 'done' ? 'أُرسلت' : 'تُرسل الآن'}
+                    </Badge>
+                    <span className="text-sm text-ink-muted">{AUDIENCE_TEXT(b.audience, names)}</span>
+                    <span className="flex-1" />
+                    <span className="num text-sm font-semibold">
+                      {b.sent} / {b.total}
+                      {b.failed > 0 ? ` · لم تصل ${b.failed}` : ''}
+                    </span>
+                  </div>
+                  <p className="line-clamp-2 whitespace-pre-line text-sm text-ink">{b.text}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
       </div>
     </AppShell>
   );

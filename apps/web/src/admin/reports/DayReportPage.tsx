@@ -1,17 +1,25 @@
 import { useState, type ReactNode } from 'react';
 import type { CurrencyCode, MeResponse } from '@serva/core';
 import {
+  AccountingIcon,
   Button,
   Card,
+  CategoriesIcon,
   cn,
+  CustomersIcon,
   DataTable,
   displayNumber,
   EmptyState,
   formatQuantity,
   Money,
+  OfferIcon,
   PrintIcon,
+  ProductsIcon,
+  ReportsIcon,
   SalesIcon,
   StatTile,
+  TrendUpIcon,
+  WalletIcon,
   useDigits,
   type DataColumn,
 } from '@serva/ui';
@@ -47,8 +55,8 @@ function Line({ label, children, strong = false }: { label: string; children: Re
   return (
     <div
       className={cn(
-        'flex items-baseline justify-between gap-3 py-1.5',
-        strong && 'border-t border-line pt-2.5 font-bold',
+        'flex items-baseline justify-between gap-3 border-b border-line py-2.5 last:border-b-0',
+        strong && 'rounded-control border-b-0 bg-surface-total px-3 font-bold',
       )}
     >
       <dt className={strong ? 'text-ink' : 'text-ink-muted'}>{label}</dt>
@@ -161,6 +169,7 @@ function DayReportBody({ report }: { report: DayReport }) {
         <StatTile
           hero
           className="sm:col-span-2"
+          icon={TrendUpIcon}
           label="المبيعات"
           value={<Money minor={report.totalMinor} currency={base} />}
           footnote={
@@ -170,16 +179,27 @@ function DayReportBody({ report }: { report: DayReport }) {
             </>
           }
         />
-        <StatTile label="الحسم" value={<Money minor={report.discountMinor} currency={base} />} />
-        <StatTile label="الضريبة" value={<Money minor={report.taxMinor} currency={base} />} />
+        <StatTile
+          label="الحسم"
+          icon={OfferIcon}
+          tone="warning"
+          value={<Money minor={report.discountMinor} currency={base} />}
+        />
+        <StatTile
+          label="الضريبة"
+          icon={AccountingIcon}
+          tone="info"
+          value={<Money minor={report.taxMinor} currency={base} />}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <Section title="تفصيل المبيعات">
+        <Section title="تفصيل المبيعات" icon={ReportsIcon} description="من المبيعات الإجمالية إلى الصافي">
           <Breakdown report={report} />
         </Section>
-        <Section title="حسب طريقة الدفع">
+        <Section title="حسب طريقة الدفع" icon={WalletIcon} description="كل طريقة وعملة بما دخل فيها">
           <DataTable
+            className="shadow-none"
             caption="المبيعات حسب طريقة الدفع والعملة"
             columns={withTotals(methodColumns(base), {
               base: <Money minor={methodsBase} currency={base} />,
@@ -193,8 +213,9 @@ function DayReportBody({ report }: { report: DayReport }) {
         </Section>
       </div>
 
-      <Section title="حسب الكاشير">
+      <Section title="حسب الكاشير" icon={CustomersIcon} description="فواتير كل كاشير ومبيعاته">
         <DataTable
+          className="shadow-none"
           caption="المبيعات حسب الكاشير"
           columns={withTotals(cashierColumns(base), {
             count: cashierInvoices,
@@ -208,8 +229,9 @@ function DayReportBody({ report }: { report: DayReport }) {
       {(report.bySalesperson ?? []).some(
         (s) => !report.byCashier.some((c) => c.userId === s.userId && c.totalMinor === s.totalMinor),
       ) ? (
-        <Section title="حسب البائع">
+        <Section title="حسب البائع" icon={CustomersIcon}>
           <DataTable
+            className="shadow-none"
             caption="المبيعات حسب البائع"
             columns={cashierColumns(base)}
             rows={report.bySalesperson}
@@ -220,8 +242,9 @@ function DayReportBody({ report }: { report: DayReport }) {
 
       {(report.byCategory ?? []).length > 0 ? (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="حسب القسم">
+          <Section title="حسب القسم" icon={CategoriesIcon}>
             <DataTable
+              className="shadow-none"
               caption="المبيعات حسب القسم"
               columns={[
                 { key: 'name', header: 'القسم', cell: (row) => row.name },
@@ -243,8 +266,9 @@ function DayReportBody({ report }: { report: DayReport }) {
               rowKey={(row) => row.categoryId ?? 'none'}
             />
           </Section>
-          <Section title="الأكثر مبيعاً">
+          <Section title="الأكثر مبيعاً" icon={ProductsIcon}>
             <DataTable
+              className="shadow-none"
               caption="الأصناف الأكثر مبيعاً"
               columns={[
                 { key: 'name', header: 'الصنف', cell: (row) => row.name },
@@ -333,6 +357,7 @@ export function DayReportPage() {
     <ReportScreen me={me} access={DAY_REPORT_ACCESS} title="مبيعات اليوم">
       <PageHead
         crumbs={['البيع', 'المبيعات']}
+        icon={SalesIcon}
         title={isToday ? 'مبيعات اليوم' : 'مبيعات يوم'}
         subtitle={title}
         actions={

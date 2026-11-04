@@ -1,6 +1,25 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { BillingCycle, SubscriptionInvoice, SubscriptionPage as Page } from '@serva/core';
-import { Alert, Button, cn, FullScreenLoader, Money, StatTile, TextField } from '@serva/ui';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import type {
+  BillingCycle,
+  SubscriptionInvoice,
+  SubscriptionPayment,
+  SubscriptionPage as Page,
+} from '@serva/core';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  cn,
+  DataTable,
+  FullScreenLoader,
+  Money,
+  PageHeader,
+  SubscriptionIcon,
+  TextField,
+  type BadgeTone,
+  type DataColumn,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
@@ -101,66 +120,95 @@ export function SubscriptionPage() {
     <AppShell>
       <title>الاشتراك · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">الاشتراك</h1>
+        <PageHeader
+          className="mb-0"
+          icon={SubscriptionIcon}
+          title="الاشتراك"
+          description="باقتك الحالية، وتجديدها أو تغييرها، ودفعاتك وفواتيرك."
+        />
         {!canManage ? <Alert tone="info">الاشتراك والدفع للمالك فقط.</Alert> : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
         {notice ? <Alert tone="success">{notice}</Alert> : null}
         {canManage && !page && !error ? <FullScreenLoader /> : null}
         {page ? (
           <>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <StatTile hero label="الباقة" value={page.planName} footnote={STATUS_TEXT[page.status]} />
-              <StatTile
-                label={page.status === 'trialing' ? 'تنتهي التجربة' : 'ينتهي الاشتراك'}
-                value={dateText(page.status === 'trialing' ? page.trialEndsAt : page.currentPeriodEnd)}
+            <section
+              aria-label="اشتراكك الحالي"
+              className="relative overflow-hidden rounded-card bg-brand p-6 text-on-brand shadow-e2 sm:p-8"
+            >
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -top-24 -left-16 size-72 rounded-full bg-on-brand/10 blur-2xl"
               />
-              {page.graceEndsAt ? (
-                <StatTile label="يعمل متجرك حتى تأكيد الدفعة" value={dateText(page.graceEndsAt)} />
-              ) : null}
-            </div>
+              <div className="relative flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-semibold opacity-85">الباقة</p>
+                  <p className="text-3xl font-bold tracking-tight">{page.planName}</p>
+                  <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-on-brand/15 px-3 py-1 text-sm font-semibold ring-1 ring-on-brand/20">
+                    <span aria-hidden="true" className="size-2 rounded-full bg-current" />
+                    {STATUS_TEXT[page.status]}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-8 gap-y-3">
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-sm opacity-85">
+                      {page.status === 'trialing' ? 'تنتهي التجربة' : 'ينتهي الاشتراك'}
+                    </p>
+                    <p className="num text-xl font-bold">
+                      {dateText(page.status === 'trialing' ? page.trialEndsAt : page.currentPeriodEnd)}
+                    </p>
+                  </div>
+                  {page.graceEndsAt ? (
+                    <div className="flex flex-col gap-0.5">
+                      <p className="text-sm opacity-85">يعمل متجرك حتى تأكيد الدفعة</p>
+                      <p className="num text-xl font-bold">{dateText(page.graceEndsAt)}</p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </section>
 
-            <section className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold text-ink">اختر باقتك</h2>
-              <div role="group" aria-label="مدة الاشتراك" className="flex gap-2">
-                {(['monthly', 'yearly'] as const).map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-pressed={cycle === c}
-                    onClick={() => setCycle(c)}
-                    className={cn(
-                      'min-h-11 rounded-control border-2 px-4 font-semibold',
-                      cycle === c
-                        ? 'border-brand bg-brand-soft text-brand-ink'
-                        : 'border-line bg-surface text-ink',
-                    )}
-                  >
-                    {c === 'monthly' ? 'شهري' : 'سنوي (شهران مجاناً)'}
-                  </button>
-                ))}
+            <section className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold text-ink">اختر باقتك</h2>
+                <div
+                  role="group"
+                  aria-label="مدة الاشتراك"
+                  className="inline-flex gap-1 rounded-xl bg-surface-muted p-1"
+                >
+                  {(['monthly', 'yearly'] as const).map((c) => (
+                    <PressButton key={c} pressed={cycle === c} onClick={() => setCycle(c)}>
+                      {c === 'monthly' ? 'شهري' : 'سنوي (شهران مجاناً)'}
+                    </PressButton>
+                  ))}
+                </div>
               </div>
               <ul className="grid gap-4 md:grid-cols-3">
                 {page.plans.map((plan) => {
                   const price = cycle === 'yearly' ? plan.priceYearlyMinor : plan.priceMonthlyMinor;
+                  const current = page.planCode === plan.code;
                   return (
-                    <li
-                      key={plan.code}
-                      className="flex flex-col gap-3 rounded-card border border-line bg-surface p-5"
-                    >
-                      <span className="text-lg font-bold text-ink">{plan.name}</span>
-                      <span className="text-2xl font-bold text-ink">
-                        <Money minor={price ?? 0} currency="USD" />
-                        <span className="text-sm font-normal text-ink-muted">
-                          {' '}
-                          / {cycle === 'yearly' ? 'سنة' : 'شهر'}
+                    <li key={plan.code} className="flex">
+                      <Card selected={current} interactive className="flex w-full flex-col gap-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-lg font-bold text-ink">{plan.name}</span>
+                          {current ? <Badge tone="brand">باقتك الحالية</Badge> : null}
+                        </div>
+                        <span className="text-3xl font-bold tracking-tight text-ink">
+                          <Money minor={price ?? 0} currency="USD" />
+                          <span className="text-sm font-normal text-ink-muted">
+                            {' '}
+                            / {cycle === 'yearly' ? 'سنة' : 'شهر'}
+                          </span>
                         </span>
-                      </span>
-                      <Button
-                        variant={page.planCode === plan.code ? 'secondary' : 'primary'}
-                        onClick={() => void choose(plan.code)}
-                      >
-                        {page.planCode === plan.code ? 'جدّد هذه الباقة' : 'اختر هذه الباقة'}
-                      </Button>
+                        <Button
+                          variant={current ? 'secondary' : 'primary'}
+                          className="mt-auto"
+                          onClick={() => void choose(plan.code)}
+                        >
+                          {current ? 'جدّد هذه الباقة' : 'اختر هذه الباقة'}
+                        </Button>
+                      </Card>
                     </li>
                   );
                 })}
@@ -170,7 +218,7 @@ export function SubscriptionPage() {
             {invoice ? (
               <section
                 aria-label="فاتورة الاشتراك"
-                className="flex flex-col gap-4 rounded-card border-2 border-brand bg-surface p-5"
+                className="flex flex-col gap-5 rounded-card border-2 border-brand bg-surface p-5 shadow-e2 sm:p-6"
               >
                 <h2 className="text-lg font-bold text-ink">
                   فاتورة{' '}
@@ -179,7 +227,7 @@ export function SubscriptionPage() {
                   </bdi>{' '}
                   · {invoice.planName} · {invoice.billingCycle === 'yearly' ? 'سنوي' : 'شهري'}
                 </h2>
-                <p className="text-ink">
+                <p className="rounded-control bg-brand-soft px-4 py-3 text-ink">
                   المبلغ: <Money minor={invoice.sypMinor} currency="SYP" className="font-bold" /> أو{' '}
                   <Money minor={invoice.usdMinor} currency="USD" className="font-bold" /> · اكتب رقم الفاتورة
                   في ملاحظة التحويل.
@@ -188,35 +236,35 @@ export function SubscriptionPage() {
                   <Alert tone="info">أرسلت دفعة لهذه الفاتورة وهي بانتظار التأكيد.</Alert>
                 ) : (
                   <>
-                    <div role="group" aria-label="طريقة الدفع" className="flex flex-wrap gap-2">
-                      {page.paymentMethods.map((m) => (
-                        <button
-                          key={m.key}
-                          type="button"
-                          aria-pressed={method === m.key}
-                          onClick={() => setMethod(m.key)}
-                          className={cn(
-                            'min-h-11 rounded-control border-2 px-4 font-semibold',
-                            method === m.key
-                              ? 'border-brand bg-brand-soft text-brand-ink'
-                              : 'border-line bg-surface text-ink',
-                          )}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
+                    <div className="flex flex-col gap-2">
+                      <p className="text-sm font-semibold text-ink-muted">طريقة الدفع</p>
+                      <div
+                        role="group"
+                        aria-label="طريقة الدفع"
+                        className="inline-flex max-w-full flex-wrap gap-1 self-start rounded-xl bg-surface-muted p-1"
+                      >
+                        {page.paymentMethods.map((m) => (
+                          <PressButton
+                            key={m.key}
+                            pressed={method === m.key}
+                            onClick={() => setMethod(m.key)}
+                          >
+                            {m.label}
+                          </PressButton>
+                        ))}
+                      </div>
                     </div>
                     {chosen ? (
-                      <dl className="grid gap-1 rounded-control bg-surface-muted p-4 text-sm text-ink">
+                      <dl className="grid gap-1 rounded-control border border-line bg-surface-muted p-4 text-sm text-ink">
                         <dt className="text-ink-muted">الحساب</dt>
                         <dd>
-                          <bdi dir="ltr" className="num font-semibold">
+                          <bdi dir="ltr" className="num text-base font-semibold">
                             {chosen.account}
                           </bdi>
                         </dd>
-                        <dt className="text-ink-muted">المستفيد</dt>
+                        <dt className="mt-2 text-ink-muted">المستفيد</dt>
                         <dd className="font-semibold">{chosen.beneficiary}</dd>
-                        <dd className="mt-2">{chosen.instructions}</dd>
+                        <dd className="mt-2 border-t border-line pt-2">{chosen.instructions}</dd>
                       </dl>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2">
@@ -227,58 +275,53 @@ export function SubscriptionPage() {
                         onChange={(e) => setReference(e.target.value)}
                         error={fields.transactionRef}
                       />
-                      <div role="group" aria-label="العملة التي دفعت بها" className="flex items-end gap-2">
-                        {(['SYP', 'USD'] as const).map((c) => (
-                          <button
-                            key={c}
-                            type="button"
-                            aria-pressed={currency === c}
-                            onClick={() => setCurrency(c)}
-                            className={cn(
-                              'min-h-12 rounded-control border-2 px-4 font-semibold',
-                              currency === c
-                                ? 'border-brand bg-brand-soft text-brand-ink'
-                                : 'border-line bg-surface text-ink',
-                            )}
-                          >
-                            {c === 'SYP' ? 'بالليرة' : 'بالدولار'}
-                          </button>
-                        ))}
+                      <div role="group" aria-label="العملة التي دفعت بها" className="flex items-end">
+                        <div className="inline-flex gap-1 rounded-xl bg-surface-muted p-1">
+                          {(['SYP', 'USD'] as const).map((c) => (
+                            <PressButton key={c} pressed={currency === c} onClick={() => setCurrency(c)}>
+                              {c === 'SYP' ? 'بالليرة' : 'بالدولار'}
+                            </PressButton>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                    <Button
-                      onClick={() => void report()}
-                      loading={saving}
-                      disabled={reference.trim().length < 3}
-                    >
-                      أرسلت المبلغ
-                    </Button>
+                    <div className="flex justify-end border-t border-line pt-4">
+                      <Button
+                        size="lg"
+                        className="max-sm:w-full"
+                        onClick={() => void report()}
+                        loading={saving}
+                        disabled={reference.trim().length < 3}
+                      >
+                        أرسلت المبلغ
+                      </Button>
+                    </div>
                   </>
                 )}
               </section>
             ) : null}
 
             {page.payments.length > 0 ? (
-              <section className="flex flex-col gap-2">
+              <section className="flex flex-col gap-3">
                 <h2 className="text-lg font-semibold text-ink">دفعاتك</h2>
-                <ul className="flex flex-col divide-y divide-line rounded-card border border-line bg-surface">
-                  {page.payments.map((p) => (
-                    <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                      <bdi dir="ltr" className="num font-semibold">
-                        {p.number}
-                      </bdi>
-                      <Money minor={p.amountMinor} currency={p.currency} />
-                      <span
-                        className={
-                          p.status === 'rejected' ? 'font-semibold text-danger-ink' : 'text-ink-muted'
-                        }
-                      >
-                        {PAYMENT_STATUS[p.status]}
-                        {p.reason ? `: ${p.reason}` : ''}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <DataTable
+                  caption="دفعاتك"
+                  columns={paymentColumns}
+                  rows={page.payments}
+                  rowKey={(p) => p.id}
+                />
+              </section>
+            ) : null}
+
+            {page.invoices.length > 0 ? (
+              <section className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold text-ink">فواتير الاشتراك</h2>
+                <DataTable
+                  caption="فواتير الاشتراك"
+                  columns={invoiceColumns}
+                  rows={page.invoices}
+                  rowKey={(i) => i.id}
+                />
               </section>
             ) : null}
           </>
@@ -287,3 +330,93 @@ export function SubscriptionPage() {
     </AppShell>
   );
 }
+
+/** One choice in a group of pressed-or-not buttons, drawn as a segment. */
+function PressButton({
+  pressed,
+  onClick,
+  children,
+}: {
+  pressed: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={cn(
+        'min-h-11 rounded-lg px-4 font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+        pressed ? 'bg-surface text-brand-ink shadow-e1' : 'text-ink-muted hover:text-ink',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+const paymentColumns: DataColumn<SubscriptionPayment>[] = [
+  {
+    key: 'number',
+    header: 'الرقم',
+    cell: (p) => (
+      <bdi dir="ltr" className="num font-semibold">
+        {p.number}
+      </bdi>
+    ),
+  },
+  {
+    key: 'amount',
+    header: 'المبلغ',
+    numeric: true,
+    cell: (p) => <Money minor={p.amountMinor} currency={p.currency} />,
+  },
+  {
+    key: 'status',
+    header: 'الحالة',
+    cell: (p) => (
+      <span className="flex flex-wrap items-center gap-2">
+        <Badge tone={p.status === 'rejected' ? 'danger' : p.status === 'confirmed' ? 'success' : 'warning'}>
+          {PAYMENT_STATUS[p.status]}
+        </Badge>
+        {p.reason ? <span className="text-ink-muted">{p.reason}</span> : null}
+      </span>
+    ),
+  },
+];
+
+const INVOICE_STATUS: Record<SubscriptionInvoice['status'], { label: string; tone: BadgeTone }> = {
+  open: { label: 'بانتظار الدفع', tone: 'warning' },
+  paid: { label: 'مدفوعة', tone: 'success' },
+  cancelled: { label: 'ملغاة', tone: 'neutral' },
+};
+
+const invoiceColumns: DataColumn<SubscriptionInvoice>[] = [
+  {
+    key: 'number',
+    header: 'الرقم',
+    cell: (i) => (
+      <bdi dir="ltr" className="num font-semibold">
+        {i.number}
+      </bdi>
+    ),
+  },
+  {
+    key: 'plan',
+    header: 'الباقة',
+    cell: (i) => `${i.planName} · ${i.billingCycle === 'yearly' ? 'سنوي' : 'شهري'}`,
+  },
+  { key: 'date', header: 'التاريخ', cell: (i) => dateText(i.createdAt) },
+  {
+    key: 'amount',
+    header: 'المبلغ',
+    numeric: true,
+    cell: (i) => <Money minor={i.usdMinor} currency="USD" />,
+  },
+  {
+    key: 'status',
+    header: 'الحالة',
+    cell: (i) => <Badge tone={INVOICE_STATUS[i.status].tone}>{INVOICE_STATUS[i.status].label}</Badge>,
+  },
+];

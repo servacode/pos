@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
-import { cn } from '@serva/ui';
+import { AccountingIcon, cn, PageHeader } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { inAccountingMode } from '../reports/access';
-import { PageHead, ReportScreen } from '../reports/parts';
+import { ReportScreen } from '../reports/parts';
 
 const TABS = [
   { to: '/accounting/accounts', label: 'دليل الحسابات' },
@@ -28,15 +28,17 @@ export function AccountingLayout({
   const me = useMe();
   return (
     <ReportScreen me={me} access={inAccountingMode} title={title}>
-      <PageHead
-        crumbs={['المال', 'المحاسبة']}
+      <PageHeader
+        className="mb-0 print:hidden"
+        icon={AccountingIcon}
+        eyebrow="المال / المحاسبة"
         title={title}
-        subtitle="وضع المحاسبة مفعّل · المبالغ بالعملة الأساسية"
+        description="وضع المحاسبة مفعّل · المبالغ بالعملة الأساسية"
         actions={actions}
       />
       <nav
         aria-label="أقسام المحاسبة"
-        className="scrollbar-none flex gap-1 overflow-x-auto border-b border-line"
+        className="scrollbar-none flex gap-1 overflow-x-auto border-b border-line print:hidden"
       >
         {TABS.map((tab) => (
           <NavLink

@@ -3,6 +3,8 @@ import { deviceNameSchema, type DeviceKind, type DeviceSummary } from '@serva/co
 import {
   BarcodeIcon,
   Button,
+  ClockIcon,
+  cn,
   DeviceIcon,
   EditIcon,
   IconButton,
@@ -84,77 +86,85 @@ export function DeviceRow({ device, now, canManage, onRename, onRevoke }: Device
   }
 
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 last:border-b-0 sm:px-5">
-      <span
-        className={
-          revoked
-            ? 'grid size-10 shrink-0 place-items-center rounded-control bg-danger-soft text-danger-ink'
-            : 'grid size-10 shrink-0 place-items-center rounded-control bg-brand-soft text-brand-ink'
-        }
-      >
-        <KindIcon />
-      </span>
-
-      {editing ? (
-        <form noValidate onSubmit={save} className="flex min-w-0 flex-1 flex-wrap items-start gap-2">
-          <TextField
-            label={`الاسم الجديد لـ«${device.name}»`}
-            hideLabel
-            value={name}
-            maxLength={40}
-            onChange={(e) => {
-              setName(e.target.value);
-              setError(undefined);
-            }}
-            error={error}
-            className="min-w-48 flex-1"
-          />
-          <Button type="submit" loading={saving}>
-            احفظ
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setEditing(false);
-              setName(device.name);
-              setError(undefined);
-            }}
-          >
-            تراجع
-          </Button>
-        </form>
-      ) : (
-        <div className="flex min-w-0 flex-1 flex-col">
-          <span className="flex items-center gap-1">
-            <span className="truncate font-semibold text-ink">{device.name}</span>
-            {canManage && !revoked ? (
-              <IconButton
-                label={`غيّر اسم «${device.name}»`}
-                icon={<EditIcon size={16} />}
-                onClick={() => setEditing(true)}
-              />
-            ) : null}
-          </span>
-          <span className="text-xs text-ink-muted">
-            {device.code ? (
-              <>
-                رمز <bdi className="num">{device.code}</bdi> ·{' '}
-              </>
-            ) : null}
-            {deviceTypeLabel(device.kind, device.platform)}
-            {device.appVersion ? (
-              <>
-                {' '}
-                · نسخة <bdi className="num">{device.appVersion}</bdi>
-              </>
-            ) : null}
-          </span>
-        </div>
+    <li
+      className={cn(
+        'flex flex-col gap-4 rounded-card border border-line bg-surface p-4 shadow-e1 transition-shadow hover:shadow-e2 sm:p-5',
+        revoked && 'bg-surface-muted',
       )}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={
+            revoked
+              ? 'grid size-12 shrink-0 place-items-center rounded-xl bg-danger-soft text-danger-ink'
+              : 'grid size-12 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink'
+          }
+        >
+          <KindIcon size={24} />
+        </span>
 
-      <div className="flex flex-col items-start gap-1 text-sm sm:min-w-44">
+        {editing ? (
+          <form noValidate onSubmit={save} className="flex min-w-0 flex-1 flex-wrap items-start gap-2">
+            <TextField
+              label={`الاسم الجديد لـ«${device.name}»`}
+              hideLabel
+              value={name}
+              maxLength={40}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError(undefined);
+              }}
+              error={error}
+              className="min-w-48 flex-1"
+            />
+            <Button type="submit" loading={saving}>
+              احفظ
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setEditing(false);
+                setName(device.name);
+                setError(undefined);
+              }}
+            >
+              تراجع
+            </Button>
+          </form>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="flex items-center gap-1">
+              <span className="truncate font-semibold text-ink">{device.name}</span>
+              {canManage && !revoked ? (
+                <IconButton
+                  label={`غيّر اسم «${device.name}»`}
+                  icon={<EditIcon size={16} />}
+                  onClick={() => setEditing(true)}
+                />
+              ) : null}
+            </span>
+            <span className="text-xs text-ink-muted">
+              {device.code ? (
+                <>
+                  رمز <bdi className="num">{device.code}</bdi> ·{' '}
+                </>
+              ) : null}
+              {deviceTypeLabel(device.kind, device.platform)}
+              {device.appVersion ? (
+                <>
+                  {' '}
+                  · نسخة <bdi className="num">{device.appVersion}</bdi>
+                </>
+              ) : null}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <StatusChip status={STATUS_CHIPS[device.status]} />
-        <span className="text-ink-muted">
+        <span className="flex items-center gap-1.5 text-ink-muted">
+          <ClockIcon size={16} />
           {revoked && device.revokedAt
             ? `أُوقف ${formatSince(device.revokedAt, now)}`
             : device.lastSeenAt
@@ -164,11 +174,10 @@ export function DeviceRow({ device, now, canManage, onRename, onRevoke }: Device
       </div>
 
       <p
-        className={
-          sending.danger
-            ? 'text-sm font-semibold text-danger-ink sm:min-w-40'
-            : 'text-sm text-ink sm:min-w-40'
-        }
+        className={cn(
+          'rounded-control px-3 py-2 text-sm',
+          sending.danger ? 'bg-danger-soft font-semibold text-danger-ink' : 'bg-surface-muted text-ink',
+        )}
       >
         {sending.text}
       </p>
@@ -180,7 +189,7 @@ export function DeviceRow({ device, now, canManage, onRename, onRevoke }: Device
           icon={<LockIcon size={16} />}
           onClick={() => onRevoke(device)}
           aria-label={`أوقف عن بُعد: ${device.name}`}
-          className="min-h-12 sm:min-h-10"
+          className="min-h-12 w-full sm:min-h-10"
         >
           أوقف عن بُعد
         </Button>

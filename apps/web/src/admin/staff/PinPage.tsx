@@ -1,5 +1,16 @@
 import { useState } from 'react';
-import { Alert, Button, Card, InfoIcon, KeyIcon, PasswordField, TextField } from '@serva/ui';
+import {
+  Alert,
+  Button,
+  Card,
+  CardHeader,
+  InfoIcon,
+  KeyIcon,
+  PageHeader,
+  PasswordField,
+  ShieldCheckIcon,
+  TextField,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError } from '../../lib/api';
@@ -73,15 +84,17 @@ export function PinPage() {
   return (
     <AppShell>
       <title>رمز الدخول للكاشير · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-5">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold text-ink">رمز الدخول للكاشير</h1>
-          <p className="text-ink-muted">تكتبه على أجهزة الكاشير لتدخل باسمك، بدل كلمة السر.</p>
-        </div>
+      <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
+        <PageHeader
+          className="mb-0"
+          icon={KeyIcon}
+          title="رمز الدخول للكاشير"
+          description="تكتبه على أجهزة الكاشير لتدخل باسمك، بدل كلمة السر."
+        />
 
-        <Card className="flex flex-col gap-3">
+        <Card className="flex flex-col gap-3 border-info/20 bg-info-soft">
           <p className="flex items-start gap-2 text-ink">
-            <InfoIcon className="mt-1 text-info-ink" />
+            <InfoIcon className="mt-1 shrink-0 text-info-ink" />
             <span>
               الكاشير يكفيه 4 أرقام. المالك والمدير ومن يوافق على خصم أو إرجاع أو سحب نقد يحتاج 6 أرقام، لأن
               رمزه يفتح عمليات غيره.
@@ -101,8 +114,13 @@ export function PinPage() {
         ) : null}
         {formError ? <Alert tone="error">{formError}</Alert> : null}
 
-        <Card>
-          <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <Card className="p-5 sm:p-8">
+          <CardHeader
+            icon={ShieldCheckIcon}
+            title="اختر رمزك"
+            description="يبقى سرّاً بينك وبين جهاز الكاشير."
+          />
+          <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
             <TextField
               {...pinInput}
               name="pin"
@@ -131,12 +149,7 @@ export function PinPage() {
               onChange={(event) => setValue('password', event.target.value)}
               error={errors.password}
             />
-            <Button
-              type="submit"
-              icon={<KeyIcon />}
-              loading={submitting}
-              className="self-start max-sm:w-full"
-            >
+            <Button type="submit" icon={<KeyIcon />} loading={submitting} size="lg" className="w-full">
               احفظ الرمز
             </Button>
           </form>
