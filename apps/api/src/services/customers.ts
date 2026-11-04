@@ -5,6 +5,7 @@ import type {
   CustomerInput,
   CustomerListItem,
   CustomerListResponse,
+  CustomerPurchases,
   StatementLine,
 } from '@serva/core';
 import { normalizeArabic } from '@serva/core/text';
@@ -12,6 +13,7 @@ import { customers, withTenant, type Database, type Transaction } from '@serva/d
 import { createUuidV7 } from '@serva/sync';
 import { eq } from 'drizzle-orm';
 import { requirePermission } from '../auth/permissions';
+import type { DeviceClaims } from '../auth/device-guard';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
@@ -227,4 +229,99 @@ export async function updateCustomer(
     );
     return after;
   });
+}
+
+// ─── What a customer bought (03 › الألبسة: سجل الزبون ومقاسه) ─────────────────
+
+async function purchasesOf(tx: Transaction, id: string): Promise<CustomerPurchases> {
+  const [known] = await tx.execute<{ id: string }>(sql`select id from customers where id = ${id}`);
+  if (!known) throw notFound();
+  const returned = sql`coalesce((select sum(rl.base_qty) from sale_return_lines rl
+    join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+    where r.sale_id = l.invoice_id and rl.sale_line_no = l.line_no), 0)`;
+  const invoices = await tx.execute<{
+    id: string;
+    number: string;
+    date: string;
+    total: string;
+    currency: string;
+  }>(sql`
+    select id, number, business_date::text as date, total_minor::text as total, currency
+    from invoices where customer_id = ${id}
+    order by business_date desc, device_time desc, id desc limit 20`);
+  const lines =
+    invoices.length === 0
+      ? []
+      : await tx.execute<{ invoice_id: string; name: string; qty: string; total: string; back: string }>(sql`
+          select l.invoice_id, l.name, l.base_qty::text as qty, l.total_minor::text as total,
+                 ${returned}::text as back
+          from invoice_lines l
+          where l.invoice_id in (${sql.join(
+            invoices.map((i) => sql`${i.id}::uuid`),
+            sql`, `,
+          )})
+          order by l.invoice_id, l.line_no`);
+  // Colour tells what someone likes, not what fits: every other option counts as a size
+  const sizes = await tx.execute<{ name: string; value: string; qty: string }>(sql`
+    select a->>'name' as name, a->>'value' as value, sum(l.base_qty - ${returned})::text as qty
+    from invoice_lines l
+    join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+    join variants v on v.id = l.variant_id
+    cross join lateral jsonb_array_elements(v.attributes) a
+    where i.customer_id = ${id} and coalesce(a->>'name', '') <> '' and coalesce(a->>'value', '') <> ''
+      and a->>'name' not like '%لون%'
+    group by 1, 2
+    having sum(l.base_qty - ${returned}) > 0
+    order by 3 desc, 2`);
+  const [totals] = await tx.execute<{ pieces: string; spent: string }>(sql`
+    select coalesce((select sum(l.base_qty - ${returned}) from invoice_lines l
+                     join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+                     where i.customer_id = ${id}), 0)::text as pieces,
+           (coalesce((select sum(total_minor) from invoices where customer_id = ${id}), 0)
+            - coalesce((select sum(r.total_minor) from sale_returns r
+                        join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
+                        where i.customer_id = ${id}), 0))::text as spent`);
+  const byName = new Map<string, { value: string; qty: number }[]>();
+  for (const s of sizes) {
+    const list = byName.get(s.name) ?? [];
+    list.push({ value: s.value, qty: Number(s.qty) });
+    byName.set(s.name, list);
+  }
+  return {
+    customerId: id,
+    sizes: [...byName.entries()].map(([name, values]) => ({ name, values: values.slice(0, 5) })),
+    invoices: invoices.map((i) => ({
+      id: i.id,
+      number: i.number,
+      date: i.date,
+      totalMinor: Number(i.total),
+      currency: i.currency as CurrencyCode,
+      lines: lines
+        .filter((l) => l.invoice_id === i.id)
+        .map((l) => ({
+          name: l.name,
+          qty: Number(l.qty),
+          totalMinor: Number(l.total),
+          returnedQty: Number(l.back),
+        })),
+    })),
+    pieces: Number(totals?.pieces ?? 0),
+    spentMinor: Number(totals?.spent ?? 0),
+  };
+}
+
+export function customerPurchases(db: Database, auth: AccessClaims, id: string): Promise<CustomerPurchases> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'customers.view');
+    return purchasesOf(tx, id);
+  });
+}
+
+/** The till's view: any signed-in cashier of the store may look a customer up while selling */
+export function customerPurchasesForDevice(
+  db: Database,
+  device: DeviceClaims,
+  id: string,
+): Promise<CustomerPurchases> {
+  return withTenant(db, device.tenantId, (tx) => purchasesOf(tx, id));
 }

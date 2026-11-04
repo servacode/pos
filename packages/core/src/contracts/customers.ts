@@ -122,3 +122,30 @@ export const customerPayloadSchema = z.object({
   createdBy: uuidSchema,
 });
 export type CustomerPayload = z.output<typeof customerPayloadSchema>;
+
+// ─── What a customer bought (03 › الألبسة: سجل الزبون ومقاسه) ─────────────────
+
+/**
+ *   GET /v1/customers/{id}/purchases           customers.view          → CustomerPurchases
+ *   GET /v1/device/customers/{id}/purchases    (Authorization: Device) → CustomerPurchases
+ *
+ * The sizes a customer buys most, and the latest invoices with their lines and what came back:
+ * the cashier advises («ريم تلبس M») and finds a sale to exchange without its receipt.
+ */
+export interface CustomerPurchases {
+  customerId: string;
+  /** Per option other than colour (المقاس، النمرة، العمر…), the values bought most, the most first */
+  sizes: { name: string; values: { value: string; qty: number }[] }[];
+  /** The latest 20 invoices, newest first */
+  invoices: {
+    id: string;
+    number: string;
+    date: string;
+    totalMinor: number;
+    currency: CurrencyCode;
+    lines: { name: string; qty: number; totalMinor: number; returnedQty: number }[];
+  }[];
+  /** Pieces bought in all, and what they came to, net of returns */
+  pieces: number;
+  spentMinor: number;
+}

@@ -25,6 +25,7 @@ import {
   useDigits,
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
+import { CustomerHistory } from '../customers/CustomerHistory';
 import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
 import { nextOrderNo } from '../sale/orders';
 import { digitOf } from '../PinScreen';
@@ -97,6 +98,7 @@ export function PaymentPanel({
   const settings = catalog.settings!;
   const base = ctx.currency;
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  const [history, setHistory] = useState(false);
   const [picking, setPicking] = useState(false);
   // This till's own documents, for the vouchers it issued or spent that the server has not sent back
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
@@ -402,21 +404,27 @@ export function PaymentPanel({
               onCancel={() => setPicking(false)}
             />
           ) : customer ? (
-            <div className="flex items-center gap-2 rounded-control border border-line px-3 py-2">
-              <span className="flex flex-1 flex-col">
-                <span className="text-xs text-ink-muted">الزبون</span>
-                <span className="font-semibold text-ink">{customer.name}</span>
-              </span>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setCustomer(null);
-                  setParts((list) => list.filter((p) => !onAccount(p.option.method)));
-                  if (onAccount(option.method)) pick(options[0]!);
-                }}
-              >
-                أزله
-              </Button>
+            <div className="flex flex-col gap-2 rounded-control border border-line px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="flex flex-1 flex-col">
+                  <span className="text-xs text-ink-muted">الزبون</span>
+                  <span className="font-semibold text-ink">{customer.name}</span>
+                </span>
+                <Button variant="ghost" aria-pressed={history} onClick={() => setHistory((h) => !h)}>
+                  مشترياته
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setCustomer(null);
+                    setParts((list) => list.filter((p) => !onAccount(p.option.method)));
+                    if (onAccount(option.method)) pick(options[0]!);
+                  }}
+                >
+                  أزله
+                </Button>
+              </div>
+              {history ? <CustomerHistory customerId={customer.id} /> : null}
             </div>
           ) : (
             <Button variant="secondary" onClick={() => setPicking(true)}>

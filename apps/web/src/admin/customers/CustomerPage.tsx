@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import type { CustomerDetail, StatementLine } from '@serva/core';
+import type { CustomerDetail, CustomerPurchases, StatementLine } from '@serva/core';
 import {
   Alert,
   BackIcon,
@@ -14,7 +14,7 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
-import { getCustomer, updateCustomer } from './api';
+import { getCustomer, getPurchases, updateCustomer } from './api';
 import { CustomerForm } from './CustomerForm';
 
 const SOURCE_TEXT: Record<string, string> = {
@@ -32,11 +32,16 @@ export function CustomerPage() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
+  const [purchases, setPurchases] = useState<CustomerPurchases | null>(null);
+
   const load = useCallback(() => {
     setError(null);
     getCustomer(id)
       .then(setCustomer)
       .catch((e: unknown) => setError(errorMessage(e)));
+    getPurchases(id)
+      .then(setPurchases)
+      .catch(() => setPurchases(null));
   }, [id]);
   useEffect(load, [load]);
 
@@ -152,6 +157,56 @@ export function CustomerPage() {
                 }
               />
             </div>
+            {purchases ? (
+              <section aria-label="مشترياته" className="flex flex-col gap-3">
+                <h2 className="text-xl font-bold text-ink">مشترياته</h2>
+                <p className="text-ink-muted">
+                  <span className="num">{purchases.pieces / 1000}</span> قطعة بـ{' '}
+                  <Money minor={purchases.spentMinor} currency={base} /> بعد المرتجعات.
+                </p>
+                {purchases.sizes.map((s) => (
+                  <p key={s.name}>
+                    <span className="font-semibold">{s.name}: </span>
+                    {s.values.map((v) => `${v.value} (${v.qty / 1000})`).join('، ')}
+                  </p>
+                ))}
+                <DataTable
+                  caption="آخر الفواتير"
+                  columns={[
+                    {
+                      key: 'number',
+                      header: 'الفاتورة',
+                      cell: (r) => (
+                        <bdi dir="ltr" className="num font-semibold">
+                          {r.number}
+                        </bdi>
+                      ),
+                    },
+                    { key: 'date', header: 'التاريخ', cell: (r) => <span className="num">{r.date}</span> },
+                    {
+                      key: 'lines',
+                      header: 'القطع',
+                      cell: (r) =>
+                        r.lines
+                          .map(
+                            (l) =>
+                              `${l.name} ×${l.qty / 1000}${l.returnedQty > 0 ? ` (رجع ${l.returnedQty / 1000})` : ''}`,
+                          )
+                          .join('، '),
+                    },
+                    {
+                      key: 'total',
+                      header: 'المبلغ',
+                      numeric: true,
+                      cell: (r) => <Money minor={r.totalMinor} currency={r.currency} />,
+                    },
+                  ]}
+                  rows={purchases.invoices}
+                  rowKey={(r) => r.id}
+                  empty="لم يشترِ شيئاً بعد."
+                />
+              </section>
+            ) : null}
             <DataTable
               caption="كشف الحساب"
               columns={columns}

@@ -26,6 +26,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/customers': 'signed-in',
   'POST /v1/customers': 'signed-in',
   'GET /v1/customers/:id': 'signed-in',
+  'GET /v1/customers/:id/purchases': 'signed-in',
+  'GET /v1/device/customers/:id/purchases': 'device',
   'PUT /v1/customers/:id': 'signed-in',
   'GET /v1/suppliers': 'signed-in',
   'POST /v1/suppliers': 'signed-in',
@@ -521,6 +523,33 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
   },
   'GET /v1/customers/:id': customerIdor('GET'),
+  'GET /v1/customers/:id/purchases': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: owner(a),
+      payload: { name: 'زبون أ' },
+    });
+    const id = made.json<{ id: string }>().id;
+    const res = await app.inject({ method: 'GET', url: `/v1/customers/${id}/purchases`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+  },
+  'GET /v1/device/customers/:id/purchases': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: owner(a),
+      payload: { name: 'زبون أ' },
+    });
+    const id = made.json<{ id: string }>().id;
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/customers/${id}/purchases`,
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.statusCode).toBe(404);
+  },
   'PUT /v1/customers/:id': customerIdor('PUT'),
   'GET /v1/products/:id': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}`),
   'PATCH /v1/products/:id': catalogIdor('products', productOf, 'PATCH', (id) => `/v1/products/${id}`),
@@ -755,6 +784,9 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/sync/snapshots/:id']!(app, { a, b });
+  },
+  'GET /v1/device/customers/:id/purchases': async (app, { a, b }) => {
+    await IDOR_PROBES['GET /v1/device/customers/:id/purchases']!(app, { a, b });
   },
 };
 
