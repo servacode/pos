@@ -1497,6 +1497,8 @@ export const customers = pgTable(
     priceTier: text('price_tier').notNull().default('retail'),
     /** «نقاط الولاء» earned less spent; kept by the sale processor, reset and replayed by the rebuild */
     loyaltyPoints: integer('loyalty_points').notNull().default(0),
+    /** «لا يريد رسائل»: no message to customers ever reaches this one */
+    noMessages: boolean('no_messages').notNull().default(false),
     /** The till document that created it, when a till did */
     createdByDoc: uuid('created_by_doc'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1809,6 +1811,77 @@ export const supplierReturns = pgTable(
     primaryKey({ name: 'supplier_returns_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Alteration tickets (03 › الألبسة: التعديل والتقصير): a piece left to be altered, numbered per
+ * store (ALT-000001), followed from received to ready to delivered. The fee is sold at the till as
+ * a service when collected; the ticket itself posts nothing.
+ */
+export const alterationTickets = pgTable(
+  'alteration_tickets',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    seq: integer('seq').notNull(),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    deviceId: uuid('device_id'),
+    /** received | ready | delivered */
+    status: text('status').notNull().default('received'),
+    customerName: text('customer_name').notNull(),
+    phone: text('phone').notNull(),
+    item: text('item').notNull(),
+    work: text('work').notNull(),
+    currency: text('currency').notNull(),
+    priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
+    dueDate: date('due_date').notNull(),
+    note: text('note'),
+    readyAt: timestamp('ready_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'alteration_tickets_pkey', columns: [t.tenantId, t.id] }),
+    unique('alteration_tickets_seq_unique').on(t.tenantId, t.seq),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    index('alteration_tickets_status_idx').on(t.tenantId, t.status, t.dueDate),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Messages to the store's customers (03 › الألبسة: رسائل للزبائن): the text, who it is for, and the
+ * phones it goes to, sent one at a time; `nextIndex` is how far it got, so a restart carries on.
+ */
+export const broadcasts = pgTable(
+  'broadcasts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    text: text('text').notNull(),
+    audience: jsonb('audience').notNull(),
+    phones: jsonb('phones').$type<string[]>().notNull(),
+    /** sending | done */
+    status: text('status').notNull().default('sending'),
+    nextIndex: integer('next_index').notNull().default(0),
+    sent: integer('sent').notNull().default(0),
+    failed: integer('failed').notNull().default(0),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ name: 'broadcasts_pkey', columns: [t.tenantId, t.id] }),
+    index('broadcasts_status_idx').on(t.status),
     tenantIsolation(),
   ],
 );

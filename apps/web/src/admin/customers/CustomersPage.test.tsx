@@ -21,6 +21,7 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   creditLimitMinor: 5_000_000,
   balanceMinor: 1_800_000,
   priceTier: 'retail',
+  noMessages: false,
   archived: false,
   taxNumber: null,
   address: null,

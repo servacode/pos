@@ -50,6 +50,8 @@ const envSchema = z
     SESSION_ABSOLUTE_DAYS: z.coerce.number().int().positive().default(90),
     /** How long a "session still live" answer is cached per server instance (0 = always ask) */
     AUTH_CHECK_CACHE_SECONDS: z.coerce.number().int().min(0).max(60).default(30),
+    /** The pause between two messages to customers, so the WhatsApp number is not taken for spam */
+    BROADCAST_DELAY_MS: z.coerce.number().int().min(0).max(60_000).default(2_000),
     /** Requests per minute per client address, on every route */
     RATE_LIMIT_PER_MINUTE: perMinute(600),
     /** Requests per minute per client address on sign-in and sign-up */

@@ -6,7 +6,9 @@ import { deriveKey } from './tokens';
 export interface OtpMessage {
   phone: string;
   code: string;
-  purpose: 'registration' | 'shop_order';
+  purpose: 'registration' | 'shop_order' | 'broadcast';
+  /** A message to customers (purpose broadcast) carries its own text and no code */
+  text?: string;
 }
 
 /**
@@ -61,13 +63,13 @@ export function gatewayOtpSender(
   send: typeof fetch = fetch,
 ): OtpSender {
   return {
-    async send({ phone, code, purpose }) {
+    async send({ phone, code, purpose, text }) {
       let status: number;
       try {
         const res = await send(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-          body: JSON.stringify({ phone, code, purpose, text: otpText(code, purpose) }),
+          body: JSON.stringify({ phone, code, purpose, text: text ?? otpText(code, purpose) }),
           signal: AbortSignal.timeout(OTP_GATEWAY_TIMEOUT_MS),
         });
         status = res.status;

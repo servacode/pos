@@ -41,6 +41,8 @@ export const customerInput = z.object({
   creditLimitMinor: nonNegativeMinorSchema.nullable().optional(),
   /** «زبون جملة»: the till sells to them at the wholesale price (03 › الجملة) */
   priceTier: z.enum(PRICE_TIERS).optional(),
+  /** «لا يريد رسائل»: left out of every message to customers */
+  noMessages: z.boolean().optional(),
   archived: z.boolean().optional(),
 });
 export type CustomerInput = z.output<typeof customerInput>;
@@ -75,6 +77,7 @@ export interface CustomerListItem {
   /** What the customer owes the store, base currency (negative: the store owes them) */
   balanceMinor: number;
   priceTier: PriceTier;
+  noMessages: boolean;
   archived: boolean;
 }
 

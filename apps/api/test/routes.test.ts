@@ -66,6 +66,12 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/cheques/actions': 'signed-in',
   'POST /v1/device/staff-sessions': 'device',
   'POST /v1/device/holds': 'device',
+  'POST /v1/broadcasts/preview': 'signed-in',
+  'POST /v1/broadcasts': 'signed-in',
+  'GET /v1/broadcasts': 'signed-in',
+  'GET /v1/device/alterations': 'device',
+  'POST /v1/device/alterations': 'device',
+  'POST /v1/device/alterations/:id/status': 'device',
   'POST /v1/sync/push': 'device',
   'GET /v1/sync/pull': 'device',
   'POST /v1/sync/resync': 'device',
@@ -523,6 +529,36 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
   },
   'GET /v1/customers/:id': customerIdor('GET'),
+  'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
+    const deviceA = await createDevice(a.tenantId);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/device/alterations',
+      headers: { authorization: deviceA.authorization },
+      payload: {
+        customerName: 'زبون',
+        phone: '0944555666',
+        item: 'بنطال',
+        work: 'تقصير',
+        priceMinor: 0,
+        dueDate: '2026-11-06',
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const t = made.json<{ id: string; version: number }>();
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/alterations/${t.id}/status`,
+      headers: { authorization: deviceB.authorization },
+      payload: { status: 'ready', version: t.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from alteration_tickets where id = ${t.id}`;
+    expect(row!.status).toBe('received');
+  },
   'GET /v1/customers/:id/purchases': async (app, { a, b }) => {
     const made = await app.inject({
       method: 'POST',
@@ -787,6 +823,56 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
   },
   'GET /v1/device/customers/:id/purchases': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/device/customers/:id/purchases']!(app, { a, b });
+  },
+  'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
+    await IDOR_PROBES['POST /v1/device/alterations/:id/status']!(app, { a, b });
+  },
+  // Store B's till lists none of store A's tickets, and its new one is its own
+  'GET /v1/device/alterations': async (app, { a, b }) => {
+    const deviceA = await createDevice(a.tenantId);
+    await app.inject({
+      method: 'POST',
+      url: '/v1/device/alterations',
+      headers: { authorization: deviceA.authorization },
+      payload: {
+        customerName: 'زبون',
+        phone: '0944555666',
+        item: 'بنطال',
+        work: 'تقصير',
+        priceMinor: 0,
+        dueDate: '2026-11-06',
+      },
+    });
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/alterations',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'POST /v1/device/alterations': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/device/alterations',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        customerName: 'زبون',
+        phone: '0944555666',
+        item: 'بنطال',
+        work: 'تقصير',
+        priceMinor: 0,
+        dueDate: '2026-11-06',
+      },
+    });
+    expect(made.statusCode).toBe(201);
+    const id = made.json<{ id: string }>().id;
+    const [row] = await ownerDb()<
+      { tenant_id: string }[]
+    >`select tenant_id from alteration_tickets where id = ${id}`;
+    expect(row!.tenant_id).toBe(b.tenantId);
+    expect(row!.tenant_id).not.toBe(a.tenantId);
   },
 };
 

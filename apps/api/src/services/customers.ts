@@ -39,6 +39,7 @@ type Row = {
   phone: string | null;
   credit_limit_minor: string | null;
   price_tier: string;
+  no_messages: boolean;
   archived_at: string | null;
   balance: string;
 };
@@ -56,6 +57,7 @@ const item = (r: Row): CustomerListItem => ({
   creditLimitMinor: r.credit_limit_minor === null ? null : Number(r.credit_limit_minor),
   balanceMinor: Number(r.balance),
   priceTier: r.price_tier === 'wholesale' ? 'wholesale' : 'retail',
+  noMessages: r.no_messages,
   archived: r.archived_at !== null,
 });
 
@@ -67,7 +69,7 @@ export async function listCustomers(
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
     const rows = await tx.execute<Row>(sql`
-      select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.archived_at,
+      select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
              coalesce(b.balance, 0)::text as balance
       from customers c left join (${balances}) b on b.customer_id = c.id
       order by coalesce(b.balance, 0) desc, c.name, c.id`);
@@ -94,7 +96,7 @@ async function detail(tx: Transaction, id: string): Promise<CustomerDetail> {
   const [row] = await tx.execute<
     Row & { tax_number: string | null; address: string | null; notes: string | null; created_at: string }
   >(sql`
-    select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.archived_at, c.tax_number, c.address,
+    select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at, c.tax_number, c.address,
            c.notes, c.created_at, coalesce(b.balance, 0)::text as balance
     from customers c left join (${balances}) b on b.customer_id = c.id
     where c.id = ${id}`);
@@ -155,6 +157,7 @@ const fields = (input: CustomerInput, now: Date) => ({
   ...(input.notes !== undefined ? { notes: input.notes } : {}),
   ...(input.creditLimitMinor !== undefined ? { creditLimitMinor: input.creditLimitMinor } : {}),
   ...(input.priceTier !== undefined ? { priceTier: input.priceTier } : {}),
+  ...(input.noMessages !== undefined ? { noMessages: input.noMessages } : {}),
   ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
 });
 
