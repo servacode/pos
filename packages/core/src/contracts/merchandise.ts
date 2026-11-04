@@ -19,6 +19,8 @@ export const merchandiseQuery = z
     /** One department (رجالي، نسائي، ولادي) and its sub-categories */
     categoryId: uuidSchema.optional(),
     idleDays: z.coerce.number().int().min(7).max(365).default(60),
+    /** «قرّب يخلص»: a piece that sells is short at this many pieces or fewer (its own minimum first) */
+    lowQty: z.coerce.number().int().min(0).max(1000).default(2),
   })
   .refine((q) => q.from <= q.to, { path: ['to'], message: 'نهاية المدة قبل بدايتها' });
 
@@ -62,6 +64,19 @@ export interface MerchandiseReport {
   }[];
   /** What the slow pieces cost, together; null without «التكلفة» */
   slowValueMinor: number | null;
+  /**
+   * «قرّب يخلص» (03 › الألبسة): pieces at or below their own minimum («الحد الأدنى»), and pieces with
+   * none that sold in the period and have `lowQty` or fewer left; the best sellers first, to reorder.
+   */
+  lowStock: {
+    variantId: string;
+    productId: string;
+    name: string;
+    label: string | null;
+    stockQty: number;
+    soldQty: number;
+    minStockQty: number | null;
+  }[];
   /**
    * Each seller's sales in the period (03 › عمولة البائع): the salesperson named on the sale, else
    * its cashier; net of what came back from those sales. Not narrowed by category.

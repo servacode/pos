@@ -52,6 +52,17 @@ const report = (idleDays: number, withCost: boolean): MerchandiseReport => ({
     },
   ],
   slowValueMinor: withCost ? 300_000 : null,
+  lowStock: [
+    {
+      variantId: 'v-mw',
+      productId: 'p-shirt',
+      name: 'قميص كتان',
+      label: 'M · أبيض',
+      stockQty: 1000,
+      soldQty: 6000,
+      minStockQty: null,
+    },
+  ],
   byDepartment: [
     {
       categoryId: 'c-men',
@@ -115,6 +126,13 @@ describe('«حركة الأصناف»', () => {
     );
     expect(slow).toHaveTextContent('لم يُبع');
     expect(screen.getByText('رأس مال نائم فيها')).toBeInTheDocument();
+
+    // One M white left of six sold: reorder it
+    const low = screen.getByRole('table', { name: 'قرّب يخلص' });
+    expect(within(low).getByRole('link', { name: 'قميص كتان M · أبيض' })).toHaveAttribute(
+      'href',
+      '/products/p-shirt',
+    );
 
     // Men's 30,000 net of 40,000 in all
     const departments = screen.getByRole('table', { name: 'المبيعات حسب القسم' });

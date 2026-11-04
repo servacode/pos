@@ -53,7 +53,14 @@ async function branchesOf(tx: Transaction, auth: AccessClaims, branchId: string 
 export function merchandiseReport(
   db: Database,
   auth: AccessClaims,
-  query: { from: string; to: string; branchId?: string; categoryId?: string; idleDays: number },
+  query: {
+    from: string;
+    to: string;
+    branchId?: string;
+    categoryId?: string;
+    idleDays: number;
+    lowQty: number;
+  },
   now: Date,
 ): Promise<MerchandiseReport> {
   return withTenant(db, auth.tenantId, async (tx) => {
@@ -247,6 +254,34 @@ export function merchandiseReport(
       from sold s left join back b on b.id = s.id left join users u on u.id = s.id
       order by s.total desc, s.id`);
 
+    const low = await tx.execute<{
+      variant_id: string;
+      product_id: string;
+      name: string;
+      label: string | null;
+      stock: string;
+      sold: string;
+      min: string | null;
+    }>(sql`
+      with ${moved},
+      stock as (
+        select variant_id, sum(qty) as qty from stock_levels
+        where ${inBranches(sql`branch_id`)} group by variant_id
+      )
+      select v.id as variant_id, v.product_id, p.name_ar as name, v.label,
+             coalesce(k.qty, 0)::text as stock, coalesce(s.qty, 0)::text as sold, v.min_stock_qty::text as min
+      from variants v
+      join products p on p.id = v.product_id
+      left join stock k on k.variant_id = v.id
+      left join sold s on s.variant_id = v.id
+      where v.archived_at is null and p.archived_at is null and p.type = 'stock'
+        and ${inCategory(sql`p.category_id`)}
+        and ((v.min_stock_qty is not null and coalesce(k.qty, 0) <= v.min_stock_qty)
+          or (v.min_stock_qty is null and coalesce(s.qty, 0) > 0
+              and coalesce(k.qty, 0) <= ${query.lowQty * 1000}))
+      order by coalesce(s.qty, 0) desc, coalesce(k.qty, 0), p.name_ar, v.sort_order
+      limit 100`);
+
     const departments = await tx.execute<{
       id: string | null;
       name: string | null;
@@ -314,6 +349,15 @@ export function merchandiseReport(
       })),
       slowMovers,
       slowValueMinor: canCost ? slowMovers.reduce((n, r) => n + (r.valueMinor ?? 0), 0) : null,
+      lowStock: low.map((r) => ({
+        variantId: r.variant_id,
+        productId: r.product_id,
+        name: r.name,
+        label: r.label,
+        stockQty: num(r.stock),
+        soldQty: num(r.sold),
+        minStockQty: r.min === null ? null : num(r.min),
+      })),
       byDepartment: departments.map((d) => ({
         categoryId: d.id,
         name: d.name ?? 'بلا قسم',
