@@ -53,11 +53,14 @@ function Sidebar({
   );
 }
 
-/** The first letters of the store's first two words, for the top bar's round badge. */
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
+// Words that say what a shop is rather than its name: «متجر أحمد نور» shows «أن».
+const SHOP_WORDS = new Set(['متجر', 'محل', 'محلات', 'شركة', 'مؤسسة', 'سوبرماركت', 'صيدلية', 'مطعم']);
+
+/** The first letters of the store's name, for the top bar's round badge. */
+export function initials(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  const named = words.filter((word) => !SHOP_WORDS.has(word));
+  return (named.length > 0 ? named : words)
     .slice(0, 2)
     .map((word) => word[0])
     .join('');

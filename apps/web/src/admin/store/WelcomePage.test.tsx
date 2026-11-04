@@ -144,7 +144,7 @@ describe('the start wizard', () => {
 
   it('does not open for a store that finished it, nor for staff who cannot change the store', async () => {
     openWizard(owner(4, true), store());
-    expect(await screen.findByRole('heading', { name: /متجرك جاهز/, level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /^أهلاً، /, level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'شو بتشتغل؟' })).not.toBeInTheDocument();
   });
 });

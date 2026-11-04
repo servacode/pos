@@ -4,6 +4,7 @@ import type { Permission, SectorKey } from '@serva/core';
 import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
+import { initials } from './AppShell';
 
 function signedIn(permissions?: Permission[], sectors?: SectorKey[]) {
   const base = makeMe();
@@ -136,5 +137,11 @@ describe('AppShell', () => {
     signedIn(['purchases.manage'], ['pharmacy']);
     const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: 'الصلاحية' })).toBeInTheDocument();
+  });
+
+  it("shows the store name's initials, skipping words like «متجر»", () => {
+    expect(initials('متجر أحمد نور')).toBe('أن');
+    expect(initials('سوبرماركت الياسمين')).toBe('ا');
+    expect(initials('متجر')).toBe('م');
   });
 });

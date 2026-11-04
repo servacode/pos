@@ -22,7 +22,7 @@ describe('glossary wording (tab 14 › الكتابة والرسائل)', () => 
       'GET /v1/me': { status: 200, body: makeMe() },
     });
     renderApp('/');
-    await screen.findByRole('heading', { name: 'متجرك جاهز، أحمد' });
+    await screen.findByRole('heading', { name: 'أهلاً، أحمد' });
 
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
