@@ -33,7 +33,7 @@ describe('LoginPage', () => {
     await user.type(screen.getByLabelText('كلمة السر'), 'secret-pass');
     await user.click(screen.getByRole('button', { name: 'دخول' }));
 
-    expect(await screen.findByRole('heading', { name: 'متجرك جاهز، أحمد' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'أهلاً، أحمد' })).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/auth/login')[0]?.body).toEqual({
       phone: '+963912345678',
       password: 'secret-pass',

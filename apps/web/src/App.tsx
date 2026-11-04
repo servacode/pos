@@ -31,7 +31,7 @@ export function App() {
   return (
     <DirectionProvider dir="rtl">
       {/* The local server's test mode: on every page, admin and cashier alike. */}
-      {testMode ? <TestModeRibbon className="sticky top-0 z-50" /> : null}
+      {testMode ? <TestModeRibbon className="relative z-50" /> : null}
       <Suspense fallback={<FullScreenLoader />}>
         <Routes>
           {UiGallery ? <Route path="/dev/ui" element={<UiGallery />} /> : null}

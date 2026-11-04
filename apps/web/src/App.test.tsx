@@ -35,7 +35,7 @@ describe('routing', () => {
     });
     renderApp('/register');
 
-    expect(await screen.findByRole('heading', { name: 'متجرك جاهز، أحمد' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'أهلاً، أحمد' })).toBeInTheDocument();
   });
 
   it('redirects unknown routes to the home page', async () => {
@@ -45,6 +45,6 @@ describe('routing', () => {
     });
     renderApp('/does-not-exist');
 
-    expect(await screen.findByRole('heading', { name: 'متجرك جاهز، أحمد' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'أهلاً، أحمد' })).toBeInTheDocument();
   });
 });

@@ -1,12 +1,14 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { Permission } from '@serva/core';
+import type { Permission, SectorKey } from '@serva/core';
 import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
+import { initials } from './AppShell';
 
-function signedIn(permissions?: Permission[]) {
-  const me = makeMe();
+function signedIn(permissions?: Permission[], sectors?: SectorKey[]) {
+  const base = makeMe();
+  const me = sectors ? { ...base, tenant: { ...base.tenant, sectors } } : base;
   mockFetch({
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': { status: 200, body: permissions ? { ...me, user: { ...me.user, permissions } } : me },
@@ -23,7 +25,7 @@ describe('AppShell', () => {
       within(nav)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['الرئيسية', 'الأجهزة', 'شاشة الدليل']);
+    ).toEqual(['الرئيسية', 'شاشة الدليل', 'الأجهزة']);
     expect(within(nav).getByRole('link', { name: 'الرئيسية' })).toHaveAttribute('aria-current', 'page');
     expect(document.body).not.toHaveTextContent('قريباً');
   });
@@ -55,9 +57,8 @@ describe('AppShell', () => {
       'العروض',
       'تغيير الأسعار',
       'طباعة الملصقات',
-      'الأرقام التسلسلية',
-      'الأجهزة',
       'شاشة الدليل',
+      'الأجهزة',
     ]);
   });
 
@@ -78,16 +79,15 @@ describe('AppShell', () => {
       'الرئيسية',
       'مبيعات اليوم',
       'الورديات',
-      'حركة الأصناف',
       'المنتجات',
       'التصنيفات',
       'العروض',
       'تغيير الأسعار',
       'طباعة الملصقات',
-      'الأرقام التسلسلية',
+      'حركة الأصناف',
       'المحاسبة',
-      'الأجهزة',
       'شاشة الدليل',
+      'الأجهزة',
     ]);
   });
 
@@ -110,5 +110,38 @@ describe('AppShell', () => {
         .map((link) => link.textContent),
     ).toEqual(['الرئيسية']);
     expect(screen.getByRole('link', { name: 'رمز الدخول للكاشير' })).toHaveAttribute('href', '/me/pin');
+  });
+
+  it('puts the menu in titled groups', async () => {
+    signedIn(['catalog.manage', 'customers.view', 'devices.view', 'report.view']);
+    const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    for (const title of ['البيع والزبائن', 'البضاعة', 'التقارير والحسابات', 'الإعدادات']) {
+      expect(within(nav).getByText(title)).toBeInTheDocument();
+    }
+  });
+
+  it('hides what a clothing store does not use: expiry, serial numbers and cheques', async () => {
+    signedIn(['catalog.manage', 'customers.view', 'purchases.manage'], ['clothing']);
+    const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    const labels = within(nav)
+      .getAllByRole('link')
+      .map((link) => link.textContent);
+    expect(labels).toContain('المنتجات');
+    expect(labels).toContain('المشتريات');
+    expect(labels).not.toContain('الصلاحية');
+    expect(labels).not.toContain('الأرقام التسلسلية');
+    expect(labels).not.toContain('الشيكات');
+  });
+
+  it('shows expiry dates to a pharmacy', async () => {
+    signedIn(['purchases.manage'], ['pharmacy']);
+    const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    expect(within(nav).getByRole('link', { name: 'الصلاحية' })).toBeInTheDocument();
+  });
+
+  it("shows the store name's initials, skipping words like «متجر»", () => {
+    expect(initials('متجر أحمد نور')).toBe('أن');
+    expect(initials('سوبرماركت الياسمين')).toBe('ا');
+    expect(initials('متجر')).toBe('م');
   });
 });

@@ -34,6 +34,9 @@ export interface CatalogItem {
   productId: string;
   /** The product name with the variant's label, as shown and printed */
   name: string;
+  /** The product name alone, and the variant's size, colour… (the till groups a model's pieces) */
+  productName?: string;
+  attributes?: readonly { name: string; value: string }[];
   searchKey: string;
   categoryId: string | null;
   /** categoryId and every category above it (promotions on a parent reach its children) */
@@ -174,6 +177,8 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       variantId: variant.id,
       productId: product.id,
       name,
+      productName: product.nameAr,
+      attributes: variant.attributes ?? [],
       searchKey: normalizeArabic(
         [name, product.nameEn, product.brand, product.genericName, variant.sku].filter(Boolean).join(' '),
       ),

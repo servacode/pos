@@ -25,8 +25,8 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div className={cn('flex flex-col items-center gap-3 px-6 py-12 text-center', className)}>
-      <span className="grid size-24 place-items-center rounded-full bg-brand-soft text-brand-ink">
-        <EmptyIcon size={48} />
+      <span className="grid size-16 place-items-center rounded-full bg-brand-soft text-brand-ink ring-8 ring-brand-soft/50">
+        <EmptyIcon size={32} />
       </span>
       <p className="text-lg font-semibold text-ink">{title}</p>
       {description ? <p className="max-w-md text-ink-muted">{description}</p> : null}

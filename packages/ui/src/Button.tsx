@@ -8,8 +8,8 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'dang
 export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg' | 'pay';
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-brand text-on-brand hover:bg-brand-hover',
-  secondary: 'border border-line-control bg-surface text-brand-ink hover:bg-surface-muted',
+  primary: 'bg-brand text-on-brand shadow-e1 hover:bg-brand-hover',
+  secondary: 'border border-line-control bg-surface text-ink shadow-e1 hover:bg-surface-muted',
   ghost: 'text-ink hover:bg-surface-muted',
   danger: 'bg-danger text-on-danger hover:opacity-90',
   'danger-soft': 'bg-danger-soft text-danger-ink hover:opacity-90',
@@ -17,7 +17,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
 
 const SIZES: Record<ButtonSize, string> = {
   xs: 'min-h-8 rounded-small px-3 text-sm',
-  sm: 'min-h-10 rounded-xl px-3.5 text-sm',
+  sm: 'min-h-10 rounded-control px-3.5 text-sm',
   md: 'min-h-12 rounded-control px-5 text-base',
   lg: 'min-h-14 rounded-control px-6 text-lg',
   pay: 'min-h-18 w-full justify-between rounded-control px-6 text-xl font-bold',
@@ -25,7 +25,7 @@ const SIZES: Record<ButtonSize, string> = {
 
 const ICON_SIZES: Record<Exclude<ButtonSize, 'pay'>, string> = {
   xs: 'size-8 rounded-small',
-  sm: 'size-10 rounded-xl',
+  sm: 'size-10 rounded-control',
   md: 'size-12 rounded-control',
   lg: 'size-14 rounded-control',
 };

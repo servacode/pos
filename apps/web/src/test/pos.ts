@@ -46,7 +46,7 @@ let n = 0;
 const id = () => `0192a000-0000-7000-8000-${String(++n).padStart(12, '0')}`;
 
 /** One product with one variant, its price and barcode. */
-function product(
+export function product(
   nameAr: string,
   priceMinor: number,
   barcode: string | null,

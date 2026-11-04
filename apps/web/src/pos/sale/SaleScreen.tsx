@@ -64,6 +64,8 @@ import { usePos } from '../services';
 import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
+import { gridEntries, lowestPrice, modelPieces, piecesText } from './models';
+import { VariantPicker } from './VariantPicker';
 import { TableBoard } from './TableBoard';
 import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
 import { HoldPanel } from './HoldPanel';
@@ -85,7 +87,8 @@ export type SaleMode =
   | { kind: 'tables' }
   | { kind: 'online' }
   | { kind: 'hold' }
-  | { kind: 'serial'; lineNo: number };
+  | { kind: 'serial'; lineNo: number }
+  | { kind: 'pick'; productId: string };
 
 export interface SaleScreenProps {
   statusBar: ReactNode;
@@ -375,6 +378,13 @@ export function SaleScreen(props: SaleScreenProps) {
     () => searchCatalog(catalog, query, { categoryId: category, limit: 60 }),
     [catalog, query, category],
   );
+  const pieces = useMemo(() => modelPieces(catalog.items), [catalog.items]);
+  // «سعر الجملة» shows only where some item has a wholesale price (a clothing shop has none).
+  const hasWholesale = useMemo(
+    () => catalog.items.some((item) => (item.price.wholesalePriceMinor ?? null) !== null),
+    [catalog.items],
+  );
+  const entries = useMemo(() => gridEntries(results, pieces), [results, pieces]);
 
   function onSearchKey(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') {
@@ -535,7 +545,7 @@ export function SaleScreen(props: SaleScreenProps) {
             ))}
           </select>
         ) : null}
-        {session.permissions.has('sale.wholesale') || cart.priceTier === 'wholesale' ? (
+        {(session.permissions.has('sale.wholesale') && hasWholesale) || cart.priceTier === 'wholesale' ? (
           <Button
             size="sm"
             variant={cart.priceTier === 'wholesale' ? 'primary' : 'secondary'}
@@ -1071,6 +1081,17 @@ export function SaleScreen(props: SaleScreenProps) {
           }}
           onCancel={() => setMode({ kind: 'items' })}
         />
+      ) : effectiveMode.kind === 'pick' && pieces.get(effectiveMode.productId) ? (
+        <VariantPicker
+          key={effectiveMode.productId}
+          name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
+          pieces={pieces.get(effectiveMode.productId)!}
+          onAdd={(piece) => {
+            setMode({ kind: 'items' });
+            add(piece);
+          }}
+          onCancel={() => setMode({ kind: 'items' })}
+        />
       ) : effectiveMode.kind === 'choose' ? (
         <ModifierPanel
           key={effectiveMode.item.variantId}
@@ -1297,22 +1318,46 @@ export function SaleScreen(props: SaleScreenProps) {
           ) : (
             <ul
               aria-label="الأصناف"
-              className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] content-start gap-3"
+              className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] content-start gap-3"
             >
-              {results.map((item) => (
-                <li key={item.variantId}>
-                  <ItemTile
-                    name={item.name}
-                    priceMinor={item.price.priceMinor}
-                    currency={item.price.currency}
-                    weighed={item.unit?.allowsFraction ?? false}
-                    {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
-                    selected={cart.lines.some((l) => l.variantId === item.variantId)}
-                    onSelect={() => add(item)}
-                    className="w-full"
-                  />
-                </li>
-              ))}
+              {entries.map((entry) => {
+                if (entry.kind === 'model') {
+                  const price = lowestPrice(entry.pieces);
+                  return (
+                    <li key={entry.productId}>
+                      <ItemTile
+                        name={entry.name}
+                        priceMinor={price.priceMinor}
+                        currency={price.currency}
+                        detail={piecesText(entry.pieces.length)}
+                        pictureSlot
+                        {...(entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
+                        selected={
+                          (effectiveMode.kind === 'pick' && effectiveMode.productId === entry.productId) ||
+                          cart.lines.some((l) => entry.pieces.some((p) => p.variantId === l.variantId))
+                        }
+                        onSelect={() => setMode({ kind: 'pick', productId: entry.productId })}
+                        className="w-full"
+                      />
+                    </li>
+                  );
+                }
+                const { item } = entry;
+                return (
+                  <li key={item.variantId}>
+                    <ItemTile
+                      name={item.name}
+                      priceMinor={item.price.priceMinor}
+                      currency={item.price.currency}
+                      weighed={item.unit?.allowsFraction ?? false}
+                      {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
+                      selected={cart.lines.some((l) => l.variantId === item.variantId)}
+                      onSelect={() => add(item)}
+                      className="w-full"
+                    />
+                  </li>
+                );
+              })}
             </ul>
           )}
         </>

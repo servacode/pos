@@ -29,13 +29,13 @@ export function AdminShell({ sidebar, topBar, children, contentClassName, framed
       <aside
         className={cn(
           framed ? 'h-full' : 'h-dvh',
-          'sticky top-0 hidden flex-col gap-8 overflow-y-auto border-e border-line bg-surface px-3 py-4 lg:flex',
+          'sticky top-0 hidden flex-col gap-4 overflow-y-auto border-e border-line bg-surface px-3 py-4 lg:flex',
         )}
       >
         {sidebar}
       </aside>
       <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-10 border-b border-line bg-surface">
+        <header className="sticky top-0 z-10 border-b border-line bg-surface/90 backdrop-blur">
           <div className="flex min-h-16 items-center gap-3 px-4 py-2 sm:px-6 lg:px-8">{topBar}</div>
         </header>
         <main className={cn('mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8', contentClassName)}>
@@ -49,8 +49,10 @@ export function AdminShell({ sidebar, topBar, children, contentClassName, framed
 /** A sidebar link's look; for a router NavLink: `className={({ isActive }) => navItemClass(isActive)}`. */
 export function navItemClass(active: boolean): string {
   return cn(
-    'flex min-h-12 items-center gap-3 rounded-control px-3 font-semibold transition-colors duration-120',
-    active ? 'bg-brand-soft text-brand-ink' : 'text-ink-muted hover:bg-surface-muted hover:text-ink',
+    'flex min-h-12 items-center gap-3 rounded-control px-3 text-[0.9375rem] transition-colors duration-120',
+    active
+      ? 'bg-brand-soft font-semibold text-brand-ink'
+      : 'font-medium text-ink-muted hover:bg-surface-muted hover:text-ink',
   );
 }
 
@@ -89,8 +91,8 @@ export function NavItem<C extends ElementType = 'a'>({
 export function NavGroup({ label, children }: { label?: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      {label ? <p className="px-3 pt-3.5 pb-1 text-xs font-semibold text-ink-subtle">{label}</p> : null}
-      <ul className="flex flex-col gap-1">{children}</ul>
+      {label ? <p className="px-3 pt-4 pb-1 text-xs font-semibold text-ink-subtle">{label}</p> : null}
+      <ul className="flex flex-col gap-0.5">{children}</ul>
     </div>
   );
 }

@@ -72,7 +72,7 @@ export function ReceiptPreview({ values }: { values: ProfileValues }) {
   return (
     <div
       aria-label="معاينة رأس الإيصال"
-      className="mx-auto w-full max-w-[18rem] rounded-sm border border-dashed border-line bg-surface p-4 text-center font-mono text-sm text-ink shadow-e1"
+      className="mx-auto w-full max-w-[18rem] rounded-sm border border-dashed border-line bg-surface p-4 text-center text-sm leading-relaxed text-ink shadow-e1"
     >
       <p className="text-base font-bold">{values.name || 'اسم المحل'}</p>
       {values.legalName ? <p className="text-xs">{values.legalName}</p> : null}
