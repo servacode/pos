@@ -50,13 +50,27 @@ export function CartLine({
 }: CartLineProps) {
   const digits = useDigits();
   return (
-    <li className={cn('border-b border-line', selected && 'bg-brand-soft')}>
+    <li
+      className={cn(
+        'rounded-2xl transition-colors duration-120',
+        selected ? 'bg-brand-soft ring-1 ring-brand/30' : 'bg-canvas hover:bg-surface-muted',
+      )}
+    >
       <button
         type="button"
         onClick={onSelect}
         aria-expanded={selected}
-        className="flex min-h-14 w-full items-center gap-3 px-4 py-2 text-start motion-safe:animate-rise"
+        className="flex min-h-16 w-full items-center gap-3 px-3 py-2.5 text-start motion-safe:animate-rise"
       >
+        <span
+          aria-hidden="true"
+          className={cn(
+            'num grid h-10 min-w-10 shrink-0 place-items-center rounded-xl px-1.5 text-sm font-bold',
+            selected ? 'bg-brand text-on-brand' : 'bg-surface text-ink shadow-e1',
+          )}
+        >
+          ×{formatQuantity(qtyThousandths, digits)}
+        </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-lg/7 font-semibold text-ink">
             <bdi>{name}</bdi>
@@ -73,7 +87,7 @@ export function CartLine({
         <Money minor={lineTotalMinor} currency={currency} className="text-lg font-bold text-ink" />
       </button>
       {selected && children ? (
-        <div className="flex flex-wrap items-center gap-2 px-4 pb-3">{children}</div>
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-3">{children}</div>
       ) : null}
     </li>
   );

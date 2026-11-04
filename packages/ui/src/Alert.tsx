@@ -22,7 +22,7 @@ export function Alert({ tone = 'info', title, children, className }: AlertProps)
   return (
     <div
       role={tone === 'error' ? 'alert' : 'status'}
-      className={cn('flex items-start gap-3 rounded-control border px-4 py-3 text-sm', toneClass, className)}
+      className={cn('flex items-start gap-3 rounded-2xl border px-4 py-3.5 text-sm', toneClass, className)}
     >
       <ToneIcon className="mt-0.5" />
       <div className="flex flex-col gap-0.5">

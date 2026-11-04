@@ -11,7 +11,7 @@ export function ChoiceCard({ title, description, leading, className, ...inputPro
   return (
     <label
       className={cn(
-        'group flex min-h-16 cursor-pointer items-center gap-3 rounded-control border border-line-control bg-surface p-3 transition-colors duration-150 select-none',
+        'group flex min-h-16 cursor-pointer items-center gap-3 rounded-2xl border border-line-control/60 bg-surface p-3.5 shadow-e1 transition-colors duration-150 select-none',
         'has-checked:border-brand has-checked:bg-brand-soft has-checked:ring-1 has-checked:ring-brand',
         'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring',
         className,

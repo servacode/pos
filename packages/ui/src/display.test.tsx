@@ -118,11 +118,11 @@ describe('Banner', () => {
 });
 
 describe('Card and StatTile', () => {
-  it('marks a selected card with brand-soft and a brand border, not surface', () => {
+  it('marks a selected card with brand-soft and a brand ring, not surface', () => {
     renderUi(<Card selected>مقهى الياسمين</Card>);
 
     const card = screen.getByText('مقهى الياسمين');
-    expect(card).toHaveClass('bg-brand-soft', 'border-brand');
+    expect(card).toHaveClass('bg-brand-soft', 'ring-brand');
     expect(card).not.toHaveClass('bg-surface');
   });
 

@@ -88,7 +88,7 @@ export function Dialog({
             {...(description ? {} : { 'aria-describedby': undefined })}
             onInteractOutside={(event) => event.preventDefault()}
             className={cn(
-              'relative flex w-full flex-col gap-4 rounded-card bg-surface p-6 text-ink shadow-e3 motion-safe:animate-rise',
+              'relative flex w-full flex-col gap-4 rounded-[1.75rem] bg-surface p-7 text-ink shadow-e3 motion-safe:animate-rise',
               size === 'sm' ? 'max-w-100' : 'max-w-120',
             )}
           >

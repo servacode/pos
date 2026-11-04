@@ -277,22 +277,30 @@ export function ProductsPage() {
       key: 'name',
       header: 'المنتج',
       cell: (item) => (
-        <div className="flex min-w-48 flex-col gap-0.5 py-2">
-          <span className="flex flex-wrap items-center gap-2">
-            <Link to={`/products/${item.id}`} className="font-semibold text-ink hover:text-brand-ink">
-              {item.nameAr}
-            </Link>
-            {item.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
-            {item.archivedAt ? <Badge>مؤرشف</Badge> : null}
+        <div className="flex min-w-56 items-center gap-3 py-2">
+          <span
+            aria-hidden="true"
+            className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft font-bold text-brand-ink"
+          >
+            {Array.from(item.nameAr.trim())[0] ?? ''}
           </span>
-          <span className="flex flex-wrap gap-2 text-[0.8125rem] text-ink-muted">
-            {item.barcode ? (
-              <bdi dir="ltr" className="num">
-                {item.barcode}
-              </bdi>
-            ) : null}
-            {item.variantCount > 1 ? <span>{item.variantCount} متغيّرات</span> : null}
-          </span>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex flex-wrap items-center gap-2">
+              <Link to={`/products/${item.id}`} className="font-semibold text-ink hover:text-brand-ink">
+                {item.nameAr}
+              </Link>
+              {item.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
+              {item.archivedAt ? <Badge>مؤرشف</Badge> : null}
+            </span>
+            <span className="flex flex-wrap gap-2 text-[0.8125rem] text-ink-muted">
+              {item.barcode ? (
+                <bdi dir="ltr" className="num">
+                  {item.barcode}
+                </bdi>
+              ) : null}
+              {item.variantCount > 1 ? <span>{item.variantCount} متغيّرات</span> : null}
+            </span>
+          </div>
         </div>
       ),
     },

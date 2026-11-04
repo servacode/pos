@@ -48,9 +48,9 @@ export function ItemTile({
       disabled={outOfStock}
       aria-pressed={selected}
       className={cn(
-        'flex min-h-26 min-w-28 flex-col justify-between gap-2 rounded-card border text-start text-ink shadow-e1 transition-[border-color,background-color,box-shadow,transform] duration-80 ease-standard select-none hover:shadow-e2 active:scale-[0.98]',
+        'flex min-h-26 min-w-28 flex-col justify-between gap-2 rounded-card text-start text-ink shadow-e1 transition-[background-color,box-shadow,transform] duration-80 ease-standard select-none hover:-translate-y-0.5 hover:shadow-e2 active:scale-[0.98]',
         imageUrl || pictureSlot ? 'p-2 pb-3' : 'p-3.5',
-        selected ? 'border-2 border-brand bg-brand-soft' : 'border-line bg-surface hover:border-line-control',
+        selected ? 'bg-brand-soft ring-2 ring-brand' : 'bg-surface ring-1 ring-line/70',
         outOfStock && 'cursor-not-allowed opacity-50 active:scale-100',
         className,
       )}

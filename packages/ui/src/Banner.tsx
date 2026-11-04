@@ -42,7 +42,7 @@ export function Banner({ tone = 'info', title, children, action, onDismiss, clas
   return (
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
-      className={cn('flex items-center gap-3 rounded-control px-4 py-3 text-sm', toneClass, className)}
+      className={cn('flex items-center gap-3 rounded-2xl px-4 py-3.5 text-sm', toneClass, className)}
     >
       <ToneIcon />
       <div className="flex min-w-0 flex-1 flex-col">

@@ -35,14 +35,15 @@ describe('AdminShell', () => {
     );
 
     const [aside, column] = [...screen.getByRole('complementary').parentElement!.children];
-    expect(aside).toHaveClass('border-e');
+    expect(aside).toHaveClass('sticky');
+    expect(aside!.firstElementChild).toHaveClass('rounded-[1.5rem]', 'bg-surface');
     expect(within(column as HTMLElement).getByRole('banner')).toHaveTextContent('بقالية أبو خليل');
     expect(screen.getByRole('main')).toHaveClass('max-w-7xl');
 
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     const home = within(nav).getByRole('link', { name: 'الرئيسية' });
     expect(home).toHaveAttribute('aria-current', 'page');
-    expect(home).toHaveClass('min-h-12', 'bg-brand-soft');
+    expect(home).toHaveClass('min-h-12', 'bg-brand', 'text-on-brand');
     expect(within(nav).getByRole('link', { name: /بانتظارك/ })).toHaveTextContent('3');
   });
 });
@@ -55,7 +56,7 @@ describe('CashierShell', () => {
       </CashierShell>,
     );
 
-    expect(screen.getByRole('banner')).toHaveClass('z-60', 'h-11');
+    expect(screen.getByRole('banner')).toHaveClass('z-60', 'h-14');
     const cart = screen.getByRole('complementary', { name: 'السلة' });
     expect(cart.nextElementSibling).toBe(screen.getByRole('main'));
     expect(screen.getByRole('button', { name: 'اسبريسو' })).toHaveClass('min-h-14');

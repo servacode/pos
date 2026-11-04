@@ -14,10 +14,10 @@ export function Card({ className, interactive = false, selected = false, ...rest
   return (
     <div
       className={cn(
-        'rounded-card border p-4 shadow-e1 sm:p-6',
-        selected ? 'border-2 border-brand bg-brand-soft' : 'border-line bg-surface',
+        'rounded-card p-5 shadow-e1 sm:p-6',
+        selected ? 'bg-brand-soft ring-2 ring-brand' : 'bg-surface ring-1 ring-line/70',
         interactive &&
-          'transition-[border-color,box-shadow] duration-120 ease-standard hover:border-line-control hover:shadow-e2',
+          'transition-[box-shadow,transform] duration-120 ease-standard hover:-translate-y-0.5 hover:shadow-e2',
         className,
       )}
       {...rest}
@@ -29,17 +29,68 @@ export function Card({ className, interactive = false, selected = false, ...rest
 export function CardHeader({
   title,
   action,
+  icon,
+  description,
   className,
 }: {
   title: ReactNode;
   action?: ReactNode;
+  /** A small picture in a soft square before the title. */
+  icon?: ReactNode;
+  description?: ReactNode;
   className?: string;
 }) {
   return (
-    <div className={cn('mb-3 flex items-center justify-between gap-3', className)}>
-      <h3 className="text-lg font-semibold text-ink">{title}</h3>
+    <div className={cn('mb-4 flex items-center justify-between gap-3', className)}>
+      <div className="flex min-w-0 items-center gap-3">
+        {icon ? <IconChip>{icon}</IconChip> : null}
+        <div className="flex min-w-0 flex-col">
+          <h3 className="text-base font-bold text-ink">{title}</h3>
+          {description ? <p className="text-sm text-ink-muted">{description}</p> : null}
+        </div>
+      </div>
       {action}
     </div>
+  );
+}
+
+const CHIP_TONES = {
+  brand: 'bg-brand-soft text-brand-ink',
+  success: 'bg-success-soft text-success-ink',
+  warning: 'bg-warning-soft text-warning-ink',
+  danger: 'bg-danger-soft text-danger-ink',
+  info: 'bg-info-soft text-info-ink',
+  neutral: 'bg-surface-muted text-ink-muted',
+} as const;
+
+/** A picture in a soft rounded square: card titles, stat tiles, list rows (هوية 3). */
+export function IconChip({
+  tone = 'brand',
+  size = 'md',
+  className,
+  children,
+}: {
+  tone?: keyof typeof CHIP_TONES;
+  size?: 'sm' | 'md' | 'lg';
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'grid shrink-0 place-items-center',
+        size === 'sm'
+          ? 'size-8 rounded-[0.625rem]'
+          : size === 'lg'
+            ? 'size-12 rounded-2xl'
+            : 'size-10 rounded-xl',
+        CHIP_TONES[tone],
+        className,
+      )}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -53,6 +104,9 @@ export interface StatTileProps {
   footnote?: ReactNode;
   /** The hero tile at the top of the dashboard: a bigger number (tab 14 › لوحات المؤشرات). */
   hero?: boolean;
+  /** A picture beside the label, in a soft square. */
+  icon?: ReactNode;
+  iconTone?: keyof typeof CHIP_TONES;
   className?: string;
 }
 
@@ -60,19 +114,35 @@ export interface StatTileProps {
  * A KPI on the owner's dashboard (tab 14 › بطاقة المؤشر): the label, the number in equal-width
  * digits, and the change with an arrow, a colour and words, never colour alone.
  */
-export function StatTile({ label, value, trend, footnote, hero = false, className }: StatTileProps) {
+export function StatTile({
+  label,
+  value,
+  trend,
+  footnote,
+  hero = false,
+  icon,
+  iconTone = 'brand',
+  className,
+}: StatTileProps) {
   const TrendIcon = trend?.direction === 'down' ? TrendDownIcon : TrendUpIcon;
   return (
-    <Card className={cn('flex flex-col gap-1', className)}>
-      <p className="text-sm font-semibold text-ink-muted">{label}</p>
-      <p className={cn('num font-bold text-ink', hero ? 'text-total' : 'text-kpi')}>{value}</p>
+    <Card className={cn('relative flex flex-col gap-2', className)}>
+      {icon ? (
+        <IconChip tone={iconTone} size="sm" className="absolute end-5 top-5 sm:end-6 sm:top-6">
+          {icon}
+        </IconChip>
+      ) : null}
+      <p className={cn('text-sm font-medium text-ink-muted', icon ? 'pe-10' : null)}>{label}</p>
+      <p className={cn('num font-bold tracking-tight text-ink', hero ? 'text-total' : 'text-kpi')}>{value}</p>
       {footnote ? <p className="text-sm text-ink-muted">{footnote}</p> : null}
       {trend ? (
         <p className="flex flex-wrap items-center gap-x-2 text-[0.8125rem]">
           <span
             className={cn(
-              'inline-flex items-center gap-1 font-semibold',
-              trend.direction === 'up' ? 'text-success-ink' : 'text-danger-ink',
+              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold',
+              trend.direction === 'up'
+                ? 'bg-success-soft text-success-ink'
+                : 'bg-danger-soft text-danger-ink',
             )}
           >
             <TrendIcon size={16} />

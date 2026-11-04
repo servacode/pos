@@ -36,7 +36,7 @@ export function Select({
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      <label htmlFor={selectId} className={cn('text-sm font-semibold text-ink', hideLabel && 'sr-only')}>
+      <label htmlFor={selectId} className={cn('text-sm font-medium text-ink-muted', hideLabel && 'sr-only')}>
         {label}
       </label>
       <div className={cn('relative flex items-center', disabled && 'opacity-50')}>
@@ -47,11 +47,11 @@ export function Select({
           aria-describedby={[errorId, hintId].filter(Boolean).join(' ') || undefined}
           className={cn(
             CONTROL_HEIGHT[density],
-            'w-full appearance-none rounded-control border bg-surface ps-3.5 pe-10 text-base text-ink outline-none transition-[border-color,box-shadow] duration-120 disabled:cursor-not-allowed',
+            'w-full appearance-none rounded-control border bg-surface ps-3.5 pe-10 text-base text-ink shadow-e1 outline-none transition-[border-color,box-shadow] duration-120 disabled:cursor-not-allowed',
             density === 'touch' && 'text-lg',
             error
-              ? 'border-danger ring-1 ring-danger ring-inset'
-              : 'border-line-control focus:border-ring focus:ring-1 focus:ring-ring focus:ring-inset',
+              ? 'border-danger ring-4 ring-danger/15'
+              : 'border-line-control/50 hover:border-line-control focus:border-brand focus:ring-4 focus:ring-brand/15',
           )}
           {...selectProps}
         >

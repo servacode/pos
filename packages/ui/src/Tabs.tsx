@@ -41,7 +41,7 @@ export function Tabs<V extends string>({ label, items, value, onValueChange, cla
       <div
         role="tablist"
         aria-label={label}
-        className="scrollbar-none flex gap-1 overflow-x-auto border-b border-line"
+        className="scrollbar-none flex max-w-full gap-1 self-start overflow-x-auto rounded-full bg-surface-muted p-1 ring-1 ring-line/60"
       >
         {items.map((item, index) => {
           const selected = index === activeIndex;
@@ -68,14 +68,19 @@ export function Tabs<V extends string>({ label, items, value, onValueChange, cla
                 tabs.current[next]?.focus();
               }}
               className={cn(
-                density === 'touch' ? 'min-h-12' : 'min-h-11',
-                '-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3.5 text-[0.9375rem] font-semibold whitespace-nowrap transition-colors duration-120',
-                selected ? 'border-brand text-brand-ink' : 'border-transparent text-ink-muted hover:text-ink',
+                density === 'touch' ? 'min-h-12' : 'min-h-10',
+                'inline-flex shrink-0 items-center gap-2 rounded-full px-4 text-[0.9375rem] font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120',
+                selected ? 'bg-surface text-ink shadow-e1' : 'text-ink-muted hover:text-ink',
               )}
             >
               {item.label}
               {item.count !== undefined ? (
-                <span className="num min-w-5.5 rounded-full bg-surface-muted px-1.5 text-xs/5.5 text-ink-muted">
+                <span
+                  className={cn(
+                    'num min-w-5.5 rounded-full px-1.5 text-xs/5.5',
+                    selected ? 'bg-brand text-on-brand' : 'bg-surface text-ink-muted',
+                  )}
+                >
                   {item.count}
                 </span>
               ) : null}
