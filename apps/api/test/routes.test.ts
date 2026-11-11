@@ -65,6 +65,12 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/cheques': 'signed-in',
   'POST /v1/cheques/actions': 'signed-in',
   'POST /v1/device/staff-sessions': 'device',
+  'GET /v1/staff': 'signed-in',
+  'POST /v1/staff': 'signed-in',
+  'PATCH /v1/staff/:id': 'signed-in',
+  'POST /v1/staff/:id/pin': 'signed-in',
+  'POST /v1/staff/:id/deactivate': 'signed-in',
+  'POST /v1/staff/:id/reactivate': 'signed-in',
   'POST /v1/device/holds': 'device',
   'POST /v1/broadcasts/preview': 'signed-in',
   'POST /v1/broadcasts': 'signed-in',
@@ -254,6 +260,34 @@ function customerIdor(method: 'GET' | 'PUT') {
     expect(res.statusCode, `${method} /v1/customers/:id`).toBe(404);
     const [row] = await ownerDb()<{ name: string }[]>`select name from customers where id = ${id}`;
     expect(row!.name).toBe('زبون أ');
+  };
+}
+
+/** Store B's owner on store A's staff member: 404, and the person is untouched. */
+function staffIdor(method: 'PATCH' | 'POST', suffix: string, payload?: Record<string, unknown>) {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/staff',
+      headers: owner(a),
+      payload: { fullName: 'كاشير أ', roleKey: 'cashier', branchIds: null, pin: '4829' },
+    });
+    const id = made.json<{ id: string }>().id;
+    const read = async () =>
+      (
+        await ownerDb()<
+          { version: number; status: string }[]
+        >`select version, status from users where id = ${id}`
+      )[0];
+    const before = await read();
+    const res = await app.inject({
+      method,
+      url: `/v1/staff/${id}${suffix}`,
+      headers: owner(b),
+      ...(payload ? { payload } : {}),
+    });
+    expect(res.statusCode, `${method} /v1/staff/:id${suffix}`).toBe(404);
+    expect(await read()).toEqual(before);
   };
 }
 
@@ -587,6 +621,10 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
   },
   'PUT /v1/customers/:id': customerIdor('PUT'),
+  'PATCH /v1/staff/:id': staffIdor('PATCH', '', { fullName: 'مسروق' }),
+  'POST /v1/staff/:id/pin': staffIdor('POST', '/pin', { pin: '7391' }),
+  'POST /v1/staff/:id/deactivate': staffIdor('POST', '/deactivate'),
+  'POST /v1/staff/:id/reactivate': staffIdor('POST', '/reactivate'),
   'GET /v1/products/:id': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}`),
   'PATCH /v1/products/:id': catalogIdor('products', productOf, 'PATCH', (id) => `/v1/products/${id}`),
   'POST /v1/products/:id/archive': catalogIdor(

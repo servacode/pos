@@ -10,6 +10,7 @@ export * from './contracts/common';
 export * from './contracts/catalog';
 export * from './contracts/documents';
 export * from './contracts/staff';
+export * from './contracts/staff-admin';
 export * from './contracts/store';
 export * from './contracts/accounting';
 export * from './contracts/customers';

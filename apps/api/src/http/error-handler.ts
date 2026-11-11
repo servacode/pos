@@ -1,4 +1,4 @@
-import type { FastifyError, FastifyInstance } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
 import type { ApiErrorBody, ErrorCode } from '@serva/core';
 import { AppError } from '../errors';
 import { RATE_LIMITED_MESSAGE } from './rate-limit';
@@ -27,6 +27,17 @@ const bodyOf = (code: ErrorCode, message: string, ref: string): ApiErrorBody => 
   error: { code, message, ref },
 });
 
+/** Sends a server error to the tracker (if one is set). 503 is load shedding, not a fault. */
+function report(request: FastifyRequest, error: unknown, status: number): void {
+  if (status === 503) return;
+  request.server.reporter.captureException(error, {
+    ref: request.id,
+    route: request.routeOptions?.url,
+    method: request.method,
+    status,
+  });
+}
+
 export function installErrorHandling(app: FastifyInstance): void {
   app.addHook('onRequest', async (request, reply) => {
     reply.header('x-request-id', request.id);
@@ -34,7 +45,10 @@ export function installErrorHandling(app: FastifyInstance): void {
 
   app.setErrorHandler((error: FastifyError | AppError, request, reply) => {
     if (error instanceof AppError) {
-      if (error.statusCode >= 500) request.log.error({ err: error }, 'request failed');
+      if (error.statusCode >= 500) {
+        request.log.error({ err: error }, 'request failed');
+        report(request, error, error.statusCode);
+      }
       if (error.retryAfter !== undefined) reply.header('retry-after', String(error.retryAfter));
       return reply.status(error.statusCode).send(error.toBody(request.id));
     }
@@ -44,6 +58,7 @@ export function installErrorHandling(app: FastifyInstance): void {
       return reply.status(status).send(bodyOf(known.code, known.message, request.id));
     }
     request.log.error({ err: error }, 'request failed');
+    report(request, error, status);
     if (status === 503) {
       const busy = TRANSPORT_ERRORS[503]!;
       return reply.status(503).send(bodyOf(busy.code, busy.message, request.id));

@@ -24,6 +24,7 @@ import {
   StoreIcon,
   TransferIcon,
   UndoIcon,
+  UserIcon,
   CardIcon,
   type Icon,
 } from '@serva/ui';
@@ -248,6 +249,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     label: 'إعدادات المتجر',
     icon: SettingsIcon,
     permission: ['settings.manage'],
+  },
+  {
+    section: 'settings',
+    to: '/staff',
+    label: 'الموظفون',
+    icon: UserIcon,
+    permission: ['users.manage'],
   },
   { section: 'settings', to: '/devices', label: 'الأجهزة', icon: DeviceIcon, permission: ['devices.view'] },
   {

@@ -10,6 +10,7 @@ import { systemClock, type Clock } from './clock';
 import type { Env } from './env';
 import { clientAddressing, clientIp } from './http/client-ip';
 import { installErrorHandling } from './http/error-handler';
+import { createReporter, noopReporter } from './http/error-reporting';
 import { loggerOptions, newRequestRef } from './http/logging';
 import { postgresRateLimitStore } from './http/rate-limit';
 import { installSecurityHeaders } from './http/security-headers';
@@ -31,6 +32,7 @@ import { promotionRoutes } from './routes/promotions';
 import { chequeRoutes } from './routes/cheques';
 import { serialRoutes } from './routes/serials';
 import { staffRoutes } from './routes/staff';
+import { staffAdminRoutes } from './routes/staff-admin';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
 import type { SyncProcessors } from './services/sync-push';
@@ -80,6 +82,18 @@ export async function buildApp({
   app.decorate('tokenKeys', new TokenKeys(env.JWT_SECRET, env.JWT_PREVIOUS_SECRETS));
   app.decorate('otpSender', otpSender !== undefined ? otpSender : otpSenderFor(env, app.log));
   app.decorate('sessionGate', new SessionGate(handle.db, clock, env.AUTH_CHECK_CACHE_SECONDS));
+  const reporter = env.SENTRY_DSN
+    ? createReporter(
+        {
+          dsn: env.SENTRY_DSN,
+          environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV,
+          release: env.SENTRY_RELEASE,
+        },
+        app.log,
+      )
+    : noopReporter;
+  app.decorate('reporter', reporter);
+  app.addHook('onClose', async () => reporter.flush());
   app.decorateRequest('auth', null);
   app.decorateRequest('device', null);
   if (!database) app.addHook('onClose', async () => handle.client.end());
@@ -119,6 +133,7 @@ export async function buildApp({
   await app.register(deviceRoutes);
   await app.register(catalogRoutes);
   await app.register(staffRoutes);
+  await app.register(staffAdminRoutes);
   await app.register(reportRoutes);
   await app.register(storeRoutes);
   await app.register(customerRoutes);

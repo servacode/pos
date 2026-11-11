@@ -76,6 +76,12 @@ const pinSchema = z
   .transform(latinDigits)
   .pipe(z.string().regex(/^(\d{4}|\d{6})$/, 'رمز الدخول 4 أو 6 أرقام'));
 
+/** The PIN field as typed, for the owner setting a staff member's PIN (contracts/staff-admin.ts). */
+export const staffPinSchema = pinSchema.refine(
+  (pin) => !isTrivialPin(pin),
+  'هذا الرمز سهل التخمين. اختر رمزاً آخر',
+);
+
 /**
  * PUT /v1/me/pin: sets my PIN, confirmed with my password. The server also refuses 4 digits for an
  * owner, a manager or an approver (validation_failed on `pin`) and a wrong password
