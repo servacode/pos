@@ -551,7 +551,13 @@ export function SaleScreen(props: SaleScreenProps) {
     waitingOnline.length > 0 || canHoldForCustomer || priced !== null || showWholesale || props.heldCount > 0;
   const orderType = cart.service?.orderType ?? defaultOrderType;
   const closeButton = (label: string, onClick: () => void) => (
-    <Button variant="secondary" size="md" icon={<CloseIcon size={20} />} aria-keyshortcuts="Escape" onClick={onClick}>
+    <Button
+      variant="secondary"
+      size="md"
+      icon={<CloseIcon size={20} />}
+      aria-keyshortcuts="Escape"
+      onClick={onClick}
+    >
       {label}
       <Kbd>Esc</Kbd>
     </Button>
@@ -671,7 +677,11 @@ export function SaleScreen(props: SaleScreenProps) {
       </header>
       {service ? (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-3">
-          <div role="group" aria-label="نوع الطلب" className="inline-flex gap-1 rounded-control bg-surface-muted p-1">
+          <div
+            role="group"
+            aria-label="نوع الطلب"
+            className="inline-flex gap-1 rounded-control bg-surface-muted p-1"
+          >
             {(['dine_in', 'takeaway', 'delivery'] as const).map((type) => (
               <button
                 key={type}
@@ -737,7 +747,11 @@ export function SaleScreen(props: SaleScreenProps) {
             </bdi>{' '}
             · {cart.onlineOrder.customerName}: يُغلق عند الدفع
           </span>
-          <Button size="sm" variant="ghost" onClick={() => setCart((c) => ({ ...c, onlineOrder: undefined }))}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setCart((c) => ({ ...c, onlineOrder: undefined }))}
+          >
             افصل الطلب
           </Button>
         </div>
@@ -783,19 +797,6 @@ export function SaleScreen(props: SaleScreenProps) {
                     خصم <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
-                line.tracksSerial ? (
-                  <button
-                    key="s"
-                    type="button"
-                    className={cn(
-                      'rounded-small underline-offset-4 hover:underline',
-                      (line.serials?.length ?? 0) > 0 ? 'text-ink-muted' : 'font-semibold text-danger-ink',
-                    )}
-                    onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
-                  >
-                    {line.serials?.length ? `IMEI ${line.serials.join('، ')}` : 'اكتب الرقم التسلسلي'}
-                  </button>
-                ) : null,
                 p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
                   <span key="o" className="font-semibold text-success-ink">
                     {p.discount.reason} −
@@ -827,6 +828,22 @@ export function SaleScreen(props: SaleScreenProps) {
                           </span>
                         ))}
                       </>
+                    ) : undefined
+                  }
+                  extra={
+                    line.tracksSerial ? (
+                      <button
+                        type="button"
+                        className={cn(
+                          'min-h-11 rounded-small underline-offset-4 hover:underline',
+                          (line.serials?.length ?? 0) > 0
+                            ? 'text-ink-muted'
+                            : 'font-semibold text-danger-ink',
+                        )}
+                        onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
+                      >
+                        {line.serials?.length ? `IMEI ${line.serials.join('، ')}` : 'اكتب الرقم التسلسلي'}
+                      </button>
                     ) : undefined
                   }
                   selected={selected === line.lineNo}
@@ -1252,10 +1269,7 @@ export function SaleScreen(props: SaleScreenProps) {
           onClose={() => setMode({ kind: 'items' })}
         />
       ) : effectiveMode.kind === 'help' ? (
-        <SalePanel
-          title="دليل الاختصارات"
-          actions={closeButton('أغلق', () => setMode({ kind: 'items' }))}
-        >
+        <SalePanel title="دليل الاختصارات" actions={closeButton('أغلق', () => setMode({ kind: 'items' }))}>
           <ul className="flex flex-col divide-y divide-line">
             {SHORTCUTS.map(([action, key]) => (
               <li key={action} className="flex min-h-12 items-center justify-between gap-4 py-2">

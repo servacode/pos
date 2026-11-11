@@ -28,6 +28,8 @@ export interface CartLineProps {
   meta?: ReactNode;
   selected?: boolean;
   onSelect: () => void;
+  /** A control that sits under the line, always in view, outside its button (a button cannot hold a button). */
+  extra?: ReactNode;
   /** The selected line's actions, shown under it in place (tab 14 › سلة الكاشير). */
   children?: ReactNode;
 }
@@ -48,6 +50,7 @@ export function CartLine({
   meta,
   selected = false,
   onSelect,
+  extra,
   children,
 }: CartLineProps) {
   const digits = useDigits();
@@ -88,6 +91,7 @@ export function CartLine({
         </span>
         <Money minor={lineTotalMinor} currency={currency} className="text-base/7 font-bold text-ink" />
       </button>
+      {extra ? <div className="px-3 pb-3 ps-[3.75rem] text-sm">{extra}</div> : null}
       {selected && children ? (
         <div className="flex flex-wrap items-center gap-2 px-3 pb-3">{children}</div>
       ) : null}
