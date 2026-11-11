@@ -99,5 +99,73 @@ describe('HomePage', () => {
       expect(screen.getByRole('link', { name: 'منتج جديد' })).toHaveAttribute('href', '/products/new');
       expect(screen.getByRole('link', { name: 'افتح الكاشير' })).toHaveAttribute('href', '/pos');
     });
+
+    it('compares today with yesterday, shows the payment mix and the expiring batches', async () => {
+      const days = [6, 5, 4, 3, 2].map((back) => `2026-10-${String(31 - back).padStart(2, '0')}`);
+      const routes: Parameters<typeof mockFetch>[0] = {
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'purchases.manage']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({ totalMinor: 1_500_000 }) },
+        'GET /v1/reports/day?date=2026-10-30': { status: 200, body: dayReport({ totalMinor: 1_000_000 }) },
+        'GET /v1/inventory/expiry?days=30': {
+          status: 200,
+          body: {
+            today: TODAY,
+            items: [
+              {
+                variantId: 'v-1',
+                name: 'حليب',
+                batchNo: null,
+                expiryDate: '2026-11-05',
+                purchaseNumber: 'PUR-1',
+                receivedOn: '2026-10-01',
+                qty: 5000,
+                daysLeft: 5,
+              },
+            ],
+          },
+        },
+      };
+      for (const date of days) routes[`GET /v1/reports/day?date=${date}`] = { status: 200, body: dayReport() };
+      mockFetch(routes);
+      renderApp('/');
+
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      expect((await within(sales).findAllByText('عن أمس', { exact: false }, { timeout: 5000 })).length).toBeGreaterThan(0);
+      expect(within(sales).getAllByText('50%', { exact: false }).length).toBeGreaterThan(0);
+      expect(await screen.findByText('دفعة قرّب انتهاؤها')).toBeInTheDocument();
+      expect(screen.getByRole('radiogroup', { name: 'الفترة' })).toBeInTheDocument();
+      expect(screen.getByText('طرق الدفع اليوم')).toBeInTheDocument();
+    });
+
+    it('welcomes a store with no sales yet', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: {
+          status: 200,
+          body: dayReport({ invoiceCount: 0, totalMinor: 0, topProducts: [], byMethod: [] }),
+        },
+      });
+      renderApp('/');
+
+      expect(await screen.findByText('ما في مبيعات بعد')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'ابدأ أول عملية بيع' })).toHaveAttribute('href', '/pos');
+    });
+
+    it('offers a retry when the day report fails', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: {
+          status: 500,
+          body: { error: { code: 'server_error', message: 'تعذّر الاتصال' } },
+        },
+      });
+      renderApp('/');
+
+      expect(await screen.findByText('تعذّر تحميل مبيعات اليوم')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'حاول مرة ثانية' })).toBeInTheDocument();
+    });
   });
 });
