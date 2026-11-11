@@ -38,6 +38,24 @@ const SEMANTIC_TOKENS = [
   'info',
   'info-soft',
   'info-ink',
+  // هوية 4: the teal accent and the sidebar's own set
+  'accent',
+  'on-accent',
+  'accent-soft',
+  'accent-ink',
+  'sidebar',
+  'sidebar-hover',
+  'sidebar-active',
+  'sidebar-line',
+  'sidebar-ink',
+  'sidebar-muted',
+  'sidebar-strong',
+  'sidebar-brand',
+  // The same in both modes: the logo mark and the light along a raised button's top edge.
+  'mark-from',
+  'mark-to',
+  'on-mark',
+  'highlight',
 ] as const;
 type Token = (typeof SEMANTIC_TOKENS)[number];
 
@@ -66,6 +84,10 @@ const ALLOWED_PAIRS: readonly (readonly [fg: Token, bg: Token, min: number])[] =
   ['danger-ink', 'canvas', TEXT],
   ['info-ink', 'info-soft', TEXT],
   ['on-danger', 'danger', TEXT],
+  // The danger button under a mouse.
+  ['on-danger', 'danger-ink', TEXT],
+  // The white «S» on the mark's emerald, in both modes.
+  ['on-mark', 'mark-from', TEXT],
   // The toast: light text on the ink surface (kit .toast).
   ['surface', 'ink', TEXT],
   // Field borders, focus ring and selected/error borders (WCAG 1.4.11).
@@ -75,6 +97,19 @@ const ALLOWED_PAIRS: readonly (readonly [fg: Token, bg: Token, min: number])[] =
   ['ring', 'canvas', NON_TEXT],
   ['brand', 'surface', NON_TEXT],
   ['danger', 'surface', NON_TEXT],
+  // هوية 4: brand text on the tinted panels, the accent, and the deep sidebar in both modes.
+  ['ink-muted', 'brand-soft', TEXT],
+  ['on-accent', 'accent', TEXT],
+  ['accent-ink', 'accent-soft', TEXT],
+  ['accent-ink', 'surface', TEXT],
+  ['sidebar-ink', 'sidebar', TEXT],
+  ['sidebar-muted', 'sidebar', TEXT],
+  ['sidebar-ink', 'sidebar-hover', TEXT],
+  ['sidebar-strong', 'sidebar-active', TEXT],
+  ['sidebar-brand', 'sidebar', NON_TEXT],
+  ['success', 'surface', NON_TEXT],
+  ['warning', 'surface', NON_TEXT],
+  ['info', 'surface', NON_TEXT],
 ];
 
 function section(css: string, pattern: RegExp, label: string): string {
@@ -134,12 +169,22 @@ describe('dark mode switch (tab 14 › الوضع الداكن)', () => {
 
   it('follows the device unless the root says data-theme="light"', () => {
     expect(variant).toMatch(
-      /@media \(prefers-color-scheme: dark\)[\s\S]*:root:not\(\[data-theme='light'\]\)/,
+      /@media screen and \(prefers-color-scheme: dark\)[\s\S]*:root:not\(\[data-theme='light'\]\)/,
     );
   });
 
   it('is forced on by data-theme="dark", whatever the device says', () => {
-    expect(variant).toContain("&:where([data-theme='dark'], [data-theme='dark'] *)");
+    expect(variant).toMatch(
+      /@media screen \{\s*&:where\(\[data-theme='dark'\], \[data-theme='dark'\] \*\)/,
+    );
+  });
+
+  it('is for screens only: paper prints in the light colours, whatever the theme', () => {
+    // Every rule of the variant sits inside a screen media query, so print never matches it.
+    const rules = [...variant.matchAll(/@media ([^{]*)\{/g)].map((m) => m[1]!.trim());
+    expect(rules).toEqual(['screen and (prefers-color-scheme: dark)', 'screen']);
+    expect(variant.replace(/@media[^{]*\{[\s\S]*?\n {2}\}/g, '').trim()).toBe('');
+    expect(appCss).toMatch(/@media print \{\s*:root \{\s*color-scheme: light;/);
   });
 });
 

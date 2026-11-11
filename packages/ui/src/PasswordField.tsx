@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { useDensity } from './context';
 import { EyeIcon, EyeOffIcon } from './icons';
-import { TextField, type TextFieldProps } from './TextField';
+import { FieldButton, TextField, type TextFieldProps } from './TextField';
 
+/** A password with a show/hide toggle at the end of the box. */
 export function PasswordField(props: Omit<TextFieldProps, 'type' | 'endAdornment'>) {
+  const density = useDensity();
   const [visible, setVisible] = useState(false);
   const Icon = visible ? EyeOffIcon : EyeIcon;
 
@@ -11,15 +14,12 @@ export function PasswordField(props: Omit<TextFieldProps, 'type' | 'endAdornment
       {...props}
       type={visible ? 'text' : 'password'}
       endAdornment={
-        <button
-          type="button"
-          onClick={() => setVisible((v) => !v)}
-          aria-label="أظهر كلمة السر"
+        <FieldButton
+          label="أظهر كلمة السر"
           aria-pressed={visible}
-          className="me-1 grid size-11 shrink-0 place-items-center rounded-full text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink"
-        >
-          <Icon />
-        </button>
+          onClick={() => setVisible((v) => !v)}
+          icon={<Icon size={density === 'dense' ? 16 : 20} />}
+        />
       }
     />
   );

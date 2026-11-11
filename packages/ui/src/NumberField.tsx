@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ChangeEvent } from 'react';
 import { getCurrency, stripBidiControls, toLatinDigits, toMinor, type CurrencyId } from '@serva/core';
 import { cn } from './cn';
-import { useDigits, type Digits } from './context';
-import { TextField, type TextFieldProps } from './TextField';
+import { useDensity, useDigits, type Digits } from './context';
+import { ADORNMENT_INSET, TextField, type TextFieldProps } from './TextField';
 
 const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
@@ -81,6 +81,7 @@ export function NumberField({
   ...rest
 }: NumberFieldProps) {
   const digits = useDigits();
+  const density = useDensity();
   const inputRef = useRef<HTMLInputElement>(null);
   const caret = useRef<number | null>(null);
   const shown = displayNumber(value, digits);
@@ -112,7 +113,15 @@ export function NumberField({
       inputClassName={cn('num', inputClassName)}
       endAdornment={
         unit ? (
-          <span aria-hidden="true" className="pe-3.5 text-sm text-ink-muted">
+          // At the end of the box, in the subtle ink the box gives its icons and units.
+          <span
+            aria-hidden="true"
+            className={cn(
+              'shrink-0 whitespace-nowrap select-none',
+              density === 'touch' ? 'text-base' : 'text-sm',
+              ADORNMENT_INSET[density].end,
+            )}
+          >
             {unit}
           </span>
         ) : undefined

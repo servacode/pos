@@ -4,8 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#F6FAF8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0B1210" media="(prefers-color-scheme: dark)" />
+    <!-- The page colour of each theme (canvas) for the browser bar; data-scheme lets a saved choice pick one. -->
+    <meta name="theme-color" content="#F4F7F6" media="(prefers-color-scheme: light)" data-scheme="light" />
+    <meta name="theme-color" content="#0A0E0D" media="(prefers-color-scheme: dark)" data-scheme="dark" />
+    <!--
+      The theme saved on this device (serva.theme: THEME_STORAGE_KEY of @serva/ui › themePreference.ts),
+      set before any style or script loads so a dark choice never flashes light. With none, the page
+      follows the device. Inside a function, so nothing it names lands on window.
+    -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('serva.theme');
+          if (theme !== 'light' && theme !== 'dark') return;
+          document.documentElement.setAttribute('data-theme', theme);
+          var metas = document.querySelectorAll('meta[name="theme-color"][data-scheme]');
+          for (var i = 0; i < metas.length; i += 1) {
+            metas[i].setAttribute(
+              'media',
+              metas[i].getAttribute('data-scheme') === theme ? 'all' : 'not all',
+            );
+          }
+        } catch (error) {
+          // No storage (private mode, blocked): the page follows the device.
+        }
+      })();
+    </script>
     <meta name="description" content="Serva POS — كاشير سحابي بسيط لمحلك" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Serva POS</title>

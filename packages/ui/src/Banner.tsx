@@ -13,13 +13,14 @@ import {
 
 export type BannerTone = 'warning' | 'danger' | 'info' | 'success' | 'neutral' | 'offline';
 
+// هوية 4 › Alert / banner: the tone's tinted fill with a hairline of the tone, its icon, -ink words.
 const TONES: Record<BannerTone, { className: string; icon: Icon }> = {
-  warning: { className: 'bg-warning-soft text-warning-ink', icon: WarningIcon },
-  danger: { className: 'bg-danger-soft text-danger-ink', icon: AlertCircleIcon },
-  info: { className: 'bg-info-soft text-info-ink', icon: InfoIcon },
-  success: { className: 'bg-success-soft text-success-ink', icon: CheckCircleIcon },
-  neutral: { className: 'bg-surface-muted text-ink', icon: InfoIcon },
-  offline: { className: 'bg-warning-soft text-warning-ink', icon: OfflineIcon },
+  warning: { className: 'border-warning/20 bg-warning-soft text-warning-ink', icon: WarningIcon },
+  danger: { className: 'border-danger/20 bg-danger-soft text-danger-ink', icon: AlertCircleIcon },
+  info: { className: 'border-info/20 bg-info-soft text-info-ink', icon: InfoIcon },
+  success: { className: 'border-success/20 bg-success-soft text-success-ink', icon: CheckCircleIcon },
+  neutral: { className: 'border-line bg-surface-muted text-ink', icon: InfoIcon },
+  offline: { className: 'border-warning/20 bg-warning-soft text-warning-ink', icon: OfflineIcon },
 };
 
 export interface BannerProps {
@@ -42,21 +43,23 @@ export function Banner({ tone = 'info', title, children, action, onDismiss, clas
   return (
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
-      className={cn('flex items-center gap-3 rounded-2xl px-4 py-3.5 text-sm', toneClass, className)}
+      className={cn('flex items-center gap-3 rounded-card border px-4 py-3 text-sm', toneClass, className)}
     >
       <ToneIcon />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         {title ? <p className="font-semibold">{title}</p> : null}
         {children ? <div className={cn(!title && 'font-semibold')}>{children}</div> : null}
       </div>
-      {action}
+      {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
       {onDismiss ? (
         <IconButton
           label="أخفِ التنبيه"
           size="sm"
           icon={<CloseIcon />}
           onClick={onDismiss}
-          className="-me-2 text-current hover:bg-surface/40 hover:text-current"
+          // Important (!): the ghost button's own ink would win the cascade, and the cross takes the
+          // banner's tone.
+          className="-me-2 text-current! hover:bg-surface/40 hover:text-current!"
         />
       ) : null}
     </div>

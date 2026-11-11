@@ -2,9 +2,16 @@ import type { ReactNode } from 'react';
 import { cn } from '../cn';
 import { DensityProvider } from '../context';
 
-/** The cashier's status bar (kit .cash-status): 44 px, above every layer (z 60). */
+/**
+ * The cashier's status bar (kit .cash-status; هوية 4): 56 high on the surface, a hairline under it,
+ * above every layer (z 60).
+ */
 export function CashierStatusBar({ children }: { children: ReactNode }) {
-  return <header className="relative z-60 flex h-14 items-center gap-3 bg-canvas px-4">{children}</header>;
+  return (
+    <header className="relative z-60 flex h-14 items-center gap-3 border-b border-line bg-surface px-4 shadow-e1">
+      {children}
+    </header>
+  );
 }
 
 export interface CashierShellProps {
@@ -40,15 +47,15 @@ export function CashierShell({
       >
         {statusBar}
         {cart ? (
-          <div className="grid min-h-0 grid-cols-[minmax(0,26.25rem)_minmax(0,1fr)] gap-3 px-3 pb-3">
-            {/* هوية 3: the cart floats as a white panel beside the items. */}
+          <div className="grid min-h-0 grid-cols-[minmax(0,26.25rem)_minmax(0,1fr)] gap-4 p-4">
+            {/* هوية 4: the cart is a panel on the hairline, the items lie on the page beside it. */}
             <aside
               aria-label="السلة"
-              className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] bg-surface shadow-e1 ring-1 ring-line/70"
+              className="flex min-h-0 flex-col overflow-hidden rounded-panel border border-line bg-surface shadow-e1"
             >
               {cart}
             </aside>
-            <main className={cn('flex min-h-0 flex-col gap-3 overflow-y-auto p-1', mainClassName)}>
+            <main className={cn('flex min-h-0 flex-col gap-4 overflow-y-auto p-0.5', mainClassName)}>
               {children}
             </main>
           </div>

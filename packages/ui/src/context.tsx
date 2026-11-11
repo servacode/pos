@@ -23,19 +23,35 @@ export function useDensity(): Density {
   return useContext(DensityContext);
 }
 
-/** Field and button height per density: 56 / 48 / 40 / 32. */
+/**
+ * Field and button height per density (هوية 4): 56 on touch; 40 with a mouse on the admin
+ * (comfortable), raised to 48 wherever the pointer is a finger (pointer-coarse: tablets and phones,
+ * tab 14 › أهداف اللمس); 36 → 44 compact; 32 dense (mouse and keyboard only).
+ */
 export const CONTROL_HEIGHT: Record<Density, string> = {
   touch: 'min-h-14',
-  comfortable: 'min-h-12',
-  compact: 'min-h-10',
+  comfortable: 'min-h-10 pointer-coarse:min-h-12',
+  compact: 'min-h-9 pointer-coarse:min-h-11',
   dense: 'min-h-8',
 };
 
-/** Table row height per density: 56 / 52 / 40 / 32. */
+/** Table row height per density: 56 / 48 / 40 / 32. */
 export const ROW_HEIGHT: Record<Density, string> = {
   touch: 'h-14',
-  comfortable: 'h-13',
+  comfortable: 'h-12',
   compact: 'h-10',
+  dense: 'h-8',
+};
+
+/**
+ * A table's column heads: a step lower than a body row (ROW_HEIGHT) of the same density, 40 over rows
+ * of 48 on the admin. A table metric, not a control height (a table row takes a height, never a
+ * min-height).
+ */
+export const HEAD_ROW_HEIGHT: Record<Density, string> = {
+  touch: 'h-12',
+  comfortable: 'h-10',
+  compact: 'h-9',
   dense: 'h-8',
 };
 

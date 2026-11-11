@@ -1,7 +1,7 @@
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
-import { FullScreenLoader, TestModeRibbon } from '@serva/ui';
+import { FullScreenLoader, TestModeRibbon, useThemeSync } from '@serva/ui';
 import { useTestMode } from './lib/testMode';
 
 // Two apps, two code-split entries. The cashier (/pos) boots from what the device keeps locally
@@ -26,6 +26,8 @@ function PairingLink() {
 
 export function App() {
   const testMode = useTestMode();
+  // A theme chosen in another tab is painted here at once, on every screen (the cashier too).
+  useThemeSync();
   // Radix primitives read the reading direction from this provider (arrow keys in menus, tabs,
   // radio groups and sliders); the document itself is <html dir="rtl">.
   return (

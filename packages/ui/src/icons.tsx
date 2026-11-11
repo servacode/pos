@@ -40,8 +40,11 @@ import {
   Minus,
   Monitor,
   MonitorSmartphone,
+  Moon,
   Package,
   PackageOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
   Pencil,
   Percent,
@@ -61,6 +64,7 @@ import {
   Smartphone,
   Sparkles,
   Store,
+  Sun,
   Tablet,
   Tag,
   Trash,
@@ -209,3 +213,13 @@ export const ShirtIcon = defineIcon(Shirt);
 export const NoImageIcon = defineIcon(ImageOff);
 export const PackageOpenIcon = defineIcon(PackageOpen);
 export const PanelIcon = defineIcon(PanelRight);
+
+// The theme switch (هوية 4 › الوضع الداكن): light, dark, and «حسب الجهاز» (follow the device).
+export const SunIcon = defineIcon(Sun);
+export const MoonIcon = defineIcon(Moon);
+export const SystemThemeIcon = defineIcon(Monitor);
+// Fold and unfold the sidebar. Drawn, like every directional glyph here, for a left-to-right page
+// (the panel on the left) and mirrored in RTL, where the sidebar sits on the right: in Arabic they
+// show lucide's PanelRightClose and PanelRightOpen.
+export const PanelCollapseIcon = defineIcon(PanelLeftClose, { directional: true });
+export const PanelExpandIcon = defineIcon(PanelLeftOpen, { directional: true });
