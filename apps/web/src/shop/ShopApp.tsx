@@ -149,6 +149,14 @@ export function ShopApp() {
               <span className="font-semibold text-ink-muted">سيرفا</span>
             </span>
           </p>
+          <span className="flex items-center gap-4 text-sm">
+            <TextLink href="/terms" target="_blank" rel="noopener">
+              الشروط
+            </TextLink>
+            <TextLink href="/privacy" target="_blank" rel="noopener">
+              الخصوصية
+            </TextLink>
+          </span>
           <ThemeToggle size="sm" />
         </div>
       </footer>

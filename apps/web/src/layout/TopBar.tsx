@@ -11,6 +11,7 @@ import {
   IconButton,
   IconChip,
   KeyIcon,
+  ShieldCheckIcon,
   LogoutIcon,
   Menu,
   MenuIcon,
@@ -443,6 +444,16 @@ function AccountMenu({
                 الاشتراك
               </MenuItem>
             ) : null}
+            <MenuItem
+              icon={<ShieldCheckIcon />}
+              render={(props) => (
+                <a href="/terms" target="_blank" rel="noopener" {...plain(props)}>
+                  {props.children}
+                </a>
+              )}
+            >
+              الشروط والخصوصية
+            </MenuItem>
           </div>
           {/* A phone's top bar has no theme button: the choice is here instead. */}
           <div className="sm:hidden">

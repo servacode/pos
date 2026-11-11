@@ -66,6 +66,16 @@ describe('AppShell', () => {
     for (const target of targets) expect(target.className).toMatch(TOUCH_TARGET);
   });
 
+  it('links the legal texts from the account menu, in a new tab', async () => {
+    const { user } = signedIn();
+
+    await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    await user.click(screen.getByRole('button', { name: /^حسابي/ }));
+    const link = screen.getByRole('link', { name: 'الشروط والخصوصية' });
+    expect(link).toHaveAttribute('href', '/terms');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
   it('shows each section only to whoever holds its permission key', async () => {
     signedIn(['catalog.manage', 'devices.view']);
     const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });

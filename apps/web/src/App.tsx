@@ -10,6 +10,7 @@ import { useTestMode } from './lib/testMode';
 const PosApp = lazy(() => import('./pos/PosApp').then((m) => ({ default: m.PosApp })));
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })));
 const ShopApp = lazy(() => import('./shop/ShopApp').then((m) => ({ default: m.ShopApp })));
+const LegalPage = lazy(() => import('./legal/LegalPage').then((m) => ({ default: m.LegalPage })));
 const PlatformApp = lazy(() => import('./platform/PlatformApp').then((m) => ({ default: m.PlatformApp })));
 
 // The component gallery (tab 14 › معرض المكوّنات) exists in dev builds only: in a production build
@@ -37,6 +38,9 @@ export function App() {
       <Suspense fallback={<FullScreenLoader />}>
         <Routes>
           {UiGallery ? <Route path="/dev/ui" element={<UiGallery />} /> : null}
+          {/* The legal texts (24 › الشروط القانونية): public, linked from sign-in, sign-up and the shop */}
+          <Route path="/terms" element={<LegalPage document="terms" />} />
+          <Route path="/privacy" element={<LegalPage document="privacy" />} />
           <Route path="/pos/*" element={<PosApp />} />
           <Route path="/link" element={<PairingLink />} />
           <Route path="/platform/*" element={<PlatformApp />} />

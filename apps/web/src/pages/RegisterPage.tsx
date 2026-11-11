@@ -173,7 +173,17 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
           <Button type="submit" size="lg" fullWidth loading={submitting}>
             {submitting ? 'جارٍ إرسال الرمز…' : 'افتح متجري'}
           </Button>
-          <p className="text-center text-sm text-ink-subtle">بفتح الحساب توافق على الشروط وسياسة الخصوصية.</p>
+          <p className="text-center text-sm text-ink-subtle">
+            بفتح الحساب توافق على{' '}
+            <TextLink href="/terms" target="_blank" rel="noopener">
+              الشروط
+            </TextLink>{' '}
+            و
+            <TextLink href="/privacy" target="_blank" rel="noopener">
+              سياسة الخصوصية
+            </TextLink>
+            .
+          </p>
         </div>
       </form>
     </AuthLayout>

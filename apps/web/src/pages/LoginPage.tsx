@@ -59,6 +59,15 @@ export function LoginPage() {
         <Button type="submit" size="lg" fullWidth loading={submitting} className="mt-1">
           دخول
         </Button>
+        <p className="text-center text-sm text-ink-subtle">
+          <TextLink href="/terms" target="_blank" rel="noopener">
+            الشروط
+          </TextLink>{' '}
+          ·{' '}
+          <TextLink href="/privacy" target="_blank" rel="noopener">
+            سياسة الخصوصية
+          </TextLink>
+        </p>
       </form>
     </AuthLayout>
   );

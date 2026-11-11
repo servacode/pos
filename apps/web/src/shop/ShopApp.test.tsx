@@ -106,6 +106,14 @@ beforeEach(() => {
 });
 
 describe('the online shop', () => {
+  it('links the terms and the privacy policy from its footer', async () => {
+    mockFetch({ 'GET /v1/shop/nour': { status: 200, body: HOME } });
+    renderApp('/shop/nour');
+    await screen.findByRole('list', { name: 'البضاعة' });
+    expect(screen.getByRole('link', { name: 'الشروط' })).toHaveAttribute('href', '/terms');
+    expect(screen.getByRole('link', { name: 'الخصوصية' })).toHaveAttribute('href', '/privacy');
+  });
+
   it('browses by department, picks a size and colour on the shelf, fills the cart and orders on WhatsApp', async () => {
     const { requestsTo } = mockFetch({
       'GET /v1/shop/nour': { status: 200, body: HOME },
