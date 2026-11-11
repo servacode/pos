@@ -6,6 +6,7 @@ import {
   Card,
   EmptyState,
   LockIcon,
+  PageHeader,
   RetryIcon,
   Select,
   SkeletonText,
@@ -14,31 +15,25 @@ import {
 import { AppShell } from '../../layout/AppShell';
 import { holdsAny, type AccessRule } from './access';
 
-/** The page title row (kit .page-head): the path, the title and its line, the page's actions. */
+/** The page title row: the one h1 with its line, an icon tile and the page's actions (PageHeader). */
 export function PageHead({
-  crumbs,
   title,
   subtitle,
+  icon,
   actions,
 }: {
-  crumbs?: readonly string[];
   title: string;
   subtitle?: ReactNode;
+  icon?: ReactNode;
   actions?: ReactNode;
 }) {
+  return <PageHeader className="print:hidden" title={title} description={subtitle} icon={icon} actions={actions} />;
+}
+
+/** The date, branch and device controls of a report, in one calm card above the numbers. */
+export function ReportFilters({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 print:hidden">
-      <div className="flex min-w-0 flex-col gap-1">
-        {crumbs && crumbs.length > 0 ? (
-          <nav aria-label="المسار" className="text-sm text-ink-muted">
-            {crumbs.join(' / ')}
-          </nav>
-        ) : null}
-        <h1 className="text-2xl font-bold text-ink">{title}</h1>
-        {subtitle ? <p className="text-ink-muted">{subtitle}</p> : null}
-      </div>
-      {actions ? <div className="flex flex-wrap items-center gap-3">{actions}</div> : null}
-    </div>
+    <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">{children}</Card>
   );
 }
 

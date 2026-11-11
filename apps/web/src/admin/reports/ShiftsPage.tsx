@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import type { CurrencyCode } from '@serva/core';
-import { Badge, Card, ClockIcon, DataTable, EmptyState, Money, useDigits, type DataColumn } from '@serva/ui';
+import { Badge, ClockIcon, DataTable, EmptyState, Money, useDigits, type DataColumn } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay, zonedClock } from '../../lib/dates';
 import { SHIFTS_ACCESS } from './access';
 import { listShifts } from './api';
 import type { ShiftSummary } from './contracts';
-import { BranchSelect, DayField, defaultBranch, PageHead, ReportScreen } from './parts';
+import { BranchSelect, DayField, defaultBranch, PageHead, ReportFilters, ReportScreen } from './parts';
 import { useReport } from './useReport';
 
 export function ShiftStatus({ status }: { status: ShiftSummary['status'] }) {
@@ -75,11 +75,11 @@ export function ShiftsPage() {
 
   return (
     <ReportScreen me={me} access={SHIFTS_ACCESS} title="الورديات">
-      <PageHead crumbs={['البيع', 'المبيعات']} title="الورديات" subtitle="سجل الورديات وتقارير إغلاقها" />
-      <Card className="flex flex-wrap items-end gap-4">
+      <PageHead icon={<ClockIcon />} title="الورديات" subtitle="سجل الورديات وتقارير إغلاقها" />
+      <ReportFilters>
         <BranchSelect me={me} value={branchId} onChange={setBranchId} />
         <DayField label="اليوم" value={date} max={today} onChange={setDate} />
-      </Card>
+      </ReportFilters>
       <DataTable
         caption={`ورديات ${dayText(date, digits)}`}
         columns={columns}

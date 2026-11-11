@@ -5,6 +5,7 @@ import {
   BackIcon,
   Button,
   Card,
+  ClockIcon,
   cn,
   DataTable,
   displayNumber,
@@ -371,7 +372,7 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
   return (
     <>
       <PageHead
-        crumbs={['البيع', 'الورديات']}
+        icon={<ClockIcon />}
         title={report.status === 'closed' ? 'تقرير إغلاق الوردية' : 'تقرير الوردية'}
         subtitle={
           <>

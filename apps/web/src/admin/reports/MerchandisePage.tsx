@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import type { Category, MerchandiseReport, OptionSales } from '@serva/core';
+import { formatMoney, type Category, type MerchandiseReport, type OptionSales } from '@serva/core';
 import {
   Alert,
   Badge,
+  BarChart,
+  Card,
   DataTable,
   formatQuantity,
   Money,
+  PageHeader,
+  ReportsIcon,
   SegmentedControl,
   Select,
   StatTile,
   TextField,
+  useDigits,
   type DataColumn,
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
@@ -95,6 +100,7 @@ export function MerchandisePage() {
   }, [period, idle, department]);
   useEffect(load, [load]);
 
+  const digits = useDigits();
   const base = data?.baseCurrency ?? 'SYP';
   const optionColumns: DataColumn<OptionSales>[] = [
     { key: 'value', header: 'القيمة', cell: (r) => <span className="font-semibold">{r.value}</span> },
@@ -167,14 +173,14 @@ export function MerchandisePage() {
     <AppShell>
       <title>حركة الأصناف · Serva POS</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold text-ink">حركة الأصناف</h1>
-          <p className="text-ink-muted">
-            ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف.
-          </p>
-        </div>
+        <PageHeader
+          className="print:hidden"
+          icon={<ReportsIcon />}
+          title="حركة الأصناف"
+          description="ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف."
+        />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <div className="flex flex-wrap gap-4">
+        <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">
           {departments.length > 0 ? (
             <Select
               label="القسم"
@@ -208,7 +214,7 @@ export function MerchandisePage() {
               label: IDLE[value],
             }))}
           />
-        </div>
+        </Card>
         <div className="grid gap-4 sm:grid-cols-2">
           <StatTile
             label="قطع راكدة"
@@ -222,6 +228,26 @@ export function MerchandisePage() {
             />
           ) : null}
         </div>
+
+        {data && data.byDepartment.length > 1 ? (
+          <Card className="flex flex-col gap-3">
+            <h2 className="text-lg font-semibold text-ink">المبيعات حسب القسم</h2>
+            <BarChart
+              label="صافي المبيعات حسب القسم بعد المرتجع"
+              orientation="horizontal"
+              labels={data.byDepartment.map((d) => d.name)}
+              series={[
+                {
+                  key: 'net',
+                  label: 'الصافي',
+                  values: data.byDepartment.map((d) => d.totalMinor - d.returnedMinor),
+                },
+              ]}
+              formatValue={(value) => formatMoney(value, base, { digits })}
+              labelHeader="القسم"
+            />
+          </Card>
+        ) : null}
 
         {data && data.byDepartment.length > 0 ? (
           <DataTable

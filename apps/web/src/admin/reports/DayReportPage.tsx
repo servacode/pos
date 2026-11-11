@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
-import type { CurrencyCode, MeResponse } from '@serva/core';
+import { formatMoney, type CurrencyCode, type MeResponse } from '@serva/core';
 import {
+  BarChart,
   Button,
   Card,
   cn,
@@ -10,6 +11,7 @@ import {
   formatQuantity,
   Money,
   PrintIcon,
+  ShareBar,
   SalesIcon,
   StatTile,
   useDigits,
@@ -27,6 +29,7 @@ import {
   DayField,
   defaultBranch,
   PageHead,
+  ReportFilters,
   ReportError,
   ReportLoading,
   ReportScreen,
@@ -155,6 +158,17 @@ function DayReportBody({ report }: { report: DayReport }) {
   const cashierInvoices = report.byCashier.reduce((sum, row) => sum + row.invoiceCount, 0);
   const cashierTotal = report.byCashier.reduce((sum, row) => sum + row.totalMinor, 0);
 
+  const methodParts = report.byMethod
+    .filter((row) => row.baseAmountMinor > 0)
+    .sort((a, b) => b.baseAmountMinor - a.baseAmountMinor)
+    .map((row) => ({
+      key: `${row.method}-${row.currency}`,
+      label: methodLabel(row.method, row.currency, base),
+      value: row.baseAmountMinor,
+    }));
+
+  const topChart = report.topProducts.slice(0, 8);
+
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -179,6 +193,11 @@ function DayReportBody({ report }: { report: DayReport }) {
           <Breakdown report={report} />
         </Section>
         <Section title="حسب طريقة الدفع">
+          <ShareBar
+            label="حصة طرق الدفع من المبيعات بالعملة الأساسية"
+            parts={methodParts}
+            formatValue={(value) => formatMoney(value, base, { digits })}
+          />
           <DataTable
             caption="المبيعات حسب طريقة الدفع والعملة"
             columns={withTotals(methodColumns(base), {
@@ -244,6 +263,16 @@ function DayReportBody({ report }: { report: DayReport }) {
             />
           </Section>
           <Section title="الأكثر مبيعاً">
+            {topChart.length > 1 ? (
+              <BarChart
+                label="الأصناف الأكثر مبيعاً"
+                orientation="horizontal"
+                labels={topChart.map((row) => row.name)}
+                series={[{ key: 'total', label: 'المبيعات', values: topChart.map((row) => row.totalMinor) }]}
+                formatValue={(value) => formatMoney(value, base, { digits })}
+                labelHeader="الصنف"
+              />
+            ) : null}
             <DataTable
               caption="الأصناف الأكثر مبيعاً"
               columns={[
@@ -332,7 +361,7 @@ export function DayReportPage() {
   return (
     <ReportScreen me={me} access={DAY_REPORT_ACCESS} title="مبيعات اليوم">
       <PageHead
-        crumbs={['البيع', 'المبيعات']}
+        icon={<SalesIcon />}
         title={isToday ? 'مبيعات اليوم' : 'مبيعات يوم'}
         subtitle={title}
         actions={
@@ -342,10 +371,10 @@ export function DayReportPage() {
         }
       />
 
-      <Card className="flex flex-wrap items-end gap-4 print:hidden">
+      <ReportFilters>
         <BranchSelect me={me} value={branchId} onChange={setBranchId} />
         <DayField label="اليوم" value={date} max={today} onChange={setDate} />
-      </Card>
+      </ReportFilters>
 
       {loading ? <ReportLoading label="نحمّل مبيعات اليوم…" /> : null}
       {error ? <ReportError message={error} onRetry={retry} /> : null}
