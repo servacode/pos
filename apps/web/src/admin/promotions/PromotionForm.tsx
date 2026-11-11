@@ -1,6 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { Category, Promotion, PromotionInput, PromotionKind, PromotionScope } from '@serva/core';
-import { Alert, Button, SearchField, SegmentedControl, Select, TextField, ToggleChip } from '@serva/ui';
+import {
+  AddIcon,
+  Alert,
+  Button,
+  CheckIcon,
+  ChoiceCard,
+  FieldError,
+  GiftIcon,
+  PercentIcon,
+  SearchField,
+  Select,
+  TextField,
+  ToggleChip,
+  cn,
+  CONTROL_HEIGHT,
+  useDensity,
+} from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { listCategories, listProducts } from '../catalog/api';
 import { categoryTree, categoryOptionLabel } from '../catalog/catalog';
@@ -61,6 +77,7 @@ export function PromotionForm({
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const density = useDensity();
 
   useEffect(() => {
     listCategories()
@@ -131,163 +148,239 @@ export function PromotionForm({
   return (
     <form
       aria-label={promotion ? 'عدّل العرض' : 'عرض جديد'}
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+      // Fills the sheet's body; the actions stay at its foot while the fields scroll under them.
+      className="flex flex-1 flex-col gap-6"
       onSubmit={(e) => {
         e.preventDefault();
         void save();
       }}
     >
       {error ? <Alert tone="error">{error}</Alert> : null}
-      <TextField
-        label="اسم العرض كما يُطبع على الإيصال"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        error={fields.name}
-      />
-      <SegmentedControl
-        label="نوع العرض"
-        value={kind}
-        onValueChange={setKind}
-        options={[
-          { value: 'percent', label: 'خصم بنسبة' },
-          { value: 'buy_get', label: 'اشترِ واحصل مجاناً' },
-        ]}
-      />
-      {kind === 'percent' ? (
+
+      <FormSection title="ماذا يعطي">
         <TextField
-          label="نسبة الخصم %"
-          inputMode="decimal"
-          dir="ltr"
-          value={percent}
-          onChange={(e) => setPercent(e.target.value)}
-          error={fields.percentBp}
+          label="اسم العرض كما يُطبع على الإيصال"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          error={fields.name}
         />
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="mb-1.5 text-sm font-semibold text-ink-muted">نوع العرض</legend>
+          <div className="grid gap-3">
+            <ChoiceCard
+              name="promotion-kind"
+              title="خصم بنسبة"
+              leading={<PercentIcon />}
+              checked={kind === 'percent'}
+              onChange={() => setKind('percent')}
+            />
+            <ChoiceCard
+              name="promotion-kind"
+              title="اشترِ واحصل مجاناً"
+              leading={<GiftIcon />}
+              checked={kind === 'buy_get'}
+              onChange={() => setKind('buy_get')}
+            />
+          </div>
+        </fieldset>
+        {kind === 'percent' ? (
           <TextField
-            label="يشتري الزبون (قطعة)"
-            inputMode="numeric"
+            label="نسبة الخصم %"
+            inputMode="decimal"
             dir="ltr"
-            value={buy}
-            onChange={(e) => setBuy(e.target.value)}
-            error={fields.buyQty}
+            value={percent}
+            onChange={(e) => setPercent(e.target.value)}
+            error={fields.percentBp}
+            inputClassName="num"
+            endAdornment={
+              <span aria-hidden="true" className="me-3 text-sm font-semibold">
+                %
+              </span>
+            }
+            className="sm:max-w-48"
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <TextField
+              label="يشتري الزبون (قطعة)"
+              inputMode="numeric"
+              dir="ltr"
+              value={buy}
+              onChange={(e) => setBuy(e.target.value)}
+              error={fields.buyQty}
+              inputClassName="num"
+            />
+            <TextField
+              label="ويأخذ مجاناً (قطعة)"
+              inputMode="numeric"
+              dir="ltr"
+              value={get}
+              onChange={(e) => setGet(e.target.value)}
+              error={fields.getQty}
+              inputClassName="num"
+            />
+          </div>
+        )}
+      </FormSection>
+
+      <FormSection title="على ماذا ينطبق">
+        <Select label="على ماذا" value={scope} onChange={(e) => setScope(e.target.value as PromotionScope)}>
+          <option value="all">كل المنتجات</option>
+          <option value="categories">تصنيفات محددة</option>
+          <option value="products">منتجات محددة</option>
+        </Select>
+        {scope === 'categories' ? (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1.5 text-sm font-semibold text-ink-muted">التصنيفات (وما تحتها)</legend>
+            <div className="flex flex-wrap gap-2">
+              {categoryTree(categories).map((node) => (
+                <ToggleChip
+                  key={node.category.id}
+                  label={categoryOptionLabel(node)}
+                  checked={categoryIds.includes(node.category.id)}
+                  onChange={() => setCategoryIds((ids) => toggle(ids, node.category.id))}
+                />
+              ))}
+            </div>
+            {fields.categoryIds ? <FieldError>{fields.categoryIds}</FieldError> : null}
+          </fieldset>
+        ) : null}
+        {scope === 'products' ? (
+          <div className="flex flex-col gap-3">
+            <SearchField label="ابحث عن منتج لإضافته" value={search} onValueChange={setSearch} />
+            {found.length > 0 ? (
+              <ul
+                aria-label="نتائج البحث"
+                className="flex flex-col overflow-hidden rounded-control border border-line bg-surface shadow-e2"
+              >
+                {found.map((p) => {
+                  const added = productIds.includes(p.id);
+                  return (
+                    <li key={p.id} className="border-b border-line last:border-0">
+                      <button
+                        type="button"
+                        onClick={() => setProductIds((ids) => (ids.includes(p.id) ? ids : [...ids, p.id]))}
+                        className={cn(
+                          'flex w-full items-center gap-3 px-3 text-start text-[0.9375rem] text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted',
+                          CONTROL_HEIGHT[density],
+                        )}
+                      >
+                        <span className="min-w-0 flex-1 truncate">
+                          <span className="sr-only">أضف </span>
+                          {p.nameAr}
+                          {added ? <span className="sr-only">، مضاف</span> : null}
+                        </span>
+                        {added ? (
+                          <CheckIcon size={16} className="text-brand-ink" />
+                        ) : (
+                          <AddIcon size={16} className="text-ink-subtle" />
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {productIds.length > 0 ? (
+              <ul aria-label="منتجات العرض" className="flex flex-wrap gap-2">
+                {productIds.map((id) => (
+                  <li key={id}>
+                    <ToggleChip
+                      label={names.get(id) ?? 'منتج'}
+                      checked
+                      onChange={() => setProductIds((ids) => ids.filter((x) => x !== id))}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-ink-subtle">لم تختر منتجات بعد: ابحث بالاسم وأضفها.</p>
+            )}
+            {fields.productIds ? <FieldError>{fields.productIds}</FieldError> : null}
+          </div>
+        ) : null}
+      </FormSection>
+
+      <FormSection title="متى يعمل" description="اترك ما لا تحتاجه فارغاً: يعمل كل يوم وطوال الوقت.">
+        <div className="grid grid-cols-2 gap-3">
+          <TextField
+            label="من تاريخ (اختياري)"
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
           />
           <TextField
-            label="ويأخذ مجاناً (قطعة)"
-            inputMode="numeric"
-            dir="ltr"
-            value={get}
-            onChange={(e) => setGet(e.target.value)}
-            error={fields.getQty}
+            label="حتى تاريخ (اختياري)"
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            error={fields.endsAt}
           />
         </div>
-      )}
-      <Select label="على ماذا" value={scope} onChange={(e) => setScope(e.target.value as PromotionScope)}>
-        <option value="all">كل المنتجات</option>
-        <option value="categories">تصنيفات محددة</option>
-        <option value="products">منتجات محددة</option>
-      </Select>
-      {scope === 'categories' ? (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-2 text-sm font-semibold text-ink">التصنيفات (وما تحتها)</legend>
+        <fieldset>
+          <legend className="mb-2 text-sm font-semibold text-ink-muted">
+            الأيام (بلا اختيار: كل الأيام)
+          </legend>
           <div className="flex flex-wrap gap-2">
-            {categoryTree(categories).map((node) => (
+            {WEEKDAY_NAMES.map((day, i) => (
               <ToggleChip
-                key={node.category.id}
-                label={categoryOptionLabel(node)}
-                checked={categoryIds.includes(node.category.id)}
-                onChange={() => setCategoryIds((ids) => toggle(ids, node.category.id))}
+                key={day}
+                label={day}
+                checked={days.includes(i)}
+                onChange={() => setDays((d) => toggle(d, i))}
               />
             ))}
           </div>
-          {fields.categoryIds ? <p className="text-sm text-danger-ink">{fields.categoryIds}</p> : null}
         </fieldset>
-      ) : null}
-      {scope === 'products' ? (
-        <div className="flex flex-col gap-2">
-          <SearchField label="ابحث عن منتج لإضافته" value={search} onValueChange={setSearch} />
-          {found.length > 0 ? (
-            <ul aria-label="نتائج البحث" className="flex flex-wrap gap-2">
-              {found.map((p) => (
-                <li key={p.id}>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setProductIds((ids) => (ids.includes(p.id) ? ids : [...ids, p.id]))}
-                  >
-                    + {p.nameAr}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <ul aria-label="منتجات العرض" className="flex flex-wrap gap-2">
-            {productIds.map((id) => (
-              <li key={id}>
-                <ToggleChip
-                  label={names.get(id) ?? 'منتج'}
-                  checked
-                  onChange={() => setProductIds((ids) => ids.filter((x) => x !== id))}
-                />
-              </li>
-            ))}
-          </ul>
-          {fields.productIds ? <p className="text-sm text-danger-ink">{fields.productIds}</p> : null}
+        <div className="grid grid-cols-2 gap-3">
+          <TextField
+            label="من الساعة (اختياري)"
+            type="time"
+            dir="ltr"
+            value={fromTime}
+            onChange={(e) => setFromTime(e.target.value)}
+          />
+          <TextField
+            label="حتى الساعة"
+            type="time"
+            dir="ltr"
+            value={toTime}
+            onChange={(e) => setToTime(e.target.value)}
+            error={fields.toTime}
+          />
         </div>
-      ) : null}
-      <div className="grid gap-4 md:grid-cols-2">
-        <TextField
-          label="من تاريخ (اختياري)"
-          type="date"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-        />
-        <TextField
-          label="حتى تاريخ (اختياري)"
-          type="date"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          error={fields.endsAt}
-        />
-      </div>
-      <fieldset>
-        <legend className="mb-2 text-sm font-semibold text-ink">الأيام (بلا اختيار: كل الأيام)</legend>
-        <div className="flex flex-wrap gap-2">
-          {WEEKDAY_NAMES.map((day, i) => (
-            <ToggleChip
-              key={day}
-              label={day}
-              checked={days.includes(i)}
-              onChange={() => setDays((d) => toggle(d, i))}
-            />
-          ))}
-        </div>
-      </fieldset>
-      <div className="grid gap-4 md:grid-cols-2">
-        <TextField
-          label="من الساعة (اختياري)"
-          type="time"
-          dir="ltr"
-          value={fromTime}
-          onChange={(e) => setFromTime(e.target.value)}
-        />
-        <TextField
-          label="حتى الساعة"
-          type="time"
-          dir="ltr"
-          value={toTime}
-          onChange={(e) => setToTime(e.target.value)}
-          error={fields.toTime}
-        />
-      </div>
-      <div className="flex gap-3">
-        <Button type="submit" loading={saving}>
-          احفظ
-        </Button>
+      </FormSection>
+
+      {/* The sheet's foot: pinned while the fields scroll, flush with the sheet's edges. */}
+      <div className="sticky -bottom-5 z-10 -mx-6 mt-auto -mb-5 flex flex-wrap justify-end gap-3 border-t border-line bg-surface px-6 py-4">
         <Button variant="secondary" onClick={onCancel}>
           إلغاء
         </Button>
+        <Button type="submit" loading={saving}>
+          احفظ
+        </Button>
       </div>
     </form>
+  );
+}
+
+/** A titled group of the form's fields, with a hairline above every group but the first. */
+function FormSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-4 border-line not-first-of-type:border-t not-first-of-type:pt-6">
+      <div className="flex flex-col gap-0.5">
+        <h3 className="text-base font-semibold text-ink">{title}</h3>
+        {description ? <p className="text-sm text-ink-muted">{description}</p> : null}
+      </div>
+      {children}
+    </section>
   );
 }

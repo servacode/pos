@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ProductDetail } from '@serva/core';
-import { Button, TextField } from '@serva/ui';
+import { AddIcon, Button, GridIcon, IconChip, TextField } from '@serva/ui';
 import { moneyOf, qtyOf } from './api';
 
 export interface GridLine {
@@ -72,21 +72,36 @@ export function SizeGrid({
 
   return (
     <div
-      className="flex flex-col gap-3 rounded-control border border-line p-3"
+      className="flex flex-col gap-4 rounded-card border border-line bg-surface-muted/40 p-4"
       role="group"
       aria-label={`جدول ${product.nameAr}`}
     >
-      <p className="font-semibold text-ink">{product.nameAr}: اكتب كمية كل قطعة</p>
-      <div className="overflow-x-auto">
-        <table className="border-separate border-spacing-1">
+      <div className="flex items-center gap-3">
+        <IconChip>
+          <GridIcon />
+        </IconChip>
+        <div className="flex min-w-0 flex-col">
+          <p className="truncate font-semibold text-ink">{product.nameAr}</p>
+          <p className="text-sm text-ink-muted">اكتب كمية كل قطعة، ثم كلفة القطعة الواحدة.</p>
+        </div>
+      </div>
+      <div className="w-fit max-w-full overflow-x-auto rounded-control border border-line bg-surface">
+        <table className="border-collapse">
           <thead>
-            <tr>
-              <th className="text-start text-sm text-ink-muted">
+            <tr className="border-b border-line bg-surface-muted">
+              <th
+                scope="col"
+                className="sticky start-0 z-10 bg-surface-muted px-3 py-2 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle"
+              >
                 {grid.rowName}
-                {grid.colName ? ` \\ ${grid.colName}` : ''}
+                {grid.colName ? ` / ${grid.colName}` : ''}
               </th>
               {grid.cols.map((col) => (
-                <th key={col || '_'} scope="col" className="px-1 text-sm font-semibold">
+                <th
+                  key={col || '_'}
+                  scope="col"
+                  className="px-1.5 py-2 text-center text-xs font-semibold whitespace-nowrap text-ink-muted"
+                >
                   {col || 'الكمية'}
                 </th>
               ))}
@@ -94,25 +109,31 @@ export function SizeGrid({
           </thead>
           <tbody>
             {grid.rows.map((row) => (
-              <tr key={row}>
-                <th scope="row" className="pe-2 text-start font-semibold">
+              <tr key={row} className="border-b border-line last:border-0">
+                <th
+                  scope="row"
+                  className="sticky start-0 z-10 bg-surface px-3 py-1.5 text-start text-sm font-semibold whitespace-nowrap text-ink"
+                >
                   {row}
                 </th>
                 {grid.cols.map((col) => {
                   const v = grid.cell(row, col);
                   return (
-                    <td key={col || '_'}>
+                    <td key={col || '_'} className="px-1.5 py-1.5">
                       {v ? (
-                        <input
-                          aria-label={`كمية ${v.label ?? row}`}
+                        <TextField
+                          label={`كمية ${v.label ?? row}`}
+                          hideLabel
                           inputMode="decimal"
-                          dir="ltr"
                           value={qty[v.id] ?? ''}
                           onChange={(e) => setQty((all) => ({ ...all, [v.id]: e.target.value.slice(0, 8) }))}
-                          className="num h-11 w-16 rounded-control border border-line bg-surface text-center"
+                          className="relative w-18"
+                          inputClassName="num text-center"
                         />
                       ) : (
-                        <span className="block w-16 text-center text-ink-muted">—</span>
+                        <span aria-hidden="true" className="block w-18 text-center text-ink-subtle">
+                          —
+                        </span>
                       )}
                     </td>
                   );
@@ -129,9 +150,11 @@ export function SizeGrid({
           inputMode="decimal"
           value={unit}
           onChange={(e) => setUnit(e.target.value.slice(0, 14))}
-          className="w-44"
+          className="w-full sm:w-48"
+          endAdornment={<span className="me-3 text-sm">ل.س</span>}
         />
         <Button
+          icon={<AddIcon />}
           disabled={pieces.length === 0 || !unitOk}
           onClick={() =>
             onAdd(

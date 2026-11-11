@@ -5,11 +5,35 @@ import type {
   SupplierReturnInput,
   SupplierReturnRow,
 } from '@serva/core';
-import { Alert, Button, DataTable, Money, Select, TextField, type DataColumn } from '@serva/ui';
+import {
+  Alert,
+  Badge,
+  BookIcon,
+  Button,
+  Card,
+  CardHeader,
+  CashIcon,
+  ChequeIcon,
+  ChoiceCard,
+  DataTable,
+  EmptyState,
+  formatQuantity,
+  Money,
+  PageHeader,
+  RadioGroup,
+  Select,
+  TextField,
+  UndoIcon,
+  useDigits,
+  type BadgeTone,
+  type DataColumn,
+  type Icon,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, ApiError, errorMessage } from '../../lib/api';
 import { listSuppliers, moneyOf, qtyOf, today } from './api';
+import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } from './parts';
 import { VariantPicker } from './VariantPicker';
 
 const listReturns = () => apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true });
@@ -22,6 +46,16 @@ const REFUND_TEXT: Record<SupplierReturnRow['refund'], string> = {
   bank: 'تحويل بنكي',
 };
 
+/** Each way the supplier pays back, as a choice and as a state in the list. */
+const REFUND_CHOICE: Record<
+  SupplierReturnRow['refund'],
+  { title: string; hint: string; icon: Icon; tone: BadgeTone }
+> = {
+  credit: { title: 'من رصيده عندي', hint: 'ينزل مما تدين له', icon: BookIcon, tone: 'neutral' },
+  cash: { title: 'نقداً', hint: 'تدخل المصاري الخزنة', icon: CashIcon, tone: 'success' },
+  bank: { title: 'تحويل بنكي', hint: 'تدخل حساب البنك', icon: ChequeIcon, tone: 'info' },
+};
+
 interface Line {
   variantId: string;
   name: string;
@@ -30,6 +64,9 @@ interface Line {
   amount: string;
 }
 
+/** The grid of a return line: the item, its quantity, what the supplier credits and the bin. */
+const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_7rem_11rem_2.5rem]';
+
 /**
  * «مرتجع إلى المورد» (09 › purchase returns): pieces sent back to their supplier, out of the branch
  * at their average cost. The supplier credits them off what the store owes it, or pays back in cash
@@ -37,6 +74,7 @@ interface Line {
  */
 export function SupplierReturnsPage() {
   const me = useMe();
+  const digits = useDigits();
   const branches = me.branches;
   const base = me.settings.baseCurrency;
   const [suppliers, setSuppliers] = useState<SupplierListResponse | null>(null);
@@ -73,6 +111,7 @@ export function SupplierReturnsPage() {
   }));
   const ready =
     supplierId && lines.length > 0 && parsed.every((p) => p.qty !== null && p.qty > 0 && p.amount !== null);
+  const pieces = parsed.reduce<number>((sum, p) => sum + (p.qty ?? 0), 0);
 
   async function save() {
     if (!ready) return;
@@ -110,6 +149,7 @@ export function SupplierReturnsPage() {
   const columns: DataColumn<SupplierReturnRow>[] = [
     {
       key: 'number',
+      className: 'whitespace-nowrap',
       header: 'الرقم',
       cell: (r) => (
         <bdi dir="ltr" className="num font-semibold">
@@ -117,20 +157,29 @@ export function SupplierReturnsPage() {
         </bdi>
       ),
     },
-    { key: 'date', header: 'التاريخ', cell: (r) => <span className="num">{r.date}</span> },
-    { key: 'supplier', header: 'المورد', cell: (r) => r.supplierName },
-    { key: 'refund', header: 'الاسترداد', cell: (r) => REFUND_TEXT[r.refund] },
+    {
+      key: 'date',
+      className: 'whitespace-nowrap',
+      header: 'التاريخ',
+      cell: (r) => <span className="num text-ink-muted">{r.date}</span>,
+    },
+    { key: 'supplier', className: 'whitespace-nowrap', header: 'المورد', cell: (r) => r.supplierName },
+    {
+      key: 'refund',
+      header: 'الاسترداد',
+      cell: (r) => <Badge tone={REFUND_CHOICE[r.refund].tone}>{REFUND_TEXT[r.refund]}</Badge>,
+    },
     {
       key: 'pieces',
       header: 'القطع',
       numeric: true,
-      cell: (r) => <span className="num">{r.pieces / 1000}</span>,
+      cell: (r) => <span className="num">{formatQuantity(r.pieces, digits)}</span>,
     },
     {
       key: 'amount',
       header: 'المبلغ',
       numeric: true,
-      cell: (r) => <Money minor={r.amountMinor} currency={base} />,
+      cell: (r) => <Money minor={r.amountMinor} currency={base} className="font-semibold" />,
     },
   ];
 
@@ -138,129 +187,210 @@ export function SupplierReturnsPage() {
   return (
     <AppShell>
       <title>مرتجع إلى المورد · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">مرتجع إلى المورد</h1>
-        <section
-          aria-label="مرتجع جديد"
-          className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
-        >
-          {error ? <Alert tone="error">{error}</Alert> : null}
-          {done ? (
-            <Alert tone="success">
-              سُجّل المرتجع {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
-              {done.refund === 'credit' ? 'نزلت من رصيد المورد.' : 'استرددتها منه.'} خرجت القطع من المخزون.
-            </Alert>
-          ) : null}
-          {suppliers && active.length === 0 ? (
-            <Alert tone="info">لا موردين بعد. أضف المورد من «المشتريات».</Alert>
-          ) : null}
-          <div className="grid gap-4 md:grid-cols-3">
-            <Select
-              label="المورد"
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              error={fields.supplierId}
-            >
-              {active.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-            {branches.length > 1 ? (
-              <Select label="من فرع" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </Select>
-            ) : null}
-            <Select
-              label="الاسترداد"
-              value={refund}
-              onChange={(e) => setRefund(e.target.value as SupplierReturnRow['refund'])}
-            >
-              <option value="credit">من رصيده عندي</option>
-              <option value="cash">نقداً</option>
-              <option value="bank">تحويل بنكي</option>
-            </Select>
-            <TextField
-              label="رقم إشعار المورد (اختياري)"
-              dir="ltr"
-              value={reference}
-              onChange={(e) => setReference(e.target.value.slice(0, 64))}
+      <div className="flex w-full flex-col gap-6">
+        <PageHeader
+          title="مرتجع إلى المورد"
+          description="قطع ترجع لمورّدها: تخرج من المخزون بكلفتها، وتنزل من رصيده أو تستردّ ثمنها."
+        />
+        <section aria-label="مرتجع جديد">
+          <Card>
+            <CardHeader
+              icon={<UndoIcon />}
+              title="مرتجع جديد"
+              description="اختر المورد وطريقة الاسترداد، ثم أضف القطع الراجعة."
             />
-            <TextField
-              label="السبب (اختياري)"
-              placeholder="عيب خياطة، مقاس خطأ…"
-              value={note}
-              onChange={(e) => setNote(e.target.value.slice(0, 200))}
-            />
-          </div>
-          <VariantPicker
-            onPick={(v) =>
-              setLines((list) =>
-                list.some((l) => l.variantId === v.variantId)
-                  ? list
-                  : [...list, { ...v, qty: '', amount: '' }],
-              )
-            }
-            onPickGrid={(picked) =>
-              setLines((list) => [
-                ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
-                ...picked.map((p) => ({ variantId: p.variantId, name: p.name, qty: p.qty, amount: '' })),
-              ])
+            <div className="flex flex-col gap-5">
+              {error ? <Alert tone="error">{error}</Alert> : null}
+              {done ? (
+                <Alert tone="success">
+                  سُجّل المرتجع {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
+                  {done.refund === 'credit' ? 'نزلت من رصيد المورد.' : 'استرددتها منه.'} خرجت القطع من
+                  المخزون.
+                </Alert>
+              ) : null}
+              {suppliers && active.length === 0 ? (
+                <Alert tone="info">لا موردين بعد. أضف المورد من «المشتريات».</Alert>
+              ) : null}
+              {/* The way the pieces go: out of a branch, back to the supplier. */}
+              <div
+                className={
+                  branches.length > 1
+                    ? 'grid grid-cols-1 items-start gap-x-3 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+                    : 'grid grid-cols-1 gap-4 md:grid-cols-2'
+                }
+              >
+                {branches.length > 1 ? (
+                  <>
+                    <Select label="من فرع" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </Select>
+                    <WayArrow />
+                  </>
+                ) : null}
+                <Select
+                  label="المورد"
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                  error={fields.supplierId}
+                >
+                  {active.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <RadioGroup legend="الاسترداد">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  {(Object.keys(REFUND_CHOICE) as SupplierReturnRow['refund'][]).map((r) => {
+                    const RefundIcon = REFUND_CHOICE[r].icon;
+                    return (
+                      <ChoiceCard
+                        key={r}
+                        name="supplier-return-refund"
+                        value={r}
+                        checked={refund === r}
+                        onChange={() => setRefund(r)}
+                        title={REFUND_CHOICE[r].title}
+                        description={REFUND_CHOICE[r].hint}
+                        leading={<RefundIcon />}
+                      />
+                    );
+                  })}
+                </div>
+              </RadioGroup>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <TextField
+                  label="رقم إشعار المورد (اختياري)"
+                  dir="ltr"
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value.slice(0, 64))}
+                />
+                <TextField
+                  label="السبب (اختياري)"
+                  placeholder="عيب خياطة، مقاس خطأ…"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value.slice(0, 200))}
+                />
+              </div>
+              <VariantPicker
+                onPick={(v) =>
+                  setLines((list) =>
+                    list.some((l) => l.variantId === v.variantId)
+                      ? list
+                      : [...list, { ...v, qty: '', amount: '' }],
+                  )
+                }
+                onPickGrid={(picked) =>
+                  setLines((list) => [
+                    ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
+                    ...picked.map((p) => ({ variantId: p.variantId, name: p.name, qty: p.qty, amount: '' })),
+                  ])
+                }
+              />
+              {lines.length > 0 ? (
+                <LinesTable
+                  label="أصناف المرتجع"
+                  head={
+                    <LinesHead className={LINE_COLUMNS}>
+                      <span>الصنف</span>
+                      <span>الكمية</span>
+                      <span>المبلغ (فارغ: بكلفتها)</span>
+                      <span />
+                    </LinesHead>
+                  }
+                >
+                  {lines.map((l, i) => (
+                    <li
+                      key={l.variantId}
+                      className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 px-4 py-3 md:items-center ${LINE_COLUMNS}`}
+                    >
+                      <span className="col-span-2 min-w-0 truncate font-semibold text-ink md:col-span-1">
+                        {l.name}
+                      </span>
+                      <div className="col-start-1 row-start-2 md:col-start-auto md:row-start-auto">
+                        <Caption>الكمية</Caption>
+                        <TextField
+                          label={`كمية ${l.name}`}
+                          hideLabel
+                          dir="ltr"
+                          inputMode="decimal"
+                          value={l.qty}
+                          onChange={(e) =>
+                            setLines((all) =>
+                              all.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)),
+                            )
+                          }
+                          error={fields[`lines.${i}.qty`]}
+                          inputClassName="num"
+                        />
+                      </div>
+                      <div className="col-span-2 col-start-2 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
+                        <Caption>المبلغ (فارغ: بكلفتها)</Caption>
+                        <TextField
+                          label={`مبلغ ${l.name}`}
+                          hideLabel
+                          placeholder="بكلفتها"
+                          dir="ltr"
+                          inputMode="decimal"
+                          value={l.amount}
+                          onChange={(e) =>
+                            setLines((all) =>
+                              all.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)),
+                            )
+                          }
+                          inputClassName="num"
+                        />
+                      </div>
+                      <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto">
+                        <RemoveLine
+                          name={l.name}
+                          onRemove={() => setLines((all) => all.filter((_, j) => j !== i))}
+                        />
+                      </div>
+                    </li>
+                  ))}
+                </LinesTable>
+              ) : null}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+                <p className="text-sm text-ink-muted">
+                  {lines.length > 0 ? (
+                    <>
+                      الأصناف: <span className="num font-semibold text-ink">{lines.length}</span> · القطع:{' '}
+                      <span className="num font-semibold text-ink">{formatQuantity(pieces, digits)}</span>
+                    </>
+                  ) : (
+                    'ابحث عن القطعة الراجعة وأضفها بكميتها.'
+                  )}
+                </p>
+                <Button icon={<UndoIcon />} disabled={!ready} loading={saving} onClick={() => void save()}>
+                  سجّل المرتجع
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </section>
+        <section aria-label="المرتجعات السابقة" className="flex flex-col gap-3">
+          <SectionHead title="المرتجعات إلى الموردين" description="الأحدث أولاً." />
+          <DataTable
+            caption="المرتجعات إلى الموردين"
+            columns={columns}
+            rows={items ?? []}
+            rowKey={(r) => r.id}
+            loading={!items && !error}
+            empty={
+              <EmptyState
+                icon={UndoIcon}
+                title="لا مرتجعات بعد."
+                description="كل مرتجع تسجّله يظهر هنا بمبلغه وطريقة استرداده."
+              />
             }
           />
-          {lines.length > 0 ? (
-            <ul aria-label="أصناف المرتجع" className="flex flex-col gap-2">
-              {lines.map((l, i) => (
-                <li key={l.variantId} className="flex flex-wrap items-end gap-3">
-                  <span className="flex-1 pb-3 font-semibold">{l.name}</span>
-                  <TextField
-                    label={`كمية ${l.name}`}
-                    dir="ltr"
-                    inputMode="decimal"
-                    value={l.qty}
-                    onChange={(e) =>
-                      setLines((all) => all.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))
-                    }
-                    error={fields[`lines.${i}.qty`]}
-                    className="w-32"
-                  />
-                  <TextField
-                    label={`مبلغ ${l.name}`}
-                    hint="فارغ: بكلفتها"
-                    dir="ltr"
-                    inputMode="decimal"
-                    value={l.amount}
-                    onChange={(e) =>
-                      setLines((all) => all.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))
-                    }
-                    className="w-40"
-                  />
-                  <Button variant="ghost" onClick={() => setLines((all) => all.filter((_, j) => j !== i))}>
-                    احذف
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <div>
-            <Button disabled={!ready} loading={saving} onClick={() => void save()}>
-              سجّل المرتجع
-            </Button>
-          </div>
         </section>
-        <DataTable
-          caption="المرتجعات إلى الموردين"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(r) => r.id}
-          loading={!items && !error}
-          empty="لا مرتجعات بعد."
-        />
       </div>
     </AppShell>
   );

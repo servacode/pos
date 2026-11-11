@@ -1,13 +1,22 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type { Cheque, ChequeStatus, CurrencyCode } from '@serva/core';
 import {
   Alert,
+  Avatar,
   Badge,
   Button,
+  CheckIcon,
+  ChequeIcon,
+  ClockIcon,
   DataTable,
+  EmptyState,
   Money,
+  PageHeader,
   SegmentedControl,
+  Skeleton,
   StatTile,
+  UndoIcon,
+  type BadgeTone,
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
@@ -19,6 +28,20 @@ const STATUS_TEXT: Record<ChequeStatus, string> = {
   pending: 'تحت التحصيل',
   cleared: 'حُصّل',
   bounced: 'مرتجع',
+};
+
+const STATUS_TONE: Record<ChequeStatus, BadgeTone> = {
+  pending: 'warning',
+  cleared: 'success',
+  bounced: 'danger',
+};
+
+/** What an empty list says, per filter. */
+const EMPTY_TITLE: Record<ChequeStatus | 'all', string> = {
+  pending: 'لا شيكات تحت التحصيل.',
+  cleared: 'لا شيكات محصّلة.',
+  bounced: 'لا شيكات مرتجعة.',
+  all: 'لا شيكات بعد.',
 };
 
 /** Today on the store's clock, «2026-11-03» */
@@ -72,50 +95,97 @@ export function ChequesPage() {
   const pendingTotal = (items ?? [])
     .filter((c) => c.status === 'pending')
     .reduce((sum, c) => sum + c.amountMinor, 0);
+  // A number of the tiles: a placeholder while the list loads, a dash when it could not.
+  const kpi = (value: ReactNode) => (items ? value : error ? '—' : <Skeleton className="h-9 w-24" />);
 
+  // The status: its badge, and the day it was marked under it.
+  const status = (c: Cheque) => (
+    <span className="flex flex-col items-start gap-0.5">
+      <Badge tone={STATUS_TONE[c.status]}>{STATUS_TEXT[c.status]}</Badge>
+      {c.actionDate ? <bdi className="num ps-1 text-xs text-ink-subtle">{c.actionDate}</bdi> : null}
+    </span>
+  );
+
+  // On a phone the cheque's own cell carries its customer and status, so the amount and the
+  // actions stay in view; from 640 px they have their own columns.
   const columns: DataColumn<Cheque>[] = [
-    { key: 'date', header: 'التاريخ', cell: (c) => <bdi className="num">{c.date}</bdi> },
-    { key: 'customer', header: 'الزبون', cell: (c) => c.customerName ?? '—' },
-    { key: 'reference', header: 'رقم الشيك', cell: (c) => c.reference ?? '—' },
     {
-      key: 'doc',
-      header: 'المستند',
+      key: 'reference',
+      header: 'رقم الشيك',
       cell: (c) => (
-        <bdi dir="ltr" className="num text-sm">
-          {c.documentNumber}
-        </bdi>
+        <div className="flex flex-col items-start gap-1 py-2.5">
+          {c.reference ? (
+            <bdi dir="ltr" className="num font-semibold whitespace-nowrap">
+              {c.reference}
+            </bdi>
+          ) : (
+            <span className="text-ink-subtle">بلا رقم</span>
+          )}
+          <span className="hidden text-xs text-ink-muted sm:block">
+            <bdi dir="ltr" className="num whitespace-nowrap">
+              {c.documentNumber}
+            </bdi>
+          </span>
+          <span className="text-xs text-ink-muted sm:hidden">{c.customerName ?? '—'}</span>
+          <span className="sm:hidden">{status(c)}</span>
+        </div>
       ),
+    },
+    {
+      key: 'customer',
+      header: 'الزبون',
+      className: 'hidden sm:table-cell',
+      cell: (c) =>
+        c.customerName ? (
+          <span className="flex items-center gap-2.5">
+            <Avatar name={c.customerName} size="sm" />
+            <span className="font-semibold">{c.customerName}</span>
+          </span>
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        ),
+    },
+    {
+      key: 'date',
+      header: 'التاريخ',
+      className: 'hidden lg:table-cell',
+      cell: (c) => <bdi className="num whitespace-nowrap text-ink-muted">{c.date}</bdi>,
     },
     {
       key: 'amount',
       header: 'المبلغ',
       numeric: true,
-      cell: (c) => <Money minor={c.amountMinor} currency={c.currency} />,
+      cell: (c) => <Money minor={c.amountMinor} currency={c.currency} className="font-semibold" />,
     },
     {
       key: 'status',
       header: 'الحالة',
-      cell: (c) => (
-        <Badge tone={c.status === 'pending' ? 'warning' : c.status === 'cleared' ? 'success' : 'danger'}>
-          {STATUS_TEXT[c.status]}
-          {c.actionDate ? ` ${c.actionDate}` : ''}
-        </Badge>
-      ),
+      className: 'hidden sm:table-cell',
+      cell: status,
     },
     {
       key: 'actions',
-      header: '',
+      // Positioned, so the hidden heading stays inside the table's scroll box.
+      header: <span className="sr-only">إجراءات</span>,
+      className: 'relative w-px',
       cell: (c) =>
         c.status === 'pending' && canManage ? (
-          <span className="flex gap-2">
+          <span className="flex flex-col items-stretch gap-1.5 py-2 sm:flex-row sm:justify-end sm:py-0">
             <Button
               size="sm"
+              variant="secondary"
+              icon={<CheckIcon size={16} />}
               loading={busy === `${c.sourceId}-${c.paymentNo}`}
               onClick={() => void mark(c, 'cleared')}
             >
               حُصّل
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => void mark(c, 'bounced')}>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<UndoIcon size={16} />}
+              onClick={() => void mark(c, 'bounced')}
+            >
               مرتجع
             </Button>
           </span>
@@ -126,37 +196,60 @@ export function ChequesPage() {
   return (
     <AppShell>
       <title>الشيكات · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <h1 className="text-2xl font-bold text-ink">الشيكات</h1>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        <Alert tone="info">
-          «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد واحد في
-          الدفاتر.
-        </Alert>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+        <PageHeader
+          title="الشيكات"
+          description="كل شيك قبضه الكاشير من بيع أو من دفعة زبون، حتى يُحصَّل في البنك أو يرتجع."
+        />
+        {error && items ? <Alert tone="error">{error}</Alert> : null}
         <div className="grid gap-4 sm:grid-cols-2">
-          <StatTile label="تحت التحصيل" value={<Money minor={pendingTotal} currency={base} />} />
-          <StatTile label="عدد الشيكات" value={items?.length ?? 0} />
+          <StatTile
+            label="تحت التحصيل"
+            icon={<ClockIcon />}
+            iconTone="warning"
+            value={kpi(<Money minor={pendingTotal} currency={base} />)}
+          />
+          <StatTile
+            label="عدد الشيكات"
+            icon={<ChequeIcon />}
+            iconTone="neutral"
+            value={kpi(<bdi className="num">{items?.length ?? 0}</bdi>)}
+          />
         </div>
-        <SegmentedControl
-          label="اعرض"
-          value={filter}
-          onValueChange={setFilter}
-          options={[
-            { value: 'pending', label: 'تحت التحصيل' },
-            { value: 'cleared', label: 'المحصّلة' },
-            { value: 'bounced', label: 'المرتجعة' },
-            { value: 'all', label: 'الكل' },
-          ]}
-        />
-        <DataTable
-          caption="الشيكات"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(c) => `${c.sourceType}-${c.sourceId}-${c.paymentNo}`}
-          loading={!items && !error}
-          {...(error ? { onRetry: load } : {})}
-          empty="لا شيكات هنا. الكاشير يقبل الشيك من «الدفع» بعد اختيار الزبون."
-        />
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <SegmentedControl
+              label="اعرض"
+              value={filter}
+              onValueChange={setFilter}
+              options={[
+                { value: 'pending', label: 'تحت التحصيل' },
+                { value: 'cleared', label: 'المحصّلة' },
+                { value: 'bounced', label: 'المرتجعة' },
+                { value: 'all', label: 'الكل' },
+              ]}
+            />
+          </div>
+          <Alert tone="info">
+            «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد واحد في
+            الدفاتر.
+          </Alert>
+          <DataTable
+            caption="الشيكات"
+            columns={columns}
+            rows={items ?? []}
+            rowKey={(c) => `${c.sourceType}-${c.sourceId}-${c.paymentNo}`}
+            loading={!items && !error}
+            {...(error && !items ? { error, onRetry: load } : {})}
+            empty={
+              <EmptyState
+                icon={ChequeIcon}
+                title={EMPTY_TITLE[filter]}
+                description="الكاشير يقبل الشيك من «الدفع» بعد اختيار الزبون."
+              />
+            }
+          />
+        </div>
       </div>
     </AppShell>
   );

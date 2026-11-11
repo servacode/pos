@@ -1,25 +1,40 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Category, CurrencyCode, ProductDetail, TaxRate, Unit } from '@serva/core';
 import {
   Alert,
   ArchiveIcon,
+  BackIcon,
   Badge,
+  BarcodeIcon,
   Button,
+  CameraIcon,
   Card,
+  CategoriesIcon,
+  CheckIcon,
   Dialog,
+  GiftIcon,
+  PageHeader,
+  PrintIcon,
+  ProductsIcon,
   RetryIcon,
   Select,
+  ShirtIcon,
+  Skeleton,
   SkeletonText,
+  StatusChip,
+  StockIcon,
+  StoreIcon,
   Switch,
   TextField,
   UndoIcon,
+  cn,
   formatQuantity,
-  textLinkClass,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
+import { dayText, isoDay, zonedDateTime } from '../../lib/dates';
 import {
   createProduct,
   getProduct,
@@ -50,8 +65,9 @@ import { MODIFIER_SECTORS, SERIAL_SECTORS, storeSells, WEIGHED_SECTORS } from '.
 import { ModifiersEditor } from './ModifiersEditor';
 import { ImagesEditor } from './ImagesEditor';
 import { OptionsEditor } from './OptionsEditor';
+import { ButtonLink, Fact, SectionCard } from './parts';
 import { StockGrid } from './StockGrid';
-import { VariantBlock } from './VariantBlock';
+import { VariantBlock, VariantGrid } from './VariantBlock';
 
 interface Lookups {
   units: Unit[];
@@ -75,19 +91,11 @@ const TOP_FIELDS = [
   'modifiers',
 ];
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  const id = useId();
-  return (
-    <Card className="flex flex-col gap-4">
-      <section aria-labelledby={id} className="flex flex-col gap-4">
-        <h2 id={id} className="text-lg font-bold text-ink">
-          {title}
-        </h2>
-        {children}
-      </section>
-    </Card>
-  );
-}
+/** No groups yet: one array for every render, so the memoized editor is not redrawn for nothing. */
+const NO_MODIFIERS: NonNullable<ProductDraft['modifiers']> = [];
+
+/** The two columns of the card from 1280 px: the product's parts, and its status at the side. */
+const COLUMNS = 'grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]';
 
 /** «في كل الفروع»: the stock of every live variant, summed per branch. */
 function StockByBranch({ product, numberFormat }: { product: ProductDetail; numberFormat: 'latn' | 'arab' }) {
@@ -100,18 +108,42 @@ function StockByBranch({ product, numberFormat }: { product: ProductDetail; numb
       branches.set(stock.branchId, entry);
     }
   }
-  if (branches.size === 0) return <p className="text-ink-muted">لا مخزون مسجّل بعد.</p>;
+  if (branches.size === 0) return <p className="text-sm text-ink-muted">لا مخزون مسجّل بعد.</p>;
+  const total = [...branches.values()].reduce((sum, branch) => sum + branch.qty, 0);
   return (
-    <dl className="flex flex-col divide-y divide-line">
+    <dl className="-my-2.5 flex flex-col divide-y divide-line">
       {[...branches.entries()].map(([id, { name, qty }]) => (
-        <div key={id} className="flex items-center justify-between py-2">
-          <dt className="text-ink">{name}</dt>
-          <dd className={qty < 0 ? 'num font-semibold text-danger-ink' : 'num font-semibold text-ink'}>
+        <div key={id} className="flex items-center justify-between gap-3 py-2.5">
+          <dt className="text-sm text-ink">{name}</dt>
+          <dd className={cn('num font-semibold', qty < 0 ? 'text-danger-ink' : 'text-ink')}>
             {formatQuantity(qty, numberFormat)}
           </dd>
         </div>
       ))}
+      {branches.size > 1 ? (
+        <div className="flex items-center justify-between gap-3 py-2.5">
+          <dt className="text-sm font-semibold text-ink-muted">في كل الفروع معاً</dt>
+          <dd className={cn('num font-bold', total < 0 ? 'text-danger-ink' : 'text-ink')}>
+            {formatQuantity(total, numberFormat)}
+          </dd>
+        </div>
+      ) : null}
     </dl>
+  );
+}
+
+/** Back to the list, above the title. */
+function BackToProducts() {
+  return (
+    <nav aria-label="مسار الصفحة">
+      <Link
+        to="/products"
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-small text-sm font-semibold text-ink-muted transition-colors duration-120 ease-standard hover:text-ink"
+      >
+        <BackIcon size={16} />
+        المنتجات
+      </Link>
+    </nav>
   );
 }
 
@@ -127,6 +159,15 @@ export function ProductRoute() {
  * /products/new (?barcode= from an unknown scan), existing at /products/{id}.
  */
 export function ProductPage() {
+  // The card keeps its state below the shell, so typing in it never redraws the menu and the top bar.
+  return (
+    <AppShell>
+      <ProductCard />
+    </AppShell>
+  );
+}
+
+function ProductCard() {
   const { id = null } = useParams();
   const productId = id === 'new' ? null : id;
   const me = useMe();
@@ -152,9 +193,11 @@ export function ProductPage() {
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState<'ask' | 'busy' | null>(null);
 
-  const currencies: CurrencyCode[] = me.settings.enabledCurrencies.length
-    ? me.settings.enabledCurrencies
-    : [me.settings.baseCurrency];
+  const { enabledCurrencies, baseCurrency } = me.settings;
+  const currencies: CurrencyCode[] = useMemo(
+    () => (enabledCurrencies.length ? enabledCurrencies : [baseCurrency]),
+    [enabledCurrencies, baseCurrency],
+  );
   const initialBarcode = search.get('barcode');
 
   const load = useCallback(async () => {
@@ -188,26 +231,48 @@ export function ProductPage() {
     void load();
   }, [load]);
 
-  const update = (patch: Partial<ProductDraft>) => {
+  // Stable across renders (they only call the state setters), so the memoized parts of the card
+  // (OptionsEditor, VariantBlock, ImagesEditor, ModifiersEditor) skip a render while another field is
+  // typed in.
+  const update = useCallback((patch: Partial<ProductDraft>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));
     setErrors((current) => {
       const next = { ...current };
       for (const key of Object.keys(patch)) delete next[key];
       return next;
     });
-  };
+  }, []);
 
-  const updateVariant = (variant: VariantDraft) =>
-    setDraft((current) =>
-      current
-        ? { ...current, variants: current.variants.map((v) => (v.key === variant.key ? variant : v)) }
-        : current,
-    );
+  const updateVariant = useCallback(
+    (variant: VariantDraft) =>
+      setDraft((current) =>
+        current
+          ? { ...current, variants: current.variants.map((v) => (v.key === variant.key ? variant : v)) }
+          : current,
+      ),
+    [],
+  );
 
-  const setAxes = (axes: Axis[]) =>
-    setDraft((current) =>
-      current ? { ...current, axes, variants: applyAxes(current.variants, axes) } : current,
-    );
+  const setAxes = useCallback(
+    (axes: Axis[]) =>
+      setDraft((current) =>
+        current ? { ...current, axes, variants: applyAxes(current.variants, axes) } : current,
+      ),
+    [],
+  );
+
+  const setModifiers = useCallback(
+    (modifiers: NonNullable<ProductDraft['modifiers']>) => update({ modifiers }),
+    [update],
+  );
+
+  const variants = draft?.variants;
+  const axes = draft?.axes;
+  const codesInCard = useMemo(
+    () => new Set((variants ?? []).flatMap((v) => v.barcodes.map((b) => b.code)).filter(Boolean)),
+    [variants],
+  );
+  const optionValues = useMemo(() => [...new Set((axes ?? []).flatMap((a) => a.values))], [axes]);
 
   function showErrors(next: FieldErrors) {
     setErrors(next);
@@ -294,30 +359,47 @@ export function ProductPage() {
   }
 
   const title = product?.nameAr ?? 'منتج جديد';
+  const digits = me.settings.numberFormat;
 
   if (loadError || !lookups || !draft) {
     return (
-      <AppShell>
+      <>
         <title>{`${title} · Serva POS`}</title>
-        <div className="flex flex-col gap-5">
-          <Link to="/products" className={`${textLinkClass} self-start`}>
-            المنتجات
-          </Link>
+        <div className="flex flex-col gap-6">
+          <BackToProducts />
           {loadError ? (
-            <Card className="flex flex-col items-start gap-3">
-              <Alert tone="error">{loadError}</Alert>
+            <Card className="flex flex-col items-start gap-4">
+              <Alert tone="error" className="self-stretch">
+                {loadError}
+              </Alert>
               <Button variant="secondary" icon={<RetryIcon />} onClick={() => void load()}>
                 أعد المحاولة
               </Button>
             </Card>
           ) : (
-            <Card aria-busy="true">
+            <div aria-busy="true" className="flex flex-col gap-6">
               <span className="sr-only">نحمّل المنتج…</span>
-              <SkeletonText lines={6} />
-            </Card>
+              <div className="flex flex-col gap-2">
+                <Skeleton className="h-8 w-56" />
+                <Skeleton className="h-4 w-72 max-w-full" />
+              </div>
+              <div className={COLUMNS}>
+                <div className="flex flex-col gap-6">
+                  <Card>
+                    <SkeletonText lines={5} />
+                  </Card>
+                  <Card>
+                    <SkeletonText lines={4} />
+                  </Card>
+                </div>
+                <Card>
+                  <SkeletonText lines={4} />
+                </Card>
+              </div>
+            </div>
           )}
         </div>
-      </AppShell>
+      </>
     );
   }
 
@@ -328,38 +410,60 @@ export function ProductPage() {
   const liveVariants = draft.variants.filter((v) => !v.archived);
   const archivedVariants = draft.variants.filter((v) => v.archived);
   const titled = draft.axes.length > 0 && liveVariants.some((v) => v.attributes.length > 0);
-  const codesInCard = new Set(draft.variants.flatMap((v) => v.barcodes.map((b) => b.code)).filter(Boolean));
   const tree = categoryTree(lookups.categories.filter((c) => !c.archivedAt || c.id === draft.categoryId));
   const archived = Boolean(product?.archivedAt);
+  const barcodeCount = liveVariants.reduce((sum, v) => sum + v.barcodes.length, 0);
+
+  const variantBlock = (variant: VariantDraft) => (
+    <VariantBlock
+      key={variant.key}
+      variant={variant}
+      titled={titled}
+      productId={product?.id ?? null}
+      currencies={currencies}
+      unitSymbol={unit?.symbol ?? ''}
+      allowsFraction={unit?.allowsFraction ?? false}
+      errors={errors}
+      codesInCard={codesInCard}
+      onChange={updateVariant}
+    />
+  );
 
   return (
-    <AppShell>
+    <>
       <title>{`${title} · Serva POS`}</title>
-      <form ref={formRef} noValidate onSubmit={save} className="flex flex-col gap-5">
+      <form
+        ref={formRef}
+        noValidate
+        onSubmit={save}
+        // A field reached with Tab scrolls clear of the sticky top bar and the save bar.
+        className="flex flex-col gap-6 [&_:is(input,select,textarea,button)]:scroll-my-28"
+      >
         <div className="flex flex-col gap-2">
-          <nav aria-label="مسار الصفحة" className="text-sm">
-            <Link to="/products" className={textLinkClass}>
-              المنتجات
-            </Link>
-          </nav>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold text-ink">{title}</h1>
-              {product?.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
-              {archived ? <Badge>مؤرشف</Badge> : null}
-            </div>
-            {canManage ? (
-              <div className="flex flex-wrap gap-2 max-sm:w-full">
-                {product && !archived ? (
-                  <Link
-                    to={`/labels?product=${product.id}`}
-                    className="inline-flex min-h-10 items-center rounded-control px-3 font-semibold text-brand-ink hover:bg-surface-muted"
-                  >
-                    اطبع الملصقات
-                  </Link>
-                ) : null}
-                {product ? (
-                  archived ? (
+          <BackToProducts />
+          <PageHeader
+            title={title}
+            description={
+              product ? (
+                <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                  {product.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
+                  {archived ? <Badge>مؤرشف</Badge> : null}
+                  {!archived && product.status !== 'temporary' ? <StatusChip status="active" /> : null}
+                  {!product.sellOnPos ? <Badge>لا يظهر على الكاشير</Badge> : null}
+                </span>
+              ) : (
+                'الاسم والسعر والباركود تكفي ليُباع على الكاشير، والباقي حين تحتاجه.'
+              )
+            }
+            actions={
+              canManage && product ? (
+                <>
+                  {!archived ? (
+                    <ButtonLink to={`/labels?product=${product.id}`} icon={<PrintIcon />}>
+                      اطبع الملصقات
+                    </ButtonLink>
+                  ) : null}
+                  {archived ? (
                     <Button
                       variant="secondary"
                       icon={<UndoIcon />}
@@ -372,208 +476,317 @@ export function ProductPage() {
                     <Button variant="ghost" icon={<ArchiveIcon />} onClick={() => setArchiving('ask')}>
                       أرشف
                     </Button>
-                  )
+                  )}
+                </>
+              ) : undefined
+            }
+          />
+        </div>
+
+        <div className={COLUMNS}>
+          <div className="flex min-w-0 flex-col gap-6">
+            <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
+              <SectionCard
+                title="البيانات الأساسية"
+                icon={<ProductsIcon />}
+                description="الاسم كما يظهر على الكاشير والإيصال والملصق."
+              >
+                <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
+                  <TextField
+                    name="nameAr"
+                    label="اسم المنتج"
+                    value={draft.nameAr}
+                    onChange={(event) => update({ nameAr: event.target.value })}
+                    error={errors.nameAr}
+                    className="sm:col-span-2"
+                  />
+                  <TextField
+                    name="nameEn"
+                    label="الاسم بالإنجليزية (اختياري)"
+                    dir="ltr"
+                    value={draft.nameEn}
+                    onChange={(event) => update({ nameEn: event.target.value })}
+                    error={errors.nameEn}
+                  />
+                  <TextField
+                    name="brand"
+                    label="الماركة (اختياري)"
+                    value={draft.brand}
+                    onChange={(event) => update({ brand: event.target.value })}
+                    error={errors.brand}
+                  />
+                  {fits(['pharmacy']) || draft.genericName ? (
+                    <TextField
+                      name="genericName"
+                      label="الاسم العلمي (للأدوية، اختياري)"
+                      hint="الكاشير يجد الدواء به أيضاً"
+                      value={draft.genericName ?? ''}
+                      onChange={(event) => update({ genericName: event.target.value })}
+                      error={errors.genericName}
+                    />
+                  ) : null}
+                  {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
+                    <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
+                      <Switch
+                        label="له رقم تسلسلي أو IMEI"
+                        description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
+                        checked={draft.tracksSerial ?? false}
+                        disabled={!canManage}
+                        onCheckedChange={(tracksSerial) => update({ tracksSerial })}
+                        className="sm:col-span-2"
+                      />
+                      <TextField
+                        name="warrantyMonths"
+                        label="الكفالة بالأشهر (اختياري)"
+                        inputMode="numeric"
+                        dir="ltr"
+                        value={draft.warranty ?? ''}
+                        disabled={!canManage}
+                        onChange={(event) => update({ warranty: event.target.value })}
+                        error={errors.warrantyMonths}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </SectionCard>
+
+              <SectionCard title="المقاسات والألوان" icon={<ShirtIcon />}>
+                <OptionsEditor axes={draft.axes} variantCount={liveVariants.length} onChange={setAxes} />
+                {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
+              </SectionCard>
+
+              <SectionCard
+                title={titled ? 'الأسعار والباركودات' : 'السعر والباركود'}
+                icon={<BarcodeIcon />}
+                description={
+                  titled
+                    ? 'لكل مقاس ولون سعره وباركوده. القطعة الجديدة تبدأ بسعر الأولى.'
+                    : 'سعر البيع على الكاشير، والباركودات التي تُمسح له.'
+                }
+              >
+                {titled ? (
+                  <>
+                    <VariantGrid currencies={currencies}>{liveVariants.map(variantBlock)}</VariantGrid>
+                    <ul className="flex flex-col gap-1 text-sm text-ink-subtle">
+                      <li>الأدنى للمفاصلة: الكاشير ينزل حتى هذا السعر دون رمز المدير.</li>
+                      <li>سعر الجملة: يُباع به عند اختيار «سعر الجملة» على الكاشير أو لزبون جملة.</li>
+                      <li>الحد الأدنى في الفرع: تحته يصلك تنبيه النقص.</li>
+                      {liveVariants.some((v) => v.currency !== 'SYP') ? (
+                        <li>
+                          السعر بالدولار يبقى بالدولار، ويحوّله الكاشير إلى الليرة بسعر الصرف عند البيع.
+                        </li>
+                      ) : null}
+                    </ul>
+                  </>
+                ) : (
+                  liveVariants.map(variantBlock)
+                )}
+                {archivedVariants.length > 0 ? (
+                  <p className="flex items-start gap-2 rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
+                    <ArchiveIcon size={16} className="mt-0.5 text-ink-subtle" />
+                    <span>
+                      متغيّرات مؤرشفة تبقى في الفواتير السابقة:{' '}
+                      {archivedVariants
+                        .map((v) => v.attributes.map((a) => a.value).join(' · ') || '—')
+                        .join('، ')}
+                    </span>
+                  </p>
                 ) : null}
-                <Button type="submit" loading={saving} className="max-sm:flex-1">
-                  احفظ
-                </Button>
-              </div>
+              </SectionCard>
+
+              <SectionCard
+                title="الصور"
+                icon={<CameraIcon />}
+                description="تظهر في المتجر الإلكتروني؛ الأولى هي الرئيسية."
+              >
+                <ImagesEditor
+                  productId={product?.id ?? null}
+                  optionValues={optionValues}
+                  disabled={!canManage}
+                />
+              </SectionCard>
+
+              {fits(MODIFIER_SECTORS) || (draft.modifiers?.length ?? 0) > 0 ? (
+                <SectionCard
+                  title="الإضافات والخيارات (للمطاعم والمقاهي)"
+                  icon={<GiftIcon />}
+                  description="ما يختاره الزبون مع الطلب، كالحجم والإضافات، وما يزيده على السعر."
+                >
+                  <ModifiersEditor
+                    groups={draft.modifiers ?? NO_MODIFIERS}
+                    currency={liveVariants[0]?.currency ?? 'SYP'}
+                    disabled={!canManage}
+                    onChange={setModifiers}
+                  />
+                  {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
+                </SectionCard>
+              ) : null}
+            </fieldset>
+
+            {product && draft.type === 'stock' ? (
+              <StockGrid product={product} numberFormat={me.settings.numberFormat} />
+            ) : null}
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-6">
+            <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
+              <SectionCard title="الحالة" icon={<StoreIcon />}>
+                <Switch
+                  label="يُباع على الكاشير"
+                  description="أطفئه ليختفي من شاشة البيع ويبقى في المخزون."
+                  checked={draft.sellOnPos}
+                  disabled={!canManage}
+                  onCheckedChange={(sellOnPos) => update({ sellOnPos })}
+                />
+                {archived ? (
+                  <p className="rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
+                    في الأرشيف: لا يظهر على الكاشير حتى تعيده إلى البيع.
+                  </p>
+                ) : null}
+                {product ? (
+                  <dl className="-my-2.5 flex flex-col divide-y divide-line border-t border-line">
+                    {titled ? (
+                      <Fact label="المتغيّرات">
+                        <bdi className="num">{liveVariants.length}</bdi>
+                      </Fact>
+                    ) : null}
+                    <Fact label="الباركودات">
+                      <bdi className="num">{barcodeCount}</bdi>
+                    </Fact>
+                    <Fact label="أُضيف في">
+                      <bdi className="num">
+                        {dayText(isoDay(Date.parse(product.createdAt), me.tenant.timezone), digits)}
+                      </bdi>
+                    </Fact>
+                  </dl>
+                ) : null}
+              </SectionCard>
+
+              <SectionCard title="التنظيم" icon={<CategoriesIcon />}>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-1">
+                  <Select
+                    name="categoryId"
+                    label="التصنيف"
+                    value={draft.categoryId}
+                    onChange={(event) => update({ categoryId: event.target.value })}
+                    error={errors.categoryId}
+                  >
+                    <option value="">بلا تصنيف</option>
+                    {tree.map((node) => (
+                      <option key={node.category.id} value={node.category.id}>
+                        {categoryOptionLabel(node)}
+                      </option>
+                    ))}
+                  </Select>
+                  <Select
+                    name="type"
+                    label="نوع المنتج"
+                    value={draft.type}
+                    onChange={(event) => update({ type: event.target.value as ProductDraft['type'] })}
+                    error={errors.type}
+                  >
+                    <option value="stock">بضاعة لها مخزون</option>
+                    <option value="service">خدمة بلا مخزون</option>
+                  </Select>
+                  <Select
+                    name="unitId"
+                    label="الوحدة"
+                    value={draft.unitId}
+                    onChange={(event) => update({ unitId: event.target.value })}
+                    error={errors.unitId}
+                  >
+                    {lookups.units
+                      .filter((u) => !u.archivedAt || u.id === draft.unitId)
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.allowsFraction ? `${u.name} (بالوزن)` : u.name}
+                        </option>
+                      ))}
+                  </Select>
+                  <Select
+                    name="taxRateId"
+                    label="الضريبة"
+                    value={draft.taxRateId}
+                    onChange={(event) => update({ taxRateId: event.target.value })}
+                    error={errors.taxRateId}
+                  >
+                    <option value="">بلا ضريبة</option>
+                    {lookups.taxRates
+                      .filter((t) => !t.archivedAt || t.id === draft.taxRateId)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {`${t.name} ${t.rateBp / 100}%`}
+                        </option>
+                      ))}
+                  </Select>
+                  {fits(WEIGHED_SECTORS) || unit?.allowsFraction ? (
+                    <Switch
+                      label="يُباع بالوزن"
+                      description="الكمية على الكاشير بالكيلو، مثل 0.250"
+                      checked={unit?.allowsFraction ?? false}
+                      disabled={!canManage || !fractionUnit(!(unit?.allowsFraction ?? false))}
+                      onCheckedChange={(checked) => {
+                        const next = fractionUnit(checked);
+                        if (next) update({ unitId: next.id });
+                      }}
+                      className="sm:col-span-2 xl:col-span-1"
+                    />
+                  ) : null}
+                </div>
+              </SectionCard>
+            </fieldset>
+
+            {product && draft.type === 'stock' ? (
+              <SectionCard title="في كل الفروع" icon={<StockIcon />}>
+                <StockByBranch product={product} numberFormat={me.settings.numberFormat} />
+              </SectionCard>
             ) : null}
           </div>
         </div>
 
-        {notice ? <Alert tone="success">{notice}</Alert> : null}
-        {conflict ? <Alert tone="error">{conflict}</Alert> : null}
-        {formError ? <Alert tone="error">{formError}</Alert> : null}
-
-        <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-5">
-          <Section title="الأساسي">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <TextField
-                name="nameAr"
-                label="اسم المنتج"
-                value={draft.nameAr}
-                onChange={(event) => update({ nameAr: event.target.value })}
-                error={errors.nameAr}
-                className="sm:col-span-2"
-              />
-              <TextField
-                name="nameEn"
-                label="الاسم بالإنجليزية (اختياري)"
-                dir="ltr"
-                value={draft.nameEn}
-                onChange={(event) => update({ nameEn: event.target.value })}
-                error={errors.nameEn}
-              />
-              <TextField
-                name="brand"
-                label="الماركة (اختياري)"
-                value={draft.brand}
-                onChange={(event) => update({ brand: event.target.value })}
-                error={errors.brand}
-              />
-              {fits(['pharmacy']) || draft.genericName ? (
-                <TextField
-                  name="genericName"
-                  label="الاسم العلمي (للأدوية، اختياري)"
-                  hint="الكاشير يجد الدواء به أيضاً"
-                  value={draft.genericName ?? ''}
-                  onChange={(event) => update({ genericName: event.target.value })}
-                  error={errors.genericName}
-                />
-              ) : null}
-              <Select
-                name="categoryId"
-                label="التصنيف"
-                value={draft.categoryId}
-                onChange={(event) => update({ categoryId: event.target.value })}
-                error={errors.categoryId}
-              >
-                <option value="">بلا تصنيف</option>
-                {tree.map((node) => (
-                  <option key={node.category.id} value={node.category.id}>
-                    {categoryOptionLabel(node)}
-                  </option>
-                ))}
-              </Select>
-              <Select
-                name="type"
-                label="نوع المنتج"
-                value={draft.type}
-                onChange={(event) => update({ type: event.target.value as ProductDraft['type'] })}
-                error={errors.type}
-              >
-                <option value="stock">بضاعة لها مخزون</option>
-                <option value="service">خدمة بلا مخزون</option>
-              </Select>
-              <Select
-                name="unitId"
-                label="الوحدة"
-                value={draft.unitId}
-                onChange={(event) => update({ unitId: event.target.value })}
-                error={errors.unitId}
-              >
-                {lookups.units
-                  .filter((u) => !u.archivedAt || u.id === draft.unitId)
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.allowsFraction ? `${u.name} (بالوزن)` : u.name}
-                    </option>
-                  ))}
-              </Select>
-              <Select
-                name="taxRateId"
-                label="الضريبة"
-                value={draft.taxRateId}
-                onChange={(event) => update({ taxRateId: event.target.value })}
-                error={errors.taxRateId}
-              >
-                <option value="">بلا ضريبة</option>
-                {lookups.taxRates
-                  .filter((t) => !t.archivedAt || t.id === draft.taxRateId)
-                  .map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {`${t.name} ${t.rateBp / 100}%`}
-                    </option>
-                  ))}
-              </Select>
-              {fits(WEIGHED_SECTORS) || unit?.allowsFraction ? (
-                <Switch
-                  label="يُباع بالوزن"
-                  description="الكمية على الكاشير بالكيلو، مثل 0.250"
-                  checked={unit?.allowsFraction ?? false}
-                  disabled={!canManage || !fractionUnit(!(unit?.allowsFraction ?? false))}
-                  onCheckedChange={(checked) => {
-                    const next = fractionUnit(checked);
-                    if (next) update({ unitId: next.id });
-                  }}
-                />
-              ) : null}
-              <Switch
-                label="يُباع على الكاشير"
-                description="أطفئه ليختفي من شاشة البيع ويبقى في المخزون."
-                checked={draft.sellOnPos}
-                disabled={!canManage}
-                onCheckedChange={(sellOnPos) => update({ sellOnPos })}
-              />
-              {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
-                <>
-                  <Switch
-                    label="له رقم تسلسلي أو IMEI"
-                    description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
-                    checked={draft.tracksSerial ?? false}
-                    disabled={!canManage}
-                    onCheckedChange={(tracksSerial) => update({ tracksSerial })}
-                  />
-                  <TextField
-                    name="warrantyMonths"
-                    label="الكفالة بالأشهر (اختياري)"
-                    inputMode="numeric"
-                    dir="ltr"
-                    value={draft.warranty ?? ''}
-                    disabled={!canManage}
-                    onChange={(event) => update({ warranty: event.target.value })}
-                    error={errors.warrantyMonths}
-                  />
-                </>
-              ) : null}
-            </div>
-          </Section>
-
-          {fits(MODIFIER_SECTORS) || (draft.modifiers?.length ?? 0) > 0 ? (
-            <Section title="الإضافات والخيارات (للمطاعم والمقاهي)">
-              <ModifiersEditor
-                groups={draft.modifiers ?? []}
-                currency={liveVariants[0]?.currency ?? 'SYP'}
-                disabled={!canManage}
-                onChange={(modifiers) => update({ modifiers })}
-              />
-              {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
-            </Section>
-          ) : null}
-
-          <Section title="المقاسات والألوان">
-            <OptionsEditor axes={draft.axes} variantCount={liveVariants.length} onChange={setAxes} />
-            {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
-          </Section>
-
-          <Section title="الصور">
-            <ImagesEditor
-              productId={product?.id ?? null}
-              optionValues={[...new Set(draft.axes.flatMap((a) => a.values))]}
-              disabled={!canManage}
-            />
-          </Section>
-
-          <Section title="السعر والباركود">
-            {liveVariants.map((variant) => (
-              <VariantBlock
-                key={variant.key}
-                variant={variant}
-                titled={titled}
-                productId={product?.id ?? null}
-                currencies={currencies}
-                unitSymbol={unit?.symbol ?? ''}
-                allowsFraction={unit?.allowsFraction ?? false}
-                errors={errors}
-                codesInCard={codesInCard}
-                onChange={updateVariant}
-              />
-            ))}
-            {archivedVariants.length > 0 ? (
-              <p className="text-sm text-ink-muted">
-                متغيّرات مؤرشفة تبقى في الفواتير السابقة:{' '}
-                {archivedVariants.map((v) => v.attributes.map((a) => a.value).join(' · ') || '—').join('، ')}
-              </p>
+        {canManage || notice || conflict || formError ? (
+          // Saving happens here, so what it answers shows here too, whatever the scroll.
+          <div className="sticky bottom-3 z-10 flex flex-col gap-2">
+            {notice ? (
+              <Alert tone="success" className="shadow-e2">
+                {notice}
+              </Alert>
             ) : null}
-          </Section>
-        </fieldset>
-
-        {product && draft.type === 'stock' ? (
-          <Section title="في كل الفروع">
-            <StockByBranch product={product} numberFormat={me.settings.numberFormat} />
-            <StockGrid product={product} numberFormat={me.settings.numberFormat} />
-          </Section>
+            {conflict ? (
+              <Alert tone="error" className="shadow-e2">
+                {conflict}
+              </Alert>
+            ) : null}
+            {formError ? (
+              <Alert tone="error" className="shadow-e2">
+                {formError}
+              </Alert>
+            ) : null}
+            {canManage ? (
+              <div className="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 shadow-e3">
+                <p className="ps-2 text-sm text-ink-muted max-sm:hidden">
+                  {product ? (
+                    <>
+                      آخر حفظ:{' '}
+                      <bdi className="num">
+                        {zonedDateTime(product.updatedAt, me.tenant.timezone, digits)}
+                      </bdi>
+                    </>
+                  ) : (
+                    'منتج جديد: يصل إلى أجهزة الكاشير بعد الحفظ.'
+                  )}
+                </p>
+                <div className="flex flex-1 items-center justify-end gap-2 sm:flex-none">
+                  <ButtonLink to="/products" variant="ghost">
+                    إلغاء
+                  </ButtonLink>
+                  <Button type="submit" loading={saving} icon={<CheckIcon />} className="max-sm:flex-1">
+                    احفظ
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </form>
 
@@ -599,6 +812,6 @@ export function ProductPage() {
           </>
         }
       />
-    </AppShell>
+    </>
   );
 }

@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   Badge,
   Balance,
   Button,
-  Card,
   CheckCircleIcon,
   DataTable,
   EmptyState,
   Money,
   ReportsIcon,
+  Skeleton,
+  StatTile,
   useDigits,
   WarningIcon,
   type DataColumn,
@@ -17,19 +18,20 @@ import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay, monthStart } from '../../lib/dates';
 import { getTrialBalance } from '../reports/api';
 import type { TrialBalance, TrialBalanceRow } from '../reports/contracts';
-import { BranchSelect, DayField, defaultBranch } from '../reports/parts';
+import { defaultBranch } from '../reports/parts';
 import { useReport } from '../reports/useReport';
 import { AccountingLayout } from './AccountingLayout';
 import { debitSigned, downloadText, trialBalanceCsv } from './csv';
+import { AccountName, PeriodBar } from './parts';
 
 function BalancedBadge({ report }: { report: TrialBalance }) {
   return report.balanced ? (
-    <Badge tone="success" className="gap-1">
+    <Badge tone="success">
       <CheckCircleIcon size={16} />
       متوازن
     </Badge>
   ) : (
-    <Badge tone="danger" className="gap-1">
+    <Badge tone="danger">
       <WarningIcon size={16} />
       غير متوازن
     </Badge>
@@ -58,9 +60,7 @@ export function TrialBalancePage() {
       key: 'account',
       header: 'الحساب',
       cell: (row) => (
-        <span>
-          <bdi className="num text-ink-muted">{row.accountCode}</bdi> {row.accountName}
-        </span>
+        <AccountName code={row.accountCode} name={row.accountName} strong className="whitespace-nowrap" />
       ),
       total: 'المجموع',
     },
@@ -97,6 +97,10 @@ export function TrialBalancePage() {
     downloadText(`ميزان-المراجعة-${data.from}-${data.to}.csv`, trialBalanceCsv(data, base));
   }
 
+  // A tile's number: grey while the period loads, a dash when it could not.
+  const kpi = (value: (report: TrialBalance) => ReactNode) =>
+    data ? value(data) : error ? '—' : <Skeleton className="h-9 w-40" />;
+
   return (
     <AccountingLayout
       title="ميزان المراجعة"
@@ -106,35 +110,58 @@ export function TrialBalancePage() {
         </Button>
       }
     >
-      <Card className="flex flex-wrap items-end gap-4">
-        <DayField label="من" value={from} max={to} onChange={setFrom} />
-        <DayField label="إلى" value={to} max={today} onChange={setTo} />
-        <BranchSelect me={me} value={branchId} onChange={setBranchId} />
-      </Card>
-      {data ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <BalancedBadge report={data} />
-          <span className="text-sm text-ink-muted">
-            من {dayText(data.from, digits)} إلى {dayText(data.to, digits)} · «عليه» رصيد مدين و«له» رصيد دائن
-          </span>
-        </div>
-      ) : null}
-      <DataTable
-        caption="ميزان المراجعة"
-        columns={columns}
-        rows={data?.rows ?? []}
-        rowKey={(row) => row.accountCode}
-        loading={loading}
-        error={error ?? undefined}
-        onRetry={retry}
-        empty={
-          <EmptyState
-            icon={ReportsIcon}
-            title="لا حركة على الحسابات في هذه الفترة."
-            description="اختر فترة أخرى، أو انتظر وصول فواتير اليوم."
-          />
-        }
-      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <StatTile
+          label="مجموع المدين"
+          value={kpi((report) => (
+            <Money minor={report.totals.debitMinor} currency={base} />
+          ))}
+        />
+        <StatTile
+          label="مجموع الدائن"
+          value={kpi((report) => (
+            <Money minor={report.totals.creditMinor} currency={base} />
+          ))}
+        />
+      </div>
+      <PeriodBar
+        me={me}
+        today={today}
+        from={from}
+        to={to}
+        branchId={branchId}
+        onFrom={setFrom}
+        onTo={setTo}
+        onBranch={setBranchId}
+      >
+        {data ? (
+          <>
+            <BalancedBadge report={data} />
+            <span className="text-sm text-ink-muted">
+              من {dayText(data.from, digits)} إلى {dayText(data.to, digits)}
+            </span>
+          </>
+        ) : null}
+      </PeriodBar>
+      <div className="flex flex-col gap-2">
+        <DataTable
+          caption="ميزان المراجعة"
+          columns={columns}
+          rows={data?.rows ?? []}
+          rowKey={(row) => row.accountCode}
+          loading={loading}
+          error={error ?? undefined}
+          onRetry={retry}
+          empty={
+            <EmptyState
+              icon={ReportsIcon}
+              title="لا حركة على الحسابات في هذه الفترة."
+              description="اختر فترة أخرى، أو انتظر وصول فواتير اليوم."
+            />
+          }
+        />
+        <p className="text-sm text-ink-subtle">«عليه» رصيد مدين، و«له» رصيد دائن.</p>
+      </div>
     </AccountingLayout>
   );
 }

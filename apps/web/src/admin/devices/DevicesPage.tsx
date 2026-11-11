@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DeviceSummary } from '@serva/core';
 import {
+  AlertCircleIcon,
   Alert,
+  Badge,
   Button,
   Card,
   DeviceIcon,
@@ -10,7 +12,11 @@ import {
   InfoIcon,
   LinkIcon,
   LockIcon,
+  PageHeader,
   RetryIcon,
+  SendIcon,
+  ShieldCheckIcon,
+  Skeleton,
   SkeletonText,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
@@ -118,27 +124,33 @@ export function DevicesPage() {
   return (
     <AppShell>
       <title>الأجهزة · Serva POS</title>
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-ink">الأجهزة</h1>
-            <p className="text-ink-muted">أجهزة الكاشير والجوالات المربوطة بمتجرك، في كل فرع.</p>
-          </div>
-          {isOwner ? (
-            <Button icon={<LinkIcon />} onClick={() => setPairing(true)} className="max-sm:w-full">
-              اربط جهازاً جديداً
-            </Button>
-          ) : null}
-        </div>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+        <PageHeader
+          title="الأجهزة"
+          description="أجهزة الكاشير والجوالات المربوطة بمتجرك، في كل فرع."
+          icon={<DeviceIcon />}
+          actions={
+            isOwner ? (
+              <Button icon={<LinkIcon />} onClick={() => setPairing(true)} className="max-sm:w-full">
+                اربط جهازاً جديداً
+              </Button>
+            ) : null
+          }
+        />
 
         {actionError ? <Alert tone="error">{actionError}</Alert> : null}
 
         {pending.length > 0 ? (
           <section aria-labelledby="pending-title" className="flex flex-col gap-3">
-            <h2 id="pending-title" className="text-lg font-semibold text-ink">
-              بانتظار موافقتك
-            </h2>
-            <div className="grid gap-3 lg:grid-cols-2">
+            <div className="flex items-center gap-2">
+              <h2 id="pending-title" className="text-lg font-semibold text-ink">
+                بانتظار موافقتك
+              </h2>
+              <Badge tone="warning">
+                <bdi className="num">{pending.length}</bdi>
+              </Badge>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
               {pending.map((device) => (
                 <PendingDevice
                   key={device.id}
@@ -153,10 +165,18 @@ export function DevicesPage() {
         ) : null}
 
         {devices === null && !loadError ? (
-          <Card aria-busy="true">
+          <div aria-busy="true" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <span className="sr-only">نحمّل الأجهزة…</span>
-            <SkeletonText lines={4} />
-          </Card>
+            {Array.from({ length: 3 }, (_, index) => (
+              <Card key={index} className="flex flex-col gap-4">
+                <div className="flex items-center gap-3">
+                  <Skeleton className="size-11" />
+                  <SkeletonText lines={2} className="flex-1" />
+                </div>
+                <Skeleton className="h-4 w-2/3" />
+              </Card>
+            ))}
+          </div>
         ) : null}
 
         {loadError && devices === null ? (
@@ -169,28 +189,29 @@ export function DevicesPage() {
         ) : null}
 
         {devices !== null && groups.length === 0 && pending.length === 0 ? (
-          <Card>
-            <EmptyState
-              icon={DeviceIcon}
-              title="لا أجهزة مربوطة بعد."
-              description="اربط جهاز الكاشير الأول: يظهر لك رمز تكتبه على الجهاز أو تمسحه بكاميرته."
-              action={
-                isOwner ? (
-                  <Button icon={<LinkIcon />} onClick={() => setPairing(true)}>
-                    اربط جهازاً جديداً
-                  </Button>
-                ) : null
-              }
-            />
-          </Card>
+          <EmptyState
+            icon={DeviceIcon}
+            title="لا أجهزة مربوطة بعد."
+            description="اربط جهاز الكاشير الأول: يظهر لك رمز تكتبه على الجهاز أو تمسحه بكاميرته."
+            action={
+              isOwner ? (
+                <Button icon={<LinkIcon />} onClick={() => setPairing(true)}>
+                  اربط جهازاً جديداً
+                </Button>
+              ) : null
+            }
+          />
         ) : null}
 
         {groups.map((group) => (
           <section key={group.id} aria-labelledby={`branch-${group.id}`} className="flex flex-col gap-3">
-            <h2 id={`branch-${group.id}`} className="text-lg font-semibold text-ink">
-              {group.name}
-            </h2>
-            <ul className="flex flex-col rounded-card border border-line bg-surface shadow-e1">
+            <div className="flex items-center gap-2">
+              <h2 id={`branch-${group.id}`} className="text-lg font-semibold text-ink">
+                {group.name}
+              </h2>
+              <Badge dot={false}>{devicesCount(group.devices.length)}</Badge>
+            </div>
+            <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {group.devices.map((device) => (
                 <DeviceRow
                   key={device.id}
@@ -207,7 +228,7 @@ export function DevicesPage() {
 
         {groups.length > 0 ? (
           <p className="flex items-start gap-2 text-sm text-ink-muted">
-            <InfoIcon className="mt-0.5" />
+            <InfoIcon size={16} className="mt-0.5" />
             الجهاز الموقوف يعرض «أوقف المالك هذا الجهاز»، وما فيه من فواتير لم تصل يُرسل ويُحفظ للمراجعة.
           </p>
         ) : null}
@@ -264,17 +285,44 @@ export function DevicesPage() {
   );
 }
 
+const plural = new Intl.PluralRules('ar');
+
+/** «جهاز واحد», «جهازان», «3 أجهزة», «11 جهازاً». */
+function devicesCount(count: number): string {
+  switch (plural.select(count)) {
+    case 'one':
+      return 'جهاز واحد';
+    case 'two':
+      return 'جهازان';
+    case 'few':
+      return `${count} أجهزة`;
+    case 'many':
+      return `${count} جهازاً`;
+    default:
+      return `${count} جهاز`;
+  }
+}
+
 /** What happens to the documents still on the device (16 › ضياع جهاز الكاشير). */
 function RevokeDetails({ device }: { device: DeviceSummary }) {
   return (
-    <div className="flex flex-col gap-1 rounded-control bg-surface-muted px-3 py-2 text-sm text-ink">
+    <div className="flex flex-col gap-2 rounded-card border border-line bg-surface-muted/60 p-4 text-sm text-ink">
       {device.unsentCount ? (
-        <span>بانتظار الإرسال على الجهاز: {documentsCount(device.unsentCount)}</span>
+        <span className="flex items-start gap-2">
+          <SendIcon size={16} className="mt-0.5 text-ink-subtle" />
+          بانتظار الإرسال على الجهاز: {documentsCount(device.unsentCount)}
+        </span>
       ) : null}
       {device.missingDocuments ? (
-        <span>أعلن عنها الجهاز ولم تصل: {documentsCount(device.missingDocuments)}</span>
+        <span className="flex items-start gap-2 font-semibold text-danger-ink">
+          <AlertCircleIcon size={16} className="mt-0.5" />
+          أعلن عنها الجهاز ولم تصل: {documentsCount(device.missingDocuments)}
+        </span>
       ) : null}
-      <span>ما يرسله بعد الإيقاف لا يضيع: يُحفظ جانباً لتراجعه قبل أن يدخل الحسابات.</span>
+      <span className="flex items-start gap-2 text-ink-muted">
+        <ShieldCheckIcon size={16} className="mt-0.5 text-ink-subtle" />
+        ما يرسله بعد الإيقاف لا يضيع: يُحفظ جانباً لتراجعه قبل أن يدخل الحسابات.
+      </span>
     </div>
   );
 }

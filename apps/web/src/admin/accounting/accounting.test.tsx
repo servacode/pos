@@ -53,7 +53,9 @@ describe('accounting: who sees it', () => {
     signIn('/accounting', { 'GET /v1/accounts': { status: 200, body: { items: ACCOUNTS } } });
 
     expect(await screen.findByRole('heading', { name: 'دليل الحسابات', level: 1 })).toBeInTheDocument();
-    expect(await menuLinks()).toContain('المحاسبة');
+    expect(await menuLinks()).toContain('التقارير');
+    const pages = screen.getByRole('navigation', { name: 'صفحات التقارير' });
+    expect(within(pages).getByRole('link', { name: 'المحاسبة' })).toHaveAttribute('aria-current', 'page');
     const tabs = screen.getByRole('navigation', { name: 'أقسام المحاسبة' });
     expect(within(tabs).getByRole('link', { name: 'دليل الحسابات' })).toHaveAttribute('aria-current', 'page');
     expect(
@@ -67,14 +69,16 @@ describe('accounting: who sees it', () => {
     signIn('/accounting/journal', {}, MANAGER_KEYS);
 
     expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
-    expect(await menuLinks()).not.toContain('المحاسبة');
+    await menuLinks();
+    expect(screen.queryByRole('link', { name: 'المحاسبة' })).not.toBeInTheDocument();
   });
 
   it('is hidden when the store turned accounting mode off', async () => {
     signIn('/accounting/trial-balance', {}, OWNER_KEYS, false);
 
     expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
-    expect(await menuLinks()).not.toContain('المحاسبة');
+    await menuLinks();
+    expect(screen.queryByRole('link', { name: 'المحاسبة' })).not.toBeInTheDocument();
   });
 });
 
@@ -178,10 +182,19 @@ describe('«القيود»', () => {
       name: 'القيود من 1 تشرين الأول 2026 إلى 31 تشرين الأول 2026',
     });
     await within(table).findByText('JRN-2026-0000001');
+    // The general journal: each entry heads its own group of rows (number, day, document, memo),
+    // its lines under it with the debit and the credit in their own columns.
     expect(within(table).getAllByRole('row').map(text)).toEqual([
-      'رقم القيدالتاريخالمستندالبيانالمبلغ',
-      'JRN-2026-000000131 تشرين الأول 2026فاتورة بيع INV-001-002-0000001فاتورة بيع1,200 ل.س',
+      'الحسابمديندائن',
+      'JRN-2026-000000131 تشرين الأول 2026فاتورة بيع INV-001-002-0000001فاتورة بيع',
+      '1110 الصندوق (أدراج الكاشير)30 ل.س',
+      '1111 الصندوق بالدولار9.00 $ بسعر 1301,170 ل.س',
+      '4100 المبيعات1,200 ل.س',
     ]);
+    expect(within(table).getByRole('rowheader', { name: /JRN-2026-0000001/ })).toHaveAttribute(
+      'scope',
+      'rowgroup',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'اعرض المزيد' }));
     expect(await within(table).findByText('JRN-2026-0000002')).toBeInTheDocument();

@@ -1,6 +1,18 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import type { OptionValuesResponse } from '@serva/core';
-import { AddIcon, Button, CloseIcon, cn, DeleteIcon, IconButton, Switch, TextField } from '@serva/ui';
+import {
+  AddIcon,
+  Button,
+  CheckIcon,
+  CloseIcon,
+  CONTROL_HEIGHT,
+  DeleteIcon,
+  IconButton,
+  Switch,
+  TextField,
+  cn,
+  useDensity,
+} from '@serva/ui';
 import { apiFetch } from '../../lib/api';
 import { DEFAULT_AXIS_NAMES, MAX_AXES, newKey, type Axis } from './form';
 import { insertValue, presetGroups, SIZE_KINDS, type PresetGroup } from './presets';
@@ -31,12 +43,70 @@ function useStoreValues(on: boolean): Map<string, string[]> {
 }
 
 /**
+ * A value to tap (هوية 4 › الشرائح, as ToggleChip draws them): the brand tint and a ticked box when
+ * chosen. A pressed button, not a checkbox, so the whole row reads as «اختر»; the box keeps its place
+ * either way, so a row of chips never shifts under the finger. Round for a single choice.
+ */
+function ChoiceChip({
+  pressed,
+  single = false,
+  onClick,
+  children,
+}: {
+  pressed: boolean;
+  single?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const density = useDensity();
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-2 rounded-small border ps-2.5 pe-3 text-sm font-semibold whitespace-nowrap select-none',
+        'transition-[background-color,border-color,color] duration-120 ease-standard',
+        CONTROL_HEIGHT[density],
+        pressed
+          ? 'border-brand/30 bg-brand-soft text-brand-ink'
+          : 'border-line-control/50 bg-surface text-ink hover:bg-surface-muted',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'grid size-4 shrink-0 place-items-center border text-on-brand transition-colors duration-120 ease-standard',
+          // 4, not rounded-small: 8 on a 16 box is a circle, the single choice's shape.
+          single ? 'rounded-full' : 'rounded-sm',
+          pressed ? 'border-brand bg-brand' : 'border-line-control bg-surface',
+        )}
+      >
+        <CheckIcon
+          size={16}
+          strokeWidth={3}
+          className={cn(
+            'size-3 transition-opacity duration-120 ease-standard',
+            pressed ? 'opacity-100' : 'opacity-0',
+          )}
+        />
+      </span>
+      {children}
+    </button>
+  );
+}
+
+/**
  * «المقاسات والألوان» (kit admin/ProductCard ٢): the options and their values; every combination
  * becomes a variant (contract Q8: the matrix is built here and sent as `variants`). Sizes, shoe
  * numbers, children's ages and colours are ready to tap (presets.ts), beside the values the store
  * already uses; anything else is typed once and offered from then on.
  */
-export function OptionsEditor({ axes, variantCount, onChange }: OptionsEditorProps) {
+export const OptionsEditor = memo(function OptionsEditor({
+  axes,
+  variantCount,
+  onChange,
+}: OptionsEditorProps) {
   const on = axes.length > 0;
   const storeValues = useStoreValues(on);
   return (
@@ -49,17 +119,19 @@ export function OptionsEditor({ axes, variantCount, onChange }: OptionsEditorPro
       />
       {on ? (
         <>
-          {axes.map((axis, index) => (
-            <AxisRow
-              key={axis.key}
-              axis={axis}
-              first={index === 0}
-              storeValues={storeValues.get(axis.name.trim()) ?? []}
-              canRemove={axes.length > 1}
-              onChange={(next) => onChange(axes.map((a) => (a.key === axis.key ? next : a)))}
-              onRemove={() => onChange(axes.filter((a) => a.key !== axis.key))}
-            />
-          ))}
+          <div className="flex flex-col gap-3">
+            {axes.map((axis, index) => (
+              <AxisRow
+                key={axis.key}
+                axis={axis}
+                first={index === 0}
+                storeValues={storeValues.get(axis.name.trim()) ?? []}
+                canRemove={axes.length > 1}
+                onChange={(next) => onChange(axes.map((a) => (a.key === axis.key ? next : a)))}
+                onRemove={() => onChange(axes.filter((a) => a.key !== axis.key))}
+              />
+            ))}
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             {axes.length < MAX_AXES ? (
               <Button
@@ -72,7 +144,13 @@ export function OptionsEditor({ axes, variantCount, onChange }: OptionsEditorPro
             ) : (
               <span />
             )}
-            <p className="text-sm text-ink-muted" role="status">
+            <p
+              className={cn(
+                'rounded-full px-3 py-1 text-sm font-semibold',
+                variantCount > 1 ? 'bg-brand-soft text-brand-ink' : 'text-ink-muted',
+              )}
+              role="status"
+            >
               {variantCount > 1 ? `${variantCount} متغيّرات` : 'أضف القيم لتظهر المتغيّرات'}
             </p>
           </div>
@@ -80,7 +158,7 @@ export function OptionsEditor({ axes, variantCount, onChange }: OptionsEditorPro
       ) : null}
     </div>
   );
-}
+});
 
 function AxisRow({
   axis,
@@ -132,36 +210,35 @@ function AxisRow({
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-control border border-line p-3">
+    <div className="flex flex-col gap-4 rounded-control border border-line bg-surface p-4">
       <div className="flex items-end gap-2">
         <TextField
           label="اسم الخاصية"
           value={axis.name}
           onChange={(event) => onChange({ ...axis, name: event.target.value })}
-          className="flex-1"
+          className="min-w-0 flex-1 sm:max-w-xs"
         />
         {canRemove ? (
-          <IconButton label={`احذف خاصية ${title}`} icon={<DeleteIcon />} onClick={onRemove} />
+          <IconButton
+            label={`احذف خاصية ${title}`}
+            icon={<DeleteIcon />}
+            onClick={onRemove}
+            className="ms-auto"
+          />
         ) : null}
       </div>
       {first ? (
         <div role="group" aria-label="نوع القياس" className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-ink-muted">القياس:</span>
+          <span className="text-sm font-semibold text-ink-muted">القياس:</span>
           {SIZE_KINDS.map((kind) => (
-            <button
+            <ChoiceChip
               key={kind.name}
-              type="button"
-              aria-pressed={axis.name.trim() === kind.name}
+              single
+              pressed={axis.name.trim() === kind.name}
               onClick={() => onChange({ ...axis, name: kind.name })}
-              className={cn(
-                'min-h-10 rounded-full border px-3 text-sm font-semibold',
-                axis.name.trim() === kind.name
-                  ? 'border-brand bg-brand-soft text-brand-ink'
-                  : 'border-line bg-surface text-ink',
-              )}
             >
               {kind.pick}
-            </button>
+            </ChoiceChip>
           ))}
         </div>
       ) : null}
@@ -170,76 +247,70 @@ function AxisRow({
           key={group.label}
           role="group"
           aria-label={`${title}: ${group.label}`}
-          className="flex flex-col gap-1.5"
+          className="flex flex-col gap-2"
         >
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-ink-muted">{group.label}</span>
+          <div className="flex min-h-8 items-center gap-2">
+            <span className="text-xs font-semibold text-ink-subtle">{group.label}</span>
             {group.values.length > 3 ? (
-              <Button size="sm" variant="ghost" onClick={() => takeAll(group)}>
+              <Button size="xs" variant="ghost" onClick={() => takeAll(group)}>
                 اختر الكل
               </Button>
             ) : null}
           </div>
           <div className="flex flex-wrap gap-1.5">
             {group.values.map((v) => (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={axis.values.includes(v)}
-                onClick={() => toggle(v)}
-                className={cn(
-                  'min-h-10 min-w-10 rounded-control border px-2.5 text-sm font-semibold',
-                  axis.values.includes(v)
-                    ? 'border-brand bg-brand text-on-brand'
-                    : 'border-line bg-surface text-ink hover:bg-surface-muted',
-                )}
-              >
+              <ChoiceChip key={v} pressed={axis.values.includes(v)} onClick={() => toggle(v)}>
                 {v}
-              </button>
+              </ChoiceChip>
             ))}
           </div>
         </div>
       ))}
-      {axis.values.length > 0 ? (
-        <ul className="flex flex-wrap gap-2" aria-label={`قيم ${title}`}>
-          {axis.values.map((v) => (
-            <li
-              key={v}
-              className="inline-flex items-center gap-1 rounded-full bg-brand-soft ps-3 text-sm font-semibold text-brand-ink"
-            >
-              {v}
-              <IconButton
-                size="xs"
-                label={`احذف ${v}`}
-                icon={<CloseIcon size={16} />}
-                onClick={() => onChange({ ...axis, values: axis.values.filter((x) => x !== v) })}
-              />
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div className="flex items-start gap-2">
-        <TextField
-          label={`قيمة جديدة لـ${title}`}
-          hideLabel
-          placeholder={
-            presets.length > 0
-              ? `قيمة غير موجودة فوق، مثل ${axis.name === 'اللون' ? 'نيلي' : '6XL'}`
-              : `قيمة جديدة لـ${title}`
-          }
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              add();
+      <div className="flex flex-col gap-3 border-t border-line pt-4">
+        {axis.values.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-ink-subtle">المختار:</span>
+            <ul className="flex flex-wrap gap-1.5" aria-label={`قيم ${title}`}>
+              {axis.values.map((v) => (
+                <li
+                  key={v}
+                  className="inline-flex items-center gap-0.5 rounded-small bg-brand-soft ps-2.5 text-sm font-semibold text-brand-ink"
+                >
+                  {v}
+                  <IconButton
+                    size="xs"
+                    label={`احذف ${v}`}
+                    icon={<CloseIcon size={16} />}
+                    onClick={() => onChange({ ...axis, values: axis.values.filter((x) => x !== v) })}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <div className="flex items-start gap-2">
+          <TextField
+            label={`قيمة جديدة لـ${title}`}
+            hideLabel
+            placeholder={
+              presets.length > 0
+                ? `قيمة غير موجودة فوق، مثل ${axis.name === 'اللون' ? 'نيلي' : '6XL'}`
+                : `قيمة جديدة لـ${title}`
             }
-          }}
-          className="flex-1"
-        />
-        <Button variant="secondary" onClick={add}>
-          أضف القيمة
-        </Button>
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                add();
+              }
+            }}
+            className="min-w-0 flex-1"
+          />
+          <Button variant="secondary" icon={<AddIcon />} onClick={add}>
+            أضف القيمة
+          </Button>
+        </div>
       </div>
     </div>
   );

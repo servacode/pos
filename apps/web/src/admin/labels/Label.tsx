@@ -37,12 +37,16 @@ export const LABEL_LAYOUTS = {
 } as const;
 export type LabelLayout = keyof typeof LABEL_LAYOUTS;
 
-/** One label: the store, the product and its options, the price big, the bars and their digits. */
+/**
+ * One label: the store, the product and its options, the price big, the bars and their digits. It is
+ * paper: light with dark ink in both modes (the on-screen preview, and a print made in dark mode,
+ * whose bars must stay dark for the scanner).
+ */
 export function Label({ item, store, showStore }: { item: LabelItem; store: string; showStore: boolean }) {
   return (
     <div
       dir="rtl"
-      className="flex h-full w-full flex-col items-center justify-between overflow-hidden bg-surface px-[1.5mm] py-[1mm] text-center text-ink"
+      className="flex h-full w-full flex-col items-center justify-between overflow-hidden bg-surface px-[1.5mm] py-[1mm] text-center text-ink dark:bg-ink dark:text-surface"
       style={{ fontSize: '2.6mm', lineHeight: 1.15 }}
     >
       {showStore ? <span className="w-full truncate font-semibold">{store}</span> : null}

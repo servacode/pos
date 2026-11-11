@@ -5,18 +5,28 @@ import {
   AddIcon,
   Alert,
   Badge,
-  BarcodeIcon,
   Button,
   DataTable,
   EditIcon,
   EmptyState,
   IconButton,
+  IconChip,
+  Menu,
+  MenuItem,
   Money,
   MoneyField,
+  MoreIcon,
+  PageHeader,
+  PrintIcon,
   ProductsIcon,
   SearchField,
   SegmentedControl,
   Select,
+  Skeleton,
+  StatTile,
+  StatusChip,
+  StockIcon,
+  WarningIcon,
   cn,
   formatQuantity,
   textLinkClass,
@@ -35,6 +45,7 @@ import {
   searchTerm,
 } from '../catalog/catalog';
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
+import { ButtonLink } from './parts';
 
 /** Typing pauses this long before the list is asked again. */
 export const SEARCH_DEBOUNCE_MS = 250;
@@ -64,6 +75,34 @@ function useDebounced<T>(value: T, ms: number): T {
     return () => clearTimeout(timer);
   }, [value, ms]);
   return debounced;
+}
+
+/** A tile's width in the phone's sideways row; the grid sizes them from 640 px. */
+const TILE = 'w-64 shrink-0 snap-start sm:w-auto';
+
+/** What the rows on screen add up to, for the tiles over the list. */
+interface ListSummary {
+  products: number;
+  variants: number;
+  /** Thousandths, over the stocked products */
+  pieces: number;
+  /** Stocked products at zero or below */
+  runOut: number;
+  /** The stocked product with the least left */
+  lowest: ProductListItem | null;
+}
+
+function summaryOf(items: readonly ProductListItem[]): ListSummary {
+  const stocked = items.filter((item) => item.type === 'stock');
+  let lowest: ProductListItem | null = null;
+  for (const item of stocked) if (!lowest || item.stockQty < lowest.stockQty) lowest = item;
+  return {
+    products: items.length,
+    variants: items.reduce((sum, item) => sum + item.variantCount, 0),
+    pieces: stocked.reduce((sum, item) => sum + item.stockQty, 0),
+    runOut: stocked.filter((item) => item.stockQty <= 0).length,
+    lowest,
+  };
 }
 
 function PriceCell({ item }: { item: ProductListItem }) {
@@ -150,7 +189,7 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   }
 
   return (
-    <form noValidate onSubmit={save} className="flex flex-wrap items-start justify-end gap-2 py-1">
+    <form noValidate onSubmit={save} className="flex flex-wrap items-start justify-end gap-2 py-2">
       <MoneyField
         label={`السعر الجديد لـ«${item.nameAr}»`}
         hideLabel
@@ -160,13 +199,24 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
         error={error}
         className="w-36"
       />
-      <Button type="submit" size="sm" loading={saving}>
+      <Button type="submit" loading={saving}>
         احفظ
       </Button>
-      <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+      <Button variant="ghost" onClick={() => setEditing(false)}>
         تراجع
       </Button>
     </form>
+  );
+}
+
+/** The state of a row, as a word in its colour: archived, waiting for review, or on sale. */
+function StatusCell({ item }: { item: ProductListItem }) {
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      {item.archivedAt ? <Badge>مؤرشف</Badge> : null}
+      {item.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
+      {!item.archivedAt && item.status !== 'temporary' ? <StatusChip status="active" /> : null}
+    </span>
   );
 }
 
@@ -176,9 +226,20 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
  * and the in-place price edit.
  */
 export function ProductsPage() {
+  // The list keeps its state below the shell, so typing in the search never redraws the menu and
+  // the top bar.
+  return (
+    <AppShell>
+      <ProductsList />
+    </AppShell>
+  );
+}
+
+function ProductsList() {
   const me = useMe();
   const navigate = useNavigate();
   const canManage = canManageCatalog(me);
+  const digits = me.settings.numberFormat;
   const [params] = useSearchParams();
   // «التصنيفات» links here with ?category=
   const [filters, setFilters] = useState<Filters>(() => ({
@@ -271,35 +332,38 @@ export function ProductsPage() {
 
   const filtered = filters.q.trim() !== '' || filters.categoryId !== '' || filters.status !== 'active';
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
+  const summary = items ? summaryOf(items) : null;
+  // More pages wait behind «اعرض المزيد»: the tiles count what is on screen, «+» says there is more.
+  const more = nextCursor ? '+' : '';
+  const showSummary = !loadError && (items === null || items.length > 0);
 
   const columns: DataColumn<ProductListItem>[] = [
     {
       key: 'name',
       header: 'المنتج',
       cell: (item) => (
-        <div className="flex min-w-56 items-center gap-3 py-2">
-          <span
-            aria-hidden="true"
-            className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft font-bold text-brand-ink"
-          >
+        <div className="flex min-w-44 items-center gap-3 py-2.5 sm:min-w-60">
+          <IconChip className="text-base font-bold max-sm:hidden">
             {Array.from(item.nameAr.trim())[0] ?? ''}
-          </span>
+          </IconChip>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex flex-wrap items-center gap-2">
-              <Link to={`/products/${item.id}`} className="font-semibold text-ink hover:text-brand-ink">
-                {item.nameAr}
-              </Link>
-              {item.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
-              {item.archivedAt ? <Badge>مؤرشف</Badge> : null}
-            </span>
-            <span className="flex flex-wrap gap-2 text-[0.8125rem] text-ink-muted">
-              {item.barcode ? (
-                <bdi dir="ltr" className="num">
-                  {item.barcode}
-                </bdi>
-              ) : null}
-              {item.variantCount > 1 ? <span>{item.variantCount} متغيّرات</span> : null}
-            </span>
+            <Link
+              to={`/products/${item.id}`}
+              className="rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
+            >
+              {item.nameAr}
+            </Link>
+            {item.variantCount > 1 || item.barcode ? (
+              <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-subtle">
+                {item.variantCount > 1 ? <span>{item.variantCount} متغيّرات</span> : null}
+                {item.variantCount > 1 && item.barcode ? <span aria-hidden="true">·</span> : null}
+                {item.barcode ? (
+                  <bdi dir="ltr" className="num">
+                    {item.barcode}
+                  </bdi>
+                ) : null}
+              </span>
+            ) : null}
           </div>
         </div>
       ),
@@ -307,7 +371,14 @@ export function ProductsPage() {
     {
       key: 'category',
       header: 'التصنيف',
-      cell: (item) => item.categoryName ?? <span className="text-ink-subtle">بلا تصنيف</span>,
+      // A phone keeps the price and the stock in view; the category is on the product's card.
+      className: 'max-md:hidden',
+      cell: (item) =>
+        item.categoryName ? (
+          <span className="whitespace-nowrap text-ink-muted">{item.categoryName}</span>
+        ) : (
+          <span className="whitespace-nowrap text-ink-subtle">بلا تصنيف</span>
+        ),
     },
     {
       key: 'price',
@@ -339,151 +410,238 @@ export function ProductsPage() {
         item.type === 'service' ? (
           <span className="text-ink-subtle">—</span>
         ) : (
-          <span className={cn(item.stockQty < 0 && 'text-danger-ink')}>
-            {formatQuantity(item.stockQty, me.settings.numberFormat)}
+          <span
+            className={cn(
+              'font-semibold',
+              item.stockQty < 0 && 'text-danger-ink',
+              item.stockQty === 0 && 'text-warning-ink',
+            )}
+          >
+            {formatQuantity(item.stockQty, digits)}
           </span>
         ),
     },
+    { key: 'status', header: 'الحالة', cell: (item) => <StatusCell item={item} /> },
+    ...(canManage
+      ? [
+          {
+            key: 'actions',
+            // The words are for screen readers; the box around them keeps them inside the table's
+            // scroll on a phone (a lone sr-only box escapes it and widens the page).
+            header: (
+              <span className="relative block">
+                <span className="sr-only">إجراءات</span>
+              </span>
+            ),
+            className: 'w-14',
+            cell: (item: ProductListItem) => (
+              <Menu
+                label={`إجراءات «${item.nameAr}»`}
+                align="end"
+                trigger={<IconButton size="sm" label={`إجراءات «${item.nameAr}»`} icon={<MoreIcon />} />}
+              >
+                <MenuItem
+                  icon={<EditIcon />}
+                  render={(props) => <Link to={`/products/${item.id}`} {...props} />}
+                >
+                  افتح المنتج
+                </MenuItem>
+                {!item.archivedAt ? (
+                  <MenuItem
+                    icon={<PrintIcon />}
+                    render={(props) => <Link to={`/labels?product=${item.id}`} {...props} />}
+                  >
+                    اطبع الملصقات
+                  </MenuItem>
+                ) : null}
+              </Menu>
+            ),
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
   ];
 
+  const addProduct = (
+    <ButtonLink to="/products/new" variant="primary" icon={<AddIcon />}>
+      أضف منتجاً
+    </ButtonLink>
+  );
+
   return (
-    <AppShell>
+    <>
       <title>المنتجات · Serva POS</title>
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-ink">المنتجات</h1>
-            <p className="text-ink-muted">
-              ابحث بالاسم أو امسح الباركود.{' '}
-              <Link to="/categories" className={textLinkClass}>
-                التصنيفات
-              </Link>
-            </p>
-          </div>
-          {canManage ? (
-            <Link
-              to="/products/new"
-              className="inline-flex min-h-12 items-center gap-2 rounded-control bg-brand px-5 font-semibold text-on-brand hover:bg-brand-hover max-sm:w-full max-sm:justify-center"
-            >
-              <AddIcon />
-              أضف منتجاً
-            </Link>
-          ) : null}
-        </div>
-
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-          <SearchField
-            label="ابحث بالاسم أو الباركود"
-            value={filters.q}
-            onValueChange={(value) => setFilter('q', value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
-                event.preventDefault();
-                void openBarcode(filters.q);
-              }
-            }}
-            slashShortcut
-            className="lg:flex-1"
-          />
-          <Select
-            label="التصنيف"
-            hideLabel
-            value={filters.categoryId}
-            onChange={(event) => setFilter('categoryId', event.target.value)}
-            className="lg:w-56"
-          >
-            <option value="">كل التصنيفات</option>
-            {tree.map((node) => (
-              <option key={node.category.id} value={node.category.id}>
-                {categoryOptionLabel(node)}
-              </option>
-            ))}
-          </Select>
-          <SegmentedControl
-            label="حالة المنتج"
-            options={STATUS_OPTIONS}
-            value={filters.status}
-            onValueChange={(value) => setFilter('status', value)}
-          />
-        </div>
-
-        {notice ? <Alert tone={notice.tone}>{notice.text}</Alert> : null}
-
-        {unknownCode ? (
-          <Alert tone="info">
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>
-                لا منتج بهذا الباركود:{' '}
-                <bdi dir="ltr" className="num">
-                  {unknownCode}
-                </bdi>
-              </span>
-              {canManage ? (
-                <Link
-                  to={`/products/new?barcode=${encodeURIComponent(unknownCode)}`}
-                  className={textLinkClass}
-                >
-                  أضف منتجاً بهذا الباركود
-                </Link>
-              ) : null}
-            </span>
-          </Alert>
-        ) : null}
-
-        <DataTable
-          caption="المنتجات"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(item) => item.id}
-          loading={items === null && !loadError}
-          error={loadError ?? undefined}
-          onRetry={() => void load()}
-          empty={
-            filtered ? (
-              <EmptyState
-                icon={ProductsIcon}
-                title="لا منتجات تطابق بحثك."
-                description="جرّب كلمة أخرى أو تصنيفاً آخر."
-                action={
-                  <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
-                    امسح البحث والتصفية
-                  </Button>
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={ProductsIcon}
-                title="لا منتجات بعد."
-                description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
-                action={
-                  canManage ? (
-                    <Link
-                      to="/products/new"
-                      className="inline-flex min-h-12 items-center gap-2 rounded-control bg-brand px-5 font-semibold text-on-brand hover:bg-brand-hover"
-                    >
-                      <AddIcon />
-                      أضف منتجاً
-                    </Link>
-                  ) : null
-                }
-              />
-            )
-          }
+      <div className="flex flex-col gap-6">
+        <PageHeader
+          icon={<ProductsIcon />}
+          title="المنتجات"
+          description="ابحث بالاسم، أو امسح باركوداً في أي وقت لتفتح منتجه."
+          actions={canManage ? addProduct : null}
         />
 
-        {nextCursor && items ? (
-          <div className="flex justify-center">
-            <Button variant="secondary" loading={loadingMore} onClick={() => void loadMore()}>
-              اعرض المزيد
-            </Button>
+        {showSummary ? (
+          // On a phone the tiles slide sideways in one row instead of filling the screen.
+          <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:pb-0">
+            <StatTile
+              className={TILE}
+              label="المنتجات"
+              icon={<ProductsIcon />}
+              value={
+                summary ? (
+                  <bdi className="num">{`${summary.products}${more}`}</bdi>
+                ) : (
+                  <Skeleton className="my-1.5 h-6 w-16" />
+                )
+              }
+              footnote={
+                summary && summary.variants > summary.products ? (
+                  <>
+                    المتغيّرات: <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
+                  </>
+                ) : undefined
+              }
+            />
+            <StatTile
+              className={TILE}
+              label="القطع في المخزون"
+              icon={<StockIcon />}
+              iconTone="neutral"
+              value={
+                summary ? (
+                  <bdi className="num">{`${formatQuantity(summary.pieces, digits)}${more}`}</bdi>
+                ) : (
+                  <Skeleton className="my-1.5 h-6 w-20" />
+                )
+              }
+            />
+            <StatTile
+              className={TILE}
+              label="نفد مخزونها"
+              icon={<WarningIcon />}
+              iconTone={summary && summary.runOut > 0 ? 'warning' : 'neutral'}
+              value={
+                summary ? (
+                  <bdi className="num">{`${summary.runOut}${more}`}</bdi>
+                ) : (
+                  <Skeleton className="my-1.5 h-6 w-12" />
+                )
+              }
+              footnote={
+                summary?.lowest ? (
+                  <>
+                    أقلّها: {summary.lowest.nameAr} ·{' '}
+                    <bdi className="num font-semibold text-ink">
+                      {formatQuantity(summary.lowest.stockQty, digits)}
+                    </bdi>
+                  </>
+                ) : undefined
+              }
+            />
           </div>
         ) : null}
 
-        <p className="flex items-center gap-2 text-sm text-ink-muted">
-          <BarcodeIcon />
-          امسح باركوداً في أي وقت لتفتح منتجه.
-        </p>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <SearchField
+              label="ابحث بالاسم أو الباركود"
+              placeholder="ابحث بالاسم أو امسح الباركود"
+              value={filters.q}
+              onValueChange={(value) => setFilter('q', value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
+                  event.preventDefault();
+                  void openBarcode(filters.q);
+                }
+              }}
+              slashShortcut
+              className="min-w-0 basis-full lg:min-w-64 lg:flex-1 lg:basis-0"
+            />
+            <Select
+              label="التصنيف"
+              hideLabel
+              value={filters.categoryId}
+              onChange={(event) => setFilter('categoryId', event.target.value)}
+              className="min-w-40 flex-1 lg:w-56 lg:flex-none"
+            >
+              <option value="">كل التصنيفات</option>
+              {tree.map((node) => (
+                <option key={node.category.id} value={node.category.id}>
+                  {categoryOptionLabel(node)}
+                </option>
+              ))}
+            </Select>
+            <SegmentedControl
+              label="حالة المنتج"
+              options={STATUS_OPTIONS}
+              value={filters.status}
+              onValueChange={(value) => setFilter('status', value)}
+              fullWidth
+              className="max-sm:w-full"
+            />
+          </div>
+
+          {notice ? <Alert tone={notice.tone}>{notice.text}</Alert> : null}
+
+          {unknownCode ? (
+            <Alert tone="info">
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>
+                  لا منتج بهذا الباركود:{' '}
+                  <bdi dir="ltr" className="num">
+                    {unknownCode}
+                  </bdi>
+                </span>
+                {canManage ? (
+                  <Link
+                    to={`/products/new?barcode=${encodeURIComponent(unknownCode)}`}
+                    className={textLinkClass}
+                  >
+                    أضف منتجاً بهذا الباركود
+                  </Link>
+                ) : null}
+              </span>
+            </Alert>
+          ) : null}
+
+          <DataTable
+            caption="المنتجات"
+            columns={columns}
+            rows={items ?? []}
+            rowKey={(item) => item.id}
+            loading={items === null && !loadError}
+            error={loadError ?? undefined}
+            onRetry={() => void load()}
+            empty={
+              filtered ? (
+                <EmptyState
+                  icon={ProductsIcon}
+                  title="لا منتجات تطابق بحثك."
+                  description="جرّب كلمة أخرى أو تصنيفاً آخر."
+                  action={
+                    <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
+                      امسح البحث والتصفية
+                    </Button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={ProductsIcon}
+                  title="لا منتجات بعد."
+                  description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
+                  action={canManage ? addProduct : null}
+                />
+              )
+            }
+          />
+
+          {nextCursor && items ? (
+            <div className="flex justify-center">
+              <Button variant="secondary" loading={loadingMore} onClick={() => void loadMore()}>
+                اعرض المزيد
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </div>
-    </AppShell>
+    </>
   );
 }
