@@ -52,6 +52,23 @@ describe('RegisterPage', () => {
     await waitFor(() => expect(screen.queryByLabelText('رمز التحقق')).not.toBeInTheDocument());
   });
 
+  it('shows which of the three steps the visitor is on', async () => {
+    mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh, 'POST /v1/auth/register': codeSent });
+    const { user } = renderApp('/register');
+
+    const steps = await screen.findByRole('list', { name: 'خطوات فتح المتجر' });
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(steps).getByText('بياناتك').closest('li')).toHaveAttribute('aria-current', 'step');
+
+    await fillDetails(user);
+    await user.click(screen.getByRole('button', { name: 'افتح متجري' }));
+    await screen.findByLabelText('رمز التحقق');
+
+    const next = screen.getByRole('list', { name: 'خطوات فتح المتجر' });
+    expect(within(next).getByText('رمز التحقق').closest('li')).toHaveAttribute('aria-current', 'step');
+    expect(within(next).getByText('بياناتك').closest('li')).not.toHaveAttribute('aria-current');
+  });
+
   it('shows no test box on a normal server', async () => {
     mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh, 'POST /v1/auth/register': codeSent });
     const { user } = renderApp('/register');

@@ -41,6 +41,7 @@ describe('HomePage', () => {
     });
     const { user } = renderApp('/');
 
+    await user.click(await screen.findByRole('button', { name: /^حسابي/ }));
     await user.click(await screen.findByRole('button', { name: /خروج/ }));
 
     expect(await screen.findByRole('heading', { name: 'أهلاً بعودتك' })).toBeInTheDocument();
