@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   REFUND_METHODS,
   type Approval,
@@ -10,19 +10,32 @@ import { businessDateOf } from '@serva/core/sale';
 import { buildReturnPayload, defaultRefundMethod, returnableLines } from '@serva/core/sale-return';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
 import {
-  BackIcon,
+  AddIcon,
+  Alert,
+  Badge,
   Button,
+  CardIcon,
+  CashIcon,
   cn,
   EmptyState,
   formatQuantity,
+  IconChip,
   Money,
+  OfferIcon,
+  PhoneIcon,
   PrintIcon,
+  RemoveIcon,
+  SearchIcon,
+  SalesIcon,
+  Skeleton,
   TextField,
+  TransferIcon,
   UndoIcon,
   useDigits,
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
 import { clockText, dateText } from '../format';
+import { ChoiceGroup, DoneCard, FlowHeader, OptionChip, OptionTile } from '../FlowParts';
 import { usePos } from '../services';
 import { deviceDocuments, type OpenShift } from '../shift/shift';
 import { ManagerCode } from '../staff/ManagerCode';
@@ -38,6 +51,18 @@ const REFUND_TEXT: Record<RefundMethod, string> = {
   transfer: 'بتحويل',
   voucher: 'على قسيمة استبدال',
 };
+
+const REFUND_ICON: Record<RefundMethod, ReactNode> = {
+  cash: <CashIcon />,
+  card: <CardIcon />,
+  wallet: <PhoneIcon />,
+  transfer: <TransferIcon />,
+  voucher: <OfferIcon />,
+};
+
+/** A − or + of the quantity stepper: 48 square, like the cart's (هوية 4 › الكاشير). */
+const STEP =
+  'grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard enabled:hover:bg-surface-muted enabled:hover:text-ink enabled:active:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40';
 
 export type SavedReturn = Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
 
@@ -170,24 +195,25 @@ export function ReturnScreen({
     }
   }
 
+  const refundMethods = current
+    ? ['cash', ...current.sale.payments.map((p) => p.method), 'voucher'].filter(
+        (m, i, all): m is RefundMethod =>
+          (REFUND_METHODS as readonly string[]).includes(m) && all.indexOf(m) === i,
+      )
+    : [];
+
   return (
-    <div className="flex w-full max-w-6xl flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <Button variant="secondary" icon={<BackIcon />} onClick={onBack}>
-          ارجع للبيع
-        </Button>
-        <div className="flex flex-col">
-          <h1 className="text-3xl font-bold text-ink">مرتجع</h1>
-          <p className="text-ink-muted">
-            اختر فاتورة من هذا الجهاز خلال آخر {RETURN_WINDOW_DAYS} أيام، ثم ما يرجع منها. المبلغ من الفاتورة
-            نفسها.
-          </p>
-        </div>
-      </div>
-      <div className="grid grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-6">
+    <div className="flex w-full max-w-7xl flex-col gap-6">
+      <FlowHeader
+        onBack={onBack}
+        icon={<UndoIcon size={24} />}
+        title="مرتجع"
+        description={`اختر فاتورة من هذا الجهاز خلال آخر ${RETURN_WINDOW_DAYS} أيام، ثم ما يرجع منها. المبلغ من الفاتورة نفسها.`}
+      />
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
         <section
           aria-label="الفواتير"
-          className="flex flex-col gap-3 self-start rounded-card border border-line bg-surface p-4"
+          className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4 shadow-e1 lg:sticky lg:top-0"
         >
           <TextField
             label="رقم الفاتورة"
@@ -196,39 +222,55 @@ export function ReturnScreen({
             dir="ltr"
             value={search}
             onChange={(e) => setSearch(e.target.value.slice(0, 40))}
+            inputClassName="num"
+            startAdornment={<SearchIcon className="ms-4 shrink-0" />}
           />
-          {entries && shown.length === 0 ? (
-            <p className="py-4 text-center text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
+          {entries === null ? (
+            <div aria-hidden="true" className="flex flex-col gap-2 py-1">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-14 w-full rounded-control" />
+              ))}
+            </div>
           ) : null}
-          <ul className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto">
+          {entries && shown.length === 0 ? (
+            <p className="py-6 text-center text-sm text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
+          ) : null}
+          <ul className="-mx-1 flex max-h-[28rem] flex-col gap-1 overflow-y-auto px-1 py-0.5">
             {shown.map((s) => {
               const at = Date.parse(s.deviceTime);
+              const selected = current?.id === s.id;
               return (
                 <li key={s.id}>
                   <button
                     type="button"
-                    aria-pressed={current?.id === s.id}
+                    aria-pressed={selected}
                     onClick={() => choose(s)}
                     className={cn(
-                      'flex min-h-14 w-full items-center justify-between gap-2 rounded-control border-2 px-3 text-start',
-                      current?.id === s.id
-                        ? 'border-brand bg-brand-soft'
+                      'flex min-h-14 w-full items-center justify-between gap-3 rounded-control border px-3 py-2 text-start transition-colors duration-120 ease-standard',
+                      selected
+                        ? 'border-brand bg-brand-soft/60 ring-4 ring-brand/10'
                         : 'border-transparent hover:bg-surface-muted',
                     )}
                   >
-                    <span className="flex flex-col">
-                      <bdi dir="ltr" className="num font-semibold">
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <bdi dir="ltr" className="num truncate font-semibold text-ink">
                         {s.number}
                       </bdi>
-                      <span className="text-xs text-ink-muted">
-                        {dateText(at, digits)} ، {clockText(at, digits)}
-                        {s.returned.length > 0 ? ' · رجع منها شيء' : ''}
+                      <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+                        <span className="num">
+                          {dateText(at, digits)} ، {clockText(at, digits)}
+                        </span>
+                        {s.returned.length > 0 ? (
+                          <span className="text-warning-ink">· رجع منها شيء</span>
+                        ) : (
+                          ''
+                        )}
                       </span>
                     </span>
                     <Money
                       minor={s.sale.totals.totalMinor}
                       currency={s.sale.currency}
-                      className="font-bold"
+                      className="shrink-0 font-bold text-ink"
                     />
                   </button>
                 </li>
@@ -241,14 +283,30 @@ export function ReturnScreen({
             icon={UndoIcon}
             title="اختر فاتورة"
             description="تظهر أصنافها هنا مع الكمية التي ما زالت ترجع."
+            className="min-h-80 justify-center"
           />
         ) : saved ? (
-          <section
-            aria-label="سُجّل المرتجع"
-            className="flex flex-col items-start gap-4 rounded-card border border-line bg-surface p-6"
+          <DoneCard
+            label="سُجّل المرتجع"
+            title="سُجّل المرتجع"
+            actions={
+              <>
+                {savedRefund(saved) === 'voucher' && onExchange && saved.number ? (
+                  <Button onClick={() => onExchange(saved.number!)}>بيع البديل بالقسيمة</Button>
+                ) : null}
+                <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
+                  اطبع الإيصال مرة أخرى
+                </Button>
+                <Button variant="secondary" onClick={() => setSaved(null)}>
+                  مرتجع آخر من نفس الفاتورة
+                </Button>
+                <Button variant="ghost" onClick={onBack}>
+                  ارجع للبيع
+                </Button>
+              </>
+            }
           >
-            <h2 className="text-2xl font-bold text-ink">سُجّل المرتجع</h2>
-            <p className="text-ink">
+            <p className="text-lg text-ink">
               <bdi dir="ltr" className="num font-semibold">
                 {saved.number}
               </bdi>{' '}
@@ -261,182 +319,176 @@ export function ReturnScreen({
               {REFUND_TEXT[savedRefund(saved)]}
             </p>
             {savedRefund(saved) === 'voucher' ? (
-              <p className="text-ink-muted">
+              <p className="max-w-md text-ink-muted">
                 القسيمة برقم المرتجع، مطبوعة على الإيصال. تُصرف على أي جهاز في المحل.
               </p>
             ) : null}
-            <div className="flex flex-wrap gap-3">
-              {savedRefund(saved) === 'voucher' && onExchange && saved.number ? (
-                <Button onClick={() => onExchange(saved.number!)}>بيع البديل بالقسيمة</Button>
-              ) : null}
-              <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
-                اطبع الإيصال مرة أخرى
-              </Button>
-              <Button variant="secondary" onClick={() => setSaved(null)}>
-                مرتجع آخر من نفس الفاتورة
-              </Button>
-              <Button variant="secondary" onClick={onBack}>
-                ارجع للبيع
-              </Button>
-            </div>
-          </section>
+          </DoneCard>
         ) : (
           <section
             aria-label="ما يرجع"
-            className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
+            className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
           >
-            <h2 className="text-xl font-bold text-ink">
-              الفاتورة{' '}
-              <bdi dir="ltr" className="num">
-                {current.number}
-              </bdi>
-            </h2>
-            <ul className="flex flex-col divide-y divide-line">
-              {lines.map((line) => {
-                const q = qty[line.saleLineNo] ?? 0;
-                const set = (next: number) =>
-                  setQty((all) => ({
-                    ...all,
-                    [line.saleLineNo]: Math.max(0, Math.min(line.remainingQty, next)),
-                  }));
-                return (
-                  <li key={line.saleLineNo} className="flex items-center justify-between gap-3 py-3">
-                    <span className="flex min-w-0 flex-col">
-                      <span className="font-semibold text-ink">{line.name}</span>
-                      <span className="text-sm text-ink-muted">
-                        بيع {formatQuantity(line.soldQty, digits)}
-                        {line.returnedQty > 0 ? ` · رجع ${formatQuantity(line.returnedQty, digits)}` : ''}
+            <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1">
+              <div className="flex flex-wrap items-center gap-3">
+                <IconChip>
+                  <SalesIcon />
+                </IconChip>
+                <h2 className="min-w-0 flex-1 text-lg font-semibold wrap-anywhere text-ink">
+                  الفاتورة{' '}
+                  <bdi dir="ltr" className="num">
+                    {current.number}
+                  </bdi>
+                </h2>
+                <Money
+                  minor={current.sale.totals.totalMinor}
+                  currency={current.sale.currency}
+                  className="text-sm font-semibold text-ink-muted"
+                />
+              </div>
+              <ul className="flex flex-col divide-y divide-line border-t border-line">
+                {lines.map((line) => {
+                  const q = qty[line.saleLineNo] ?? 0;
+                  const set = (next: number) =>
+                    setQty((all) => ({
+                      ...all,
+                      [line.saleLineNo]: Math.max(0, Math.min(line.remainingQty, next)),
+                    }));
+                  return (
+                    <li
+                      key={line.saleLineNo}
+                      className="flex flex-wrap items-center justify-between gap-3 py-3"
+                    >
+                      <span className="flex min-w-40 flex-1 flex-col gap-0.5">
+                        <span className="font-semibold text-ink">{line.name}</span>
+                        <span className="num text-sm text-ink-muted">
+                          بيع {formatQuantity(line.soldQty, digits)}
+                          {line.returnedQty > 0 ? ` · رجع ${formatQuantity(line.returnedQty, digits)}` : ''}
+                        </span>
                       </span>
-                    </span>
-                    {line.remainingQty === 0 ? (
-                      <span className="text-sm text-ink-muted">رجع كله</span>
-                    ) : (
-                      <span className="flex items-center gap-2" role="group" aria-label={`كمية ${line.name}`}>
-                        <Button
-                          variant="secondary"
-                          aria-label={`أنقص ${line.name}`}
-                          onClick={() => set(q - 1000)}
-                          disabled={q === 0}
+                      {line.remainingQty === 0 ? (
+                        <Badge>رجع كله</Badge>
+                      ) : (
+                        <span
+                          className="flex items-center gap-2"
+                          role="group"
+                          aria-label={`كمية ${line.name}`}
                         >
-                          −
-                        </Button>
-                        <output className="num min-w-12 text-center text-lg font-bold" aria-live="polite">
-                          {formatQuantity(q, digits)}
-                        </output>
-                        <Button
-                          variant="secondary"
-                          aria-label={`زد ${line.name}`}
-                          onClick={() => set(q + 1000 > line.remainingQty ? line.remainingQty : q + 1000)}
-                          disabled={q >= line.remainingQty}
-                        >
-                          +
-                        </Button>
-                        <Button variant="ghost" onClick={() => set(line.remainingQty)}>
-                          الكل
-                        </Button>
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-            <div role="group" aria-label="السبب" className="flex flex-wrap gap-2">
-              {[...REASONS, 'other' as const].map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  aria-pressed={reason === r}
-                  onClick={() => setReason(r)}
-                  className={cn(
-                    'min-h-11 rounded-full border-2 px-4 font-semibold',
-                    reason === r
-                      ? 'border-brand bg-brand-soft text-brand-ink'
-                      : 'border-line bg-surface text-ink',
-                  )}
-                >
-                  {r === 'other' ? 'سبب آخر' : r}
-                </button>
-              ))}
-            </div>
-            {reason === 'other' ? (
-              <TextField
-                label="السبب"
-                value={otherReason}
-                onChange={(e) => setOtherReason(e.target.value.slice(0, 200))}
-              />
-            ) : null}
-            <div role="group" aria-label="طريقة الرد" className="flex flex-wrap gap-2">
-              {['cash', ...current.sale.payments.map((p) => p.method), 'voucher']
-                .filter(
-                  (m, i, all): m is RefundMethod =>
-                    (REFUND_METHODS as readonly string[]).includes(m) && all.indexOf(m) === i,
-                )
-                .map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    aria-pressed={method === m}
-                    onClick={() => setMethod(m)}
-                    className={cn(
-                      'min-h-11 rounded-control border-2 px-4 font-semibold',
-                      method === m
-                        ? 'border-brand bg-brand-soft text-brand-ink'
-                        : 'border-line bg-surface text-ink',
-                    )}
-                  >
-                    {REFUND_TEXT[m]}
-                  </button>
+                          <span className="inline-flex items-stretch overflow-hidden rounded-control border border-line-control/50 bg-surface shadow-e1">
+                            <button
+                              type="button"
+                              aria-label={`أنقص ${line.name}`}
+                              onClick={() => set(q - 1000)}
+                              disabled={q === 0}
+                              className={STEP}
+                            >
+                              <RemoveIcon />
+                            </button>
+                            <output
+                              className={cn(
+                                'num grid min-w-14 place-items-center border-x border-line px-2 text-lg font-bold',
+                                q > 0 ? 'text-brand-ink' : 'text-ink',
+                              )}
+                              aria-live="polite"
+                            >
+                              {formatQuantity(q, digits)}
+                            </output>
+                            <button
+                              type="button"
+                              aria-label={`زد ${line.name}`}
+                              onClick={() => set(q + 1000 > line.remainingQty ? line.remainingQty : q + 1000)}
+                              disabled={q >= line.remainingQty}
+                              className={STEP}
+                            >
+                              <AddIcon />
+                            </button>
+                          </span>
+                          <Button variant="ghost" onClick={() => set(line.remainingQty)}>
+                            الكل
+                          </Button>
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              <ChoiceGroup label="السبب" className="flex flex-wrap gap-2">
+                {[...REASONS, 'other' as const].map((r) => (
+                  <OptionChip key={r} selected={reason === r} onClick={() => setReason(r)}>
+                    {r === 'other' ? 'سبب آخر' : r}
+                  </OptionChip>
                 ))}
+              </ChoiceGroup>
+              {reason === 'other' ? (
+                <TextField
+                  label="السبب"
+                  value={otherReason}
+                  onChange={(e) => setOtherReason(e.target.value.slice(0, 200))}
+                />
+              ) : null}
             </div>
-            {needsReference ? (
-              <TextField
-                label="رقم العملية"
-                hint="من جهاز البطاقة أو من التطبيق"
-                dir="ltr"
-                value={reference}
-                onChange={(e) => setReference(e.target.value.slice(0, 64))}
-              />
-            ) : null}
-            <div
-              role="status"
-              aria-label="المبلغ المردود"
-              className="flex items-center justify-between rounded-card bg-surface-total p-4"
-            >
-              <span className="font-semibold text-ink-muted">
-                {method === 'voucher' ? 'مبلغ القسيمة' : 'المبلغ المردود'}
-              </span>
-              <Money
-                minor={draft?.totals.totalMinor ?? 0}
-                currency={current.sale.currency}
-                className="text-3xl font-bold text-ink"
-              />
-            </div>
-            {error ? (
-              <p role="alert" className="font-semibold text-danger-ink">
-                {error}
-              </p>
-            ) : null}
-            {approving ? (
-              <ManagerCode
-                staff={staff}
-                permission="sale.refund"
-                reason={
-                  method === 'voucher'
-                    ? 'المرتجع يُصدر قسيمة بمبلغه، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                    : 'المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                }
-                onApproved={(approval) => void record(approval)}
-                onCancel={() => setApproving(false)}
-              />
-            ) : (
-              <Button
-                size="lg"
-                disabled={!ready || saving}
-                onClick={() => (canRefund ? void record(null) : setApproving(true))}
+
+            <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 xl:sticky xl:top-0">
+              <ChoiceGroup label="طريقة الرد" className="grid gap-2">
+                {refundMethods.map((m) => (
+                  <OptionTile
+                    key={m}
+                    selected={method === m}
+                    onClick={() => setMethod(m)}
+                    icon={REFUND_ICON[m]}
+                    title={REFUND_TEXT[m]}
+                  />
+                ))}
+              </ChoiceGroup>
+              {needsReference ? (
+                <TextField
+                  label="رقم العملية"
+                  hint="من جهاز البطاقة أو من التطبيق"
+                  dir="ltr"
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value.slice(0, 64))}
+                />
+              ) : null}
+              <div
+                role="status"
+                aria-label="المبلغ المردود"
+                className="flex flex-col gap-0.5 rounded-control bg-surface-total px-4 py-3"
               >
-                سجّل المرتجع
-              </Button>
-            )}
+                <span className="text-sm font-semibold text-ink-muted">
+                  {method === 'voucher' ? 'مبلغ القسيمة' : 'المبلغ المردود'}
+                </span>
+                <Money
+                  minor={draft?.totals.totalMinor ?? 0}
+                  currency={current.sale.currency}
+                  className="text-kpi font-bold tracking-tight text-ink"
+                  unitClassName="text-base font-semibold text-ink-subtle"
+                />
+              </div>
+              {error ? <Alert tone="error">{error}</Alert> : null}
+              {approving ? (
+                <ManagerCode
+                  staff={staff}
+                  permission="sale.refund"
+                  reason={
+                    method === 'voucher'
+                      ? 'المرتجع يُصدر قسيمة بمبلغه، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                      : 'المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                  }
+                  onApproved={(approval) => void record(approval)}
+                  onCancel={() => setApproving(false)}
+                />
+              ) : (
+                <Button
+                  size="lg"
+                  fullWidth
+                  icon={<UndoIcon />}
+                  disabled={!ready || saving}
+                  onClick={() => (canRefund ? void record(null) : setApproving(true))}
+                >
+                  سجّل المرتجع
+                </Button>
+              )}
+            </div>
           </section>
         )}
       </div>

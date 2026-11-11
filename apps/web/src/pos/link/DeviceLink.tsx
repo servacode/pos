@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice } from '@serva/core';
 import type { SyncStore } from '@serva/sync/client';
-import { Alert } from '@serva/ui';
+import { Alert, DeviceIcon, IconChip } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
 import { deviceStore } from '../../offline/database';
 import {
@@ -148,8 +148,13 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
 
   return (
     <div className="flex w-full flex-col items-center gap-8">
-      <div className="flex w-full max-w-6xl flex-wrap items-center justify-between gap-4">
-        <p className="text-lg font-semibold text-ink">إعداد جهاز الكاشير</p>
+      <div className="flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-card border border-line bg-surface px-5 py-3 shadow-e1">
+        <p className="flex items-center gap-3 font-semibold text-ink">
+          <IconChip size="sm">
+            <DeviceIcon size={16} />
+          </IconChip>
+          إعداد جهاز الكاشير
+        </p>
         <LinkSteps current={stage.step} ownerSignedIn={ownerSignedIn} />
       </div>
 

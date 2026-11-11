@@ -8,28 +8,45 @@ import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
 import { toLatinDigits } from '@serva/core/text';
 import type { OutboxEntry } from '@serva/sync';
 import {
+  AddIcon,
+  Badge,
   BarcodeIcon,
   Button,
+  CalendarIcon,
   CartIcon,
   CartLine,
   CashierShell,
+  ClockIcon,
   CloseIcon,
   cn,
+  CONTROL_HEIGHT,
+  DeleteIcon,
   displayNumber,
+  EmptyState,
   formatQuantity,
+  IconButton,
+  IconChip,
+  InboxIcon,
+  InfoIcon,
   ItemTile,
   KeyIcon,
   Money,
-  RemoveIcon,
-  AddIcon,
-  DeleteIcon,
   OfferIcon,
+  PercentIcon,
   PrintIcon,
+  ProductsIcon,
+  RemoveIcon,
   RetryIcon,
   SearchIcon,
+  Select,
+  SendIcon,
+  TextField,
+  Tooltip,
+  TotalPanel,
   UndoIcon,
   useDigits,
   WarningIcon,
+  WeighedIcon,
 } from '@serva/ui';
 import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
 import { counted } from '../format';
@@ -72,6 +89,8 @@ import { HoldPanel } from './HoldPanel';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
+import { Kbd } from './Kbd';
+import { SalePanel } from './SalePanel';
 
 const PaymentPanel = lazy(() => import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })));
 
@@ -385,6 +404,12 @@ export function SaleScreen(props: SaleScreenProps) {
     [catalog.items],
   );
   const entries = useMemo(() => gridEntries(results, pieces), [results, pieces]);
+  // Where some tile has a photo, the others keep the picture's place; with none, a model shows its
+  // first letter instead (هوية 4 › بطاقة الصنف).
+  const gridHasPhotos = useMemo(
+    () => entries.some((e) => Boolean(e.kind === 'model' ? e.lead.imageUrl : e.item.imageUrl)),
+    [entries],
+  );
 
   function onSearchKey(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') {
@@ -519,90 +544,139 @@ export function SaleScreen(props: SaleScreenProps) {
     : null;
   const totals = priced?.priced.totals;
   const lineCount = cart.lines.length;
+  const wholesaleOn = cart.priceTier === 'wholesale';
+  const showWholesale = (session.permissions.has('sale.wholesale') && hasWholesale) || wholesaleOn;
+  const canHoldForCustomer = priced !== null && !cart.onlineOrder;
+  const ticketTools =
+    waitingOnline.length > 0 || canHoldForCustomer || priced !== null || showWholesale || props.heldCount > 0;
+  const orderType = cart.service?.orderType ?? defaultOrderType;
+  const closeButton = (label: string, onClick: () => void) => (
+    <Button variant="secondary" size="md" icon={<CloseIcon size={20} />} aria-keyshortcuts="Escape" onClick={onClick}>
+      {label}
+      <Kbd>Esc</Kbd>
+    </Button>
+  );
 
   const cartPanel = (
     <>
-      <div className="flex h-16 shrink-0 items-center gap-3 px-4">
-        <span className="grid size-10 place-items-center rounded-xl bg-brand-soft text-brand-ink">
-          <CartIcon size={20} />
-        </span>
-        <span className="text-lg font-bold text-ink">
-          {lineCount === 0 ? 'فاتورة جديدة' : 'الفاتورة الحالية'}
-        </span>
-        <span className="flex-1" />
-        {staff.length > 1 ? (
-          <select
-            aria-label="البائع"
-            value={seller}
-            onChange={(e) => {
-              setSeller(e.target.value);
-              void pos.local.set(SELLER_KEY, e.target.value);
-            }}
-            className="h-10 max-w-36 rounded-control border border-line-control bg-surface px-2 text-sm text-ink"
-          >
-            {staff.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.fullName}
-              </option>
-            ))}
-          </select>
-        ) : null}
-        {(session.permissions.has('sale.wholesale') && hasWholesale) || cart.priceTier === 'wholesale' ? (
-          <Button
-            size="sm"
-            variant={cart.priceTier === 'wholesale' ? 'primary' : 'secondary'}
-            aria-pressed={cart.priceTier === 'wholesale'}
-            onClick={() =>
-              setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
-            }
-          >
-            سعر الجملة
-          </Button>
-        ) : null}
-        {priced ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<PrintIcon size={16} />}
-            onClick={() =>
-              setQuote({
-                settings,
-                lines: priced.lines,
-                totals: priced.priced.totals,
-                at: Date.now(),
-                cashierName: session.fullName,
-                wholesale: cart.priceTier === 'wholesale',
-              })
-            }
-          >
-            عرض سعر
-          </Button>
-        ) : null}
-        {priced && !cart.onlineOrder ? (
-          <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'hold' })}>
-            احجز
-          </Button>
-        ) : null}
-        {waitingOnline.length > 0 ? (
-          <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'online' })}>
-            طلبات المتجر ({waitingOnline.length})
-          </Button>
-        ) : null}
-        {props.heldCount > 0 ? (
-          <span className="rounded-full bg-warning-soft px-3 py-1 text-xs font-semibold text-warning-ink">
-            {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
-          </span>
-        ) : null}
-      </div>
-      {service ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2">
-          <div role="group" aria-label="نوع الطلب" className="flex gap-1">
-            {(['dine_in', 'takeaway', 'delivery'] as const).map((type) => (
+      {/* The ticket's head: what it is, who sells, and the actions on the whole ticket */}
+      <header className="flex shrink-0 flex-col gap-3 border-b border-line p-4">
+        <div className="flex items-center gap-3">
+          <IconChip size="md">
+            <CartIcon size={20} />
+          </IconChip>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <h2 className="truncate text-lg/6 font-semibold text-ink">
+              {lineCount === 0 ? 'فاتورة جديدة' : 'الفاتورة الحالية'}
+            </h2>
+            <p className="truncate text-sm text-ink-muted">
+              {lineCount === 0
+                ? 'لا أسطر بعد'
+                : `${counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)} · ${counted(pieceCount(cart), ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)}`}
+            </p>
+          </div>
+          {staff.length > 1 ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {/* Seen beside the box; the select is named by its own label for screen readers */}
+              <span aria-hidden="true" className="text-sm text-ink-subtle">
+                البائع
+              </span>
+              <Select
+                label="البائع"
+                hideLabel
+                value={seller}
+                onChange={(e) => {
+                  setSeller(e.target.value);
+                  void pos.local.set(SELLER_KEY, e.target.value);
+                }}
+                className="w-36"
+              >
+                {staff.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.fullName}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          ) : null}
+        </div>
+        {ticketTools ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {waitingOnline.length > 0 ? (
               <Button
+                variant="ghost"
+                size="md"
+                icon={<InboxIcon size={20} />}
+                aria-label={`طلبات المتجر (${waitingOnline.length})`}
+                onClick={() => setMode({ kind: 'online' })}
+              >
+                طلبات المتجر
+                <span
+                  aria-hidden="true"
+                  className="num grid h-6 min-w-6 place-items-center rounded-full bg-brand px-1.5 text-xs font-bold text-on-brand"
+                >
+                  {displayNumber(String(waitingOnline.length), digits)}
+                </span>
+              </Button>
+            ) : null}
+            {canHoldForCustomer ? (
+              <Button
+                variant="ghost"
+                size="md"
+                icon={<CalendarIcon size={20} />}
+                onClick={() => setMode({ kind: 'hold' })}
+              >
+                احجز
+              </Button>
+            ) : null}
+            {priced ? (
+              <Tooltip content="اطبع عرض سعر للزبون">
+                <IconButton
+                  label="عرض سعر"
+                  size="md"
+                  icon={<PrintIcon />}
+                  onClick={() =>
+                    setQuote({
+                      settings,
+                      lines: priced.lines,
+                      totals: priced.priced.totals,
+                      at: Date.now(),
+                      cashierName: session.fullName,
+                      wholesale: cart.priceTier === 'wholesale',
+                    })
+                  }
+                />
+              </Tooltip>
+            ) : null}
+            {showWholesale ? (
+              <Button
+                variant="ghost"
+                size="md"
+                aria-pressed={wholesaleOn}
+                onClick={() =>
+                  setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
+                }
+              >
+                سعر الجملة
+              </Button>
+            ) : null}
+            <span className="flex-1" />
+            {props.heldCount > 0 ? (
+              <Badge tone="warning">
+                {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
+      </header>
+      {service ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+          <div role="group" aria-label="نوع الطلب" className="inline-flex gap-1 rounded-control bg-surface-muted p-1">
+            {(['dine_in', 'takeaway', 'delivery'] as const).map((type) => (
+              <button
                 key={type}
-                size="sm"
-                variant={(cart.service?.orderType ?? defaultOrderType) === type ? 'primary' : 'ghost'}
-                aria-pressed={(cart.service?.orderType ?? defaultOrderType) === type}
+                type="button"
+                aria-pressed={orderType === type}
                 onClick={() =>
                   setCart((c) => ({
                     ...c,
@@ -612,20 +686,28 @@ export function SaleScreen(props: SaleScreenProps) {
                     },
                   }))
                 }
+                className={cn(
+                  'min-h-12 rounded-small px-4 text-base font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard',
+                  orderType === type
+                    ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
+                    : 'text-ink-muted hover:text-ink',
+                )}
               >
                 {ORDER_TYPE_TEXT[type]}
-              </Button>
+              </button>
             ))}
           </div>
           <span className="flex-1" />
           {service.tables.length > 0 ? (
-            <Button size="sm" variant="secondary" onClick={() => setMode({ kind: 'tables' })}>
+            <Button variant="secondary" size="md" onClick={() => setMode({ kind: 'tables' })}>
               {cart.service?.table ? `طاولة ${cart.service.table}` : 'الطاولات'}
             </Button>
           ) : null}
           {service.kitchenTickets && kitchenLines(cart).length > 0 ? (
             <Button
-              size="sm"
+              variant="secondary"
+              size="md"
+              icon={<SendIcon size={20} />}
               onClick={() => {
                 setKitchen({
                   lines: kitchenLines(cart),
@@ -645,20 +727,17 @@ export function SaleScreen(props: SaleScreenProps) {
       {cart.onlineOrder ? (
         <div
           role="status"
-          className="flex items-center gap-2 border-b border-line bg-brand-soft px-4 py-2 text-sm text-brand-ink"
+          className="flex shrink-0 items-center gap-3 border-b border-line bg-brand-soft py-2 ps-4 pe-2 text-sm text-brand-ink"
         >
-          <span className="flex-1">
+          <InboxIcon size={20} className="shrink-0" />
+          <span className="min-w-0 flex-1">
             طلب المتجر{' '}
             <bdi dir="ltr" className="num font-semibold">
               {cart.onlineOrder.number}
             </bdi>{' '}
             · {cart.onlineOrder.customerName}: يُغلق عند الدفع
           </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setCart((c) => ({ ...c, onlineOrder: undefined }))}
-          >
+          <Button size="sm" variant="ghost" onClick={() => setCart((c) => ({ ...c, onlineOrder: undefined }))}>
             افصل الطلب
           </Button>
         </div>
@@ -666,9 +745,10 @@ export function SaleScreen(props: SaleScreenProps) {
       {cart.voucher ? (
         <div
           role="status"
-          className="flex items-center gap-2 border-b border-line bg-brand-soft px-4 py-2 text-sm text-brand-ink"
+          className="flex shrink-0 items-center gap-3 border-b border-line bg-brand-soft py-2 ps-4 pe-2 text-sm text-brand-ink"
         >
-          <span className="flex-1">
+          <UndoIcon size={20} className="shrink-0" />
+          <span className="min-w-0 flex-1">
             استبدال: القسيمة{' '}
             <bdi dir="ltr" className="num font-semibold">
               {cart.voucher}
@@ -682,13 +762,16 @@ export function SaleScreen(props: SaleScreenProps) {
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {lineCount === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-ink-muted">
-            <BarcodeIcon size={48} />
-            <span className="text-lg font-semibold text-ink">السلة فارغة</span>
-            <span>امسح الباركود أو اختر صنفاً من الشبكة.</span>
+          <div className="h-full p-4">
+            <EmptyState
+              icon={BarcodeIcon}
+              title="السلة فارغة"
+              description="امسح الباركود أو اختر صنفاً من الشبكة."
+              className="h-full justify-center"
+            />
           </div>
         ) : (
-          <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-1.5 px-3 pb-3">
+          <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-0.5 p-2">
             {cart.lines.map((line, i) => {
               const p = priced?.lines[i];
               const need = needs.get(line.lineNo);
@@ -696,7 +779,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 line.packName ? line.packName : null,
                 line.adjustment?.kind === 'price' ? 'سعر معدّل' : null,
                 p && p.priced.lineDiscountMinor > 0 && line.adjustment?.kind === 'discount' ? (
-                  <span key="d" className="text-info-ink">
+                  <span key="d" className="font-semibold text-info-ink">
                     خصم <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
@@ -704,16 +787,17 @@ export function SaleScreen(props: SaleScreenProps) {
                   <button
                     key="s"
                     type="button"
-                    className={
-                      (line.serials?.length ?? 0) > 0 ? 'text-ink-muted' : 'font-semibold text-danger-ink'
-                    }
+                    className={cn(
+                      'rounded-small underline-offset-4 hover:underline',
+                      (line.serials?.length ?? 0) > 0 ? 'text-ink-muted' : 'font-semibold text-danger-ink',
+                    )}
                     onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
                   >
                     {line.serials?.length ? `IMEI ${line.serials.join('، ')}` : 'اكتب الرقم التسلسلي'}
                   </button>
                 ) : null,
                 p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
-                  <span key="o" className="text-success-ink">
+                  <span key="o" className="font-semibold text-success-ink">
                     {p.discount.reason} −
                     <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
@@ -751,78 +835,87 @@ export function SaleScreen(props: SaleScreenProps) {
                   {need ? (
                     <p
                       role="alert"
-                      className="flex w-full items-center gap-2 text-sm font-semibold text-warning-ink"
+                      className="flex w-full items-center gap-2 rounded-small bg-warning-soft px-3 py-2 text-sm font-semibold text-warning-ink"
                     >
-                      <WarningIcon size={16} />
+                      <WarningIcon size={16} className="shrink-0" />
                       {NEED_TEXT[need]}
                     </p>
                   ) : null}
-                  {line.weighed ? (
-                    <Button
-                      variant="secondary"
-                      onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
-                    >
-                      الوزن
-                    </Button>
-                  ) : (
-                    <div className="inline-flex items-center overflow-hidden rounded-control border border-line">
-                      <button
-                        type="button"
-                        aria-label="أنقص الكمية"
-                        onClick={() => changeQty(line, -1)}
-                        className="grid size-12 place-items-center hover:bg-surface-muted"
-                      >
-                        <RemoveIcon size={20} />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="اكتب الكمية"
+                  <div className="flex w-full items-center gap-2">
+                    {line.weighed ? (
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        icon={<WeighedIcon size={20} />}
                         onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
-                        className="num min-w-10 text-center text-lg font-bold"
                       >
-                        {formatQuantity(line.qty, digits)}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="زِد الكمية"
-                        onClick={() => changeQty(line, 1)}
-                        className="grid size-12 place-items-center hover:bg-surface-muted"
-                      >
-                        <AddIcon size={20} />
-                      </button>
-                    </div>
-                  )}
-                  <Button
-                    variant="secondary"
-                    icon={<OfferIcon size={16} />}
-                    onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'percent' })}
-                  >
-                    خصم
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'price' })}
-                  >
-                    السعر
-                  </Button>
-                  {need ? (
+                        الوزن
+                      </Button>
+                    ) : (
+                      <div className="inline-flex items-stretch overflow-hidden rounded-control border border-line-control/50 bg-surface shadow-e1">
+                        <button
+                          type="button"
+                          aria-label="أنقص الكمية"
+                          onClick={() => changeQty(line, -1)}
+                          className="grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink active:bg-surface-muted"
+                        >
+                          <RemoveIcon size={20} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="اكتب الكمية"
+                          onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
+                          className="num min-w-14 border-x border-line px-2 text-center text-lg font-bold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                        >
+                          {formatQuantity(line.qty, digits)}
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="زِد الكمية"
+                          onClick={() => changeQty(line, 1)}
+                          className="grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink active:bg-surface-muted"
+                        >
+                          <AddIcon size={20} />
+                        </button>
+                      </div>
+                    )}
+                    <span className="flex-1" />
+                    <IconButton
+                      label="احذف السطر"
+                      size="md"
+                      variant="danger-soft"
+                      icon={<DeleteIcon size={20} />}
+                      onClick={() => remove(line.lineNo)}
+                    />
+                  </div>
+                  <div className="grid w-full auto-cols-fr grid-flow-col gap-2">
                     <Button
                       variant="secondary"
-                      icon={<KeyIcon size={16} />}
-                      onClick={() => setMode({ kind: 'approve', lineNo: line.lineNo, need })}
+                      size="md"
+                      icon={<PercentIcon size={20} />}
+                      onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'percent' })}
                     >
-                      رمز المدير
+                      خصم
                     </Button>
-                  ) : null}
-                  <span className="flex-1" />
-                  <button
-                    type="button"
-                    aria-label="احذف السطر"
-                    onClick={() => remove(line.lineNo)}
-                    className="grid size-12 place-items-center rounded-control text-ink-muted hover:bg-danger-soft hover:text-danger-ink"
-                  >
-                    <DeleteIcon size={20} />
-                  </button>
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      icon={<OfferIcon size={20} />}
+                      onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'price' })}
+                    >
+                      السعر
+                    </Button>
+                    {need ? (
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        icon={<KeyIcon size={20} />}
+                        onClick={() => setMode({ kind: 'approve', lineNo: line.lineNo, need })}
+                      >
+                        رمز المدير
+                      </Button>
+                    ) : null}
+                  </div>
                 </CartLine>
               );
             })}
@@ -830,114 +923,105 @@ export function SaleScreen(props: SaleScreenProps) {
         )}
       </div>
       {removed ? (
-        <div role="status" className="flex items-center gap-3 bg-ink px-4 py-2 text-sm text-canvas">
-          <span className="flex-1 truncate">حُذف «{removed.line.name}»</span>
+        <div
+          role="status"
+          className="mx-3 mb-3 flex shrink-0 items-center gap-3 rounded-card bg-ink py-1 ps-4 pe-1 text-sm text-surface shadow-e3 motion-safe:animate-rise"
+        >
+          <span className="min-w-0 flex-1 truncate">حُذف «{removed.line.name}»</span>
           <button
             type="button"
             onClick={() => {
               setCart((c) => restoreLine(c, removed.line, removed.index));
               setRemoved(null);
             }}
-            className="flex min-h-12 items-center gap-1 px-2 font-bold text-brand-soft"
+            className="flex min-h-12 items-center gap-1.5 rounded-small px-3 font-bold text-brand-soft transition-colors duration-120 ease-standard hover:bg-surface/10"
           >
             <UndoIcon size={16} />
             تراجع
           </button>
         </div>
       ) : null}
-      <div className="m-3 mt-0 flex shrink-0 flex-col gap-3 rounded-[1.25rem] bg-surface-total p-4">
-        {totals && totals.discountMinor > 0 ? (
-          <dl className="flex flex-col gap-0.5 text-sm">
-            <div className="flex justify-between text-ink-muted">
-              <dt>المجموع قبل الخصم</dt>
-              <dd>
-                <Money minor={totals.grossMinor} currency={ctx.currency} />
-              </dd>
+      <TotalPanel
+        totalMinor={totalMinor}
+        currency={ctx.currency}
+        label="المطلوب"
+        breakdown={[
+          ...(totals && totals.discountMinor > 0
+            ? [
+                { label: 'المجموع قبل الخصم', minor: totals.grossMinor },
+                { label: 'الخصم · وفّر الزبون', minor: totals.discountMinor, tone: 'info' as const },
+              ]
+            : []),
+          ...(totals && !settings.taxInclusive && totals.taxMinor > 0
+            ? [{ label: 'الضريبة', minor: totals.taxMinor }]
+            : []),
+        ]}
+        note={
+          foreign ? (
+            <>
+              ≈{' '}
+              <Money
+                minor={convert(totalMinor, ctx.currency, foreign, rateFor(ctx.rates, foreign, ctx.currency))}
+                currency={foreign}
+              />{' '}
+              · سعر الصرف <bdi className="num">{displayNumber(catalog.rates[0]!.rate, digits)}</bdi>
+            </>
+          ) : undefined
+        }
+        notice={
+          invoiceNeeds ? (
+            <div
+              role="alert"
+              className="flex items-center gap-3 rounded-card border border-warning/20 bg-warning-soft py-2 ps-3 pe-2 text-sm font-semibold text-warning-ink"
+            >
+              <WarningIcon size={20} className="shrink-0" />
+              <span className="min-w-0 flex-1">{NEED_TEXT[invoiceNeeds]}</span>
+              <Button
+                variant="secondary"
+                size="md"
+                icon={<KeyIcon size={20} />}
+                onClick={() => setMode({ kind: 'approve', lineNo: null, need: invoiceNeeds })}
+              >
+                رمز المدير
+              </Button>
             </div>
-            <div className="flex justify-between font-semibold text-info-ink">
-              <dt>الخصم · وفّر الزبون</dt>
-              <dd>
-                <Money minor={totals.discountMinor} currency={ctx.currency} />
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        {totals && !settings.taxInclusive && totals.taxMinor > 0 ? (
-          <div className="flex justify-between text-sm text-ink-muted">
-            <span>الضريبة</span>
-            <Money minor={totals.taxMinor} currency={ctx.currency} />
-          </div>
-        ) : null}
-        {invoiceNeeds ? (
-          <div role="alert" className="flex items-center gap-2 text-sm font-semibold text-warning-ink">
-            <WarningIcon size={16} />
-            <span className="flex-1">{NEED_TEXT[invoiceNeeds]}</span>
+          ) : undefined
+        }
+        actions={
+          <>
             <Button
               variant="secondary"
               size="md"
-              onClick={() => setMode({ kind: 'approve', lineNo: null, need: invoiceNeeds })}
+              icon={lineCount === 0 && props.heldCount > 0 ? <UndoIcon size={20} /> : <ClockIcon size={20} />}
+              aria-keyshortcuts="F4"
+              onClick={() => (lineCount > 0 ? props.onHold() : props.onResume())}
+              disabled={lineCount === 0 && props.heldCount === 0}
             >
-              رمز المدير
+              {lineCount === 0 && props.heldCount > 0 ? 'استرجع المعلّقة' : 'علّق'}
+              <Kbd>F4</Kbd>
             </Button>
-          </div>
-        ) : null}
-        <div className="flex items-end justify-between gap-3">
-          <div className="flex flex-col pb-1">
-            <span className="font-semibold text-ink-muted">المطلوب</span>
-            <span className="text-xs text-ink-muted">
-              {lineCount === 0
-                ? 'لا أسطر بعد'
-                : `${counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)} · ${counted(pieceCount(cart), ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)}`}
-            </span>
-          </div>
-          <div className="flex flex-col items-end">
-            <output aria-live="polite" aria-label="المطلوب" className="text-total font-bold text-ink">
-              <Money minor={totalMinor} currency={ctx.currency} />
-            </output>
-            {foreign ? (
-              <span className="text-sm text-ink-muted">
-                ≈{' '}
-                <Money
-                  minor={convert(
-                    totalMinor,
-                    ctx.currency,
-                    foreign,
-                    rateFor(ctx.rates, foreign, ctx.currency),
-                  )}
-                  currency={foreign}
-                />{' '}
-                · سعر الصرف <bdi className="num">{displayNumber(catalog.rates[0]!.rate, digits)}</bdi>
-              </span>
-            ) : null}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => (lineCount > 0 ? props.onHold() : props.onResume())}
-            disabled={lineCount === 0 && props.heldCount === 0}
-          >
-            {lineCount === 0 && props.heldCount > 0 ? 'استرجع المعلّقة' : 'علّق'}
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<OfferIcon size={16} />}
-            onClick={() => setMode({ kind: 'invoice' })}
-            disabled={lineCount === 0}
-          >
-            خصم
-          </Button>
-        </div>
-        <Button size="pay" onClick={() => setMode({ kind: 'pay' })} disabled={!canPay}>
-          <span>ادفع</span>
-          <Money minor={totalMinor} currency={ctx.currency} />
-        </Button>
-      </div>
+            <Button
+              variant="secondary"
+              size="md"
+              icon={<PercentIcon size={20} />}
+              aria-keyshortcuts="Alt+1"
+              onClick={() => setMode({ kind: 'invoice' })}
+              disabled={lineCount === 0}
+            >
+              خصم
+              <Kbd>Alt+1</Kbd>
+            </Button>
+          </>
+        }
+        onPay={() => setMode({ kind: 'pay' })}
+        payDisabled={!canPay}
+        payShortcut="F12"
+      />
     </>
   );
 
   return (
-    <CashierShell statusBar={props.statusBar} cart={cartPanel} mainClassName="gap-3.5 p-4 xl:px-6">
+    <CashierShell statusBar={props.statusBar} cart={cartPanel}>
       {quote ? <PrintableQuote data={quote} width={80} /> : null}
       {kitchen ? <PrintableKitchenTicket data={kitchen} /> : null}
       {effectiveMode.kind === 'pay' && priced ? (
@@ -1052,8 +1136,7 @@ export function SaleScreen(props: SaleScreenProps) {
           onClose={() => setMode({ kind: 'items' })}
         />
       ) : effectiveMode.kind === 'approve' ? (
-        <div className="flex flex-col gap-4">
-          <h2 className="text-2xl font-bold text-ink">موافقة على الخصم</h2>
+        <SalePanel title="موافقة على الخصم" icon={<KeyIcon size={20} />}>
           <ManagerCode
             staff={staff}
             permission="sale.discount_over_limit"
@@ -1067,7 +1150,7 @@ export function SaleScreen(props: SaleScreenProps) {
             }}
             onCancel={() => setMode({ kind: 'items' })}
           />
-        </div>
+        </SalePanel>
       ) : effectiveMode.kind === 'serial' && lineOf(effectiveMode.lineNo) ? (
         <SerialPanel
           key={effectiveMode.lineNo}
@@ -1169,84 +1252,78 @@ export function SaleScreen(props: SaleScreenProps) {
           onClose={() => setMode({ kind: 'items' })}
         />
       ) : effectiveMode.kind === 'help' ? (
-        <section
-          aria-label="دليل الاختصارات"
-          className="flex flex-col gap-4 rounded-card border border-line bg-surface p-6"
+        <SalePanel
+          title="دليل الاختصارات"
+          actions={closeButton('أغلق', () => setMode({ kind: 'items' }))}
         >
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-ink">دليل الاختصارات</h2>
-            <Button variant="secondary" icon={<CloseIcon />} onClick={() => setMode({ kind: 'items' })}>
-              أغلق
-            </Button>
-          </div>
-          <table className="w-full text-start">
-            <thead>
-              <tr className="text-sm text-ink-muted">
-                <th className="py-2 text-start font-semibold">الفعل</th>
-                <th className="py-2 text-start font-semibold">المفتاح</th>
-              </tr>
-            </thead>
-            <tbody>
-              {SHORTCUTS.map(([action, key]) => (
-                <tr key={action} className="border-t border-line">
-                  <td className="py-3">{action}</td>
-                  <td className="py-3">
-                    <kbd
-                      dir="ltr"
-                      className="rounded-small border border-line bg-surface-muted px-2 py-1 font-sans text-sm font-semibold"
-                    >
-                      {key}
-                    </kbd>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+          <ul className="flex flex-col divide-y divide-line">
+            {SHORTCUTS.map(([action, key]) => (
+              <li key={action} className="flex min-h-12 items-center justify-between gap-4 py-2">
+                <span className="text-ink">{action}</span>
+                <span className="flex shrink-0 items-center gap-1.5 text-sm text-ink-subtle">
+                  {key.split(' ').map((part, index) =>
+                    part === 'أو' || part === 'ثم' ? (
+                      <span key={index}>{part}</span>
+                    ) : (
+                      <Kbd key={index} always>
+                        {part}
+                      </Kbd>
+                    ),
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </SalePanel>
       ) : (
         <>
+          {/* The items: search or scan, the categories, then the grid */}
           <div className="flex shrink-0 gap-3">
-            <label className="flex h-14 min-w-0 flex-1 items-center gap-2.5 rounded-full border border-line-control/50 bg-surface px-5 shadow-e1 transition-[border-color,box-shadow] duration-120 focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15">
-              <SearchIcon size={20} className="text-ink-muted" />
-              <span className="sr-only">ابحث أو امسح الباركود</span>
-              <input
-                ref={searchRef}
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={onSearchKey}
-                placeholder="ابحث باسم الصنف أو امسح الباركود"
-                autoComplete="off"
-                className="h-full min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-subtle"
-              />
-              {multiplier ? (
-                <span
-                  className="num rounded-full bg-brand-soft px-3 py-1 font-bold text-brand-ink"
-                  aria-label={`الكمية التالية ${multiplier}`}
-                >
-                  ×{displayNumber(String(multiplier), digits)}
+            <TextField
+              ref={searchRef}
+              type="search"
+              label="ابحث أو امسح الباركود"
+              hideLabel
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={onSearchKey}
+              placeholder="ابحث باسم الصنف أو امسح الباركود"
+              autoComplete="off"
+              aria-keyshortcuts="F2"
+              className="min-w-0 flex-1"
+              inputClassName="[&::-webkit-search-cancel-button]:appearance-none"
+              startAdornment={<SearchIcon size={20} className="ms-4" />}
+              endAdornment={
+                <span className="me-1 flex shrink-0 items-center gap-2">
+                  {multiplier ? (
+                    <span
+                      className="num rounded-small bg-brand-soft px-2.5 py-1 text-base font-bold text-brand-ink"
+                      aria-label={`الكمية التالية ${multiplier}`}
+                    >
+                      ×{displayNumber(String(multiplier), digits)}
+                    </span>
+                  ) : null}
+                  {query ? (
+                    <IconButton
+                      label="امسح البحث"
+                      size="md"
+                      icon={<CloseIcon size={20} />}
+                      onClick={() => setQuery('')}
+                    />
+                  ) : (
+                    <span className="hidden items-center gap-2 pe-3 text-sm whitespace-nowrap text-ink-subtle lg:flex">
+                      <span aria-hidden="true" className="size-2 rounded-full bg-success" />
+                      القارئ جاهز
+                      <Kbd>F2</Kbd>
+                    </span>
+                  )}
                 </span>
-              ) : null}
-              {query ? (
-                <button
-                  type="button"
-                  aria-label="امسح البحث"
-                  onClick={() => setQuery('')}
-                  className="grid size-12 place-items-center rounded-small text-ink-muted hover:bg-surface-muted"
-                >
-                  <CloseIcon size={16} />
-                </button>
-              ) : (
-                <span className="hidden items-center gap-1.5 text-xs whitespace-nowrap text-ink-muted lg:flex">
-                  <BarcodeIcon size={16} />
-                  القارئ جاهز
-                </span>
-              )}
-            </label>
+              }
+            />
             {props.lastLines.length > 0 ? (
               <Button
                 variant="secondary"
-                icon={<RetryIcon size={16} />}
+                icon={<RetryIcon size={20} />}
                 onClick={() => {
                   for (const l of props.lastLines) {
                     const hit = l.barcode ? catalog.byBarcode.get(l.barcode) : undefined;
@@ -1264,24 +1341,32 @@ export function SaleScreen(props: SaleScreenProps) {
             <div
               role="alert"
               className={cn(
-                'flex items-center gap-3 rounded-control px-4 py-3 font-semibold',
-                notice.tone === 'warning' ? 'bg-warning-soft text-warning-ink' : 'bg-info-soft text-info-ink',
+                'flex shrink-0 items-center gap-3 rounded-card border py-1 ps-4 pe-1 text-sm motion-safe:animate-rise',
+                notice.tone === 'warning'
+                  ? 'border-warning/20 bg-warning-soft text-warning-ink'
+                  : 'border-info/20 bg-info-soft text-info-ink',
               )}
             >
-              <WarningIcon size={20} />
-              <span className="flex-1">{notice.text}</span>
-              <button
-                type="button"
-                aria-label="أخفِ التنبيه"
+              {notice.tone === 'warning' ? (
+                <WarningIcon size={20} className="shrink-0" />
+              ) : (
+                <InfoIcon size={20} className="shrink-0" />
+              )}
+              <span className="min-w-0 flex-1 py-2 font-semibold">{notice.text}</span>
+              <IconButton
+                label="أخفِ التنبيه"
+                size="md"
+                icon={<CloseIcon size={20} />}
                 onClick={() => setNotice(null)}
-                className="grid size-12 place-items-center rounded-small"
-              >
-                <CloseIcon size={16} />
-              </button>
+              />
             </div>
           ) : null}
           {catalog.categories.length > 0 ? (
-            <div role="group" aria-label="التصنيفات" className="flex shrink-0 gap-2 overflow-x-auto pb-1">
+            <div
+              role="group"
+              aria-label="التصنيفات"
+              className="-m-1 flex shrink-0 gap-2 overflow-x-auto p-1 scrollbar-none"
+            >
               {[{ id: null, name: 'الكل' }, ...catalog.categories].map((c) => {
                 const on = !query && category === c.id;
                 return (
@@ -1294,10 +1379,11 @@ export function SaleScreen(props: SaleScreenProps) {
                       setQuery('');
                     }}
                     className={cn(
-                      'min-h-12 shrink-0 rounded-full px-5 font-semibold whitespace-nowrap transition-colors duration-120',
+                      CONTROL_HEIGHT.touch,
+                      'shrink-0 rounded-small border px-5 text-base font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard',
                       on
-                        ? 'bg-ink text-surface shadow-e1'
-                        : 'bg-surface text-ink-muted shadow-e1 ring-1 ring-line/70 hover:text-ink',
+                        ? 'border-brand/30 bg-brand-soft text-brand-ink'
+                        : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
                     )}
                   >
                     {c.name}
@@ -1307,60 +1393,63 @@ export function SaleScreen(props: SaleScreenProps) {
             </div>
           ) : null}
           {results.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-12 text-center text-ink-muted">
-              <span className="text-lg font-semibold text-ink">
-                {catalog.items.length === 0 ? 'لا أصناف على هذا الجهاز بعد' : 'لا يوجد صنف بهذا الاسم'}
-              </span>
-              <span>
-                {catalog.items.length === 0
+            <EmptyState
+              icon={catalog.items.length === 0 ? ProductsIcon : SearchIcon}
+              title={catalog.items.length === 0 ? 'لا أصناف على هذا الجهاز بعد' : 'لا يوجد صنف بهذا الاسم'}
+              description={
+                catalog.items.length === 0
                   ? 'تصل الأصناف مع أول اتصال بالإنترنت.'
-                  : 'جرّب كلمة أقصر، أو امسح الباركود.'}
-              </span>
-            </div>
+                  : 'جرّب كلمة أقصر، أو امسح الباركود.'
+              }
+            />
           ) : (
-            <ul
-              aria-label="الأصناف"
-              className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] content-start gap-3"
-            >
-              {entries.map((entry) => {
-                if (entry.kind === 'model') {
-                  const price = lowestPrice(entry.pieces);
+            <div className="-m-1 min-h-0 flex-1 overflow-y-auto p-1">
+              <ul
+                aria-label="الأصناف"
+                className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] content-start gap-3"
+              >
+                {entries.map((entry) => {
+                  if (entry.kind === 'model') {
+                    const price = lowestPrice(entry.pieces);
+                    return (
+                      <li key={entry.productId}>
+                        <ItemTile
+                          name={entry.name}
+                          priceMinor={price.priceMinor}
+                          currency={price.currency}
+                          detail={piecesText(entry.pieces.length)}
+                          pictureSlot={gridHasPhotos}
+                          initial={!gridHasPhotos}
+                          {...(entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
+                          selected={
+                            (effectiveMode.kind === 'pick' && effectiveMode.productId === entry.productId) ||
+                            cart.lines.some((l) => entry.pieces.some((p) => p.variantId === l.variantId))
+                          }
+                          onSelect={() => setMode({ kind: 'pick', productId: entry.productId })}
+                          className="h-full w-full"
+                        />
+                      </li>
+                    );
+                  }
+                  const { item } = entry;
                   return (
-                    <li key={entry.productId}>
+                    <li key={item.variantId}>
                       <ItemTile
-                        name={entry.name}
-                        priceMinor={price.priceMinor}
-                        currency={price.currency}
-                        detail={piecesText(entry.pieces.length)}
-                        pictureSlot
-                        {...(entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
-                        selected={
-                          (effectiveMode.kind === 'pick' && effectiveMode.productId === entry.productId) ||
-                          cart.lines.some((l) => entry.pieces.some((p) => p.variantId === l.variantId))
-                        }
-                        onSelect={() => setMode({ kind: 'pick', productId: entry.productId })}
-                        className="w-full"
+                        name={item.name}
+                        priceMinor={item.price.priceMinor}
+                        currency={item.price.currency}
+                        weighed={item.unit?.allowsFraction ?? false}
+                        {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
+                        pictureSlot={gridHasPhotos}
+                        selected={cart.lines.some((l) => l.variantId === item.variantId)}
+                        onSelect={() => add(item)}
+                        className="h-full w-full"
                       />
                     </li>
                   );
-                }
-                const { item } = entry;
-                return (
-                  <li key={item.variantId}>
-                    <ItemTile
-                      name={item.name}
-                      priceMinor={item.price.priceMinor}
-                      currency={item.price.currency}
-                      weighed={item.unit?.allowsFraction ?? false}
-                      {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
-                      selected={cart.lines.some((l) => l.variantId === item.variantId)}
-                      onSelect={() => add(item)}
-                      className="w-full"
-                    />
-                  </li>
-                );
-              })}
-            </ul>
+                })}
+              </ul>
+            </div>
           )}
         </>
       )}

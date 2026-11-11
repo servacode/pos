@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Alert, Button, TextField } from '@serva/ui';
+import { Alert, Button, CheckIcon, SerialIcon, TextField } from '@serva/ui';
 import type { CartLine } from './cart';
+import { SalePanel } from './SalePanel';
 
 /**
  * «الرقم التسلسلي / IMEI» (03 › الإلكترونيات): the number of the piece sold, scanned from its box or
@@ -35,14 +36,10 @@ export function SerialPanel({
   }
 
   return (
-    <section
-      aria-label="الرقم التسلسلي"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-4"
-    >
-      <h2 className="text-lg font-bold text-ink">{line.name}</h2>
+    <SalePanel label="الرقم التسلسلي" title={line.name} icon={<SerialIcon size={20} />}>
       {error ? <Alert tone="error">{error}</Alert> : null}
       <form
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
           save();
@@ -54,14 +51,17 @@ export function SerialPanel({
           autoFocus
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          inputClassName="num"
         />
-        <div className="flex gap-3">
-          <Button type="submit">احفظ الرقم</Button>
+        <div className="flex flex-wrap gap-3">
+          <Button type="submit" icon={<CheckIcon size={20} />}>
+            احفظ الرقم
+          </Button>
           <Button variant="secondary" onClick={onCancel}>
             لاحقاً
           </Button>
         </div>
       </form>
-    </section>
+    </SalePanel>
   );
 }

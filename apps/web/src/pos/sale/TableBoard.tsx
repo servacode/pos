@@ -1,6 +1,7 @@
 import { Button, CloseIcon, cn, Money } from '@serva/ui';
 import type { CurrencyCode } from '@serva/core/currencies';
 import type { Cart } from './cart';
+import { SalePanel } from './SalePanel';
 
 /**
  * «خريطة الصالة» (03 › المطاعم): the hall's tables, free or with an open order and what it holds.
@@ -27,17 +28,16 @@ export function TableBoard({
   for (const cart of held) if (cart.service?.table) open.set(cart.service.table, cart);
   if (current.service?.table && current.lines.length > 0) open.set(current.service.table, current);
   return (
-    <section
-      aria-label="الطاولات"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-4"
-    >
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-ink">الطاولات</h2>
-        <Button variant="secondary" icon={<CloseIcon />} onClick={onClose}>
+    <SalePanel
+      label="الطاولات"
+      title="الطاولات"
+      actions={
+        <Button variant="secondary" size="md" icon={<CloseIcon size={20} />} onClick={onClose}>
           أغلق
         </Button>
-      </div>
-      <ul className="grid grid-cols-3 gap-3 md:grid-cols-4 xl:grid-cols-6">
+      }
+    >
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-3">
         {tables.map((table) => {
           const cart = open.get(table);
           const here = current.service?.table === table;
@@ -48,16 +48,20 @@ export function TableBoard({
                 onClick={() => onPick(table)}
                 aria-label={`طاولة ${table}${cart ? ' مشغولة' : ' فارغة'}`}
                 className={cn(
-                  'flex h-24 w-full flex-col items-center justify-center gap-1 rounded-card border-2 text-ink',
-                  cart ? 'border-warning bg-warning-soft' : 'border-line bg-surface hover:bg-surface-muted',
-                  here && 'ring-2 ring-brand',
+                  'flex h-24 w-full flex-col items-center justify-center gap-1 rounded-card border text-ink transition-[background-color,border-color,box-shadow,translate] duration-120 ease-standard motion-safe:active:scale-[0.98]',
+                  cart
+                    ? 'border-warning/30 bg-warning-soft'
+                    : 'border-line bg-surface shadow-e1 hover:border-line-control/50 hover:shadow-e2',
+                  here && 'ring-2 ring-brand ring-offset-2 ring-offset-surface',
                 )}
               >
-                <span className="text-xl font-bold">{table}</span>
+                <span className="num text-2xl font-bold">{table}</span>
                 {cart ? (
-                  <span className="text-sm">
-                    <Money minor={totalOf(cart)} currency={currency} />
-                  </span>
+                  <Money
+                    minor={totalOf(cart)}
+                    currency={currency}
+                    className="text-sm font-semibold text-warning-ink"
+                  />
                 ) : (
                   <span className="text-sm text-ink-muted">فارغة</span>
                 )}
@@ -66,6 +70,6 @@ export function TableBoard({
           );
         })}
       </ul>
-    </section>
+    </SalePanel>
   );
 }

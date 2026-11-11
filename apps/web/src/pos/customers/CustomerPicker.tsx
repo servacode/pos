@@ -4,7 +4,18 @@ import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { normalizePhone } from '@serva/core/phone';
 import { businessDateOf } from '@serva/core/sale';
 import { normalizeArabic, toLatinDigits } from '@serva/core/text';
-import { Button, cn, CustomersIcon, Money, TextField } from '@serva/ui';
+import {
+  AddIcon,
+  Alert,
+  Avatar,
+  BackIcon,
+  Button,
+  CustomersIcon,
+  IconChip,
+  Money,
+  SearchIcon,
+  TextField,
+} from '@serva/ui';
 import type { Catalog } from '../catalog';
 import { usePos } from '../services';
 
@@ -77,11 +88,13 @@ export function CustomerPicker({
   return (
     <section
       aria-label="اختر الزبون"
-      className="flex flex-col gap-3 rounded-card border-2 border-brand bg-surface p-4 motion-safe:animate-rise"
+      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-4 shadow-e2 motion-safe:animate-rise"
     >
       <div className="flex items-center gap-3">
-        <CustomersIcon size={20} className="text-brand-ink" />
-        <h3 className="flex-1 text-lg font-bold text-ink">{adding ? 'زبون جديد' : 'الزبون'}</h3>
+        <IconChip>
+          <CustomersIcon />
+        </IconChip>
+        <h3 className="flex-1 text-lg font-semibold text-ink">{adding ? 'زبون جديد' : 'الزبون'}</h3>
         <Button variant="ghost" onClick={onCancel}>
           إلغاء
         </Button>
@@ -99,17 +112,14 @@ export function CustomerPicker({
             dir="ltr"
             value={phone}
             onChange={(e) => setPhone(e.target.value.slice(0, 20))}
+            inputClassName="num"
           />
-          {error ? (
-            <p role="alert" className="text-sm font-semibold text-danger-ink">
-              {error}
-            </p>
-          ) : null}
-          <div className="flex gap-2">
-            <Button onClick={() => void add()} loading={saving}>
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button icon={<AddIcon />} onClick={() => void add()} loading={saving}>
               احفظ واختره
             </Button>
-            <Button variant="secondary" onClick={() => setAdding(false)}>
+            <Button variant="secondary" icon={<BackIcon />} onClick={() => setAdding(false)}>
               ارجع للبحث
             </Button>
           </div>
@@ -120,8 +130,9 @@ export function CustomerPicker({
             label="ابحث بالاسم أو الجوال"
             value={search}
             onChange={(e) => setSearch(e.target.value.slice(0, 60))}
+            startAdornment={<SearchIcon className="ms-4 shrink-0" />}
           />
-          <ul aria-label="الزبائن" className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+          <ul aria-label="الزبائن" className="-mx-1 flex max-h-64 flex-col gap-1 overflow-y-auto px-1">
             {found.map((c) => (
               <li key={c.id}>
                 <button
@@ -134,32 +145,37 @@ export function CustomerPicker({
                       priceTier: c.priceTier,
                     })
                   }
-                  className={cn(
-                    'flex min-h-12 w-full items-center justify-between gap-2 rounded-control px-3 text-start hover:bg-surface-muted',
-                  )}
+                  className="flex min-h-14 w-full items-center gap-3 rounded-control px-2 py-1.5 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted active:bg-surface-muted"
                 >
-                  <span className="font-semibold text-ink">{c.name}</span>
-                  <span className="flex flex-col items-end text-xs text-ink-muted">
+                  <Avatar name={c.name} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-semibold text-ink">{c.name}</span>
                     {c.phone ? (
-                      <bdi dir="ltr" className="num">
+                      <bdi dir="ltr" className="num self-start text-sm text-ink-muted">
                         {c.phone}
                       </bdi>
                     ) : null}
-                    {c.creditLimitMinor !== null ? (
-                      <span>
-                        حد الدين <Money minor={c.creditLimitMinor} currency={settings.baseCurrency} />
-                      </span>
-                    ) : null}
                   </span>
+                  {c.creditLimitMinor !== null ? (
+                    <span className="flex shrink-0 flex-col items-end text-xs text-ink-subtle">
+                      حد الدين{' '}
+                      <Money
+                        minor={c.creditLimitMinor}
+                        currency={settings.baseCurrency}
+                        className="text-sm font-semibold text-ink-muted"
+                      />
+                    </span>
+                  ) : null}
                 </button>
               </li>
             ))}
             {found.length === 0 ? (
-              <li className="py-3 text-center text-sm text-ink-muted">لا زبون بهذا الاسم أو الرقم.</li>
+              <li className="py-4 text-center text-sm text-ink-muted">لا زبون بهذا الاسم أو الرقم.</li>
             ) : null}
           </ul>
           <Button
             variant="secondary"
+            icon={<AddIcon />}
             onClick={() => {
               setAdding(true);
               setName(/\d/.test(search) ? '' : search);

@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import type { Permission } from '@serva/core';
 import type { Approval } from '@serva/core/contracts/documents';
-import { Button, cn, KeyIcon } from '@serva/ui';
+import { AlertCircleIcon, Button, IconChip, KeyIcon } from '@serva/ui';
+import { OptionChip } from '../FlowParts';
 import { PinPad, type PinStatus } from '../PinScreen';
 import { usePos } from '../services';
 import { approveWithCode, approversFor } from './approve';
@@ -47,22 +48,26 @@ export function ManagerCode({
   return (
     <section
       aria-label="رمز المدير"
-      className="flex flex-col gap-3 rounded-card border-2 border-warning bg-warning-soft/60 p-4 motion-safe:animate-rise"
+      className="flex flex-col gap-4 rounded-card border border-warning/30 bg-surface p-4 shadow-e2 motion-safe:animate-rise sm:p-5"
     >
-      <div className="flex items-start gap-3">
-        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-warning-soft text-warning-ink">
-          <KeyIcon size={20} />
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h3 className="text-lg font-bold text-ink">رمز المدير</h3>
-          <p className="text-sm text-ink-muted">{reason}</p>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-3">
+          <IconChip tone="warning">
+            <KeyIcon />
+          </IconChip>
+          <h3 className="min-w-0 flex-1 text-lg font-semibold text-ink">رمز المدير</h3>
+          <Button variant="ghost" onClick={onCancel}>
+            إلغاء
+          </Button>
         </div>
-        <Button variant="ghost" onClick={onCancel}>
-          إلغاء
-        </Button>
+        <p className="text-sm text-ink-muted">{reason}</p>
       </div>
       {approvers.length === 0 ? (
-        <p role="alert" className="text-sm font-semibold text-danger-ink">
+        <p
+          role="alert"
+          className="flex items-start gap-2 rounded-card border border-danger/20 bg-danger-soft px-4 py-3 text-sm font-semibold text-danger-ink"
+        >
+          <AlertCircleIcon size={20} className="shrink-0" />
           لا يوجد على هذا الجهاز مدير برمز من 6 أرقام يملك هذه الموافقة.
         </p>
       ) : (
@@ -70,23 +75,16 @@ export function ManagerCode({
           {approvers.length > 1 ? (
             <div role="group" aria-label="من يوافق؟" className="flex flex-wrap gap-2">
               {approvers.map((m) => (
-                <button
+                <OptionChip
                   key={m.id}
-                  type="button"
-                  aria-pressed={picked?.id === m.id}
+                  selected={picked?.id === m.id}
                   onClick={() => {
                     setPicked(m);
                     setStatus({ kind: 'idle' });
                   }}
-                  className={cn(
-                    'min-h-12 rounded-full border-2 px-4 font-semibold',
-                    picked?.id === m.id
-                      ? 'border-brand bg-brand-soft text-brand-ink'
-                      : 'border-line bg-surface text-ink',
-                  )}
                 >
                   {m.fullName}
-                </button>
+                </OptionChip>
               ))}
             </div>
           ) : null}

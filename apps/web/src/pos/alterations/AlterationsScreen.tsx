@@ -1,9 +1,25 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AlterationTicket } from '@serva/core/contracts/alterations';
-import { Alert, BackIcon, Badge, Button, cn, Money, PrintIcon, TextField } from '@serva/ui';
+import {
+  AddIcon,
+  Alert,
+  Badge,
+  Button,
+  CalendarIcon,
+  cn,
+  EmptyState,
+  IconChip,
+  Money,
+  PrintIcon,
+  ScissorsIcon,
+  Skeleton,
+  TextField,
+  type BadgeTone,
+} from '@serva/ui';
 import { APP_VERSION } from '../../offline/sync';
 import type { Catalog } from '../catalog';
+import { FlowHeader } from '../FlowParts';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 
@@ -44,6 +60,12 @@ const STATUS_TEXT: Record<AlterationTicket['status'], string> = {
   received: 'قيد التعديل',
   ready: 'جاهزة للاستلام',
   delivered: 'سُلّمت',
+};
+
+const STATUS_TONE: Record<AlterationTicket['status'], BadgeTone> = {
+  received: 'warning',
+  ready: 'success',
+  delivered: 'neutral',
 };
 
 /** Today plus `days`, YYYY-MM-DD in the browser's calendar */
@@ -136,26 +158,32 @@ export function AlterationsScreen({ catalog, onBack }: { catalog: Catalog; onBac
     void load();
   }
 
+  const open = items ?? [];
+  // The board's columns: what is in work, what waits to be collected (and anything else the list holds)
+  const columns = (['received', 'ready', 'delivered'] as const)
+    .map((status) => ({ status, tickets: open.filter((t) => t.status === status) }))
+    .filter((column) => column.status !== 'delivered' || column.tickets.length > 0);
+
   return (
-    <div className="flex w-full max-w-4xl flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <Button variant="secondary" icon={<BackIcon />} onClick={onBack}>
-          ارجع للبيع
-        </Button>
-        <div className="flex flex-col">
-          <h1 className="text-3xl font-bold text-ink">التعديلات</h1>
-          <p className="text-ink-muted">
-            تقصير وتضييق وتعديل: تذكرة بموعد التسليم، وتُباع الأجرة عند الاستلام.
-          </p>
-        </div>
-      </div>
+    <div className="flex w-full max-w-7xl flex-col gap-6">
+      <FlowHeader
+        onBack={onBack}
+        icon={<ScissorsIcon size={24} />}
+        title="التعديلات"
+        description="تقصير وتضييق وتعديل: تذكرة بموعد التسليم، وتُباع الأجرة عند الاستلام."
+      />
       {error ? <Alert tone="error">{error}</Alert> : null}
-      <section
-        aria-label="تذكرة جديدة"
-        className="flex flex-col gap-3 rounded-card border border-line bg-surface p-5"
-      >
-        <h2 className="text-xl font-bold text-ink">تذكرة جديدة</h2>
-        <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+        <section
+          aria-label="تذكرة جديدة"
+          className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 lg:sticky lg:top-0"
+        >
+          <div className="flex items-center gap-3">
+            <IconChip>
+              <AddIcon />
+            </IconChip>
+            <h2 className="text-lg font-semibold text-ink">تذكرة جديدة</h2>
+          </div>
           <TextField label="اسم الزبون" value={name} onChange={(e) => setName(e.target.value.slice(0, 80))} />
           <TextField
             label="جوال الزبون"
@@ -163,6 +191,7 @@ export function AlterationsScreen({ catalog, onBack }: { catalog: Catalog; onBac
             inputMode="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value.slice(0, 20))}
+            inputClassName="num"
           />
           <TextField
             label="القطعة"
@@ -176,66 +205,130 @@ export function AlterationsScreen({ catalog, onBack }: { catalog: Catalog; onBac
             value={work}
             onChange={(e) => setWork(e.target.value.slice(0, 200))}
           />
-          <TextField
-            label="الأجرة"
-            dir="ltr"
-            inputMode="decimal"
-            value={price}
-            onChange={(e) => setPrice(e.target.value.slice(0, 12))}
-            error={priceMinor === null ? 'مبلغ غير صحيح' : undefined}
-          />
-          <TextField
-            label="موعد التسليم"
-            type="date"
-            dir="ltr"
-            value={due}
-            onChange={(e) => setDue(e.target.value)}
-          />
-        </div>
-        <div>
-          <Button loading={saving} disabled={!ready} icon={<PrintIcon />} onClick={() => void create()}>
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3">
+            <TextField
+              label="الأجرة"
+              dir="ltr"
+              inputMode="decimal"
+              value={price}
+              onChange={(e) => setPrice(e.target.value.slice(0, 12))}
+              error={priceMinor === null ? 'مبلغ غير صحيح' : undefined}
+              inputClassName="num"
+            />
+            <TextField
+              label="موعد التسليم"
+              type="date"
+              dir="ltr"
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+              inputClassName="num"
+            />
+          </div>
+          <Button
+            size="lg"
+            fullWidth
+            loading={saving}
+            disabled={!ready}
+            icon={<PrintIcon />}
+            onClick={() => void create()}
+          >
             سجّل واطبع التذكرة
           </Button>
-        </div>
-      </section>
-      <section aria-label="التذاكر المفتوحة" className="flex flex-col gap-2">
-        <h2 className="text-xl font-bold text-ink">التذاكر المفتوحة</h2>
-        {items && items.length === 0 && !error ? <p className="text-ink-muted">لا تعديلات مفتوحة.</p> : null}
-        <ul className="flex flex-col gap-2">
-          {(items ?? []).map((t) => (
-            <li
-              key={t.id}
-              aria-label={`التذكرة ${t.number}`}
-              className="flex flex-wrap items-center gap-3 rounded-control border border-line bg-surface p-3"
-            >
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="font-bold">
-                  <bdi dir="ltr" className="num">
-                    {t.number}
-                  </bdi>{' '}
-                  · {t.customerName}
-                </span>
-                <span className="text-sm text-ink-muted">
-                  {t.item}: {t.work}
-                </span>
-                <span className="text-sm text-ink-muted">
-                  التسليم <span className="num">{t.dueDate}</span> ·{' '}
-                  <Money minor={t.priceMinor} currency={t.currency} />
-                </span>
-              </span>
-              <Badge tone={t.status === 'ready' ? 'success' : 'warning'}>{STATUS_TEXT[t.status]}</Badge>
-              {t.status === 'received' ? (
-                <Button size="sm" variant="secondary" onClick={() => void move(t, 'ready')}>
-                  جاهزة
-                </Button>
-              ) : null}
-              <Button size="sm" onClick={() => void move(t, 'delivered')}>
-                سُلّمت
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </section>
+        </section>
+        <section aria-label="التذاكر المفتوحة" className="flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-ink">التذاكر المفتوحة</h2>
+            {open.length > 0 ? (
+              <Badge>
+                <span className="num">{open.length}</span>
+              </Badge>
+            ) : null}
+          </div>
+          {items === null ? (
+            <div aria-hidden="true" className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              {[0, 1].map((i) => (
+                <Skeleton key={i} className="h-44 w-full rounded-card" />
+              ))}
+            </div>
+          ) : null}
+          {items && items.length === 0 && !error ? (
+            <EmptyState
+              icon={ScissorsIcon}
+              title="لا تعديلات مفتوحة."
+              description="سجّل تذكرة لكل قطعة تُترك للتقصير أو التعديل، وتظهر هنا حتى تُسلَّم."
+            />
+          ) : null}
+          {open.length > 0 ? (
+            <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+              {columns.map((column) => (
+                <div
+                  key={column.status}
+                  className="flex flex-col gap-3 rounded-card border border-line bg-surface-muted/60 p-3"
+                >
+                  <div className="flex items-center gap-2 px-1 pt-1">
+                    <Badge tone={STATUS_TONE[column.status]}>{STATUS_TEXT[column.status]}</Badge>
+                    <span className="num text-sm font-semibold text-ink-muted">{column.tickets.length}</span>
+                  </div>
+                  {column.tickets.length === 0 ? (
+                    <p className="px-1 py-6 text-center text-sm text-ink-subtle">لا تذاكر هنا الآن.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-2">
+                      {column.tickets.map((t) => (
+                        <li
+                          key={t.id}
+                          aria-label={`التذكرة ${t.number}`}
+                          className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4 shadow-e1"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <span className="flex min-w-0 flex-col">
+                              <bdi dir="ltr" className="num self-start text-sm font-semibold text-ink-muted">
+                                {t.number}
+                              </bdi>
+                              <span className="truncate text-lg font-semibold text-ink">
+                                {t.customerName}
+                              </span>
+                            </span>
+                            <Badge tone={STATUS_TONE[t.status]}>{STATUS_TEXT[t.status]}</Badge>
+                          </div>
+                          <p className="text-ink">
+                            {t.item}: <span className="text-ink-muted">{t.work}</span>
+                          </p>
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3 text-sm">
+                            <span className="flex items-center gap-1.5 text-ink-muted">
+                              <CalendarIcon size={16} />
+                              التسليم <span className="num font-semibold text-ink">{t.dueDate}</span>
+                            </span>
+                            <Money
+                              minor={t.priceMinor}
+                              currency={t.currency}
+                              className="font-semibold text-ink"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            {t.status === 'received' ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="flex-1"
+                                onClick={() => void move(t, 'ready')}
+                              >
+                                جاهزة
+                              </Button>
+                            ) : null}
+                            <Button size="sm" className="flex-1" onClick={() => void move(t, 'delivered')}>
+                              سُلّمت
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      </div>
       {slip ? <PrintableAlteration ticket={slip} store={catalog.settings!.storeName} /> : null}
     </div>
   );

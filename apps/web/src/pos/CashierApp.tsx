@@ -1,7 +1,27 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
-import { Button, CashierShell, EmptyState, MoreIcon, PrintIcon, useDigits, WarningIcon } from '@serva/ui';
+import {
+  Button,
+  CashIcon,
+  CashierShell,
+  EmptyState,
+  GiftIcon,
+  IconButton,
+  LockIcon,
+  LogoutIcon,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  MoreIcon,
+  PrintIcon,
+  ScissorsIcon,
+  SettingsIcon,
+  TransferIcon,
+  UndoIcon,
+  useDigits,
+  WarningIcon,
+} from '@serva/ui';
 import type { Catalog } from './catalog';
 import { clockText } from './format';
 import { PrintableReceipt, type PaperWidth, type ReceiptData } from './receipt/Receipt';
@@ -110,7 +130,6 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const [paper, setPaper] = useState<PaperWidth>(80);
   const [printJob, setPrintJob] = useState<{ data: ReceiptData; copy: boolean } | null>(null);
   const [printer, setPrinter] = useState<PrinterSetting>(DEFAULT_PRINTER);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const shiftMode = settings?.shiftMode ?? null;
   useEffect(() => {
@@ -272,7 +291,6 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
 
   function reprint() {
     if (!lastSale) return;
-    setMenuOpen(false);
     setPrintJob({ data: receiptData(lastSale.doc, lastSale.cashierName), copy: true });
   }
 
@@ -312,74 +330,65 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             type="button"
             onClick={reprint}
             aria-label="إيصال آخر فاتورة"
-            className="hidden min-h-8 shrink-0 items-center gap-1.5 rounded-full bg-surface-muted px-3 text-sm font-semibold text-ink lg:inline-flex"
+            className="hidden min-h-12 shrink-0 items-center gap-2 rounded-control px-3 text-sm text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink xl:inline-flex"
           >
             <PrintIcon size={16} />
             آخر فاتورة{' '}
-            <bdi dir="ltr" className="num">
+            <bdi dir="ltr" className="num font-semibold text-ink">
               {lastSale.doc.number}
             </bdi>
           </button>
         ) : null
       }
       menu={
-        <div className="relative">
-          <button
-            type="button"
-            aria-label="المزيد"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
-            className="grid size-11 place-items-center rounded-control text-ink hover:bg-surface-muted"
-          >
-            <MoreIcon size={20} />
-          </button>
-          {menuOpen ? (
-            <ul
-              role="menu"
-              aria-label="المزيد"
-              className="absolute end-0 top-12 z-60 flex w-64 flex-col rounded-card border border-line bg-surface p-2 shadow-e3"
-            >
-              {(
-                [
-                  shift ? { label: 'مرتجع', key: 'Alt+R', action: () => setView('return') } : null,
-                  shift && session.permissions.has('receipt.create')
-                    ? { label: 'قبض من زبون', key: null, action: () => setView('receipt') }
-                    : null,
-                  shift && session.permissions.has('sale.create')
-                    ? { label: 'قسيمة هدية', key: null, action: () => setView('gift') }
-                    : null,
-                  { label: 'التعديلات', key: null, action: () => setView('alterations') },
-                  shift ? { label: 'حركات الدرج', key: 'Alt+7', action: () => setView('cash') } : null,
-                  lastSale ? { label: 'إيصال آخر فاتورة', key: null, action: reprint } : null,
-                  { label: 'الطابعة', key: null, action: () => setView('printer') },
-                  { label: 'اقفل الشاشة', key: 'Alt+L', action: lock },
-                  shift ? { label: 'أغلق الوردية', key: null, action: () => setView('close') } : null,
-                ] satisfies ({ label: string; key: string | null; action: () => void } | null)[]
-              )
-                .filter((item) => item !== null)
-                .map(({ label, key, action }) => (
-                  <li key={label}>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        action();
-                      }}
-                      className="flex min-h-12 w-full items-center justify-between rounded-control px-3 text-start font-semibold text-ink hover:bg-surface-muted"
-                    >
-                      {label}
-                      {key ? (
-                        <kbd dir="ltr" className="text-xs font-normal text-ink-muted">
-                          {key}
-                        </kbd>
-                      ) : null}
-                    </button>
-                  </li>
-                ))}
-            </ul>
+        <Menu
+          label="المزيد"
+          align="end"
+          className="w-64"
+          trigger={<IconButton label="المزيد" size="md" icon={<MoreIcon />} />}
+        >
+          {shift ? (
+            <MenuItem icon={<UndoIcon />} shortcut="Alt+R" onSelect={() => setView('return')}>
+              مرتجع
+            </MenuItem>
           ) : null}
-        </div>
+          {shift && session.permissions.has('receipt.create') ? (
+            <MenuItem icon={<CashIcon />} onSelect={() => setView('receipt')}>
+              قبض من زبون
+            </MenuItem>
+          ) : null}
+          {shift && session.permissions.has('sale.create') ? (
+            <MenuItem icon={<GiftIcon />} onSelect={() => setView('gift')}>
+              قسيمة هدية
+            </MenuItem>
+          ) : null}
+          <MenuItem icon={<ScissorsIcon />} onSelect={() => setView('alterations')}>
+            التعديلات
+          </MenuItem>
+          <MenuSeparator />
+          {shift ? (
+            <MenuItem icon={<TransferIcon />} shortcut="Alt+7" onSelect={() => setView('cash')}>
+              حركات الدرج
+            </MenuItem>
+          ) : null}
+          {lastSale ? (
+            <MenuItem icon={<PrintIcon />} onSelect={reprint}>
+              إيصال آخر فاتورة
+            </MenuItem>
+          ) : null}
+          <MenuItem icon={<SettingsIcon />} onSelect={() => setView('printer')}>
+            الطابعة
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem icon={<LockIcon />} shortcut="Alt+L" onSelect={lock}>
+            اقفل الشاشة
+          </MenuItem>
+          {shift ? (
+            <MenuItem icon={<LogoutIcon />} onSelect={() => setView('close')}>
+              أغلق الوردية
+            </MenuItem>
+          ) : null}
+        </Menu>
       }
     />
   );
