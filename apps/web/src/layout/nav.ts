@@ -58,96 +58,154 @@ export interface NavEntry {
   sectors?: readonly SectorKey[];
 }
 
-export type NavGroupKey = 'home' | 'selling' | 'stock' | 'reports' | 'settings';
+export type NavGroupKey = 'home' | 'selling' | 'stock' | 'admin';
 
 /** The menu's groups, in order; the home page stands alone at the top. */
 export const NAV_GROUPS: readonly { key: NavGroupKey; label?: string }[] = [
   { key: 'home' },
   { key: 'selling', label: 'البيع والزبائن' },
   { key: 'stock', label: 'البضاعة' },
-  { key: 'reports', label: 'التقارير والحسابات' },
-  { key: 'settings', label: 'الإعدادات' },
+  { key: 'admin', label: 'الإدارة' },
 ];
 
-/**
- * The admin menu (12 › خريطة الشاشات), in its order. It lists only screens that exist (tab 12: no
- * button the user cannot use), each with its icon from @serva/ui and its glossary name.
- */
-export const NAV_ENTRIES: readonly (NavEntry & { group: NavGroupKey })[] = [
-  { group: 'home', to: '/', label: 'الرئيسية', icon: HomeIcon, end: true },
+export type NavSectionKey =
+  | 'home'
+  | 'sales'
+  | 'customers'
+  | 'online'
+  | 'products'
+  | 'promotions'
+  | 'purchases'
+  | 'inventory'
+  | 'reports'
+  | 'settings';
 
+/**
+ * One menu link each. Related pages share a section: the menu shows the section once, and the
+ * section's pages are tabs above the page (a short menu instead of twenty links).
+ */
+export const NAV_SECTIONS: readonly { key: NavSectionKey; group: NavGroupKey; label: string; icon: Icon }[] =
+  [
+    { key: 'home', group: 'home', label: 'الرئيسية', icon: HomeIcon },
+    { key: 'sales', group: 'selling', label: 'المبيعات', icon: SalesIcon },
+    { key: 'customers', group: 'selling', label: 'الزبائن', icon: CustomersIcon },
+    { key: 'online', group: 'selling', label: 'المتجر الإلكتروني', icon: StoreIcon },
+    { key: 'products', group: 'stock', label: 'المنتجات', icon: ProductsIcon },
+    { key: 'promotions', group: 'stock', label: 'العروض', icon: OfferIcon },
+    { key: 'purchases', group: 'stock', label: 'المشتريات', icon: CartIcon },
+    { key: 'inventory', group: 'stock', label: 'المخزون', icon: StockIcon },
+    { key: 'reports', group: 'admin', label: 'التقارير', icon: ReportsIcon },
+    { key: 'settings', group: 'admin', label: 'الإعدادات', icon: SettingsIcon },
+  ];
+
+/**
+ * The admin pages (12 › خريطة الشاشات), in their order inside each section. It lists only screens
+ * that exist (tab 12: no button the user cannot use), each with its glossary name.
+ */
+export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
+  { section: 'home', to: '/', label: 'الرئيسية', icon: HomeIcon, end: true },
   {
-    group: 'selling',
+    section: 'sales',
     to: '/sales/today',
     label: 'مبيعات اليوم',
     icon: SalesIcon,
     permission: DAY_REPORT_ACCESS,
   },
-  { group: 'selling', to: '/shifts', label: 'الورديات', icon: ClockIcon, permission: SHIFTS_ACCESS },
+  { section: 'sales', to: '/shifts', label: 'الورديات', icon: ClockIcon, permission: SHIFTS_ACCESS },
   {
-    group: 'selling',
+    section: 'customers',
     to: '/customers',
     label: 'الزبائن',
     icon: CustomersIcon,
     permission: ['customers.view'],
   },
   {
-    group: 'selling',
-    to: '/messages',
-    label: 'رسائل للزبائن',
-    icon: MegaphoneIcon,
-    permission: ['customers.manage'],
-  },
-  {
-    group: 'selling',
-    to: '/online-store',
-    label: 'المتجر الإلكتروني',
-    icon: StoreIcon,
-    permission: ['settings.manage', 'customers.view'],
-  },
-  {
-    group: 'selling',
+    section: 'customers',
     to: '/cheques',
     label: 'الشيكات',
     icon: ChequeIcon,
     permission: ['customers.view'],
     sectors: CHEQUE_SECTORS,
   },
-
-  { group: 'stock', to: '/products', label: 'المنتجات', icon: ProductsIcon, permission: ['catalog.manage'] },
   {
-    group: 'stock',
+    section: 'customers',
+    to: '/messages',
+    label: 'رسائل للزبائن',
+    icon: MegaphoneIcon,
+    permission: ['customers.manage'],
+  },
+  {
+    section: 'online',
+    to: '/online-store',
+    label: 'المتجر الإلكتروني',
+    icon: StoreIcon,
+    permission: ['settings.manage', 'customers.view'],
+  },
+  {
+    section: 'products',
+    to: '/products',
+    label: 'المنتجات',
+    icon: ProductsIcon,
+    permission: ['catalog.manage'],
+  },
+  {
+    section: 'products',
     to: '/categories',
     label: 'التصنيفات',
     icon: CategoriesIcon,
     permission: ['catalog.manage'],
   },
-  { group: 'stock', to: '/promotions', label: 'العروض', icon: OfferIcon, permission: ['catalog.manage'] },
   {
-    group: 'stock',
+    section: 'products',
     to: '/prices',
     label: 'تغيير الأسعار',
     icon: PercentIcon,
     permission: ['catalog.manage'],
   },
-  { group: 'stock', to: '/labels', label: 'طباعة الملصقات', icon: PrintIcon, permission: ['catalog.manage'] },
-  { group: 'stock', to: '/purchases', label: 'المشتريات', icon: CartIcon, permission: ['purchases.manage'] },
   {
-    group: 'stock',
+    section: 'products',
+    to: '/labels',
+    label: 'طباعة الملصقات',
+    icon: PrintIcon,
+    permission: ['catalog.manage'],
+  },
+  {
+    section: 'promotions',
+    to: '/promotions',
+    label: 'العروض',
+    icon: OfferIcon,
+    permission: ['catalog.manage'],
+  },
+  {
+    section: 'purchases',
+    to: '/purchases',
+    label: 'المشتريات',
+    icon: CartIcon,
+    permission: ['purchases.manage'],
+  },
+  {
+    section: 'purchases',
     to: '/supplier-returns',
     label: 'مرتجع إلى المورد',
     icon: UndoIcon,
     permission: ['purchases.manage'],
   },
   {
-    group: 'stock',
+    section: 'inventory',
+    to: '/inventory',
+    label: 'المخزون والأرباح',
+    icon: StockIcon,
+    permission: ['cost.view'],
+  },
+  {
+    section: 'inventory',
     to: '/transfers',
     label: 'التحويل بين الفروع',
     icon: TransferIcon,
     permission: ['inventory.adjust'],
   },
   {
-    group: 'stock',
+    section: 'inventory',
     to: '/expiry',
     label: 'الصلاحية',
     icon: CalendarIcon,
@@ -155,30 +213,22 @@ export const NAV_ENTRIES: readonly (NavEntry & { group: NavGroupKey })[] = [
     sectors: EXPIRY_SECTORS,
   },
   {
-    group: 'stock',
+    section: 'inventory',
     to: '/serials',
     label: 'الأرقام التسلسلية',
     icon: SerialIcon,
     permission: ['catalog.manage'],
     sectors: SERIAL_SECTORS,
   },
-
   {
-    group: 'reports',
+    section: 'reports',
     to: '/reports/merchandise',
     label: 'حركة الأصناف',
     icon: ReportsIcon,
     permission: ['report.view'],
   },
   {
-    group: 'reports',
-    to: '/inventory',
-    label: 'المخزون والأرباح',
-    icon: StockIcon,
-    permission: ['cost.view'],
-  },
-  {
-    group: 'reports',
+    section: 'reports',
     to: '/accounting',
     label: 'المحاسبة',
     icon: BookIcon,
@@ -186,23 +236,22 @@ export const NAV_ENTRIES: readonly (NavEntry & { group: NavGroupKey })[] = [
     accountingMode: true,
   },
   {
-    group: 'reports',
+    section: 'reports',
     to: '/evidence',
     label: 'شاشة الدليل',
     icon: ShieldCheckIcon,
     permission: EVIDENCE_ACCESS,
   },
-
-  { group: 'settings', to: '/devices', label: 'الأجهزة', icon: DeviceIcon, permission: ['devices.view'] },
   {
-    group: 'settings',
+    section: 'settings',
     to: '/settings',
     label: 'إعدادات المتجر',
     icon: SettingsIcon,
     permission: ['settings.manage'],
   },
+  { section: 'settings', to: '/devices', label: 'الأجهزة', icon: DeviceIcon, permission: ['devices.view'] },
   {
-    group: 'settings',
+    section: 'settings',
     to: '/subscription',
     label: 'الاشتراك',
     icon: CardIcon,
@@ -216,8 +265,8 @@ function fitsSectors(entry: NavEntry, sectors: readonly SectorKey[] | undefined)
 
 type NavMe = Pick<MeResponse, 'user' | 'settings'> & { tenant?: { sectors?: readonly SectorKey[] } };
 
-/** The entries this user may open, flat and in menu order. */
-export function navFor(me: NavMe): (NavEntry & { group: NavGroupKey })[] {
+/** The pages this user may open, flat and in menu order. */
+export function navFor(me: NavMe): (NavEntry & { section: NavSectionKey })[] {
   return NAV_ENTRIES.filter(
     (entry) =>
       (!entry.permission || holdsAny(me, entry.permission)) &&
@@ -226,11 +275,42 @@ export function navFor(me: NavMe): (NavEntry & { group: NavGroupKey })[] {
   );
 }
 
-/** The same entries in their groups; a group with nothing the user may open is left out. */
-export function navGroupsFor(me: NavMe): { key: NavGroupKey; label?: string; entries: NavEntry[] }[] {
-  const entries = navFor(me);
+export interface NavSection {
+  key: NavSectionKey;
+  label: string;
+  icon: Icon;
+  /** The pages of the section this user may open; the first is where its menu link goes */
+  pages: NavEntry[];
+}
+
+/** The sections this user may open; a section with no page they may open is left out. */
+export function navSectionsFor(me: NavMe): (NavSection & { group: NavGroupKey })[] {
+  const pages = navFor(me);
+  return NAV_SECTIONS.map((section) => ({
+    ...section,
+    pages: pages.filter((page) => page.section === section.key),
+  })).filter((section) => section.pages.length > 0);
+}
+
+/** The sections in their groups; a group with nothing the user may open is left out. */
+export function navGroupsFor(me: NavMe): { key: NavGroupKey; label?: string; sections: NavSection[] }[] {
+  const sections = navSectionsFor(me);
   return NAV_GROUPS.map((group) => ({
     ...group,
-    entries: entries.filter((entry) => entry.group === group.key),
-  })).filter((group) => group.entries.length > 0);
+    sections: sections.filter((section) => section.group === group.key),
+  })).filter((group) => group.sections.length > 0);
+}
+
+/** Whether a page owns this address: its own, or one under it (/products/123). */
+export function pageOwns(page: Pick<NavEntry, 'to' | 'end'>, pathname: string): boolean {
+  if (page.end || page.to === '/') return pathname === page.to;
+  return pathname === page.to || pathname.startsWith(`${page.to}/`);
+}
+
+/** The section the address belongs to, among those this user may open. */
+export function sectionAt<S extends Pick<NavSection, 'pages'>>(
+  sections: readonly S[],
+  pathname: string,
+): S | undefined {
+  return sections.find((section) => section.pages.some((page) => pageOwns(page, pathname)));
 }
