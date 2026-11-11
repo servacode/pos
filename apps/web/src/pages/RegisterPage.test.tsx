@@ -12,9 +12,21 @@ async function fillDetails(user: ReturnType<typeof renderApp>['user']) {
   await user.type(await screen.findByLabelText('رقم الجوال'), '0912 345 678');
   await user.type(screen.getByLabelText('اسمك'), 'أحمد الخطيب');
   await user.type(screen.getByLabelText('كلمة السر'), 'secret-pass');
+  await user.click(screen.getByRole('checkbox', { name: /أوافق على/ }));
 }
 
 describe('RegisterPage', () => {
+  it('asks for an explicit tick on the terms before sending anything', async () => {
+    const { requestsTo } = mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh, 'POST /v1/auth/register': codeSent });
+    const { user } = renderApp('/register');
+    await user.type(await screen.findByLabelText('رقم الجوال'), '0912 345 678');
+    await user.type(screen.getByLabelText('اسمك'), 'أحمد الخطيب');
+    await user.type(screen.getByLabelText('كلمة السر'), 'secret-pass');
+    await user.click(screen.getByRole('button', { name: 'افتح متجري' }));
+    expect(await screen.findByText('وافق على الشروط وسياسة الخصوصية لتفتح الحساب.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/auth/register')).toHaveLength(0);
+  });
+
   it('sends three fields with the agent code and terms version, then opens the store with the code', async () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedOutRefresh,

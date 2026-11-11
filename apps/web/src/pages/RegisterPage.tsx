@@ -12,6 +12,7 @@ import {
   AddIcon,
   Alert,
   Button,
+  Checkbox,
   CheckIcon,
   cn,
   CONTROL_HEIGHT,
@@ -32,6 +33,8 @@ interface RegisterValues {
   fullName: string;
   password: string;
   agentCode: string;
+  /** The terms and the privacy policy, ticked by the owner (24-legal: an explicit tick, not a footnote) */
+  agreed: boolean;
 }
 
 const FIELD_ORDER = [
@@ -39,6 +42,7 @@ const FIELD_ORDER = [
   'fullName',
   'password',
   'agentCode',
+  'agreed',
 ] as const satisfies readonly (keyof RegisterValues)[];
 
 interface PendingCode {
@@ -69,14 +73,24 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
   const [agentCodeOpen, setAgentCodeOpen] = useState(referralCode !== '');
 
   const { formRef, values, setValue, errors, formError, submitting, handleSubmit } = useForm({
-    initialValues: (): RegisterValues => ({ phone: '', fullName: '', password: '', agentCode: referralCode }),
+    initialValues: (): RegisterValues => ({
+      phone: '',
+      fullName: '',
+      password: '',
+      agentCode: referralCode,
+      agreed: false,
+    }),
     fieldOrder: FIELD_ORDER,
-    validate: ({ agentCode, ...rest }) =>
-      registerStoreInput.safeParse({
+    validate: ({ agentCode, agreed, ...rest }) => {
+      const result = registerStoreInput.safeParse({
         ...rest,
         agentCode: agentCode.trim() || undefined,
         termsVersion: TERMS_VERSION,
-      }),
+      });
+      if (agreed) return result;
+      const notAgreed = { path: ['agreed'], message: 'وافق على الشروط وسياسة الخصوصية لتفتح الحساب.' };
+      return { success: false as const, error: { issues: [...(result.error?.issues ?? []), notAgreed] } };
+    },
     onSubmit: async (data: RegisterStoreData) => {
       const sent = await apiFetch<RegisterResponse>('/v1/auth/register', { method: 'POST', body: data });
       onCodeSent({
@@ -89,6 +103,7 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
   });
 
   const showAgentCode = agentCodeOpen || Boolean(errors.agentCode);
+  const agreedErrorId = useId();
 
   return (
     <AuthLayout
@@ -169,21 +184,33 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
           </Button>
         )}
 
+        <div className="flex flex-col gap-1">
+          <Checkbox
+            name="agreed"
+            checked={values.agreed}
+            onChange={(e) => setValue('agreed', e.target.checked)}
+            aria-invalid={errors.agreed ? true : undefined}
+            aria-describedby={errors.agreed ? agreedErrorId : undefined}
+            label={
+              <>
+                أوافق على{' '}
+                <TextLink href="/terms" target="_blank" rel="noopener">
+                  الشروط
+                </TextLink>{' '}
+                و
+                <TextLink href="/privacy" target="_blank" rel="noopener">
+                  سياسة الخصوصية
+                </TextLink>
+              </>
+            }
+          />
+          {errors.agreed ? <FieldError id={agreedErrorId}>{errors.agreed}</FieldError> : null}
+        </div>
+
         <div className="flex flex-col gap-3 pt-1">
           <Button type="submit" size="lg" fullWidth loading={submitting}>
             {submitting ? 'جارٍ إرسال الرمز…' : 'افتح متجري'}
           </Button>
-          <p className="text-center text-sm text-ink-subtle">
-            بفتح الحساب توافق على{' '}
-            <TextLink href="/terms" target="_blank" rel="noopener">
-              الشروط
-            </TextLink>{' '}
-            و
-            <TextLink href="/privacy" target="_blank" rel="noopener">
-              سياسة الخصوصية
-            </TextLink>
-            .
-          </p>
         </div>
       </form>
     </AuthLayout>
