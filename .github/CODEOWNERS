@@ -95,6 +95,8 @@
 /apps/api/src/services/sync-state.ts @servacode
 # the database connection and withTenant(), which the maintenance steps sit beside
 /packages/db/src/client.ts @servacode
+# the read-only rule sync push applies to a lapsed subscription
+/apps/api/src/services/subscription-gate.ts @servacode
 # what the posting tests assert against
 /apps/api/test/accounting-fixtures.ts @servacode
 # the shared harness of the financial tests

@@ -12,4 +12,6 @@ regexes = [
   '''Kq8vX2mPz7Lw4Rt9''',
   # apps/api/test/error-reporting.test.ts: {"alg":"HS256"}.{"sub":"user"}."signature", planted to prove it is scrubbed
   '''eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl''',
+  # apps/api/test/totp.test.ts: the JWT secret the two-factor encryption test derives its key from
+  '''a-long-enough-jwt-secret-for-the-test-1234567890''',
 ]
