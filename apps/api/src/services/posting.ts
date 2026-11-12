@@ -80,6 +80,14 @@ export interface DraftEntry {
   memo: string;
   baseCurrency: string;
   lines: DraftLine[];
+  /**
+   * auto (the default: one per document, unique by its source), or manual and reversal (29 ›
+   * القيود اليدوية والعكسية): the same insert, balance check and numbering, with who wrote it and,
+   * for a reversal, the entry it reverses.
+   */
+  kind?: 'auto' | 'manual' | 'reversal';
+  reversesId?: string | null;
+  createdBy?: string | null;
 }
 
 const refKey = (ref: AccountRef) => ('code' in ref ? ref.code : `${ref.cash}:${ref.currency}`);
@@ -151,7 +159,7 @@ export async function postEntry(tx: Transaction, draft: DraftEntry): Promise<str
         eq(journalEntries.tenantId, draft.tenantId),
         eq(journalEntries.sourceType, draft.sourceType),
         eq(journalEntries.sourceId, draft.sourceId),
-        eq(journalEntries.kind, 'auto'),
+        eq(journalEntries.kind, draft.kind ?? 'auto'),
       ),
     );
   if (existing) return null;
@@ -173,13 +181,15 @@ export async function postEntry(tx: Transaction, draft: DraftEntry): Promise<str
       number,
       entryDate: draft.date,
       postingDate: draft.date,
-      kind: 'auto',
+      kind: draft.kind ?? 'auto',
       sourceType: draft.sourceType,
       sourceId: draft.sourceId,
       sourceNumber: draft.sourceNumber,
       memo: draft.memo,
       baseCurrency: draft.baseCurrency,
       totalMinor: debit,
+      reversesId: draft.reversesId ?? null,
+      createdBy: draft.createdBy ?? null,
     })
     .returning({ id: journalEntries.id });
   await tx.insert(journalLines).values(

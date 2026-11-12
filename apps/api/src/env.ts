@@ -96,6 +96,18 @@ const envSchema = z
     LOGIN_PHONE_LIMIT_PER_HOUR: perMinute(20),
     /** Sign-up codes per hour sent to one phone number */
     REGISTER_PHONE_LIMIT_PER_HOUR: perMinute(5),
+    /** Password-recovery codes per hour sent to one phone number */
+    RESET_PHONE_LIMIT_PER_HOUR: perMinute(5),
+    /** Password-recovery requests and code attempts per hour from one address */
+    RESET_IP_LIMIT_PER_HOUR: perMinute(20),
+    /**
+     * The platform team must use two-factor (TOTP): a member without it enrols at the next sign-in.
+     * Default: on in production, off elsewhere (read it with platformRequires2fa).
+     */
+    PLATFORM_REQUIRE_2FA: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === 'true')),
     /** Where this server runs: "cloud" (default) or "local", the server in the shop (tab 00). */
     DEPLOYMENT: z.enum(['cloud', 'local']).default('cloud'),
     /**
@@ -196,6 +208,14 @@ const envSchema = z
      * "false" is allowed only outside production, for browsers that refuse it on localhost.
      */
     COOKIE_SECURE: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
+    /**
+     * "false" switches the read-only rule off (an emergency lever, e.g. while the payment provider
+     * is down): an expired store keeps selling. On by default (07 › دورة حياة الاشتراك).
+     */
+    SUBSCRIPTION_ENFORCEMENT: z
       .enum(['true', 'false'])
       .default('true')
       .transform((v) => v === 'true'),

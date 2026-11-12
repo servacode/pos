@@ -56,6 +56,11 @@ export function LoginPage() {
           onChange={(e) => setValue('password', e.target.value)}
           error={errors.password}
         />
+        <p className="-mt-2 text-sm">
+          <TextLink as={Link} to="/forgot-password">
+            نسيت كلمة السر؟
+          </TextLink>
+        </p>
         <Button type="submit" size="lg" fullWidth loading={submitting} className="mt-1">
           دخول
         </Button>

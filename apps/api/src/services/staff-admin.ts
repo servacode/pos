@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { assertWithinPlanLimit } from './subscription-gate';
 import {
   ALL_PERMISSIONS,
   requiredPinLength,
@@ -215,6 +216,7 @@ export async function createStaff(
   try {
     return await withTenant(db, auth.tenantId, async (tx) => {
       await requirePermission(tx, auth.userId, 'users.manage');
+      await assertWithinPlanLimit(tx, 'users');
       await checkBranches(tx, input.branchIds);
       const role = await roleToGive(tx, auth, input.roleKey, input.branchIds);
       if (input.pin.length < pinLengthOf(role)) throw invalid({ pin: 'رمز هذا الدور 6 أرقام' });
@@ -389,6 +391,7 @@ export async function setStaffActive(
   const { member, families } = await withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'users.manage');
     const before = await manageable(tx, auth, id);
+    if (active && before.status !== 'active') await assertWithinPlanLimit(tx, 'users');
     await tx
       .update(users)
       .set({ status: active ? 'active' : 'disabled' })

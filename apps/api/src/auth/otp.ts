@@ -6,7 +6,7 @@ import { deriveKey } from './tokens';
 export interface OtpMessage {
   phone: string;
   code: string;
-  purpose: 'registration' | 'shop_order' | 'broadcast';
+  purpose: 'registration' | 'shop_order' | 'broadcast' | 'password_reset';
   /** A message to customers (purpose broadcast) carries its own text and no code */
   text?: string;
 }
@@ -47,7 +47,9 @@ export const OTP_GATEWAY_TIMEOUT_MS = 10_000;
 export const otpText = (code: string, purpose: OtpMessage['purpose'] = 'registration') =>
   purpose === 'shop_order'
     ? `رمز تأكيد طلبك من المتجر: ${code}\nصالح 10 دقائق.`
-    : `رمز التحقق في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق.`;
+    : purpose === 'password_reset'
+      ? `رمز استعادة كلمة السر في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق. إن لم تطلبه فتجاهل الرسالة.`
+      : `رمز التحقق في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق.`;
 
 /**
  * OTP_DELIVERY=gateway: hands the code to a separate sending service (a WhatsApp bot today, an SMS

@@ -16,6 +16,7 @@ import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { MODIFIER_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors';
 import { getStore } from './api';
+import { DataCard } from './DataCard';
 import { LoyaltyForm } from './LoyaltyForm';
 import { SETTINGS_SECTIONS, type SettingsSection } from './parts';
 import { ScaleForm } from './ScaleForm';
@@ -152,6 +153,7 @@ export function SettingsPage() {
     ...(weighs ? [SETTINGS_SECTIONS.scale] : []),
     ...(serves ? [SETTINGS_SECTIONS.service] : []),
     SETTINGS_SECTIONS.loyalty,
+    SETTINGS_SECTIONS.data,
   ];
 
   return (
@@ -175,6 +177,7 @@ export function SettingsPage() {
               {weighs ? <ScaleForm store={store} onSaved={saved} /> : null}
               {serves ? <ServiceForm store={store} onSaved={saved} /> : null}
               <LoyaltyForm store={store} onSaved={saved} />
+              <DataCard />
             </div>
           </div>
         ) : null}

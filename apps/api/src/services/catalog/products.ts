@@ -439,7 +439,7 @@ async function checkLiveVariants(tx: Transaction, productId: string): Promise<vo
   if (new Set(keys).size !== keys.length) throw fieldError('variants', 'هذا المتغير مكرر');
 }
 
-const barcodeConflict = () =>
+export const barcodeConflict = () =>
   fieldError('variants', 'أحد الباركودات أُضيف لمنتج آخر في اللحظة نفسها. حدّث الصفحة وأعد المحاولة.');
 
 /** POST /v1/products: the product with its variants, prices and barcodes in one transaction. */
@@ -448,83 +448,95 @@ export async function createProduct(
   input: CreateProductData,
   ctx: CatalogContext,
 ): Promise<ProductDetail> {
-  const { tenantId } = ctx.auth;
   try {
-    return await withTenant(db, tenantId, async (tx) => {
+    return await withTenant(db, ctx.auth.tenantId, async (tx) => {
       await requireCatalogManager(tx, ctx.auth.userId);
-      await checkReferences(tx, input);
-      const writes: BarcodeWrite[] = input.variants.flatMap((v, i) =>
-        v.barcodes.map((data, b) => ({ path: `variants.${i}.barcodes.${b}.code`, variantIndex: i, data })),
-      );
-      await checkBarcodesFree(tx, writes, []);
-      const generated = await internalBarcodes(
-        tx,
-        tenantId,
-        writes.filter((w) => w.data.code === undefined).length,
-      );
-      const [product] = await tx
-        .insert(products)
-        .values({
-          tenantId,
-          nameAr: input.nameAr,
-          nameEn: input.nameEn,
-          searchName: searchNameOf(input.nameAr, input.nameEn),
-          categoryId: input.categoryId,
-          brand: input.brand,
-          genericName: input.genericName,
-          tracksSerial: input.tracksSerial,
-          warrantyMonths: input.warrantyMonths,
-          type: input.type,
-          unitId: input.unitId ?? (await pieceUnit(tx)),
-          taxRateId: input.taxRateId,
-          sellOnPos: input.sellOnPos,
-          modifiers: input.modifiers,
-        })
-        .returning({ id: products.id });
-      const productId = product!.id;
-      for (const [i, v] of input.variants.entries()) {
-        const [variant] = await tx
-          .insert(variants)
-          .values({
-            tenantId,
-            productId,
-            sku: v.sku,
-            label: labelOf(v.attributes),
-            attributes: v.attributes,
-            sortOrder: i,
-            minStockQty: v.minStockQty,
-          })
-          .returning({ id: variants.id });
-        await tx.insert(prices).values({
-          tenantId,
-          id: variant!.id,
-          currency: v.price.currency,
-          priceMinor: v.price.priceMinor,
-          minPriceMinor: v.minPriceMinor,
-          wholesalePriceMinor: v.wholesalePriceMinor,
-          priceChangedAt: ctx.now,
-        });
-        await writeBarcodes(tx, tenantId, variant!.id, v.barcodes, generated);
-      }
-      const detail = await productDetail(tx, productId);
-      await audit(
-        tx,
-        {
-          tenantId,
-          userId: ctx.auth.userId,
-          action: 'product.created',
-          entity: 'product',
-          entityId: productId,
-          data: { nameAr: input.nameAr, variants: detail.variants.length },
-        },
-        ctx.meta,
-      );
-      return detail;
+      return createProductTx(tx, input, ctx);
     });
   } catch (error) {
     if (isUniqueViolation(error, 'barcodes_code_unique')) throw barcodeConflict();
     throw error;
   }
+}
+
+/**
+ * The write of createProduct inside the caller's transaction, for the import: the caller has checked
+ * catalog.manage once and turns a barcodes_code_unique violation into its row's message itself.
+ */
+export async function createProductTx(
+  tx: Transaction,
+  input: CreateProductData,
+  ctx: CatalogContext,
+): Promise<ProductDetail> {
+  const { tenantId } = ctx.auth;
+  await checkReferences(tx, input);
+  const writes: BarcodeWrite[] = input.variants.flatMap((v, i) =>
+    v.barcodes.map((data, b) => ({ path: `variants.${i}.barcodes.${b}.code`, variantIndex: i, data })),
+  );
+  await checkBarcodesFree(tx, writes, []);
+  const generated = await internalBarcodes(
+    tx,
+    tenantId,
+    writes.filter((w) => w.data.code === undefined).length,
+  );
+  const [product] = await tx
+    .insert(products)
+    .values({
+      tenantId,
+      nameAr: input.nameAr,
+      nameEn: input.nameEn,
+      searchName: searchNameOf(input.nameAr, input.nameEn),
+      categoryId: input.categoryId,
+      brand: input.brand,
+      genericName: input.genericName,
+      tracksSerial: input.tracksSerial,
+      warrantyMonths: input.warrantyMonths,
+      type: input.type,
+      unitId: input.unitId ?? (await pieceUnit(tx)),
+      taxRateId: input.taxRateId,
+      sellOnPos: input.sellOnPos,
+      modifiers: input.modifiers,
+    })
+    .returning({ id: products.id });
+  const productId = product!.id;
+  for (const [i, v] of input.variants.entries()) {
+    const [variant] = await tx
+      .insert(variants)
+      .values({
+        tenantId,
+        productId,
+        sku: v.sku,
+        label: labelOf(v.attributes),
+        attributes: v.attributes,
+        sortOrder: i,
+        minStockQty: v.minStockQty,
+      })
+      .returning({ id: variants.id });
+    await tx.insert(prices).values({
+      tenantId,
+      id: variant!.id,
+      currency: v.price.currency,
+      priceMinor: v.price.priceMinor,
+      minPriceMinor: v.minPriceMinor,
+      wholesalePriceMinor: v.wholesalePriceMinor,
+      priceChangedAt: ctx.now,
+    });
+    await writeBarcodes(tx, tenantId, variant!.id, v.barcodes, generated);
+  }
+  const detail = await productDetail(tx, productId);
+  await audit(
+    tx,
+    {
+      tenantId,
+      userId: ctx.auth.userId,
+      action: 'product.created',
+      entity: 'product',
+      entityId: productId,
+      data: { nameAr: input.nameAr, variants: detail.variants.length },
+    },
+    ctx.meta,
+  );
+  return detail;
 }
 
 /**
@@ -537,166 +549,176 @@ export async function updateProduct(
   input: UpdateProductData,
   ctx: CatalogContext,
 ): Promise<ProductDetail> {
-  const { tenantId } = ctx.auth;
   try {
-    return await withTenant(db, tenantId, async (tx) => {
+    return await withTenant(db, ctx.auth.tenantId, async (tx) => {
       await requireCatalogManager(tx, ctx.auth.userId);
-      const [current] = await tx.select().from(products).where(eq(products.id, id)).for('update');
-      if (!current) throw productNotFound();
-      if (current.version !== input.version) throw staleVersion();
-      await checkReferences(tx, input);
-
-      const existing = await tx
-        .select({ variant: variants, price: prices })
-        .from(variants)
-        .innerJoin(prices, and(eq(prices.tenantId, variants.tenantId), eq(prices.id, variants.id)))
-        .where(eq(variants.productId, id));
-      const variantInput = input.variants ?? [];
-      variantInput.forEach((v, i) => {
-        if (v.id && !existing.some((e) => e.variant.id === v.id)) {
-          throw fieldError(`variants.${i}.id`, 'هذا المتغير ليس من هذا المنتج');
-        }
-      });
-      const writes: BarcodeWrite[] = variantInput.flatMap((v, i) =>
-        (v.barcodes ?? []).map((data, b) => ({
-          path: `variants.${i}.barcodes.${b}.code`,
-          variantIndex: i,
-          data,
-        })),
-      );
-      const replaced = variantInput.flatMap((v) => (v.id && v.barcodes ? [v.id] : []));
-      await checkBarcodesFree(tx, writes, replaced);
-      const generated = await internalBarcodes(
-        tx,
-        tenantId,
-        writes.filter((w) => w.data.code === undefined).length,
-      );
-
-      const nameAr = input.nameAr ?? current.nameAr;
-      const nameEn = input.nameEn === undefined ? current.nameEn : input.nameEn;
-      const next = {
-        nameAr: input.nameAr,
-        nameEn: input.nameEn,
-        categoryId: input.categoryId,
-        brand: input.brand,
-        genericName: input.genericName,
-        tracksSerial: input.tracksSerial,
-        warrantyMonths: input.warrantyMonths,
-        type: input.type,
-        unitId: input.unitId,
-        taxRateId: input.taxRateId,
-        sellOnPos: input.sellOnPos,
-        modifiers: input.modifiers,
-      };
-      await tx
-        .update(products)
-        .set({ ...next, searchName: searchNameOf(nameAr, nameEn), updatedAt: ctx.now })
-        .where(eq(products.id, id));
-
-      // Barcodes dropped from any variant go first, so a code can move between variants at once.
-      for (const v of variantInput) {
-        if (!v.id || !v.barcodes) continue;
-        const keep = v.barcodes.flatMap((b) => (b.id ? [b.id] : []));
-        await tx
-          .delete(barcodes)
-          .where(
-            and(eq(barcodes.variantId, v.id), keep.length > 0 ? notInArray(barcodes.id, keep) : undefined),
-          );
-      }
-
-      const variantChanges: Record<string, unknown>[] = [];
-      let sortOrder = Math.max(-1, ...existing.map((e) => e.variant.sortOrder)) + 1;
-      for (const v of variantInput) {
-        const before = existing.find((e) => e.variant.id === v.id);
-        let variantId: string;
-        if (before) {
-          variantId = before.variant.id;
-          const variantNext = {
-            sku: v.sku,
-            attributes: v.attributes,
-            label: v.attributes ? labelOf(v.attributes) : undefined,
-            minStockQty: v.minStockQty,
-            archivedAt:
-              v.archived === undefined
-                ? undefined
-                : v.archived
-                  ? (before.variant.archivedAt ?? ctx.now)
-                  : null,
-          };
-          const variantDiff = diff(before.variant, variantNext);
-          if (Object.keys(variantDiff).length > 0) {
-            await tx.update(variants).set(variantNext).where(eq(variants.id, variantId));
-          }
-          const priceNext = {
-            currency: v.price?.currency,
-            priceMinor: v.price?.priceMinor,
-            minPriceMinor: v.minPriceMinor,
-            wholesalePriceMinor: v.wholesalePriceMinor,
-          };
-          const priceDiff = diff(before.price, priceNext);
-          if (Object.keys(priceDiff).length > 0) {
-            const moved = 'currency' in priceDiff || 'priceMinor' in priceDiff;
-            await tx
-              .update(prices)
-              .set({ ...priceNext, ...(moved ? { priceChangedAt: ctx.now } : {}) })
-              .where(eq(prices.id, variantId));
-            // A price typed back up to (or past) the struck one ends that markdown
-            if (moved) {
-              await tx.execute(sql`update prices set was_price_minor = null
-                where id = ${variantId} and was_price_minor <= price_minor`);
-            }
-          }
-          variantChanges.push({ id: variantId, ...variantDiff, ...priceDiff });
-        } else {
-          const attributes = v.attributes ?? [];
-          const [created] = await tx
-            .insert(variants)
-            .values({
-              tenantId,
-              productId: id,
-              sku: v.sku ?? null,
-              label: labelOf(attributes),
-              attributes,
-              sortOrder: sortOrder++,
-              minStockQty: v.minStockQty ?? null,
-              archivedAt: v.archived ? ctx.now : null,
-            })
-            .returning({ id: variants.id });
-          variantId = created!.id;
-          await tx.insert(prices).values({
-            tenantId,
-            id: variantId,
-            currency: v.price!.currency,
-            priceMinor: v.price!.priceMinor,
-            minPriceMinor: v.minPriceMinor ?? null,
-            wholesalePriceMinor: v.wholesalePriceMinor ?? null,
-            priceChangedAt: ctx.now,
-          });
-          variantChanges.push({ id: variantId, created: true });
-        }
-        if (v.barcodes) await writeBarcodes(tx, tenantId, variantId, v.barcodes, generated);
-      }
-      if (input.variants) await checkLiveVariants(tx, id);
-
-      await audit(
-        tx,
-        {
-          tenantId,
-          userId: ctx.auth.userId,
-          action: 'product.updated',
-          entity: 'product',
-          entityId: id,
-          changes: diff(current, next),
-          ...(variantChanges.length > 0 ? { data: { variants: variantChanges } } : {}),
-        },
-        ctx.meta,
-      );
-      return productDetail(tx, id);
+      return updateProductTx(tx, id, input, ctx);
     });
   } catch (error) {
     if (isUniqueViolation(error, 'barcodes_code_unique')) throw barcodeConflict();
     throw error;
   }
+}
+
+/** The write of updateProduct inside the caller's transaction (the import); permission checked by the caller. */
+export async function updateProductTx(
+  tx: Transaction,
+  id: string,
+  input: UpdateProductData,
+  ctx: CatalogContext,
+): Promise<ProductDetail> {
+  const { tenantId } = ctx.auth;
+  const [current] = await tx.select().from(products).where(eq(products.id, id)).for('update');
+  if (!current) throw productNotFound();
+  if (current.version !== input.version) throw staleVersion();
+  await checkReferences(tx, input);
+
+  const existing = await tx
+    .select({ variant: variants, price: prices })
+    .from(variants)
+    .innerJoin(prices, and(eq(prices.tenantId, variants.tenantId), eq(prices.id, variants.id)))
+    .where(eq(variants.productId, id));
+  const variantInput = input.variants ?? [];
+  variantInput.forEach((v, i) => {
+    if (v.id && !existing.some((e) => e.variant.id === v.id)) {
+      throw fieldError(`variants.${i}.id`, 'هذا المتغير ليس من هذا المنتج');
+    }
+  });
+  const writes: BarcodeWrite[] = variantInput.flatMap((v, i) =>
+    (v.barcodes ?? []).map((data, b) => ({
+      path: `variants.${i}.barcodes.${b}.code`,
+      variantIndex: i,
+      data,
+    })),
+  );
+  const replaced = variantInput.flatMap((v) => (v.id && v.barcodes ? [v.id] : []));
+  await checkBarcodesFree(tx, writes, replaced);
+  const generated = await internalBarcodes(
+    tx,
+    tenantId,
+    writes.filter((w) => w.data.code === undefined).length,
+  );
+
+  const nameAr = input.nameAr ?? current.nameAr;
+  const nameEn = input.nameEn === undefined ? current.nameEn : input.nameEn;
+  const next = {
+    nameAr: input.nameAr,
+    nameEn: input.nameEn,
+    categoryId: input.categoryId,
+    brand: input.brand,
+    genericName: input.genericName,
+    tracksSerial: input.tracksSerial,
+    warrantyMonths: input.warrantyMonths,
+    type: input.type,
+    unitId: input.unitId,
+    taxRateId: input.taxRateId,
+    sellOnPos: input.sellOnPos,
+    modifiers: input.modifiers,
+  };
+  await tx
+    .update(products)
+    .set({ ...next, searchName: searchNameOf(nameAr, nameEn), updatedAt: ctx.now })
+    .where(eq(products.id, id));
+
+  // Barcodes dropped from any variant go first, so a code can move between variants at once.
+  for (const v of variantInput) {
+    if (!v.id || !v.barcodes) continue;
+    const keep = v.barcodes.flatMap((b) => (b.id ? [b.id] : []));
+    await tx
+      .delete(barcodes)
+      .where(
+        and(eq(barcodes.variantId, v.id), keep.length > 0 ? notInArray(barcodes.id, keep) : undefined),
+      );
+  }
+
+  const variantChanges: Record<string, unknown>[] = [];
+  let sortOrder = Math.max(-1, ...existing.map((e) => e.variant.sortOrder)) + 1;
+  for (const v of variantInput) {
+    const before = existing.find((e) => e.variant.id === v.id);
+    let variantId: string;
+    if (before) {
+      variantId = before.variant.id;
+      const variantNext = {
+        sku: v.sku,
+        attributes: v.attributes,
+        label: v.attributes ? labelOf(v.attributes) : undefined,
+        minStockQty: v.minStockQty,
+        archivedAt:
+          v.archived === undefined
+            ? undefined
+            : v.archived
+              ? (before.variant.archivedAt ?? ctx.now)
+              : null,
+      };
+      const variantDiff = diff(before.variant, variantNext);
+      if (Object.keys(variantDiff).length > 0) {
+        await tx.update(variants).set(variantNext).where(eq(variants.id, variantId));
+      }
+      const priceNext = {
+        currency: v.price?.currency,
+        priceMinor: v.price?.priceMinor,
+        minPriceMinor: v.minPriceMinor,
+        wholesalePriceMinor: v.wholesalePriceMinor,
+      };
+      const priceDiff = diff(before.price, priceNext);
+      if (Object.keys(priceDiff).length > 0) {
+        const moved = 'currency' in priceDiff || 'priceMinor' in priceDiff;
+        await tx
+          .update(prices)
+          .set({ ...priceNext, ...(moved ? { priceChangedAt: ctx.now } : {}) })
+          .where(eq(prices.id, variantId));
+        // A price typed back up to (or past) the struck one ends that markdown
+        if (moved) {
+          await tx.execute(sql`update prices set was_price_minor = null
+            where id = ${variantId} and was_price_minor <= price_minor`);
+        }
+      }
+      variantChanges.push({ id: variantId, ...variantDiff, ...priceDiff });
+    } else {
+      const attributes = v.attributes ?? [];
+      const [created] = await tx
+        .insert(variants)
+        .values({
+          tenantId,
+          productId: id,
+          sku: v.sku ?? null,
+          label: labelOf(attributes),
+          attributes,
+          sortOrder: sortOrder++,
+          minStockQty: v.minStockQty ?? null,
+          archivedAt: v.archived ? ctx.now : null,
+        })
+        .returning({ id: variants.id });
+      variantId = created!.id;
+      await tx.insert(prices).values({
+        tenantId,
+        id: variantId,
+        currency: v.price!.currency,
+        priceMinor: v.price!.priceMinor,
+        minPriceMinor: v.minPriceMinor ?? null,
+        wholesalePriceMinor: v.wholesalePriceMinor ?? null,
+        priceChangedAt: ctx.now,
+      });
+      variantChanges.push({ id: variantId, created: true });
+    }
+    if (v.barcodes) await writeBarcodes(tx, tenantId, variantId, v.barcodes, generated);
+  }
+  if (input.variants) await checkLiveVariants(tx, id);
+
+  await audit(
+    tx,
+    {
+      tenantId,
+      userId: ctx.auth.userId,
+      action: 'product.updated',
+      entity: 'product',
+      entityId: id,
+      changes: diff(current, next),
+      ...(variantChanges.length > 0 ? { data: { variants: variantChanges } } : {}),
+    },
+    ctx.meta,
+  );
+  return productDetail(tx, id);
 }
 
 /** POST /v1/products/{id}/archive and /restore. Archived products stay in the pull, flagged. */

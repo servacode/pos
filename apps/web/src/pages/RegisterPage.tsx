@@ -317,7 +317,7 @@ function RegisterSteps({ current }: { current: number }) {
   );
 }
 
-const CODE_LENGTH = 6;
+export const CODE_LENGTH = 6;
 
 interface CodeFieldProps extends Omit<ComponentProps<'input'>, 'value' | 'size' | 'className'> {
   label: string;
@@ -359,7 +359,7 @@ function keepCaretAtEnd(event: SyntheticEvent<HTMLInputElement>) {
  * one real input: the code is typed, pasted, filled from the phone's suggestion and read by a screen
  * reader as one field, with its label, hint and error like any other.
  */
-function CodeField({ label, value, hint, error, id, ...inputProps }: CodeFieldProps) {
+export function CodeField({ label, value, hint, error, id, ...inputProps }: CodeFieldProps) {
   const autoId = useId();
   const inputId = id ?? autoId;
   const hintId = `${inputId}-hint`;
@@ -416,7 +416,7 @@ function CodeField({ label, value, hint, error, id, ...inputProps }: CodeFieldPr
  * The local server's test mode: there is no SMS there, so the code is shown here, clearly marked
  * as a test, with a button that types it in.
  */
-function TestCodeBox({ code, onFill }: { code: string; onFill: () => void }) {
+export function TestCodeBox({ code, onFill }: { code: string; onFill: () => void }) {
   // "123 456", isolated (LRI…PDI) so the digits keep their order inside the Arabic sentence.
   const spaced = `⁦${code.slice(0, 3)} ${code.slice(3)}⁩`;
   return (

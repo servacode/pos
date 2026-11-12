@@ -1,6 +1,7 @@
 import { useId, type FormEvent, type ReactNode, type Ref } from 'react';
 import {
   AlertCircleIcon,
+  ArchiveIcon,
   CashIcon,
   Card,
   CheckCircleIcon,
@@ -46,6 +47,12 @@ export const SETTINGS_SECTIONS = {
     title: 'الصالة والمطبخ',
     description: 'نوع الطلب ورقمه، وطاولات الصالة، وورقة المطبخ.',
     icon: ListIcon,
+  },
+  data: {
+    id: 'store-data',
+    title: 'بيانات المتجر',
+    description: 'استورد منتجاتك وزبائنك من ملف، أو صدّر كل بيانات المتجر.',
+    icon: ArchiveIcon,
   },
   loyalty: {
     id: 'store-loyalty',

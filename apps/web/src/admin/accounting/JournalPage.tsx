@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { CurrencyCode } from '@serva/core';
 import {
+  AddIcon,
   AlertCircleIcon,
   Alert,
   Badge,
@@ -27,6 +28,7 @@ import type { JournalEntry, JournalLine } from '../reports/contracts';
 import { sourceLabel } from '../reports/labels';
 import { defaultBranch } from '../reports/parts';
 import { useReport } from '../reports/useReport';
+import { ManualEntryDialog, ReverseDialog } from '../ledger/ManualEntryDialog';
 import { AccountingLayout } from './AccountingLayout';
 import { AccountName, PeriodBar } from './parts';
 
@@ -110,7 +112,16 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** The entry drawer (admin/IntegrityWhy › القيود والمستند): its lines, balance and source document. */
-function EntrySheet({ entry, onClose }: { entry: JournalEntry | null; onClose: () => void }) {
+function EntrySheet({
+  entry,
+  onClose,
+  onReverse,
+}: {
+  entry: JournalEntry | null;
+  onClose: () => void;
+  /** Offered for a manual entry to whoever may post one */
+  onReverse?: (entry: JournalEntry) => void;
+}) {
   const me = useMe();
   const digits = useDigits();
   const base = me.settings.baseCurrency;
@@ -154,6 +165,11 @@ function EntrySheet({ entry, onClose }: { entry: JournalEntry | null; onClose: (
           ) : (
             <Alert tone="error">مدين هذا القيد لا يساوي دائنه. أرسله للدعم مع رقمه.</Alert>
           )}
+          {onReverse && entry.source.type === 'manual' ? (
+            <Button variant="secondary" className="self-start" onClick={() => onReverse(entry)}>
+              اعكس هذا القيد
+            </Button>
+          ) : null}
         </>
       ) : null}
     </Sheet>
@@ -333,6 +349,10 @@ export function JournalPage() {
   } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [open, setOpen] = useState<JournalEntry | null>(null);
+  const [writing, setWriting] = useState(false);
+  const [reversing, setReversing] = useState<JournalEntry | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const canPost = me.user.permissions.includes('accounting.post');
   const base = me.settings.baseCurrency;
 
   const extra = more?.key === key ? more : null;
@@ -353,7 +373,17 @@ export function JournalPage() {
   }
 
   return (
-    <AccountingLayout title="القيود">
+    <AccountingLayout
+      title="القيود"
+      actions={
+        canPost ? (
+          <Button icon={<AddIcon />} onClick={() => setWriting(true)}>
+            قيد يدوي
+          </Button>
+        ) : undefined
+      }
+    >
+      {notice ? <Alert tone="success">{notice}</Alert> : null}
       <PeriodBar
         me={me}
         today={today}
@@ -391,7 +421,36 @@ export function JournalPage() {
           اعرض المزيد
         </Button>
       ) : null}
-      <EntrySheet entry={open} onClose={() => setOpen(null)} />
+      <EntrySheet
+        entry={open}
+        onClose={() => setOpen(null)}
+        onReverse={canPost ? (entry) => setReversing(entry) : undefined}
+      />
+      {writing ? (
+        <ManualEntryDialog
+          onCancel={() => setWriting(false)}
+          onSaved={(number) => {
+            setWriting(false);
+            setNotice(`رُحّل القيد ${number}.`);
+            setMore(null);
+            first.retry();
+          }}
+        />
+      ) : null}
+      {reversing ? (
+        <ReverseDialog
+          entryId={reversing.id}
+          number={reversing.number}
+          onCancel={() => setReversing(null)}
+          onDone={(number) => {
+            setReversing(null);
+            setOpen(null);
+            setNotice(`رُحّل القيد العكسي ${number}.`);
+            setMore(null);
+            first.retry();
+          }}
+        />
+      ) : null}
     </AccountingLayout>
   );
 }

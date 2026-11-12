@@ -73,7 +73,7 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // ─── The till: «احجز» ────────────────────────────────────────────────────
-  app.post('/v1/device/holds', { onRequest: requireDevice() }, async (request, reply) => {
+  app.post('/v1/device/holds', { onRequest: requireDevice({ write: true }) }, async (request, reply) => {
     if (!request.device) throw unauthorized();
     const placed = await placeHold(app.db, request.device, parseBody(holdInput, request.body));
     return reply.status(201).send(placed);

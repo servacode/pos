@@ -4,6 +4,7 @@ import {
   type CurrencyCode,
   type MeResponse,
   type Permission,
+  lifecycleOf,
   type SectorKey,
 } from '@serva/core';
 import {
@@ -27,7 +28,12 @@ export function daysLeft(end: Date | null, now: Date): number | null {
   return Math.max(0, Math.ceil((end.getTime() - now.getTime()) / DAY_MS));
 }
 
-export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promise<MeResponse> {
+export async function loadMe(
+  db: Database,
+  auth: AccessClaims,
+  now: Date,
+  enforceSubscription = true,
+): Promise<MeResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const [user] = await tx.select().from(users).where(eq(users.id, auth.userId)).limit(1);
     if (!user || user.status !== 'active') throw unauthorized();
@@ -35,7 +41,7 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
     const [tenant] = await tx.select().from(tenants).where(eq(tenants.id, auth.tenantId)).limit(1);
     const [settings] = await tx.select().from(tenantSettings).limit(1);
     const [sub] = await tx
-      .select({ subscription: subscriptions, planName: plans.name })
+      .select({ subscription: subscriptions, planName: plans.name, graceDays: plans.graceDays })
       .from(subscriptions)
       .innerJoin(plans, eq(plans.id, subscriptions.planId))
       .limit(1);
@@ -62,6 +68,17 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
 
     const s = sub.subscription;
     const periodEnd = s.status === 'trialing' ? s.trialEndsAt : s.currentPeriodEnd;
+    const life = lifecycleOf(
+      {
+        status: s.status,
+        trialEndsAt: s.trialEndsAt,
+        currentPeriodEnd: s.currentPeriodEnd,
+        graceEndsAt: s.graceEndsAt,
+        updatedAt: s.updatedAt,
+        graceDays: sub.graceDays,
+      },
+      now,
+    );
     return {
       user: {
         id: user.id,
@@ -89,6 +106,10 @@ export async function loadMe(db: Database, auth: AccessClaims, now: Date): Promi
         trialEndsAt: s.trialEndsAt?.toISOString() ?? null,
         currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
         daysLeft: daysLeft(periodEnd, now),
+        lifecycle: life.state,
+        readOnly: enforceSubscription && life.readOnly,
+        writeUntil: life.writeUntil?.toISOString() ?? null,
+        graceDaysLeft: life.daysLeft,
       },
       branches: branchRows,
       onboarding: { step: settings.onboardingStep, done: settings.onboardedAt !== null },

@@ -91,6 +91,7 @@ export function syncRoutes(processors: SyncProcessors = {}) {
           meta: { ip: clientIp(request), userAgent: request.headers['user-agent'] ?? null },
           now: app.clock.now(),
           processors,
+          enforceSubscription: app.env.SUBSCRIPTION_ENFORCEMENT,
           onError: (error, docId) => request.log.error({ err: error, docId }, 'sync document failed'),
         });
         // What was sold is costed next, apart: a failure there is retried on the next push

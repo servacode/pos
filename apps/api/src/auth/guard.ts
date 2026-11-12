@@ -1,7 +1,15 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { unauthorized } from '../errors';
 import { enforceLimits } from '../http/rate-limit';
+import { assertStoreWritable } from '../services/subscription-gate';
 import { verifyAccessToken } from './tokens';
+
+/**
+ * Writes that stay open in a read-only store (07 › الانتهاء لا يحذف شيئاً): the subscription page
+ * (open an invoice, report a payment). Reads, sign-in and sign-out are never gated.
+ */
+const OPEN_WHEN_READ_ONLY = /^\/v1\/subscription(\/|\?|$)/;
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
  * preHandler for routes that need a signed-in store user. Beyond the signature and expiry, the
@@ -20,4 +28,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     { key: `store:${claims.tenantId}`, max: env.STORE_RATE_LIMIT_PER_MINUTE },
   ]);
   request.auth = claims;
+  if (!SAFE_METHODS.has(request.method) && !OPEN_WHEN_READ_ONLY.test(request.url)) {
+    await assertStoreWritable(request.server.db, claims.tenantId, clock.now(), env.SUBSCRIPTION_ENFORCEMENT);
+  }
 }

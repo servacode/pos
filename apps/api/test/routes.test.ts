@@ -18,6 +18,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/auth/register': 'public',
   'POST /v1/auth/register/verify': 'public',
   'POST /v1/auth/login': 'public',
+  'POST /v1/auth/forgot': 'public',
+  'POST /v1/auth/forgot/reset': 'public',
   'POST /v1/auth/refresh': 'public',
   'POST /v1/auth/logout': 'public',
   'GET /v1/me': 'signed-in',
@@ -28,6 +30,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/customers/:id': 'signed-in',
   'GET /v1/customers/:id/purchases': 'signed-in',
   'GET /v1/device/customers/:id/purchases': 'device',
+  'GET /v1/device/subscription': 'device',
   'PUT /v1/customers/:id': 'signed-in',
   'GET /v1/suppliers': 'signed-in',
   'POST /v1/suppliers': 'signed-in',
@@ -40,11 +43,20 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/inventory/expiry': 'signed-in',
   'GET /v1/serials': 'signed-in',
   'POST /v1/stocktakes': 'signed-in',
+  'POST /v1/import': 'signed-in',
+  'GET /v1/export': 'signed-in',
   'GET /v1/reports/profit': 'signed-in',
   'GET /v1/subscription': 'signed-in',
   'POST /v1/subscription/invoices': 'signed-in',
   'POST /v1/subscription/payments': 'signed-in',
   'POST /v1/platform/login': 'public',
+  'POST /v1/platform/login/code': 'public',
+  'POST /v1/platform/login/password': 'public',
+  'POST /v1/platform/login/enrol': 'public',
+  'POST /v1/platform/login/enrol/confirm': 'public',
+  'GET /v1/platform/2fa': 'platform',
+  'POST /v1/platform/2fa/enrol': 'platform',
+  'POST /v1/platform/2fa/enrol/confirm': 'platform',
   'GET /v1/platform/stores': 'platform',
   'PUT /v1/platform/stores/:id/subscription': 'platform',
   'GET /v1/platform/payments': 'platform',
@@ -137,8 +149,18 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/reports/merchandise': 'signed-in',
   'GET /v1/shifts': 'signed-in',
   'GET /v1/shifts/:id': 'signed-in',
+  'GET /v1/sales': 'signed-in',
+  'GET /v1/sales/:id': 'signed-in',
   'GET /v1/journal': 'signed-in',
   'GET /v1/reports/trial-balance': 'signed-in',
+  'GET /v1/customers/:id/statement': 'signed-in',
+  'GET /v1/suppliers/:id/statement': 'signed-in',
+  'GET /v1/expenses': 'signed-in',
+  'POST /v1/expenses': 'signed-in',
+  'POST /v1/expenses/:id/void': 'signed-in',
+  'POST /v1/journal/manual': 'signed-in',
+  'POST /v1/journal/:id/reverse': 'signed-in',
+  'GET /v1/reports/profit-loss': 'signed-in',
   'GET /v1/sync/evidence': 'signed-in',
 };
 
@@ -563,6 +585,84 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
   },
   'GET /v1/customers/:id': customerIdor('GET'),
+  // Store B's owner on store A's customer, supplier, expense and entry: 404, nothing of A's in the answer.
+  'GET /v1/customers/:id/statement': async (app, { a, b }) => {
+    const made = await app.inject({ method: 'POST', url: '/v1/customers', headers: owner(a), payload: { name: 'زبون كشف' } });
+    const id = made.json<{ id: string }>().id;
+    const own = await app.inject({
+      method: 'GET',
+      url: `/v1/customers/${id}/statement?from=2026-01-01&to=2026-12-31`,
+      headers: owner(a),
+    });
+    expect(own.statusCode, own.body).toBe(200);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/customers/${id}/statement?from=2026-01-01&to=2026-12-31`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('زبون كشف');
+  },
+  'GET /v1/suppliers/:id/statement': async (app, { a, b }) => {
+    const id = await supplierOf(app, a);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/suppliers/${id}/statement?from=2026-01-01&to=2026-12-31`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('مورد أ');
+  },
+  'POST /v1/expenses/:id/void': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/expenses',
+      headers: owner(a),
+      payload: {
+        date: '2026-10-30',
+        branchId: await firstBranch(a.tenantId),
+        accountCode: '6101',
+        amountMinor: 5000,
+        currency: 'SYP',
+        payFrom: 'safe',
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const id = made.json<{ id: string }>().id;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/expenses/${id}/void`,
+      headers: owner(b),
+      payload: { reason: 'سرقة' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from journal_entries where kind = 'reversal'`;
+    expect(n!.n).toBe(0);
+  },
+  'POST /v1/journal/:id/reverse': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/journal/manual',
+      headers: owner(a),
+      payload: {
+        date: '2026-10-30',
+        branchId: await firstBranch(a.tenantId),
+        memo: 'قيد أ',
+        lines: [
+          { accountCode: '6190', debitMinor: 100 },
+          { accountCode: '1120', creditMinor: 100 },
+        ],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/journal/${made.json<{ id: string }>().id}/reverse`,
+      headers: owner(b),
+      payload: { reason: 'سرقة' },
+    });
+    expect(res.statusCode).toBe(404);
+  },
   'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
     const made = await app.inject({
@@ -693,6 +793,22 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     const res = await app.inject({ method: 'GET', url: `/v1/shifts/${shiftId}`, headers: owner(b) });
     expect(res.statusCode).toBe(404);
     expect(res.body).not.toContain('SFT-001-002');
+  },
+  // Store B's owner asking for store A's invoice: 404, nothing of store A in the answer.
+  'GET /v1/sales/:id': async (app, { a, b }) => {
+    const deviceA = await createDevice(a.tenantId);
+    const [userA] = await ownerDb()<{ id: string }[]>`select id from users where tenant_id = ${a.tenantId}`;
+    const saleId = createUuidV7()();
+    await ownerDb()`insert into invoices (tenant_id, id, branch_id, device_id, number, business_date,
+        device_time, shift_id, cashier_id, currency, tax_inclusive, gross_minor, discount_minor, tax_minor,
+        total_minor, tip_minor, payload)
+      values (${a.tenantId}, ${saleId}, ${deviceA.branchId}, ${deviceA.deviceId}, 'INV-001-002-0000001',
+        '2026-10-30', now(), ${createUuidV7()()}, ${userA!.id}, 'SYP', true, 100, 0, 0, 100, 0, '{}'::jsonb)`;
+    const own = await app.inject({ method: 'GET', url: `/v1/sales/${saleId}`, headers: owner(a) });
+    expect(own.statusCode).toBe(200);
+    const res = await app.inject({ method: 'GET', url: `/v1/sales/${saleId}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('INV-001-002');
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
@@ -864,6 +980,21 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
   },
   'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
     await IDOR_PROBES['POST /v1/device/alterations/:id/status']!(app, { a, b });
+  },
+  // A till is told about its own store's subscription: A's lapse never reaches B's till
+  'GET /v1/device/subscription': async (app, { a, b }) => {
+    await ownerDb()`update subscriptions set status = 'suspended' where tenant_id = ${a.tenantId}`;
+    const read = async (tenantId: string) =>
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/v1/device/subscription',
+          headers: { authorization: (await createDevice(tenantId)).authorization },
+        })
+      ).json<{ readOnly: boolean }>().readOnly;
+    expect(await read(a.tenantId)).toBe(true);
+    expect(await read(b.tenantId)).toBe(false);
+    await ownerDb()`update subscriptions set status = 'active' where tenant_id = ${a.tenantId}`;
   },
   // Store B's till lists none of store A's tickets, and its new one is its own
   'GET /v1/device/alterations': async (app, { a, b }) => {

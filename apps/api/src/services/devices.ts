@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { assertWithinPlanLimit } from './subscription-gate';
 import { and, asc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import {
   PAIRING_CODE_ALPHABET,
@@ -375,6 +376,7 @@ export async function activateByOwner(
 ): Promise<{ status: 'active'; device: ActivatedDevice }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const branch = await branchToManage(tx, auth, data.branchId);
+    await assertWithinPlanLimit(tx, 'registers');
     const code = await reserveCode(tx, branch.id);
     const token = newDeviceToken();
     const [device] = await tx
@@ -616,6 +618,7 @@ export async function approveDevice(
     if (device.activationExpiresAt!.getTime() <= now.getTime()) {
       throw wrongState('انتهت مهلة طلب الربط. اربط الجهاز من جديد.');
     }
+    await assertWithinPlanLimit(tx, 'registers');
     const code = await reserveCode(tx, device.branchId);
     await tx
       .update(devices)

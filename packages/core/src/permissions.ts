@@ -26,6 +26,8 @@ export const PERMISSIONS = {
   // Phase 1, step 3: «مبيعات اليوم» and the shift reports; the journal, trial balance and chart.
   'report.view': 'مبيعات اليوم وتقارير الورديات',
   'accounting.view': 'الدفاتر والقيود وميزان المراجعة',
+  'accounting.post': 'القيود اليدوية وعكسها',
+  'expenses.manage': 'تسجيل المصاريف وإلغاؤها',
   'users.manage': 'المستخدمون والصلاحيات',
   'whatsapp.manage': 'ربط واتساب',
   'subscription.manage': 'الاشتراك والدفع للمنصة',
@@ -56,6 +58,8 @@ const OWNER_ONLY: readonly Permission[] = [
   'devices.manage',
   // 04 › الإعدادات: the store's name, currency and dollar rate (migration 0015 adds it to owners)
   'settings.manage',
+  // 29 › القيود اليدوية: a hand-written entry reaches any account, so it is the owner's alone
+  'accounting.post',
 ];
 
 /** Roles created automatically for every new store. The owner can edit them or add more. */

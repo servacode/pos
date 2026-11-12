@@ -4,6 +4,7 @@ import { FullScreenLoader } from '@serva/ui';
 import { AuthProvider } from '../auth/AuthProvider';
 import { GuestOnly, RequireAuth } from '../auth/guards';
 import { HomePage } from '../pages/HomePage';
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
 
@@ -23,6 +24,7 @@ const SupplierReturnsPage = lazy(() =>
 const TransfersPage = lazy(() =>
   import('./purchases/TransfersPage').then((m) => ({ default: m.TransfersPage })),
 );
+const ImportPage = lazy(() => import('./import/ImportPage').then((m) => ({ default: m.ImportPage })));
 const BulkPricesPage = lazy(() =>
   import('./products/BulkPricesPage').then((m) => ({ default: m.BulkPricesPage })),
 );
@@ -64,6 +66,9 @@ const PinPage = lazy(() => import('./staff/PinPage').then((m) => ({ default: m.P
 const DayReportPage = lazy(() =>
   import('./reports/DayReportPage').then((m) => ({ default: m.DayReportPage })),
 );
+const InvoicesPage = lazy(() =>
+  import('./sales/InvoicesPage').then((m) => ({ default: m.InvoicesPage })),
+);
 const ShiftsPage = lazy(() => import('./reports/ShiftsPage').then((m) => ({ default: m.ShiftsPage })));
 const ShiftReportPage = lazy(() =>
   import('./reports/ShiftReportPage').then((m) => ({ default: m.ShiftReportPage })),
@@ -75,6 +80,17 @@ const ChartOfAccountsPage = lazy(() =>
 const JournalPage = lazy(() => import('./accounting/JournalPage').then((m) => ({ default: m.JournalPage })));
 const TrialBalancePage = lazy(() =>
   import('./accounting/TrialBalancePage').then((m) => ({ default: m.TrialBalancePage })),
+);
+// Statements, expenses and the profit and loss (29).
+const CustomerStatementPage = lazy(() =>
+  import('./ledger/StatementPage').then((m) => ({ default: () => <m.StatementPage type="customer" /> })),
+);
+const SupplierStatementPage = lazy(() =>
+  import('./ledger/StatementPage').then((m) => ({ default: () => <m.StatementPage type="supplier" /> })),
+);
+const ExpensesPage = lazy(() => import('./ledger/ExpensesPage').then((m) => ({ default: m.ExpensesPage })));
+const ProfitLossPage = lazy(() =>
+  import('./ledger/ProfitLossPage').then((m) => ({ default: m.ProfitLossPage })),
 );
 
 const page = (element: ReactNode) => <Suspense fallback={<FullScreenLoader />}>{element}</Suspense>;
@@ -91,6 +107,7 @@ export function AdminApp() {
         <Route element={<GuestOnly />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         </Route>
         <Route element={<RequireAuth />}>
           <Route path="/" element={<HomePage />} />
@@ -107,18 +124,23 @@ export function AdminApp() {
           <Route path="/expiry" element={page(<ExpiryPage />)} />
           <Route path="/online-store" element={page(<OnlineStorePage />)} />
           <Route path="/prices" element={page(<BulkPricesPage />)} />
+          <Route path="/import" element={page(<ImportPage />)} />
           <Route path="/transfers" element={page(<TransfersPage />)} />
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
           <Route path="/serials" element={page(<SerialsPage />)} />
           <Route path="/labels" element={page(<LabelsPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />
+          <Route path="/customers/:id/statement" element={page(<CustomerStatementPage />)} />
+          <Route path="/suppliers/:id/statement" element={page(<SupplierStatementPage />)} />
+          <Route path="/expenses" element={page(<ExpensesPage />)} />
           <Route path="/staff" element={page(<StaffPage />)} />
           <Route path="/me/pin" element={page(<PinPage />)} />
           <Route path="/welcome" element={page(<WelcomePage />)} />
           <Route path="/settings" element={page(<SettingsPage />)} />
           <Route path="/subscription" element={page(<SubscriptionPage />)} />
           <Route path="/sales/today" element={page(<DayReportPage />)} />
+          <Route path="/sales/invoices" element={page(<InvoicesPage />)} />
           <Route path="/shifts" element={page(<ShiftsPage />)} />
           <Route path="/shifts/:id" element={page(<ShiftReportPage />)} />
           <Route path="/evidence" element={page(<EvidencePage />)} />
@@ -126,6 +148,7 @@ export function AdminApp() {
           <Route path="/accounting/accounts" element={page(<ChartOfAccountsPage />)} />
           <Route path="/accounting/journal" element={page(<JournalPage />)} />
           <Route path="/accounting/trial-balance" element={page(<TrialBalancePage />)} />
+          <Route path="/accounting/profit-loss" element={page(<ProfitLossPage />)} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

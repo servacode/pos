@@ -388,6 +388,12 @@ function Suppliers({
                       max={owed}
                     />
                   ) : null}
+                  <Link
+                    to={`/suppliers/${s.id}/statement`}
+                    className="self-start rounded-small text-sm font-semibold text-brand-ink underline-offset-4 hover:underline"
+                  >
+                    كشف الحساب
+                  </Link>
                 </div>
               </Card>
             </li>

@@ -78,7 +78,7 @@ export const userStatus = pgEnum('user_status', ['active', 'disabled']);
 /** Administrative state of a store, set by the platform team (e.g. suspended for abuse). */
 export const tenantStatus = pgEnum('tenant_status', ['active', 'suspended']);
 export const agentStatus = pgEnum('agent_status', ['active', 'suspended']);
-export const otpPurpose = pgEnum('otp_purpose', ['registration']);
+export const otpPurpose = pgEnum('otp_purpose', ['registration', 'password_reset']);
 
 // ─── Platform (no tenant_id) ──────────────────────────────────────────────────
 
@@ -124,6 +124,19 @@ export const platformUsers = pgTable('platform_users', {
   role: platformRole('role').notNull(),
   status: userStatus('status').notNull().default('active'),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  /** AES-256-GCM sealed TOTP secret (services/platform-2fa.ts); null until two-factor is on */
+  totpSecretEnc: text('totp_secret_enc'),
+  /** A secret shown for enrolment and not yet confirmed with a code */
+  totpPendingEnc: text('totp_pending_enc'),
+  totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+  /** The last 30-second step accepted, so one code works once */
+  totpLastStep: bigint('totp_last_step', { mode: 'number' }),
+  /** SHA-256 hashes of the unused recovery codes */
+  recoveryCodeHashes: jsonb('recovery_code_hashes')
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  /** Set by the seed while the password still equals the bootstrap one; cleared on change */
+  mustChangePassword: boolean('must_change_password').notNull().default(false),
   version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -2069,6 +2082,43 @@ export const journalLines = pgTable(
     foreignKey({ columns: [t.tenantId, t.accountId], foreignColumns: [accounts.tenantId, accounts.id] }),
     index('journal_lines_account_idx').on(t.tenantId, t.accountId),
     index('journal_lines_shift_idx').on(t.tenantId, t.shiftId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * An expense recorded on the dashboard (29 › المصاريف): the document that owns one automatic
+ * journal entry (Dr the expense account, Cr where it was paid from). Never changed; cancelling it
+ * is a reversing entry of its journal entry, which the list shows as «ملغى».
+ */
+export const expenses = pgTable(
+  'expenses',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** The expense account's number in the chart (6101, 6102, …) */
+    accountCode: text('account_code').notNull(),
+    currency: text('currency').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    /** In the store's base currency, at the rate frozen when it was recorded */
+    baseAmountMinor: bigint('base_amount_minor', { mode: 'number' }).notNull(),
+    rate: jsonb('rate'),
+    /** safe, bank, wallet, card */
+    payFrom: text('pay_from').notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'expenses_pkey', columns: [t.tenantId, t.id] }),
+    unique('expenses_number_unique').on(t.tenantId, t.number),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    index('expenses_date_idx').on(t.tenantId, t.businessDate),
     tenantIsolation(),
   ],
 );

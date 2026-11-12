@@ -62,7 +62,7 @@ describe('accounting: who sees it', () => {
       within(tabs)
         .getAllByRole('link')
         .map((l) => l.textContent),
-    ).toEqual(['دليل الحسابات', 'القيود', 'ميزان المراجعة']);
+    ).toEqual(['دليل الحسابات', 'القيود', 'ميزان المراجعة', 'قائمة الدخل']);
   });
 
   it('is hidden from a manager without accounting.view, and closed if opened by address', async () => {

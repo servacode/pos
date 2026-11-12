@@ -37,6 +37,7 @@ import { PosProvider, usePos } from './services';
 import { validated } from './validate';
 import { readShift, type OpenShift } from './shift/shift';
 import { staffRoster, type StaffSession } from './staff/staff';
+import { SubscriptionChip, useTillSubscription } from '../layout/subscription-banner';
 import { StatusBar, type OutboxStatus } from './StatusBar';
 import { useIdle } from './useIdle';
 
@@ -114,6 +115,8 @@ export function CashierApp(props: CashierAppProps) {
 function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut }: CashierAppProps) {
   const pos = usePos();
   const digits = useDigits();
+  const tillSubscription = useTillSubscription(pos.device.token);
+  const notice = <SubscriptionChip subscription={tillSubscription} />;
   const settings = catalog.settings;
   const staff = useMemo(
     () => staffRoster(catalog.staff, pos.device.branchCode),
@@ -204,7 +207,15 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   if (!settings) {
     return (
       <CashierShell
-        statusBar={<StatusBar device={pos.device} persisted={persisted} online={online} outbox={outbox} />}
+        statusBar={
+          <StatusBar
+            device={pos.device}
+            persisted={persisted}
+            online={online}
+            outbox={outbox}
+            notice={notice}
+          />
+        }
         mainClassName="grid place-items-center p-6"
       >
         <EmptyState
@@ -320,6 +331,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       persisted={persisted}
       online={online}
       outbox={outbox}
+      notice={notice}
       user={{
         name: session.fullName,
         detail: shift ? `وردية منذ ${clockText(shift.openedAt, digits)}` : 'لا وردية مفتوحة',

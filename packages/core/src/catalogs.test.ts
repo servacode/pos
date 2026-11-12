@@ -35,7 +35,8 @@ describe('default roles', () => {
     expect(manager).toContain('accounting.view');
     expect(role('cashier')?.permissions).not.toContain('report.view');
     expect(manager).not.toContain('settings.manage');
-    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 5);
+    // users, WhatsApp, subscription, devices, settings, and the hand-written journal (accounting.post)
+    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 6);
   });
 
   it('limits the cashier to selling with a 10% discount and taking customers’ payments', () => {

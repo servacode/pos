@@ -20,6 +20,7 @@ import { useAuth, useMe } from '../auth/useAuth';
 import { apiFetch } from '../lib/api';
 import { formatDays } from '../lib/format';
 import { navGroupsFor, pageOwns, sectionAt, type NavGroupKey, type NavSection } from './nav';
+import { SubscriptionBanner } from './subscription-banner';
 import { TopBar, type Notice } from './TopBar';
 
 // ── The sidebar's fold, kept on this device ──────────────────────────────────────────────────────
@@ -129,9 +130,33 @@ function noticesFor(me: MeResponse, pending: OnlineOrder[], canSeePlan: boolean)
     });
   }
   if (canSeePlan) {
-    const { status, daysLeft } = me.subscription;
+    const { status, daysLeft, lifecycle, readOnly } = me.subscription;
     const days = daysLeft === null ? '' : formatDays(daysLeft, me.settings.numberFormat);
-    if (status === 'trialing') {
+    if (readOnly || lifecycle === 'read_only') {
+      notices.push({
+        key: 'plan',
+        to: '/subscription',
+        icon: CardIcon,
+        tone: 'danger',
+        title: 'المتجر للقراءة والتصدير فقط',
+        detail: 'ادفع من صفحة الاشتراك ليعود البيع',
+        attention: 1,
+      });
+    } else if (lifecycle === 'grace') {
+      const left = me.subscription.graceDaysLeft;
+      notices.push({
+        key: 'plan',
+        to: '/subscription',
+        icon: CardIcon,
+        tone: 'warning',
+        title: 'انتهى الاشتراك: مهلة السماح',
+        detail:
+          left === null || left <= 0
+            ? 'ينتهي البيع اليوم. ادفع الآن'
+            : `باقي ${formatDays(left, me.settings.numberFormat)} على البيع. ادفع الآن`,
+        attention: 1,
+      });
+    } else if (status === 'trialing') {
       const endingSoon = daysLeft !== null && daysLeft <= 3;
       notices.push({
         key: 'plan',
@@ -422,6 +447,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
       subBar={tabs}
     >
+      <SubscriptionBanner
+        subscription={me.subscription}
+        numberFormat={me.settings.numberFormat}
+        canPay={canSeePlan}
+        className="mb-4"
+      />
       {children}
     </AdminShell>
   );

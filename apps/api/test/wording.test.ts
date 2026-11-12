@@ -26,6 +26,12 @@ function files(dir: string): string[] {
   });
 }
 
+/**
+ * Column headers the import wizard must recognise in spreadsheets from other programs: they are
+ * matched, never shown, so they may use words we don't say.
+ */
+const RECOGNISED_HEADERS = new Set(['اسم العميل', 'العميل']);
+
 const STRING = /'([^'\\\n]*(?:\\.[^'\\\n]*)*)'|`([^`]*)`/g;
 const ARABIC = /[؀-ۿ]/;
 
@@ -38,6 +44,7 @@ describe('API messages follow the glossary', () => {
       for (const match of readFileSync(file, 'utf8').matchAll(STRING)) {
         const text = match[1] ?? match[2] ?? '';
         if (!ARABIC.test(text)) continue;
+        if (file.endsWith('import.ts') && RECOGNISED_HEADERS.has(text)) continue;
         const banned = BANNED.filter((word) => text.includes(word));
         if (banned.length > 0) offenders.push(`${file}: ${text} (${banned.join(', ')})`);
       }

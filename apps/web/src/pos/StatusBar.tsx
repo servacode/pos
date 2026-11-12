@@ -35,6 +35,8 @@ export interface StatusBarProps {
   /** «آخر فاتورة»: reprints the last receipt */
   lastInvoice?: ReactNode;
   menu?: ReactNode;
+  /** The subscription chip (trial ending, grace, read-only) */
+  notice?: ReactNode;
 }
 
 /** A hairline between the bar's groups. */
@@ -69,7 +71,16 @@ function Clock() {
  * last invoice, the connection with what waits to be sent and when it last went, the time, the
  * theme and the menu.
  */
-export function StatusBar({ device, persisted, online, outbox, user, lastInvoice, menu }: StatusBarProps) {
+export function StatusBar({
+  device,
+  persisted,
+  online,
+  outbox,
+  user,
+  lastInvoice,
+  menu,
+  notice,
+}: StatusBarProps) {
   const digits = useDigits();
   return (
     <CashierStatusBar>
@@ -116,6 +127,7 @@ export function StatusBar({ device, persisted, online, outbox, user, lastInvoice
           </span>
         </span>
       ) : null}
+      {notice}
       {lastInvoice}
       <span className="flex shrink-0 items-center gap-2.5">
         <ConnectionPill online={online}>{connectionText(online, outbox?.pending ?? 0)}</ConnectionPill>

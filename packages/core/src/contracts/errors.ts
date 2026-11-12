@@ -14,6 +14,10 @@ export const ERROR_CODES = [
   'forbidden',
   /** The device was revoked by the owner: it stops selling and syncing (17) */
   'device_revoked',
+  /** 402: the subscription ended and its grace is over: the store is read-only (07 › دورة حياة الاشتراك) */
+  'subscription_read_only',
+  /** 403: the plan's limit (users, devices, branches) is reached; nothing existing is touched */
+  'plan_limit_reached',
   'not_found',
   'method_not_allowed',
   /** 409: the record changed since it was read (`version`); reload it before saving (17 › التعديل المتزامن) */

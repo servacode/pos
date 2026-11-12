@@ -91,25 +91,34 @@ export async function createCategory(
 ): Promise<Category> {
   return withTenant(db, ctx.auth.tenantId, async (tx) => {
     await requireCatalogManager(tx, ctx.auth.userId);
-    await checkParent(tx, input.parentId);
-    const [row] = await tx
-      .insert(categories)
-      .values({ tenantId: ctx.auth.tenantId, ...input })
-      .returning({ id: categories.id });
-    await audit(
-      tx,
-      {
-        tenantId: ctx.auth.tenantId,
-        userId: ctx.auth.userId,
-        action: 'category.created',
-        entity: 'category',
-        entityId: row!.id,
-        data: input,
-      },
-      ctx.meta,
-    );
-    return (await categoryViews(tx, row!.id))[0]!;
+    return createCategoryTx(tx, input, ctx);
   });
+}
+
+/** The write of createCategory inside the caller's transaction (the import); permission checked by the caller. */
+export async function createCategoryTx(
+  tx: Transaction,
+  input: CategoryCreate,
+  ctx: CatalogContext,
+): Promise<Category> {
+  await checkParent(tx, input.parentId);
+  const [row] = await tx
+    .insert(categories)
+    .values({ tenantId: ctx.auth.tenantId, ...input })
+    .returning({ id: categories.id });
+  await audit(
+    tx,
+    {
+      tenantId: ctx.auth.tenantId,
+      userId: ctx.auth.userId,
+      action: 'category.created',
+      entity: 'category',
+      entityId: row!.id,
+      data: input,
+    },
+    ctx.meta,
+  );
+  return (await categoryViews(tx, row!.id))[0]!;
 }
 
 export async function updateCategory(

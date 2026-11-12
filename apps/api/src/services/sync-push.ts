@@ -23,10 +23,12 @@ import {
   type SyncDocument,
   type SyncFlag,
 } from '@serva/sync';
+import { acceptsDocumentMadeAt, type Lifecycle } from '@serva/core';
 import type { z } from 'zod';
 import type { DeviceClaims } from '../auth/device-guard';
 import { audit } from './audit';
 import type { RequestMeta } from '../types';
+import { lifecycleInTx } from './subscription-gate';
 import { readServerState } from './sync-state';
 
 /** Payload hashes are not secrets, but compare them in constant time so no comparison leaks timing. */
@@ -69,6 +71,8 @@ export type SyncProcessors = Partial<Record<DocType, DocumentProcessor>>;
 const CLOCK_SKEW_MS = 5 * 60_000;
 
 interface Prepared {
+  /** Set when the store is read-only: what a device made after the cut-off is quarantined, not posted */
+  readOnly: Lifecycle | null;
   branchCode: string;
   announced: Map<string, number>;
 }
@@ -83,6 +87,8 @@ export interface PushContext {
   meta: RequestMeta;
   now: Date;
   processors?: SyncProcessors;
+  /** false = the read-only rule is off (SUBSCRIPTION_ENFORCEMENT=false) */
+  enforceSubscription?: boolean;
   /** Where unexpected per-document errors are logged (the document itself answers retry) */
   onError?: (error: unknown, docId: string) => void;
 }
@@ -91,7 +97,7 @@ export async function pushDocuments(
   db: Database,
   device: DeviceClaims,
   request: PushRequest,
-  { meta, now, processors = {}, onError }: PushContext,
+  { meta, now, processors = {}, onError, enforceSubscription = true }: PushContext,
 ): Promise<PushResponse> {
   return withTenant(db, device.tenantId, async (tx) => {
     await tx.execute(
@@ -108,7 +114,9 @@ export async function pushDocuments(
     // Heartbeat: what the device says it issued. A revoked device's cut-off is what it announced
     // before it was revoked, so it can no longer move it.
     if (!device.revokedAt) await recordAnnounced(tx, device, request.lastIssued);
+    const life = enforceSubscription ? await lifecycleInTx(tx, now) : null;
     const prepared: Prepared = {
+      readOnly: life?.readOnly ? life : null,
       branchCode: (
         await tx.select({ code: branches.code }).from(branches).where(eq(branches.id, device.branchId))
       )[0]!.code,
@@ -330,6 +338,16 @@ async function classify(
     const cutOff = parsed ? (prepared.announced.get(parsed.series) ?? 0) : 0;
     if (!parsed || parsed.sequence > cutOff) {
       return { status: 'quarantined', code: 'after_revocation', flags: [] };
+    }
+  }
+
+  // A read-only store (07 › دورة حياة الاشتراك) takes no NEW documents, but never loses an offline
+  // sale made before the cut-off: the device's own clock, corrected by its announced offset, decides.
+  // The refused document is kept whole (quarantined), not dropped. A shift close always goes through.
+  if (prepared.readOnly && doc.type !== 'shift_close') {
+    const madeAt = new Date(Date.parse(doc.deviceTime) - doc.deviceOffsetMs);
+    if (Number.isNaN(madeAt.getTime()) || !acceptsDocumentMadeAt(prepared.readOnly, madeAt)) {
+      return { status: 'quarantined', code: 'subscription_read_only', flags: [] };
     }
   }
 

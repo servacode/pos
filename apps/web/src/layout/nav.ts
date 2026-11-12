@@ -9,9 +9,11 @@ import {
   CustomersIcon,
   DeviceIcon,
   HomeIcon,
+  ListIcon,
   BookIcon,
   MegaphoneIcon,
   OfferIcon,
+  PackageOpenIcon,
   PercentIcon,
   PrintIcon,
   ProductsIcon,
@@ -112,6 +114,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     icon: SalesIcon,
     permission: DAY_REPORT_ACCESS,
   },
+  {
+    section: 'sales',
+    to: '/sales/invoices',
+    label: 'الفواتير',
+    icon: ListIcon,
+    permission: ['report.view'],
+  },
   { section: 'sales', to: '/shifts', label: 'الورديات', icon: ClockIcon, permission: SHIFTS_ACCESS },
   {
     section: 'customers',
@@ -171,6 +180,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     permission: ['catalog.manage'],
   },
   {
+    section: 'products',
+    to: '/import',
+    label: 'استيراد البيانات',
+    icon: PackageOpenIcon,
+    permission: ['catalog.manage'],
+  },
+  {
     section: 'promotions',
     to: '/promotions',
     label: 'العروض',
@@ -190,6 +206,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     label: 'مرتجع إلى المورد',
     icon: UndoIcon,
     permission: ['purchases.manage'],
+  },
+  {
+    section: 'purchases',
+    to: '/expenses',
+    label: 'المصاريف',
+    icon: CardIcon,
+    permission: ['expenses.manage'],
   },
   {
     section: 'inventory',

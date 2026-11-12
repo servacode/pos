@@ -143,6 +143,14 @@ export interface MeResponse {
     currentPeriodEnd: string | null;
     /** Whole days left in the trial or paid period; null when unlimited */
     daysLeft: number | null;
+    /** Derived from the dates (packages/core › subscription-lifecycle): what the store may do now */
+    lifecycle: 'trialing' | 'active' | 'grace' | 'read_only';
+    /** True when the store may only read and export: the app disables what writes */
+    readOnly: boolean;
+    /** Last moment of selling once the period ended (end of grace); null when unlimited */
+    writeUntil: string | null;
+    /** Whole days until selling stops once in grace (or until the period ends); null when unlimited */
+    graceDaysLeft: number | null;
   };
   branches: { id: string; code: string; name: string }[];
   /** The start wizard (04 › معالج البداية): the step to resume at, and whether it is over */

@@ -170,23 +170,34 @@ export async function createCustomer(
 ): Promise<CustomerDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
-    const id = newId();
-    await tx.insert(customers).values({ tenantId: auth.tenantId, id, ...fields(input, now) });
-    const created = await detail(tx, id);
-    await audit(
-      tx,
-      {
-        tenantId: auth.tenantId,
-        userId: auth.userId,
-        action: 'customer.create',
-        entity: 'customer',
-        entityId: id,
-        changes: { name: [null, created.name], creditLimitMinor: [null, created.creditLimitMinor] },
-      },
-      meta,
-    );
-    return created;
+    return createCustomerTx(tx, auth, input, meta, now);
   });
+}
+
+/** The write of createCustomer inside the caller's transaction (the import); permission checked by the caller. */
+export async function createCustomerTx(
+  tx: Transaction,
+  auth: AccessClaims,
+  input: CustomerInput,
+  meta: RequestMeta,
+  now: Date,
+): Promise<CustomerDetail> {
+  const id = newId();
+  await tx.insert(customers).values({ tenantId: auth.tenantId, id, ...fields(input, now) });
+  const created = await detail(tx, id);
+  await audit(
+    tx,
+    {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      action: 'customer.create',
+      entity: 'customer',
+      entityId: id,
+      changes: { name: [null, created.name], creditLimitMinor: [null, created.creditLimitMinor] },
+    },
+    meta,
+  );
+  return created;
 }
 
 export async function updateCustomer(
@@ -199,39 +210,51 @@ export async function updateCustomer(
 ): Promise<CustomerDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
-    const before = await detail(tx, id);
-    await tx
-      .update(customers)
-      .set({ ...fields(input, now), updatedAt: now })
-      .where(eq(customers.id, id));
-    const after = await detail(tx, id);
-    const changes: Record<string, [unknown, unknown]> = {};
-    for (const key of [
-      'name',
-      'phone',
-      'taxNumber',
-      'address',
-      'notes',
-      'creditLimitMinor',
-      'priceTier',
-      'archived',
-    ] as const) {
-      if (before[key] !== after[key]) changes[key] = [before[key], after[key]];
-    }
-    await audit(
-      tx,
-      {
-        tenantId: auth.tenantId,
-        userId: auth.userId,
-        action: 'customer.update',
-        entity: 'customer',
-        entityId: id,
-        changes,
-      },
-      meta,
-    );
-    return after;
+    return updateCustomerTx(tx, auth, id, input, meta, now);
   });
+}
+
+/** The write of updateCustomer inside the caller's transaction (the import); permission checked by the caller. */
+export async function updateCustomerTx(
+  tx: Transaction,
+  auth: AccessClaims,
+  id: string,
+  input: CustomerInput,
+  meta: RequestMeta,
+  now: Date,
+): Promise<CustomerDetail> {
+  const before = await detail(tx, id);
+  await tx
+    .update(customers)
+    .set({ ...fields(input, now), updatedAt: now })
+    .where(eq(customers.id, id));
+  const after = await detail(tx, id);
+  const changes: Record<string, [unknown, unknown]> = {};
+  for (const key of [
+    'name',
+    'phone',
+    'taxNumber',
+    'address',
+    'notes',
+    'creditLimitMinor',
+    'priceTier',
+    'archived',
+  ] as const) {
+    if (before[key] !== after[key]) changes[key] = [before[key], after[key]];
+  }
+  await audit(
+    tx,
+    {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      action: 'customer.update',
+      entity: 'customer',
+      entityId: id,
+      changes,
+    },
+    meta,
+  );
+  return after;
 }
 
 // ─── What a customer bought (03 › الألبسة: سجل الزبون ومقاسه) ─────────────────

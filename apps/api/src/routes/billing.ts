@@ -9,6 +9,7 @@ import {
   reportPaymentInput,
   uuidSchema,
 } from '@serva/core';
+import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { requirePlatform } from '../auth/platform-guard';
 import type { PlatformClaims } from '../auth/tokens';
@@ -17,7 +18,6 @@ import { enforceLimits } from '../http/rate-limit';
 import {
   decidePayment,
   openInvoice,
-  platformLogin,
   platformPayments,
   platformPlans,
   platformSettings,
@@ -28,6 +28,8 @@ import {
   setSubscription,
   subscriptionPage,
 } from '../services/billing';
+import { platformSignIn } from '../services/platform-2fa';
+import { tillSubscription } from '../services/subscription-gate';
 import { parseBody } from './validation';
 
 /** The store's subscription, and the platform panel (packages/core › contracts/billing.ts). */
@@ -45,6 +47,16 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/subscription', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return subscriptionPage(app.db, request.auth);
+  });
+  // The till has no user to ask /v1/me: its status bar reads the same state with the device token.
+  app.get('/v1/device/subscription', { onRequest: requireDevice() }, async (request) => {
+    if (!request.device) throw unauthorized();
+    return tillSubscription(
+      app.db,
+      request.device.tenantId,
+      app.clock.now(),
+      app.env.SUBSCRIPTION_ENFORCEMENT,
+    );
   });
   app.post('/v1/subscription/invoices', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) throw unauthorized();
@@ -76,18 +88,12 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
         ]);
       },
     },
-    async (request) =>
-      platformLogin(
-        app.db,
-        app.passwords,
-        app.tokenKeys,
-        parseBody(platformLoginInput, request.body),
-        app.clock.now(),
-      ),
+    // Password first; a code, a new password or enrolment may follow (services/platform-2fa.ts)
+    async (request) => platformSignIn(app, parseBody(platformLoginInput, request.body), app.clock.now()),
   );
 
   const platform = { preHandler: requirePlatform };
-  app.get('/v1/platform/stores', platform, async () => platformStores(app.db));
+  app.get('/v1/platform/stores', platform, async () => platformStores(app.db, app.clock.now()));
   app.put('/v1/platform/stores/:id/subscription', platform, async (request, reply) => {
     await setSubscription(
       app.db,

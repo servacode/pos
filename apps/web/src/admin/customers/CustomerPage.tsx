@@ -244,6 +244,7 @@ export function CustomerPage() {
   const me = useMe();
   const digits = useDigits();
   const canManage = me.user.permissions.includes('customers.manage');
+  const seesInvoices = me.user.permissions.includes('report.view');
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -361,6 +362,14 @@ export function CustomerPage() {
                     </bdi>
                   </p>
                 </div>
+                {seesInvoices ? (
+                  <Link
+                    to={`/sales/invoices?customerId=${encodeURIComponent(customer.id)}`}
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-small px-2 text-sm font-semibold text-brand-ink underline-offset-4 hover:underline"
+                  >
+                    <SalesIcon size={16} /> فواتير الزبون
+                  </Link>
+                ) : null}
                 {canManage && !editing ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <Button variant="secondary" icon={<EditIcon />} onClick={() => setEditing(true)}>
@@ -469,10 +478,18 @@ export function CustomerPage() {
                   </section>
                 ) : null}
                 <section className="flex flex-col gap-3">
-                  <SectionTitle
-                    title="كشف الحساب"
-                    description="كل بيع بالآجل وكل دفعة ومرتجع، والرصيد بعد كل حركة."
-                  />
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <SectionTitle
+                      title="كشف الحساب"
+                      description="كل بيع بالآجل وكل دفعة ومرتجع، والرصيد بعد كل حركة."
+                    />
+                    <Link
+                      to={`/customers/${customer.id}/statement`}
+                      className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-sm font-semibold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                    >
+                      <BookIcon size={16} /> كشف حساب بفترة، للطباعة
+                    </Link>
+                  </div>
                   <DataTable
                     caption="كشف الحساب"
                     columns={columns}

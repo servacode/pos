@@ -16,6 +16,7 @@ import {
   Money,
   MoneyField,
   MoreIcon,
+  PackageOpenIcon,
   PageHeader,
   PrintIcon,
   ProductsIcon,
@@ -462,9 +463,14 @@ function ProductsList() {
   ];
 
   const addProduct = (
-    <ButtonLink to="/products/new" variant="primary" icon={<AddIcon />}>
-      أضف منتجاً
-    </ButtonLink>
+    <div className="flex flex-wrap items-center gap-2">
+      <ButtonLink to="/import?type=products" icon={<PackageOpenIcon />}>
+        استيراد من Excel
+      </ButtonLink>
+      <ButtonLink to="/products/new" variant="primary" icon={<AddIcon />}>
+        أضف منتجاً
+      </ButtonLink>
+    </div>
   );
 
   return (

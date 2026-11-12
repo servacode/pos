@@ -9,6 +9,7 @@ const TABS = [
   { to: '/accounting/accounts', label: 'دليل الحسابات' },
   { to: '/accounting/journal', label: 'القيود' },
   { to: '/accounting/trial-balance', label: 'ميزان المراجعة' },
+  { to: '/accounting/profit-loss', label: 'قائمة الدخل' },
 ] as const;
 
 /**

@@ -77,15 +77,15 @@ import { receiveSerials } from './serials';
 
 const newId = createUuidV7();
 const notFound = (what: string) => new AppError(404, 'not_found', `${what} غير موجود.`);
-const invalid = (fields: Record<string, string>) =>
+export const invalid = (fields: Record<string, string>) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', fields);
 
-async function baseCurrency(tx: Transaction): Promise<CurrencyCode> {
+export async function baseCurrency(tx: Transaction): Promise<CurrencyCode> {
   const [row] = await tx.execute<{ base: string }>(sql`select base_currency as base from tenant_settings`);
   return (row?.base ?? 'SYP') as CurrencyCode;
 }
 
-async function branchOf(tx: Transaction, branchId: string | undefined): Promise<string> {
+export async function branchOf(tx: Transaction, branchId: string | undefined): Promise<string> {
   const [row] = branchId
     ? await tx.select({ id: branches.id }).from(branches).where(eq(branches.id, branchId))
     : await tx.select({ id: branches.id }).from(branches).orderBy(asc(branches.code)).limit(1);
@@ -94,7 +94,7 @@ async function branchOf(tx: Transaction, branchId: string | undefined): Promise<
 }
 
 /** The next number of a dashboard series this year: «PUR-2026-000001». */
-async function nextNumber(tx: Transaction, tenantId: string, series: string, date: string): Promise<string> {
+export async function nextNumber(tx: Transaction, tenantId: string, series: string, date: string): Promise<string> {
   const year = Number(date.slice(0, 4));
   const [row] = await tx
     .insert(documentSequences)
@@ -169,37 +169,49 @@ export async function saveSupplier(
 ): Promise<SupplierRow> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'purchases.manage');
-    const fields = {
-      name: input.name,
-      ...(input.phone !== undefined ? { phone: input.phone } : {}),
-      ...(input.notes !== undefined ? { notes: input.notes } : {}),
-      ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
-    };
-    const supplierId = id ?? newId();
-    if (id) {
-      const [found] = await tx
-        .update(suppliers)
-        .set({ ...fields, updatedAt: now })
-        .where(eq(suppliers.id, id))
-        .returning();
-      if (!found) throw notFound('هذا المورد');
-    } else {
-      await tx.insert(suppliers).values({ tenantId: auth.tenantId, id: supplierId, ...fields });
-    }
-    await audit(
-      tx,
-      {
-        tenantId: auth.tenantId,
-        userId: auth.userId,
-        action: id ? 'supplier.update' : 'supplier.create',
-        entity: 'supplier',
-        entityId: supplierId,
-        changes: { name: [null, input.name] },
-      },
-      meta,
-    );
-    return (await supplierRows(tx, supplierId))[0]!;
+    return saveSupplierTx(tx, auth, id, input, meta, now);
   });
+}
+
+/** The write of saveSupplier inside the caller's transaction (the import); permission checked by the caller. */
+export async function saveSupplierTx(
+  tx: Transaction,
+  auth: AccessClaims,
+  id: string | null,
+  input: SupplierInput,
+  meta: RequestMeta,
+  now: Date,
+): Promise<SupplierRow> {
+  const fields = {
+    name: input.name,
+    ...(input.phone !== undefined ? { phone: input.phone } : {}),
+    ...(input.notes !== undefined ? { notes: input.notes } : {}),
+    ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
+  };
+  const supplierId = id ?? newId();
+  if (id) {
+    const [found] = await tx
+      .update(suppliers)
+      .set({ ...fields, updatedAt: now })
+      .where(eq(suppliers.id, id))
+      .returning();
+    if (!found) throw notFound('هذا المورد');
+  } else {
+    await tx.insert(suppliers).values({ tenantId: auth.tenantId, id: supplierId, ...fields });
+  }
+  await audit(
+    tx,
+    {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      action: id ? 'supplier.update' : 'supplier.create',
+      entity: 'supplier',
+      entityId: supplierId,
+      changes: { name: [null, input.name] },
+    },
+    meta,
+  );
+  return (await supplierRows(tx, supplierId))[0]!;
 }
 
 // ─── Purchases ───────────────────────────────────────────────────────────────
@@ -276,7 +288,7 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
 }
 
 /** Moves stock for a dashboard document (purchase or count), once per line. */
-async function moveStock(
+export async function moveStock(
   tx: Transaction,
   tenantId: string,
   branchId: string,

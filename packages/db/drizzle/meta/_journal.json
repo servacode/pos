@@ -267,6 +267,20 @@
       "when": 1793770634275,
       "tag": "0037_broadcasts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794432604542,
+      "tag": "0038_platform_2fa_password_reset",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794432767428,
+      "tag": "0039_expenses",
+      "breakpoints": true
     }
   ]
 }

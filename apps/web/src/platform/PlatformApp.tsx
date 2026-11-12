@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type {
   PaymentMethodInfo,
   PlanRow,
-  PlatformLoginResponse,
   PlatformPayment,
   PlatformSettings,
   PlatformStore,
@@ -37,7 +36,6 @@ import {
   NavItem,
   NextIcon,
   PageHeader,
-  PasswordField,
   ShieldCheckIcon,
   Skeleton,
   SkeletonText,
@@ -53,6 +51,8 @@ import {
 } from '@serva/ui';
 import { apiFetch, errorMessage } from '../lib/api';
 import { counted } from '../pos/format';
+import { PlatformLogin } from './PlatformLogin';
+import { PlatformSecurity } from './PlatformSecurity';
 
 /**
  * The platform panel (07 › لوحة مدير المنصة), apart from the stores: its own sign-in (email and
@@ -114,7 +114,7 @@ export function PlatformApp() {
       {token ? (
         <Panel token={token} onSignOut={signOut} />
       ) : (
-        <Login
+        <PlatformLogin
           onSignedIn={(t) => {
             keepToken(t);
             setToken(t);
@@ -122,63 +122,6 @@ export function PlatformApp() {
         />
       )}
     </div>
-  );
-}
-
-/**
- * The sign-in (هوية 4): the logo and the theme switch above, and in the middle the panel's name
- * and the form on a card, apart from the stores' own sign-in.
- */
-function Login({ onSignedIn }: { onSignedIn: (token: string) => void }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  return (
-    <main className="flex min-h-dvh flex-col px-5 pt-3 pb-10 sm:px-10">
-      <header className="flex min-h-12 items-center justify-between gap-4">
-        <Logo />
-        <ThemeToggle />
-      </header>
-      <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center pt-10 pb-6 motion-safe:animate-rise">
-        <IconChip size="lg">
-          <ShieldCheckIcon size={24} />
-        </IconChip>
-        <h1 className="mt-5 text-2xl font-bold text-ink sm:text-3xl">لوحة المنصة</h1>
-        <p className="mt-2 text-ink-muted">لإدارة سيرفا: المتاجر واشتراكاتها، والدفعات، والباقات.</p>
-        <Card className="mt-8">
-          <form
-            className="flex flex-col gap-5"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setBusy(true);
-              setError(null);
-              apiFetch<PlatformLoginResponse>('/v1/platform/login', {
-                method: 'POST',
-                body: { email, password },
-              })
-                .then((r) => onSignedIn(r.token))
-                .catch((err: unknown) => setError(errorMessage(err)))
-                .finally(() => setBusy(false));
-            }}
-          >
-            {error ? <Alert tone="error">{error}</Alert> : null}
-            <TextField
-              label="البريد الإلكتروني"
-              type="email"
-              dir="ltr"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <PasswordField label="كلمة السر" value={password} onChange={(e) => setPassword(e.target.value)} />
-            <Button type="submit" size="lg" fullWidth loading={busy} className="mt-1">
-              ادخل
-            </Button>
-          </form>
-        </Card>
-        <p className="mt-6 text-center text-sm text-ink-subtle">تنتهي الجلسة بعد ثماني ساعات من الدخول.</p>
-      </div>
-    </main>
   );
 }
 
@@ -221,6 +164,12 @@ const SECTIONS: readonly { value: string; label: string; icon: Icon; description
     label: 'طرق الدفع',
     icon: CashIcon,
     description: 'الحسابات التي تحوّل إليها المتاجر، وسعر الدولار الذي تُحسب به فواتيرها.',
+  },
+  {
+    value: 'security',
+    label: 'الأمان',
+    icon: ShieldCheckIcon,
+    description: 'التحقق بخطوتين لدخول اللوحة، ورموز الاسترداد.',
   },
 ];
 
@@ -288,6 +237,8 @@ function Panel({ token, onSignOut }: { token: string; onSignOut: () => void }) {
             <Plans call={call} />
           ) : tab === 'settings' ? (
             <Settings call={call} />
+          ) : tab === 'security' ? (
+            <PlatformSecurity call={call} />
           ) : (
             <Payments call={call} />
           )}
