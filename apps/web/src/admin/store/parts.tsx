@@ -9,6 +9,7 @@ import {
   GiftIcon,
   IconChip,
   ListIcon,
+  ShieldCheckIcon,
   StoreIcon,
   WeighedIcon,
   type Icon,
@@ -53,6 +54,12 @@ export const SETTINGS_SECTIONS = {
     title: 'بيانات المتجر',
     description: 'استورد منتجاتك وزبائنك من ملف، أو صدّر كل بيانات المتجر.',
     icon: ArchiveIcon,
+  },
+  pharmacy: {
+    id: 'store-pharmacy',
+    title: 'الصيدلية',
+    description: 'الوصفة الطبية عند البيع، وسجل الأدوية المراقبة.',
+    icon: ShieldCheckIcon,
   },
   loyalty: {
     id: 'store-loyalty',

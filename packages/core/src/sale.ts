@@ -1,6 +1,7 @@
 import type { CurrencyCode, CurrencyId } from './currencies';
 import type {
   DocumentDiscount,
+  Prescription,
   PaymentMethod,
   SaleCashRounding,
   SaleChange,
@@ -51,6 +52,9 @@ export interface SaleCartLine {
   discount?: SaleDiscount | null;
   /** Serial numbers or IMEIs of the pieces, one each (left out of a line without them) */
   serials?: readonly string[];
+  /** The batch the till picked (03 › الصيدليات) and its expiry; metadata, left out of other lines */
+  batchNo?: string | null;
+  batchExpiry?: string | null;
 }
 
 export interface SalePricingInput {
@@ -118,6 +122,8 @@ export interface SaleCart
   service?: ServiceInfo | null;
   /** An online shop order this sale delivers (26 › حياة الطلب); left out of an ordinary sale */
   onlineOrderId?: string | null;
+  /** A pharmacy sale's prescription (03 › الصيدليات); left out of an ordinary sale */
+  prescription?: Prescription | null;
 }
 
 /** The rate pairing `currency` with the invoice currency, or undefined for the invoice currency itself. */
@@ -207,6 +213,7 @@ export function priceSale(input: SalePricingInput): { lines: SaleLine[]; priced:
       taxRateBp: line.taxRateBp,
       discount: line.discount ?? null,
       ...(line.serials?.length ? { serials: [...line.serials] } : {}),
+      ...(line.batchNo ? { batchNo: line.batchNo, batchExpiry: line.batchExpiry ?? null } : {}),
       priced: result,
     };
   });
@@ -389,6 +396,7 @@ export function buildSalePayload(cart: SaleCart): SalePayload {
     note: cart.note ?? null,
     ...(cart.service ? { service: cart.service } : {}),
     ...(cart.onlineOrderId ? { onlineOrderId: cart.onlineOrderId } : {}),
+    ...(cart.prescription ? { prescription: cart.prescription } : {}),
   };
 }
 

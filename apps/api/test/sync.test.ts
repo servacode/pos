@@ -657,7 +657,8 @@ describe('POST /v1/sync/resync and the server epoch', () => {
     });
     const snapshot = parseSnapshot(gunzipSync(file.rawPayload).toString('utf8'));
     expect(Object.keys(snapshot.sets).sort()).toEqual(['roles', 'users']);
-    expect(snapshot.sets.roles).toHaveLength(3);
+    // owner, manager, cashier, and the waiter and pharmacist every new store starts with
+    expect(snapshot.sets.roles).toHaveLength(5);
   });
 
   it('carries the epoch on every answer; server_epoch_bump() after a restore moves it on', async () => {

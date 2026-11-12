@@ -1,14 +1,16 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
-import type {
-  CurrencyCode,
-  OnboardingInput,
-  SectorKey,
-  StoreCurrencyData,
-  StoreProfileData,
-  StoreResponse,
-  StoreScaleData,
-  StoreLoyaltyData,
-  StoreServiceData,
+import {
+  DEFAULT_PHARMACY_SETTINGS,
+  type CurrencyCode,
+  type OnboardingInput,
+  type PharmacySettings,
+  type SectorKey,
+  type StoreCurrencyData,
+  type StoreProfileData,
+  type StoreResponse,
+  type StoreScaleData,
+  type StoreLoyaltyData,
+  type StoreServiceData,
 } from '@serva/core';
 import {
   branches,
@@ -69,6 +71,10 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
     scaleBarcode: settings.scaleBarcode ?? null,
     service: settings.service ?? null,
     loyalty: settings.loyalty ?? null,
+    // Only a pharmacy has it; one that never chose gets the defaults
+    pharmacy: tenant.sectors.includes('pharmacy')
+      ? (settings.pharmacy ?? DEFAULT_PHARMACY_SETTINGS)
+      : (settings.pharmacy ?? null),
   };
 }
 
@@ -279,6 +285,34 @@ export function updateLoyalty(
         entity: 'tenant_settings',
         entityId: auth.tenantId,
         changes: changesOf(before, after, ['loyalty']),
+      },
+      meta,
+    );
+    return after;
+  });
+}
+
+/** «الصيدلية»: whether a prescription medicine's number and doctor are required at the till. */
+export function updatePharmacy(
+  db: Database,
+  auth: AccessClaims,
+  input: PharmacySettings,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'settings.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ pharmacy: input });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.pharmacy_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['pharmacy']),
       },
       meta,
     );

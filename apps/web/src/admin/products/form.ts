@@ -65,6 +65,9 @@ export interface ProductDraft {
   brand: string;
   /** «الاسم العلمي» (pharmacies); "" = none */
   genericName?: string;
+  /** «يحتاج وصفة» and «مراقَب» (pharmacies) */
+  requiresPrescription?: boolean;
+  controlled?: boolean;
   /** «له رقم تسلسلي أو IMEI» and «الكفالة» in months as typed ("" = none) */
   tracksSerial?: boolean;
   warranty?: string;
@@ -189,6 +192,8 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     nameEn: detail.nameEn ?? '',
     brand: detail.brand ?? '',
     genericName: detail.genericName ?? '',
+    requiresPrescription: detail.requiresPrescription ?? false,
+    controlled: detail.controlled ?? false,
     tracksSerial: detail.tracksSerial ?? false,
     warranty: detail.warrantyMonths ? String(detail.warrantyMonths) : '',
     categoryId: detail.categoryId ?? '',
@@ -338,6 +343,8 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       nameEn: textOrNull(draft.nameEn),
       brand: textOrNull(draft.brand),
       ...(textOrNull(draft.genericName ?? '') ? { genericName: textOrNull(draft.genericName ?? '') } : {}),
+      ...(draft.requiresPrescription ? { requiresPrescription: true } : {}),
+      ...(draft.controlled ? { controlled: true } : {}),
       ...(draft.tracksSerial ? { tracksSerial: true } : {}),
       ...(warrantyOf(draft.warranty) !== null ? { warrantyMonths: warrantyOf(draft.warranty) } : {}),
       categoryId: draft.categoryId || null,
@@ -404,6 +411,12 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   if (nameAr !== original.nameAr) body.nameAr = nameAr;
   if (textOrNull(draft.nameEn) !== original.nameEn) body.nameEn = textOrNull(draft.nameEn);
   if (textOrNull(draft.brand) !== original.brand) body.brand = textOrNull(draft.brand);
+  if ((draft.requiresPrescription ?? false) !== (original.requiresPrescription ?? false)) {
+    body.requiresPrescription = draft.requiresPrescription ?? false;
+  }
+  if ((draft.controlled ?? false) !== (original.controlled ?? false)) {
+    body.controlled = draft.controlled ?? false;
+  }
   if ((draft.tracksSerial ?? false) !== (original.tracksSerial ?? false)) {
     body.tracksSerial = draft.tracksSerial ?? false;
   }

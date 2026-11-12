@@ -376,7 +376,7 @@ export async function activateByOwner(
 ): Promise<{ status: 'active'; device: ActivatedDevice }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const branch = await branchToManage(tx, auth, data.branchId);
-    await assertWithinPlanLimit(tx, 'registers');
+    await assertWithinPlanLimit(tx, 'registers', data.kind);
     const code = await reserveCode(tx, branch.id);
     const token = newDeviceToken();
     const [device] = await tx
@@ -618,7 +618,7 @@ export async function approveDevice(
     if (device.activationExpiresAt!.getTime() <= now.getTime()) {
       throw wrongState('انتهت مهلة طلب الربط. اربط الجهاز من جديد.');
     }
-    await assertWithinPlanLimit(tx, 'registers');
+    await assertWithinPlanLimit(tx, 'registers', device.kind);
     const code = await reserveCode(tx, device.branchId);
     await tx
       .update(devices)

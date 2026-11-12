@@ -3,6 +3,7 @@ import { SECTOR_KEYS, type SectorKey } from '../sectors';
 import { phoneSchema } from './auth';
 import type { CurrencyCode } from '../currencies';
 import { scaleBarcodeSchema, type ScaleBarcodeConfig } from '../scale';
+import type { PharmacySettings } from './pharmacy';
 
 /**
  * The store's own settings (04 › معالج البداية، الإعدادات): what the receipt shows, the activity,
@@ -14,6 +15,7 @@ import { scaleBarcodeSchema, type ScaleBarcodeConfig } from '../scale';
  *   PUT /v1/store/onboarding     onboardingInput    → StoreResponse
  *   PUT /v1/store/scale          storeScaleInput    → StoreResponse
  *   PUT /v1/store/service        storeServiceInput  → StoreResponse
+ *   PUT /v1/store/pharmacy       pharmacySettingsSchema → StoreResponse
  */
 
 /** 0 النشاط · 1 معلومات المحل · 2 العملة · 3 ابدأ */
@@ -132,4 +134,6 @@ export interface StoreResponse {
   scaleBarcode: ScaleBarcodeConfig | null;
   service: ServiceSettings | null;
   loyalty: LoyaltySettings | null;
+  /** «الصيدلية» (contracts/pharmacy.ts); null for a store that is not a pharmacy */
+  pharmacy?: PharmacySettings | null;
 }

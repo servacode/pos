@@ -39,7 +39,7 @@ import {
   SHIFTS_ACCESS,
   type AccessRule,
 } from '../admin/reports/access';
-import { CHEQUE_SECTORS, EXPIRY_SECTORS, SERIAL_SECTORS, storeSells } from '../lib/sectors';
+import { CHEQUE_SECTORS, EXPIRY_SECTORS, HALL_SECTORS, SERIAL_SECTORS, storeSells } from '../lib/sectors';
 
 export interface NavEntry {
   to: string;
@@ -174,6 +174,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'products',
+    to: '/price-list',
+    label: 'تحديث الأسعار من ملف',
+    icon: PercentIcon,
+    permission: ['catalog.manage'],
+  },
+  {
+    section: 'products',
     to: '/labels',
     label: 'طباعة الملصقات',
     icon: PrintIcon,
@@ -238,6 +245,14 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'inventory',
+    to: '/controlled-register',
+    label: 'سجل الأدوية المراقبة',
+    icon: ShieldCheckIcon,
+    permission: ['pharmacy.controlled'],
+    sectors: ['pharmacy'],
+  },
+  {
+    section: 'inventory',
     to: '/serials',
     label: 'الأرقام التسلسلية',
     icon: SerialIcon,
@@ -250,6 +265,14 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     label: 'حركة الأصناف',
     icon: ReportsIcon,
     permission: ['report.view'],
+  },
+  {
+    section: 'reports',
+    to: '/reports/cancellations',
+    label: 'الإلغاءات بعد المطبخ',
+    icon: ReportsIcon,
+    permission: ['report.view'],
+    sectors: HALL_SECTORS,
   },
   {
     section: 'reports',

@@ -368,6 +368,8 @@ export const tenantSettings = pgTable(
     service: jsonb('service').$type<{ tables: string[]; orderNumbers: boolean; kitchenTickets: boolean }>(),
     /** «نقاط الولاء»: null, no points */
     loyalty: jsonb('loyalty').$type<{ earnEveryMinor: number; pointValueMinor: number }>(),
+    /** «الصيدلية» (packages/core › contracts/pharmacy.ts); null: not set, a pharmacy gets the defaults */
+    pharmacy: jsonb('pharmacy').$type<{ prescription: 'required' | 'optional' }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -958,6 +960,10 @@ export const products = pgTable(
     brand: text('brand'),
     /** «الاسم العلمي» of a medicine (03 › الصيدليات): the till finds the product by it too */
     genericName: text('generic_name'),
+    /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
+    requiresPrescription: boolean('requires_prescription').notNull().default(false),
+    /** «مراقَب»: only the pharmacist sells it; every movement enters the controlled-drug register */
+    controlled: boolean('controlled').notNull().default(false),
     /** «له رقم تسلسلي أو IMEI» (03 › الإلكترونيات): every piece is received and sold by its number */
     tracksSerial: boolean('tracks_serial').notNull().default(false),
     /** «الكفالة» in months from the day of sale; null: none */
@@ -1023,6 +1029,11 @@ export const variants = pgTable(
      * newest receipts first); null when no receipt gave one. The till warns on it.
      */
     nearestExpiry: date('nearest_expiry'),
+    /**
+     * The batches on the shelf with something left, nearest expiry first, as the same estimate
+     * gives them: [{ batchNo, expiry }]. The till picks the batch of a sale from it.
+     */
+    shelfBatches: jsonb('shelf_batches').$type<{ batchNo: string | null; expiry: string }[]>(),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
@@ -1869,6 +1880,153 @@ export const alterationTickets = pgTable(
     unique('alteration_tickets_seq_unique').on(t.tenantId, t.seq),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     index('alteration_tickets_status_idx').on(t.tenantId, t.status, t.dueDate),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A table's open order (03 › المطاعم › الصالة): an operational document shared by the waiter
+ * screens and the tills of a branch, never a financial one. One open order per table; every
+ * command on it runs under its row lock and moves `version`. Closed when the till charges the
+ * table (the sale itself goes through the sync path) or when an empty order is dropped.
+ */
+export const openOrders = pgTable(
+  'open_orders',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    tableName: text('table_name').notNull(),
+    guests: integer('guests'),
+    /** open | bill_requested | closed */
+    status: text('status').notNull().default('open'),
+    openedBy: uuid('opened_by'),
+    deviceId: uuid('device_id'),
+    billRequestedAt: timestamp('bill_requested_at', { withTimezone: true }),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    /** paid | empty */
+    closedReason: text('closed_reason'),
+    /** The sale's document number when it was paid */
+    closedRef: text('closed_ref'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'open_orders_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    // One live order per table of a branch
+    uniqueIndex('open_orders_table_live_idx')
+      .on(t.tenantId, t.branchId, t.tableName)
+      .where(sql`status <> 'closed'`),
+    index('open_orders_branch_idx').on(t.tenantId, t.branchId, t.status),
+    tenantIsolation(),
+  ],
+);
+
+/** A line of an open order: what was ordered, with its choices, and where the kitchen has it. */
+export const openOrderLines = pgTable(
+  'open_order_lines',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    orderId: uuid('order_id').notNull(),
+    productId: uuid('product_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    name: text('name').notNull(),
+    qty: integer('qty').notNull(),
+    choices: jsonb('choices')
+      .$type<{ group: string; name: string; priceMinor: number }[]>()
+      .notNull()
+      .default([]),
+    note: text('note'),
+    seat: integer('seat'),
+    /** The kitchen section: the product's top-level category */
+    section: text('section').notNull(),
+    /** new | sent | preparing | ready | served | cancelled */
+    status: text('status').notNull().default('new'),
+    ticketId: uuid('ticket_id'),
+    addedBy: uuid('added_by'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    preparingAt: timestamp('preparing_at', { withTimezone: true }),
+    readyAt: timestamp('ready_at', { withTimezone: true }),
+    servedAt: timestamp('served_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancelReason: text('cancel_reason'),
+    cancelledBy: uuid('cancelled_by'),
+    approvedBy: uuid('approved_by'),
+    /** Cancelled after it reached the kitchen: needs a reason and a manager, and shows in the report */
+    cancelledAfterSend: boolean('cancelled_after_send').notNull().default(false),
+    /** before_prep | after_prep, for a line cancelled after the send */
+    cancelStage: text('cancel_stage'),
+    /** The section has seen the cancellation */
+    kitchenAckAt: timestamp('kitchen_ack_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'open_order_lines_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [openOrders.tenantId, openOrders.id] }),
+    index('open_order_lines_order_idx').on(t.tenantId, t.orderId),
+    index('open_order_lines_ticket_idx').on(t.tenantId, t.ticketId),
+    index('open_order_lines_cancel_idx')
+      .on(t.tenantId, t.cancelledAt)
+      .where(sql`cancelled_after_send`),
+    tenantIsolation(),
+  ],
+);
+
+/** What one «أرسل للمطبخ» sends to one section: the slip on its screen or printer. */
+export const kitchenTickets = pgTable(
+  'kitchen_tickets',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    orderId: uuid('order_id').notNull(),
+    seq: integer('seq').notNull(),
+    section: text('section').notNull(),
+    tableName: text('table_name').notNull(),
+    /** new | add (the second and later sends of one order) */
+    kind: text('kind').notNull().default('new'),
+    sentBy: uuid('sent_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'kitchen_tickets_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [openOrders.tenantId, openOrders.id] }),
+    unique('kitchen_tickets_seq_unique').on(t.tenantId, t.seq),
+    index('kitchen_tickets_branch_idx').on(t.tenantId, t.branchId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/** Everything that happened to an order, append-only (who, from which device, when). */
+export const openOrderEvents = pgTable(
+  'open_order_events',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    orderId: uuid('order_id').notNull(),
+    type: text('type').notNull(),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    userId: uuid('user_id'),
+    deviceId: uuid('device_id'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'open_order_events_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [openOrders.tenantId, openOrders.id] }),
+    index('open_order_events_order_idx').on(t.tenantId, t.orderId, t.at),
     tenantIsolation(),
   ],
 );

@@ -7,6 +7,8 @@ import {
   createProductInput,
   createTaxRateInput,
   createUnitInput,
+  priceListApplyInput,
+  priceListPreviewInput,
   productImageInput,
   productImageOrder,
   productImagePatch,
@@ -18,6 +20,7 @@ import {
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { bulkPrices } from '../services/catalog/bulk-prices';
+import { applyPriceList, previewPriceList } from '../services/catalog/price-list';
 import {
   addProductImage,
   deleteProductImage,
@@ -164,6 +167,15 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/prices/bulk', signedIn, async (request) =>
     bulkPrices(db, parseCatalog(bulkPriceInput, request.body), ctxOf(request)),
+  );
+
+  // «تحديث الأسعار من ملف»: 5,000 rows of a price list are a megabyte or two
+  const priceList = { preHandler: requireAuth, bodyLimit: 4 * 1024 * 1024 };
+  app.post('/v1/prices/list/preview', priceList, async (request) =>
+    previewPriceList(db, parseCatalog(priceListPreviewInput, request.body), ctxOf(request)),
+  );
+  app.post('/v1/prices/list/apply', priceList, async (request) =>
+    applyPriceList(db, parseCatalog(priceListApplyInput, request.body), ctxOf(request)),
   );
 
   app.get('/v1/barcodes/:code', signedIn, async (request) => {

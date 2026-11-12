@@ -1,6 +1,6 @@
 import type { CurrencyCode } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
-import type { Approval, OrderType, SaleLine } from '@serva/core/contracts/documents';
+import type { Approval, OrderType, Prescription, SaleLine } from '@serva/core/contracts/documents';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { PricedInvoice } from '@serva/core/pricing';
 import { bestPromotions, type PromotionRule } from '@serva/core/promotions';
@@ -57,6 +57,9 @@ export interface CartLine {
   /** The product sells each piece by its serial number or IMEI: one per piece before payment */
   tracksSerial?: boolean;
   serials?: readonly string[];
+  /** The batch the till picked for the line, nearest expiry first (03 › الصيدليات); metadata only */
+  batchNo?: string | null;
+  batchExpiry?: string | null;
   /** One pack at the shelf price and at the wholesale price (null: none), in priceCurrency */
   retailPriceMinor?: number;
   wholesalePriceMinor?: number | null;
@@ -82,12 +85,19 @@ export interface Cart {
   service?: { orderType: OrderType; table: string | null };
   /** Quantity of each line already printed for the kitchen, so «للمطبخ» prints only what is new */
   sent?: Record<number, number>;
+  /**
+   * The table's order on the server (03 › وضع النادل), when the till works online: its id and, for
+   * each line, the quantity the server already has (so «للمطبخ» adds only the difference)
+   */
+  hall?: { orderId: string; known: Record<number, number> };
   /** «سعر الجملة» (03 › الجملة): every line at its wholesale price where it has one */
   priceTier?: 'retail' | 'wholesale';
   /** An exchange (03 › الملابس): the voucher of the return just saved, offered first at payment */
   voucher?: string;
   /** An online shop order opened at the till (26 › حياة الطلب): the sale closes it */
   onlineOrder?: { id: string; number: string; customerName: string };
+  /** A pharmacy sale's prescription (03 › الصيدليات), asked before payment when an item needs it */
+  prescription?: Prescription;
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
   invoiceApproval: Approval | null;
 }
@@ -121,6 +131,7 @@ export function addItem(
   hit?: BarcodeHit | null,
   qty = 1000,
   choice?: ItemChoice | null,
+  batch?: { batchNo: string | null; expiry: string } | null,
 ): Cart {
   const packQty = hit?.barcode.packQty ?? 1000;
   const weighed = item.unit?.allowsFraction ?? false;
@@ -133,6 +144,7 @@ export function addItem(
       line.packQty === packQty &&
       line.adjustment === null &&
       !line.weighed &&
+      (line.batchNo ?? null) === (batch?.batchNo ?? null) &&
       choiceKey(line.choices, line.note) === key,
   );
   if (same && !weighed) {
@@ -173,6 +185,7 @@ export function addItem(
     categoryPath: item.categoryPath ?? [],
     ...(choice ? { choices: choice.choices, note: choice.note } : {}),
     ...(item.tracksSerial ? { tracksSerial: true, serials: [] } : {}),
+    ...(batch?.batchNo ? { batchNo: batch.batchNo, batchExpiry: batch.expiry } : {}),
   };
   return { ...cart, lines: [...cart.lines, line], nextLineNo: cart.nextLineNo + 1 };
 }
@@ -281,6 +294,7 @@ export function pricingInput(cart: Cart, ctx: PricingContext): SalePricingInput 
     taxRateBp: line.taxRateBp,
     discount: lineDiscount(line, ctx),
     ...(line.serials?.length ? { serials: line.serials } : {}),
+    ...(line.batchNo ? { batchNo: line.batchNo, batchExpiry: line.batchExpiry ?? null } : {}),
   }));
   return {
     currency: ctx.currency,

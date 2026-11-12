@@ -44,6 +44,8 @@ import {
 } from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
 import { returnSerials, sellSerials } from './serials';
+import { refreshExpiry } from './expiry';
+import { inScope, permissionScope } from '../auth/permissions';
 
 /**
  * What the server does with the phase-1 documents once they are accepted (17 › الإرسال), inside
@@ -127,6 +129,45 @@ async function moveStock(
   return negative;
 }
 
+/**
+ * Controlled drugs on a sale (03 › الصيدليات): sold by someone without the pharmacist's permission
+ * (permission_stale: the till checked, but the permission was withdrawn or the till is not to be
+ * trusted), or without the prescription, doctor and patient details (controlled_incomplete). The
+ * sale is kept and flagged, never refused (08 › قاعدة 8): it was printed and the drug is gone.
+ */
+async function controlledFlags(
+  tx: Transaction,
+  device: DocumentContext['device'],
+  sale: SalePayload,
+): Promise<SyncFlag[]> {
+  const ids = [...new Set(sale.lines.map((l) => l.productId))];
+  const controlled = await tx
+    .select({ id: products.id })
+    .from(products)
+    .where(and(inArray(products.id, ids), eq(products.controlled, true)))
+    .limit(1);
+  if (controlled.length === 0) return [];
+  const flags: SyncFlag[] = [];
+  const scope = await permissionScope(tx, sale.cashierId, 'pharmacy.controlled');
+  if (!inScope(scope, device.branchId)) flags.push('permission_stale');
+  const rx = sale.prescription;
+  if (!rx || !rx.ref || !rx.doctor || !rx.patientName || !rx.patientId) flags.push('controlled_incomplete');
+  return flags;
+}
+
+/** The shelf of items that carry expiry dates moves with the sale: the batches the till sees follow it. */
+async function refreshShelf(tx: Transaction, sale: SalePayload): Promise<void> {
+  const ids = [...new Set(sale.lines.map((l) => l.variantId))];
+  const dated = await tx
+    .select({ id: variants.id })
+    .from(variants)
+    .where(and(inArray(variants.id, ids), isNotNull(variants.nearestExpiry)));
+  await refreshExpiry(
+    tx,
+    dated.map((v) => v.id),
+  );
+}
+
 /** A sale: the invoice, its lines and payments, and stock out of the device's branch. */
 async function processSale({ tx, device, doc }: DocumentContext) {
   const sale = salePayloadSchema.parse(doc.payload);
@@ -138,6 +179,7 @@ async function processSale({ tx, device, doc }: DocumentContext) {
 
   const { tenantId } = device;
   if (await moveStock(tx, device, doc, 'sale', sale.lines, -1)) flags.push('negative_stock');
+  flags.push(...(await controlledFlags(tx, device, sale)));
   flags.push(...(await sellSerials(tx, tenantId, doc.id, doc.businessDate, sale.lines)));
 
   const [inserted] = await tx
@@ -171,6 +213,7 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     .onConflictDoNothing()
     .returning({ id: invoices.id });
   if (!inserted) return { flags };
+  await refreshShelf(tx, sale);
 
   await tx.insert(invoiceLines).values(
     sale.lines.map((l) => ({

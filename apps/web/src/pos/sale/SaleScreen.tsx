@@ -6,6 +6,7 @@ import { businessDateOf, rateFor } from '@serva/core/sale';
 import { promotionActive } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
 import { toLatinDigits } from '@serva/core/text';
+import { missingPrescription, pickBatch, prescriptionNeed } from '@serva/core/pharmacy';
 import type { OutboxEntry } from '@serva/sync';
 import {
   AddIcon,
@@ -89,6 +90,7 @@ import { HoldPanel } from './HoldPanel';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
+import { PrescriptionPanel } from './PrescriptionPanel';
 import { Kbd } from './Kbd';
 import { SalePanel } from './SalePanel';
 
@@ -107,6 +109,7 @@ export type SaleMode =
   | { kind: 'online' }
   | { kind: 'hold' }
   | { kind: 'serial'; lineNo: number }
+  | { kind: 'rx' }
   | { kind: 'pick'; productId: string };
 
 export interface SaleScreenProps {
@@ -124,6 +127,8 @@ export interface SaleScreenProps {
   heldCarts?: readonly Cart[];
   /** Opens a table's order, or starts one there (CashierApp keeps the held orders) */
   onOpenTable?: (table: string) => void;
+  /** The order just sent to the kitchen, before it is marked sent (online, the server gets it too) */
+  onKitchenSent?: (cart: Cart) => void;
   /** The last sale's lines, for «كرّر آخر طلب» */
   lastLines: { variantId: string; barcode: string | null; qty: number }[];
   onSaved: (entry: OutboxEntry) => void;
@@ -277,32 +282,56 @@ export function SaleScreen(props: SaleScreenProps) {
           return;
         }
       }
+      // 03 › الصيدليات: a controlled drug is the pharmacist's alone
+      if (item.controlled && !session.permissions.has('pharmacy.controlled')) {
+        setNotice({
+          tone: 'warning',
+          text: `«${item.name}» دواء مراقَب، لا يبيعه إلا الصيدلاني.`,
+        });
+        return;
+      }
+      // …and no box of an expired batch goes out: the nearest batch that is still good is taken
+      const today = businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff);
+      const pick = settings.pharmacy ? pickBatch(item.shelfBatches, today) : { kind: 'none' as const };
+      if (pick.kind === 'expired') {
+        setNotice({
+          tone: 'warning',
+          text: `لا يُباع «${item.name}»: كل دفعاته على الرف منتهية الصلاحية (آخرها ${pick.latest}).`,
+        });
+        return;
+      }
+      const batch = pick.kind === 'ok' ? pick.batch : null;
       const qty = weighedQty ?? (multiplier ?? 1) * 1000;
       setMultiplier(null);
       setNotice(null);
       if (props.done) props.onNextSale();
       // From the latest cart, so scans arriving before the next render all count.
       const current = cartRef.current;
-      const next = addItem(current, item, hit, qty, choice ?? null);
+      const next = addItem(current, item, hit, qty, choice ?? null, batch);
       cartRef.current = next;
       setCart(() => next);
       const added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
       setBump(added);
       // 03 › الصيدليات: what is on the shelf may have expired, or soon will
-      if (item.nearestExpiry) {
-        const today = businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff);
+      const expiry = batch ? batch.expiry : item.nearestExpiry;
+      if (expiry) {
         const soon = businessDateOf(
           Date.now() + 30 * 86_400_000,
           settings.timezone,
           settings.businessDayCutoff,
         );
-        if (item.nearestExpiry < today) {
+        if (expiry < today) {
           setNotice({
             tone: 'warning',
-            text: `صلاحية «${item.name}» انتهت في ${item.nearestExpiry} حسب آخر استلام. تأكد من العلبة قبل البيع.`,
+            text: `صلاحية «${item.name}» انتهت في ${expiry} حسب آخر استلام. تأكد من العلبة قبل البيع.`,
           });
-        } else if (item.nearestExpiry <= soon) {
-          setNotice({ tone: 'info', text: `صلاحية «${item.name}» تنتهي في ${item.nearestExpiry}.` });
+        } else if (expiry <= soon) {
+          setNotice({
+            tone: 'info',
+            text: batch?.batchNo
+              ? `صلاحية «${item.name}» (دفعة ${batch.batchNo}) تنتهي في ${expiry}.`
+              : `صلاحية «${item.name}» تنتهي في ${expiry}.`,
+          });
         }
       }
       if (item.tracksSerial && added !== null) {
@@ -315,7 +344,17 @@ export function SaleScreen(props: SaleScreenProps) {
         setMode({ kind: 'items' });
       }
     },
-    [ctx, multiplier, setCart, mode.kind, props, settings.timezone, settings.businessDayCutoff],
+    [
+      ctx,
+      multiplier,
+      setCart,
+      mode.kind,
+      props,
+      settings.timezone,
+      settings.businessDayCutoff,
+      settings.pharmacy,
+      session.permissions,
+    ],
   );
 
   const scan = useCallback(
@@ -362,7 +401,11 @@ export function SaleScreen(props: SaleScreenProps) {
   );
 
   const keypadOpen =
-    mode.kind === 'line' || mode.kind === 'invoice' || mode.kind === 'approve' || mode.kind === 'serial';
+    mode.kind === 'line' ||
+    mode.kind === 'invoice' ||
+    mode.kind === 'approve' ||
+    mode.kind === 'serial' ||
+    mode.kind === 'rx';
   // While paying, amounts are typed and confirmed with Enter: only a full barcode counts as a scan.
   useScanner({
     enabled: !keypadOpen,
@@ -501,6 +544,33 @@ export function SaleScreen(props: SaleScreenProps) {
     }
   }
 
+  // ── Prescription (03 › الصيدليات) ──────────────────────────────────────────────────────────
+  const rxNeed = useMemo(
+    () =>
+      prescriptionNeed(
+        cart.lines.map((l) => catalog.byVariant.get(l.variantId) ?? {}),
+        settings.pharmacy,
+      ),
+    [cart.lines, catalog.byVariant, settings.pharmacy],
+  );
+  const hasControlled = cart.lines.some((l) => catalog.byVariant.get(l.variantId)?.controlled);
+  /** To payment, through the prescription details when an item asks for them and they are not given yet */
+  function startPay() {
+    if (hasControlled && !session.permissions.has('pharmacy.controlled')) {
+      setNotice({
+        tone: 'warning',
+        text: 'في الفاتورة دواء مراقَب لا يبيعه إلا الصيدلاني. احذفه أو سلّم الفاتورة له.',
+      });
+      return;
+    }
+    const asked = cart.prescription !== undefined;
+    if (rxNeed.asks && (!asked || missingPrescription(rxNeed, cart.prescription).length > 0)) {
+      setMode({ kind: 'rx' });
+      return;
+    }
+    setMode({ kind: 'pay' });
+  }
+
   // ── Keyboard ────────────────────────────────────────────────────────────────────────────────
   const keys = useRef<(event: KeyboardEvent) => void>(() => undefined);
   keys.current = (event) => {
@@ -521,7 +591,7 @@ export function SaleScreen(props: SaleScreenProps) {
       else props.onResume();
     } else if (event.key === 'F12' || (event.key === '+' && !typing)) {
       event.preventDefault();
-      if (canPay) setMode({ kind: 'pay' });
+      if (canPay) startPay();
     } else if (event.altKey && event.code === 'Digit1') {
       event.preventDefault();
       if (cart.lines.length > 0) setMode({ kind: 'invoice' });
@@ -726,6 +796,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   at: Date.now(),
                   cashierName: session.fullName,
                 });
+                props.onKitchenSent?.(cart);
                 setCart(markSent);
               }}
             >
@@ -1030,7 +1101,7 @@ export function SaleScreen(props: SaleScreenProps) {
             </Button>
           </>
         }
-        onPay={() => setMode({ kind: 'pay' })}
+        onPay={startPay}
         payDisabled={!canPay}
         payShortcut="F12"
       />
@@ -1168,6 +1239,17 @@ export function SaleScreen(props: SaleScreenProps) {
             onCancel={() => setMode({ kind: 'items' })}
           />
         </SalePanel>
+      ) : effectiveMode.kind === 'rx' ? (
+        <PrescriptionPanel
+          need={rxNeed}
+          initial={cart.prescription}
+          controlled={hasControlled}
+          onSave={(prescription) => {
+            setCart((c) => ({ ...c, prescription }));
+            setMode({ kind: 'pay' });
+          }}
+          onCancel={() => setMode({ kind: 'items' })}
+        />
       ) : effectiveMode.kind === 'serial' && lineOf(effectiveMode.lineNo) ? (
         <SerialPanel
           key={effectiveMode.lineNo}

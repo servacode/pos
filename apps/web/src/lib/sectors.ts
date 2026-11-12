@@ -25,6 +25,9 @@ export const EXPIRY_SECTORS: readonly SectorKey[] = [
   'general',
 ];
 
+/** The hall and the kitchen: tables, a waiter and cancellations after the kitchen. */
+export const HALL_SECTORS: readonly SectorKey[] = ['restaurant', 'cafe'];
+
 /** Pieces sold by their serial number or IMEI, with a warranty. */
 export const SERIAL_SECTORS: readonly SectorKey[] = ['electronics', 'building_materials', 'general'];
 

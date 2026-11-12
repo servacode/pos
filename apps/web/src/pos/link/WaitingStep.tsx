@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ACTIVATION_TTL_SECONDS, type ActivatedDevice } from '@serva/core';
+import { ACTIVATION_TTL_SECONDS, type ActivatedDevice, type DeviceKind } from '@serva/core';
 import {
   AlertCircleIcon,
   Banner,
@@ -29,6 +29,8 @@ interface WaitingStepProps {
   onActive: (device: ActivatedDevice) => void;
   /** Back to step 1 (the request is forgotten on this device) */
   onRestart: (method?: 'owner') => void;
+  /** What the device is for; a till unless the kitchen or waiter screen is linking */
+  kind?: DeviceKind;
 }
 
 const MIN_POLL_MS = 2000;
@@ -38,7 +40,7 @@ const time = new Intl.DateTimeFormat('ar-u-nu-latn', { hour: 'numeric', minute: 
  * Step 3 «بانتظار موافقة المالك من جواله». Asks the server every `pollAfterSeconds` with the
  * activation secret; keeps waiting through a lost connection, and stops on «ارفض» or expiry.
  */
-export function WaitingStep({ link, onActive, onRestart }: WaitingStepProps) {
+export function WaitingStep({ link, onActive, onRestart, kind = 'cashier' }: WaitingStepProps) {
   const [state, setState] = useState<Waiting>('pending');
   const [offline, setOffline] = useState(false);
   const [expiresAt, setExpiresAt] = useState(link.expiresAt);
@@ -129,7 +131,7 @@ export function WaitingStep({ link, onActive, onRestart }: WaitingStepProps) {
 
   const rows: [string, string][] = [
     ['اسم الجهاز', link.deviceName],
-    ['نوع الجهاز', `${DEVICE_KIND_LABELS.cashier} · ${DEVICE_PLATFORM_LABELS.browser}`],
+    ['نوع الجهاز', `${DEVICE_KIND_LABELS[kind]} · ${DEVICE_PLATFORM_LABELS.browser}`],
     ['الفرع', link.branchName],
     [
       'طريقة الربط',

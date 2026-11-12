@@ -4,6 +4,7 @@ import type { OnlineOrderRow } from './shop';
 import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
 import type { LoyaltySettings, ServiceSettings } from './store';
+import type { PharmacySettings, ShelfBatch } from './pharmacy';
 import type { CurrencyCode } from '../currencies';
 import type { Permission } from '../permissions';
 import type { ShiftMode } from './documents';
@@ -257,6 +258,10 @@ const productFields = {
   brand: optionalText(60, 'اسم الماركة طويل جداً'),
   /** «الاسم العلمي» (03 › الصيدليات): the till finds the medicine by it too */
   genericName: optionalText(120, 'الاسم العلمي طويل جداً'),
+  /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
+  requiresPrescription: z.boolean().default(false),
+  /** «مراقَب»: only the pharmacist sells it, with the patient's details, and it enters the register */
+  controlled: z.boolean().default(false),
   /** «له رقم تسلسلي أو IMEI» (03 › الإلكترونيات): each piece is received and sold by its number */
   tracksSerial: z.boolean().default(false),
   /** «الكفالة» in months from the sale; null: none */
@@ -322,6 +327,8 @@ export const updateProductInput = z
     categoryId: uuidSchema.nullable().optional(),
     brand: patchText(60, 'اسم الماركة طويل جداً'),
     genericName: patchText(120, 'الاسم العلمي طويل جداً'),
+    requiresPrescription: z.boolean().optional(),
+    controlled: z.boolean().optional(),
     tracksSerial: z.boolean().optional(),
     warrantyMonths: z.int().min(1).max(120).nullable().optional(),
     type: z.enum(PRODUCT_TYPES).optional(),
@@ -410,6 +417,8 @@ export interface ProductDetail {
   categoryId: string | null;
   brand: string | null;
   genericName: string | null;
+  requiresPrescription: boolean;
+  controlled: boolean;
   tracksSerial: boolean;
   warrantyMonths: number | null;
   type: ProductType;
@@ -591,6 +600,10 @@ export interface ProductRow {
   brand: string | null;
   /** «الاسم العلمي»; searched on the till */
   genericName: string | null;
+  /** «يحتاج وصفة» and «مراقَب» (03 › الصيدليات): the till asks for the prescription. Rows a device
+   *  pulled before these existed leave them out: read as false. */
+  requiresPrescription?: boolean;
+  controlled?: boolean;
   /** Each piece is sold by its serial number or IMEI, asked at the till */
   tracksSerial: boolean;
   /** «الكفالة» in months, printed with the numbers on the receipt */
@@ -620,6 +633,8 @@ export interface VariantRow {
   sortOrder: number;
   /** The earliest expiry of what is on the shelf (services/expiry.ts); null when none was received */
   nearestExpiry: string | null;
+  /** The batches on the shelf, nearest expiry first (services/expiry.ts); null when none was received */
+  shelfBatches?: ShelfBatch[] | null;
   /** The thumbnail shown on the till: the picture of this piece's colour, else the main one */
   imageUrl: string | null;
   archived: boolean;
@@ -757,6 +772,8 @@ export interface SettingsRow {
   service: ServiceSettings | null;
   /** «نقاط الولاء» (contracts/store.ts LoyaltySettings); null when the store gives none */
   loyalty: LoyaltySettings | null;
+  /** «الصيدلية» (contracts/pharmacy.ts); null when the store is not a pharmacy */
+  pharmacy?: PharmacySettings | null;
   version: number;
 }
 

@@ -203,6 +203,8 @@ export const SYNC_FLAGS = [
   /** A sale spent more than was left on a voucher */
   'voucher_overdrawn',
   'points_overdrawn',
+  /** A controlled drug sold without the prescription, doctor and patient details (03 › الصيدليات) */
+  'controlled_incomplete',
   'posted_to_open_period',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,

@@ -1,5 +1,6 @@
 import type {
   OnboardingInput,
+  PharmacySettings,
   StoreCurrencyInput,
   StoreProfileInput,
   StoreLoyaltyInput,
@@ -35,3 +36,7 @@ export const saveService = (input: StoreServiceInput) =>
 /** `PUT /v1/store/loyalty`: the loyalty points' rates, or null for none (settings.manage) */
 export const saveLoyalty = (input: StoreLoyaltyInput) =>
   apiFetch<StoreResponse>('/v1/store/loyalty', { method: 'PUT', body: input, auth: true });
+
+/** `PUT /v1/store/pharmacy`: is a prescription's number and doctor required at the till (settings.manage) */
+export const savePharmacy = (input: PharmacySettings) =>
+  apiFetch<StoreResponse>('/v1/store/pharmacy', { method: 'PUT', body: input, auth: true });

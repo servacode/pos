@@ -17,6 +17,7 @@ import { errorMessage } from '../../lib/api';
 import { MODIFIER_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors';
 import { getStore } from './api';
 import { DataCard } from './DataCard';
+import { PharmacyForm } from './PharmacyForm';
 import { LoyaltyForm } from './LoyaltyForm';
 import { SETTINGS_SECTIONS, type SettingsSection } from './parts';
 import { ScaleForm } from './ScaleForm';
@@ -147,11 +148,13 @@ export function SettingsPage() {
 
   const weighs = store ? store.scaleBarcode !== null || storeSells(store.sectors, WEIGHED_SECTORS) : false;
   const serves = store ? store.service !== null || storeSells(store.sectors, MODIFIER_SECTORS) : false;
+  const pharmacy = store ? storeSells(store.sectors, ['pharmacy']) : false;
   const sections: SettingsSection[] = [
     SETTINGS_SECTIONS.profile,
     SETTINGS_SECTIONS.currency,
     ...(weighs ? [SETTINGS_SECTIONS.scale] : []),
     ...(serves ? [SETTINGS_SECTIONS.service] : []),
+    ...(pharmacy ? [SETTINGS_SECTIONS.pharmacy] : []),
     SETTINGS_SECTIONS.loyalty,
     SETTINGS_SECTIONS.data,
   ];
@@ -176,6 +179,7 @@ export function SettingsPage() {
               <CurrencyForm store={store} onSaved={saved} section={SETTINGS_SECTIONS.currency} />
               {weighs ? <ScaleForm store={store} onSaved={saved} /> : null}
               {serves ? <ServiceForm store={store} onSaved={saved} /> : null}
+              {pharmacy ? <PharmacyForm store={store} onSaved={saved} /> : null}
               <LoyaltyForm store={store} onSaved={saved} />
               <DataCard />
             </div>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice } from '@serva/core';
+import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice, type DeviceKind } from '@serva/core';
 import type { SyncStore } from '@serva/sync/client';
 import { Alert, DeviceIcon, IconChip } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
@@ -33,13 +33,20 @@ interface DeviceLinkProps {
   onLinked: () => void;
   store?: SyncStore;
   helpers?: LinkHelpers;
+  /** What this device is for: a till by default; the kitchen and waiter screens link as theirs */
+  kind?: DeviceKind;
 }
 
 /**
  * «ربط الجهاز» (12, kit cashier/DeviceLink): shown by the cashier while this device has no
  * activated record. Nothing is asked of the server until the person picks a way and goes on.
  */
-export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelpers }: DeviceLinkProps) {
+export function DeviceLink({
+  onLinked,
+  store = deviceStore(),
+  helpers = linkHelpers,
+  kind = 'cashier',
+}: DeviceLinkProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>({ step: 'loading' });
@@ -80,7 +87,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
       const { publicKey } = await helpers.createDeviceKeys(store);
       const device = {
         name: named.name,
-        kind: 'cashier' as const,
+        kind,
         platform: 'browser' as const,
         publicKey,
         appVersion: APP_VERSION,
@@ -183,6 +190,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
           error={error}
           onBack={() => leaveName(stage.credentials)}
           onSubmit={(named) => void activate(stage.credentials, named)}
+          kind={kind}
         />
       ) : null}
 
@@ -195,6 +203,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
             )
           }
           onRestart={(method) => void restart(method)}
+          kind={kind}
         />
       ) : null}
 

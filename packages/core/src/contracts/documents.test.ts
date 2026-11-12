@@ -496,3 +496,49 @@ describe('validateDocumentPayload', () => {
     });
   });
 });
+
+describe('a pharmacy sale carries its batch and prescription', () => {
+  const RX = { ref: 'RX-77', doctor: 'د. سامر', patientName: 'ليلى', patientId: '01020304' };
+
+  it('keeps the batch on its line and the prescription on the sale, and passes the contract', () => {
+    const line = { ...saleCart().lines[1]!, priceMinor: 30000, batchNo: 'B-07', batchExpiry: '2027-03-01' };
+    const sold = buildSalePayload(
+      saleCart({
+        lines: [line],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 40000 }],
+        prescription: RX,
+      }),
+    );
+    expect(sold.lines[0]).toMatchObject({ batchNo: 'B-07', batchExpiry: '2027-03-01' });
+    expect(sold.prescription).toEqual(RX);
+    expect(salePayloadSchema.safeParse(sold).error?.issues ?? []).toEqual([]);
+  });
+
+  it('writes a batch without a date as null, and leaves both out of an ordinary line and sale', () => {
+    const line = { ...saleCart().lines[1]!, batchNo: 'B-07' };
+    expect(
+      buildSalePayload(
+        saleCart({ lines: [line], payments: [{ method: 'cash', currency: 'SYP', amountMinor: 40000 }] }),
+      ).lines[0],
+    ).toMatchObject({
+      batchNo: 'B-07',
+      batchExpiry: null,
+    });
+    const plain = validSale();
+    expect('batchNo' in plain.lines[0]!).toBe(false);
+    expect('prescription' in plain).toBe(false);
+    expect('prescription' in buildSalePayload(saleCart({ prescription: null }))).toBe(false);
+  });
+
+  it('refuses a prescription with a blank field or a batch date that is not a date', () => {
+    const base = validSale();
+    expect(salePayloadSchema.safeParse({ ...base, prescription: { ...RX, ref: ' ' } }).success).toBe(false);
+    expect(
+      salePayloadSchema.safeParse({ ...base, prescription: { ...RX, patientId: null, patientName: null } })
+        .success,
+    ).toBe(true);
+    expect(salePayloadSchema.safeParse({ ...base, prescription: null }).success).toBe(true);
+    const badDate = { ...base, lines: [{ ...base.lines[0]!, batchNo: 'B', batchExpiry: 'soon' }] };
+    expect(salePayloadSchema.safeParse(badDate).success).toBe(false);
+  });
+});

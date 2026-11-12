@@ -13,6 +13,7 @@ import type {
   VariantRow,
   VoucherRow,
 } from '@serva/core/contracts/catalog';
+import type { ShelfBatch } from '@serva/core/contracts/pharmacy';
 import type { OnlineOrderRow } from '@serva/core/contracts/shop';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { CustomerRow } from '@serva/core/contracts/customers';
@@ -45,6 +46,11 @@ export interface CatalogItem {
   modifiers?: readonly ModifierGroup[];
   /** The earliest expiry of what is on the shelf, «2026-12-31»; null when none was received */
   nearestExpiry?: string | null;
+  /** The batches on the shelf, nearest expiry first; null or empty when none was received (03 › الصيدليات) */
+  shelfBatches?: readonly ShelfBatch[] | null;
+  /** «يحتاج وصفة» and «مراقَب» (03 › الصيدليات) */
+  requiresPrescription?: boolean;
+  controlled?: boolean;
   /** The piece's thumbnail on the grid (03 › الألبسة: صورة القطعة على الكاشير) */
   imageUrl?: string | null;
   /** Each piece is sold by its serial number or IMEI (03 › الإلكترونيات) */
@@ -186,6 +192,9 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       categoryPath: categoryPath(product.categoryId),
       modifiers: product.modifiers ?? [],
       nearestExpiry: variant.nearestExpiry ?? null,
+      shelfBatches: variant.shelfBatches ?? null,
+      requiresPrescription: product.requiresPrescription ?? false,
+      controlled: product.controlled ?? false,
       imageUrl: variant.imageUrl ?? null,
       tracksSerial: product.tracksSerial ?? false,
       warrantyMonths: product.warrantyMonths ?? null,

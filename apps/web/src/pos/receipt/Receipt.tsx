@@ -378,6 +378,17 @@ export function Receipt({
                 IMEI {line.serials.join('، ')}
               </bdi>
             ) : null}
+            {line.batchNo ? (
+              <span className="text-xs">
+                دفعة <bdi dir="ltr">{line.batchNo}</bdi>
+                {line.batchExpiry ? (
+                  <>
+                    {' '}
+                    · تنتهي <bdi className="num">{line.batchExpiry}</bdi>
+                  </>
+                ) : null}
+              </span>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -435,6 +446,18 @@ export function Receipt({
         <Row label="الباقي للزبون" strong>
           <Money minor={sale.change.amountMinor} currency={sale.change.currency} />
         </Row>
+      ) : null}
+      {sale.prescription && (sale.prescription.ref || sale.prescription.doctor) ? (
+        <>
+          <Rule />
+          {sale.prescription.ref ? (
+            <Row label="رقم الوصفة">
+              <bdi dir="ltr">{sale.prescription.ref}</bdi>
+            </Row>
+          ) : null}
+          {sale.prescription.doctor ? <Row label="الطبيب">{sale.prescription.doctor}</Row> : null}
+          {sale.prescription.patientName ? <Row label="المريض">{sale.prescription.patientName}</Row> : null}
+        </>
       ) : null}
       <Rule />
       <Row label="عدد القطع">{displayNumber(String(pieces), digits)}</Row>

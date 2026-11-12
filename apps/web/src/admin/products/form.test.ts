@@ -307,3 +307,37 @@ describe('what another person changed', () => {
     expect(changedParts(before, before)).toEqual([]);
   });
 });
+
+describe('the pharmacy flags of a product', () => {
+  it('sends «يحتاج وصفة» and «مراقَب» when set on a new product, and nothing when they are off', () => {
+    const draft = simpleDraft();
+    expect('requiresPrescription' in buildCreate(draft).body).toBe(false);
+    expect('controlled' in buildCreate(draft).body).toBe(false);
+    draft.requiresPrescription = true;
+    draft.controlled = true;
+    expect(buildCreate(draft).body).toMatchObject({ requiresPrescription: true, controlled: true });
+  });
+
+  it('sends a changed flag alone in the PATCH, in both directions', () => {
+    const detail = product({ requiresPrescription: true, controlled: false });
+    const draft = draftFromDetail(detail);
+    expect(draft).toMatchObject({ requiresPrescription: true, controlled: false });
+    expect(buildUpdate(draft, detail).body).toEqual({ version: 3 });
+    draft.requiresPrescription = false;
+    draft.controlled = true;
+    const { body } = buildUpdate(draft, detail);
+    expect(body).toEqual({ version: 3, requiresPrescription: false, controlled: true });
+    expect(updateProductInput.safeParse(body).success).toBe(true);
+  });
+
+  it('reads a card from before the flags existed as off', () => {
+    const detail = product();
+    const old = { ...detail } as Partial<typeof detail>;
+    delete old.requiresPrescription;
+    delete old.controlled;
+    expect(draftFromDetail(old as typeof detail)).toMatchObject({
+      requiresPrescription: false,
+      controlled: false,
+    });
+  });
+});

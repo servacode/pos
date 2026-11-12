@@ -90,6 +90,12 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/device/alterations': 'device',
   'POST /v1/device/alterations': 'device',
   'POST /v1/device/alterations/:id/status': 'device',
+  'GET /v1/device/hall': 'device',
+  'POST /v1/device/hall': 'device',
+  'GET /v1/device/kitchen': 'device',
+  'POST /v1/device/kitchen': 'device',
+  'GET /v1/device/menu': 'device',
+  'GET /v1/hall/cancellations': 'signed-in',
   'POST /v1/sync/push': 'device',
   'GET /v1/sync/pull': 'device',
   'POST /v1/sync/resync': 'device',
@@ -111,11 +117,15 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/products/:id': 'signed-in',
   'GET /v1/products/options': 'signed-in',
   'PUT /v1/store/loyalty': 'signed-in',
+  'PUT /v1/store/pharmacy': 'signed-in',
+  'GET /v1/pharmacy/controlled-register': 'signed-in',
   'GET /v1/transfers': 'signed-in',
   'GET /v1/supplier-returns': 'signed-in',
   'POST /v1/supplier-returns': 'signed-in',
   'POST /v1/transfers': 'signed-in',
   'POST /v1/prices/bulk': 'signed-in',
+  'POST /v1/prices/list/preview': 'signed-in',
+  'POST /v1/prices/list/apply': 'signed-in',
   'GET /v1/products/:id/images': 'signed-in',
   'POST /v1/products/:id/images': 'signed-in',
   'POST /v1/products/:id/images/order': 'signed-in',
@@ -835,6 +845,48 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
 };
 
 /** Device routes: store B's device acting on store A's ids gets nothing of store A. */
+/** Store A with a café menu, one table, a waiter-capable owner and an open order (optionally sent). */
+async function hallFixtureOf(app: FastifyInstance, a: Stores['a'], send = false) {
+  const deviceA = await createDevice(a.tenantId);
+  const [me] = await ownerDb()<{ id: string }[]>`
+    select id from users where tenant_id = ${a.tenantId} limit 1`;
+  const userA = me!.id;
+  await ownerDb()`update tenant_settings set service = ${ownerDb().json({ tables: ['1'], orderNumbers: false, kitchenTickets: true })} where tenant_id = ${a.tenantId}`;
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/products',
+    headers: owner(a),
+    payload: {
+      nameAr: 'قهوة',
+      type: 'service',
+      variants: [{ price: { currency: 'SYP', priceMinor: 15_000 } }],
+    },
+  });
+  const product = made.json<{ id: string; variants: { id: string }[] }>();
+  const post = (payload: object) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceA.authorization },
+      payload,
+    });
+  const opened = await post({ type: 'open', userId: userA, table: '1' });
+  expect(opened.statusCode, opened.body).toBe(200);
+  const orderId = opened.json<{ order: { id: string } }>().order.id;
+  const added = await post({
+    type: 'add',
+    userId: userA,
+    orderId,
+    lines: [{ productId: product.id, variantId: product.variants[0]!.id, name: 'قهوة', qty: 1 }],
+  });
+  expect(added.statusCode, added.body).toBe(200);
+  if (send) expect((await post({ type: 'send', userId: userA, orderId })).statusCode).toBe(200);
+  const [line] = await ownerDb()<
+    { id: string }[]
+  >`select id from open_order_lines where order_id = ${orderId}`;
+  return { deviceA, orderId, userA, lineId: line!.id };
+}
+
 const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
   'POST /v1/sync/push': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
@@ -1002,6 +1054,82 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     expect(await read(a.tenantId)).toBe(true);
     expect(await read(b.tenantId)).toBe(false);
     await ownerDb()`update subscriptions set status = 'active' where tenant_id = ${a.tenantId}`;
+  },
+  // The hall: store B's devices see none of store A's orders and cannot touch them by id
+  'GET /v1/device/hall': async (app, { a, b }) => {
+    const { orderId, deviceA } = await hallFixtureOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ orders: unknown[] }>().orders).toEqual([]);
+    const own = await app.inject({
+      method: 'GET',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceA.authorization },
+    });
+    expect(own.json<{ orders: { id: string }[] }>().orders.map((o) => o.id)).toEqual([orderId]);
+  },
+  'POST /v1/device/hall': async (app, { a, b }) => {
+    const { orderId, userA } = await hallFixtureOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    // Another store's order id is as good as none, and another store's staff are unknown
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/hall',
+      headers: { authorization: deviceB.authorization },
+      payload: { type: 'send', userId: userA, orderId },
+    });
+    expect([403, 404]).toContain(res.statusCode);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from open_orders where id = ${orderId}`;
+    expect(row!.status).toBe('open');
+  },
+  'GET /v1/device/kitchen': async (app, { a, b }) => {
+    const { deviceA } = await hallFixtureOf(app, a, true);
+    const deviceB = await createDevice(b.tenantId);
+    await ownerDb()`update devices set kind = 'kitchen_screen' where id = ${deviceB.deviceId}`;
+    const seen = async (device: { authorization: string }) =>
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/v1/device/kitchen',
+          headers: { authorization: device.authorization },
+        })
+      ).json<{ tickets: unknown[] }>().tickets.length;
+    expect(await seen(deviceB)).toBe(0);
+    expect(await seen(deviceA)).toBe(1);
+  },
+  'POST /v1/device/kitchen': async (app, { a, b }) => {
+    const { lineId } = await hallFixtureOf(app, a, true);
+    const deviceB = await createDevice(b.tenantId);
+    await ownerDb()`update devices set kind = 'kitchen_screen' where id = ${deviceB.deviceId}`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/kitchen',
+      headers: { authorization: deviceB.authorization },
+      payload: { type: 'status', lineIds: [lineId], status: 'preparing' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from open_order_lines where id = ${lineId}`;
+    expect(row!.status).toBe('sent');
+  },
+  'GET /v1/device/menu': async (app, { a, b }) => {
+    await hallFixtureOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/menu',
+      headers: { authorization: deviceB.authorization },
+    });
+    const menu = res.json<{ items: unknown[]; staff: { id: string }[] }>();
+    expect(menu.items).toEqual([]);
+    const usersA = await ownerDb()<{ id: string }[]>`select id from users where tenant_id = ${a.tenantId}`;
+    const idsA = new Set(usersA.map((u) => u.id));
+    expect(menu.staff.every((p) => !idsA.has(p.id))).toBe(true);
   },
   // Store B's till lists none of store A's tickets, and its new one is its own
   'GET /v1/device/alterations': async (app, { a, b }) => {

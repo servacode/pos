@@ -142,7 +142,14 @@ describe('AppShell', () => {
       within(tabs)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual(['المنتجات', 'التصنيفات', 'تغيير الأسعار', 'طباعة الملصقات', 'استيراد البيانات']);
+    ).toEqual([
+      'المنتجات',
+      'التصنيفات',
+      'تغيير الأسعار',
+      'تحديث الأسعار من ملف',
+      'طباعة الملصقات',
+      'استيراد البيانات',
+    ]);
     expect(within(tabs).getByRole('link', { name: 'تغيير الأسعار' })).toHaveAttribute('aria-current', 'page');
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: 'المنتجات' })).toHaveAttribute('aria-current', 'page');

@@ -55,6 +55,7 @@ export const APPROVER_PERMISSIONS: readonly Permission[] = [
   'cash.move',
   'shift.close_any',
   'users.manage',
+  'hall.cancel_approve',
 ];
 
 /** 6 for owners, managers and approvers; 4 is allowed for everyone else. */

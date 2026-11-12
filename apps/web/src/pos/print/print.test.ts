@@ -111,4 +111,56 @@ describe('the receipt as printer lines', () => {
     } as never);
     expect(cash.some((l) => l.kind === 'barcode')).toBe(false);
   });
+
+  describe('a pharmacy receipt as printer lines', () => {
+    const withRx = (prescription: unknown, batch = true) => ({
+      ...data,
+      doc: {
+        ...data.doc,
+        payload: {
+          ...sale,
+          prescription,
+          lines: sale.lines.map((l) => ({
+            ...l,
+            ...(batch ? { batchNo: 'B-07', batchExpiry: '2027-01-01' } : {}),
+          })),
+        } as never,
+      },
+    });
+
+    it('prints the batch of a line, and the prescription number, doctor and patient (not the ID)', () => {
+      const lines = receiptLines(
+        withRx({ ref: 'RX-77', doctor: 'د. سامر', patientName: 'ليلى', patientId: '01020304' }),
+      );
+      const text = JSON.stringify(lines);
+      expect(text).toContain('دفعة B-07 · تنتهي 2027-01-01');
+      expect(lines).toContainEqual({ kind: 'pair', start: 'رقم الوصفة', end: 'RX-77' });
+      expect(lines).toContainEqual({ kind: 'pair', start: 'الطبيب', end: 'د. سامر' });
+      expect(lines).toContainEqual({ kind: 'pair', start: 'المريض', end: 'ليلى' });
+      expect(text).not.toContain('01020304');
+    });
+
+    it('prints a batch without a date, and nothing when the prescription is empty', () => {
+      const noDate = withRx(null);
+      (noDate.doc.payload as { lines: { batchExpiry?: string | null }[] }).lines[0]!.batchExpiry = null;
+      const lines = receiptLines(noDate);
+      expect(JSON.stringify(lines)).toContain('دفعة B-07');
+      expect(JSON.stringify(lines)).not.toContain('تنتهي');
+      expect(JSON.stringify(lines)).not.toContain('رقم الوصفة');
+      const empty = receiptLines(
+        withRx({ ref: null, doctor: null, patientName: null, patientId: null }, false),
+      );
+      expect(JSON.stringify(empty)).not.toContain('رقم الوصفة');
+      expect(JSON.stringify(empty)).not.toContain('دفعة');
+    });
+
+    it('prints the doctor alone, without a number or a patient', () => {
+      const lines = receiptLines(
+        withRx({ ref: null, doctor: 'د. هالة', patientName: null, patientId: null }),
+      );
+      expect(lines).toContainEqual({ kind: 'pair', start: 'الطبيب', end: 'د. هالة' });
+      expect(JSON.stringify(lines)).not.toContain('رقم الوصفة');
+      expect(JSON.stringify(lines)).not.toContain('المريض');
+    });
+  });
 });

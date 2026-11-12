@@ -45,6 +45,15 @@ describe('the fields each business type uses', () => {
     openCard('/products/new', {}, undefined, ['pharmacy', 'electronics']);
     expect(await screen.findByLabelText(/الاسم العلمي/)).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'له رقم تسلسلي أو IMEI' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'يحتاج وصفة' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'مراقَب' })).toBeInTheDocument();
+  });
+
+  it('does not show a supermarket the prescription switches', async () => {
+    openCard('/products/new', {}, undefined, ['supermarket']);
+    await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
+    expect(screen.queryByRole('switch', { name: 'يحتاج وصفة' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'مراقَب' })).not.toBeInTheDocument();
   });
 });
 

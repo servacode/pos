@@ -133,6 +133,12 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       });
     }
     if (l.serials?.length) lines.push({ kind: 'text', text: `IMEI ${l.serials.join('، ')}` });
+    if (l.batchNo) {
+      lines.push({
+        kind: 'text',
+        text: `دفعة ${l.batchNo}${l.batchExpiry ? ` · تنتهي ${l.batchExpiry}` : ''}`,
+      });
+    }
   }
   lines.push({ kind: 'rule' });
   const t = sale.totals;
@@ -163,6 +169,13 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       end: money(sale.change.amountMinor, sale.change.currency),
       bold: true,
     });
+  }
+  const rx = sale.prescription;
+  if (rx && (rx.ref || rx.doctor)) {
+    lines.push({ kind: 'rule' });
+    if (rx.ref) lines.push({ kind: 'pair', start: 'رقم الوصفة', end: rx.ref });
+    if (rx.doctor) lines.push({ kind: 'pair', start: 'الطبيب', end: rx.doctor });
+    if (rx.patientName) lines.push({ kind: 'pair', start: 'المريض', end: rx.patientName });
   }
   return [...lines, ...footer(data)];
 }

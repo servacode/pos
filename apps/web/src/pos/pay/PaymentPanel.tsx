@@ -311,6 +311,8 @@ export function PaymentPanel({
         salespersonId,
         service,
         onlineOrderId: cart.onlineOrder?.id ?? null,
+        prescription:
+          cart.prescription && Object.values(cart.prescription).some(Boolean) ? cart.prescription : null,
       });
       const entry = await pos.save({
         type: 'sale',

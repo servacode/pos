@@ -98,6 +98,9 @@ export async function assertStoreWritable(
 
 type LimitKind = 'users' | 'registers' | 'branches';
 
+/** Devices that take no money (03 › وضع النادل): they are not counted against the cashier limit */
+const NON_TILL_KINDS: readonly string[] = ['waiter', 'kitchen_screen', 'call_screen'];
+
 const LIMIT_TEXT: Record<LimitKind, { count: SQL; message: (limit: number) => string }> = {
   users: {
     count: sql`select count(*)::int as n from users where status = 'active'`,
@@ -105,7 +108,10 @@ const LIMIT_TEXT: Record<LimitKind, { count: SQL; message: (limit: number) => st
       `وصلت باقتك إلى حدّها: ${n} مستخدمين فعّالين. أوقف مستخدماً أو انتقل إلى باقة أعلى من صفحة الاشتراك.`,
   },
   registers: {
-    count: sql`select count(*)::int as n from devices where status = 'active' and revoked_at is null`,
+    // 03 › وضع النادل: waiter, kitchen and call screens take no money, so they are not tills
+    count: sql`select count(*)::int as n from devices
+      where status = 'active' and revoked_at is null
+        and kind not in ('waiter', 'kitchen_screen', 'call_screen')`,
     message: (n) =>
       `وصلت باقتك إلى حدّها: ${n} أجهزة كاشير فعّالة. أوقف جهازاً أو انتقل إلى باقة أعلى من صفحة الاشتراك.`,
   },
@@ -120,7 +126,13 @@ const LIMIT_TEXT: Record<LimitKind, { count: SQL; message: (limit: number) => st
  * limit = unlimited). Rows over the limit that already exist, for example after a downgrade, are
  * never touched: only new ones are refused. Call it inside the transaction that inserts.
  */
-export async function assertWithinPlanLimit(tx: Transaction, kind: LimitKind): Promise<void> {
+export async function assertWithinPlanLimit(
+  tx: Transaction,
+  kind: LimitKind,
+  /** For `registers`: the kind of the device being added; waiter, kitchen and call screens are not tills */
+  deviceKind?: string,
+): Promise<void> {
+  if (kind === 'registers' && deviceKind && NON_TILL_KINDS.includes(deviceKind)) return;
   const found = await readFacts(tx);
   const limit = found?.limits[kind];
   if (limit === null || limit === undefined) return;

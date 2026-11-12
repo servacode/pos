@@ -119,6 +119,8 @@ describe('wholesale prices and customers', () => {
       cashier: false,
       manager: true,
       owner: true,
+      pharmacist: false,
+      waiter: false,
     });
   });
 });

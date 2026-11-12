@@ -288,6 +288,20 @@
       "when": 1794445264607,
       "tag": "0040_sync_inbox_quarantined",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794480667521,
+      "tag": "0041_hall_open_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794480807826,
+      "tag": "0042_pharmacy_sale_rules",
+      "breakpoints": true
     }
   ]
 }

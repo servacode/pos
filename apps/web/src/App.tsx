@@ -8,6 +8,8 @@ import { useTestMode } from './lib/testMode';
 // and asks for the login code, with no network request; the store admin restores its session
 // from the server. Neither loads the other's code.
 const PosApp = lazy(() => import('./pos/PosApp').then((m) => ({ default: m.PosApp })));
+const KitchenApp = lazy(() => import('./hall/kitchen/KitchenApp').then((m) => ({ default: m.KitchenApp })));
+const WaiterApp = lazy(() => import('./hall/waiter/WaiterApp').then((m) => ({ default: m.WaiterApp })));
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })));
 const ShopApp = lazy(() => import('./shop/ShopApp').then((m) => ({ default: m.ShopApp })));
 const LegalPage = lazy(() => import('./legal/LegalPage').then((m) => ({ default: m.LegalPage })));
@@ -42,6 +44,9 @@ export function App() {
           <Route path="/terms" element={<LegalPage document="terms" />} />
           <Route path="/privacy" element={<LegalPage document="privacy" />} />
           <Route path="/pos/*" element={<PosApp />} />
+          {/* The restaurant's kitchen screen and the waiter's phone: devices of their own kind */}
+          <Route path="/kitchen" element={<KitchenApp />} />
+          <Route path="/waiter" element={<WaiterApp />} />
           <Route path="/link" element={<PairingLink />} />
           <Route path="/platform/*" element={<PlatformApp />} />
           {/* A store's online shop: public, no sign-in (26 › المتجر الإلكتروني) */}

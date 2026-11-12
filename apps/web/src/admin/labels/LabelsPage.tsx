@@ -28,6 +28,7 @@ import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { getProduct, listProducts, updateProduct } from '../catalog/api';
 import { getPurchase } from '../purchases/api';
+import { takeLabelQueue } from '../products/priceList';
 import { Label, LABEL_LAYOUTS, PrintableLabels, type LabelItem, type LabelLayout } from './Label';
 
 const LAYOUT_KEY = 'serva.labels.layout';
@@ -110,6 +111,21 @@ export function LabelsPage() {
       getProduct(id)
         .then((p) => addProduct(p))
         .catch((e: unknown) => setError(errorMessage(e)));
+    }
+    // After a price list (products/PriceListPage): up to a thousand products, kept in the tab
+    if (params.get('queue')) {
+      const queue = takeLabelQueue();
+      void (async () => {
+        for (let at = 0; at < queue.length; at += 6) {
+          await Promise.all(
+            queue.slice(at, at + 6).map((id) =>
+              getProduct(id)
+                .then((p) => addProduct(p))
+                .catch((e: unknown) => setError(errorMessage(e))),
+            ),
+          );
+        }
+      })();
     }
     if (product) {
       getProduct(product)

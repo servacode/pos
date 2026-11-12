@@ -18,6 +18,9 @@ const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ 
 const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
 );
+const CancellationsPage = lazy(() =>
+  import('./reports/CancellationsPage').then((m) => ({ default: m.CancellationsPage })),
+);
 const SupplierReturnsPage = lazy(() =>
   import('./purchases/SupplierReturnsPage').then((m) => ({ default: m.SupplierReturnsPage })),
 );
@@ -25,11 +28,17 @@ const TransfersPage = lazy(() =>
   import('./purchases/TransfersPage').then((m) => ({ default: m.TransfersPage })),
 );
 const ImportPage = lazy(() => import('./import/ImportPage').then((m) => ({ default: m.ImportPage })));
+const PriceListPage = lazy(() =>
+  import('./products/PriceListPage').then((m) => ({ default: m.PriceListPage })),
+);
 const BulkPricesPage = lazy(() =>
   import('./products/BulkPricesPage').then((m) => ({ default: m.BulkPricesPage })),
 );
 const OnlineStorePage = lazy(() =>
   import('./shop/OnlineStorePage').then((m) => ({ default: m.OnlineStorePage })),
+);
+const ControlledRegisterPage = lazy(() =>
+  import('./pharmacy/ControlledRegisterPage').then((m) => ({ default: m.ControlledRegisterPage })),
 );
 const ExpiryPage = lazy(() => import('./purchases/ExpiryPage').then((m) => ({ default: m.ExpiryPage })));
 const ChequesPage = lazy(() => import('./cheques/ChequesPage').then((m) => ({ default: m.ChequesPage })));
@@ -120,12 +129,15 @@ export function AdminApp() {
           <Route path="/purchases" element={page(<PurchasesPage />)} />
           <Route path="/inventory" element={page(<InventoryPage />)} />
           <Route path="/expiry" element={page(<ExpiryPage />)} />
+          <Route path="/controlled-register" element={page(<ControlledRegisterPage />)} />
           <Route path="/online-store" element={page(<OnlineStorePage />)} />
           <Route path="/prices" element={page(<BulkPricesPage />)} />
+          <Route path="/price-list" element={page(<PriceListPage />)} />
           <Route path="/import" element={page(<ImportPage />)} />
           <Route path="/transfers" element={page(<TransfersPage />)} />
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
+          <Route path="/reports/cancellations" element={page(<CancellationsPage />)} />
           <Route path="/serials" element={page(<SerialsPage />)} />
           <Route path="/labels" element={page(<LabelsPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />

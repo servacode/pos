@@ -33,18 +33,27 @@ const onShelf = (variantFilter = sql`true`) => sql`
   from received r left join stock s on s.variant_id = r.variant_id
   where r.expiry_date is not null`;
 
-/** Writes the earliest expiry still on the shelf onto these items (null when there is none). */
+/**
+ * Writes the earliest expiry still on the shelf onto these items (null when there is none), and
+ * the batches that are on the shelf with their dates (no quantities, so a sale that leaves the
+ * set as it was changes nothing the tills pull), which the till takes a sale's batch from.
+ */
 export async function refreshExpiry(tx: Transaction, variantIds: readonly string[]): Promise<void> {
   if (variantIds.length === 0) return;
   const ids = uuidArray([...new Set(variantIds)]);
   await tx.execute(sql`
-    update variants v set nearest_expiry = x.nearest
+    update variants v set nearest_expiry = x.nearest, shelf_batches = x.batches
     from (
-      select v2.id, (select min(o.expiry_date)::date from (${onShelf(sql`l.variant_id = v2.id`)}) o
-                     where o.left_qty > 0) as nearest
+      select v2.id,
+             (select min(o.expiry_date)::date from (${onShelf(sql`l.variant_id = v2.id`)}) o
+              where o.left_qty > 0) as nearest,
+             (select jsonb_agg(jsonb_build_object('batchNo', o.batch_no, 'expiry', o.expiry_date)
+                                 order by o.expiry_date, o.batch_no)
+              from (${onShelf(sql`l.variant_id = v2.id`)}) o where o.left_qty > 0) as batches
       from variants v2 where v2.id = any(${ids})
     ) x
-    where v.id = x.id and v.nearest_expiry is distinct from x.nearest`);
+    where v.id = x.id
+      and (v.nearest_expiry is distinct from x.nearest or v.shelf_batches is distinct from x.batches)`);
 }
 
 export function expiryReport(

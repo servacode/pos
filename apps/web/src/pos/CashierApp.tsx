@@ -32,6 +32,8 @@ import { renderLines } from './print/render';
 import { sendToPrinter } from './print/usb';
 import { SaleDone } from './receipt/SaleDone';
 import { EMPTY_CART, type Cart } from './sale/cart';
+import { cartFromOrder } from './hall/hallCart';
+import { useServerHall } from './hall/useServerHall';
 import { SaleScreen } from './sale/SaleScreen';
 import { PosProvider, usePos } from './services';
 import { validated } from './validate';
@@ -77,6 +79,14 @@ function paidInCash(data: ReceiptData): boolean {
 }
 
 const HELD_KEY = 'heldCarts';
+const HALL_CLOSE_KEY = 'hallPendingClose';
+
+/** A table paid at this till whose order the server has not been told to close yet */
+interface PendingHallClose {
+  orderId: string;
+  userId: string;
+  ref: string;
+}
 const LAST_SALE_KEY = 'lastSale';
 const PAPER_KEY = 'paperWidth';
 const cartKey = (userId: string) => `cart:${userId}`;
@@ -164,6 +174,50 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
 
   const setCart = useCallback((update: (cart: Cart) => Cart) => setCartState(update), []);
 
+  // 03 › وضع النادل: online, the table board also shows the orders on the server (a waiter's too)
+  const hallTables = settings?.service?.tables ?? [];
+  const serverHall = useServerHall({
+    enabled: online && hallTables.length > 0,
+    token: pos.device.token,
+    fetchFn: pos.fetch,
+  });
+
+  // A table charged while the server could not be reached is closed there once it can (looked at on every read that gets an answer)
+  useEffect(() => {
+    const api = serverHall.api;
+    if (!api || !serverHall.reachable) return;
+    let alive = true;
+    void pos.local.get<PendingHallClose[]>(HALL_CLOSE_KEY).then(async (pending) => {
+      if (!pending || pending.length === 0) return;
+      const left: PendingHallClose[] = [];
+      for (const item of pending) {
+        const answer = await api.command({
+          type: 'close',
+          userId: item.userId,
+          orderId: item.orderId,
+          reason: 'paid',
+          ref: item.ref,
+        });
+        // A refusal (already closed, unknown order) will not change: drop it; no answer: keep it
+        if (answer.kind === 'network') left.push(item);
+      }
+      if (alive) await pos.local.set(HALL_CLOSE_KEY, left);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [serverHall.api, serverHall.reachable, serverHall.orders, pos.local]);
+
+  /** Tables with an order on the server and none on this till: shown on the board, opened on a tap */
+  const serverOnly = useMemo(() => {
+    const mine = new Set(held.flatMap((c) => (c.service?.table ? [c.service.table] : [])));
+    if (cart.service?.table && cart.lines.length > 0) mine.add(cart.service.table);
+    return serverHall.orders
+      .filter((o) => !mine.has(o.table))
+      .map((o) => cartFromOrder(o, catalog).cart)
+      .filter((c) => c.lines.length > 0);
+  }, [serverHall.orders, held, cart, catalog]);
+
   /** Signs out, keeping an unfinished cart for this cashier's next sign-in. */
   const lock = useCallback(() => {
     const current = cartRef.current;
@@ -250,6 +304,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     };
     setLastSale(last);
     void pos.local.set(LAST_SALE_KEY, last);
+    closeHallOrder(cartRef.current, entry.doc.number ?? '');
     setCartState(EMPTY_CART);
     const data = receiptData(last.doc, session.fullName);
     setDone(data);
@@ -281,23 +336,102 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   function openTable(table: string) {
     const current = cartRef.current;
     if (current.service?.table === table) return;
+    // The server's order for this table (a waiter's, or one this till sent from another cart)
+    const remote = serverHall.orders.find((o) => o.table === table);
     let rest = held;
     if (current.lines.length > 0 && !current.service?.table) {
       const mine = rest.find((c) => c.service?.table === table);
       if (!mine) {
+        if (remote) {
+          setCartState(cartFromOrder(remote, catalog, current).cart);
+          setDone(null);
+          return;
+        }
         setCartState({ ...current, service: { orderType: 'dine_in', table } });
         return;
       }
     }
     if (current.lines.length > 0) rest = [...rest, current];
     const index = rest.findIndex((c) => c.service?.table === table);
-    const next =
+    let next =
       index >= 0 ? rest[index]! : { ...EMPTY_CART, service: { orderType: 'dine_in' as const, table } };
     if (index >= 0) rest = rest.filter((_, i) => i !== index);
+    // Held on this till and also on the server: the server's lines first, this till's new ones after
+    if (remote) next = cartFromOrder(remote, catalog, index >= 0 ? newLinesOf(next) : null).cart;
     setHeld(rest);
     void pos.local.set(HELD_KEY, rest);
     setCartState(next);
     setDone(null);
+  }
+
+  /** What a till cart holds beyond what the kitchen and the server already have */
+  function newLinesOf(cart: Cart): Cart {
+    const known = cart.hall?.known ?? {};
+    return {
+      ...cart,
+      lines: cart.lines.map((l) => ({ ...l, qty: l.qty - (known[l.lineNo] ?? 0) })).filter((l) => l.qty > 0),
+    };
+  }
+
+  /** «للمطبخ» online: the lines not yet on the server go there as one send (the paper ticket prints as ever) */
+  async function sendToHall(sent: Cart) {
+    const api = serverHall.api;
+    const table = sent.service?.table;
+    if (!api || !table) return;
+    const known = sent.hall?.known ?? {};
+    const fresh = sent.lines
+      .map((l) => ({ line: l, qty: Math.round((l.qty - (known[l.lineNo] ?? 0)) / 1000) }))
+      .filter((x) => x.qty > 0);
+    if (fresh.length === 0) return;
+    const userId = session.userId;
+    let orderId = sent.hall?.orderId ?? serverHall.orders.find((o) => o.table === table)?.id;
+    if (!orderId) {
+      const opened = await api.command({ type: 'open', userId, table });
+      if (opened.kind !== 'ok' || !opened.body.order) return;
+      orderId = opened.body.order.id;
+    }
+    const added = await api.command({
+      type: 'add',
+      userId,
+      orderId,
+      lines: fresh.map(({ line, qty }) => ({
+        productId: line.productId,
+        variantId: line.variantId,
+        name: line.name,
+        qty: Math.min(99, qty),
+        choices: [...(line.choices ?? [])],
+        note: line.note ?? null,
+      })),
+    });
+    if (added.kind !== 'ok') return;
+    const done = await api.command({ type: 'send', userId, orderId });
+    if (done.kind !== 'ok') return;
+    const now: Record<number, number> = {};
+    for (const l of sent.lines) now[l.lineNo] = l.qty;
+    const id = orderId;
+    setCartState((c) => (c.service?.table === table ? { ...c, hall: { orderId: id, known: now } } : c));
+    void serverHall.refresh();
+  }
+
+  /** Charging a table closes its order on the server; without a connection it waits in a list */
+  function closeHallOrder(paid: Cart, ref: string) {
+    const table = paid.service?.table;
+    if (!table) return;
+    const orderId = paid.hall?.orderId ?? serverHall.orders.find((o) => o.table === table)?.id;
+    if (!orderId) return;
+    const userId = session.userId;
+    const later = () =>
+      pos.local
+        .get<PendingHallClose[]>(HALL_CLOSE_KEY)
+        .then((list) => pos.local.set(HALL_CLOSE_KEY, [...(list ?? []), { orderId, userId, ref }]));
+    const api = serverHall.api;
+    if (!api) {
+      void later();
+      return;
+    }
+    void api
+      .command({ type: 'close', userId, orderId, reason: 'paid', ref })
+      .then((answer) => (answer.kind === 'network' ? later() : serverHall.refresh()));
   }
 
   function reprint() {
@@ -521,8 +655,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         heldCount={held.length}
         onHold={hold}
         onResume={resume}
-        heldCarts={held}
+        heldCarts={[...held, ...serverOnly]}
         onOpenTable={openTable}
+        onKitchenSent={(sent) => void sendToHall(sent)}
         lastLines={
           last ? last.lines.map((l) => ({ variantId: l.variantId, barcode: l.barcode, qty: l.qty })) : []
         }

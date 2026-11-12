@@ -82,6 +82,8 @@ const TOP_FIELDS = [
   'categoryId',
   'brand',
   'genericName',
+  'requiresPrescription',
+  'controlled',
   'tracksSerial',
   'warrantyMonths',
   'type',
@@ -524,6 +526,24 @@ function ProductCard() {
                       onChange={(event) => update({ genericName: event.target.value })}
                       error={errors.genericName}
                     />
+                  ) : null}
+                  {fits(['pharmacy']) || draft.requiresPrescription || draft.controlled ? (
+                    <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
+                      <Switch
+                        label="يحتاج وصفة"
+                        description="الكاشير يطلب رقم الوصفة واسم الطبيب قبل الدفع."
+                        checked={draft.requiresPrescription ?? false}
+                        disabled={!canManage}
+                        onCheckedChange={(requiresPrescription) => update({ requiresPrescription })}
+                      />
+                      <Switch
+                        label="مراقَب"
+                        description="لا يبيعه إلا الصيدلاني، ويدخل سجل الأدوية المراقبة."
+                        checked={draft.controlled ?? false}
+                        disabled={!canManage}
+                        onCheckedChange={(controlled) => update({ controlled })}
+                      />
+                    </div>
                   ) : null}
                   {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
                     <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">

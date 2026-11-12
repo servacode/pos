@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   onboardingInput,
+  pharmacySettingsSchema,
   storeCurrencyInput,
   storeProfileInput,
   storeScaleInput,
@@ -17,6 +18,7 @@ import {
   updateProfile,
   updateScale,
   updateLoyalty,
+  updatePharmacy,
   updateService,
 } from '../services/store';
 import { parseBody } from './validation';
@@ -67,5 +69,15 @@ export async function storeRoutes(app: FastifyInstance): Promise<void> {
   app.put('/v1/store/loyalty', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return updateLoyalty(app.db, request.auth, parseBody(storeLoyaltyInput, request.body), meta(request));
+  });
+
+  app.put('/v1/store/pharmacy', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updatePharmacy(
+      app.db,
+      request.auth,
+      parseBody(pharmacySettingsSchema, request.body),
+      meta(request),
+    );
   });
 }

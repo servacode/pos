@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { deviceNameSchema } from '@serva/core';
+import { deviceNameSchema, type DeviceKind } from '@serva/core';
 import {
   Alert,
   Avatar,
@@ -31,12 +31,21 @@ interface NameStepProps {
   error: string | null;
   onBack: () => void;
   onSubmit: (named: NamedDevice) => void;
+  /** What the device is for; a till unless the kitchen or waiter screen is linking */
+  kind?: DeviceKind;
 }
 
 const SUGGESTIONS = ['كاشير 1', 'كاشير 2', 'كاشير 3'];
 
 /** Step 2: name the device; the owner signed in here also picks the branch. */
-export function NameStep({ credentials, submitting, error, onBack, onSubmit }: NameStepProps) {
+export function NameStep({
+  credentials,
+  submitting,
+  error,
+  onBack,
+  onSubmit,
+  kind = 'cashier',
+}: NameStepProps) {
   const owner = credentials.method === 'owner' ? credentials.owner : null;
   const branches = owner?.me.branches ?? [];
   const [branchId, setBranchId] = useState<string | null>(branches[0]?.id ?? null);
@@ -166,7 +175,7 @@ export function NameStep({ credentials, submitting, error, onBack, onSubmit }: N
             <div className="flex flex-col">
               <span className="text-sm text-ink-muted">نوع الجهاز</span>
               <span className="text-lg font-semibold text-ink">
-                {DEVICE_KIND_LABELS.cashier} · {DEVICE_PLATFORM_LABELS.browser}
+                {DEVICE_KIND_LABELS[kind]} · {DEVICE_PLATFORM_LABELS.browser}
               </span>
             </div>
           </div>

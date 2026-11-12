@@ -77,6 +77,11 @@ const PULL_SETS: Record<string, PullSet> = {
       scaleBarcode: tenantSettings.scaleBarcode,
       service: tenantSettings.service,
       loyalty: tenantSettings.loyalty,
+      // A pharmacy that never chose gets the defaults, so its tills enforce the batch rules
+      pharmacy: sql<{ prescription: 'required' | 'optional' } | null>`coalesce(tenant_settings.pharmacy,
+        case when exists (select 1 from tenants t
+                          where t.id = tenant_settings.tenant_id and 'pharmacy' = any(t.sectors))
+             then '{"prescription":"optional"}'::jsonb end)`,
       version: tenantSettings.version,
     },
   },
@@ -144,6 +149,8 @@ const PULL_SETS: Record<string, PullSet> = {
       taxRateId: products.taxRateId,
       sellOnPos: products.sellOnPos,
       genericName: products.genericName,
+      requiresPrescription: products.requiresPrescription,
+      controlled: products.controlled,
       tracksSerial: products.tracksSerial,
       warrantyMonths: products.warrantyMonths,
       modifiers: products.modifiers,
@@ -162,6 +169,7 @@ const PULL_SETS: Record<string, PullSet> = {
       attributes: variants.attributes,
       sortOrder: variants.sortOrder,
       nearestExpiry: variants.nearestExpiry,
+      shelfBatches: variants.shelfBatches,
       // Its colour's picture (or any option value it has) first, else the product's main one
       imageUrl: sql<string | null>`(
         select '/v1/images/' || i.tenant_id || '/' || i.upload_id || '?size=thumb'

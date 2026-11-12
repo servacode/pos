@@ -188,6 +188,12 @@ export const saleLineSchema = z.object({
    * as optional, so a line without them leaves it out.
    */
   serials: z.array(z.string().trim().min(3).max(40)).max(1000).optional(),
+  /**
+   * The batch the till chose for this line (03 › الصيدليات: الدفعة, nearest expiry first) and its
+   * expiry date. Metadata only: stock and costing stay per item. Optional, left out elsewhere.
+   */
+  batchNo: z.string().trim().min(1).max(60).nullable().optional(),
+  batchExpiry: z.iso.date().nullable().optional(),
   /** Price of one pack in the invoice currency: what the engine prices */
   unitPriceMinor: nonNegativeMinorSchema,
   /** The tax rate row (posting picks its account); null with taxRateBp 0 when untaxed */
@@ -197,6 +203,19 @@ export const saleLineSchema = z.object({
   priced: pricedLineSchema,
 });
 export type SaleLine = z.output<typeof saleLineSchema>;
+
+/**
+ * «الوصفة» (03 › الصيدليات): the prescription number and doctor of a sale with a prescription
+ * medicine, and for a controlled one also the patient's name and ID number. Every field is
+ * optional text; the till asks for what the item and the store's setting require.
+ */
+export const prescriptionSchema = z.object({
+  ref: z.string().trim().min(1).max(60).nullable(),
+  doctor: z.string().trim().min(1).max(120).nullable(),
+  patientName: z.string().trim().min(1).max(120).nullable(),
+  patientId: z.string().trim().min(1).max(40).nullable(),
+});
+export type Prescription = z.output<typeof prescriptionSchema>;
 
 /**
  * One payment as received (09 › payments). For cash, amountMinor is what the customer handed over
@@ -328,6 +347,8 @@ export const salePayloadSchema = z
      * contract v1 as optional: an ordinary sale leaves it out.
      */
     onlineOrderId: uuidSchema.nullable().optional(),
+    /** The prescription of a pharmacy sale (03 › الصيدليات); optional, an ordinary sale leaves it out */
+    prescription: prescriptionSchema.nullable().optional(),
   })
   .superRefine((sale, ctx) => {
     const issue = (path: (string | number)[], message: string) =>
