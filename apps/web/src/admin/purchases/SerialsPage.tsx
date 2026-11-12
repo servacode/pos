@@ -92,7 +92,7 @@ export function SerialsPage() {
 
   return (
     <AppShell>
-      <title>الأرقام التسلسلية · Serva POS</title>
+      <title>الأرقام التسلسلية · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="الأرقام التسلسلية"

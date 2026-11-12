@@ -15,7 +15,7 @@ export function LegalPage({ document: key }: { document: keyof typeof DOCUMENTS 
   const other = DOCUMENTS[key === 'terms' ? 'privacy' : 'terms'];
   return (
     <div className="min-h-dvh bg-canvas text-ink">
-      <title>{`${doc.title} · Serva POS`}</title>
+      <title>{`${doc.title} · SERFA`}</title>
       <header className="border-b border-line bg-surface print:hidden">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4 px-5 py-2 sm:px-6">
           <Link to="/" className="flex min-h-12 items-center rounded-control" aria-label="سيرفا">

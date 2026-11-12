@@ -243,7 +243,7 @@ export function CustomersPage() {
 
   return (
     <AppShell>
-      <title>الزبائن · Serva POS</title>
+      <title>الزبائن · SERFA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="الزبائن"

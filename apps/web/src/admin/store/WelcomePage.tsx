@@ -174,7 +174,7 @@ export function WelcomePage() {
   if (!store) {
     return (
       <AppShell>
-        <title>أهلاً بك · Serva POS</title>
+        <title>أهلاً بك · SERFA</title>
         {error ? (
           <div className="mx-auto w-full max-w-4xl">
             <Alert tone="error">{error}</Alert>
@@ -194,7 +194,7 @@ export function WelcomePage() {
 
   return (
     <AppShell>
-      <title>أهلاً بك · Serva POS</title>
+      <title>أهلاً بك · SERFA</title>
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
         <div className="flex flex-col gap-8">
           <WizardSteps current={step} />

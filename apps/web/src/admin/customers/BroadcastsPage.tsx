@@ -161,7 +161,7 @@ export function BroadcastsPage() {
   const names = new Map(categories.map((c) => [c.id, c.name]));
   return (
     <AppShell>
-      <title>رسائل للزبائن · Serva POS</title>
+      <title>رسائل للزبائن · SERFA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <PageHeader
           title="رسائل للزبائن"

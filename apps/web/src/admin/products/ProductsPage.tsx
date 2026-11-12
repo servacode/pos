@@ -475,7 +475,7 @@ function ProductsList() {
 
   return (
     <>
-      <title>المنتجات · Serva POS</title>
+      <title>المنتجات · SERFA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           icon={<ProductsIcon />}

@@ -231,7 +231,7 @@ export function InventoryPage() {
 
   return (
     <AppShell>
-      <title>المخزون والأرباح · Serva POS</title>
+      <title>المخزون والأرباح · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="المخزون والأرباح"

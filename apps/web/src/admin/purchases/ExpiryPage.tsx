@@ -112,7 +112,7 @@ export function ExpiryPage() {
   const count = (n: number) => (data ? n : <Skeleton className="h-9 w-12" />);
   return (
     <AppShell>
-      <title>الصلاحية · Serva POS</title>
+      <title>الصلاحية · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="الصلاحية"

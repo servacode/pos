@@ -364,7 +364,7 @@ function ProductCard() {
   if (loadError || !lookups || !draft) {
     return (
       <>
-        <title>{`${title} · Serva POS`}</title>
+        <title>{`${title} · SERFA`}</title>
         <div className="flex flex-col gap-6">
           <BackToProducts />
           {loadError ? (
@@ -431,7 +431,7 @@ function ProductCard() {
 
   return (
     <>
-      <title>{`${title} · Serva POS`}</title>
+      <title>{`${title} · SERFA`}</title>
       <form
         ref={formRef}
         noValidate

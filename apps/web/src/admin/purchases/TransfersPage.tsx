@@ -125,7 +125,7 @@ export function TransfersPage() {
 
   return (
     <AppShell>
-      <title>التحويل بين الفروع · Serva POS</title>
+      <title>التحويل بين الفروع · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="التحويل بين الفروع"

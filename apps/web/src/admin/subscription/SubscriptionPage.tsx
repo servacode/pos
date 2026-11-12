@@ -397,7 +397,7 @@ export function SubscriptionPage() {
 
   return (
     <AppShell>
-      <title>الاشتراك · Serva POS</title>
+      <title>الاشتراك · SERFA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="الاشتراك"

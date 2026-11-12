@@ -177,7 +177,7 @@ function BulkPrices() {
 
   return (
     <>
-      <title>تغيير الأسعار · Serva POS</title>
+      <title>تغيير الأسعار · SERFA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           icon={<PercentIcon />}

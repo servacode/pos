@@ -52,7 +52,7 @@ export function ReportScreen({
   const allowed = typeof access === 'function' ? access(me) : holdsAny(me, access);
   return (
     <AppShell>
-      <title>{`${title} · Serva POS`}</title>
+      <title>{`${title} · SERFA`}</title>
       {allowed ? (
         <div className="flex flex-col gap-6">{children}</div>
       ) : (

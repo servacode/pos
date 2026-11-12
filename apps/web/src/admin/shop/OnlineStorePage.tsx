@@ -80,7 +80,7 @@ export function OnlineStorePage() {
   const permissions = new Set<string>(me.user.permissions);
   return (
     <AppShell>
-      <title>المتجر الإلكتروني · Serva POS</title>
+      <title>المتجر الإلكتروني · SERFA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <PageHeader
           title="المتجر الإلكتروني"

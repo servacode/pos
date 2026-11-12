@@ -123,7 +123,7 @@ export function DevicesPage() {
 
   return (
     <AppShell>
-      <title>الأجهزة · Serva POS</title>
+      <title>الأجهزة · SERFA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="الأجهزة"

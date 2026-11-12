@@ -72,7 +72,7 @@ export function PinPage() {
 
   return (
     <AppShell>
-      <title>رمز الدخول للكاشير · Serva POS</title>
+      <title>رمز الدخول للكاشير · SERFA</title>
       <div className="mx-auto flex w-full max-w-md flex-col gap-6 pt-2 sm:pt-6">
         <div className="flex flex-col items-center gap-4 text-center">
           <IconChip size="lg">

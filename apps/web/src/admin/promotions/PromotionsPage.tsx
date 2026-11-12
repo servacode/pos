@@ -300,7 +300,7 @@ export function PromotionsPage() {
 
   return (
     <AppShell>
-      <title>العروض · Serva POS</title>
+      <title>العروض · SERFA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           title="العروض"

@@ -171,7 +171,7 @@ export function MerchandisePage() {
 
   return (
     <AppShell>
-      <title>حركة الأصناف · Serva POS</title>
+      <title>حركة الأصناف · SERFA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           className="print:hidden"

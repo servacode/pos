@@ -58,7 +58,7 @@ function PhoneStep({ onCodeSent }: { onCodeSent: (pending: PendingReset) => void
         </>
       }
     >
-      <title>استعادة كلمة السر · Serva POS</title>
+      <title>استعادة كلمة السر · SERFA</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         <TextField
@@ -120,7 +120,7 @@ function ResetStep({ pending, onChangeNumber }: { pending: PendingReset; onChang
         </>
       }
     >
-      <title>كلمة سر جديدة · Serva POS</title>
+      <title>كلمة سر جديدة · SERFA</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         {pending.testCode ? (

@@ -195,7 +195,7 @@ export function ChequesPage() {
 
   return (
     <AppShell>
-      <title>الشيكات · Serva POS</title>
+      <title>الشيكات · SERFA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="الشيكات"

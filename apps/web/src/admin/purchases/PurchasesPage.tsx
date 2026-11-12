@@ -180,7 +180,7 @@ export function PurchasesPage() {
 
   return (
     <AppShell>
-      <title>المشتريات · Serva POS</title>
+      <title>المشتريات · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="المشتريات والموردون"

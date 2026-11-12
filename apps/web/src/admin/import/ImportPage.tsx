@@ -275,7 +275,7 @@ function Import() {
 
   return (
     <>
-      <title>استيراد البيانات · Serva POS</title>
+      <title>استيراد البيانات · SERFA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           icon={<PackageOpenIcon />}
