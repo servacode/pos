@@ -94,7 +94,12 @@ export async function branchOf(tx: Transaction, branchId: string | undefined): P
 }
 
 /** The next number of a dashboard series this year: «PUR-2026-000001». */
-export async function nextNumber(tx: Transaction, tenantId: string, series: string, date: string): Promise<string> {
+export async function nextNumber(
+  tx: Transaction,
+  tenantId: string,
+  series: string,
+  date: string,
+): Promise<string> {
   const year = Number(date.slice(0, 4));
   const [row] = await tx
     .insert(documentSequences)

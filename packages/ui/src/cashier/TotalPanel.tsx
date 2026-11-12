@@ -81,8 +81,16 @@ export function TotalPanel({
         {/* The word and the total share a baseline; what explains them sits on the line under. */}
         <div className="flex items-baseline justify-between gap-3">
           <span className="font-semibold text-ink-muted">{label}</span>
-          <output aria-live="polite" aria-label={label} className="text-total font-bold tracking-tight text-ink">
-            <Money minor={totalMinor} currency={currency} unitClassName="text-xl font-semibold text-ink-muted" />
+          <output
+            aria-live="polite"
+            aria-label={label}
+            className="text-total font-bold tracking-tight text-ink"
+          >
+            <Money
+              minor={totalMinor}
+              currency={currency}
+              unitClassName="text-xl font-semibold text-ink-muted"
+            />
           </output>
         </div>
         {caption || note || secondary ? (

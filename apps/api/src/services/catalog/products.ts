@@ -626,9 +626,7 @@ export async function updateProductTx(
     const keep = v.barcodes.flatMap((b) => (b.id ? [b.id] : []));
     await tx
       .delete(barcodes)
-      .where(
-        and(eq(barcodes.variantId, v.id), keep.length > 0 ? notInArray(barcodes.id, keep) : undefined),
-      );
+      .where(and(eq(barcodes.variantId, v.id), keep.length > 0 ? notInArray(barcodes.id, keep) : undefined));
   }
 
   const variantChanges: Record<string, unknown>[] = [];
@@ -644,11 +642,7 @@ export async function updateProductTx(
         label: v.attributes ? labelOf(v.attributes) : undefined,
         minStockQty: v.minStockQty,
         archivedAt:
-          v.archived === undefined
-            ? undefined
-            : v.archived
-              ? (before.variant.archivedAt ?? ctx.now)
-              : null,
+          v.archived === undefined ? undefined : v.archived ? (before.variant.archivedAt ?? ctx.now) : null,
       };
       const variantDiff = diff(before.variant, variantNext);
       if (Object.keys(variantDiff).length > 0) {

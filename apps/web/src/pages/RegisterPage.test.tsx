@@ -17,7 +17,10 @@ async function fillDetails(user: ReturnType<typeof renderApp>['user']) {
 
 describe('RegisterPage', () => {
   it('asks for an explicit tick on the terms before sending anything', async () => {
-    const { requestsTo } = mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh, 'POST /v1/auth/register': codeSent });
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedOutRefresh,
+      'POST /v1/auth/register': codeSent,
+    });
     const { user } = renderApp('/register');
     await user.type(await screen.findByLabelText('رقم الجوال'), '0912 345 678');
     await user.type(screen.getByLabelText('اسمك'), 'أحمد الخطيب');

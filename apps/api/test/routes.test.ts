@@ -587,7 +587,12 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
   'GET /v1/customers/:id': customerIdor('GET'),
   // Store B's owner on store A's customer, supplier, expense and entry: 404, nothing of A's in the answer.
   'GET /v1/customers/:id/statement': async (app, { a, b }) => {
-    const made = await app.inject({ method: 'POST', url: '/v1/customers', headers: owner(a), payload: { name: 'زبون كشف' } });
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: owner(a),
+      payload: { name: 'زبون كشف' },
+    });
     const id = made.json<{ id: string }>().id;
     const own = await app.inject({
       method: 'GET',
@@ -636,7 +641,9 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       payload: { reason: 'سرقة' },
     });
     expect(res.statusCode).toBe(404);
-    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from journal_entries where kind = 'reversal'`;
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from journal_entries where kind = 'reversal'`;
     expect(n!.n).toBe(0);
   },
   'POST /v1/journal/:id/reverse': async (app, { a, b }) => {

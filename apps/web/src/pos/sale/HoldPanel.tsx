@@ -131,7 +131,13 @@ export function HoldPanel({
       title="احجز للزبون"
       icon={<CalendarIcon size={20} />}
       actions={
-        <Button variant="secondary" size="md" icon={<CloseIcon size={20} />} onClick={onClose} disabled={saving}>
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<CloseIcon size={20} />}
+          onClick={onClose}
+          disabled={saving}
+        >
           أغلق
         </Button>
       }

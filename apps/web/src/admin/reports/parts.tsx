@@ -27,14 +27,14 @@ export function PageHead({
   icon?: ReactNode;
   actions?: ReactNode;
 }) {
-  return <PageHeader className="print:hidden" title={title} description={subtitle} icon={icon} actions={actions} />;
+  return (
+    <PageHeader className="print:hidden" title={title} description={subtitle} icon={icon} actions={actions} />
+  );
 }
 
 /** The date, branch and device controls of a report, in one calm card above the numbers. */
 export function ReportFilters({ children }: { children: ReactNode }) {
-  return (
-    <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">{children}</Card>
-  );
+  return <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">{children}</Card>;
 }
 
 /** A report screen inside the admin shell, or «ليست لك» for whoever lacks its key. */

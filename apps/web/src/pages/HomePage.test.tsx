@@ -126,12 +126,15 @@ describe('HomePage', () => {
           },
         },
       };
-      for (const date of days) routes[`GET /v1/reports/day?date=${date}`] = { status: 200, body: dayReport() };
+      for (const date of days)
+        routes[`GET /v1/reports/day?date=${date}`] = { status: 200, body: dayReport() };
       mockFetch(routes);
       renderApp('/');
 
       const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
-      expect((await within(sales).findAllByText('عن أمس', { exact: false }, { timeout: 5000 })).length).toBeGreaterThan(0);
+      expect(
+        (await within(sales).findAllByText('عن أمس', { exact: false }, { timeout: 5000 })).length,
+      ).toBeGreaterThan(0);
       expect(within(sales).getAllByText('50%', { exact: false }).length).toBeGreaterThan(0);
       expect(await screen.findByText('دفعة قرّب انتهاؤها')).toBeInTheDocument();
       expect(screen.getByRole('radiogroup', { name: 'الفترة' })).toBeInTheDocument();

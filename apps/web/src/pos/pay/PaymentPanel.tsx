@@ -489,7 +489,12 @@ export function PaymentPanel({
                 {history ? <CustomerHistory customerId={customer.id} /> : null}
               </div>
             ) : (
-              <Button variant="secondary" size="md" icon={<UserIcon size={20} />} onClick={() => setPicking(true)}>
+              <Button
+                variant="secondary"
+                size="md"
+                icon={<UserIcon size={20} />}
+                onClick={() => setPicking(true)}
+              >
                 {canCredit ? 'اختر الزبون (للبيع بالآجل)' : 'اختر الزبون'}
               </Button>
             )}
@@ -510,7 +515,9 @@ export function PaymentPanel({
                   }}
                   className={cn(
                     'min-h-12 rounded-small px-3 text-base font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard',
-                    split === on ? 'bg-surface text-ink shadow-e1 ring-1 ring-line' : 'text-ink-muted hover:text-ink',
+                    split === on
+                      ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
+                      : 'text-ink-muted hover:text-ink',
                   )}
                 >
                   {on ? 'قسّم الدفع' : 'دفعة واحدة'}
@@ -527,7 +534,9 @@ export function PaymentPanel({
                   return (
                     <li key={index} className="flex items-center gap-3 bg-surface py-1 ps-3 pe-1">
                       <PartIcon size={20} className="text-ink-subtle" />
-                      <span className="min-w-0 flex-1 truncate font-semibold text-ink">{part.option.label}</span>
+                      <span className="min-w-0 flex-1 truncate font-semibold text-ink">
+                        {part.option.label}
+                      </span>
                       <Money
                         minor={part.tender.amountMinor}
                         currency={part.tender.currency}
@@ -611,7 +620,11 @@ export function PaymentPanel({
                       {voucher.code}
                     </bdi>{' '}
                     · بقي عليها{' '}
-                    <Money minor={Math.max(0, voucherLeft)} currency={voucher.currency} className="font-bold" />
+                    <Money
+                      minor={Math.max(0, voucherLeft)}
+                      currency={voucher.currency}
+                      className="font-bold"
+                    />
                   </p>
                 ) : null}
                 {voucherProblem ? (
@@ -660,7 +673,9 @@ export function PaymentPanel({
 
       <footer className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-line bg-surface-total px-5 py-2 @3xl/pay:py-3">
         <div role="status" className="flex items-baseline gap-3">
-          <span className="text-base font-semibold text-ink-muted">{short ? 'ناقص من الزبون' : 'الباقي'}</span>
+          <span className="text-base font-semibold text-ink-muted">
+            {short ? 'ناقص من الزبون' : 'الباقي'}
+          </span>
           <span
             className={cn(
               'text-kpi font-bold tracking-tight @3xl/pay:text-total',

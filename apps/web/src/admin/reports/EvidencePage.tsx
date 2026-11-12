@@ -21,7 +21,15 @@ import { EVIDENCE_ACCESS } from './access';
 import { getEvidence } from './api';
 import type { SyncEvidence } from './contracts';
 import { seriesLabel } from './labels';
-import { DayField, PageHead, ReportFilters, ReportError, ReportLoading, ReportScreen, Section } from './parts';
+import {
+  DayField,
+  PageHead,
+  ReportFilters,
+  ReportError,
+  ReportLoading,
+  ReportScreen,
+  Section,
+} from './parts';
 import { useReport } from './useReport';
 
 interface SeriesRow {

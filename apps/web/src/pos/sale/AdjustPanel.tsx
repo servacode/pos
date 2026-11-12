@@ -216,7 +216,9 @@ export function AdjustPanel({
                   }}
                   className={cn(
                     'min-h-12 rounded-small px-3 text-base font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard',
-                    mode === m ? 'bg-surface text-ink shadow-e1 ring-1 ring-line' : 'text-ink-muted hover:text-ink',
+                    mode === m
+                      ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
+                      : 'text-ink-muted hover:text-ink',
                   )}
                 >
                   {MODE_LABEL[m]}

@@ -66,9 +66,7 @@ const PinPage = lazy(() => import('./staff/PinPage').then((m) => ({ default: m.P
 const DayReportPage = lazy(() =>
   import('./reports/DayReportPage').then((m) => ({ default: m.DayReportPage })),
 );
-const InvoicesPage = lazy(() =>
-  import('./sales/InvoicesPage').then((m) => ({ default: m.InvoicesPage })),
-);
+const InvoicesPage = lazy(() => import('./sales/InvoicesPage').then((m) => ({ default: m.InvoicesPage })));
 const ShiftsPage = lazy(() => import('./reports/ShiftsPage').then((m) => ({ default: m.ShiftsPage })));
 const ShiftReportPage = lazy(() =>
   import('./reports/ShiftReportPage').then((m) => ({ default: m.ShiftReportPage })),

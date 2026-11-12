@@ -10,4 +10,6 @@ regexes = [
   '''test-secret-that-is-definitely-long-enough-123''',
   '''Zr4x9Qw2Lp8Vt6Nb3Hc7Jd1Kf5Gm0Sa''',
   '''Kq8vX2mPz7Lw4Rt9''',
+  # apps/api/test/error-reporting.test.ts: {"alg":"HS256"}.{"sub":"user"}."signature", planted to prove it is scrubbed
+  '''eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl''',
 ]

@@ -174,9 +174,7 @@ describe('dark mode switch (tab 14 › الوضع الداكن)', () => {
   });
 
   it('is forced on by data-theme="dark", whatever the device says', () => {
-    expect(variant).toMatch(
-      /@media screen \{\s*&:where\(\[data-theme='dark'\], \[data-theme='dark'\] \*\)/,
-    );
+    expect(variant).toMatch(/@media screen \{\s*&:where\(\[data-theme='dark'\], \[data-theme='dark'\] \*\)/);
   });
 
   it('is for screens only: paper prints in the light colours, whatever the theme', () => {

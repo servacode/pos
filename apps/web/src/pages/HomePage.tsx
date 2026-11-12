@@ -113,12 +113,11 @@ interface DayPoint {
 
 const loadDays = (dates: readonly string[]) =>
   Promise.all(
-    dates.map(
-      (date): Promise<DayPoint> =>
-        getDayReport({ branchId: null, date }).then(
-          (report) => ({ date, total: report.totalMinor, count: report.invoiceCount }),
-          () => ({ date, total: null, count: null }),
-        ),
+    dates.map((date): Promise<DayPoint> =>
+      getDayReport({ branchId: null, date }).then(
+        (report) => ({ date, total: report.totalMinor, count: report.invoiceCount }),
+        () => ({ date, total: null, count: null }),
+      ),
     ),
   );
 
@@ -753,9 +752,7 @@ export function HomePage() {
   const month = useReport(seesSales && range === '30' ? `month:${today}` : null, () =>
     loadDays(Array.from({ length: 23 }, (_, i) => shiftDay(today, 29 - i))),
   );
-  const profit = useReport(seesSales && seesProfit ? `profit:${today}` : null, () =>
-    getProfit(today, today),
-  );
+  const profit = useReport(seesSales && seesProfit ? `profit:${today}` : null, () => getProfit(today, today));
   const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrders);
   const merch = useReport(seesStock ? 'home:low' : null, () => getMerchandise(daysAgo(30), daysAgo(0), 60));
   const expiry = useReport(seesExpiry ? 'home:expiry' : null, () => listExpiry(30));

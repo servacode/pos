@@ -37,7 +37,12 @@ export function LegalPage({ document: key }: { document: keyof typeof DOCUMENTS 
             </span>
           </p>
           <div className="print:hidden">
-            <Button variant="secondary" size="sm" icon={<PrintIcon size={16} />} onClick={() => window.print()}>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<PrintIcon size={16} />}
+              onClick={() => window.print()}
+            >
               اطبع الصفحة
             </Button>
           </div>
@@ -113,7 +118,9 @@ function Sections({ doc }: { doc: LegalDocument }) {
                   {row.map((cell, column) => (
                     <td
                       key={column}
-                      className={column === 0 ? 'px-3 py-3 font-semibold text-ink' : 'px-3 py-3 text-ink-muted'}
+                      className={
+                        column === 0 ? 'px-3 py-3 font-semibold text-ink' : 'px-3 py-3 text-ink-muted'
+                      }
                     >
                       {fill(cell)}
                     </td>

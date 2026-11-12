@@ -30,11 +30,7 @@ function Value({ name }: { name: LegalKey }) {
 export function fill(text: string): ReactNode {
   const parts = text.split(MARKER);
   return parts.map((part, index) =>
-    index % 2 === 1 ? (
-      <Value key={index} name={part as LegalKey} />
-    ) : (
-      <Fragment key={index}>{part}</Fragment>
-    ),
+    index % 2 === 1 ? <Value key={index} name={part as LegalKey} /> : <Fragment key={index}>{part}</Fragment>,
   );
 }
 

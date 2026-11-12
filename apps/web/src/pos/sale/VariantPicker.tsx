@@ -59,7 +59,11 @@ export function VariantPicker({
       }
       media={
         image ? (
-          <img src={image} alt="" className="size-14 shrink-0 rounded-control bg-surface-muted object-cover" />
+          <img
+            src={image}
+            alt=""
+            className="size-14 shrink-0 rounded-control bg-surface-muted object-cover"
+          />
         ) : (
           <span
             aria-hidden="true"
