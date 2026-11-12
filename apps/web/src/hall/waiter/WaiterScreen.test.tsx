@@ -1,7 +1,14 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { HallCommand, HallLine, HallMenuResponse, HallOrder, StaffSessionResponse } from '@serva/core';
+import type {
+  HallCommand,
+  HallLine,
+  HallLineInput,
+  HallMenuResponse,
+  HallOrder,
+  StaffSessionResponse,
+} from '@serva/core';
 import type { HallAnswer, HallApi } from '../api';
 import type { SignIn } from './WaiterScreen';
 import { WaiterScreen } from './WaiterScreen';
@@ -102,7 +109,7 @@ function fakeHall(initial: HallOrder[] = []) {
             ...o,
             lines: [
               ...o.lines,
-              ...command.lines.map((l, i) =>
+              ...command.lines.map((l: HallLineInput, i: number) =>
                 line({ id: `new-${o.lines.length + i}`, ...l, status: 'new', section: 'مشاوي' }),
               ),
             ],
