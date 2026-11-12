@@ -677,8 +677,10 @@ export type CashMovementPayload = z.output<typeof cashMovementPayloadSchema>;
 /**
  * How a return pays back. `voucher` (03 › الملابس: قسيمة الاستبدال) pays nothing out: the amount
  * stays the customer's, on a voucher whose code is the return's own number (2310 until spent).
+ * `account` (08 › مرتجع مبيعات: تخفيض دين الزبون) pays nothing out either: the amount comes off what
+ * the customer owes (credit on 1200 for the customer the return names), as a collection would.
  */
-export const REFUND_METHODS = ['cash', 'card', 'wallet', 'transfer', 'voucher'] as const;
+export const REFUND_METHODS = ['cash', 'card', 'wallet', 'transfer', 'voucher', 'account'] as const;
 export type RefundMethod = (typeof REFUND_METHODS)[number];
 
 /** A returned line's share of its sale line, in the invoice currency (packages/core › sale-return.ts) */
@@ -718,10 +720,13 @@ export const refundSchema = z
     amountMinor: positiveMinorSchema,
     reference: z.string().trim().min(1).max(64).nullable(),
   })
-  .refine((r) => r.method === 'cash' || r.method === 'voucher' || r.reference !== null, {
-    path: ['reference'],
-    message: 'a card, wallet or transfer refund needs its reference',
-  });
+  .refine(
+    (r) => r.method === 'cash' || r.method === 'voucher' || r.method === 'account' || r.reference !== null,
+    {
+      path: ['reference'],
+      message: 'a card, wallet or transfer refund needs its reference',
+    },
+  );
 export type Refund = z.output<typeof refundSchema>;
 
 /**
@@ -746,10 +751,18 @@ export const returnPayloadSchema = z
     refunds: z.array(refundSchema).max(10),
     /** The manager who allowed it, when the cashier may not refund alone */
     approval: approvalSchema.nullable(),
+    /**
+     * The customer whose account an `account` refund comes off (the sale's own customer). Optional
+     * and absent from every other return, so tills that predate it still sync.
+     */
+    customerId: uuidSchema.nullable().optional(),
   })
   .superRefine((r, ctx) => {
     const issue = (path: (string | number)[], message: string) =>
       ctx.addIssue({ code: 'custom', path, message });
+    if (r.refunds.some((f) => f.method === 'account') && !r.customerId) {
+      issue(['customerId'], 'a refund to the customer account needs the customer');
+    }
     const lineNos = new Set<number>();
     const saleLines = new Set<number>();
     r.lines.forEach((l, i) => {

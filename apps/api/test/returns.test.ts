@@ -18,6 +18,7 @@ import {
 import { createDb, withTenant } from '@serva/db';
 import type { DayReport, ShiftReport } from '@serva/core';
 import { checkIntegrity } from '../src/services/integrity';
+import { correctCreditReturns } from '../src/services/credit-return-correction';
 import { DOCUMENT_PROCESSORS } from '../src/services/processors';
 import { checkRebuild } from '../src/services/rebuild';
 import { appDb, closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
@@ -148,6 +149,167 @@ describe('a card return', () => {
       ['1140', 0, 60_000],
     ]);
     expect((await balances(day.store.tenantId)).get('1140')?.base).toBe(0);
+  });
+});
+
+describe('a return to the customer’s account', () => {
+  async function creditDay() {
+    const store = await openStore(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: { authorization: `Bearer ${store.accessToken}` },
+      payload: { name: 'أبو خالد' },
+    });
+    const customerId = created.json<{ id: string }>().id;
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const payload = sale(store, open.id, {
+      lines: [cartLine(1, 25_000, { qty: 2000 })],
+      payments: [{ method: 'credit', currency: 'SYP', amountMinor: 50_000 }],
+      customerId,
+      customerName: 'أبو خالد',
+    });
+    const sold = doc('sale', payload);
+    await push(app, store.device, [open, sold]);
+    return { store, doc, shiftId: open.id, sold, payload, customerId };
+  }
+  const balanceOf = async (tenantId: string, customerId: string) =>
+    Number(
+      (
+        await ownerDb()<{ b: string }[]>`
+          select coalesce(sum(l.debit_minor - l.credit_minor), 0)::text as b
+          from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+          where l.tenant_id = ${tenantId} and a.code = '1200' and l.party_id = ${customerId}`
+      )[0]!.b,
+    );
+
+  function returnFor(d: Awaited<ReturnType<typeof creditDay>>, qty: number, extra = {}) {
+    const payload = buildReturnPayload({
+      sale: d.payload,
+      saleId: d.sold.id,
+      saleNumber: d.sold.number!,
+      shiftId: d.shiftId,
+      cashierId: d.store.userId,
+      reason: 'تالف',
+      picks: [{ saleLineNo: 1, qty }],
+      ...extra,
+    });
+    const { hash: _hash, ...body } = d.doc('return', payload);
+    const withDeps = { ...body, deps: [d.sold.id] };
+    return { ...withDeps, hash: payloadHash(withDeps), payload };
+  }
+
+  it('comes off the customer’s debt on 1200, and never touches the drawer', async () => {
+    const d = await creditDay();
+    const ret = returnFor(d, 1000);
+    expect(ret.payload.refunds[0]!.method).toBe('account');
+    const res = await push(app, d.store.device, [ret]);
+    expect(res.results[0]).toMatchObject({ status: 'accepted', flags: [] });
+    const entry = (await postedEntries(d.store.tenantId)).find((e) => e.sourceType === 'return');
+    expect(compact(entry)).toEqual([
+      ['4100', 25_000, 0],
+      ['1200', 0, 25_000],
+    ]);
+    expect(await balanceOf(d.store.tenantId, d.customerId)).toBe(25_000);
+    expect((await balances(d.store.tenantId)).get('111001')).toBeUndefined();
+    const [stored] = await ownerDb()<{ refund_method: string }[]>`
+      select refund_method from sale_returns where tenant_id = ${d.store.tenantId}`;
+    expect(stored!.refund_method).toBe('account');
+    const report = await withTenant(appDb().db, d.store.tenantId, (tx) =>
+      checkIntegrity(tx, d.store.tenantId),
+    );
+    expect(report.checks.flatMap((c) => c.problems)).toEqual([]);
+  });
+
+  it('a return of more than the customer still owes leaves them a credit balance on 1200, as an over-payment does', async () => {
+    const d = await creditDay();
+    const pay = d.doc('receipt', {
+      customerId: d.customerId,
+      customerName: 'أبو خالد',
+      shiftId: d.shiftId,
+      cashierId: d.store.userId,
+      currency: 'SYP',
+      amountMinor: 40_000,
+      method: 'cash',
+      reference: null,
+      note: null,
+    });
+    await push(app, d.store.device, [pay, returnFor(d, 2000)]);
+    expect(await balanceOf(d.store.tenantId, d.customerId)).toBe(-40_000);
+  });
+
+  it('an older till’s cash refund of a credit sale still posts to the drawer as it came', async () => {
+    const d = await creditDay();
+    await push(app, d.store.device, [returnFor(d, 1000, { refundMethod: 'cash' })]);
+    const entry = (await postedEntries(d.store.tenantId)).find((e) => e.sourceType === 'return');
+    expect(compact(entry)).toEqual([
+      ['4100', 25_000, 0],
+      ['111001', 0, 25_000],
+    ]);
+    expect(await balanceOf(d.store.tenantId, d.customerId)).toBe(50_000);
+  });
+});
+
+describe('the opt-in correction of older returns of credit sales', () => {
+  it('lists them, posts one dated correction each only when applied, and a second run posts nothing', async () => {
+    const store = await openStore(app);
+    const customerId = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/customers',
+        headers: { authorization: `Bearer ${store.accessToken}` },
+        payload: { name: 'أبو خالد' },
+      })
+    ).json<{ id: string }>().id;
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const payload = sale(store, open.id, {
+      lines: [cartLine(1, 25_000, { qty: 2000 })],
+      payments: [{ method: 'credit', currency: 'SYP', amountMinor: 50_000 }],
+      customerId,
+      customerName: 'أبو خالد',
+    });
+    const sold = doc('sale', payload);
+    // What a till that predates the account refund sent: cash back on a credit sale
+    const old = buildReturnPayload({
+      sale: payload,
+      saleId: sold.id,
+      saleNumber: sold.number!,
+      shiftId: open.id,
+      cashierId: store.userId,
+      reason: 'تالف',
+      picks: [{ saleLineNo: 1, qty: 1000 }],
+      refundMethod: 'cash',
+    });
+    const { hash: _hash, ...body } = doc('return', old);
+    const withDeps = { ...body, deps: [sold.id] };
+    await push(app, store.device, [open, sold, { ...withDeps, hash: payloadHash(withDeps) }]);
+
+    const run = (apply: boolean) =>
+      withTenant(appDb().db, store.tenantId, (tx) =>
+        correctCreditReturns(tx, store.tenantId, { apply, today: '2026-11-12' }),
+      );
+    const dry = await run(false);
+    expect(dry).toMatchObject({ posted: 0, items: [{ amountMinor: 25_000, customerId }] });
+    expect(
+      await ownerDb()`select 1 from journal_entries where tenant_id = ${store.tenantId} and kind = 'manual'`,
+    ).toHaveLength(0);
+
+    expect((await run(true)).posted).toBe(1);
+    expect((await run(true)).items).toEqual([]);
+    const fix = (await postedEntries(store.tenantId)).find((e) => e.sourceType === 'manual');
+    expect(compact(fix)).toEqual([
+      ['111001', 25_000, 0],
+      ['1200', 0, 25_000],
+    ]);
+    const [total] = await ownerDb()<{ b: string }[]>`
+      select sum(l.debit_minor - l.credit_minor)::text as b from journal_lines l
+      join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+      where l.tenant_id = ${store.tenantId} and a.code = '1200' and l.party_id = ${customerId}`;
+    expect(total!.b).toBe('25000');
+    const report = await withTenant(appDb().db, store.tenantId, (tx) => checkIntegrity(tx, store.tenantId));
+    expect(report.checks.flatMap((c) => c.problems)).toEqual([]);
   });
 });
 

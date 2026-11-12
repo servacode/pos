@@ -1,0 +1,53 @@
+{
+  "_comment": "Written by hand from 08 and 10 (not produced by the system). Amounts in qirsh of SYP, no tax.",
+  "scenario": [
+    "Sale S1: customer X buys 3 pieces at 100.00 = 300.00, all on credit (آجل).",
+    "Return R1: 1 piece (100.00) of S1, refunded to the customer's account.",
+    "Receipt C1: X pays 50.00 in cash.",
+    "Sale S2: 100.00 paid in cash. Return R2: all of it back in cash (the unchanged cash path)."
+  ],
+  "entries": [
+    {
+      "source": "sale S1",
+      "lines": [
+        ["1200", 30000, 0],
+        ["4100", 0, 30000]
+      ]
+    },
+    {
+      "source": "return R1",
+      "lines": [
+        ["4100", 10000, 0],
+        ["1200", 0, 10000]
+      ]
+    },
+    {
+      "source": "receipt C1",
+      "lines": [
+        ["111001", 5000, 0],
+        ["1200", 0, 5000]
+      ]
+    },
+    {
+      "source": "sale S2",
+      "lines": [
+        ["111001", 10000, 0],
+        ["4100", 0, 10000]
+      ]
+    },
+    {
+      "source": "return R2",
+      "lines": [
+        ["4100", 10000, 0],
+        ["111001", 0, 10000]
+      ]
+    }
+  ],
+  "statementOfX": [
+    { "source": "sale", "debit": 30000, "credit": 0, "balance": 30000 },
+    { "source": "return", "debit": 0, "credit": 10000, "balance": 20000 },
+    { "source": "receipt", "debit": 0, "credit": 5000, "balance": 15000 }
+  ],
+  "balances": { "1200": 15000, "4100": -20000, "111001": 5000 },
+  "customerBalanceX": 15000
+}

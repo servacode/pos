@@ -17,6 +17,7 @@ import {
   CardIcon,
   CashIcon,
   cn,
+  CustomersIcon,
   EmptyState,
   formatQuantity,
   IconChip,
@@ -50,6 +51,7 @@ const REFUND_TEXT: Record<RefundMethod, string> = {
   wallet: 'إلى شام كاش',
   transfer: 'بتحويل',
   voucher: 'على قسيمة استبدال',
+  account: 'إلى حساب الزبون',
 };
 
 const REFUND_ICON: Record<RefundMethod, ReactNode> = {
@@ -58,6 +60,7 @@ const REFUND_ICON: Record<RefundMethod, ReactNode> = {
   wallet: <PhoneIcon />,
   transfer: <TransferIcon />,
   voucher: <OfferIcon />,
+  account: <CustomersIcon />,
 };
 
 /** A − or + of the quantity stepper: 48 square, like the cart's (هوية 4 › الكاشير). */
@@ -131,7 +134,7 @@ export function ReturnScreen({
     .map(([lineNo, q]) => ({ saleLineNo: Number(lineNo), qty: q }))
     .filter((p) => p.qty > 0);
   const why = reason === 'other' ? otherReason.trim() : reason;
-  const needsReference = method !== 'cash' && method !== 'voucher';
+  const needsReference = method !== 'cash' && method !== 'voucher' && method !== 'account';
 
   const draft = useMemo((): ReturnPayload | null => {
     if (!current || picks.length === 0) return null;
@@ -196,7 +199,14 @@ export function ReturnScreen({
   }
 
   const refundMethods = current
-    ? ['cash', ...current.sale.payments.map((p) => p.method), 'voucher'].filter(
+    ? [
+        'cash',
+        // What was on account (آجل) can go back to the customer's account, when the sale names them
+        ...current.sale.payments.map((p) =>
+          p.method === 'credit' && current.sale.customerId ? 'account' : p.method,
+        ),
+        'voucher',
+      ].filter(
         (m, i, all): m is RefundMethod =>
           (REFUND_METHODS as readonly string[]).includes(m) && all.indexOf(m) === i,
       )
@@ -455,7 +465,11 @@ export function ReturnScreen({
                 className="flex flex-col gap-0.5 rounded-control bg-surface-total px-4 py-3"
               >
                 <span className="text-sm font-semibold text-ink-muted">
-                  {method === 'voucher' ? 'مبلغ القسيمة' : 'المبلغ المردود'}
+                  {method === 'voucher'
+                    ? 'مبلغ القسيمة'
+                    : method === 'account'
+                      ? 'يُحسم من دين الزبون'
+                      : 'المبلغ المردود'}
                 </span>
                 <Money
                   minor={draft?.totals.totalMinor ?? 0}
@@ -472,7 +486,9 @@ export function ReturnScreen({
                   reason={
                     method === 'voucher'
                       ? 'المرتجع يُصدر قسيمة بمبلغه، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                      : 'المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                      : method === 'account'
+                        ? 'المرتجع يخفّض دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                        : 'المرتجع يُخرج مالاً، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
                   }
                   onApproved={(approval) => void record(approval)}
                   onCancel={() => setApproving(false)}

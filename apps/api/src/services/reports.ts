@@ -226,7 +226,7 @@ export async function dayReport(
       select r.refund_method as method, r.currency, sum(r.total_minor)::text as amount, count(*)::text as n
       from sale_returns r where ${returnsWhere} and r.refund_method is not null
       group by r.refund_method, r.currency
-      order by array_position(array['cash', 'card', 'wallet', 'transfer', 'voucher'], r.refund_method), r.currency`);
+      order by array_position(array['cash', 'card', 'wallet', 'transfer', 'voucher', 'account'], r.refund_method), r.currency`);
     const returnsTotal = num(returned?.total);
     const collected = await tx.execute<{
       method: ReceiptMethod;

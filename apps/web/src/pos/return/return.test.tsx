@@ -125,6 +125,41 @@ describe('«مرتجع» on the till', () => {
   });
 });
 
+describe('a return of a credit sale (08 › مرتجع مبيعات: تخفيض دين الزبون)', () => {
+  it('defaults to the customer’s account, shows no reference, and names the customer in the document', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    await user.type(within(pay).getByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
+    await user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
+    await user.click(within(pay).getByRole('button', { name: 'آجل على الحساب' }));
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    // The cash option stays; the account is the default for a sale that was on credit
+    expect(screen.getByRole('button', { name: 'نقداً من الدرج' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'إلى حساب الزبون' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'الكل' }));
+    expect(screen.queryByLabelText('رقم العملية')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(validateDocumentPayload('return', payload)).toEqual({ ok: true, checked: true });
+    expect(payload).toMatchObject({
+      customerId: ids.abuKhaled,
+      refunds: [{ method: 'account', currency: 'SYP', amountMinor: 25_000, reference: null }],
+    });
+  });
+});
+
 describe('«استبدال» on the till (03 › الملابس)', () => {
   it('returns a piece on a voucher, sells the other one with it, and takes the rest in cash', async () => {
     const local = memoryLocal();

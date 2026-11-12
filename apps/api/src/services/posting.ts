@@ -37,7 +37,8 @@ import {
  * - return: the sale's lines turned around, for what came back.
  *     Dr 4100 sales ex tax before discount, the tax account of each rate
  *     Cr 4200 discounts ex tax, and the money paid back: 1110 drawer of the shift (cash),
- *        1140 card, 1150 wallet, 1130 transfer
+ *        1140 card, 1150 wallet, 1130 transfer; or, refunded to the customer's account, 1200 for
+ *        the customer the return names (party), which takes the debt down like a collection
  * - receipt: a customer's payment. Dr 1110 drawer of the shift (cash), 1140 card, 1150 wallet,
  *   1130 transfer, 1160 cheque (party); Cr 1200 for the customer (party).
  * - voucher (03 › قسيمة الاستبدال): a return refunded as a voucher credits 2310 instead of paying
@@ -407,6 +408,13 @@ export function returnLines(ret: ReturnPayload, taxAccountOf: (taxRateId: string
         amountMinor: -r.amountMinor,
         rate: null,
         shiftId: ret.shiftId,
+      });
+    } else if (r.method === 'account') {
+      // The debt comes down by what went back; beyond the debt it is the store's credit to the
+      // customer, a credit balance on 1200 exactly as an over-payment by receipt is.
+      lines.push({
+        ...baseLine({ code: '1200' }, -r.amountMinor, r.currency, 'على حساب الزبون'),
+        party: ret.customerId ? { type: 'customer', id: ret.customerId } : null,
       });
     } else {
       lines.push({

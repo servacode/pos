@@ -36,6 +36,7 @@ const SOURCE_TEXT: Record<string, string> = {
   sale: 'فاتورة آجل',
   return: 'مرتجع',
   receipt: 'دفعة',
+  manual: 'قيد تصحيح',
 };
 
 /** A title over a table, with a line of what it holds. */

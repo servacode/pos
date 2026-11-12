@@ -112,6 +112,7 @@ const REFUND_LABEL: Record<ReturnPayload['refunds'][number]['method'], string> =
   wallet: 'رُدّ إلى شام كاش',
   transfer: 'رُدّ بتحويل',
   voucher: 'قسيمة استبدال',
+  account: 'حُسم من حساب الزبون',
 };
 
 /** The payment voucher (08 › سند قبض): who paid, how much and how, toward their account. */
