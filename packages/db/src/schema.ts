@@ -746,6 +746,10 @@ export const syncInbox = pgTable(
     foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
     index('sync_inbox_number_idx').on(t.tenantId, t.docType, t.number),
     index('sync_inbox_device_seq_idx').on(t.tenantId, t.deviceId, t.deviceSeq),
+    // What a sync push checks first: is anything held back for this store? (read-only release)
+    index('sync_inbox_quarantined_idx')
+      .on(t.tenantId, t.deviceId, t.deviceSeq)
+      .where(sql`${t.status} = 'quarantined'`),
     tenantIsolation(),
   ],
 );

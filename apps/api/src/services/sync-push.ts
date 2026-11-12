@@ -70,7 +70,7 @@ export type SyncProcessors = Partial<Record<DocType, DocumentProcessor>>;
 /** A device clock this far ahead of the server's (after its known offset) is flagged (15 › ساعة الجهاز). */
 const CLOCK_SKEW_MS = 5 * 60_000;
 
-interface Prepared {
+export interface Prepared {
   /** Set when the store is read-only: what a device made after the cut-off is quarantined, not posted */
   readOnly: Lifecycle | null;
   branchCode: string;
@@ -259,6 +259,46 @@ async function processDocument(
     })
     .returning({ receivedAt: syncInbox.receivedAt });
 
+  const done = await runProcessor(tx, device, doc, status, code, flags, now, processors);
+  const { finalStatus, finalCode, finalFlags } = done;
+  if (status === 'accepted' || status === 'pending_link') {
+    if (done.finalFlags !== flags || finalStatus !== status || done.processedAt) {
+      await tx
+        .update(syncInbox)
+        .set({ status: finalStatus, resultCode: finalCode, flags: finalFlags, processedAt: done.processedAt })
+        .where(and(eq(syncInbox.tenantId, device.tenantId), eq(syncInbox.docId, doc.id)));
+    }
+    if (finalStatus !== 'rejected') await linkWaiting(tx, device.tenantId, doc.id);
+  }
+  return {
+    id: doc.id,
+    status: finalStatus,
+    ...(finalCode ? { code: finalCode } : {}),
+    flags: finalFlags,
+    receivedAt: row!.receivedAt.toISOString(),
+  };
+}
+
+/**
+ * Runs the type's processor for an accepted or waiting document and says what the document ends
+ * up as (shared by a new document and the release of a quarantined one). Writes nothing to the
+ * inbox itself.
+ */
+export async function runProcessor(
+  tx: Transaction,
+  device: DeviceClaims,
+  doc: SyncDocument,
+  status: StoredStatus,
+  code: string | null,
+  flags: SyncFlag[],
+  now: Date,
+  processors: SyncProcessors,
+): Promise<{
+  finalStatus: StoredStatus;
+  finalCode: string | null;
+  finalFlags: SyncFlag[];
+  processedAt: Date | null;
+}> {
   let finalFlags = flags;
   let finalStatus: StoredStatus = status;
   let finalCode = code;
@@ -280,31 +320,20 @@ async function processDocument(
       // resending it, but it is flagged and left unprocessed: never counted as posted.
       finalFlags = [...flags, 'held_for_processing'];
     }
-    if (finalFlags !== flags || finalStatus !== status || processedAt) {
-      await tx
-        .update(syncInbox)
-        .set({ status: finalStatus, resultCode: finalCode, flags: finalFlags, processedAt })
-        .where(and(eq(syncInbox.tenantId, device.tenantId), eq(syncInbox.docId, doc.id)));
-    }
-    if (finalStatus !== 'rejected') await linkWaiting(tx, device.tenantId, doc.id);
   }
-  return {
-    id: doc.id,
-    status: finalStatus,
-    ...(finalCode ? { code: finalCode } : {}),
-    flags: finalFlags,
-    receivedAt: row!.receivedAt.toISOString(),
-  };
+  return { finalStatus, finalCode, finalFlags, processedAt };
 }
 
 /** The status a new document gets, from what it carries and what the inbox already holds. */
-async function classify(
+export async function classify(
   tx: Transaction,
   device: DeviceClaims,
   doc: SyncDocument,
   prepared: Prepared,
   now: Date,
-): Promise<{ status: StoredStatus; code: string | null; flags: SyncFlag[] }> {
+  /** Release of a read-only quarantine (services/subscription-release.ts): the document is already in the inbox */
+  releasing = false,
+): Promise<{ status: StoredStatus; code: string | null; flags: SyncFlag[]; deferred?: true }> {
   const rejected = (code: string) => ({ status: 'rejected' as const, code, flags: [] });
   if (!SUPPORTED_CONTRACT_VERSIONS.includes(doc.contractVersion)) return rejected('contract_unsupported');
   // A payload that breaks its type's schema (packages/core › contracts/documents.ts) is refused
@@ -326,6 +355,8 @@ async function classify(
           eq(syncInbox.docType, doc.type),
           eq(syncInbox.number, doc.number!),
           sql`${syncInbox.status} <> 'rejected'`,
+          // A document being released is in the inbox already: it does not conflict with itself
+          releasing ? sql`${syncInbox.docId} <> ${doc.id}` : undefined,
         ),
       )
       .limit(1);
@@ -355,13 +386,22 @@ async function classify(
   let status: StoredStatus = 'accepted';
   if (doc.deps.length > 0) {
     const found = await tx
-      .select({ docId: syncInbox.docId, status: syncInbox.status })
+      .select({ docId: syncInbox.docId, status: syncInbox.status, resultCode: syncInbox.resultCode })
       .from(syncInbox)
       .where(and(eq(syncInbox.tenantId, device.tenantId), inArray(syncInbox.docId, doc.deps)));
+    const stillHeld = (d: (typeof found)[number]) =>
+      d.status === 'quarantined' && d.resultCode === 'subscription_read_only';
     // The device holds back what depends on its own refused documents; one sent in the same
     // batch as the refused document is refused with it.
-    if (found.some((d) => d.status === 'rejected' || d.status === 'quarantined')) {
+    // While releasing, a dependency waiting in the same read-only quarantine is not a refusal: this
+    // document waits for it (the release goes on once that one is posted).
+    const refused = (d: (typeof found)[number]) =>
+      d.status === 'rejected' || (d.status === 'quarantined' && !(releasing && stillHeld(d)));
+    if (found.some(refused)) {
       return rejected('dependency_rejected');
+    }
+    if (releasing && found.some(stillHeld)) {
+      return { status: 'quarantined', code: 'subscription_read_only', flags: [], deferred: true };
     }
     // A return for a sale of another device that has not arrived yet: accepted, linked later.
     if (found.length < new Set(doc.deps).size) {
@@ -380,7 +420,7 @@ async function classify(
  * processed_at is left as it is: a waiting document's processor (if its type has one) already
  * ran when it arrived, and linking it posts nothing new (task M0-3).
  */
-async function linkWaiting(tx: Transaction, tenantId: string, docId: string): Promise<void> {
+export async function linkWaiting(tx: Transaction, tenantId: string, docId: string): Promise<void> {
   await tx.execute(sql`
     update sync_inbox w
     set status = 'accepted', flags = array_remove(w.flags, 'pending_link')
@@ -412,7 +452,7 @@ export async function recordAnnounced(
   }
 }
 
-async function recordReceived(tx: Transaction, device: DeviceClaims, received: Map<string, number>) {
+export async function recordReceived(tx: Transaction, device: DeviceClaims, received: Map<string, number>) {
   for (const [series, last] of received) {
     await tx
       .insert(docSequences)

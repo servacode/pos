@@ -150,7 +150,7 @@ export async function buildApp({
   await app.register(shopRoutes);
   await app.register(alterationRoutes);
   await app.register(broadcastRoutes);
-  await app.register(billingRoutes);
+  await app.register(billingRoutes(syncProcessors));
   await app.register(platformAuthRoutes);
   await app.register(promotionRoutes);
   await app.register(chequeRoutes);

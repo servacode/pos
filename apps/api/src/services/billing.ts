@@ -385,13 +385,17 @@ export async function decidePayment(
   confirm: boolean,
   reason: string | null,
   now: Date,
-): Promise<void> {
+): Promise<{ tenantId: string | null }> {
   mayDecide(claims);
+  // Whose payment it is, to release that store's held documents once it can write again
+  const pending = await platformPayments(db, 'pending');
+  const tenantId = pending.items.find((p) => p.id === paymentId)?.tenantId ?? null;
   await db
     .execute(
       sql`select platform_payment_decide(${paymentId}::uuid, ${claims.platformUserId}::uuid, ${confirm}, ${reason}, ${now.toISOString()}::timestamptz)`,
     )
     .catch(fromDb);
+  return { tenantId };
 }
 
 export async function setSubscription(

@@ -281,6 +281,13 @@
       "when": 1794432767428,
       "tag": "0039_expenses",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794445264607,
+      "tag": "0040_sync_inbox_quarantined",
+      "breakpoints": true
     }
   ]
 }
