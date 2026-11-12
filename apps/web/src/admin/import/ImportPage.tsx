@@ -55,9 +55,9 @@ type Step = 'file' | 'columns' | 'review';
 type Phase = 'idle' | 'checking' | 'checked' | 'importing' | 'done';
 
 const STEPS: { key: Step; label: string }[] = [
-  { key: 'file', label: '١. الملف' },
-  { key: 'columns', label: '٢. الأعمدة' },
-  { key: 'review', label: '٣. المراجعة والاستيراد' },
+  { key: 'file', label: '1. الملف' },
+  { key: 'columns', label: '2. الأعمدة' },
+  { key: 'review', label: '3. المراجعة والاستيراد' },
 ];
 
 const TONE: Record<ImportRowResult['status'], BadgeTone> = {

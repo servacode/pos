@@ -100,7 +100,8 @@ describe('«الموظفون»', () => {
     expect(await screen.findByRole('heading', { name: 'الموظفون', level: 1 })).toBeInTheDocument();
     const table = await screen.findByRole('table', { name: 'الموظفون' });
     expect(within(table).getByText('سامر الكاشير')).toBeInTheDocument();
-    expect(within(table).getByText('مدير الفرع')).toBeInTheDocument();
+    // The role shows in its column, and again under the name for phones (CSS picks one).
+    expect(within(table).getAllByText('مدير الفرع').length).toBeGreaterThan(0);
     expect(within(table).getByText('موقوف')).toBeInTheDocument();
     expect(within(table).getAllByText('يعمل')).toHaveLength(2);
     expect(within(table).getByText('فرع الميدان')).toBeInTheDocument();

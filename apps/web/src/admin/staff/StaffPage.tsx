@@ -201,6 +201,10 @@ export function StaffPage() {
                 </bdi>
               </span>
             ) : null}
+            {/* On a phone the role column is hidden, so the role sits under the name. */}
+            <span className="sm:hidden">
+              <Badge tone={ROLE_TONE[m.roleKey] ?? 'neutral'}>{m.roleName || '—'}</Badge>
+            </span>
           </span>
         </span>
       ),
@@ -208,6 +212,7 @@ export function StaffPage() {
     {
       key: 'role',
       header: 'الدور',
+      className: 'hidden sm:table-cell',
       cell: (m) => <Badge tone={ROLE_TONE[m.roleKey] ?? 'neutral'}>{m.roleName || '—'}</Badge>,
     },
     {
