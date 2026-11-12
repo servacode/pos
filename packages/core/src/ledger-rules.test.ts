@@ -90,6 +90,19 @@ describe('expense entry (29)', () => {
     expect(sum(lines)).toBe(0);
   });
 
+  it.each([
+    ['wallet', '1150'],
+    ['card', '1140'],
+  ] as const)('paid by %s: credits its account %s', (payFrom, code) => {
+    const lines = expenseLines(
+      { accountCode: '6101', amountMinor: 900, currency: 'SYP', payFrom, note: null },
+      'SYP',
+      null,
+    );
+    expect(lines[1]).toMatchObject({ account: { code }, baseMinor: -900 });
+    expect(sum(lines)).toBe(0);
+  });
+
   it('refuses an account outside the expense range', () => {
     const bad = expenseInput.safeParse({
       date: '2026-11-01',
@@ -142,6 +155,19 @@ describe('manual entries (29)', () => {
     ]);
     expect(manualEntryLines(input, 'SYP', () => null)).toMatchObject({ ok: false });
     expect(manualEntryLines(input, 'SYP', () => usd).ok).toBe(true);
+  });
+
+  it('refuses a foreign line too small to reach one minor unit of the base currency', () => {
+    // A dollar store: one piastre of pounds at 13,000 a dollar is far less than a cent.
+    const input = entry([
+      { accountCode: '1120', debitMinor: 1, currency: 'SYP' },
+      { accountCode: '3150', creditMinor: 1 },
+    ]);
+    const pounds = { unit: 'USD', quote: 'SYP', rate: '13000' } as const;
+    expect(manualEntryLines(input, 'USD', () => pounds)).toMatchObject({
+      ok: false,
+      field: 'lines.0.debitMinor',
+    });
   });
 
   it('property: random balanced entries balance; their reversal cancels line by line', () => {

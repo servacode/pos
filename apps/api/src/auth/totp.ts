@@ -138,7 +138,7 @@ export class SecretBox {
 
   seal(plain: Uint8Array): string {
     const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.keys[0]!, iv);
+    const cipher = createCipheriv('aes-256-gcm', this.keys[0]!, iv, { authTagLength: 16 });
     const body = Buffer.concat([cipher.update(plain), cipher.final()]);
     return [
       'v1',
@@ -153,7 +153,9 @@ export class SecretBox {
     if (version !== 'v1' || !iv || !tag || !body) return null;
     for (const key of this.keys) {
       try {
-        const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'));
+        const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'), {
+          authTagLength: 16,
+        });
         decipher.setAuthTag(Buffer.from(tag, 'base64url'));
         return Buffer.concat([decipher.update(Buffer.from(body, 'base64url')), decipher.final()]);
       } catch {

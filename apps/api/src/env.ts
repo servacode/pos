@@ -43,6 +43,9 @@ function checkSms(
     // The code and the key cross the internet: never in clear text from the cloud.
     issue('SMS_GATEWAY_URL', 'SMS_GATEWAY_URL must be https:// on the cloud server');
   }
+  // A single character class with one quantifier each side of the colon: linear, and the value
+  // is the operator's own setting, not user input.
+  // nosemgrep: ajinabraham.njsscan.dos.regex_dos.regex_dos
   if (env.SMS_GATEWAY_AUTH_HEADER && !HEADER_LINE.test(env.SMS_GATEWAY_AUTH_HEADER)) {
     issue('SMS_GATEWAY_AUTH_HEADER', 'must be one header line, "Name: value"');
   }

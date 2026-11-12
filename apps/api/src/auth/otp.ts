@@ -132,8 +132,9 @@ export function smsOtpSender(
   log: FastifyBaseLogger,
   send: typeof fetch = fetch,
 ): OtpSender {
-  const isJson = /json/i.test(config.contentType);
-  const isForm = /x-www-form-urlencoded/i.test(config.contentType);
+  const contentType = config.contentType.toLowerCase();
+  const isJson = contentType.includes('json');
+  const isForm = contentType.includes('x-www-form-urlencoded');
   const bodyEscape: Escape = isJson ? jsonEscape : isForm ? encodeURIComponent : (v) => v;
   return {
     async send({ phone, code, purpose, text }) {

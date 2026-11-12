@@ -107,3 +107,69 @@ describe('acceptsDocumentMadeAt', () => {
     expect(acceptsDocumentMadeAt(readOnly, plus(cutOff, OFFLINE_TOLERANCE_MS + 1))).toBe(false);
   });
 });
+
+describe('lifecycleOf: every status and the edges', () => {
+  it('names the state by status while the period runs', () => {
+    expect(lifecycleOf(facts({ status: 'trialing', trialEndsAt: END }), END).state).toBe('trialing');
+    expect(lifecycleOf(facts({ status: 'past_due' }), END).state).toBe('grace');
+    expect(lifecycleOf(facts({ status: 'cancelled' }), END).state).toBe('active');
+  });
+
+  it('a trial with no trial end falls back to the period end', () => {
+    const life = lifecycleOf(facts({ status: 'trialing', trialEndsAt: null }), plus(END, 1));
+    expect(life).toMatchObject({ state: 'grace', endsAt: END });
+  });
+
+  it('nothing to expire: never read-only, whatever the status', () => {
+    const none = { currentPeriodEnd: null, trialEndsAt: null };
+    for (const [status, state] of [
+      ['trialing', 'trialing'],
+      ['past_due', 'grace'],
+      ['active', 'active'],
+    ] as const) {
+      expect(lifecycleOf(facts({ ...none, status }), END)).toMatchObject({
+        state,
+        readOnly: false,
+        writeUntil: null,
+        daysLeft: null,
+      });
+    }
+  });
+
+  it('negative grace days count as none', () => {
+    expect(lifecycleOf(facts({ graceDays: -3 }), plus(END, 1))).toMatchObject({ state: 'read_only' });
+  });
+
+  it('suspended by hand: read-only at once, cut off when the row changed if that came first', () => {
+    const changed = at('2026-11-01T00:00:00.000Z');
+    const life = lifecycleOf(facts({ status: 'suspended', updatedAt: changed }), changed);
+    expect(life).toMatchObject({ state: 'read_only', readOnly: true, daysLeft: 0 });
+    expect(life.writeUntil).toEqual(changed);
+    // Without a period, the change time is the cut-off on its own.
+    const noPeriod = lifecycleOf(
+      facts({ status: 'suspended', currentPeriodEnd: null, updatedAt: changed }),
+      changed,
+    );
+    expect(noPeriod.writeUntil).toEqual(changed);
+  });
+
+  it('suspended, then a payment reported: sells for the 72 hours, then stops again', () => {
+    const reported = at('2026-11-20T00:00:00.000Z');
+    const grace = plus(reported, 72 * 3_600_000);
+    const on = lifecycleOf(facts({ status: 'suspended', graceEndsAt: grace }), reported);
+    expect(on).toMatchObject({ state: 'grace', readOnly: false, provisional: true, daysLeft: 3 });
+    expect(lifecycleOf(facts({ status: 'suspended', graceEndsAt: grace }), plus(grace, 1)).readOnly).toBe(
+      true,
+    );
+  });
+
+  it('a reported payment inside the grace days is not counted as provisional yet', () => {
+    const life = lifecycleOf(facts({ graceEndsAt: plus(END, 3 * D) }), plus(END, D));
+    expect(life).toMatchObject({ state: 'grace', provisional: false });
+  });
+
+  it('a read-only store with no cut-off takes nothing made offline', () => {
+    const life = { ...lifecycleOf(facts(), plus(END, 30 * D)), writeUntil: null };
+    expect(acceptsDocumentMadeAt(life, END)).toBe(false);
+  });
+});
