@@ -650,12 +650,10 @@ describe('«أبلغني عند التوفر»', () => {
 
 describe('the price-change history', () => {
   const history = (store: Pick<Store, 'accessToken'>, query = '') =>
-    app
-      .inject({ method: 'GET', url: `/v1/price-history${query}`, headers: as(store) })
-      .then((r) => ({
-        status: r.statusCode,
-        items: (r.json<{ items: PriceChange[] }>().items ?? []) as PriceChange[],
-      }));
+    app.inject({ method: 'GET', url: `/v1/price-history${query}`, headers: as(store) }).then((r) => ({
+      status: r.statusCode,
+      items: (r.json<{ items: PriceChange[] }>().items ?? []) as PriceChange[],
+    }));
 
   it('lists a product edit, a price list and a bulk change, with who, from-to and the source', async () => {
     const store = await openStore(app);
