@@ -157,8 +157,12 @@ describe('«الفواتير»', () => {
     });
     await screen.findByText('INV-001-002-0000420');
     fireEvent.change(screen.getByRole('searchbox', { name: /ابحث/ }), { target: { value: '0419' } });
-    await waitFor(() => expect(screen.queryByText('INV-001-002-0000420')).not.toBeInTheDocument());
-    expect(requests.some((r) => r.path.includes(`q=${q}`))).toBe(true);
+    // The list may clear while it reloads: wait until the search itself was asked and answered
+    await waitFor(() => {
+      expect(requests.some((r) => r.path.includes(`q=${q}`))).toBe(true);
+      expect(screen.getByText('INV-001-002-0000419')).toBeInTheDocument();
+      expect(screen.queryByText('INV-001-002-0000420')).not.toBeInTheDocument();
+    });
   });
 
   it('loads the next page with «اعرض المزيد» using the cursor', async () => {
