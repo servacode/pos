@@ -18,6 +18,7 @@ export const EXPIRY_SECTORS: readonly SectorKey[] = [
   'pharmacy',
   'bakery',
   'cosmetics',
+  'medical_supplies',
   'produce',
   'wholesale',
   'restaurant',
@@ -29,7 +30,12 @@ export const EXPIRY_SECTORS: readonly SectorKey[] = [
 export const HALL_SECTORS: readonly SectorKey[] = ['restaurant', 'cafe'];
 
 /** Pieces sold by their serial number or IMEI, with a warranty. */
-export const SERIAL_SECTORS: readonly SectorKey[] = ['electronics', 'building_materials', 'general'];
+export const SERIAL_SECTORS: readonly SectorKey[] = [
+  'electronics',
+  'building_materials',
+  'medical_supplies',
+  'general',
+];
 
 /** Customers who pay with cheques. */
 export const CHEQUE_SECTORS: readonly SectorKey[] = [
@@ -38,6 +44,7 @@ export const CHEQUE_SECTORS: readonly SectorKey[] = [
   'electronics',
   'supermarket',
   'pharmacy',
+  'medical_supplies',
   'general',
 ];
 

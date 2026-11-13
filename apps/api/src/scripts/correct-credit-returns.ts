@@ -13,11 +13,14 @@
  *   pnpm --filter @serva/api correct-credit-returns --store=236961                 list only
  *   pnpm --filter @serva/api correct-credit-returns --store=236961 --apply         post
  *   pnpm --filter @serva/api correct-credit-returns --store=236961 --apply --returns=<id>,<id>
+ *   ... --before=2026-11-15T00:00:00Z      only returns made at the till before this instant
  *
  * Without --apply nothing is written. A return is a candidate when it was refunded in cash, its sale
  * names a customer and was (partly) on credit; the amount is capped at what the sale put on
  * credit, less what earlier corrected returns of it already took. It is safe to run twice: a
  * return that has its correction is skipped (the entry is unique by the return it corrects).
+ * Only returns made at the till before the account method went live (ACCOUNT_REFUND_LIVE_AT in
+ * services/credit-return-correction.ts) are candidates: a cash refund made since is deliberate.
  * Review the list with the owner first: a return whose cash really did leave the drawer must NOT
  * be corrected, the books are right for it.
  *
@@ -35,14 +38,16 @@ const option = (name: string) => args.find((a) => a.startsWith(`--${name}=`))?.s
 const apply = args.includes('--apply');
 const storeCode = option('store');
 const only = option('returns')?.split(',').filter(Boolean);
+const beforeText = option('before');
+const before = beforeText ? new Date(beforeText) : undefined;
 
 const envFile = [resolve('.env'), resolve('../../.env')].find((f) => existsSync(f));
 if (envFile) process.loadEnvFile(envFile);
 const appUrl = process.env.DATABASE_URL;
 const ownerUrl = process.env.DATABASE_MIGRATION_URL;
-if (!storeCode || !appUrl || !ownerUrl) {
+if (!storeCode || !appUrl || !ownerUrl || (before && Number.isNaN(before.getTime()))) {
   console.error(
-    'Usage: correct-credit-returns --store=<code> [--apply] [--returns=<id>,<id>] (DATABASE_URL and DATABASE_MIGRATION_URL set)',
+    'Usage: correct-credit-returns --store=<code> [--apply] [--returns=<id>,<id>] [--before=<ISO time>] (DATABASE_URL and DATABASE_MIGRATION_URL set)',
   );
   process.exit(2);
 }
@@ -57,7 +62,7 @@ try {
   if (!store) throw new Error(`No store has the code ${storeCode}.`);
   const today = new Date().toISOString().slice(0, 10);
   const { items, posted } = await withTenant(app.db, store.id, (tx) =>
-    correctCreditReturns(tx, store.id, { apply, today, only }),
+    correctCreditReturns(tx, store.id, { apply, today, only, before }),
   );
   console.log(`المتجر ${store.name}: ${items.length} مرتجعاً يحتاج تصحيحاً.`);
   for (const i of items) {

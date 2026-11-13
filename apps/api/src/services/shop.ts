@@ -79,11 +79,12 @@ async function storeOf(tx: Transaction, tenantId: string) {
     note: string | null;
     show_out_of_stock: boolean;
     order_mode: 'whatsapp' | 'shop';
+    show_prices: boolean;
     delivery_fee_minor: string;
     delivery_areas: { name: string; feeMinor: number }[];
   }>(sql`
     select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
-           o.show_out_of_stock, o.order_mode, o.delivery_fee_minor::text as delivery_fee_minor,
+           o.show_out_of_stock, o.order_mode, o.show_prices, o.delivery_fee_minor::text as delivery_fee_minor,
            o.delivery_areas
     from online_stores o
     join tenants t on t.id = o.tenant_id
@@ -225,6 +226,7 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
       const store = await storeOf(tx, tenantId);
       const base = store.base as CurrencyCode;
       const priceOf = await pricerOf(tx, base);
+      const show = store.show_prices;
       const rows = await tx.execute<{
         id: string;
         name: string;
@@ -258,20 +260,22 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
             categoryId: r.category_id,
             imageUrl: r.upload_id ? imageUrl(tenantId, r.upload_id, true) : null,
             currency: base,
-            priceMinor: price,
-            maxPriceMinor: price,
-            wasPriceMinor: priced.wasPriceMinor,
-            offer: priced.offer,
+            priceMinor: show ? price : null,
+            maxPriceMinor: show ? price : null,
+            wasPriceMinor: show ? priced.wasPriceMinor : null,
+            offer: show ? priced.offer : null,
             available: r.available,
           });
         } else {
           // The card shows the cheapest piece, and what that one was before
-          if (price < card.priceMinor) {
-            card.priceMinor = price;
-            card.wasPriceMinor = priced.wasPriceMinor;
+          if (show && card.priceMinor !== null && card.maxPriceMinor !== null) {
+            if (price < card.priceMinor) {
+              card.priceMinor = price;
+              card.wasPriceMinor = priced.wasPriceMinor;
+            }
+            card.maxPriceMinor = Math.max(card.maxPriceMinor, price);
+            card.offer ??= priced.offer;
           }
-          card.maxPriceMinor = Math.max(card.maxPriceMinor, price);
-          card.offer ??= priced.offer;
           card.available ||= r.available;
         }
       }
@@ -299,8 +303,11 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           pickup: store.pickup,
           note: store.note,
           orderMode: store.order_mode,
-          deliveryFeeMinor: Number(store.delivery_fee_minor),
-          deliveryAreas: store.delivery_areas,
+          showPrices: show,
+          deliveryFeeMinor: show ? Number(store.delivery_fee_minor) : 0,
+          deliveryAreas: show
+            ? store.delivery_areas
+            : store.delivery_areas.map((a) => ({ name: a.name, feeMinor: 0 })),
         },
         categories: categories
           .filter((c) => shown.has(c.id))
@@ -340,14 +347,14 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
       const variants = rows.flatMap((r) => {
         const priced = priceOf({ productId, categoryId: r.category_id, ...r });
         if (priced === null || (!r.available && !store.show_out_of_stock)) return [];
-        offer ??= priced.offer;
+        if (store.show_prices) offer ??= priced.offer;
         return [
           {
             id: r.id,
             label: r.label,
             attributes: r.attributes ?? [],
-            priceMinor: priced.priceMinor,
-            wasPriceMinor: priced.wasPriceMinor,
+            priceMinor: store.show_prices ? priced.priceMinor : null,
+            wasPriceMinor: store.show_prices ? priced.wasPriceMinor : null,
             available: r.available,
           },
         ];
@@ -369,6 +376,7 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
         name: rows[0]!.product_name,
         categoryId: rows[0]!.category_id,
         currency: base,
+        showPrices: store.show_prices,
         images: images.map((i) => ({
           url: imageUrl(tenantId, i.upload_id),
           thumbUrl: imageUrl(tenantId, i.upload_id, true),
@@ -468,7 +476,24 @@ export function orderMessage(order: {
   deliveryFeeMinor: number;
   deliveryArea: string | null;
   lines: OnlineOrderLine[];
+  /** False: the store hides its prices, so the message is an inquiry with no price in it */
+  showPrices?: boolean;
 }): string {
+  if (order.showPrices === false) {
+    return [
+      `طلب جديد من المتجر: ${order.number}`,
+      `الاسم: ${order.customerName}`,
+      `الجوال: ${order.phone}`,
+      '',
+      ...order.lines.map((l) => `• ${l.name}${l.label ? ` (${l.label})` : ''} × ${l.qty}`),
+      '',
+      'أرجو إعلامي بالسعر.',
+      order.fulfilment === 'delivery'
+        ? `التوصيل إلى: ${order.address ?? '—'}${order.deliveryArea ? ` (${order.deliveryArea})` : ''}`
+        : 'الاستلام من المحل',
+      ...(order.note ? [`ملاحظة: ${order.note}`] : []),
+    ].join('\n');
+  }
   return [
     `طلب جديد من المتجر: ${order.number}`,
     `الاسم: ${order.customerName}`,
@@ -605,13 +630,15 @@ export function placeShopOrder(
         .insert(onlineOrders)
         .values({ tenantId, seq, source: mode, ...order })
         .returning({ token: onlineOrders.trackToken });
-      const message = orderMessage(order);
+      const message = orderMessage({ ...order, showPrices: store.show_prices });
       return {
         trackPath: `/shop/${store.slug}/o/${made!.token}`,
         number,
         currency: base,
-        totalMinor,
-        deliveryFeeMinor,
+        showPrices: store.show_prices,
+        // The order keeps its server-side prices for the store; the customer is told none of them
+        totalMinor: store.show_prices ? totalMinor : null,
+        deliveryFeeMinor: store.show_prices ? deliveryFeeMinor : null,
         message,
         whatsappUrl:
           mode === 'whatsapp' && store.whatsapp
@@ -682,14 +709,25 @@ export function shopOrderTrack(db: Database, slug: string, token: string): Promi
         .from(onlineOrders)
         .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)));
       if (!row) throw gone();
+      const [shop] = await tx
+        .select({ show: onlineStores.showPrices })
+        .from(onlineStores)
+        .where(eq(onlineStores.tenantId, tenantId));
+      const show = shop?.show ?? true;
       return {
         number: row.number,
         status: row.status as ShopOrderTrack['status'],
         fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
         currency: row.currency as CurrencyCode,
-        totalMinor: row.totalMinor,
-        deliveryFeeMinor: row.deliveryFeeMinor,
-        lines: row.lines.map((l) => ({ name: l.name, label: l.label, qty: l.qty, totalMinor: l.totalMinor })),
+        showPrices: show,
+        totalMinor: show ? row.totalMinor : null,
+        deliveryFeeMinor: show ? row.deliveryFeeMinor : null,
+        lines: row.lines.map((l) => ({
+          name: l.name,
+          label: l.label,
+          qty: l.qty,
+          totalMinor: show ? l.totalMinor : null,
+        })),
         createdAt: row.createdAt.toISOString(),
       };
     }),
@@ -708,6 +746,7 @@ const DEFAULTS = (slug: string): OnlineStoreSettings => ({
   note: null,
   showOutOfStock: false,
   orderMode: 'whatsapp',
+  showPrices: true,
   deliveryFeeMinor: 0,
   deliveryAreas: [],
 });
@@ -732,6 +771,7 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       note: row.note,
       showOutOfStock: row.showOutOfStock,
       orderMode: row.orderMode as OnlineStoreSettings['orderMode'],
+      showPrices: row.showPrices,
       deliveryFeeMinor: row.deliveryFeeMinor,
       deliveryAreas: row.deliveryAreas,
     };
@@ -760,6 +800,7 @@ export async function saveOnlineStore(
         note: input.note || null,
         showOutOfStock: input.showOutOfStock,
         orderMode: input.orderMode,
+        showPrices: input.showPrices,
         deliveryFeeMinor: input.deliveryFeeMinor,
         deliveryAreas: input.deliveryAreas,
       };

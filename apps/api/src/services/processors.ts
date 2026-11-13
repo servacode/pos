@@ -332,6 +332,20 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     if (ret.lines.some((l) => l.qty > (left.get(l.saleLineNo) ?? 0))) flags.push('over_return');
   }
 
+  const [original] = await tx
+    .select({ payload: invoices.payload, customerId: invoices.customerId })
+    .from(invoices)
+    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, ret.saleId)));
+  // A refund «على حساب الزبون» can only credit the customer of the sale it returns. A till that
+  // names another customer (or the sale had none) is accepted, flagged for the owner, and posted
+  // to the sale's own customer: the money stays with the account that owed it, and no one else's
+  // account is credited. A sale not yet arrived cannot be checked; it is posted as it came.
+  let postedAs = ret;
+  if (original && ret.refunds.some((r) => r.method === 'account') && ret.customerId !== original.customerId) {
+    flags.push('refund_customer_mismatch');
+    postedAs = { ...ret, customerId: original.customerId };
+  }
+
   const [inserted] = await tx
     .insert(saleReturns)
     .values({
@@ -382,10 +396,6 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     })),
   );
   await moveStock(tx, device, doc, 'return', ret.lines, 1);
-  const [original] = await tx
-    .select({ payload: invoices.payload })
-    .from(invoices)
-    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, ret.saleId)));
   await returnSerials(
     tx,
     ret.saleId,
@@ -414,7 +424,7 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
       number: doc.number!,
       businessDate: doc.businessDate,
     },
-    ret,
+    postedAs,
   );
   return { flags };
 }

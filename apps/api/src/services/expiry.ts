@@ -37,6 +37,7 @@ const onShelf = (variantFilter = sql`true`) => sql`
  * Writes the earliest expiry still on the shelf onto these items (null when there is none), and
  * the batches that are on the shelf with their dates (no quantities, so a sale that leaves the
  * set as it was changes nothing the tills pull), which the till takes a sale's batch from.
+ * One pass over the shelf per item gives both (a lateral join), not one for each.
  */
 export async function refreshExpiry(tx: Transaction, variantIds: readonly string[]): Promise<void> {
   if (variantIds.length === 0) return;
@@ -45,12 +46,15 @@ export async function refreshExpiry(tx: Transaction, variantIds: readonly string
     update variants v set nearest_expiry = x.nearest, shelf_batches = x.batches
     from (
       select v2.id,
-             (select min(o.expiry_date)::date from (${onShelf(sql`l.variant_id = v2.id`)}) o
-              where o.left_qty > 0) as nearest,
-             (select jsonb_agg(jsonb_build_object('batchNo', o.batch_no, 'expiry', o.expiry_date)
-                                 order by o.expiry_date, o.batch_no)
-              from (${onShelf(sql`l.variant_id = v2.id`)}) o where o.left_qty > 0) as batches
-      from variants v2 where v2.id = any(${ids})
+             min(o.expiry_date)::date as nearest,
+             jsonb_agg(jsonb_build_object('batchNo', o.batch_no, 'expiry', o.expiry_date)
+                         order by o.expiry_date, o.batch_no) filter (where o.expiry_date is not null) as batches
+      from variants v2
+      left join lateral (
+        select s.* from (${onShelf(sql`l.variant_id = v2.id`)}) s where s.left_qty > 0
+      ) o on true
+      where v2.id = any(${ids})
+      group by v2.id
     ) x
     where v.id = x.id
       and (v.nearest_expiry is distinct from x.nearest or v.shelf_batches is distinct from x.batches)`);

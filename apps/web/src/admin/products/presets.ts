@@ -60,6 +60,16 @@ export const SIZE_KINDS: readonly OptionKind[] = [
       { label: 'أطفال', values: range(2, 16).map((n) => years(Number(n))) },
     ],
   },
+  {
+    name: 'الحجم',
+    pick: 'حجم (عطور)',
+    groups: [
+      {
+        label: 'بالمل',
+        values: ['10 مل', '30 مل', '50 مل', '75 مل', '100 مل', '125 مل', '150 مل', '200 مل'],
+      },
+    ],
+  },
 ];
 
 export const COLOURS: PresetGroup = {

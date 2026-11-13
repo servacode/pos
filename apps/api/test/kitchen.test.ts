@@ -228,6 +228,22 @@ describe('the waiter’s order', () => {
     );
   });
 
+  it('refuses an archived product or variant with a clear message, like the menu leaves them out', async () => {
+    const order = await openTable('1');
+    const add = (item: { productId: string; variantId: string }) =>
+      hall(waiterDevice, { type: 'add', userId: waiterId, orderId: order.id, lines: [lineOf(item, 'قهوة')] });
+    await ownerDb()`update variants set archived_at = now() where id = ${menu.coffee.variantId}`;
+    const variant = await add(menu.coffee);
+    expect(variant.statusCode).toBe(400);
+    expect(variant.json().error.fields.lines).toMatch(/مؤرشف/);
+    await ownerDb()`update variants set archived_at = null where id = ${menu.coffee.variantId}`;
+    await ownerDb()`update products set archived_at = now() where id = ${menu.kebab.productId}`;
+    const product = await add(menu.kebab);
+    expect(product.statusCode).toBe(400);
+    expect(product.json().error.fields.lines).toMatch(/مؤرشف/);
+    expect((await add(menu.coffee)).statusCode).toBe(200);
+  });
+
   it('two screens adding to one table keep both sets of lines', async () => {
     const order = await openTable('2');
     const [one, two] = await Promise.all([

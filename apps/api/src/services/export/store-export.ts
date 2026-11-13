@@ -71,14 +71,16 @@ const SOURCES: Record<ExportEntity, { table: string; omit?: string[] }> = {
 };
 
 const TABLE_NAME = /^[a-z_]+$/;
-const FORMULA_START = /^(?:[=@\t\r]|[+-](?![\d.]))/;
+const FORMULA_START = /^[=+\-@\t\r]/;
+/** A cell that is nothing but a number is left alone; `-1+HYPERLINK(...)` is not one. */
+const PLAIN_NUMBER = /^[+-]?\d+(\.\d+)?$/;
 
 /** One CSV field: quoted, a spreadsheet formula defanged with an apostrophe, JSON for objects. */
 export function csvCell(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   const text = typeof value === 'string' ? value : JSON.stringify(value);
-  const safe = FORMULA_START.test(text) ? `'${text}` : text;
+  const safe = FORMULA_START.test(text) && !PLAIN_NUMBER.test(text) ? `'${text}` : text;
   return `"${safe.replaceAll('"', '""')}"`;
 }
 

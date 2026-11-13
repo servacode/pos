@@ -7,6 +7,8 @@ describe('sectors', () => {
     expect(new Set(SECTOR_KEYS).size).toBe(SECTORS.length);
     expect(SECTOR_KEYS).toContain('general');
     expect(sectorLabel('cafe')).toBe('مقهى وكافتيريا');
+    expect(sectorLabel('clothing')).toBe('ألبسة وأحذية وإكسسوارات');
+    expect(sectorLabel('medical_supplies')).toBe('أدوات وتجهيزات طبية');
   });
 
   it('falls back to the key for an unknown sector', () => {

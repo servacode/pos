@@ -232,6 +232,25 @@ describe('PATCH /v1/staff/:id and the PIN', () => {
     expect((await login(STAFF_PASSWORD)).statusCode).toBe(401);
     expect((await login('another-pass-9')).statusCode).toBe(200);
   });
+
+  it('a new admin password ends the person’s web sessions at once', async () => {
+    const member = (
+      await create(s.accessToken, { phone: '0977777777', password: STAFF_PASSWORD })
+    ).json<StaffMember>();
+    const signIn = (password: string) =>
+      app.inject({ method: 'POST', url: '/v1/auth/login', payload: { phone: '0977777777', password } });
+    const token = (await signIn(STAFF_PASSWORD)).json<{ accessToken: string }>().accessToken;
+    expect((await call(token, 'GET', '/v1/me')).statusCode).toBe(200);
+    await call(s.accessToken, 'PATCH', `/v1/staff/${member.id}`, { fullName: 'اسم جديد' });
+    expect((await call(token, 'GET', '/v1/me')).statusCode).toBe(200);
+    expect(
+      (await call(s.accessToken, 'PATCH', `/v1/staff/${member.id}`, { password: 'another-pass-9' }))
+        .statusCode,
+    ).toBe(200);
+    expect((await call(token, 'GET', '/v1/me')).statusCode).toBe(401);
+    const live = await ownerDb()`select 1 from sessions where user_id = ${member.id} and revoked_at is null`;
+    expect(live).toHaveLength(0);
+  });
 });
 
 describe('owner protection and escalation', () => {

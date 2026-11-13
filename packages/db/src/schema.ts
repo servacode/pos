@@ -2510,6 +2510,8 @@ export const onlineStores = pgTable(
     showOutOfStock: boolean('show_out_of_stock').notNull().default(false),
     /** whatsapp: «اطلب عبر واتساب»; shop: the order is placed in the shop, the phone confirmed by a code */
     orderMode: text('order_mode').notNull().default('whatsapp'),
+    /** «اعرض الأسعار في المتجر الإلكتروني»: off, the public shop shows no price and the order is an inquiry */
+    showPrices: boolean('show_prices').notNull().default(true),
     /** «أجرة التوصيل»: flat, or per area when areas are set; for the courier, not a sale */
     deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
     deliveryAreas: jsonb('delivery_areas')

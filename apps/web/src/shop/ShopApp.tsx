@@ -190,6 +190,11 @@ function linkButton(variant: keyof typeof LINK_BUTTON, density: Density) {
 }
 
 /** A piece without a picture: a soft tile with the goods' sign, never an empty box. */
+/** Where the price would be, when the store keeps its prices to itself */
+function PriceOnRequest({ className }: { className?: string }) {
+  return <span className={cn('font-semibold text-ink-muted', className)}>السعر عند الطلب</span>;
+}
+
 function NoPicture({ large = false }: { large?: boolean }) {
   return (
     <span className="grid size-full place-items-center bg-brand-soft text-brand">
@@ -330,19 +335,23 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                 <span className="flex flex-1 flex-col gap-2 p-3 sm:p-4">
                   <span className="line-clamp-2 text-[0.9375rem] font-semibold text-ink">{p.name}</span>
                   <span className="mt-auto flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-[0.9375rem] text-ink">
-                      {p.maxPriceMinor > p.priceMinor ? (
-                        <span className="text-sm text-ink-muted">من </span>
-                      ) : (
-                        ''
-                      )}
-                      <Money
-                        minor={p.priceMinor}
-                        currency={p.currency}
-                        className="font-bold"
-                        unitClassName="text-xs font-semibold text-ink-subtle"
-                      />
-                    </span>
+                    {p.priceMinor === null ? (
+                      <PriceOnRequest className="text-sm" />
+                    ) : (
+                      <span className="text-[0.9375rem] text-ink">
+                        {p.maxPriceMinor !== null && p.maxPriceMinor > p.priceMinor ? (
+                          <span className="text-sm text-ink-muted">من </span>
+                        ) : (
+                          ''
+                        )}
+                        <Money
+                          minor={p.priceMinor}
+                          currency={p.currency}
+                          className="font-bold"
+                          unitClassName="text-xs font-semibold text-ink-subtle"
+                        />
+                      </span>
+                    )}
                     {p.wasPriceMinor ? (
                       <s aria-label="السعر قبل التنزيل" className="text-xs text-ink-subtle">
                         <Money minor={p.wasPriceMinor} currency={p.currency} />
@@ -419,7 +428,9 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
   const images = product.images;
   const matching = images.findIndex((i) => i.optionValue && Object.values(chosen).includes(i.optionValue));
   const main = images[matching >= 0 && shown === 0 ? matching : shown] ?? images[0];
-  const cheapest = product.variants.reduce((a, b) => (b.priceMinor < a.priceMinor ? b : a));
+  const cheapest = product.variants.reduce((a, b) =>
+    b.priceMinor !== null && (a.priceMinor === null || b.priceMinor < a.priceMinor) ? b : a,
+  );
   const price = variant?.priceMinor ?? cheapest.priceMinor;
   const was = (variant ?? cheapest).wasPriceMinor;
 
@@ -473,12 +484,16 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
             {product.offer ? <OfferTag className="w-fit max-w-full">{product.offer}</OfferTag> : null}
             <h1 className="text-2xl font-bold text-ink sm:text-3xl">{product.name}</h1>
             <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <Money
-                minor={price}
-                currency={product.currency}
-                className="text-2xl font-bold text-ink"
-                unitClassName="text-base font-semibold text-ink-subtle"
-              />
+              {price === null ? (
+                <PriceOnRequest className="text-xl" />
+              ) : (
+                <Money
+                  minor={price}
+                  currency={product.currency}
+                  className="text-2xl font-bold text-ink"
+                  unitClassName="text-base font-semibold text-ink-subtle"
+                />
+              )}
               {was ? (
                 <s aria-label="السعر قبل التنزيل" className="text-base text-ink-subtle">
                   <Money minor={was} currency={product.currency} />
@@ -598,7 +613,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                   name: product.name,
                   label: variant.label,
                   imageUrl: product.images[0]?.thumbUrl ?? null,
-                  priceMinor: variant.priceMinor,
+                  priceMinor: variant.priceMinor ?? 0,
                   qty,
                 });
                 setAdded(true);
@@ -637,8 +652,9 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [area, setArea] = useState('');
   // The courier's fee: the picked area's when the store charges by area, else the flat one
   const byArea = store.deliveryAreas.length > 0;
+  const showPrices = store.showPrices;
   const fee =
-    fulfilment !== 'delivery'
+    !showPrices || fulfilment !== 'delivery'
       ? 0
       : byArea
         ? (store.deliveryAreas.find((a) => a.name === area)?.feeMinor ?? 0)
@@ -678,13 +694,22 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               </bdi>
             </dd>
           </div>
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
-            <dt className="text-ink-muted">المجموع</dt>
-            <dd>
-              <Money minor={placed.totalMinor} currency={placed.currency} className="font-bold" />
-            </dd>
-          </div>
-          {placed.deliveryFeeMinor > 0 ? (
+          {placed.totalMinor !== null ? (
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <dt className="text-ink-muted">المجموع</dt>
+              <dd>
+                <Money minor={placed.totalMinor} currency={placed.currency} className="font-bold" />
+              </dd>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <dt className="text-ink-muted">السعر</dt>
+              <dd>
+                <PriceOnRequest />
+              </dd>
+            </div>
+          )}
+          {placed.deliveryFeeMinor !== null && placed.deliveryFeeMinor > 0 ? (
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <dt className="text-ink-muted">أجرة التوصيل (للمندوب)</dt>
               <dd>
@@ -811,11 +836,15 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
                   {line.label ? <span className="text-sm text-ink-muted">{line.label}</span> : null}
                 </span>
                 <span className="flex items-center justify-between gap-3">
-                  <Money
-                    minor={line.priceMinor * line.qty}
-                    currency={store.currency}
-                    className="text-sm font-bold"
-                  />
+                  {showPrices ? (
+                    <Money
+                      minor={line.priceMinor * line.qty}
+                      currency={store.currency}
+                      className="text-sm font-bold"
+                    />
+                  ) : (
+                    <PriceOnRequest className="text-sm" />
+                  )}
                   <span
                     className="flex shrink-0 items-center gap-1"
                     role="group"
@@ -846,11 +875,15 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
         <div className="flex flex-col gap-2 rounded-b-card border-t border-line bg-surface-total px-5 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-3">
             <span className={fee > 0 ? 'text-ink-muted' : 'font-semibold'}>المجموع</span>
-            <Money
-              minor={subtotal}
-              currency={store.currency}
-              className={fee > 0 ? 'font-semibold' : 'text-xl font-bold'}
-            />
+            {showPrices ? (
+              <Money
+                minor={subtotal}
+                currency={store.currency}
+                className={fee > 0 ? 'font-semibold' : 'text-xl font-bold'}
+              />
+            ) : (
+              <PriceOnRequest />
+            )}
           </div>
           {fee > 0 ? (
             <>
@@ -1116,16 +1149,22 @@ function TrackView({ slug, base }: { slug: string; base: string }) {
               {l.label ? <span className="text-ink-muted"> · {l.label}</span> : null}
               <span className="num text-ink-muted"> × {l.qty}</span>
             </span>
-            <Money minor={l.totalMinor} currency={order.currency} className="shrink-0" />
+            {l.totalMinor !== null ? (
+              <Money minor={l.totalMinor} currency={order.currency} className="shrink-0" />
+            ) : null}
           </li>
         ))}
       </ul>
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
           <span className="font-semibold">المجموع</span>
-          <Money minor={order.totalMinor} currency={order.currency} className="text-lg font-bold" />
+          {order.totalMinor !== null ? (
+            <Money minor={order.totalMinor} currency={order.currency} className="text-lg font-bold" />
+          ) : (
+            <PriceOnRequest />
+          )}
         </div>
-        {order.deliveryFeeMinor > 0 ? (
+        {order.deliveryFeeMinor !== null && order.deliveryFeeMinor > 0 ? (
           <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
             <span>أجرة التوصيل (للمندوب)</span>
             <Money minor={order.deliveryFeeMinor} currency={order.currency} />

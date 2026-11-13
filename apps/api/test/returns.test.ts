@@ -286,10 +286,32 @@ describe('the opt-in correction of older returns of credit sales', () => {
     const withDeps = { ...body, deps: [sold.id] };
     await push(app, store.device, [open, sold, { ...withDeps, hash: payloadHash(withDeps) }]);
 
-    const run = (apply: boolean) =>
+    // A deliberate cash refund made after the account method existed is not a mistake
+    const later = buildReturnPayload({
+      sale: payload,
+      saleId: sold.id,
+      saleNumber: sold.number!,
+      shiftId: open.id,
+      cashierId: store.userId,
+      reason: 'الزبون أخذها نقداً',
+      picks: [{ saleLineNo: 1, qty: 1000 }],
+      returned: [{ saleLineNo: 1, qty: 1000, ...old.lines[0]!.refund }],
+      refundMethod: 'cash',
+    });
+    const { hash: _h2, ...laterBody } = doc('return', later);
+    const laterDoc = {
+      ...laterBody,
+      deviceTime: '2026-11-13T08:59:00.000Z',
+      businessDate: '2026-11-13',
+      deps: [sold.id],
+    };
+    await push(app, store.device, [{ ...laterDoc, hash: payloadHash(laterDoc) }]);
+
+    const run = (apply: boolean, before?: Date) =>
       withTenant(appDb().db, store.tenantId, (tx) =>
-        correctCreditReturns(tx, store.tenantId, { apply, today: '2026-11-12' }),
+        correctCreditReturns(tx, store.tenantId, { apply, today: '2026-11-12', before }),
       );
+    expect((await run(false, new Date('2026-11-20T00:00:00Z'))).items).toHaveLength(2);
     const dry = await run(false);
     expect(dry).toMatchObject({ posted: 0, items: [{ amountMinor: 25_000, customerId }] });
     expect(
@@ -397,5 +419,79 @@ describe('the books after returns', () => {
       refundsMinor: 60_000,
       expectedMinor: 100_000,
     });
+  });
+});
+
+describe('a refund to the customer account', () => {
+  const customerOf = async (token: string, name: string) =>
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/customers',
+        headers: { authorization: `Bearer ${token}` },
+        payload: { name },
+      })
+    ).json<{ id: string }>();
+
+  /** A credit sale to `owner` (or none), then an account refund whose payload names `named`. */
+  async function accountRefund(withCustomer: boolean, named: 'same' | 'other') {
+    const store = await openStore(app);
+    const mine = await customerOf(store.accessToken, 'ريم');
+    const other = await customerOf(store.accessToken, 'سعد');
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const payload = sale(store, open.id, {
+      lines: [cartLine(1, 10_000, { qty: 3000 })],
+      payments: withCustomer
+        ? [{ method: 'credit', currency: 'SYP', amountMinor: 30_000 }]
+        : [{ method: 'cash', currency: 'SYP', amountMinor: 30_000 }],
+      ...(withCustomer ? { customerId: mine.id, customerName: 'ريم' } : {}),
+    });
+    const sold = doc('sale', payload);
+    const built = buildReturnPayload({
+      sale: payload,
+      saleId: sold.id,
+      saleNumber: sold.number!,
+      shiftId: open.id,
+      cashierId: store.userId,
+      reason: 'تالف',
+      picks: [{ saleLineNo: 1, qty: 1000 }],
+      ...(withCustomer ? { refundMethod: 'account' as const } : {}),
+    });
+    const customerId = named === 'same' ? mine.id : other.id;
+    const forged = {
+      ...built,
+      customerId,
+      refunds: [{ method: 'account' as const, currency: 'SYP', amountMinor: 10_000, reference: null }],
+    };
+    const { hash: _hash, ...body } = doc('return', forged);
+    const withDeps = { ...body, deps: [sold.id] };
+    const ret = { ...withDeps, hash: payloadHash(withDeps) };
+    const res = await push(app, store.device, [open, sold, ret]);
+    const parties = await ownerDb()<{ party_id: string | null }[]>`
+      select l.party_id from journal_lines l join journal_entries e
+        on e.tenant_id = l.tenant_id and e.id = l.entry_id
+      join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+      where e.tenant_id = ${store.tenantId} and e.source_id = ${ret.id} and a.code = '1200'`;
+    return { res, parties: parties.map((p) => p.party_id), mine: mine.id, other: other.id };
+  }
+
+  it('credits the sale’s customer without a flag', async () => {
+    const r = await accountRefund(true, 'same');
+    expect(r.res.results[2]).toMatchObject({ status: 'accepted', flags: [] });
+    expect(r.parties).toEqual([r.mine]);
+  });
+
+  it('naming another customer is accepted, flagged, and still credits the sale’s customer', async () => {
+    const r = await accountRefund(true, 'other');
+    expect(r.res.results[2]).toMatchObject({ status: 'accepted' });
+    expect(r.res.results[2]!.flags).toEqual(['refund_customer_mismatch']);
+    expect(r.parties).toEqual([r.mine]);
+  });
+
+  it('on a sale with no customer is flagged and credits no named customer', async () => {
+    const r = await accountRefund(false, 'other');
+    expect(r.res.results[2]!.flags).toEqual(['refund_customer_mismatch']);
+    expect(r.parties).toEqual([null]);
   });
 });

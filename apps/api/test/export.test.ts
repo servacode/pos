@@ -113,6 +113,11 @@ describe('the archive writer', () => {
     expect(csvCell('-5')).toBe('"-5"');
     expect(csvCell('+963912345678')).toBe('"+963912345678"');
     expect(csvCell('-cmd')).toBe(`"'-cmd"`);
+    expect(csvCell('-1.5')).toBe('"-1.5"');
+    expect(csvCell('-1+HYPERLINK("x")')).toBe(`"'-1+HYPERLINK(""x"")"`);
+    expect(csvCell('+1+cmd|calc')).toBe(`"'+1+cmd|calc"`);
+    expect(csvCell('+963 912')).toBe(`"'+963 912"`);
+    expect(csvCell('-.5')).toBe(`"'-.5"`);
     expect(csvCell({ a: 1 })).toBe('"{""a"":1}"');
   });
 });

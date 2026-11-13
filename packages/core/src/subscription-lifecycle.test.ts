@@ -3,6 +3,9 @@ import {
   acceptsDocumentMadeAt,
   lifecycleOf,
   OFFLINE_TOLERANCE_MS,
+  PROVISIONAL_MS,
+  provisionalWindows,
+  type PaymentFact,
   type SubscriptionFacts,
 } from './subscription-lifecycle';
 
@@ -105,6 +108,61 @@ describe('acceptsDocumentMadeAt', () => {
     expect(acceptsDocumentMadeAt(readOnly, plus(cutOff, -D))).toBe(true);
     expect(acceptsDocumentMadeAt(readOnly, plus(cutOff, OFFLINE_TOLERANCE_MS))).toBe(true);
     expect(acceptsDocumentMadeAt(readOnly, plus(cutOff, OFFLINE_TOLERANCE_MS + 1))).toBe(false);
+  });
+});
+
+describe('provisional windows of reported payments', () => {
+  const P = at('2026-11-20T09:00:00.000Z');
+  const pay = (status: string, submittedAt: Date, decidedAt: Date | null = null): PaymentFact => ({
+    status,
+    submittedAt,
+    decidedAt,
+  });
+  const suspended = lifecycleOf(
+    facts({ status: 'suspended', updatedAt: at('2026-11-01T00:00:00Z') }),
+    at('2026-12-01T00:00:00Z'),
+  );
+
+  it('a report gives 72 hours from the report; a rejection cuts it short', () => {
+    expect(provisionalWindows([])).toEqual([]);
+    expect(provisionalWindows([pay('pending', P)])).toEqual([{ from: P, until: plus(P, PROVISIONAL_MS) }]);
+    expect(provisionalWindows([pay('rejected', P, plus(P, 3_600_000))])).toEqual([
+      { from: P, until: plus(P, 3_600_000) },
+    ]);
+    // Rejected after the 72 hours ran out: the window is still the 72 hours
+    expect(provisionalWindows([pay('rejected', P, plus(P, 5 * D))])).toEqual([
+      { from: P, until: plus(P, PROVISIONAL_MS) },
+    ]);
+    expect(provisionalWindows([pay('confirmed', P, plus(P, D))])).toEqual([
+      { from: P, until: plus(P, PROVISIONAL_MS) },
+    ]);
+  });
+
+  it('a report made after an earlier rejection gave no window', () => {
+    const first = pay('rejected', P, plus(P, D));
+    const later = pay('pending', plus(P, 2 * D));
+    expect(provisionalWindows([first, later])).toEqual([{ from: P, until: plus(P, D) }]);
+    // A rejection with no decision time cannot bar anyone
+    expect(provisionalWindows([pay('rejected', P), later]).map((w) => w.from)).toEqual([
+      P,
+      later.submittedAt,
+    ]);
+    // A rejection decided later than the other report does not bar it
+    const decidedLater = pay('rejected', plus(P, 2 * D), plus(P, 3 * D));
+    expect(provisionalWindows([pay('pending', P), decidedLater]).map((w) => w.from)).toEqual([
+      P,
+      decidedLater.submittedAt,
+    ]);
+  });
+
+  it('a sale made inside a window is taken after it closed; one made before the report is not', () => {
+    const windows = provisionalWindows([pay('rejected', P, plus(P, D))]);
+    expect(suspended.readOnly).toBe(true);
+    expect(acceptsDocumentMadeAt(suspended, plus(P, 3_600_000))).toBe(false);
+    expect(acceptsDocumentMadeAt(suspended, plus(P, 3_600_000), windows)).toBe(true);
+    expect(acceptsDocumentMadeAt(suspended, plus(P, D + OFFLINE_TOLERANCE_MS), windows)).toBe(true);
+    expect(acceptsDocumentMadeAt(suspended, plus(P, D + OFFLINE_TOLERANCE_MS + 1), windows)).toBe(false);
+    expect(acceptsDocumentMadeAt(suspended, plus(P, -1), windows)).toBe(false);
   });
 });
 

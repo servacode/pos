@@ -99,6 +99,7 @@ export function syncRoutes(processors: SyncProcessors = {}) {
             now: app.clock.now(),
             meta,
             enforceSubscription: app.env.SUBSCRIPTION_ENFORCEMENT,
+            backoff: true,
             onError: (error, docId) => request.log.error({ err: error, docId }, 'quarantine release failed'),
           },
           (error) => request.log.error({ err: error }, 'quarantine release failed'),

@@ -302,6 +302,13 @@
       "when": 1794480807826,
       "tag": "0042_pharmacy_sale_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794551576163,
+      "tag": "0043_online_store_show_prices",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,9 @@ import { sql, type SQL } from 'drizzle-orm';
 import {
   DEFAULT_GRACE_DAYS,
   lifecycleOf,
+  provisionalWindows,
   type Lifecycle,
+  type WritableWindow,
   type SubscriptionFacts,
   type TillSubscription,
 } from '@serva/core';
@@ -59,6 +61,24 @@ export async function readFacts(
 export async function lifecycleInTx(tx: Transaction, now: Date): Promise<Lifecycle | null> {
   const found = await readFacts(tx);
   return found ? lifecycleOf(found.facts, now) : null;
+}
+
+/**
+ * The stretches in which the store sold only because a payment had been reported, kept apart from
+ * subscriptions.grace_ends_at (a rejection clears it): a sale made then is still taken when it is
+ * pushed after the window closed.
+ */
+export async function paymentWindows(tx: Transaction): Promise<WritableWindow[]> {
+  const rows = await tx.execute<{ status: string; submitted_at: string; decided_at: string | null }>(
+    sql`select status, submitted_at, decided_at from subscription_payments`,
+  );
+  return provisionalWindows(
+    rows.map((r) => ({
+      status: r.status,
+      submittedAt: new Date(r.submitted_at),
+      decidedAt: date(r.decided_at),
+    })),
+  );
 }
 
 export async function lifecycleOfStore(db: Database, tenantId: string, now: Date): Promise<Lifecycle | null> {

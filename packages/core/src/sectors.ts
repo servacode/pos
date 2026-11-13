@@ -1,6 +1,6 @@
 /** Business types a store can enable. A store may enable more than one (e.g. a mall with a café). */
 export const SECTORS = [
-  { key: 'clothing', labelAr: 'ألبسة وأحذية' },
+  { key: 'clothing', labelAr: 'ألبسة وأحذية وإكسسوارات' },
   { key: 'supermarket', labelAr: 'سوبرماركت ومولات' },
   { key: 'restaurant', labelAr: 'مطعم' },
   { key: 'cafe', labelAr: 'مقهى وكافتيريا' },
@@ -9,6 +9,7 @@ export const SECTORS = [
   { key: 'bakery', labelAr: 'مخبز وحلويات' },
   { key: 'building_materials', labelAr: 'مواد بناء وأدوات' },
   { key: 'cosmetics', labelAr: 'تجميل وعطور' },
+  { key: 'medical_supplies', labelAr: 'أدوات وتجهيزات طبية' },
   { key: 'produce', labelAr: 'خضار وفواكه' },
   { key: 'wholesale', labelAr: 'جملة وتوزيع' },
   { key: 'general', labelAr: 'متجر عام' },

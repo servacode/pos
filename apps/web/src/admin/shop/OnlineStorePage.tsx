@@ -526,6 +526,14 @@ function SettingsCard() {
                 onCheckedChange={(showOutOfStock) => set({ showOutOfStock })}
               />
             </div>
+            <div className="border-t border-line pt-4">
+              <Switch
+                label="اعرض الأسعار في المتجر الإلكتروني"
+                description="مطفأ: يرى الزبون القطع والصور دون سعر، ويصلك الطلب استفساراً تؤكد له سعره."
+                checked={form.showPrices}
+                onCheckedChange={(showPrices) => set({ showPrices })}
+              />
+            </div>
           </div>
         </Card>
         <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3 shadow-e2 sm:ps-5">

@@ -55,6 +55,8 @@ export interface ReleaseContext {
   /** false = the read-only rule is off (SUBSCRIPTION_ENFORCEMENT=false) */
   enforceSubscription?: boolean;
   onError?: (error: unknown, docId: string) => void;
+  /** releaseQuietly only: after a failure, leave the store alone for RELEASE_RETRY_AFTER_MS (the push route sets it; a payment or an owner's action always tries) */
+  backoff?: boolean;
 }
 
 const HELD = sql`status = 'quarantined' and result_code = 'subscription_read_only'`;
@@ -62,10 +64,18 @@ const MAX_PASSES = 10;
 
 const empty = (): ReleaseReport => ({ released: 0, rejected: 0, revoked: 0, failed: 0, byDevice: {} });
 
-/** The devices of the store that have documents waiting; none while the store is still read-only. */
+/**
+ * The devices of the store that have documents waiting; none while the store is still read-only.
+ * The first look is one indexed probe (sync_inbox_quarantined_idx, migration 0040): a store with
+ * nothing held, which is almost every store on almost every push, pays for nothing else.
+ */
 async function devicesWithHeld(db: Database, tenantId: string, ctx: ReleaseContext): Promise<string[]> {
   return withTenant(db, tenantId, async (tx) => {
-    // Cheap first: a store that is read-only releases nothing, whatever waits
+    const [any] = await tx.execute<{ held: boolean }>(
+      sql`select exists (select 1 from sync_inbox where tenant_id = ${tenantId} and ${HELD}) as held`,
+    );
+    if (!any?.held) return [];
+    // Cheap next: a store that is read-only releases nothing, whatever waits
     if (ctx.enforceSubscription !== false) {
       const life = await lifecycleInTx(tx, ctx.now);
       if (life?.readOnly) return [];
@@ -129,6 +139,7 @@ async function releaseDevice(
     const device: DeviceClaims = { ...row, code: row.code };
     const prepared: Prepared = {
       readOnly: null,
+      windows: [],
       branchCode: (
         await tx.select({ code: branches.code }).from(branches).where(eq(branches.id, device.branchId))
       )[0]!.code,
@@ -256,16 +267,25 @@ async function releaseDevice(
  * what triggered it already succeeded and the next trigger retries; whatever was released is costed
  * right away, as after a push.
  */
+/** After a failed release a store is left alone this long, so a broken release is not retried on every push. */
+export const RELEASE_RETRY_AFTER_MS = 30_000;
+const retryAfter = new Map<string, number>();
+
 export async function releaseQuietly(
   db: Database,
   tenantId: string,
   ctx: ReleaseContext,
   onFailure: (error: unknown) => void,
 ): Promise<void> {
+  const now = ctx.now.getTime();
+  if (ctx.backoff && (retryAfter.get(tenantId) ?? 0) > now) return;
   try {
     const report = await releaseReadOnlyQuarantine(db, tenantId, ctx);
+    if (report.failed > 0) retryAfter.set(tenantId, now + RELEASE_RETRY_AFTER_MS);
+    else retryAfter.delete(tenantId);
     if (report.released > 0) await costAfterPush(db, tenantId, onFailure);
   } catch (error) {
+    retryAfter.set(tenantId, now + RELEASE_RETRY_AFTER_MS);
     onFailure(error);
   }
 }

@@ -44,6 +44,8 @@ export async function staffAdminRoutes(app: FastifyInstance): Promise<void> {
       idOf(request.params),
       parseBody(staffUpdateInput, request.body),
       meta(request),
+      app.clock.now(),
+      (sessionId) => app.sessionGate.forget(sessionId),
     );
   });
 

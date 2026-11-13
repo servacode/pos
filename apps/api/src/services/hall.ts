@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import {
   CANCELLABLE_AFTER_SEND,
   DEFAULT_SECTION,
@@ -322,7 +322,7 @@ export async function hallCommandRun(
           command.lines.map((l) => l.productId),
         );
         const found = await tx
-          .select({ id: variants.id, productId: variants.productId })
+          .select({ id: variants.id, productId: variants.productId, archivedAt: variants.archivedAt })
           .from(variants)
           .where(
             inArray(
@@ -331,7 +331,30 @@ export async function hallCommandRun(
             ),
           );
         const productOf = new Map(found.map((v) => [v.id, v.productId]));
+        // The menu leaves archived items out (hallMenu); a till that still shows one is told so.
+        const archivedProducts = new Set(
+          (
+            await tx
+              .select({ id: products.id })
+              .from(products)
+              .where(
+                and(
+                  inArray(
+                    products.id,
+                    command.lines.map((l) => l.productId),
+                  ),
+                  isNotNull(products.archivedAt),
+                ),
+              )
+          ).map((p) => p.id),
+        );
+        const archivedVariants = new Set(found.filter((v) => v.archivedAt).map((v) => v.id));
         const rows = command.lines.map((l, i) => {
+          if (archivedProducts.has(l.productId) || archivedVariants.has(l.variantId)) {
+            throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+              lines: `الصنف «${l.name}» مؤرشف ولم يعد في القائمة. حدّث القائمة واحذفه من الطلب.`,
+            });
+          }
           const section = sections.get(l.productId);
           if (!section || productOf.get(l.variantId) !== l.productId) {
             throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {

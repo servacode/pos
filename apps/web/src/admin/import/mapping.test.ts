@@ -163,6 +163,8 @@ describe('files out', () => {
     expect(csvField('a"b')).toBe('"a""b"');
     expect(csvField('=1+1')).toBe(`"'=1+1"`);
     expect(csvField('-5')).toBe('"-5"');
+    expect(csvField('-1+HYPERLINK("x")')).toBe(`"'-1+HYPERLINK(""x"")"`);
+    expect(csvField('+1+cmd|calc')).toBe(`"'+1+cmd|calc"`);
   });
 
   it('the template has the field names, a sample row and a byte-order mark', () => {

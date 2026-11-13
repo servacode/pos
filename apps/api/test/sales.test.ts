@@ -7,6 +7,8 @@ import {
   type SaleListPage,
   type SalePayload,
 } from '@serva/core';
+import { createDb } from '@serva/db';
+import { TEST_APP_URL } from './urls';
 import { payloadHash, type SyncDocument } from '@serva/sync';
 import {
   cartLine,
@@ -206,6 +208,37 @@ describe('GET /v1/sales', () => {
     const all = await list(store.accessToken);
     expect(seen).toEqual(all.items.map((i) => i.id));
     expect((await get(store.accessToken, '/v1/sales?cursor=garbage')).statusCode).toBe(400);
+  });
+
+  it('pages whatever time zone the database session runs in', async () => {
+    const store = await openStore(app);
+    await aDay(store);
+    // This app's connections run in Damascus time (+03), so device_time::text would say "+03".
+    const damascus = createDb(TEST_APP_URL, { max: 2, timeouts: { TimeZone: 'Asia/Damascus' } });
+    const apart = await makeApp({}, { database: damascus });
+    try {
+      const [row] = await damascus.client<{ tz: string }[]>`select current_setting('TimeZone') as tz`;
+      expect(row?.tz).toBe('Asia/Damascus');
+      const page = async (query: string) => {
+        const res = await apart.inject({
+          method: 'GET',
+          url: `/v1/sales?${query}`,
+          headers: bearer(store.accessToken),
+        });
+        expect(res.statusCode, res.body).toBe(200);
+        return res.json<SaleListPage>();
+      };
+      const first = await page('limit=2');
+      expect(first.nextCursor).not.toBeNull();
+      const second = await page(`limit=2&cursor=${first.nextCursor}`);
+      expect(second.items).toHaveLength(1);
+      expect([...first.items, ...second.items].map((i) => i.id)).toEqual(
+        (await list(store.accessToken)).items.map((i) => i.id),
+      );
+    } finally {
+      await apart.close();
+      await damascus.client.end();
+    }
   });
 
   it('marks an invoice partly returned, then returned, and filters by status', async () => {

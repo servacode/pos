@@ -113,7 +113,7 @@ type Row = {
 const SELECT = sql`
   select i.id, i.number, i.branch_id, b.name as branch_name, i.device_id, d.code as device_code,
          i.business_date::text as business_date, i.device_time as device_time,
-         i.device_time::text as device_time_text,
+         to_char(i.device_time at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS.US') || '+00' as device_time_text,
          i.cashier_id, u.full_name as cashier_name, i.customer_id, i.customer_name, i.currency,
          i.total_minor::text as total, i.discount_minor::text as discount, i.tax_minor::text as tax,
          (select array_agg(distinct p.method order by p.method) from invoice_payments p

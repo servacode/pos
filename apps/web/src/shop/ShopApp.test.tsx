@@ -18,6 +18,7 @@ const HOME: ShopHome = {
     pickup: true,
     note: 'التوصيل خلال يوم',
     orderMode: 'whatsapp',
+    showPrices: true,
     deliveryFeeMinor: 0,
     deliveryAreas: [],
   },
@@ -63,6 +64,7 @@ const SHIRT: ShopProduct = {
   name: 'قميص كتان',
   categoryId: 'c-shirts',
   currency: 'SYP',
+  showPrices: true,
   images: [
     { url: '/v1/images/t/u1', thumbUrl: '/v1/images/t/u1?size=thumb', optionValue: null },
     { url: '/v1/images/t/u2', thumbUrl: '/v1/images/t/u2?size=thumb', optionValue: 'أزرق' },
@@ -345,5 +347,113 @@ describe('the online shop', () => {
       qty: 40,
     };
     expect(addLine(addLine([], line), line)[0]!.qty).toBe(50);
+  });
+});
+
+describe('the online shop with prices hidden', () => {
+  const HIDDEN_HOME: ShopHome = {
+    store: { ...HOME.store, showPrices: false },
+    categories: HOME.categories,
+    products: HOME.products.map((p) => ({
+      ...p,
+      priceMinor: null,
+      maxPriceMinor: null,
+      wasPriceMinor: null,
+      offer: null,
+    })),
+  };
+  const HIDDEN_SHIRT: ShopProduct = {
+    ...SHIRT,
+    showPrices: false,
+    variants: SHIRT.variants.map((v) => ({ ...v, priceMinor: null, wasPriceMinor: null })),
+  };
+
+  it('shows the goods without a price and says the price comes on request', async () => {
+    mockFetch({
+      'GET /v1/shop/nour': { status: 200, body: HIDDEN_HOME },
+      'GET /v1/shop/nour/products/p-shirt': { status: 200, body: HIDDEN_SHIRT },
+    });
+    const { user } = renderApp('/shop/nour');
+    const grid = await screen.findByRole('list', { name: 'البضاعة' });
+    expect(within(grid).getAllByText('السعر عند الطلب')).toHaveLength(2);
+    expect(grid).not.toHaveTextContent(/\d/);
+    expect(within(grid).queryByLabelText('السعر قبل التنزيل')).not.toBeInTheDocument();
+    await user.click(within(grid).getByRole('link', { name: /قميص كتان/ }));
+    const page = await screen.findByRole('article', { name: 'قميص كتان' });
+    expect(within(page).getByText('السعر عند الطلب')).toBeInTheDocument();
+    expect(page).not.toHaveTextContent('ل.س');
+    await user.click(within(page).getByRole('button', { name: 'L' }));
+    await user.click(within(page).getByRole('button', { name: 'أبيض' }));
+    await user.click(within(page).getByRole('button', { name: 'أضف إلى السلة' }));
+    expect(await screen.findByText('أُضيفت إلى السلة.')).toBeInTheDocument();
+  });
+
+  it('orders as an inquiry: no line total, no sum, and the placed order shows no amount', async () => {
+    localStorage.setItem(
+      'serva-shop-cart:nour',
+      JSON.stringify([
+        {
+          variantId: 'v-lw',
+          productId: 'p-shirt',
+          name: 'قميص كتان',
+          label: 'L · أبيض',
+          imageUrl: null,
+          priceMinor: 0,
+          qty: 2,
+        },
+      ]),
+    );
+    mockFetch({
+      'GET /v1/shop/nour': { status: 200, body: HIDDEN_HOME },
+      'POST /v1/shop/nour/orders': {
+        status: 201,
+        body: {
+          trackPath: '/shop/nour/o/t0',
+          number: 'ONL-000009',
+          currency: 'SYP',
+          showPrices: false,
+          totalMinor: null,
+          deliveryFeeMinor: null,
+          message: 'طلب',
+          whatsappUrl: 'https://wa.me/963933123456?text=x',
+        },
+      },
+    });
+    const { user } = renderApp('/shop/nour/cart');
+    const cart = await screen.findByRole('region', { name: 'السلة' });
+    expect(cart).toHaveTextContent('السعر عند الطلب');
+    expect(cart).not.toHaveTextContent('ل.س');
+    await user.type(screen.getByLabelText('الاسم'), 'ريم');
+    await user.type(screen.getByLabelText('رقم الجوال'), '0944555666');
+    await user.type(screen.getByLabelText('العنوان'), 'المزة');
+    await user.click(screen.getByRole('button', { name: 'اطلب عبر واتساب' }));
+    const done = await screen.findByRole('region', { name: 'وصل طلبك' });
+    expect(done).toHaveTextContent('ONL-000009');
+    expect(done).toHaveTextContent('السعر عند الطلب');
+    expect(done).not.toHaveTextContent('ل.س');
+  });
+
+  it('tracks the order without amounts', async () => {
+    mockFetch({
+      'GET /v1/shop/nour': { status: 200, body: HIDDEN_HOME },
+      'GET /v1/shop/nour/orders/abc123': {
+        status: 200,
+        body: {
+          number: 'ONL-000010',
+          status: 'accepted',
+          fulfilment: 'pickup',
+          currency: 'SYP',
+          showPrices: false,
+          totalMinor: null,
+          deliveryFeeMinor: null,
+          lines: [{ name: 'قميص كتان', label: 'L · أبيض', qty: 1, totalMinor: null }],
+          createdAt: '2026-11-03T10:00:00Z',
+        },
+      },
+    });
+    renderApp('/shop/nour/o/abc123');
+    expect(await screen.findByText('ONL-000010')).toBeInTheDocument();
+    expect(screen.getAllByText('السعر عند الطلب').length).toBeGreaterThan(0);
+    expect(document.body).not.toHaveTextContent('ل.س');
   });
 });

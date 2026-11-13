@@ -119,15 +119,64 @@ export function lifecycleOf(facts: SubscriptionFacts, now: Date): Lifecycle {
   return { state: 'read_only', readOnly: true, endsAt, writeUntil, provisional: false, daysLeft: 0 };
 }
 
+/** The provisional activation a reported payment gives (subscription_payment_submit) */
+export const PROVISIONAL_MS = 72 * 3_600_000;
+
+/** What the sync gate needs to know of a reported payment */
+export interface PaymentFact {
+  status: string;
+  submittedAt: Date;
+  decidedAt: Date | null;
+}
+
+/** A stretch of time in which the store was writable only because a payment had been reported */
+export interface WritableWindow {
+  from: Date;
+  until: Date;
+}
+
+/**
+ * The provisional windows the store's payments gave, from the payments themselves (the one place
+ * that keeps them after a rejection clears grace_ends_at): from the report to 72 hours later, cut
+ * short at the rejection. A report made after an earlier payment was rejected gave no window
+ * (the database function refuses it too).
+ */
+export function provisionalWindows(payments: readonly PaymentFact[]): WritableWindow[] {
+  const windows: WritableWindow[] = [];
+  for (const p of payments) {
+    const barred = payments.some(
+      (q) =>
+        q !== p &&
+        q.status === 'rejected' &&
+        q.decidedAt !== null &&
+        q.decidedAt.getTime() <= p.submittedAt.getTime(),
+    );
+    if (barred) continue;
+    let until = p.submittedAt.getTime() + PROVISIONAL_MS;
+    if (p.status === 'rejected' && p.decidedAt) until = Math.min(until, p.decidedAt.getTime());
+    windows.push({ from: p.submittedAt, until: new Date(until) });
+  }
+  return windows;
+}
+
 /**
  * Whether the server still takes a document a device made at `deviceTime` (its clock, already
  * corrected by its offset). Everything is taken while the store sells; once it is read-only, only
- * what was made before the cut-off plus the tolerance.
+ * what was made before the cut-off plus the tolerance, or while a reported payment had switched
+ * the store on (`windows`: sold then, pushed after the window closed or the payment was rejected).
  */
-export function acceptsDocumentMadeAt(life: Lifecycle, deviceTime: Date): boolean {
+export function acceptsDocumentMadeAt(
+  life: Lifecycle,
+  deviceTime: Date,
+  windows: readonly WritableWindow[] = [],
+): boolean {
   if (!life.readOnly) return true;
+  const t = deviceTime.getTime();
+  if (windows.some((w) => t >= w.from.getTime() && t <= w.until.getTime() + OFFLINE_TOLERANCE_MS)) {
+    return true;
+  }
   if (!life.writeUntil) return false;
-  return deviceTime.getTime() <= life.writeUntil.getTime() + OFFLINE_TOLERANCE_MS;
+  return t <= life.writeUntil.getTime() + OFFLINE_TOLERANCE_MS;
 }
 
 /** What a till (device sign-in, no user) is told about the subscription: GET /v1/device/subscription */

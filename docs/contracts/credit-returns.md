@@ -25,6 +25,14 @@ past returns of credit sales (the debt should have come down):
     pnpm --filter @serva/api correct-credit-returns --store=<code> --apply    # post
     ... --apply --returns=<id>,<id>                                            # only these
 
+Only returns **made at the till before the account method went live** are candidates
+(`ACCOUNT_REFUND_LIVE_AT` in `credit-return-correction.ts`, 2026-11-12 09:13 +03). A cash refund of a
+credit sale made since is a deliberate choice and is never listed. This is the only thing that
+separates the two: the return's payload, its engine version (always `1.0.0`) and its refund method
+are identical for an old till's cash and a deliberate cash refund, so the till's own time is used
+(`sale_returns.device_time`). If a till kept running the old version longer, widen it with
+`--before=<ISO time>` after reviewing the list with the owner.
+
 One manual entry per return, dated today, `Dr 1110 / Cr 1200 (customer)`, memo
 "تصحيح مرتجع … خُفّض من دين الزبون بدل الرد نقداً". Unique by the return it corrects, so a second
 run posts nothing. Do not apply it to a return whose cash really was handed back.

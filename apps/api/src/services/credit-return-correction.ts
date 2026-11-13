@@ -9,6 +9,15 @@ import { postEntry } from './posting';
  * script scripts/correct-credit-returns.ts is the only caller; it is opt-in and never run by itself.
  */
 
+/**
+ * When «إلى حساب الزبون» went live (the commit that added it, 2026-11-12 09:13 +03). Nothing in a
+ * stored return tells an old till's cash refund from a deliberate cash refund made since: the
+ * payload, the engine version (always 1.0.0) and the refund method are the same. Only the time the
+ * return was made at the till separates them, so only returns made before this are candidates; the
+ * owner can move it with --before when a till kept running the old version for longer.
+ */
+export const ACCOUNT_REFUND_LIVE_AT = new Date('2026-11-12T06:13:44.000Z');
+
 type Candidate = {
   id: string;
   sale_id: string;
@@ -36,9 +45,9 @@ export interface CorrectionItem {
 export async function correctCreditReturns(
   tx: Transaction,
   tenantId: string,
-  options: { apply: boolean; today: string; only?: string[] | undefined },
+  options: { apply: boolean; today: string; only?: string[] | undefined; before?: Date | undefined },
 ): Promise<{ items: CorrectionItem[]; posted: number }> {
-  const { apply, today, only } = options;
+  const { apply, today, only, before = ACCOUNT_REFUND_LIVE_AT } = options;
   const rows = await tx.execute<Candidate>(sql`
     select r.id, r.sale_id, r.number, r.sale_number, r.branch_id, r.currency, r.total_minor::text,
            i.customer_id, i.customer_name,
@@ -49,6 +58,7 @@ export async function correctCreditReturns(
     from sale_returns r
     join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
     where r.tenant_id = ${tenantId} and r.refund_method = 'cash' and i.customer_id is not null
+      and r.device_time < ${before.toISOString()}::timestamptz
       and exists (select 1 from invoice_payments p where p.tenant_id = i.tenant_id
                     and p.invoice_id = i.id and p.method = 'credit')
     order by r.sale_id, r.business_date, r.device_time, r.id`);

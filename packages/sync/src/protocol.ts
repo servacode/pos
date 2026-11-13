@@ -206,6 +206,8 @@ export const SYNC_FLAGS = [
   /** A controlled drug sold without the prescription, doctor and patient details (03 › الصيدليات) */
   'controlled_incomplete',
   'posted_to_open_period',
+  /** A refund to the customer's account named a customer other than the sale's (or the sale had none) */
+  'refund_customer_mismatch',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,
    * no stock, no drawer. "accepted" says the document arrived, never that it was posted; this

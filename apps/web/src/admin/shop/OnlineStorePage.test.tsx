@@ -23,6 +23,7 @@ const settings: OnlineStoreSettings = {
   note: null,
   showOutOfStock: false,
   orderMode: 'whatsapp',
+  showPrices: true,
   deliveryFeeMinor: 0,
   deliveryAreas: [],
 };
@@ -105,5 +106,28 @@ describe('«المتجر الإلكتروني» on the dashboard', () => {
       version: 1,
     });
     expect(await screen.findByText('لا طلبات هنا.')).toBeInTheDocument();
+  });
+});
+
+describe('«اعرض الأسعار في المتجر الإلكتروني»', () => {
+  it('is on by default and is saved off when the owner turns it off', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: owner() },
+      'GET /v1/online-store': { status: 200, body: settings },
+      'PUT /v1/online-store': (r: MockRequest) => ({
+        status: 200,
+        body: { ...(r.body as OnlineStoreSettings), version: 1 },
+      }),
+      'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
+    });
+    const { user } = renderApp('/online-store');
+    const toggle = await screen.findByRole('switch', { name: /اعرض الأسعار في المتجر الإلكتروني/ });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    expect(toggle).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await screen.findByText(/حُفظ/);
+    expect(requestsTo('PUT', '/v1/online-store')[0]!.body).toMatchObject({ showPrices: false });
   });
 });

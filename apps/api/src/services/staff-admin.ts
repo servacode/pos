@@ -261,13 +261,15 @@ export async function updateStaff(
   id: string,
   input: StaffUpdateData,
   meta: RequestMeta,
+  now: Date,
+  forget: (sessionId: string) => void,
 ): Promise<StaffMember> {
   const [pinHash, passwordHash] = await Promise.all([
     input.pin ? passwords.hash(input.pin) : Promise.resolve(null),
     input.password ? passwords.hash(input.password) : Promise.resolve(null),
   ]);
   try {
-    return await withTenant(db, auth.tenantId, async (tx) => {
+    const { member, families } = await withTenant(db, auth.tenantId, async (tx) => {
       await requirePermission(tx, auth.userId, 'users.manage');
       const before = await manageable(tx, auth, id);
       const [row] = await tx.select().from(users).where(eq(users.id, id));
@@ -307,6 +309,15 @@ export async function updateStaff(
       }
       if (Object.keys(patch).length > 0) await tx.update(users).set(patch).where(eq(users.id, id));
       if (role) await giveRole(tx, auth.tenantId, id, role.id, branchIds);
+      // A new password ends every session that signed in with the old one, as a reset does.
+      let ended: { familyId: string }[] = [];
+      if (passwordHash) {
+        ended = await tx
+          .update(sessions)
+          .set({ revokedAt: now })
+          .where(and(eq(sessions.userId, id), isNull(sessions.revokedAt)))
+          .returning({ familyId: sessions.familyId });
+      }
       if (input.pin) {
         await tx
           .update(pinAttempts)
@@ -333,8 +344,10 @@ export async function updateStaff(
         meta,
       );
       const [member] = await loadMembers(tx, id);
-      return member!;
+      return { member: member!, families: ended.map((r) => r.familyId) };
     });
+    for (const family of new Set(families)) forget(family);
+    return member;
   } catch (error) {
     if (isUniqueViolation(error, 'users_phone_unique')) throw phoneTaken();
     throw error;

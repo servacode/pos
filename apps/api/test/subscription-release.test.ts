@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
   buildReturnPayload,
@@ -11,7 +11,12 @@ import { payloadHash, type SyncDocument } from '@serva/sync';
 import { hashSecret } from '../src/auth/passwords';
 import { ManualClock } from '../src/clock';
 import { DOCUMENT_PROCESSORS } from '../src/services/processors';
-import { releaseReadOnlyQuarantine } from '../src/services/subscription-release';
+import { pushDocuments } from '../src/services/sync-push';
+import {
+  RELEASE_RETRY_AFTER_MS,
+  releaseQuietly,
+  releaseReadOnlyQuarantine,
+} from '../src/services/subscription-release';
 import {
   balances,
   cartLine,
@@ -395,5 +400,160 @@ describe('what is not the read-only quarantine', () => {
       'after_revocation',
     ]);
     expect(await postedEntries(day.store.tenantId)).toEqual([]);
+  });
+});
+
+describe('a return pushed normally while its sale is still held', () => {
+  it('waits with the same reason instead of being rejected, and is released with its sale', async () => {
+    const day = await readOnlyDay();
+    const payload = buildReturnPayload({
+      sale: day.payload,
+      saleId: day.sold.id,
+      saleNumber: day.sold.number!,
+      shiftId: day.open.id,
+      cashierId: day.store.userId,
+      reason: 'تالف',
+      picks: [{ saleLineNo: 1, qty: 1000 }],
+      returned: [],
+      reference: 'R-1',
+    });
+    const { hash: _h, ...body } = day.doc('return', payload);
+    const withDeps = { ...body, deps: [day.sold.id] };
+    const ret: SyncDocument = { ...withDeps, hash: payloadHash(withDeps) };
+
+    // The store can write, but the release has not run yet: the sale is still held when this arrives
+    await renew(day.store);
+    const device = { ...day.store.device, revokedAt: null };
+    const res = await pushDocuments(
+      appDb().db,
+      device,
+      { contractVersion: 1, appVersion: '1.0.0', sentAt: NOW, lastIssued: {}, documents: [ret] },
+      { meta: { ip: '127.0.0.1', userAgent: null }, now: clock.now(), processors: DOCUMENT_PROCESSORS },
+    );
+    expect(res.results[0]).toMatchObject({ status: 'quarantined', code: 'subscription_read_only' });
+
+    await releaseNow(day.store.tenantId);
+    expect((await rows(day.store.tenantId)).map((r) => r.status)).toEqual([
+      'accepted',
+      'accepted',
+      'accepted',
+    ]);
+    expect((await postedEntries(day.store.tenantId)).map((e) => e.sourceType)).toEqual(['sale', 'return']);
+  });
+});
+
+describe('a sale made while a reported payment kept a suspended store on', () => {
+  // The row-version trigger would move updated_at (the suspension cut-off) to the real now on every
+  // update, report and rejection; these tests keep it at the moment the platform suspended the store.
+  beforeEach(async () => {
+    await ownerDb()`alter table subscriptions disable trigger bump_row_version`;
+  });
+  afterEach(async () => {
+    await ownerDb()`alter table subscriptions enable trigger bump_row_version`;
+  });
+
+  /** Suspended 10 days ago; a payment is reported now (P = NOW), giving 72 hours. */
+  async function suspendedAndReported() {
+    const store = await openStore(app);
+    await ownerDb()`
+      update subscriptions set status = 'suspended', current_period_end = ${new Date(clock.now().getTime() + 20 * DAY)},
+        grace_ends_at = null, updated_at = ${ago(10 * DAY)}
+      where tenant_id = ${store.tenantId}`;
+    const payment = await reportPayment(store);
+    return { store, payment };
+  }
+  /** A shift opening the till made at the given instant (the till's own clock). */
+  function madeAt(doc: ReturnType<typeof documents>, store: Store, iso: string) {
+    const { hash: _h, ...body } = doc('shift_open', shiftOpen(store.userId));
+    const made = { ...body, deviceTime: iso, businessDate: iso.slice(0, 10) };
+    return { ...made, hash: payloadHash(made) } as SyncDocument;
+  }
+
+  it('is taken when pushed after the 72 hours closed; one made before the report is held', async () => {
+    const { store } = await suspendedAndReported();
+    const doc = documents(store.device);
+    const before = madeAt(doc, store, '2026-10-28T10:00:00.000Z');
+    const inside = madeAt(doc, store, '2026-10-31T15:00:00.000Z');
+    clock.set(new Date(clock.now().getTime() + 6 * DAY).toISOString());
+    const res = await push(app, store.device, [before, inside]);
+    expect(res.results.map((r) => [r.status, r.code ?? null])).toEqual([
+      ['quarantined', 'subscription_read_only'],
+      ['accepted', null],
+    ]);
+  });
+
+  it('is taken when pushed after the payment was rejected', async () => {
+    const { store, payment } = await suspendedAndReported();
+    const doc = documents(store.device);
+    const inside = madeAt(doc, store, '2026-10-30T10:00:00.000Z');
+    clock.set(new Date(clock.now().getTime() + 2 * 3_600_000).toISOString());
+    const admin = await platformAdmin();
+    const rejected = await app.inject({
+      method: 'POST',
+      url: `/v1/platform/payments/${payment.id}/reject`,
+      headers: admin,
+      payload: { reason: 'الرقم غير صحيح' },
+    });
+    expect(rejected.statusCode, rejected.body).toBe(204);
+    clock.set(new Date(clock.now().getTime() + 3 * DAY).toISOString());
+    const after = madeAt(doc, store, '2026-11-02T10:00:00.000Z');
+    const res = await push(app, store.device, [inside, after]);
+    expect(res.results.map((r) => [r.status, r.code ?? null])).toEqual([
+      ['accepted', null],
+      ['quarantined', 'subscription_read_only'],
+    ]);
+  });
+});
+
+describe('the lazy release on every push', () => {
+  it('a failing release is not retried on every push, only after the pause; a payment always tries', async () => {
+    const day = await readOnlyDay();
+    await renew(day.store);
+    let calls = 0;
+    const broken = {
+      ...DOCUMENT_PROCESSORS,
+      sale: async () => {
+        calls += 1;
+        throw new Error('boom');
+      },
+    };
+    const failures: unknown[] = [];
+    const lazy = (backoff: boolean) =>
+      releaseQuietly(
+        appDb().db,
+        day.store.tenantId,
+        { processors: broken, now: clock.now(), meta: { ip: '127.0.0.1', userAgent: null }, backoff },
+        (error) => failures.push(error),
+      );
+    await lazy(true);
+    const first = calls;
+    expect(first).toBeGreaterThan(0);
+    await lazy(true);
+    await lazy(true);
+    expect(calls).toBe(first);
+    // A payment or an owner's action is never held back by the pause
+    await lazy(false);
+    const forced = calls;
+    expect(forced).toBeGreaterThan(first);
+    clock.set(new Date(clock.now().getTime() + RELEASE_RETRY_AFTER_MS + 1).toISOString());
+    await lazy(true);
+    expect(calls).toBeGreaterThan(forced);
+  });
+
+  it('a store with nothing held releases nothing and has nothing to retry', async () => {
+    const store = await openStore(app);
+    const failures: unknown[] = [];
+    await releaseQuietly(
+      appDb().db,
+      store.tenantId,
+      {
+        processors: DOCUMENT_PROCESSORS,
+        now: clock.now(),
+        meta: { ip: '127.0.0.1', userAgent: null },
+        backoff: true,
+      },
+      (error) => failures.push(error),
+    );
+    expect(failures).toEqual([]);
   });
 });

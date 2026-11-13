@@ -23,12 +23,12 @@ import {
   type SyncDocument,
   type SyncFlag,
 } from '@serva/sync';
-import { acceptsDocumentMadeAt, type Lifecycle } from '@serva/core';
+import { acceptsDocumentMadeAt, type Lifecycle, type WritableWindow } from '@serva/core';
 import type { z } from 'zod';
 import type { DeviceClaims } from '../auth/device-guard';
 import { audit } from './audit';
 import type { RequestMeta } from '../types';
-import { lifecycleInTx } from './subscription-gate';
+import { lifecycleInTx, paymentWindows } from './subscription-gate';
 import { readServerState } from './sync-state';
 
 /** Payload hashes are not secrets, but compare them in constant time so no comparison leaks timing. */
@@ -73,6 +73,8 @@ const CLOCK_SKEW_MS = 5 * 60_000;
 export interface Prepared {
   /** Set when the store is read-only: what a device made after the cut-off is quarantined, not posted */
   readOnly: Lifecycle | null;
+  /** While read-only: when a reported payment had switched the store on (sales made then are kept) */
+  windows: WritableWindow[];
   branchCode: string;
   announced: Map<string, number>;
 }
@@ -117,6 +119,7 @@ export async function pushDocuments(
     const life = enforceSubscription ? await lifecycleInTx(tx, now) : null;
     const prepared: Prepared = {
       readOnly: life?.readOnly ? life : null,
+      windows: life?.readOnly ? await paymentWindows(tx) : [],
       branchCode: (
         await tx.select({ code: branches.code }).from(branches).where(eq(branches.id, device.branchId))
       )[0]!.code,
@@ -377,7 +380,10 @@ export async function classify(
   // The refused document is kept whole (quarantined), not dropped. A shift close always goes through.
   if (prepared.readOnly && doc.type !== 'shift_close') {
     const madeAt = new Date(Date.parse(doc.deviceTime) - doc.deviceOffsetMs);
-    if (Number.isNaN(madeAt.getTime()) || !acceptsDocumentMadeAt(prepared.readOnly, madeAt)) {
+    if (
+      Number.isNaN(madeAt.getTime()) ||
+      !acceptsDocumentMadeAt(prepared.readOnly, madeAt, prepared.windows)
+    ) {
       return { status: 'quarantined', code: 'subscription_read_only', flags: [] };
     }
   }
@@ -393,15 +399,18 @@ export async function classify(
       d.status === 'quarantined' && d.resultCode === 'subscription_read_only';
     // The device holds back what depends on its own refused documents; one sent in the same
     // batch as the refused document is refused with it.
-    // While releasing, a dependency waiting in the same read-only quarantine is not a refusal: this
-    // document waits for it (the release goes on once that one is posted).
+    // A dependency waiting in the read-only quarantine is not a refusal, in a release or in a
+    // normal push (a return of a sale that is still held): this document waits for it with the same
+    // reason, and the release posts them together, the sale first.
     const refused = (d: (typeof found)[number]) =>
-      d.status === 'rejected' || (d.status === 'quarantined' && !(releasing && stillHeld(d)));
+      d.status === 'rejected' || (d.status === 'quarantined' && !stillHeld(d));
     if (found.some(refused)) {
       return rejected('dependency_rejected');
     }
-    if (releasing && found.some(stillHeld)) {
-      return { status: 'quarantined', code: 'subscription_read_only', flags: [], deferred: true };
+    if (found.some(stillHeld)) {
+      return releasing
+        ? { status: 'quarantined', code: 'subscription_read_only', flags: [], deferred: true }
+        : { status: 'quarantined', code: 'subscription_read_only', flags: [] };
     }
     // A return for a sale of another device that has not arrived yet: accepted, linked later.
     if (found.length < new Set(doc.deps).size) {

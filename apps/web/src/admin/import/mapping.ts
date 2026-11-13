@@ -230,7 +230,7 @@ const BOM = '﻿';
 
 /** One CSV field, quoted; text a spreadsheet would run as a formula gets an apostrophe. */
 export function csvField(value: string): string {
-  const safe = /^[=@\t\r]|^[+-](?![\d.])/.test(value) ? `'${value}` : value;
+  const safe = /^[=+\-@\t\r]/.test(value) && !/^[+-]?\d+(\.\d+)?$/.test(value) ? `'${value}` : value;
   return `"${safe.replaceAll('"', '""')}"`;
 }
 

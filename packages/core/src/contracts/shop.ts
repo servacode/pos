@@ -50,6 +50,11 @@ export const onlineStoreInput = z.object({
   /** whatsapp: «اطلب عبر واتساب»; shop: placed in the shop, the phone confirmed by a code */
   orderMode: z.enum(['whatsapp', 'shop']).default('whatsapp'),
   /**
+   * «اعرض الأسعار في المتجر الإلكتروني»: off, the public shop sends no price at all (the pieces and
+   * their availability only) and an order is an inquiry the store prices later.
+   */
+  showPrices: z.boolean().default(true),
+  /**
    * «أجرة التوصيل» (03 › الألبسة): added to a delivered order for the customer to pay the courier, not
    * a sale of the store. With areas, the customer picks one and pays its fee; otherwise the flat fee.
    */
@@ -78,6 +83,7 @@ export interface OnlineStoreSettings {
   note: string | null;
   showOutOfStock: boolean;
   orderMode: 'whatsapp' | 'shop';
+  showPrices: boolean;
   deliveryFeeMinor: number;
   deliveryAreas: DeliveryArea[];
 }
@@ -97,6 +103,8 @@ export interface ShopStore {
   pickup: boolean;
   note: string | null;
   orderMode: 'whatsapp' | 'shop';
+  /** False: no price is sent anywhere in the public shop; the fees below are 0 then, not to be shown */
+  showPrices: boolean;
   deliveryFeeMinor: number;
   deliveryAreas: DeliveryArea[];
 }
@@ -107,9 +115,10 @@ export interface ShopProductCard {
   categoryId: string | null;
   imageUrl: string | null;
   currency: CurrencyCode;
-  priceMinor: number;
-  /** Above priceMinor when the pieces cost differently */
-  maxPriceMinor: number;
+  /** Null when the store hides its prices (showPrices false) */
+  priceMinor: number | null;
+  /** Above priceMinor when the pieces cost differently; null when prices are hidden */
+  maxPriceMinor: number | null;
   /** The cheapest piece's price before its markdown or offer, struck through; null: none */
   wasPriceMinor: number | null;
   /** The running offer's name («تنزيلات الصيف −30٪»); null: none */
@@ -128,6 +137,7 @@ export interface ShopProduct {
   name: string;
   categoryId: string | null;
   currency: CurrencyCode;
+  showPrices: boolean;
   images: { url: string; thumbUrl: string; optionValue: string | null }[];
   /** The options of the pieces in order («المقاس»، «اللون») with their values */
   options: { name: string; values: string[] }[];
@@ -135,8 +145,8 @@ export interface ShopProduct {
     id: string;
     label: string | null;
     attributes: { name: string; value: string }[];
-    /** After a running percent offer, as the order is priced */
-    priceMinor: number;
+    /** After a running percent offer, as the order is priced; null when prices are hidden */
+    priceMinor: number | null;
     /** Before the markdown or offer, struck through; null: none */
     wasPriceMinor: number | null;
     available: boolean;
@@ -182,10 +192,12 @@ export interface ShopOrderTrack {
   status: OnlineOrderStatus;
   fulfilment: 'delivery' | 'pickup';
   currency: CurrencyCode;
+  /** Prices are null when the store hides them (showPrices false) */
+  showPrices: boolean;
   /** The pieces; the delivery fee is on top, for the courier */
-  totalMinor: number;
-  deliveryFeeMinor: number;
-  lines: { name: string; label: string | null; qty: number; totalMinor: number }[];
+  totalMinor: number | null;
+  deliveryFeeMinor: number | null;
+  lines: { name: string; label: string | null; qty: number; totalMinor: number | null }[];
   createdAt: string;
 }
 
@@ -194,10 +206,11 @@ export interface ShopOrderPlaced {
   trackPath: string;
   number: string;
   currency: CurrencyCode;
-  /** The pieces */
-  totalMinor: number;
-  /** For the courier, on top of the pieces */
-  deliveryFeeMinor: number;
+  showPrices: boolean;
+  /** The pieces; null when the store hides its prices (it confirms the price later) */
+  totalMinor: number | null;
+  /** For the courier, on top of the pieces; null when prices are hidden */
+  deliveryFeeMinor: number | null;
   /** The text WhatsApp opens with */
   message: string;
   /** https://wa.me/<number>?text=…, or null when the store has no WhatsApp number */

@@ -26,20 +26,20 @@ export const LEGAL = {
   /** The support WhatsApp number, apart from the notifications number */
   supportWhatsapp: null as string | null,
   /** The city whose courts decide a dispute */
-  governingCity: null as string | null,
+  governingCity: 'دمشق' as string | null,
 
   // ── Retention (blanks: the lawyer)
   /** How long financial documents and their attachments stay (the legal period) */
-  financialRetention: null as string | null,
+  financialRetention: 'عشر سنوات' as string | null,
   /** The tolerated difference in a pound payment against the invoice, as a share */
-  paymentTolerance: null as string | null,
+  paymentTolerance: '1%' as string | null,
 
   // ── Providers (blanks: named when contracted)
   hostingProvider: null as string | null,
   hostingCountry: null as string | null,
   backupProvider: null as string | null,
   smsProvider: null as string | null,
-  aiProvider: null as string | null,
+  aiProvider: 'يُسمّى هنا قبل تفعيل المساعد الذكي' as string | null,
 
   // ── The draft's figures (confirm with the lawyer)
   trialDays: 30,
