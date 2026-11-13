@@ -5,12 +5,14 @@ import type {
   PlatformLoginResponse,
   PlatformPayment,
   PlatformSettings,
+  LegalDetails,
+  PublicLegal,
   PlatformStore,
   SubscriptionInvoice,
   SubscriptionPage,
   SubscriptionPayment,
 } from '@serva/core';
-import { DEFAULT_GRACE_DAYS, lifecycleOf } from '@serva/core';
+import { DEFAULT_GRACE_DAYS, TERMS_VERSION, legalInput, lifecycleOf } from '@serva/core';
 import { withTenant, type Database, type Transaction } from '@serva/db';
 import type { PasswordHasher } from '../auth/passwords';
 import { requirePermission } from '../auth/permissions';
@@ -451,5 +453,27 @@ export async function savePlatformSettings(
     throw new AppError(403, 'forbidden', 'طرق الدفع وسعر الصرف للمدير العام.');
   await db.execute(
     sql`select platform_settings_save(${JSON.stringify(input.paymentMethods)}::jsonb, ${input.sypPerUsd}::numeric, ${claims.platformUserId}::uuid)`,
+  );
+}
+
+/** The company details as stored: a key never written reads as a blank, and the day defaults to the texts' version. */
+export async function legalDetails(db: Database): Promise<LegalDetails> {
+  const [row] = await db.execute<{ legal: unknown }>(sql`select legal from platform_settings where id = 1`);
+  return legalInput.parse({ updatedAt: TERMS_VERSION, ...(row?.legal as object | undefined) });
+}
+
+/** What the public pages may read: the details and the version of the texts, nothing else from the settings row. */
+export async function publicLegal(db: Database): Promise<PublicLegal> {
+  return { ...(await legalDetails(db)), version: TERMS_VERSION };
+}
+
+export async function saveLegalDetails(
+  db: Database,
+  claims: PlatformClaims,
+  input: LegalDetails,
+): Promise<void> {
+  if (claims.role !== 'super_admin') throw new AppError(403, 'forbidden', 'بيانات الشركة للمدير العام.');
+  await db.execute(
+    sql`select platform_legal_save(${JSON.stringify(input)}::jsonb, ${claims.platformUserId}::uuid)`,
   );
 }

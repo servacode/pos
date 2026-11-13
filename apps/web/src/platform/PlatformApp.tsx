@@ -10,6 +10,7 @@ import {
   AdminShell,
   Alert,
   Badge,
+  BookIcon,
   Button,
   CalendarIcon,
   Card,
@@ -51,6 +52,7 @@ import {
 } from '@serva/ui';
 import { apiFetch, errorMessage } from '../lib/api';
 import { counted } from '../pos/format';
+import { PlatformLegal } from './PlatformLegal';
 import { PlatformLogin } from './PlatformLogin';
 import { PlatformSecurity } from './PlatformSecurity';
 
@@ -166,6 +168,12 @@ const SECTIONS: readonly { value: string; label: string; icon: Icon; description
     description: 'الحسابات التي تحوّل إليها المتاجر، وسعر الدولار الذي تُحسب به فواتيرها.',
   },
   {
+    value: 'legal',
+    label: 'بيانات الشركة والصفحات القانونية',
+    icon: BookIcon,
+    description: 'اسم الشركة وصاحب المشروع وعنوانها ووسائل التواصل والمزوّدون، كما تظهر في الشروط والخصوصية.',
+  },
+  {
     value: 'security',
     label: 'الأمان',
     icon: ShieldCheckIcon,
@@ -237,6 +245,8 @@ function Panel({ token, onSignOut }: { token: string; onSignOut: () => void }) {
             <Plans call={call} />
           ) : tab === 'settings' ? (
             <Settings call={call} />
+          ) : tab === 'legal' ? (
+            <PlatformLegal call={call} />
           ) : tab === 'security' ? (
             <PlatformSecurity call={call} />
           ) : (

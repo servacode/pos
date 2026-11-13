@@ -309,6 +309,13 @@
       "when": 1794551576163,
       "tag": "0043_online_store_show_prices",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794558234257,
+      "tag": "0044_platform_legal_details",
+      "breakpoints": true
     }
   ]
 }

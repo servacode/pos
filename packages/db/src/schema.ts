@@ -248,6 +248,12 @@ export const platformSettings = pgTable('platform_settings', {
   paymentMethods: jsonb('payment_methods').notNull().default([]),
   /** Pounds per dollar for subscription invoices, set weekly */
   sypPerUsd: numeric('syp_per_usd').notNull().default('13000'),
+  /**
+   * The company and contact details the public terms and privacy pages read (companyName,
+   * ownerName, address, email, providers…). Written through platform_legal_save(); the public
+   * GET /v1/legal returns it. A key that is missing or empty is a blank the page marks.
+   */
+  legal: jsonb('legal').notNull().default({}),
   version: version(),
   updatedAt: updatedAt(),
 });

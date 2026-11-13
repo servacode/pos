@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
+  legalInput,
   openInvoiceInput,
   planInput,
   platformLoginInput,
@@ -18,6 +19,9 @@ import { clientIp } from '../http/client-ip';
 import { enforceLimits } from '../http/rate-limit';
 import {
   decidePayment,
+  legalDetails,
+  publicLegal,
+  saveLegalDetails,
   openInvoice,
   platformPayments,
   platformPlans,
@@ -168,5 +172,15 @@ export function billingRoutes(processors: SyncProcessors = {}) {
       await savePlatformSettings(app.db, platformOf(request), parseBody(platformSettingsInput, request.body));
       return reply.code(204).send();
     });
+    app.get('/v1/platform/legal', platform, async () => legalDetails(app.db));
+    app.put('/v1/platform/legal', platform, async (request, reply) => {
+      await saveLegalDetails(app.db, platformOf(request), parseBody(legalInput, request.body));
+      return reply.code(204).send();
+    });
+
+    /** The terms and privacy pages and the contact details read this without signing in. */
+    app.get('/v1/legal', async (_request, reply) =>
+      reply.header('cache-control', 'public, max-age=60').send(await publicLegal(app.db)),
+    );
   };
 }

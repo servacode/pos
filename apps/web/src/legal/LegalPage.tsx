@@ -1,10 +1,11 @@
 import { Link } from 'react-router';
 import { Alert, Button, Logo, PrintIcon, TextLink, ThemeToggle } from '@serva/ui';
-import { BLANK_LABELS, LEGAL, LEGAL_READY, remainingBlanks, type LegalKey } from './config';
+import { BLANK_LABELS, legalReady, remainingBlanks, type LegalKey, type LegalValues } from './config';
 import { fill } from './fill';
 import { PRIVACY } from './privacy';
 import { TERMS } from './terms';
 import type { LegalDocument } from './types';
+import { useLegal } from './useLegal';
 
 const DOCUMENTS = { terms: TERMS, privacy: PRIVACY } as const;
 const PATHS = { terms: '/terms', privacy: '/privacy' } as const;
@@ -13,6 +14,7 @@ const PATHS = { terms: '/terms', privacy: '/privacy' } as const;
 export function LegalPage({ document: key }: { document: keyof typeof DOCUMENTS }) {
   const doc = DOCUMENTS[key];
   const other = DOCUMENTS[key === 'terms' ? 'privacy' : 'terms'];
+  const { status, values } = useLegal();
   return (
     <div className="min-h-dvh bg-canvas text-ink">
       <title>{`${doc.title} · SERFA`}</title>
@@ -30,10 +32,10 @@ export function LegalPage({ document: key }: { document: keyof typeof DOCUMENTS 
           <h1 className="text-3xl font-bold text-ink">{doc.title}</h1>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-muted">
             <span>
-              الإصدار <bdi className="num font-semibold text-ink">{LEGAL.version}</bdi>
+              الإصدار <bdi className="num font-semibold text-ink">{values.version}</bdi>
             </span>
             <span>
-              آخر تحديث <bdi className="num font-semibold text-ink">{LEGAL.updatedAt}</bdi>
+              آخر تحديث <bdi className="num font-semibold text-ink">{values.updatedAt}</bdi>
             </span>
           </p>
           <div className="print:hidden">
@@ -48,36 +50,51 @@ export function LegalPage({ document: key }: { document: keyof typeof DOCUMENTS 
           </div>
         </div>
 
-        {LEGAL_READY ? null : <DraftNotice />}
+        {status === 'loading' ? (
+          <p role="status" className="text-sm text-ink-muted">
+            جارٍ تحميل بيانات الشركة…
+          </p>
+        ) : legalReady(values) ? null : (
+          <DraftNotice values={values} />
+        )}
 
-        <section
-          aria-label="ملخص"
-          className="rounded-card border border-line bg-brand-soft p-5 text-brand-ink shadow-e1"
-        >
-          <p className="mb-1 text-xs font-semibold">باختصار</p>
-          <p className="text-[0.9375rem] leading-7">{fill(doc.summary)}</p>
-        </section>
+        {status === 'loading' ? null : (
+          <>
+            <section
+              aria-label="ملخص"
+              className="rounded-card border border-line bg-brand-soft p-5 text-brand-ink shadow-e1"
+            >
+              <p className="mb-1 text-xs font-semibold">باختصار</p>
+              <p className="text-[0.9375rem] leading-7">{fill(doc.summary, values)}</p>
+            </section>
 
-        <nav aria-label="المحتويات" className="rounded-card border border-line bg-surface p-5 print:hidden">
-          <h2 className="mb-3 text-lg font-semibold">المحتويات</h2>
-          <ol className="grid gap-x-8 gap-y-1 text-[0.9375rem] sm:grid-cols-2">
-            {doc.sections.map((section, index) => (
-              <li key={section.id} className="flex gap-2">
-                {doc.numbered ? <span className="num w-6 shrink-0 text-ink-subtle">{index + 1}.</span> : null}
-                <a
-                  href={`#${section.id}`}
-                  className="min-h-8 rounded-small py-1 text-ink-muted hover:text-ink focus-visible:text-ink"
-                >
-                  {section.title}
-                </a>
-              </li>
-            ))}
-          </ol>
-        </nav>
+            <nav
+              aria-label="المحتويات"
+              className="rounded-card border border-line bg-surface p-5 print:hidden"
+            >
+              <h2 className="mb-3 text-lg font-semibold">المحتويات</h2>
+              <ol className="grid gap-x-8 gap-y-1 text-[0.9375rem] sm:grid-cols-2">
+                {doc.sections.map((section, index) => (
+                  <li key={section.id} className="flex gap-2">
+                    {doc.numbered ? (
+                      <span className="num w-6 shrink-0 text-ink-subtle">{index + 1}.</span>
+                    ) : null}
+                    <a
+                      href={`#${section.id}`}
+                      className="min-h-8 rounded-small py-1 text-ink-muted hover:text-ink focus-visible:text-ink"
+                    >
+                      {section.title}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </nav>
 
-        <article className="flex flex-col gap-8">
-          <Sections doc={doc} />
-        </article>
+            <article className="flex flex-col gap-8">
+              <Sections doc={doc} values={values} />
+            </article>
+          </>
+        )}
 
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-sm text-ink-muted print:hidden">
           <TextLink as={Link} to={PATHS[other.key]}>
@@ -92,14 +109,14 @@ export function LegalPage({ document: key }: { document: keyof typeof DOCUMENTS 
   );
 }
 
-function Sections({ doc }: { doc: LegalDocument }) {
+function Sections({ doc, values }: { doc: LegalDocument; values: LegalValues }) {
   return doc.sections.map((section, index) => (
     <section key={section.id} id={section.id} aria-labelledby={`${section.id}-title`} className="scroll-mt-6">
       <h2 id={`${section.id}-title`} className="mb-2 flex gap-2 text-lg font-semibold text-ink">
         {doc.numbered ? <span className="num text-brand-ink">{index + 1}.</span> : null}
         {section.title}
       </h2>
-      {section.text ? <p className="leading-8 text-ink-muted">{fill(section.text)}</p> : null}
+      {section.text ? <p className="leading-8 text-ink-muted">{fill(section.text, values)}</p> : null}
       {section.table ? (
         <div className="overflow-x-auto rounded-card border border-line bg-surface">
           <table className="w-full min-w-xl border-collapse text-start text-sm">
@@ -122,7 +139,7 @@ function Sections({ doc }: { doc: LegalDocument }) {
                         column === 0 ? 'px-3 py-3 font-semibold text-ink' : 'px-3 py-3 text-ink-muted'
                       }
                     >
-                      {fill(cell)}
+                      {fill(cell, values)}
                     </td>
                   ))}
                 </tr>
@@ -136,8 +153,8 @@ function Sections({ doc }: { doc: LegalDocument }) {
 }
 
 /** Until the lawyer has reviewed the texts and every blank is filled, the page says it is a draft. */
-function DraftNotice() {
-  const blanks = remainingBlanks();
+function DraftNotice({ values }: { values: LegalValues }) {
+  const blanks = remainingBlanks(values);
   const named = blanks.map((key) => BLANK_LABELS[key as LegalKey] ?? key);
   return (
     <Alert tone="warning" title="مسودة قيد المراجعة القانونية">
