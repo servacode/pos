@@ -4,6 +4,7 @@ import type { SectorKey } from '../sectors';
 import type { CurrencyCode } from '../currencies';
 import { toLatinDigits } from '../text';
 import type { Permission, SystemRoleKey } from '../permissions';
+import type { CatalogOptions } from './catalog-options';
 
 /**
  * An optional contact phone (store, customer, supplier): empty becomes null, a mobile or a Syrian
@@ -158,6 +159,8 @@ export interface MeResponse {
     enabledCurrencies: CurrencyCode[];
     taxInclusive: boolean;
     numberFormat: 'latn' | 'arab';
+    /** «خيارات الأصناف»: barcode generation and size runs; the defaults until the owner chooses */
+    catalogOptions?: CatalogOptions;
   };
   subscription: {
     status: SubscriptionStatus;

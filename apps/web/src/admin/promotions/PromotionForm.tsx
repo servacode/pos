@@ -18,6 +18,7 @@ import {
   useDensity,
 } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
+import { DateField } from '../../lib/DateField';
 import { listCategories, listProducts } from '../catalog/api';
 import { categoryTree, categoryOptionLabel } from '../catalog/catalog';
 import { createPromotion, updatePromotion } from './api';
@@ -73,6 +74,7 @@ export function PromotionForm({
   const [days, setDays] = useState<number[]>(promotion?.daysOfWeek ?? []);
   const [fromTime, setFromTime] = useState(promotion?.fromTime ?? '');
   const [toTime, setToTime] = useState(promotion?.toTime ?? '');
+  const [couponCode, setCouponCode] = useState(promotion?.couponCode ?? '');
   const [categories, setCategories] = useState<Category[]>([]);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +126,7 @@ export function PromotionForm({
       daysOfWeek: days,
       fromTime: fromTime || null,
       toTime: toTime || null,
+      couponCode: couponCode.trim() || null,
       archived: promotion?.archived ?? false,
     };
     setSaving(true);
@@ -301,21 +304,24 @@ export function PromotionForm({
         ) : null}
       </FormSection>
 
+      <FormSection
+        title="كود الخصم"
+        description="اختياري: بدل أن يعمل العرض وحده، يكتب الزبون الكود في سلة المتجر الإلكتروني فيُطبَّق على طلبه."
+      >
+        <TextField
+          label="الكود (اختياري)"
+          dir="ltr"
+          placeholder="SUMMER10"
+          value={couponCode}
+          onChange={(e) => setCouponCode(e.target.value.slice(0, 20))}
+          error={fields.couponCode}
+        />
+      </FormSection>
+
       <FormSection title="متى يعمل" description="اترك ما لا تحتاجه فارغاً: يعمل كل يوم وطوال الوقت.">
         <div className="grid grid-cols-2 gap-3">
-          <TextField
-            label="من تاريخ (اختياري)"
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-          <TextField
-            label="حتى تاريخ (اختياري)"
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            error={fields.endsAt}
-          />
+          <DateField label="من تاريخ (اختياري)" value={from} onChange={setFrom} />
+          <DateField label="حتى تاريخ (اختياري)" value={to} onChange={setTo} error={fields.endsAt} />
         </div>
         <fieldset>
           <legend className="mb-2 text-sm font-semibold text-ink-muted">

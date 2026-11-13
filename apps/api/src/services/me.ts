@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import {
+  catalogOptionsOf,
   ALL_PERMISSIONS,
   type CurrencyCode,
   type MeResponse,
@@ -99,6 +100,7 @@ export async function loadMe(
         enabledCurrencies: settings.enabledCurrencies as CurrencyCode[],
         taxInclusive: settings.taxInclusive,
         numberFormat: settings.numberFormat === 'arab' ? 'arab' : 'latn',
+        catalogOptions: catalogOptionsOf(settings.catalogOptions),
       },
       subscription: {
         status: s.status,

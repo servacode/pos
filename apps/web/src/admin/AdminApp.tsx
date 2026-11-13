@@ -8,7 +8,13 @@ import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
 import { SectorGate } from './SectorGate';
-import { CHEQUE_SECTORS, EXPIRY_SECTORS, HALL_SECTORS, SERIAL_SECTORS } from '../lib/sectors';
+import {
+  CHEQUE_SECTORS,
+  EXPIRY_SECTORS,
+  HALL_SECTORS,
+  SERIAL_SECTORS,
+  WARRANTY_SECTORS,
+} from '../lib/sectors';
 
 // The devices page carries the QR generator: loaded when opened, not with every admin page.
 const DevicesPage = lazy(() => import('./devices/DevicesPage').then((m) => ({ default: m.DevicesPage })));
@@ -17,9 +23,11 @@ const ProductsPage = lazy(() => import('./products/ProductsPage').then((m) => ({
 const ProductRoute = lazy(() => import('./products/ProductPage').then((m) => ({ default: m.ProductRoute })));
 const LabelsPage = lazy(() => import('./labels/LabelsPage').then((m) => ({ default: m.LabelsPage })));
 const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ default: m.SerialsPage })));
+const WarrantyPage = lazy(() => import('./warranty/WarrantyPage').then((m) => ({ default: m.WarrantyPage })));
 const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
 );
+const FoodCostPage = lazy(() => import('./reports/FoodCostPage').then((m) => ({ default: m.FoodCostPage })));
 const SalesReportPage = lazy(() =>
   import('./reports/SalesReportPage').then((m) => ({ default: m.SalesReportPage })),
 );
@@ -35,6 +43,9 @@ const TransfersPage = lazy(() =>
 const ImportPage = lazy(() => import('./import/ImportPage').then((m) => ({ default: m.ImportPage })));
 const PriceListPage = lazy(() =>
   import('./products/PriceListPage').then((m) => ({ default: m.PriceListPage })),
+);
+const PriceHistoryPage = lazy(() =>
+  import('./products/PriceHistoryPage').then((m) => ({ default: m.PriceHistoryPage })),
 );
 const BulkPricesPage = lazy(() =>
   import('./products/BulkPricesPage').then((m) => ({ default: m.BulkPricesPage })),
@@ -159,11 +170,13 @@ export function AdminApp() {
           />
           <Route path="/online-store" element={page(<OnlineStorePage />)} />
           <Route path="/prices" element={page(<BulkPricesPage />)} />
+          <Route path="/price-history" element={page(<PriceHistoryPage />)} />
           <Route path="/price-list" element={page(<PriceListPage />)} />
           <Route path="/import" element={page(<ImportPage />)} />
           <Route path="/transfers" element={page(<TransfersPage />)} />
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
           <Route path="/reports/sales" element={page(<SalesReportPage />)} />
+          <Route path="/reports/food-cost" element={page(<FoodCostPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
           <Route
             path="/reports/cancellations"
@@ -178,6 +191,14 @@ export function AdminApp() {
             element={page(
               <SectorGate sectors={SERIAL_SECTORS}>
                 <SerialsPage />
+              </SectorGate>,
+            )}
+          />
+          <Route
+            path="/warranty"
+            element={page(
+              <SectorGate sectors={WARRANTY_SECTORS}>
+                <WarrantyPage />
               </SectorGate>,
             )}
           />

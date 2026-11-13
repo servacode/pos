@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { Promotion, PromotionData, PromotionKind, PromotionScope } from '@serva/core';
 import { categories, products, promotions, withTenant, type Database, type Transaction } from '@serva/db';
 import { requirePermission } from '../auth/permissions';
@@ -32,6 +32,7 @@ const view = (r: Row): Promotion => ({
   daysOfWeek: r.daysOfWeek,
   fromTime: r.fromTime,
   toTime: r.toTime,
+  couponCode: r.couponCode,
   archived: r.archivedAt !== null,
   version: r.version,
   updatedAt: r.updatedAt.toISOString(),
@@ -53,6 +54,7 @@ function columns(input: PromotionData, now: Date, archivedAt: Date | null) {
     daysOfWeek: [...new Set(input.daysOfWeek)].sort(),
     fromTime: input.fromTime,
     toTime: input.toTime,
+    couponCode: input.couponCode ? input.couponCode.toUpperCase() : null,
     archivedAt: input.archived ? (archivedAt ?? now) : null,
   };
 }
@@ -69,6 +71,22 @@ async function checkTargets(tx: Transaction, input: PromotionData): Promise<void
     const found = await tx.select({ id: products.id }).from(products).where(inArray(products.id, ids));
     if (found.length !== ids.length) throw fieldError('productIds', 'منتج غير موجود');
   }
+}
+
+/** A code opens one offer: «كود الخصم» is the store's own, whatever the letters' case. */
+async function checkCoupon(tx: Transaction, input: PromotionData, ownId: string | null): Promise<void> {
+  if (!input.couponCode) return;
+  const [same] = await tx
+    .select({ id: promotions.id })
+    .from(promotions)
+    .where(
+      and(
+        sql`lower(${promotions.couponCode}) = lower(${input.couponCode})`,
+        ...(ownId ? [ne(promotions.id, ownId)] : []),
+      ),
+    )
+    .limit(1);
+  if (same) throw fieldError('couponCode', 'هذا الكود لعرض آخر، اختر غيره');
 }
 
 async function one(tx: Transaction, id: string): Promise<Row> {
@@ -98,6 +116,7 @@ export function createPromotion(
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'catalog.manage');
     await checkTargets(tx, input);
+    await checkCoupon(tx, input, null);
     const [row] = await tx
       .insert(promotions)
       .values({ tenantId: auth.tenantId, ...columns(input, now, null) })
@@ -134,6 +153,7 @@ export function updatePromotion(
       throw staleVersion();
     }
     await checkTargets(tx, input);
+    await checkCoupon(tx, input, id);
     const [row] = await tx
       .update(promotions)
       .set(columns(input, now, before.archivedAt))

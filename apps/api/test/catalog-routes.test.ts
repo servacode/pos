@@ -375,6 +375,7 @@ describe('GET /v1/products and GET /v1/barcodes/{code}', () => {
       nameEn: 'Rabea Tea 450g',
       categoryId: null,
       categoryName: null,
+      season: null,
       type: 'stock',
       status: 'active',
       archivedAt: null,

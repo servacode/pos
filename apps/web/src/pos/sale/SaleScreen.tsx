@@ -5,7 +5,7 @@ import type { Approval } from '@serva/core/contracts/documents';
 import { businessDateOf, rateFor } from '@serva/core/sale';
 import { promotionActive } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
-import { missingPrescription, pickBatch, prescriptionNeed } from '@serva/core/pharmacy';
+import { missingPrescription, pickBatch, prescriptionNeed, usesAutoBatch } from '@serva/core/pharmacy';
 import type { OutboxEntry } from '@serva/sync';
 import {
   AddIcon,
@@ -58,6 +58,7 @@ import {
   setPriceTier,
   type ItemChoice,
   EMPTY_CART,
+  couponPromotion,
   removeLine,
   restoreLine,
   unitPriceOf,
@@ -77,6 +78,10 @@ import { ModifierPanel } from './ModifierPanel';
 import { modelPieces, orderPieces } from './models';
 import { VariantPicker } from './VariantPicker';
 import { TableBoard } from './TableBoard';
+import { CancelSentLine } from '../hall/CancelSentLine';
+import { SplitBill } from '../hall/SplitBill';
+import { cartFromOrder } from '../hall/hallCart';
+import type { HallTools } from '../hall/tools';
 import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
 import { HoldPanel } from './HoldPanel';
 import { HeldList, HoldNamePanel } from './HeldList';
@@ -100,6 +105,8 @@ export type SaleMode =
   | { kind: 'help' }
   | { kind: 'choose'; item: CatalogItem; hit: BarcodeHit | null }
   | { kind: 'tables' }
+  | { kind: 'split' }
+  | { kind: 'cancelSent'; lineNo: number }
   | { kind: 'online' }
   | { kind: 'hold' }
   | { kind: 'holdName' }
@@ -131,6 +138,8 @@ export interface SaleScreenProps {
   onOpenTable?: (table: string) => void;
   /** The order just sent to the kitchen, before it is marked sent (online, the server gets it too) */
   onKitchenSent?: (cart: Cart) => void;
+  /** The table's order on the server and what the till does with it: split the bill, move, cancel after the kitchen */
+  hallTools?: HallTools;
   /** The last sale's lines, for «كرّر آخر طلب» */
   lastLines: { variantId: string; barcode: string | null; qty: number }[];
   onSaved: (entry: OutboxEntry) => void;
@@ -180,7 +189,11 @@ export function SaleScreen(props: SaleScreenProps) {
   // and stops on time.
   const activePromotions = useMemo(() => {
     const now = new Date();
-    return catalog.promotions.filter((p) => promotionActive(p, now, settings.timezone));
+    const running = catalog.promotions.filter((p) => promotionActive(p, now, settings.timezone));
+    // A shop order's coupon: the offer its code opened applies to this sale, as the order was placed
+    return cart.onlineOrder?.couponRule
+      ? [...running, couponPromotion(cart.onlineOrder.couponRule)]
+      : running;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the cart is the clock's tick
   }, [catalog.promotions, settings.timezone, cart]);
   const ctx = useMemo<PricingContext>(
@@ -300,7 +313,9 @@ export function SaleScreen(props: SaleScreenProps) {
       }
       // …and no box of an expired batch goes out: the nearest batch that is still good is taken
       const today = businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff);
-      const pick = settings.pharmacy ? pickBatch(item.shelfBatches, today) : { kind: 'none' as const };
+      const pick = usesAutoBatch(settings.pharmacy)
+        ? pickBatch(item.shelfBatches, today)
+        : { kind: 'none' as const };
       if (pick.kind === 'expired') {
         setNotice({
           tone: 'warning',
@@ -530,7 +545,22 @@ export function SaleScreen(props: SaleScreenProps) {
   function remove(lineNo: number) {
     const index = cart.lines.findIndex((l) => l.lineNo === lineNo);
     if (index < 0) return;
-    setRemoved({ line: cart.lines[index]!, index });
+    // A line the kitchen already has is cancelled on the server, with a reason and a manager's code
+    if (
+      props.hallTools &&
+      (cart.sent?.[lineNo] ?? 0) > 0 &&
+      (cart.hall?.lineIds?.[lineNo]?.length ?? 0) > 0
+    ) {
+      setSelected(null);
+      setMode({ kind: 'cancelSent', lineNo });
+      return;
+    }
+    removeNow(lineNo, index);
+  }
+
+  function removeNow(lineNo: number, index: number, undoable = true) {
+    // «تراجع» is for a line only this till knew about: a cancellation sent to the kitchen stays
+    if (undoable) setRemoved({ line: cart.lines[index]!, index });
     setCart((c) => removeLine(c, lineNo));
     setSelected(null);
     if (mode.kind !== 'items') setMode({ kind: 'items' });
@@ -844,6 +874,11 @@ export function SaleScreen(props: SaleScreenProps) {
             ))}
           </div>
           <span className="flex-1" />
+          {props.hallTools?.order && cart.hall ? (
+            <Button variant="secondary" size="md" onClick={() => setMode({ kind: 'split' })}>
+              قسّم الحساب
+            </Button>
+          ) : null}
           {service.tables.length > 0 ? (
             <Button variant="secondary" size="md" onClick={() => setMode({ kind: 'tables' })}>
               {cart.service?.table ? `طاولة ${cart.service.table}` : 'الطاولات'}
@@ -1501,7 +1536,61 @@ export function SaleScreen(props: SaleScreenProps) {
             setMode({ kind: 'items' });
             props.onOpenTable?.(table);
           }}
+          onMove={props.hallTools?.onMoveTable}
           onClose={() => setMode({ kind: 'items' })}
+        />
+      ) : effectiveMode.kind === 'split' && props.hallTools?.order ? (
+        <SplitBill
+          order={props.hallTools.order}
+          currency={ctx.currency}
+          blocked={
+            cart.lines.some((l) => l.qty > (cart.hall?.known[l.lineNo] ?? 0))
+              ? 'في الطلب أصناف لم تُرسل بعد. أرسلها للمطبخ ثم قسّم الحساب.'
+              : null
+          }
+          totalOf={(lineIds) => {
+            try {
+              const part = cartFromOrder(props.hallTools!.order!, catalog, null, { lineIds }).cart;
+              return part.lines.length > 0 ? priceCart(part, ctx).priced.totals.totalMinor : 0;
+            } catch {
+              return 0;
+            }
+          }}
+          onItems={(lineIds) => {
+            setMode({ kind: 'items' });
+            props.hallTools!.onSplitItems(lineIds);
+          }}
+          onEqual={(parts) => {
+            setMode({ kind: 'items' });
+            props.hallTools!.onSplitEqual(parts);
+          }}
+          onClose={() => setMode({ kind: 'items' })}
+        />
+      ) : effectiveMode.kind === 'cancelSent' && lineOf(effectiveMode.lineNo) && props.hallTools ? (
+        <CancelSentLine
+          name={lineOf(effectiveMode.lineNo)!.name}
+          staff={staff}
+          onBack={() => setMode({ kind: 'items' })}
+          onLocalOnly={() => {
+            const at = cart.lines.findIndex((l) => l.lineNo === effectiveMode.lineNo);
+            setMode({ kind: 'items' });
+            if (at >= 0) removeNow(effectiveMode.lineNo, at);
+          }}
+          onConfirm={async (input) => {
+            const answer = await props.hallTools!.cancelSent(effectiveMode.lineNo, input);
+            if (answer.kind === 'ok') {
+              const at = cart.lines.findIndex((l) => l.lineNo === effectiveMode.lineNo);
+              setMode({ kind: 'items' });
+              if (at >= 0) removeNow(effectiveMode.lineNo, at, false);
+              setNotice({
+                tone: 'info',
+                text: answer.queued
+                  ? 'حُذف البند. سيصل إلغاؤه للمطبخ حين يعود الاتصال.'
+                  : 'أُلغي البند ووصل الإلغاء لشاشة المطبخ.',
+              });
+            }
+            return answer;
+          }}
         />
       ) : effectiveMode.kind === 'help' ? (
         <SalePanel title="دليل الاختصارات" actions={closeButton('أغلق', () => setMode({ kind: 'items' }))}>

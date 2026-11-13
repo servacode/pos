@@ -116,8 +116,47 @@ const lineOf = (r: LineRow, names: Map<string, string>): HallLine => ({
 /** Lines deleted before the send are gone for every screen */
 const visibleLine = (r: LineRow) => !(r.status === 'cancelled' && !r.cancelledAfterSend);
 
+/** What the till has charged of each order so far, read from the order's `part_paid` events */
+interface Payments {
+  lineIds: Set<string>;
+  refs: Set<string>;
+  equalParts: number | null;
+  equalPaid: number;
+}
+
+async function paymentsOf(tx: Transaction, orderIds: string[]): Promise<Map<string, Payments>> {
+  const out = new Map<string, Payments>();
+  if (orderIds.length === 0) return out;
+  const rows = await tx
+    .select({ orderId: openOrderEvents.orderId, data: openOrderEvents.data })
+    .from(openOrderEvents)
+    .where(and(inArray(openOrderEvents.orderId, orderIds), eq(openOrderEvents.type, 'part_paid')))
+    .orderBy(asc(openOrderEvents.at));
+  for (const row of rows) {
+    const pay = out.get(row.orderId) ?? {
+      lineIds: new Set<string>(),
+      refs: new Set<string>(),
+      equalParts: null,
+      equalPaid: 0,
+    };
+    const data = row.data as { lineIds?: string[]; equal?: { parts: number }; ref?: string };
+    for (const id of data.lineIds ?? []) pay.lineIds.add(id);
+    if (data.equal) {
+      pay.equalParts = data.equal.parts;
+      pay.equalPaid += 1;
+    }
+    if (data.ref) pay.refs.add(data.ref);
+    out.set(row.orderId, pay);
+  }
+  return out;
+}
+
 async function ordersWithLines(tx: Transaction, rows: OrderRow[]): Promise<HallOrder[]> {
   if (rows.length === 0) return [];
+  const payments = await paymentsOf(
+    tx,
+    rows.map((r) => r.id),
+  );
   const lineRows = await tx
     .select()
     .from(openOrderLines)
@@ -138,6 +177,10 @@ async function ordersWithLines(tx: Transaction, rows: OrderRow[]): Promise<HallO
     openedAt: r.createdAt.toISOString(),
     billRequestedAt: iso(r.billRequestedAt),
     lines: lineRows.filter((l) => l.orderId === r.id && visibleLine(l)).map((l) => lineOf(l, names)),
+    paidLineIds: [...(payments.get(r.id)?.lineIds ?? [])],
+    equal: payments.get(r.id)?.equalParts
+      ? { parts: payments.get(r.id)!.equalParts!, paid: payments.get(r.id)!.equalPaid }
+      : null,
     version: r.version,
   }));
 }
@@ -239,6 +282,42 @@ async function nextTicketSeq(tx: Transaction, tenantId: string): Promise<number>
   return (last?.seq ?? 0) + 1;
 }
 
+async function assertNotPaid(tx: Transaction, orderId: string, lineId: string): Promise<void> {
+  if ((await paymentsOf(tx, [orderId])).get(orderId)?.lineIds.has(lineId)) {
+    throw conflict('دُفع هذا البند في جزء من الحساب.');
+  }
+}
+
+/**
+ * A split table closes by itself once its last part is charged (items: every line still live is
+ * paid; equal: every part is charged). Lines never sent are dropped with it, as «close» does.
+ */
+async function closeIfAllPaid(
+  tx: Transaction,
+  device: DeviceClaims,
+  orderId: string,
+  userId: string,
+  now: Date,
+  ref: string | null = null,
+): Promise<void> {
+  const pay = (await paymentsOf(tx, [orderId])).get(orderId);
+  if (!pay) return;
+  const live = await tx
+    .select({ id: openOrderLines.id })
+    .from(openOrderLines)
+    .where(and(eq(openOrderLines.orderId, orderId), ne(openOrderLines.status, 'cancelled')));
+  const done = pay.equalParts
+    ? pay.equalPaid >= pay.equalParts
+    : pay.lineIds.size > 0 && live.every((l) => pay.lineIds.has(l.id));
+  if (!done) return;
+  await tx
+    .update(openOrderLines)
+    .set({ status: 'cancelled', cancelledAt: now, cancelledBy: userId, updatedAt: sql`now()` })
+    .where(and(eq(openOrderLines.orderId, orderId), eq(openOrderLines.status, 'new')));
+  await touch(tx, orderId, { status: 'closed', closedAt: now, closedReason: 'paid', closedRef: ref });
+  await event(tx, device, orderId, 'closed', userId, { reason: 'paid', ref, split: true });
+}
+
 async function orderResponse(tx: Transaction, orderId: string): Promise<HallCommandResponse> {
   const [row] = await tx.select().from(openOrders).where(eq(openOrders.id, orderId));
   if (!row || row.status === 'closed') return { order: null };
@@ -257,7 +336,7 @@ export async function hallCommandRun(
   // The manager's code is checked first and on its own (its failures are counted and kept even
   // when the rest of the command is refused), the same check as a cashier's sign-in.
   let approver: { id: string; fullName: string } | null = null;
-  if (command.type === 'cancel') {
+  if (command.type === 'cancel' && command.approverPin) {
     const session = await startStaffSession(
       db,
       passwords,
@@ -317,6 +396,10 @@ export async function hallCommandRun(
 
     switch (command.type) {
       case 'add': {
+        const pay = (await paymentsOf(tx, [order.id])).get(order.id);
+        if (pay?.equalParts) {
+          throw conflict('قُسّم حساب هذه الطاولة بالتساوي: لا تُضاف بنود بعد بدء الدفع.');
+        }
         const sections = await sectionsOfProducts(
           tx,
           command.lines.map((l) => l.productId),
@@ -390,6 +473,7 @@ export async function hallCommandRun(
           .for('update');
         if (!line) throw new AppError(404, 'not_found', 'هذا البند غير موجود.');
         if (line.status === 'cancelled' && !line.cancelledAfterSend) break;
+        await assertNotPaid(tx, order.id, line.id);
         if (line.status !== 'new') {
           throw conflict('أُرسل هذا البند للمطبخ. إلغاؤه يحتاج سبباً ورمز المدير.');
         }
@@ -399,6 +483,7 @@ export async function hallCommandRun(
           .where(eq(openOrderLines.id, line.id));
         await touch(tx, order.id);
         await event(tx, device, order.id, 'removed', user.id, { lineId: line.id });
+        await closeIfAllPaid(tx, device, order.id, user.id, now);
         break;
       }
       case 'send': {
@@ -488,7 +573,28 @@ export async function hallCommandRun(
         if (!CANCELLABLE_AFTER_SEND.includes(line.status as LineStatus)) {
           throw conflict(line.status === 'served' ? 'قُدِّم هذا البند للزبون.' : 'أُلغي هذا البند من قبل.');
         }
+        await assertNotPaid(tx, order.id, line.id);
         const stage = isPrepared(line.status as LineStatus) ? 'after_prep' : 'before_prep';
+        let approvedBy = approver?.id ?? null;
+        let offline = false;
+        if (!approvedBy) {
+          // The till checked the code on the device while it had no connection (03 › الإلغاء بعد المطبخ)
+          if (!command.offlineApproval || kind !== 'cashier') {
+            throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+              approverPin: 'اكتب رمز المدير.',
+            });
+          }
+          const [boss] = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(and(eq(users.id, command.approverId), eq(users.status, 'active')));
+          const scope = boss ? await permissionScope(tx, boss.id, 'hall.cancel_approve') : null;
+          if (!boss || !scope || !(scope.all || scope.branchIds.has(device.branchId))) {
+            throw refuse('هذا المستخدم لا يملك صلاحية الموافقة على الإلغاء.');
+          }
+          approvedBy = boss.id;
+          offline = true;
+        }
         await tx
           .update(openOrderLines)
           .set({
@@ -496,7 +602,7 @@ export async function hallCommandRun(
             cancelledAt: now,
             cancelReason: command.reason,
             cancelledBy: user.id,
-            approvedBy: approver!.id,
+            approvedBy,
             cancelledAfterSend: true,
             cancelStage: stage,
             updatedAt: sql`now()`,
@@ -508,8 +614,87 @@ export async function hallCommandRun(
           item: line.name,
           reason: command.reason,
           stage,
-          approvedBy: approver!.id,
+          approvedBy,
+          ...(offline ? { approvalOffline: true, approvalAt: command.offlineApproval!.at } : {}),
         });
+        await closeIfAllPaid(tx, device, order.id, user.id, now);
+        break;
+      }
+      case 'move': {
+        const tables = await tablesOf(tx, device.tenantId);
+        if (!tables.includes(command.table)) {
+          throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+            table: 'هذه الطاولة غير موجودة في الصالة.',
+          });
+        }
+        if (command.table === order.tableName) break;
+        const [taken] = await tx
+          .select({ id: openOrders.id })
+          .from(openOrders)
+          .where(
+            and(
+              eq(openOrders.tenantId, device.tenantId),
+              eq(openOrders.branchId, device.branchId),
+              eq(openOrders.tableName, command.table),
+              ne(openOrders.status, 'closed'),
+            ),
+          );
+        if (taken) throw conflict(`الطاولة ${command.table} مشغولة. ادمج الطلبين بدلاً من النقل.`);
+        await touch(tx, order.id, { tableName: command.table });
+        await event(tx, device, order.id, 'moved', user.id, { from: order.tableName, to: command.table });
+        break;
+      }
+      case 'merge': {
+        if (command.fromOrderId === order.id) throw conflict('اختر طاولتين مختلفتين للدمج.');
+        const from = liveOrder(await lockedOrder(tx, device, command.fromOrderId));
+        const pays = await paymentsOf(tx, [order.id, from.id]);
+        if (pays.size > 0) throw conflict('بدأ دفع جزء من إحدى الطاولتين: أتمّ الدفع قبل الدمج.');
+        await tx
+          .update(openOrderLines)
+          .set({ orderId: order.id, updatedAt: sql`now()` })
+          .where(eq(openOrderLines.orderId, from.id));
+        await touch(tx, from.id, { status: 'closed', closedAt: now, closedReason: 'merged', guests: null });
+        // The merged order is busy again: the bill asked for on one table no longer holds for both
+        await touch(tx, order.id, {
+          status: 'open',
+          billRequestedAt: null,
+          guests:
+            order.guests === null && from.guests === null ? null : (order.guests ?? 0) + (from.guests ?? 0),
+        });
+        await event(tx, device, from.id, 'merged_into', user.id, { into: order.id, table: order.tableName });
+        await event(tx, device, order.id, 'merged', user.id, { from: from.id, table: from.tableName });
+        break;
+      }
+      case 'part': {
+        if (kind === 'waiter') throw refuse('النادل لا يقبض: الدفع على جهاز الكاشير.');
+        if (!command.lineIds === !command.equal) {
+          throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+            lineIds: 'اختر بنوداً أو قسّم بالتساوي.',
+          });
+        }
+        const pay = (await paymentsOf(tx, [order.id])).get(order.id);
+        if (pay?.refs.has(command.ref)) break;
+        const live = (
+          await tx.select().from(openOrderLines).where(eq(openOrderLines.orderId, order.id)).for('update')
+        ).filter((l) => l.status !== 'cancelled');
+        if (command.lineIds) {
+          if (pay?.equalParts) throw conflict('قُسّم حساب هذه الطاولة بالتساوي: أتمّه بالتساوي.');
+          const ids = [...new Set(command.lineIds)];
+          for (const id of ids) {
+            if (!live.some((l) => l.id === id)) throw conflict('بند غير موجود أو ملغى في هذا الطلب.');
+            if (pay?.lineIds.has(id)) throw conflict('دُفع هذا البند من قبل.');
+          }
+          await event(tx, device, order.id, 'part_paid', user.id, { lineIds: ids, ref: command.ref });
+        } else {
+          const parts = command.equal!.parts;
+          if (pay && pay.lineIds.size > 0) throw conflict('دُفعت بنود هذه الطاولة بالأصناف: أتمّه بالأصناف.');
+          if (pay?.equalParts && pay.equalParts !== parts) {
+            throw conflict(`قُسّم الحساب إلى ${pay.equalParts} أجزاء: أتمّه بالعدد نفسه.`);
+          }
+          if ((pay?.equalPaid ?? 0) >= parts) throw conflict('دُفعت كل الأجزاء.');
+          await event(tx, device, order.id, 'part_paid', user.id, { equal: { parts }, ref: command.ref });
+        }
+        await closeIfAllPaid(tx, device, order.id, user.id, now, command.ref);
         break;
       }
       case 'close': {
@@ -596,11 +781,21 @@ export function kitchenState(db: Database, device: DeviceClaims, now: Date): Pro
           .where(inArray(openOrderLines.ticketId, ids))
           .orderBy(asc(openOrderLines.createdAt), asc(openOrderLines.id))
       : [];
+    // A slip shows the table its lines are on now: a moved or merged order keeps its slips
+    const tableOf = new Map(
+      (lineRows.length
+        ? await tx
+            .select({ id: openOrders.id, table: openOrders.tableName })
+            .from(openOrders)
+            .where(inArray(openOrders.id, [...new Set(lineRows.map((l) => l.orderId))]))
+        : []
+      ).map((o) => [o.id, o.table]),
+    );
     const out: KitchenTicket[] = tickets.map((t) => ({
       id: t.id,
       seq: t.seq,
       section: t.section,
-      table: t.tableName,
+      table: tableOf.get(lineRows.find((l) => l.ticketId === t.id)?.orderId ?? '') ?? t.tableName,
       kind: t.kind as 'new' | 'add',
       createdAt: t.createdAt.toISOString(),
       lines: lineRows

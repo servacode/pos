@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import type { Category, ProductListItem, ProductListQuery } from '@serva/core';
+import type { Category, OptionValuesResponse, ProductListItem, ProductListQuery } from '@serva/core';
 import { COUNT_NOUNS, countNoun, getCurrency } from '@serva/core';
 import {
   AddIcon,
@@ -37,7 +37,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
-import { ApiError, errorMessage } from '../../lib/api';
+import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
 import {
   barcodeOf,
@@ -67,10 +67,12 @@ const STATUS_OPTIONS: { value: ListStatus; label: string }[] = [
 interface Filters {
   q: string;
   categoryId: string;
+  /** «الموسم/التشكيلة»; "" = all */
+  season: string;
   status: ListStatus;
 }
 
-const NO_FILTERS: Filters = { q: '', categoryId: '', status: 'active' };
+const NO_FILTERS: Filters = { q: '', categoryId: '', season: '', status: 'active' };
 
 /** A phone-width screen (under Tailwind's `sm`): the list becomes cards, as a table does not fit. */
 function useIsPhone(): boolean {
@@ -275,6 +277,8 @@ function ProductsList() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
+  // The seasons the store's products carry (a clothing store's filter)
+  const [seasons, setSeasons] = useState<string[]>([]);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [unknownCode, setUnknownCode] = useState<string | null>(null);
   const request = useRef(0);
@@ -282,6 +286,7 @@ function ProductsList() {
   const queryKey = JSON.stringify({
     q: searchTerm(q) || undefined,
     categoryId: filters.categoryId || undefined,
+    season: filters.season || undefined,
     status: filters.status,
   } satisfies ProductListQuery);
 
@@ -311,7 +316,12 @@ function ProductsList() {
       .then((answer) => setCategories(answer.items))
       // The filter is a convenience: the list works without it.
       .catch(() => setCategories([]));
-  }, []);
+    if (me.tenant.sectors.includes('clothing')) {
+      apiFetch<OptionValuesResponse>('/v1/products/options', { auth: true })
+        .then((answer) => setSeasons(answer.seasons ?? []))
+        .catch(() => setSeasons([]));
+    }
+  }, [me.tenant.sectors]);
 
   /** «صدّر Excel/CSV»: every page of the current search, not only what is on screen. */
   async function exportAll() {
@@ -389,7 +399,11 @@ function ProductsList() {
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
-  const filtered = filters.q.trim() !== '' || filters.categoryId !== '' || filters.status !== 'active';
+  const filtered =
+    filters.q.trim() !== '' ||
+    filters.categoryId !== '' ||
+    filters.season !== '' ||
+    filters.status !== 'active';
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
   const summary = items ? summaryOf(items) : null;
   // More pages wait behind «اعرض المزيد»: the tiles count what is on screen, «+» says there is more.
@@ -638,6 +652,22 @@ function ProductsList() {
                 </option>
               ))}
             </Select>
+            {seasons.length > 0 || filters.season ? (
+              <Select
+                label="الموسم"
+                hideLabel
+                value={filters.season}
+                onChange={(event) => setFilter('season', event.target.value)}
+                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+              >
+                <option value="">كل المواسم</option>
+                {seasons.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
             <SegmentedControl
               label="حالة المنتج"
               options={STATUS_OPTIONS}

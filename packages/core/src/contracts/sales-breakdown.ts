@@ -8,15 +8,16 @@ import { isoDateSchema, uuidSchema } from './common';
  *
  *   GET /v1/reports/sales-breakdown?from&to&by[&option][&branchId]   SalesBreakdown
  *
- * Net of what came back. A seller's row is the base of a commission; the rate is not kept in the
- * system, so no commission amount is computed here.
+ * Net of what came back. A seller's row carries the seller's «نسبة العمولة» from the staff page
+ * (null when none is set) and the commission it makes; a report only, nothing is posted.
  */
-export const SALES_GROUPS = ['product', 'category', 'option', 'seller'] as const;
+export const SALES_GROUPS = ['product', 'category', 'season', 'option', 'seller'] as const;
 export type SalesGroup = (typeof SALES_GROUPS)[number];
 
 export const SALES_GROUP_LABEL: Record<SalesGroup, string> = {
   product: 'المنتج',
   category: 'التصنيف',
+  season: 'الموسم',
   option: 'الخيار (المقاس، اللون…)',
   seller: 'البائع',
 };
@@ -45,6 +46,10 @@ export interface SalesBreakdownRow {
   /** The same row in the previous period; zero when it did not sell then */
   previousQty: number;
   previousTotalMinor: number;
+  /** `by=seller`: the seller's rate in basis points (staff page); null otherwise or when none is set */
+  commissionBp: number | null;
+  /** `by=seller` with a rate: the net sales times the rate; null otherwise */
+  commissionMinor: number | null;
 }
 
 export interface SalesBreakdown {
@@ -61,4 +66,6 @@ export interface SalesBreakdown {
   previousTotalMinor: number;
   /** The option names the store's pieces have, for the picker of `by=option` */
   optionNames: string[];
+  /** «عمولات البائعين»: the commissions of every seller row with a rate, together; null off `by=seller` */
+  commissionTotalMinor: number | null;
 }

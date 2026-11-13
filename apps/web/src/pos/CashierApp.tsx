@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { HallOrder } from '@serva/core';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
 import {
@@ -33,7 +34,9 @@ import { sendToPrinter } from './print/usb';
 import { SaleDone } from './receipt/SaleDone';
 import { deliverTicket } from './alterations/api';
 import { addItem, EMPTY_CART, type Cart } from './sale/cart';
-import { cartFromOrder } from './hall/hallCart';
+import { cancelSentLines, flushPendingCancels } from './hall/cancelSent';
+import { cartFromOrder, lineIdsOf } from './hall/hallCart';
+import type { HallTools } from './hall/tools';
 import { useServerHall } from './hall/useServerHall';
 import { SaleScreen } from './sale/SaleScreen';
 import { PosProvider, usePos } from './services';
@@ -88,6 +91,8 @@ interface PendingHallClose {
   orderId: string;
   userId: string;
   ref: string;
+  /** A part of a split bill (items, or one equal share) rather than the whole table */
+  part?: { lineIds: string[] } | { equal: { parts: number } };
 }
 const LAST_SALE_KEY = 'lastSale';
 const PAPER_KEY = 'paperWidth';
@@ -233,17 +238,23 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     const api = serverHall.api;
     if (!api || !serverHall.reachable) return;
     let alive = true;
+    // Lines cancelled at this till while it was offline reach the kitchen screen now
+    void flushPendingCancels(api, pos.local);
     void pos.local.get<PendingHallClose[]>(HALL_CLOSE_KEY).then(async (pending) => {
       if (!pending || pending.length === 0) return;
       const left: PendingHallClose[] = [];
       for (const item of pending) {
-        const answer = await api.command({
-          type: 'close',
-          userId: item.userId,
-          orderId: item.orderId,
-          reason: 'paid',
-          ref: item.ref,
-        });
+        const answer = await api.command(
+          item.part
+            ? {
+                type: 'part',
+                userId: item.userId,
+                orderId: item.orderId,
+                ref: item.ref,
+                ...('lineIds' in item.part ? { lineIds: item.part.lineIds } : { equal: item.part.equal }),
+              }
+            : { type: 'close', userId: item.userId, orderId: item.orderId, reason: 'paid', ref: item.ref },
+        );
         // A refusal (already closed, unknown order) will not change: drop it; no answer: keep it
         if (answer.kind === 'network') left.push(item);
       }
@@ -360,7 +371,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     };
     setLastSale(last);
     void pos.local.set(LAST_SALE_KEY, last);
-    closeHallOrder(cartRef.current, entry.doc.number ?? '');
+    closeHallOrder(cartRef.current, entry.doc.number || entry.doc.id);
     // A sale that delivers an alteration ticket: the ticket turns delivered now that its fee is sold
     const delivering = cartRef.current.alteration;
     if (delivering && pos.device.token) void deliverTicket(delivering, pos.device.token, pos.fetch);
@@ -499,7 +510,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     const now: Record<number, number> = {};
     for (const l of sent.lines) now[l.lineNo] = l.qty;
     const id = orderId;
-    setCartState((c) => (c.service?.table === table ? { ...c, hall: { orderId: id, known: now } } : c));
+    const ids = done.body.order ? lineIdsOf(sent, done.body.order) : {};
+    setCartState((c) =>
+      c.service?.table === table ? { ...c, hall: { orderId: id, known: now, lineIds: ids } } : c,
+    );
     void serverHall.refresh();
   }
 
@@ -510,18 +524,127 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     const orderId = paid.hall?.orderId ?? serverHall.orders.find((o) => o.table === table)?.id;
     if (!orderId) return;
     const userId = session.userId;
+    const split = paid.hall?.part;
+    const part: PendingHallClose['part'] = split
+      ? 'lineIds' in split
+        ? { lineIds: split.lineIds }
+        : { equal: { parts: split.equal.parts } }
+      : undefined;
     const later = () =>
       pos.local
         .get<PendingHallClose[]>(HALL_CLOSE_KEY)
-        .then((list) => pos.local.set(HALL_CLOSE_KEY, [...(list ?? []), { orderId, userId, ref }]));
+        .then((list) =>
+          pos.local.set(HALL_CLOSE_KEY, [
+            ...(list ?? []),
+            { orderId, userId, ref, ...(part ? { part } : {}) },
+          ]),
+        );
     const api = serverHall.api;
     if (!api) {
       void later();
       return;
     }
     void api
-      .command({ type: 'close', userId, orderId, reason: 'paid', ref })
+      .command(
+        part
+          ? {
+              type: 'part',
+              userId,
+              orderId,
+              ref,
+              ...('lineIds' in part ? { lineIds: part.lineIds } : { equal: part.equal }),
+            }
+          : { type: 'close', userId, orderId, reason: 'paid', ref },
+      )
       .then((answer) => (answer.kind === 'network' ? later() : serverHall.refresh()));
+  }
+
+  /** The server's order behind the cart's table, while it can be reached */
+  const hallOrder =
+    serverHall.reachable && cart.hall
+      ? (serverHall.orders.find((o) => o.id === cart.hall!.orderId) ?? null)
+      : null;
+
+  /** «قسّم الحساب»: this sale becomes one part of the table's bill (items, or an equal share) */
+  function startPart(order: HallOrder, split: { lineIds: string[] } | { parts: number }) {
+    const { cart: part } = cartFromOrder(order, catalog, null, split);
+    setCartState(part);
+    setDone(null);
+  }
+
+  const hallTools: HallTools | undefined =
+    hallTables.length > 0
+      ? {
+          order: hallOrder,
+          onSplitItems: (lineIds) => hallOrder && startPart(hallOrder, { lineIds }),
+          onSplitEqual: (parts) => hallOrder && startPart(hallOrder, { parts }),
+          onMoveTable: moveTable,
+          cancelSent: async (lineNo, input) => {
+            const current = cartRef.current;
+            const ids = current.hall?.lineIds?.[lineNo] ?? [];
+            if (!current.hall || ids.length === 0) return { kind: 'ok', queued: false };
+            const answer = await cancelSentLines({
+              api: serverHall.api,
+              reachable: serverHall.reachable,
+              local: pos.local,
+              deps: {
+                local: pos.local,
+                token: pos.device.token,
+                online: pos.online(),
+                now: pos.now,
+                fetch: pos.fetch,
+              },
+              staff,
+              orderId: current.hall.orderId,
+              lineIds: ids,
+              userId: session.userId,
+              ...input,
+            });
+            if (answer.kind === 'ok') void serverHall.refresh();
+            return answer;
+          },
+        }
+      : undefined;
+
+  /** «نقل / دمج»: a table's order goes to a free table, or joins the order on a busy one */
+  async function moveTable(from: string, to: string): Promise<string | null> {
+    const source = serverHall.orders.find((o) => o.table === from);
+    const target = serverHall.orders.find((o) => o.table === to);
+    const mineAt = (table: string) =>
+      [...held, ...(cartRef.current.lines.length > 0 ? [cartRef.current] : [])].filter(
+        (c) => c.service?.table === table,
+      );
+    // Lines taken here and not yet with the server would be lost in the move
+    const unsent = [...mineAt(from), ...mineAt(to)].some((c) => newLinesOf(c).lines.length > 0);
+    if (!source) {
+      if (target || mineAt(to).length > 0) return `الطاولة ${to} مشغولة: أرسل الطلبين للمطبخ ثم ادمجهما.`;
+      // An order only this till holds: its table is renamed here
+      const rename = (c: Cart): Cart =>
+        c.service?.table === from ? { ...c, service: { ...c.service, table: to } } : c;
+      const next = held.map(rename);
+      setHeld(next);
+      void pos.local.set(HELD_KEY, next);
+      setCartState(rename);
+      return null;
+    }
+    if (unsent) return 'في الطلب أصناف لم تُرسل للمطبخ بعد. أرسلها ثم انقل الطاولة.';
+    const api = serverHall.api;
+    if (!api) return 'النقل والدمج يحتاجان اتصالاً بالخادم.';
+    const answer = await api.command(
+      target
+        ? { type: 'merge', userId: session.userId, orderId: target.id, fromOrderId: source.id }
+        : { type: 'move', userId: session.userId, orderId: source.id, table: to },
+    );
+    if (answer.kind === 'network') return 'لا يوجد اتصال بالخادم. أعد المحاولة.';
+    if (answer.kind === 'refused') return answer.message;
+    // The carts here that mirrored these tables are read again from the server
+    const gone = (c: Cart) => c.service?.table === from || c.service?.table === to;
+    const rest = held.filter((c) => !gone(c));
+    setHeld(rest);
+    void pos.local.set(HELD_KEY, rest);
+    if (gone(cartRef.current)) setCartState(EMPTY_CART);
+    await serverHall.refresh();
+    return null;
   }
 
   function reprint() {
@@ -739,7 +862,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'return' }, copy: false })
               }
               onExchange={(code) => {
-                setCart((c) => ({ ...c, voucher: code }));
+                // A cash exchange has no voucher: the return went out in cash, the other piece is paid in cash
+                if (code) setCart((c) => ({ ...c, voucher: code }));
                 setDone(null);
                 setView('sale');
               }}
@@ -778,6 +902,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         heldCarts={[...held, ...serverOnly]}
         onOpenTable={openTable}
         onKitchenSent={(sent) => void sendToHall(sent)}
+        hallTools={hallTools}
         lastLines={
           last ? last.lines.map((l) => ({ variantId: l.variantId, barcode: l.barcode, qty: l.qty })) : []
         }

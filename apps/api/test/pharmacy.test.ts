@@ -294,6 +294,63 @@ describe('batches the till picks from, and the prescription flags', () => {
   });
 });
 
+describe('medicine returns and batch picking, for a pharmacy and for medical supplies', () => {
+  const put = (store: Store, payload: Record<string, unknown>) =>
+    app.inject({ method: 'PUT', url: '/v1/store/pharmacy', headers: as(store), payload });
+
+  it('keeps the return policy and the batch switch; a pharmacy picks batches until it turns that off', async () => {
+    const store = await openStore(app);
+    await ownerDb()`update tenants set sectors = array['pharmacy'] where id = ${store.tenantId}`;
+    const policy = { prescription: 'optional', returns: 'none', controlledReturns: true };
+    const res = await put(store, policy);
+    expect(res.statusCode, res.body).toBe(200);
+    // Not written: the pharmacy's default (batch picking on) holds
+    expect(res.json<StoreResponse>().pharmacy).toEqual(policy);
+    let sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual(policy);
+
+    expect((await put(store, { ...policy, autoBatch: false })).statusCode).toBe(200);
+    sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, autoBatch: false });
+    expect((await put(store, { prescription: 'optional', returns: 'sometimes' })).statusCode).toBe(400);
+  });
+
+  it('a medical-supplies store has batch picking off until it turns it on, and its tills get the shelf batches', async () => {
+    const store = await openStore(app);
+    await ownerDb()`update tenants set sectors = array['medical_supplies'] where id = ${store.tenantId}`;
+    const read = async () =>
+      (await app.inject({ method: 'GET', url: '/v1/store', headers: as(store) })).json<StoreResponse>();
+    expect((await read()).pharmacy).toBeNull();
+
+    expect((await put(store, { prescription: 'optional', returns: 'allowed' })).statusCode).toBe(200);
+    expect((await read()).pharmacy).toEqual({
+      prescription: 'optional',
+      returns: 'allowed',
+      autoBatch: false,
+    });
+
+    expect((await put(store, { prescription: 'optional', autoBatch: true })).statusCode).toBe(200);
+    expect((await read()).pharmacy).toEqual({ prescription: 'optional', autoBatch: true });
+    const sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'optional', autoBatch: true });
+
+    const s = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/suppliers',
+        headers: as(store),
+        payload: { name: 'المورد' },
+      })
+    ).json<SupplierRow>();
+    const item = await medicine(store);
+    await receive(store, s.id, item.variantId, '2026-10-28', 5, 'M-01', '2026-12-15');
+    const pulled = await pull(store);
+    expect(pulled.variants.upserts.find((v) => v.id === item.variantId)!.shelfBatches).toEqual([
+      { batchNo: 'M-01', expiry: '2026-12-15' },
+    ]);
+  });
+});
+
 describe('controlled drugs on the server', () => {
   /** One till for the test: its numbers keep counting, and its shift is opened once */
   async function till(store: Store) {

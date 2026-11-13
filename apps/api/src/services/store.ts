@@ -1,6 +1,8 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import {
+  catalogOptionsOf,
   DEFAULT_PHARMACY_SETTINGS,
+  type CatalogOptions,
   type TillSettings,
   type CurrencyCode,
   type OnboardingInput,
@@ -27,6 +29,7 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { ensureAlterationItem } from './catalog-defaults';
 
 /**
  * The store's own settings (packages/core › contracts/store.ts): the start wizard and the settings
@@ -77,6 +80,7 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
       ? (settings.pharmacy ?? DEFAULT_PHARMACY_SETTINGS)
       : (settings.pharmacy ?? null),
     till: settings.till ?? null,
+    catalogOptions: catalogOptionsOf(settings.catalogOptions),
   };
 }
 
@@ -102,6 +106,8 @@ export function updateProfile(
         ...(input.taxNumber !== undefined ? { taxNumber: input.taxNumber } : {}),
       })
       .where(eq(tenants.id, auth.tenantId));
+    // A clothing store sells alterations: the service item is there from the moment it is one
+    if (input.sectors.includes('clothing')) await ensureAlterationItem(tx, auth.tenantId);
     const branch = await mainBranch(tx);
     if (branch && (input.address !== undefined || input.phone !== undefined)) {
       await tx
@@ -322,7 +328,35 @@ export function updateTill(
   });
 }
 
-/** «الصيدلية»: whether a prescription medicine's number and doctor are required at the till. */
+/** «خيارات الأصناف»: barcode generation for new variants and the size runs of the purchase grid. */
+export function updateCatalogOptions(
+  db: Database,
+  auth: AccessClaims,
+  input: CatalogOptions,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ catalogOptions: input });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.catalog_options_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['catalogOptions']),
+      },
+      meta,
+    );
+    return after;
+  });
+}
+
+/** «الصيدلية»: the prescription, medicine return and batch settings (pharmacies and medical-supply stores). */
 export function updatePharmacy(
   db: Database,
   auth: AccessClaims,
@@ -332,7 +366,11 @@ export function updatePharmacy(
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'settings.manage');
     const before = await read(tx, auth.tenantId);
-    await tx.update(tenantSettings).set({ pharmacy: input });
+    // The till's batch picking is on for a pharmacy unless turned off; elsewhere only when turned on
+    const isPharmacy = before.sectors.includes('pharmacy');
+    await tx
+      .update(tenantSettings)
+      .set({ pharmacy: isPharmacy ? input : { ...input, autoBatch: input.autoBatch ?? false } });
     const after = await read(tx, auth.tenantId);
     await audit(
       tx,

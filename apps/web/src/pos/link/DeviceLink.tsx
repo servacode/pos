@@ -4,6 +4,7 @@ import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice, type De
 import type { SyncStore } from '@serva/sync/client';
 import { Alert, DeviceIcon, IconChip } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
+import { DEVICE_KIND_LABELS } from '../../lib/devices';
 import { deviceStore } from '../../offline/database';
 import {
   clearPendingLink,
@@ -160,7 +161,7 @@ export function DeviceLink({
           <IconChip size="sm">
             <DeviceIcon size={16} />
           </IconChip>
-          إعداد جهاز الكاشير
+          {kind === 'cashier' ? 'إعداد جهاز الكاشير' : `إعداد ${DEVICE_KIND_LABELS[kind]}`}
         </p>
         <LinkSteps current={stage.step} ownerSignedIn={ownerSignedIn} />
       </div>
@@ -175,6 +176,7 @@ export function DeviceLink({
         <MethodStep
           method={stage.method}
           initialCode={stage.code}
+          kind={kind}
           onMethodChange={(method) => setStage({ step: 'method', method })}
           onNext={(credentials) => {
             setError(null);

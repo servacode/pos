@@ -7,12 +7,14 @@ import type { StaffSessionAnswer } from '../../pos/staff/staffApi';
 import type { HallApi } from '../api';
 import { usePoll } from '../usePoll';
 import { AddItemView, type DraftLine } from './AddItemView';
+import { MoveView } from './MoveView';
 import { CancelView, OrderView } from './OrderView';
 
 type View =
   | { kind: 'hall' }
   | { kind: 'table'; table: string }
   | { kind: 'add'; table: string }
+  | { kind: 'move'; table: string }
   | { kind: 'cancel'; table: string; lineId: string };
 
 interface Waiter {
@@ -361,7 +363,34 @@ export function WaiterScreen({
           setCancelStatus({ kind: 'idle' });
           setView({ kind: 'cancel', table: view.table, lineId: line.id });
         }}
+        onMove={() => setView({ kind: 'move', table: view.table })}
         onBack={() => setView({ kind: 'hall' })}
+      />,
+    );
+  }
+
+  if (view.kind === 'move') {
+    if (!order) {
+      return shell('النادل', <Button onClick={() => setView({ kind: 'hall' })}>الطاولات</Button>);
+    }
+    return shell(
+      `طاولة ${view.table}`,
+      <MoveView
+        order={order}
+        tables={tables}
+        orders={orders}
+        busy={busy}
+        onBack={() => setView({ kind: 'table', table: view.table })}
+        onMove={(table) =>
+          void run({ type: 'move', userId: waiter.id, orderId: order.id, table }, () =>
+            setView({ kind: 'table', table }),
+          )
+        }
+        onMerge={(from) =>
+          void run({ type: 'merge', userId: waiter.id, orderId: from.id, fromOrderId: order.id }, () =>
+            setView({ kind: 'table', table: from.table }),
+          )
+        }
       />,
     );
   }

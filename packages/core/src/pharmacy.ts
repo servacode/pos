@@ -1,5 +1,5 @@
 import type { Prescription } from './contracts/documents';
-import type { PharmacySettings, ShelfBatch } from './contracts/pharmacy';
+import type { MedicineReturnPolicy, PharmacySettings, ShelfBatch } from './contracts/pharmacy';
 
 /**
  * The pharmacy rules the till and the server share (03 › الصيدليات): which batch a sale takes,
@@ -69,4 +69,41 @@ export function missingPrescription(
   prescription: Partial<Prescription> | null | undefined,
 ): PrescriptionField[] {
   return need.required.filter((field) => !prescription?.[field]?.trim());
+}
+
+/** Whether the till picks the batch and refuses an expired one: on unless the store turned it off */
+export function usesAutoBatch(settings: PharmacySettings | null | undefined): boolean {
+  return !!settings && settings.autoBatch !== false;
+}
+
+export function medicineReturnPolicy(settings: PharmacySettings | null | undefined): MedicineReturnPolicy {
+  return settings?.returns ?? 'sealed';
+}
+
+export type MedicineReturnRule =
+  /** Not a medicine, or the store takes it back as it is */
+  | { kind: 'free' }
+  /** The cashier confirms the box is sealed and unopened */
+  | { kind: 'sealed' }
+  | { kind: 'blocked'; reason: string };
+
+/**
+ * What the return screen does with a returned line. Only a store with pharmacy settings has a
+ * rule, and only for a medicine. A controlled drug is never taken back unless the store says so
+ * (and then still as a sealed box, unless the store takes everything back).
+ */
+export function medicineReturnRule(
+  settings: PharmacySettings | null | undefined,
+  item: { medicine: boolean; controlled: boolean },
+): MedicineReturnRule {
+  if (!settings || (!item.medicine && !item.controlled)) return { kind: 'free' };
+  const policy = medicineReturnPolicy(settings);
+  if (item.controlled) {
+    if (!settings.controlledReturns) {
+      return { kind: 'blocked', reason: 'دواء مراقَب: لا يُرجَع إلا إن سمح المحل بذلك من الإعدادات.' };
+    }
+    return policy === 'allowed' ? { kind: 'free' } : { kind: 'sealed' };
+  }
+  if (policy === 'none') return { kind: 'blocked', reason: 'المحل لا يقبل مرتجع الأدوية.' };
+  return policy === 'sealed' ? { kind: 'sealed' } : { kind: 'free' };
 }

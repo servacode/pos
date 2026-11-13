@@ -58,6 +58,10 @@ const report = (idleDays: number, withCost: boolean): MerchandiseReport => ({
       productId: 'p-shirt',
       name: 'قميص كتان',
       label: 'M · أبيض',
+      attributes: [
+        { name: 'المقاس', value: 'M' },
+        { name: 'اللون', value: 'أبيض' },
+      ],
       stockQty: 1000,
       soldQty: 6000,
       minStockQty: null,
@@ -82,8 +86,16 @@ const report = (idleDays: number, withCost: boolean): MerchandiseReport => ({
     },
   ],
   bySeller: [
-    { userId: 'u-1', fullName: 'رنا', invoiceCount: 12, totalMinor: 5_400_000, returnedMinor: 400_000 },
+    {
+      userId: 'u-1',
+      fullName: 'رنا',
+      invoiceCount: 12,
+      totalMinor: 5_400_000,
+      returnedMinor: 400_000,
+      commissionBp: null,
+    },
   ],
+  seasons: [],
 });
 
 const url = (period: number, idle: number) =>

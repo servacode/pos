@@ -34,6 +34,8 @@ describe('GET /v1/me', () => {
       enabledCurrencies: ['SYP', 'USD'],
       taxInclusive: true,
       numberFormat: 'latn',
+      // the size runs and barcode choice the store starts with
+      catalogOptions: { autoBarcode: false, sizeRuns: expect.any(Array) },
     });
     expect(me.subscription).toMatchObject({ status: 'trialing', planName: 'الباقة المجانية', daysLeft: 30 });
     expect(me.branches).toEqual([{ id: expect.any(String), code: '001', name: 'الفرع الرئيسي' }]);

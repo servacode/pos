@@ -116,7 +116,35 @@ export const hallCommand = z.discriminatedUnion('type', [
     lineId: uuidSchema,
     reason: z.string().trim().min(2, 'اكتب سبب الإلغاء').max(200),
     approverId: uuidSchema,
-    approverPin: z.string().regex(/^\d{4,6}$/, 'رمز المدير 6 أرقام'),
+    /** The manager's code, checked by the server; a till with no connection sends `offlineApproval` instead */
+    approverPin: z
+      .string()
+      .regex(/^\d{4,6}$/, 'رمز المدير 6 أرقام')
+      .optional(),
+    /** A till that checked the manager's code on the device while offline, replayed once online */
+    offlineApproval: z.object({ at: z.iso.datetime({ offset: true }) }).optional(),
+  }),
+  /** The table's order moves to another free table; its lines, states and kitchen tickets go with it */
+  z.object({
+    type: z.literal('move'),
+    ...actor,
+    orderId: uuidSchema,
+    table: z.string().trim().min(1).max(40),
+  }),
+  /** Another table's order joins this one (that one closes empty): `orderId` stays, `fromOrderId` goes in */
+  z.object({ type: z.literal('merge'), ...actor, orderId: uuidSchema, fromOrderId: uuidSchema }),
+  /**
+   * The till charged one part of the table (a sale of its own, `ref` its number): by items (the
+   * chosen lines) or equally (`equal`: how many parts in all). The order closes by itself once
+   * every part is paid. The waiter cannot.
+   */
+  z.object({
+    type: z.literal('part'),
+    ...actor,
+    orderId: uuidSchema,
+    ref: z.string().trim().min(1).max(60),
+    lineIds: z.array(uuidSchema).min(1).max(60).optional(),
+    equal: z.object({ parts: z.int().min(2).max(30) }).optional(),
   }),
   /** The till charged the table (or an empty order is dropped); the waiter cannot */
   z.object({
@@ -177,6 +205,10 @@ export interface HallOrder {
   openedAt: string;
   billRequestedAt: string | null;
   lines: HallLine[];
+  /** Lines already charged in a split by items (their part's sale exists) */
+  paidLineIds: string[];
+  /** A split in equal parts: how many in all and how many are charged so far */
+  equal: { parts: number; paid: number } | null;
   version: number;
 }
 

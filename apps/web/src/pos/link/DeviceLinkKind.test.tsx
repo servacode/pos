@@ -44,4 +44,40 @@ describe('linking a kitchen screen or a waiter’s phone', () => {
     const [activate] = requestsTo('POST', '/v1/devices/activate');
     expect(activate!.body).toMatchObject({ kind: 'kitchen_screen', name: 'مطبخ المشاوي' });
   });
+
+  it('asks «هل هذه شاشة المطبخ؟» for a kitchen screen and «هل هذا جوال النادل؟» for a waiter, never about a till', async () => {
+    for (const [kind, question] of [
+      ['kitchen_screen', 'هل هذه شاشة المطبخ؟'],
+      ['waiter', 'هل هذا جوال النادل؟'],
+    ] as const) {
+      mockFetch({});
+      const view = render(
+        <DirectionProvider dir="rtl">
+          <DensityProvider density="touch">
+            <MemoryRouter initialEntries={['/waiter']}>
+              <DeviceLink onLinked={vi.fn()} helpers={fakeLinkHelpers()} kind={kind} />
+            </MemoryRouter>
+          </DensityProvider>
+        </DirectionProvider>,
+      );
+      expect(await screen.findByRole('heading', { name: question })).toBeInTheDocument();
+      expect(screen.queryByText('هل هذا جهاز كاشير؟')).toBeNull();
+      expect(screen.queryByText('إعداد جهاز الكاشير')).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it('keeps the till’s own question for a till', async () => {
+    mockFetch({});
+    render(
+      <DirectionProvider dir="rtl">
+        <DensityProvider density="touch">
+          <MemoryRouter initialEntries={['/pos']}>
+            <DeviceLink onLinked={vi.fn()} helpers={fakeLinkHelpers()} />
+          </MemoryRouter>
+        </DensityProvider>
+      </DirectionProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: 'هل هذا جهاز كاشير؟' })).toBeInTheDocument();
+  });
 });

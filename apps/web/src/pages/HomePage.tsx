@@ -8,6 +8,7 @@ import {
   type CurrencyCode,
   type MeResponse,
   type OnlineOrder,
+  type SalesBreakdown,
 } from '@serva/core';
 import {
   AddIcon,
@@ -48,6 +49,7 @@ import { ButtonLink } from '../admin/products/parts';
 import { getProfit, listExpiry } from '../admin/purchases/api';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { getDayReport } from '../admin/reports/api';
+import { getSalesBreakdown } from '../admin/reports/SalesReportPage';
 import { daysAgo, getMerchandise } from '../admin/reports/MerchandisePage';
 import type { DayReport } from '../admin/reports/contracts';
 import { methodLabel } from '../admin/reports/labels';
@@ -411,6 +413,9 @@ function SalesTrend({
   const factor = 10 ** getCurrency(base).decimals;
   const loaded = points.filter((p) => p.total !== null);
   const allZero = loaded.length > 0 && loaded.every((p) => p.total === 0);
+  // A store with no days before today: a single point, not a line falling from today to zero.
+  const todayOnly =
+    points.length > 1 && points.slice(0, -1).every((p) => p.total === 0) && !!points.at(-1)?.total;
   return (
     <Card className="flex flex-col gap-1">
       <CardHeader
@@ -452,7 +457,9 @@ function SalesTrend({
           {
             key: 'sales',
             label: 'المبيعات',
-            values: points.map((p) => (p.total === null ? null : p.total / factor)),
+            values: points.map((p, i) =>
+              p.total === null || (todayOnly && i < points.length - 1) ? null : p.total / factor,
+            ),
           },
         ]}
         formatValue={(value) => formatMoney(Math.round(value * factor), base, { digits })}
@@ -466,6 +473,9 @@ function SalesTrend({
           </p>
         }
       />
+      {todayOnly && view === 'chart' ? (
+        <p className="text-center text-xs text-ink-subtle">لا بيانات قبل اليوم</p>
+      ) : null}
     </Card>
   );
 }
@@ -512,6 +522,48 @@ function BestSellers({ report }: { report: DayState }) {
           ))}
         </ol>
       )}
+    </Card>
+  );
+}
+
+/** «الأكثر مبيعاً هذا الأسبوع»: the five products that sold most in the last seven days, net of returns */
+function BestSellersWeek({ report }: { report: ReportState<SalesBreakdown> }) {
+  const top = (report.data?.rows ?? []).filter((r) => r.totalMinor > 0).slice(0, 5);
+  // Nothing to show (still loading, failed, or no sales): the card stays out of the way
+  if (top.length === 0) return null;
+  const biggest = Math.max(...top.map((p) => p.totalMinor), 1);
+  return (
+    <Card className="flex flex-col gap-4">
+      <SectionTitle icon={<TrendUpIcon size={20} />}>الأكثر مبيعاً هذا الأسبوع</SectionTitle>
+      <ol aria-label="الأكثر مبيعاً هذا الأسبوع" className="flex flex-col gap-4">
+        {top.map((row, index) => (
+          <li key={row.key} className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-3">
+              <span className="num grid size-6 shrink-0 place-items-center rounded-small bg-surface-muted text-xs font-bold text-ink-muted">
+                {index + 1}
+              </span>
+              <Link
+                to={`/products/${row.key}`}
+                className="min-w-0 flex-1 truncate font-semibold text-ink hover:text-brand-ink"
+              >
+                {row.name}
+              </Link>
+              <span className="num text-sm text-ink-muted">×{formatQuantity(row.qty)}</span>
+              <Money
+                minor={row.totalMinor}
+                currency={report.data!.baseCurrency}
+                className="text-sm font-semibold"
+              />
+            </div>
+            <span aria-hidden="true" className="block h-1.5 overflow-hidden rounded-full bg-surface-muted">
+              <span
+                className="block h-full rounded-full bg-chart-2"
+                style={{ width: `${Math.max(3, Math.round((row.totalMinor / biggest) * 100))}%` }}
+              />
+            </span>
+          </li>
+        ))}
+      </ol>
     </Card>
   );
 }
@@ -587,6 +639,13 @@ function WaitingRow({
   );
 }
 
+/** The size a low piece is in («M» of «M · أبيض»), when it has one */
+const sizeOf = (item: { attributes?: { name: string; value: string }[] }) =>
+  item.attributes?.find((a) => a.name === 'المقاس')?.value ?? null;
+
+/** How many pieces short of a size the home list names one by one; the rest stay in the count */
+const SIZED_ROWS = 4;
+
 type OrdersState = ReportState<{ items: OnlineOrder[] }>;
 type MerchState = ReportState<Awaited<ReturnType<typeof getMerchandise>>>;
 type ExpiryState = ReportState<Awaited<ReturnType<typeof listExpiry>>>;
@@ -598,7 +657,9 @@ function Waiting({
   seesOrders,
   seesStock,
   seesExpiry,
+  sizes,
 }: {
+  sizes: boolean;
   orders: OrdersState;
   merch: MerchState;
   expiry: ExpiryState;
@@ -609,11 +670,15 @@ function Waiting({
   const count = orders.data?.items.length ?? 0;
   const holds = orders.data?.items.filter((order) => order.source === 'hold').length ?? 0;
   const online = count - holds;
-  const low = merch.data?.lowStock.length ?? 0;
+  // A clothing store hears which size ran out («المقاس M من قميص كذا نفد»), one row per piece
+  const sized = sizes
+    ? (merch.data?.lowStock ?? []).filter((item) => sizeOf(item) !== null).slice(0, SIZED_ROWS)
+    : [];
+  const low = (merch.data?.lowStock.length ?? 0) - sized.length;
   const expiring = expiry.data?.items.length ?? 0;
   const loading =
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
-  const empty = online + holds + low + expiring === 0;
+  const empty = online + holds + low + sized.length + expiring === 0;
   return (
     <Card className="flex flex-col gap-3">
       <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
@@ -635,6 +700,21 @@ function Waiting({
               {holds === 1 ? 'قطعة محجوزة بعربون' : 'قطع محجوزة بعربون'}
             </WaitingRow>
           ) : null}
+          {sized.map((item) => {
+            const colour = item.attributes?.find((a) => a.name === 'اللون')?.value;
+            return (
+              <WaitingRow
+                key={item.variantId}
+                to={`/products/${item.productId}`}
+                count={Math.max(0, Math.round(item.stockQty / 1000))}
+                tone="danger"
+                icon={<WarningIcon />}
+              >
+                المقاس {sizeOf(item)}
+                {colour ? ` (${colour})` : ''} من {item.name} {item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد'}
+              </WaitingRow>
+            );
+          })}
           {low > 0 ? (
             <WaitingRow to="/reports/merchandise" count={low} tone="danger" icon={<WarningIcon />}>
               {low === 1 ? 'صنف يوشك مخزونه على النفاد' : 'أصناف يوشك مخزونها على النفاد'}
@@ -775,6 +855,10 @@ export function HomePage() {
   const profit = useReport(seesSales && seesProfit ? `profit:${today}` : null, () => getProfit(today, today));
   const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrders);
   const merch = useReport(seesStock ? 'home:low' : null, () => getMerchandise(daysAgo(30), daysAgo(0), 60));
+  // «الأكثر مبيعاً» of the last seven days, from the sales report (it needs report.view)
+  const weekTop = useReport(seesStock ? `home:top:${today}` : null, () =>
+    getSalesBreakdown({ from: shiftDay(today, 6), to: today, by: 'product' }),
+  );
   const expiry = useReport(seesExpiry ? 'home:expiry' : null, () => listExpiry(30));
 
   // A new store starts in the wizard (04 › معالج البداية); the owner can leave it and come back.
@@ -848,6 +932,7 @@ export function HomePage() {
                 onRange={setRange}
               />
             ) : null}
+            {seesStock && !brandNew ? <BestSellersWeek report={weekTop} /> : null}
             {seesSales && !brandNew ? (
               <div className="grid items-start gap-6 md:grid-cols-2">
                 <BestSellers report={day} />
@@ -865,6 +950,7 @@ export function HomePage() {
                 seesOrders={seesOrders}
                 seesStock={seesStock}
                 seesExpiry={seesExpiry}
+                sizes={me.tenant.sectors.includes('clothing')}
               />
             ) : null}
             {seesStock ? <RunningLow report={merch} /> : null}

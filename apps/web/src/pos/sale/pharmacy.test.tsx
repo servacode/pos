@@ -133,6 +133,27 @@ describe('the batch of a pharmacy sale', () => {
     expect(plain(screen.getByRole('list', { name: 'أسطر الفاتورة' }))).toContain('بانادول 500');
   });
 
+  it('sells the line as before when the store turned the batch picking off', async () => {
+    const { user, outbox } = await saleScreen({
+      sets: shelfSets({ batches: [GONE], pharmacy: { prescription: 'optional', autoBatch: false } }),
+    });
+    await scan(user, PRODUCTS.tea.barcode!.code);
+    expect(plain(screen.getByRole('list', { name: 'أسطر الفاتورة' }))).toContain('بانادول 500');
+    await user.keyboard('{F12}');
+    await payExact(user);
+    expect(soldPayload(outbox).lines[0]!.batchNo).toBeUndefined();
+  });
+
+  it('picks the batch for a medical-supplies store that turned it on', async () => {
+    const { user, outbox } = await saleScreen({
+      sets: shelfSets({ batches: [GONE, GOOD], pharmacy: { prescription: 'optional', autoBatch: true } }),
+    });
+    await scan(user, PRODUCTS.tea.barcode!.code);
+    await user.keyboard('{F12}');
+    await payExact(user);
+    expect(soldPayload(outbox).lines[0]).toMatchObject({ batchNo: 'B-07' });
+  });
+
   it('leaves a store that is not a pharmacy alone, whatever its items carry', async () => {
     const { user, outbox } = await saleScreen({ sets: shelfSets({ batches: [GONE], pharmacy: null }) });
     await scan(user, PRODUCTS.tea.barcode!.code);

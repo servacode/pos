@@ -213,6 +213,34 @@ describe('«استبدال» on the till (03 › الملابس)', () => {
     ]);
   });
 
+  it('a cash exchange refunds the piece in cash, then the other piece is sold and paid in cash', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await sellTwoOils(user);
+
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    await user.click(screen.getByRole('button', { name: /زد زيت/ }));
+    await user.click(screen.getByRole('button', { name: 'استبدال بقطعة أخرى' }));
+    await user.click(screen.getByRole('button', { name: 'ردّ الفرق نقداً' }));
+    expect(screen.getByRole('status', { name: 'المبلغ المردود' })).toHaveTextContent('المبلغ المردود');
+    await user.click(screen.getByRole('button', { name: 'سجّل وبِع البديل' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    const ret = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(ret.reason).toBe('تبديل');
+    expect(ret.refunds).toEqual([{ method: 'cash', currency: 'SYP', amountMinor: 25_000, reference: null }]);
+
+    await scan(user, PRODUCTS.tea.barcode!.code);
+    await user.keyboard('{F12}');
+    await screen.findByRole('region', { name: 'الدفع' });
+    await user.keyboard('350{Enter}');
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    const sale = outbox.filter((e) => e.type === 'sale')[1]!.doc.payload as unknown as SalePayload;
+    expect(sale.payments).toEqual([expect.objectContaining({ method: 'cash', amountMinor: 35_000 })]);
+  });
+
   it('a voucher over the price pays it all, keeps the rest, and is found by its last digits', async () => {
     const local = memoryLocal();
     await openShift(local, ids.maryam);

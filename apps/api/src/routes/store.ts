@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  catalogOptionsSchema,
   onboardingInput,
   pharmacySettingsSchema,
   storeCurrencyInput,
@@ -22,6 +23,7 @@ import {
   updatePharmacy,
   updateService,
   updateTill,
+  updateCatalogOptions,
 } from '../services/store';
 import { parseBody } from './validation';
 
@@ -76,6 +78,16 @@ export async function storeRoutes(app: FastifyInstance): Promise<void> {
   app.put('/v1/store/till', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return updateTill(app.db, request.auth, parseBody(tillSettingsSchema, request.body), meta(request));
+  });
+
+  app.put('/v1/store/catalog-options', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updateCatalogOptions(
+      app.db,
+      request.auth,
+      parseBody(catalogOptionsSchema, request.body),
+      meta(request),
+    );
   });
 
   app.put('/v1/store/pharmacy', { preHandler: requireAuth }, async (request) => {

@@ -38,16 +38,16 @@ describe('linking a kitchen or waiter device', () => {
 
   it('shows the linking steps for a device that is not linked, or has no token yet, or cannot be read', async () => {
     gate(async () => null);
-    expect(await screen.findByRole('heading', { name: 'هل هذا جهاز كاشير؟' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'هل هذه شاشة المطبخ؟' })).toBeInTheDocument();
   });
 
   it('treats a device record without a token as not linked, and a failing read as none', async () => {
     const view = gate(async () => ({ ...linkedDevice, token: null }));
-    expect(await screen.findByRole('heading', { name: 'هل هذا جهاز كاشير؟' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'هل هذه شاشة المطبخ؟' })).toBeInTheDocument();
     view.unmount();
     gate(async () => {
       throw new Error('no database');
     }, 'waiter');
-    expect(await screen.findByRole('heading', { name: 'هل هذا جهاز كاشير؟' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'هل هذا جوال النادل؟' })).toBeInTheDocument();
   });
 });

@@ -22,7 +22,7 @@ import {
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
-import { isoDay, monthStart } from '../../lib/dates';
+import { dayText, isoDay, monthStart } from '../../lib/dates';
 import { csvField, downloadText, minorToDecimal } from '../accounting/csv';
 import { apiFetch } from '../../lib/api';
 import { commissionOf } from './MerchandisePage';
@@ -42,6 +42,15 @@ export function changePercent(now: number, before: number): number | null {
   return Math.round(((now - before) / before) * 100);
 }
 
+/**
+ * A seller's commission: the rate of the staff page when the seller has one (the server worked it
+ * out), else the percent typed here as a fallback.
+ */
+export function commissionFor(r: SalesBreakdownRow, typedPercent: string): number | null {
+  if (r.commissionMinor !== null && r.commissionMinor !== undefined) return r.commissionMinor;
+  return commissionOf(r.totalMinor + r.returnedMinor, r.returnedMinor, typedPercent);
+}
+
 /** The report as CSV for Excel: each row with the previous period beside it. */
 export function salesBreakdownCsv(s: SalesBreakdown, commission: string): string {
   const n = (minor: number) => csvField(minorToDecimal(minor, s.baseCurrency), true);
@@ -57,7 +66,7 @@ export function salesBreakdownCsv(s: SalesBreakdown, commission: string): string
   ].map((h) => csvField(h));
   const lines = s.rows.map((r) => {
     const change = changePercent(r.totalMinor, r.previousTotalMinor);
-    const c = commissionOf(r.totalMinor + r.returnedMinor, r.returnedMinor, commission);
+    const c = commissionFor(r, commission);
     return [
       csvField(r.name),
       csvField(String(r.qty / 1000), true),
@@ -118,7 +127,12 @@ export function SalesReportPage() {
         const change = changePercent(r.totalMinor, r.previousTotalMinor);
         if (change === null) return r.totalMinor > 0 ? <Badge tone="info">جديد</Badge> : '—';
         return (
-          <Badge tone={change >= 0 ? 'success' : 'warning'}>{`${change > 0 ? '+' : ''}${change}٪`}</Badge>
+          <Badge tone={change >= 0 ? 'success' : 'warning'}>
+            <bdi
+              dir="ltr"
+              className="num"
+            >{`${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)}٪`}</bdi>
+          </Badge>
         );
       },
     },
@@ -129,7 +143,7 @@ export function SalesReportPage() {
             header: 'العمولة',
             numeric: true,
             cell: (r: SalesBreakdownRow) => {
-              const c = commissionOf(r.totalMinor + r.returnedMinor, r.returnedMinor, commission);
+              const c = commissionFor(r, commission);
               return c === null ? '—' : <Money minor={c} currency={base} className="font-bold" />;
             },
           } satisfies DataColumn<SalesBreakdownRow>,
@@ -181,7 +195,7 @@ export function SalesReportPage() {
         {by === 'seller' ? (
           <TextField
             label="نسبة العمولة ٪"
-            hint="تُحسب على المبيع بعد المرتجع"
+            hint="احتياطية لمن لا نسبة له في صفحة الموظفين. تُحسب على المبيع بعد المرتجع"
             inputMode="decimal"
             dir="ltr"
             value={commission}
@@ -205,13 +219,25 @@ export function SalesReportPage() {
       ) : null}
       {data ? (
         <>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <StatTile label="مبيع المدة" value={<Money minor={data.totalMinor} currency={base} />} />
             <StatTile
               label="المدة السابقة"
               value={<Money minor={data.previousTotalMinor} currency={base} />}
-              footnote={`${data.previousFrom} إلى ${data.previousTo}`}
+              footnote={`${dayText(data.previousFrom)} إلى ${dayText(data.previousTo)}`}
             />
+            {data.by === 'seller' ? (
+              <StatTile
+                label="عمولات البائعين"
+                value={
+                  <Money
+                    minor={data.rows.reduce((n, r) => n + (commissionFor(r, commission) ?? 0), 0)}
+                    currency={base}
+                  />
+                }
+                footnote="بنسب صفحة الموظفين"
+              />
+            ) : null}
           </div>
           <DataTable
             caption="المبيعات"

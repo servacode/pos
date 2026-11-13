@@ -224,6 +224,11 @@ function PromotionCard({
           <p className="flex items-center gap-1.5 text-sm text-ink-muted">
             <ScopeIcon size={16} className="text-ink-subtle" />
             {promotionSummary(promotion)}
+            {promotion.couponCode ? (
+              <Badge tone="brand">
+                كود <bdi dir="ltr">{promotion.couponCode}</bdi>
+              </Badge>
+            ) : null}
           </p>
           <p className="flex flex-wrap items-center gap-1.5">
             <span className="sr-only">متى: </span>

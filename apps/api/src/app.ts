@@ -38,6 +38,8 @@ import { platformAuthRoutes } from './routes/platform-auth';
 import { promotionRoutes } from './routes/promotions';
 import { chequeRoutes } from './routes/cheques';
 import { serialRoutes } from './routes/serials';
+import { warrantyRoutes } from './routes/warranty';
+import { recipeRoutes } from './routes/recipes';
 import { staffRoutes } from './routes/staff';
 import { staffAdminRoutes } from './routes/staff-admin';
 import { branchRoutes } from './routes/branches';
@@ -161,5 +163,7 @@ export async function buildApp({
   await app.register(promotionRoutes);
   await app.register(chequeRoutes);
   await app.register(serialRoutes);
+  await app.register(warrantyRoutes);
+  await app.register(recipeRoutes);
   return app;
 }

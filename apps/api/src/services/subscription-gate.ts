@@ -116,7 +116,7 @@ export async function assertStoreWritable(
 
 // ─── Plan limits ─────────────────────────────────────────────────────────────
 
-type LimitKind = 'users' | 'registers' | 'branches';
+type LimitKind = 'users' | 'registers' | 'branches' | 'hallDevices';
 
 /** Devices that take no money (03 › وضع النادل): they are not counted against the cashier limit */
 const NON_TILL_KINDS: readonly string[] = ['waiter', 'kitchen_screen', 'call_screen'];
@@ -135,6 +135,13 @@ const LIMIT_TEXT: Record<LimitKind, { count: SQL; message: (limit: number) => st
     message: (n) =>
       `وصلت باقتك إلى حدّها: ${n} أجهزة كاشير فعّالة. أوقف جهازاً أو انتقل إلى باقة أعلى من صفحة الاشتراك.`,
   },
+  hallDevices: {
+    count: sql`select count(*)::int as n from devices
+      where status = 'active' and revoked_at is null
+        and kind in ('waiter', 'kitchen_screen', 'call_screen')`,
+    message: (n) =>
+      `وصلت باقتك إلى حدّها: ${n} أجهزة للنُدُل والمطبخ والنداء. أوقف جهازاً أو انتقل إلى باقة أعلى من صفحة الاشتراك.`,
+  },
   branches: {
     count: sql`select count(*)::int as n from branches where is_active`,
     message: (n) => `وصلت باقتك إلى حدّها: ${n} فروع. انتقل إلى باقة أعلى من صفحة الاشتراك.`,
@@ -149,10 +156,13 @@ const LIMIT_TEXT: Record<LimitKind, { count: SQL; message: (limit: number) => st
 export async function assertWithinPlanLimit(
   tx: Transaction,
   kind: LimitKind,
-  /** For `registers`: the kind of the device being added; waiter, kitchen and call screens are not tills */
+  /**
+   * For `registers`: the kind of the device being added. Waiter, kitchen and call screens are not
+   * tills: they count against the plan's own `hallDevices` limit (null or missing = unlimited).
+   */
   deviceKind?: string,
 ): Promise<void> {
-  if (kind === 'registers' && deviceKind && NON_TILL_KINDS.includes(deviceKind)) return;
+  if (kind === 'registers' && deviceKind && NON_TILL_KINDS.includes(deviceKind)) kind = 'hallDevices';
   const found = await readFacts(tx);
   const limit = found?.limits[kind];
   if (limit === null || limit === undefined) return;

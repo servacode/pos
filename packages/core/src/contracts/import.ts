@@ -119,6 +119,20 @@ const PRODUCT_FIELDS: readonly ImportFieldDef[] = [
     example: 'SH-001',
   },
   {
+    key: 'model',
+    label: 'رمز الموديل',
+    aliases: ['رمز الموديل', 'كود الموديل', 'الموديل', 'موديل', 'model', 'model code', 'style', 'style code'],
+    hint: 'اختياري: الصفوف التي لها رمز الموديل نفسه تصير منتجاً واحداً بمقاسات وألوان',
+    example: 'SH-001',
+  },
+  {
+    key: 'season',
+    label: 'الموسم/التشكيلة',
+    aliases: ['الموسم', 'التشكيلة', 'الموسم/التشكيلة', 'موسم', 'season', 'collection'],
+    hint: 'اختياري: صيف 2026، شتاء 2026…',
+    example: 'صيف 2026',
+  },
+  {
     key: 'category',
     label: 'التصنيف',
     aliases: ['التصنيف', 'الفئة', 'المجموعة', 'القسم', 'النوع', 'category', 'group', 'department', 'family'],

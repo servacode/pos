@@ -39,7 +39,15 @@ import {
   SHIFTS_ACCESS,
   type AccessRule,
 } from '../admin/reports/access';
-import { CHEQUE_SECTORS, EXPIRY_SECTORS, HALL_SECTORS, SERIAL_SECTORS, storeSells } from '../lib/sectors';
+import {
+  CHEQUE_SECTORS,
+  EXPIRY_SECTORS,
+  HALL_SECTORS,
+  MODIFIER_SECTORS,
+  SERIAL_SECTORS,
+  storeSells,
+  WARRANTY_SECTORS,
+} from '../lib/sectors';
 
 export interface NavEntry {
   to: string;
@@ -181,6 +189,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'products',
+    to: '/price-history',
+    label: 'سجل تغيير الأسعار',
+    icon: PercentIcon,
+    permission: ['catalog.manage'],
+  },
+  {
+    section: 'products',
     to: '/labels',
     label: 'طباعة الملصقات',
     icon: PrintIcon,
@@ -253,6 +268,14 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'inventory',
+    to: '/warranty',
+    label: 'الضمان والصيانة',
+    icon: ShieldCheckIcon,
+    permission: ['catalog.manage'],
+    sectors: WARRANTY_SECTORS,
+  },
+  {
+    section: 'inventory',
     to: '/serials',
     label: 'الأرقام التسلسلية',
     icon: SerialIcon,
@@ -272,6 +295,14 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     label: 'حركة الأصناف',
     icon: ReportsIcon,
     permission: ['report.view'],
+  },
+  {
+    section: 'reports',
+    to: '/reports/food-cost',
+    label: 'كلفة الوجبات',
+    icon: ReportsIcon,
+    permission: ['report.view'],
+    sectors: MODIFIER_SECTORS,
   },
   {
     section: 'reports',

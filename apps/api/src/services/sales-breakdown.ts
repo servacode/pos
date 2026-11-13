@@ -71,6 +71,11 @@ export function salesBreakdown(
         join: sql`join variants v on v.id = l.variant_id
           cross join lateral jsonb_array_elements(v.attributes) as o(a)`,
       },
+      season: {
+        key: sql`coalesce(p.season, '')`,
+        name: sql`coalesce(min(p.season), 'بلا موسم')`,
+        join: sql`left join products p on p.id = l.product_id`,
+      },
       seller: {
         key: sql`coalesce(i.salesperson_id, i.cashier_id)::text`,
         name: sql`min(u.full_name)`,
@@ -81,6 +86,10 @@ export function salesBreakdown(
       product: { key: sql`v.product_id::text`, join: sql`join variants v on v.id = rl.variant_id` },
       category: {
         key: sql`coalesce(p.category_id::text, '')`,
+        join: sql`join variants v on v.id = rl.variant_id join products p on p.id = v.product_id`,
+      },
+      season: {
+        key: sql`coalesce(p.season, '')`,
         join: sql`join variants v on v.id = rl.variant_id join products p on p.id = v.product_id`,
       },
       option: {
@@ -134,17 +143,30 @@ export function salesBreakdown(
       select distinct a->>'name' as name from variants v cross join lateral jsonb_array_elements(v.attributes) a
       where coalesce(a->>'name', '') <> '' order by 1`);
 
+    // The staff page's rate per seller, in basis points; sales x rate is the commission
+    const rates = new Map<string, number>();
+    if (query.by === 'seller') {
+      const rated = await tx.execute<{ id: string; bp: number }>(
+        sql`select id::text as id, commission_bp as bp from users where commission_bp is not null`,
+      );
+      for (const r of rated) rates.set(r.id, r.bp);
+    }
     const rows: SalesBreakdownRow[] = [...now.values()]
-      .map((r) => ({
-        key: r.key,
-        name: r.name ?? before.get(r.key)?.name ?? r.key,
-        qty: num(r.qty),
-        totalMinor: num(r.total),
-        returnedMinor: num(r.back),
-        invoiceCount: num(r.n),
-        previousQty: num(before.get(r.key)?.qty),
-        previousTotalMinor: num(before.get(r.key)?.total),
-      }))
+      .map((r) => {
+        const bp = rates.get(r.key) ?? null;
+        return {
+          key: r.key,
+          name: r.name ?? before.get(r.key)?.name ?? r.key,
+          qty: num(r.qty),
+          totalMinor: num(r.total),
+          returnedMinor: num(r.back),
+          invoiceCount: num(r.n),
+          previousQty: num(before.get(r.key)?.qty),
+          previousTotalMinor: num(before.get(r.key)?.total),
+          commissionBp: bp,
+          commissionMinor: bp === null ? null : Math.round((num(r.total) * bp) / 10_000),
+        };
+      })
       .sort((a, b) => b.totalMinor - a.totalMinor || a.name.localeCompare(b.name, 'ar'));
     const sum = (m: Map<string, Raw>) => [...m.values()].reduce((acc, r) => acc + num(r.total), 0);
     return {
@@ -160,6 +182,8 @@ export function salesBreakdown(
       totalMinor: sum(now),
       previousTotalMinor: sum(before),
       optionNames: names.map((n) => n.name),
+      commissionTotalMinor:
+        query.by === 'seller' ? rows.reduce((n, r) => n + (r.commissionMinor ?? 0), 0) : null,
     };
   });
 }

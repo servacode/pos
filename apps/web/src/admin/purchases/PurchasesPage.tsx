@@ -41,6 +41,7 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
+import { DateField } from '../../lib/DateField';
 import { EXPIRY_SECTORS, SERIAL_SECTORS, storeSells } from '../../lib/sectors';
 import {
   createPurchase,
@@ -637,13 +638,7 @@ function PurchaseForm({
                 </option>
               ))}
             </Select>
-            <TextField
-              label="التاريخ"
-              type="date"
-              dir="ltr"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
+            <DateField label="التاريخ" value={date} onChange={setDate} required />
             <TextField
               label="رقم فاتورة المورد"
               hint="اختياري"
@@ -798,16 +793,12 @@ function PurchaseForm({
                                 />
                               </div>
                               <div>
-                                <Caption always>تاريخ الانتهاء (اختياري)</Caption>
-                                <TextField
-                                  label={`انتهاء ${l.name}`}
-                                  hideLabel
-                                  type="date"
-                                  dir="ltr"
+                                <DateField
+                                  label="تاريخ الانتهاء (اختياري)"
                                   value={l.expiry ?? ''}
-                                  onChange={(e) =>
+                                  onChange={(iso) =>
                                     setLines((all) =>
-                                      all.map((x, j) => (j === i ? { ...x, expiry: e.target.value } : x)),
+                                      all.map((x, j) => (j === i ? { ...x, expiry: iso } : x)),
                                     )
                                   }
                                   error={s.fields[`lines.${i}.expiryDate`]}
@@ -990,13 +981,7 @@ function PaymentForm({
             error={problem ?? s.fields.amountMinor}
             inputClassName="num"
           />
-          <TextField
-            label="التاريخ"
-            type="date"
-            dir="ltr"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
+          <DateField label="التاريخ" value={date} onChange={setDate} required />
         </div>
         {over ? (
           <Alert tone="warning">

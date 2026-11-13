@@ -78,6 +78,10 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       bold: true,
     });
     lines.push({ kind: 'pair', start: 'السبب', end: r.reason });
+    // A cash exchange is two documents: this return in cash, then the sale of the other piece in cash
+    if (r.reason === 'تبديل' && r.refunds.length === 1 && r.refunds[0]!.method === 'cash') {
+      lines.push({ kind: 'center', text: 'استبدال: يُحسب هذا المبلغ مقابل ثمن القطعة البديلة' });
+    }
     const voucher = r.refunds.find((x) => x.method === 'voucher');
     if (voucher && data.doc.number) {
       lines.push({ kind: 'rule' });

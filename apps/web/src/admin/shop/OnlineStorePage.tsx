@@ -43,6 +43,8 @@ import {
 import { AppShell } from '../../layout/AppShell';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
+import { CodCard, DeliveryActions } from './DeliveryPanel';
+import { ShopLook } from './ShopLook';
 
 const getSettings = () => apiFetch<OnlineStoreSettings>('/v1/online-store', { auth: true });
 const saveSettings = (input: OnlineStoreInput) =>
@@ -533,6 +535,24 @@ function SettingsCard() {
             {fields.delivery ? <FieldError>{fields.delivery}</FieldError> : null}
           </div>
         </Card>
+        <ShopLook
+          form={form}
+          saved={form.version !== null}
+          onChange={set}
+          onImages={(s) => {
+            // The pictures are kept by the server at once: its version and addresses replace ours,
+            // and what the owner typed and has not saved stays unsaved
+            setForm((f) => (f ? { ...f, version: s.version, logoUrl: s.logoUrl, coverUrl: s.coverUrl } : f));
+            setKept((k) =>
+              JSON.stringify({
+                ...JSON.parse(k),
+                version: s.version,
+                logoUrl: s.logoUrl,
+                coverUrl: s.coverUrl,
+              }),
+            );
+          }}
+        />
         <Card>
           <CardHeader icon={<EyeIcon />} title="واجهة المتجر" description="ما يظهر للزبون فوق بضاعتك." />
           <div className="flex flex-col gap-5">
@@ -596,6 +616,7 @@ function SettingsCard() {
 }
 
 function OrdersCard() {
+  const me = useMe();
   const [status, setFilter] = useState<OnlineOrderStatus | 'all'>('pending');
   const [items, setItems] = useState<OnlineOrder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -607,6 +628,8 @@ function OrdersCard() {
   }, [status]);
   useEffect(load, [load]);
 
+  // The delivery card below asks again whenever an order changes
+  const [changes, setChanges] = useState(0);
   // The orders being decided: their buttons are off until the answer, so a double click is one request
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
@@ -625,6 +648,7 @@ function OrdersCard() {
       });
     }
     load();
+    setChanges((n) => n + 1);
   }
 
   return (
@@ -679,6 +703,11 @@ function OrdersCard() {
                     </bdi>
                     <Badge tone={STATUS_TONE[o.status]}>{STATUS_TEXT[o.status]}</Badge>
                     {o.source === 'shop' ? <Badge tone="neutral">رقم مؤكَّد</Badge> : null}
+                    {o.couponCode ? (
+                      <Badge tone="brand">
+                        كود <bdi dir="ltr">{o.couponCode}</bdi>
+                      </Badge>
+                    ) : null}
                     {o.source === 'hold' ? (
                       <Badge tone="neutral">
                         حجز في المحل{o.depositCode ? ` · عربون ${o.depositCode}` : ''}
@@ -726,6 +755,16 @@ function OrdersCard() {
                   <span className="font-semibold text-ink">ملاحظة: </span>
                   {o.note}
                 </p>
+              ) : null}
+              {o.fulfilment === 'delivery' && (o.status === 'accepted' || o.status === 'done') ? (
+                <DeliveryActions
+                  order={o}
+                  store={me.tenant.name}
+                  onChanged={() => {
+                    load();
+                    setChanges((n) => n + 1);
+                  }}
+                />
               ) : null}
               {o.status === 'pending' || o.status === 'cancel_requested' || o.status === 'accepted' ? (
                 <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-4">
@@ -793,6 +832,7 @@ function OrdersCard() {
           ))}
         </ul>
       ) : null}
+      <CodCard refreshKey={changes} />
     </section>
   );
 }

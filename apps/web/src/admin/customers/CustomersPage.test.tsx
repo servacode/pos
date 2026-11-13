@@ -62,8 +62,8 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   ...over,
 });
 
-function open(path: string) {
-  let current = detail();
+function open(path: string, start: CustomerDetail = detail()) {
+  let current = start;
   const list = (): CustomerListResponse => ({
     items: [current],
     totalOwedMinor: Math.max(0, current.balanceMinor),
@@ -122,6 +122,12 @@ function open(path: string) {
           baseCurrency: 'SYP',
         },
       };
+    },
+    'POST /v1/customers/c-1/archive-duplicate': () => {
+      if (current.balanceMinor !== 0)
+        return apiError(409, 'conflict', 'عليه دين غير مسدّد. سدّد حسابه أو حوّله قبل الأرشفة.');
+      current = { ...current, archived: true };
+      return { status: 200, body: current };
     },
     'PUT /v1/customers/c-1': (r: MockRequest) => {
       current = { ...current, ...(r.body as Partial<CustomerDetail>) };
@@ -192,6 +198,20 @@ describe('«الزبائن»', () => {
     expect(requestsTo('POST', '/v1/customers/c-1/opening-debt').at(-1)?.body).toMatchObject({
       amountMinor: 12_000_000,
     });
+  });
+
+  it('says why a duplicate that still owes is not archived', async () => {
+    const { user } = open('/customers/c-1');
+    await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
+    expect(await screen.findByText(/عليه دين غير مسدّد/)).toBeInTheDocument();
+    expect(screen.queryByText('مؤرشف')).not.toBeInTheDocument();
+  });
+
+  it('archives a duplicate with nothing open on them', async () => {
+    const { user, requestsTo } = open('/customers/c-1', detail({ balanceMinor: 0, statement: [] }));
+    await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
+    expect(await screen.findByText('مؤرشف')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/customers/c-1/archive-duplicate')).toHaveLength(1);
   });
 
   it('warns about a customer with the same phone or name, and offers to open them', async () => {

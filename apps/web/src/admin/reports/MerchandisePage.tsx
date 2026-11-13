@@ -35,9 +35,9 @@ export function daysAgo(days: number, from: Date = new Date()): string {
   return d.toLocaleDateString('en-CA');
 }
 
-export const getMerchandise = (from: string, to: string, idleDays: number, categoryId = '') =>
+export const getMerchandise = (from: string, to: string, idleDays: number, categoryId = '', season = '') =>
   apiFetch<MerchandiseReport>(
-    `/v1/reports/merchandise?from=${from}&to=${to}&idleDays=${idleDays}${categoryId ? `&categoryId=${categoryId}` : ''}`,
+    `/v1/reports/merchandise?from=${from}&to=${to}&idleDays=${idleDays}${categoryId ? `&categoryId=${categoryId}` : ''}${season ? `&season=${encodeURIComponent(season)}` : ''}`,
     { auth: true },
   );
 
@@ -82,6 +82,9 @@ export function MerchandisePage() {
   const [departments, setDepartments] = useState<Category[]>([]);
   const [department, setDepartment] = useState('');
   const [commission, setCommission] = useState(readCommission);
+  const [season, setSeason] = useState('');
+  // The seasons are kept once known, so the filter stays when a season shows nothing
+  const [seasons, setSeasons] = useState<string[]>([]);
   useEffect(() => {
     listCategories()
       .then((r) => setDepartments(r.items.filter((c) => c.parentId === null && !c.archivedAt)))
@@ -94,10 +97,13 @@ export function MerchandisePage() {
   const load = useCallback(() => {
     setError(null);
     setData(null);
-    getMerchandise(daysAgo(Number(period)), daysAgo(0), Number(idle), department)
-      .then(setData)
+    getMerchandise(daysAgo(Number(period)), daysAgo(0), Number(idle), department, season)
+      .then((report) => {
+        setData(report);
+        setSeasons((known) => (report.seasons?.length ? report.seasons : known));
+      })
       .catch((e: unknown) => setError(errorMessage(e)));
-  }, [period, idle, department]);
+  }, [period, idle, department, season]);
   useEffect(load, [load]);
 
   const digits = useDigits();
@@ -205,6 +211,16 @@ export function MerchandisePage() {
               label: PERIODS[value],
             }))}
           />
+          {seasons.length > 0 ? (
+            <Select label="الموسم" value={season} onChange={(e) => setSeason(e.target.value)}>
+              <option value="">كل المواسم</option>
+              {seasons.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <SegmentedControl
             label="راكد إن لم يُبع ولم يصل منذ"
             value={idle}
@@ -326,6 +342,7 @@ export function MerchandisePage() {
               <h2 className="flex-1 text-xl font-bold text-ink">المبيعات حسب البائع والعمولة</h2>
               <TextField
                 label="نسبة العمولة ٪"
+                hint="احتياطية: لمن لا نسبة له في صفحة الموظفين"
                 dir="ltr"
                 inputMode="decimal"
                 value={commission}
@@ -372,7 +389,10 @@ export function MerchandisePage() {
                   header: 'العمولة',
                   numeric: true,
                   cell: (r) => {
-                    const c = commissionOf(r.totalMinor, r.returnedMinor, commission);
+                    const c =
+                      r.commissionBp !== null && r.commissionBp !== undefined
+                        ? Math.round(((r.totalMinor - r.returnedMinor) * r.commissionBp) / 10_000)
+                        : commissionOf(r.totalMinor, r.returnedMinor, commission);
                     return c === null ? '—' : <Money minor={c} currency={base} className="font-bold" />;
                   },
                 },

@@ -641,6 +641,16 @@ const LIMITS: readonly { key: string; forms: CountForms; unlimited: string }[] =
     forms: { one: 'جهاز كاشير واحد', two: 'جهازان للكاشير', few: 'أجهزة كاشير', many: 'جهازاً للكاشير' },
     unlimited: 'أجهزة كاشير بلا حد',
   },
+  {
+    key: 'hallDevices',
+    forms: {
+      one: 'جهاز واحد للنُدُل والمطبخ',
+      two: 'جهازان للنُدُل والمطبخ',
+      few: 'أجهزة للنُدُل والمطبخ',
+      many: 'جهازاً للنُدُل والمطبخ',
+    },
+    unlimited: 'أجهزة النُدُل والمطبخ بلا حد',
+  },
   { key: 'users', forms: COUNT_NOUNS.user, unlimited: 'مستخدمون بلا حد' },
   { key: 'products', forms: COUNT_NOUNS.item, unlimited: 'أصناف بلا حد' },
 ];

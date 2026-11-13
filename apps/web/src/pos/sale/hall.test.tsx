@@ -45,6 +45,8 @@ function waiterOrder(): HallOrder {
     openedByName: 'نادل أول',
     openedAt: '2026-11-12T10:00:00.000Z',
     billRequestedAt: null,
+    paidLineIds: [],
+    equal: null,
     version: 3,
     lines: [
       {
@@ -100,6 +102,8 @@ function hallServer(initial: HallOrder[] = [], control: { down: boolean } = { do
         openedByName: 'سامر',
         openedAt: '2026-11-12T10:05:00.000Z',
         billRequestedAt: null,
+        paidLineIds: [],
+        equal: null,
         version: 1,
         lines: [],
       };

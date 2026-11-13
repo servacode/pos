@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { MeResponse, StaffListResponse, StaffMember } from '@serva/core';
 import { apiError, mockFetch, type MockRequest } from '../../test/fetchMock';
@@ -26,6 +26,7 @@ const person = (over: Partial<StaffMember> = {}): StaffMember => ({
   hasLogin: false,
   lastLoginAt: null,
   createdAt: '2026-10-30T09:00:00.000Z',
+  commissionBp: null,
   ...over,
 });
 
@@ -148,6 +149,27 @@ describe('«الموظفون»', () => {
     await user.click(screen.getByRole('button', { name: 'احفظ' }));
     expect(await screen.findByText('سامر الجديد')).toBeInTheDocument();
     expect(requestsTo('PATCH', '/v1/staff/u-2').at(-1)?.body).toEqual({ fullName: 'سامر الجديد' });
+  });
+
+  it('sets the commission of a seller as a percent and sends it in basis points', async () => {
+    const { user, requestsTo } = open();
+    await user.click(await screen.findByRole('button', { name: 'خيارات سامر الكاشير' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'عدّل' }));
+    await user.type(await screen.findByLabelText(/نسبة العمولة/), '2.5');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await waitFor(() =>
+      expect(requestsTo('PATCH', '/v1/staff/u-2').at(-1)?.body).toEqual({ commissionBp: 250 }),
+    );
+  });
+
+  it('refuses a commission that is no percent before sending anything', async () => {
+    const { user, requestsTo } = open();
+    await user.click(await screen.findByRole('button', { name: 'خيارات سامر الكاشير' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'عدّل' }));
+    await user.type(await screen.findByLabelText(/نسبة العمولة/), '150');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText('اكتب نسبة من 0 إلى 100')).toBeInTheDocument();
+    expect(requestsTo('PATCH', '/v1/staff/u-2')).toHaveLength(0);
   });
 
   it('sets a new till code', async () => {

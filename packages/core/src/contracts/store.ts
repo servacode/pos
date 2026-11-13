@@ -6,6 +6,7 @@ import type { CurrencyCode } from '../currencies';
 import { scaleBarcodeSchema, type ScaleBarcodeConfig } from '../scale';
 import type { PharmacySettings } from './pharmacy';
 import type { TillSettings } from './till';
+import type { CatalogOptions } from './catalog-options';
 
 /**
  * The store's own settings (04 › معالج البداية، الإعدادات): what the receipt shows, the activity,
@@ -151,4 +152,6 @@ export interface StoreResponse {
   pharmacy?: PharmacySettings | null;
   /** «الصندوق» (contracts/till.ts); null until the owner chooses */
   till?: TillSettings | null;
+  /** «خيارات الأصناف» (contracts/catalog-options.ts): always set, the defaults until the owner chooses */
+  catalogOptions?: CatalogOptions;
 }

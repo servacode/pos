@@ -1,11 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import {
   holdInput,
+  onlineOrderDeliveryInput,
   onlineOrderListQuery,
   onlineOrderStatusInput,
   onlineStoreInput,
+  priceHistoryQuery,
+  productImageInput,
+  productTextsInput,
   shopCodeInput,
+  shopCouponQuery,
   shopOrderInput,
+  stockAlertInput,
   uuidSchema,
 } from '@serva/core';
 import { requireDevice } from '../auth/device-guard';
@@ -25,6 +31,20 @@ import {
   shopOrderTrack,
   shopProduct,
 } from '../services/shop';
+import { priceHistory } from '../services/price-history';
+import {
+  codSummary,
+  getProductTexts,
+  listStockAlerts,
+  markStockAlertNotified,
+  notifyStockAlert,
+  removeStoreImage,
+  saveProductTexts,
+  setOrderDelivery,
+  setStoreImage,
+  shopCoupon,
+  type StoreImageSlot,
+} from '../services/shop-extras';
 import { parseBody } from './validation';
 
 /** The online shop (packages/core › contracts/shop.ts): its public pages and the dashboard's side. */
@@ -44,6 +64,27 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/shop/:slug', async (request) => shopHome(app.db, slugOf(request.params)));
   app.get('/v1/shop/:slug/products/:id', async (request) =>
     shopProduct(app.db, slugOf(request.params), idOf(request.params, 'هذا الصنف غير موجود.')),
+  );
+  // «كود الخصم»: a few tries a minute from one address, so a code cannot be guessed
+  app.get(
+    '/v1/shop/:slug/coupon',
+    { config: { rateLimit: { max: 20, timeWindow: 60_000 } } },
+    async (request) =>
+      shopCoupon(app.db, slugOf(request.params), parseBody(shopCouponQuery, request.query).code),
+  );
+  // «أبلغني عند التوفر»: a phone left on a piece that is out of stock
+  app.post(
+    '/v1/shop/:slug/products/:id/notify',
+    { config: { rateLimit: { max: 10, timeWindow: 60_000 } } },
+    async (request, reply) => {
+      await notifyStockAlert(
+        app.db,
+        slugOf(request.params),
+        idOf(request.params, 'هذا الصنف غير موجود.'),
+        parseBody(stockAlertInput, request.body),
+      );
+      return reply.status(204).send();
+    },
   );
   // A few orders a minute from one address is plenty for a person; more is someone else
   app.post(
@@ -104,6 +145,76 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/online-orders', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return listOnlineOrders(app.db, request.auth, parseBody(onlineOrderListQuery, request.query).status);
+  });
+  app.get('/v1/online-orders/cod', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return codSummary(app.db, request.auth);
+  });
+  app.post('/v1/online-orders/:id/delivery', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return setOrderDelivery(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا الطلب غير موجود.'),
+      parseBody(onlineOrderDeliveryInput, request.body),
+      meta(request),
+    );
+  });
+  // The logo and the cover banner
+  const slotOf = (params: unknown): StoreImageSlot => {
+    const slot = (params as { slot?: string }).slot;
+    if (slot !== 'logo' && slot !== 'cover') throw new AppError(404, 'not_found', 'هذه الصورة غير موجودة.');
+    return slot;
+  };
+  app.put(
+    '/v1/online-store/image/:slot',
+    { preHandler: requireAuth, bodyLimit: 4 * 1024 * 1024 },
+    async (request) => {
+      if (!request.auth) throw unauthorized();
+      return setStoreImage(
+        app.db,
+        request.auth,
+        slotOf(request.params),
+        parseBody(productImageInput, request.body),
+        meta(request),
+      );
+    },
+  );
+  app.delete('/v1/online-store/image/:slot', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return removeStoreImage(app.db, request.auth, slotOf(request.params), meta(request));
+  });
+  // The product's description, size guide and the phones waiting for it; the price history
+  app.get('/v1/products/:id/shop-text', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return getProductTexts(app.db, request.auth, idOf(request.params, 'هذا المنتج غير موجود.'));
+  });
+  app.put('/v1/products/:id/shop-text', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return saveProductTexts(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا المنتج غير موجود.'),
+      parseBody(productTextsInput, request.body),
+      meta(request),
+    );
+  });
+  app.get('/v1/products/:id/stock-alerts', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listStockAlerts(app.db, request.auth, idOf(request.params, 'هذا المنتج غير موجود.'));
+  });
+  app.post('/v1/stock-alerts/:id/notified', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return markStockAlertNotified(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا الطلب غير موجود.'),
+      meta(request),
+    );
+  });
+  app.get('/v1/price-history', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return priceHistory(app.db, request.auth, parseBody(priceHistoryQuery, request.query));
   });
   app.post('/v1/online-orders/:id/status', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();

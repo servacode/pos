@@ -10,6 +10,21 @@ import { pinDigits } from './pin';
 /** +963933111222 shown as 0933111222, the way it is typed */
 const localPhone = (phone: string | null) => phone?.replace(/^\+963/, '0') ?? '';
 
+/** 250 basis points shown as «2.5» */
+const percentText = (bp: number | null | undefined) =>
+  bp === null || bp === undefined ? '' : String(bp / 100);
+
+/** «2.5» or «٢٫٥» as 250 basis points; null for blank, NaN for what is not a percent */
+function basisPoints(text: string): number | null {
+  const typed = text
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace('٫', '.')
+    .trim();
+  if (typed === '') return null;
+  const n = Number(typed);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 100) : Number.NaN;
+}
+
 /**
  * Adds a staff member or edits one: name, role, branches, the till code and, optionally, a
  * phone and password for the admin panel. On edit only what changed is sent; a blank code or
@@ -46,6 +61,8 @@ export function StaffForm({
   const [login, setLogin] = useState(member?.hasLogin ?? false);
   const [phone, setPhone] = useState(localPhone(member?.phone ?? null));
   const [password, setPassword] = useState('');
+  // «نسبة العمولة ٪»: what the sales report pays a seller on the net sales (a report only)
+  const [commission, setCommission] = useState(percentText(member?.commissionBp));
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -75,6 +92,11 @@ export function StaffForm({
   }
 
   async function save() {
+    const bp = basisPoints(commission);
+    if (Number.isNaN(bp)) {
+      setFields({ commissionBp: 'اكتب نسبة من 0 إلى 100' });
+      return;
+    }
     setSaving(true);
     setError(null);
     setFields({});
@@ -87,6 +109,7 @@ export function StaffForm({
           roleKey,
           branchIds: branches,
           pin: code,
+          ...(bp !== null ? { commissionBp: bp } : {}),
           ...(login ? { phone, password } : phone ? { phone } : {}),
         });
         onSaved(created);
@@ -104,6 +127,7 @@ export function StaffForm({
         ...(sameBranches ? {} : { branchIds: branches }),
         ...(phone !== localPhone(member.phone) ? { phone: phone.trim() === '' ? null : phone } : {}),
         ...(code ? { pin: code } : {}),
+        ...(bp !== (member.commissionBp ?? null) ? { commissionBp: bp } : {}),
         ...(login && password ? { password } : {}),
       };
       if (Object.keys(patch).length === 0) {
@@ -147,6 +171,19 @@ export function StaffForm({
           </option>
         ))}
       </Select>
+
+      {member?.isOwner ? null : (
+        <TextField
+          label="نسبة العمولة ٪ (اختياري)"
+          hint="تُحسب على مبيعه بعد المرتجع في «تقرير المبيعات». لا تُسجَّل في الحسابات."
+          inputMode="decimal"
+          dir="ltr"
+          value={commission}
+          onChange={(e) => setCommission(e.target.value.slice(0, 6))}
+          error={fields.commissionBp}
+          className="sm:max-w-48"
+        />
+      )}
 
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-semibold text-ink">الفروع</legend>

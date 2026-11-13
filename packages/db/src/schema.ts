@@ -375,9 +375,22 @@ export const tenantSettings = pgTable(
     /** «نقاط الولاء»: null, no points */
     loyalty: jsonb('loyalty').$type<{ earnEveryMinor: number; pointValueMinor: number }>(),
     /** «الصيدلية» (packages/core › contracts/pharmacy.ts); null: not set, a pharmacy gets the defaults */
-    pharmacy: jsonb('pharmacy').$type<{ prescription: 'required' | 'optional' }>(),
+    pharmacy: jsonb('pharmacy').$type<{
+      prescription: 'required' | 'optional';
+      returns?: 'none' | 'sealed' | 'allowed';
+      controlledReturns?: boolean;
+      autoBatch?: boolean;
+    }>(),
     /** «الصندوق» (packages/core › contracts/till.ts): return window and card approval number; null: defaults */
     till: jsonb('till').$type<{ returnWindowDays: number | null; cardApprovalRequired: boolean }>(),
+    /**
+     * «الأصناف» (packages/core › contracts/catalog-options.ts): barcodes made for new variants, and the
+     * size runs of the purchase grid; null: the defaults
+     */
+    catalogOptions: jsonb('catalog_options').$type<{
+      autoBarcode: boolean;
+      sizeRuns: { name: string; counts: number[] }[];
+    }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -524,6 +537,8 @@ export const users = pgTable(
     pinLength: integer('pin_length'),
     /** Moves up with every PIN change, so a device forgets what it learnt of the old one */
     pinVersion: integer('pin_version').notNull().default(0),
+    /** «نسبة العمولة» of a seller in basis points of the net sales; null: none set (reports only) */
+    commissionBp: integer('commission_bp'),
     status: userStatus('status').notNull().default('active'),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     version: version(),
@@ -966,6 +981,8 @@ export const products = pgTable(
     searchName: text('search_name').notNull(),
     categoryId: uuid('category_id'),
     brand: text('brand'),
+    /** «الموسم/التشكيلة» (صيف 2026): a label to filter and report by; null: none */
+    season: text('season'),
     /** «الاسم العلمي» of a medicine (03 › الصيدليات): the till finds the product by it too */
     genericName: text('generic_name'),
     /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
@@ -1896,6 +1913,88 @@ export const alterationTickets = pgTable(
 );
 
 /**
+ * Warranty and maintenance claims (03 › الإلكترونيات والأدوات الطبية): a piece handed back for a fault,
+ * found by its serial number, with the sale, the customer and the warranty end as they were when it
+ * was opened. received → sent (to the supplier or a workshop) → ready → delivered. Numbered per store
+ * (WC-000001); each step is written in `events` with its day and note. Stock and accounts are
+ * untouched: a claim posts nothing.
+ */
+export const warrantyClaims = pgTable(
+  'warranty_claims',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    seq: integer('seq').notNull(),
+    number: text('number').notNull(),
+    /** received | sent | ready | delivered */
+    status: text('status').notNull().default('received'),
+    serial: text('serial').notNull(),
+    variantId: uuid('variant_id'),
+    /** The item's name as it was when the claim opened */
+    item: text('item').notNull(),
+    saleId: uuid('sale_id'),
+    saleNumber: text('sale_number'),
+    soldOn: date('sold_on'),
+    warrantyUntil: date('warranty_until'),
+    /** Whether the warranty still ran on the day the piece came back */
+    underWarranty: boolean('under_warranty').notNull().default(false),
+    customerName: text('customer_name'),
+    customerPhone: text('customer_phone'),
+    issue: text('issue').notNull(),
+    /** Where it was sent: the supplier or the workshop */
+    sentTo: text('sent_to'),
+    /** [{ status, on: 'YYYY-MM-DD', note }] in order, the first being the receipt */
+    events: jsonb('events')
+      .$type<{ status: string; on: string; note: string | null }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdBy: uuid('created_by'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'warranty_claims_pkey', columns: [t.tenantId, t.id] }),
+    unique('warranty_claims_seq_unique').on(t.tenantId, t.seq),
+    index('warranty_claims_status_idx').on(t.tenantId, t.status, t.createdAt),
+    index('warranty_claims_serial_idx').on(t.tenantId, t.serial),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A menu item's recipe (03 › المطاعم): what goes into one portion of a dish, to SHOW its food cost
+ * and margin in «كلفة الوجبات». Nothing is deducted from stock and nothing is posted: the cost of
+ * each ingredient is read from its own stock value when the report runs.
+ */
+export const recipeItems = pgTable(
+  'recipe_items',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** The dish */
+    productId: uuid('product_id').notNull(),
+    /** The ingredient (a stocked variant) */
+    ingredientVariantId: uuid('ingredient_variant_id').notNull(),
+    /** Thousandths of the ingredient's base unit in one portion */
+    qty: bigint('qty', { mode: 'number' }).notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'recipe_items_pkey', columns: [t.tenantId, t.id] }),
+    unique('recipe_items_ingredient_unique').on(t.tenantId, t.productId, t.ingredientVariantId),
+    index('recipe_items_product_idx').on(t.tenantId, t.productId),
+    tenantIsolation(),
+  ],
+);
+
+/**
  * A table's open order (03 › المطاعم › الصالة): an operational document shared by the waiter
  * screens and the tills of a branch, never a financial one. One open order per table; every
  * command on it runs under its row lock and moves `version`. Closed when the till charges the
@@ -2329,6 +2428,8 @@ export const promotions = pgTable(
       .default(sql`'{}'::integer[]`),
     fromTime: text('from_time'),
     toTime: text('to_time'),
+    /** «كود الخصم»: when set, the promotion applies only to a shop order that carries this code */
+    couponCode: text('coupon_code'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
@@ -2337,6 +2438,9 @@ export const promotions = pgTable(
   },
   (t) => [
     primaryKey({ name: 'promotions_pkey', columns: [t.tenantId, t.id] }),
+    uniqueIndex('promotions_coupon_unique')
+      .on(t.tenantId, sql`lower(${t.couponCode})`)
+      .where(sql`${t.couponCode} is not null`),
     index('promotions_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
   ],
@@ -2529,6 +2633,12 @@ export const onlineStores = pgTable(
       .$type<{ name: string; feeMinor: number }[]>()
       .notNull()
       .default([]),
+    /** «شعار المتجر وصورة الغلاف وعبارة قصيرة» (26 › الشكل): the pictures are rows of `uploads` */
+    tagline: text('tagline'),
+    logoUploadId: uuid('logo_upload_id'),
+    coverUploadId: uuid('cover_upload_id'),
+    /** One of the identity's own colour families: emerald (the brand), teal or blue; never a free colour */
+    accent: text('accent').notNull().default('emerald'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2576,6 +2686,15 @@ export const onlineOrders = pgTable(
     /** For the courier, on top of the pieces; 0 for a pickup */
     deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
     deliveryArea: text('delivery_area'),
+    /** out, delivered (null: not yet): «خرج للتوصيل» and «سُلّم», apart from the sale at the till */
+    deliveryStage: text('delivery_stage'),
+    courierName: text('courier_name'),
+    outAt: timestamp('out_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    /** The coupon typed in the cart; the till applies its promotion when it sells the order */
+    couponCode: text('coupon_code'),
+    /** The offer the code opened, as it was when the order was placed: the till applies it when it sells the order */
+    couponRule: jsonb('coupon_rule').$type<OnlineOrderCouponRule>(),
     decidedBy: uuid('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     version: version(),
@@ -2592,6 +2711,71 @@ export const onlineOrders = pgTable(
     tenantIsolation(),
   ],
 );
+
+/**
+ * What the shop's page says of a product (26 › المتجر الإلكتروني): a description and a size guide,
+ * plain text. Apart from `products` so editing it never moves the product's version or its sync.
+ */
+export const productTexts = pgTable(
+  'product_texts',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    productId: uuid('product_id').notNull(),
+    description: text('description'),
+    sizeGuide: text('size_guide'),
+    updatedBy: uuid('updated_by'),
+    version: version(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'product_texts_pkey', columns: [t.tenantId, t.productId] }),
+    foreignKey({ columns: [t.tenantId, t.productId], foreignColumns: [products.tenantId, products.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * «أبلغني عند التوفر»: a customer left a phone on an out-of-stock piece. The owner sees the list and
+ * writes to them on WhatsApp when the piece is back; `notifiedAt` marks the ones already told.
+ */
+export const stockAlerts = pgTable(
+  'stock_alerts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    productId: uuid('product_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    phone: text('phone').notNull(),
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'stock_alerts_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.productId], foreignColumns: [products.tenantId, products.id] }),
+    foreignKey({ columns: [t.tenantId, t.variantId], foreignColumns: [variants.tenantId, variants.id] }),
+    unique('stock_alerts_variant_phone_unique').on(t.tenantId, t.variantId, t.phone),
+    index('stock_alerts_product_idx').on(t.tenantId, t.productId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/** What the till needs of the offer a coupon opened (the shape of core's PromotionRule, without its clock) */
+export interface OnlineOrderCouponRule {
+  id: string;
+  name: string;
+  kind: 'percent' | 'buy_get';
+  percentBp: number | null;
+  buyQty: number | null;
+  getQty: number | null;
+  scope: 'all' | 'categories' | 'products';
+  categoryIds: string[];
+  productIds: string[];
+  couponCode: string;
+}
 
 export interface OnlineOrderLine {
   variantId: string;

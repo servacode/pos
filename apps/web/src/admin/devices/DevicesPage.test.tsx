@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceSummary, MeResponse } from '@serva/core';
 import { deviceSummary, pairingCode } from '../../test/devices';
@@ -289,6 +289,22 @@ describe('the pairing dialog «اربط جهازاً جديداً»', () => {
       { branchId: 'branch-1' },
       { branchId: 'branch-2' },
     ]);
+  });
+
+  it('makes a link for the kind of device picked, so a kitchen screen opens its own page', async () => {
+    const { user, requestsTo } = openDevices([cashier1], {
+      'POST /v1/devices/pairing-codes': { status: 200, body: pairingCode() },
+    });
+    await user.click(await screen.findByRole('button', { name: 'اربط جهازاً جديداً' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('img', { name: /الفرع الرئيسي/ });
+    await user.selectOptions(within(dialog).getByLabelText('نوع الجهاز'), 'kitchen_screen');
+    await waitFor(() =>
+      expect(requestsTo('POST', '/v1/devices/pairing-codes').map((r) => r.body)).toEqual([
+        { branchId: 'branch-1' },
+        { branchId: 'branch-1', kind: 'kitchen_screen' },
+      ]),
+    );
   });
 
   it('says when the code ran out', async () => {

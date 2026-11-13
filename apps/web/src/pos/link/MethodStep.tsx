@@ -6,6 +6,7 @@ import {
   PAIRING_TTL_SECONDS,
   parsePairingQr,
   storeCodeSchema,
+  type DeviceKind,
 } from '@serva/core';
 import {
   Alert,
@@ -43,7 +44,24 @@ interface MethodStepProps {
   onNext: (credentials: LinkCredentials) => void;
   /** Filled again after «رجوع» from step 2 */
   initialCode?: { storeCode: string; manualCode: string };
+  /** What this device is for: the first question and its note name it (a till by default) */
+  kind?: DeviceKind;
 }
+
+const KIND_QUESTION: Partial<Record<DeviceKind, { title: string; note: string }>> = {
+  kitchen_screen: {
+    title: 'هل هذه شاشة المطبخ؟',
+    note: 'اربطها بمتجرك مرة واحدة. بعدها تعرض أوراق الأقسام وتنتظر الطلبات الجديدة.',
+  },
+  waiter: {
+    title: 'هل هذا جوال النادل؟',
+    note: 'اربطه بمتجرك مرة واحدة. بعدها يفتح الطاولات ويأخذ الطلبات ويرسلها للمطبخ.',
+  },
+  call_screen: {
+    title: 'هل هذه شاشة النداء؟',
+    note: 'اربطها بمتجرك مرة واحدة. بعدها تعرض أرقام الطلبات الجاهزة.',
+  },
+};
 
 const TTL_MINUTES = PAIRING_TTL_SECONDS / 60;
 
@@ -117,7 +135,14 @@ function FormHead({ icon, title, aside }: { icon: ReactNode; title: string; asid
 }
 
 /** Step 1 «هل هذا جهاز كاشير؟»: three ways in, the chosen one's form beside them. */
-export function MethodStep({ method, onMethodChange, onNext, initialCode }: MethodStepProps) {
+export function MethodStep({
+  method,
+  onMethodChange,
+  onNext,
+  initialCode,
+  kind = 'cashier',
+}: MethodStepProps) {
+  const question = KIND_QUESTION[kind];
   const scan = canScanQr();
   const options: {
     key: LinkMethod;
@@ -156,9 +181,9 @@ export function MethodStep({ method, onMethodChange, onNext, initialCode }: Meth
             جهاز جديد · متصفح
           </Badge>
           <div className="flex flex-col gap-2">
-            <h1 className="text-3xl/tight font-bold text-ink">هل هذا جهاز كاشير؟</h1>
+            <h1 className="text-3xl/tight font-bold text-ink">{question?.title ?? 'هل هذا جهاز كاشير؟'}</h1>
             <p className="text-lg text-ink-muted">
-              اربطه بمتجرك مرة واحدة. بعدها يبيع ويطبع ويحفظ الفواتير حتى دون إنترنت.
+              {question?.note ?? 'اربطه بمتجرك مرة واحدة. بعدها يبيع ويطبع ويحفظ الفواتير حتى دون إنترنت.'}
             </p>
           </div>
         </div>

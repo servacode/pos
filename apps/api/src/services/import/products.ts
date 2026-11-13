@@ -92,6 +92,9 @@ interface Parsed {
   sku: string | null;
   category: string | null;
   brand: string | null;
+  /** «رمز الموديل»: rows that share it are the variants of one product */
+  model: string | null;
+  season: string | null;
   unitId: string | null;
   taxRateId: string | null;
   /** The file said something about the tax (even «0»), so an update touches it */
@@ -116,6 +119,8 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
   const nameEn = shortText(row, 'nameEn', 120, 'الاسم الإنجليزي', issues);
   const brand = shortText(row, 'brand', 60, 'الماركة', issues);
   const sku = shortText(row, 'sku', 40, 'رمز الصنف', issues);
+  const model = shortText(row, 'model', 40, 'رمز الموديل', issues);
+  const season = shortText(row, 'season', 40, 'الموسم', issues);
   const category = shortText(row, 'category', 60, 'التصنيف', issues);
 
   let barcode: string | null = null;
@@ -193,6 +198,8 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
     sku,
     category,
     brand,
+    model,
+    season,
     unitId,
     taxRateId,
     hasTax: taxText !== null,
@@ -240,16 +247,29 @@ async function productOfName(tx: Transaction, name: string): Promise<string | nu
 }
 
 /**
- * The rows of one product (the same name with different sizes or colours) travel together, so they
- * become one product with several variants. A row with no size or colour is a product on its own.
+ * The rows of one product travel together, so they become one product with several variants: first
+ * by the model code («رمز الموديل», or an SKU that two or more rows share), then by the same name with
+ * different sizes or colours. A row with no size or colour and no model code is a product on its own.
  */
 function groupRows(parsed: Parsed[]): Parsed[][] {
   const groups = new Map<string, Parsed[]>();
+  const skuUses = new Map<string, number>();
   for (const p of parsed) {
+    if (p.attributes.length > 0 && p.sku !== null) {
+      const k = normalizeArabic(p.sku);
+      skuUses.set(k, (skuUses.get(k) ?? 0) + 1);
+    }
+  }
+  for (const p of parsed) {
+    const sharedSku =
+      p.attributes.length > 0 && p.sku !== null && (skuUses.get(normalizeArabic(p.sku)) ?? 0) > 1;
+    const model = p.model ?? (sharedSku ? p.sku : null);
     const key =
-      p.attributes.length > 0
-        ? `v|${normalizeArabic(p.name)}|${normalizeArabic(p.brand ?? '')}`
-        : `s|${String(p.line)}`;
+      model !== null
+        ? `m|${normalizeArabic(model)}`
+        : p.attributes.length > 0
+          ? `v|${normalizeArabic(p.name)}|${normalizeArabic(p.brand ?? '')}`
+          : `s|${String(p.line)}`;
     groups.set(key, [...(groups.get(key) ?? []), p]);
   }
   return [...groups.values()];
@@ -403,6 +423,7 @@ function differs(detail: ProductDetail, variantId: string, p: Parsed, categoryId
     (p.sku !== null && !same(v.sku, p.sku)) ||
     (p.nameEn !== null && !same(detail.nameEn, p.nameEn)) ||
     (p.brand !== null && !same(detail.brand, p.brand)) ||
+    (p.season !== null && !same(detail.season, p.season)) ||
     (categoryId !== null && !same(detail.categoryId, categoryId)) ||
     (p.unitId !== null && !same(detail.unitId, p.unitId)) ||
     (p.hasTax && !same(detail.taxRateId, p.taxRateId))
@@ -518,6 +539,7 @@ async function processGroup(
       ? {
           ...(first.nameEn !== null ? { nameEn: first.nameEn } : {}),
           ...(first.brand !== null ? { brand: first.brand } : {}),
+          ...(first.season !== null ? { season: first.season } : {}),
           ...(categoryId !== null ? { categoryId } : {}),
           ...(first.unitId !== null ? { unitId: first.unitId } : {}),
           ...(first.hasTax ? { taxRateId: first.taxRateId } : {}),
@@ -546,6 +568,7 @@ async function processGroup(
       nameEn: first.nameEn,
       categoryId,
       brand: first.brand,
+      season: first.season,
       unitId: first.unitId ?? undefined,
       taxRateId: first.taxRateId,
       variants: newVariants,

@@ -61,6 +61,7 @@ const PATH_FIELDS: [RegExp, string][] = [
   [/^unitId/, 'unit'],
   [/^taxRateId/, 'tax'],
   [/^brand/, 'brand'],
+  [/^season/, 'season'],
   [/variants\.\d+\.barcodes/, 'barcode'],
   [/variants\.\d+\.sku/, 'sku'],
   [/variants\.\d+\.attributes/, 'size'],

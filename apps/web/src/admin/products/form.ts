@@ -65,6 +65,8 @@ export interface ProductDraft {
   nameAr: string;
   nameEn: string;
   brand: string;
+  /** «الموسم/التشكيلة»; "" = none */
+  season?: string;
   /** «الاسم العلمي» (pharmacies); "" = none */
   genericName?: string;
   /** «يحتاج وصفة» and «مراقَب» (pharmacies) */
@@ -128,6 +130,7 @@ export function emptyDraft(options: {
     nameAr: '',
     nameEn: '',
     brand: '',
+    season: '',
     categoryId: options.categoryId ?? '',
     type: 'stock',
     unitId: options.unitId,
@@ -193,6 +196,7 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     nameAr: detail.nameAr,
     nameEn: detail.nameEn ?? '',
     brand: detail.brand ?? '',
+    season: detail.season ?? '',
     genericName: detail.genericName ?? '',
     requiresPrescription: detail.requiresPrescription ?? false,
     controlled: detail.controlled ?? false,
@@ -354,6 +358,7 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       nameAr: draft.nameAr.trim(),
       nameEn: textOrNull(draft.nameEn),
       brand: textOrNull(draft.brand),
+      ...(textOrNull(draft.season ?? '') ? { season: textOrNull(draft.season ?? '') } : {}),
       ...(textOrNull(draft.genericName ?? '') ? { genericName: textOrNull(draft.genericName ?? '') } : {}),
       ...(draft.requiresPrescription ? { requiresPrescription: true } : {}),
       ...(draft.controlled ? { controlled: true } : {}),
@@ -423,6 +428,8 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   if (nameAr !== original.nameAr) body.nameAr = nameAr;
   if (textOrNull(draft.nameEn) !== original.nameEn) body.nameEn = textOrNull(draft.nameEn);
   if (textOrNull(draft.brand) !== original.brand) body.brand = textOrNull(draft.brand);
+  if (textOrNull(draft.season ?? '') !== (original.season ?? null))
+    body.season = textOrNull(draft.season ?? '');
   if ((draft.requiresPrescription ?? false) !== (original.requiresPrescription ?? false)) {
     body.requiresPrescription = draft.requiresPrescription ?? false;
   }

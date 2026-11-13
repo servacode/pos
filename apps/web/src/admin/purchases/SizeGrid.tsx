@@ -1,6 +1,10 @@
 import { useState } from 'react';
-import type { ProductDetail } from '@serva/core';
-import { AddIcon, Button, GridIcon, IconChip, TextField } from '@serva/ui';
+import { catalogOptionsOf, type CatalogOptions, type ProductDetail, type SizeRun } from '@serva/core';
+import { AddIcon, Alert, Button, GridIcon, IconChip, TextField } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
+import { errorMessage } from '../../lib/api';
+import { canManageCatalog } from '../catalog/catalog';
+import { saveCatalogOptions } from '../store/api';
 import { moneyOf, qtyOf } from './api';
 
 export interface GridLine {
@@ -36,6 +40,162 @@ export function gridOf(variants: readonly Variant[]) {
         (!colName || v.attributes.find((a) => a.name === colName)?.value === col),
     ) ?? null;
   return { rowName, colName, rows, cols, cell, fits: names.length >= 1 && names.length <= 2 };
+}
+
+/**
+ * «طقم مقاسات»: the quantities one size run puts in the grid, `sets` runs of it for every colour:
+ * the run's counts go along the sizes in the order the grid has them (1-2-2-1 over S-M-L-XL), a size
+ * the run has no count for gets none. The axis called «المقاس» is the sizes; without one, the rows.
+ */
+export function sizeRunQuantities(
+  variants: readonly Variant[],
+  counts: readonly number[],
+  sets: number,
+): Record<string, string> {
+  const grid = gridOf(variants);
+  const sizesAreCols = grid.colName === 'المقاس' && grid.rowName !== 'المقاس';
+  const sizes = sizesAreCols ? grid.cols : grid.rows;
+  const others = sizesAreCols ? grid.rows : grid.cols;
+  const out: Record<string, string> = {};
+  for (const other of others) {
+    sizes.forEach((size, i) => {
+      const n = (counts[i] ?? 0) * sets;
+      if (n <= 0) return;
+      const cell = sizesAreCols ? grid.cell(other, size) : grid.cell(size, other);
+      if (cell) out[cell.id] = String(n);
+    });
+  }
+  return out;
+}
+
+/** «1-2-2-1» as [1, 2, 2, 1]; null when it is not a list of counts */
+export function parseRunCounts(text: string): number[] | null {
+  const parts = text
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .split(/[\s,،\-–]+/)
+    .filter(Boolean);
+  if (parts.length === 0 || parts.length > 12) return null;
+  const counts = parts.map(Number);
+  return counts.every((n) => Number.isInteger(n) && n >= 0 && n <= 99) && counts.some((n) => n > 0)
+    ? counts
+    : null;
+}
+
+/** The size runs of the store and the editor of them, under the grid's title */
+function SizeRuns({ onFill }: { onFill: (counts: number[], sets: number) => void }) {
+  const me = useMe();
+  const [options, setOptions] = useState<CatalogOptions>(() => catalogOptionsOf(me.settings.catalogOptions));
+  const [sets, setSets] = useState('1');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<{ name: string; counts: string }[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const canEdit = canManageCatalog(me);
+  const setCount = Math.max(1, Math.min(99, Math.trunc(Number(sets)) || 1));
+
+  async function save() {
+    const runs: SizeRun[] = [];
+    for (const row of draft) {
+      if (row.name.trim() === '' && row.counts.trim() === '') continue;
+      const counts = parseRunCounts(row.counts);
+      if (row.name.trim() === '' || counts === null) {
+        setError('اكتب لكل طقم اسماً وأعداداً مثل 1-2-2-1.');
+        return;
+      }
+      runs.push({ name: row.name.trim(), counts });
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const store = await saveCatalogOptions({ ...options, sizeRuns: runs });
+      setOptions(catalogOptionsOf(store.catalogOptions));
+      setEditing(false);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2" role="group" aria-label="طقم مقاسات">
+      <div className="flex flex-wrap items-end gap-2">
+        <span className="text-sm font-semibold text-ink">طقم مقاسات</span>
+        {options.sizeRuns.map((run) => (
+          <Button key={run.name} variant="secondary" onClick={() => onFill(run.counts, setCount)}>
+            {run.name}
+          </Button>
+        ))}
+        <TextField
+          label="عدد الأطقم لكل لون"
+          inputMode="numeric"
+          dir="ltr"
+          value={sets}
+          onChange={(e) => setSets(e.target.value.replace(/\D/g, '').slice(0, 2))}
+          className="w-32"
+          inputClassName="num text-center"
+        />
+        {canEdit ? (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setDraft(options.sizeRuns.map((r) => ({ name: r.name, counts: r.counts.join('-') })));
+              setError(null);
+              setEditing((e) => !e);
+            }}
+          >
+            عدّل الأطقم
+          </Button>
+        ) : null}
+      </div>
+      {editing ? (
+        <div className="flex flex-col gap-2 rounded-control border border-line bg-surface p-3">
+          {draft.map((row, i) => (
+            <div key={i} className="flex flex-wrap items-end gap-2">
+              <TextField
+                label="اسم الطقم"
+                value={row.name}
+                onChange={(e) =>
+                  setDraft((all) =>
+                    all.map((r, j) => (j === i ? { ...r, name: e.target.value.slice(0, 30) } : r)),
+                  )
+                }
+                className="w-48"
+              />
+              <TextField
+                label="القطع لكل مقاس"
+                hint="بترتيب المقاسات: 1-2-2-1"
+                dir="ltr"
+                value={row.counts}
+                onChange={(e) =>
+                  setDraft((all) =>
+                    all.map((r, j) => (j === i ? { ...r, counts: e.target.value.slice(0, 40) } : r)),
+                  )
+                }
+                className="w-40"
+              />
+              <Button variant="ghost" onClick={() => setDraft((all) => all.filter((_, j) => j !== i))}>
+                احذف
+              </Button>
+            </div>
+          ))}
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              disabled={draft.length >= 10}
+              onClick={() => setDraft((all) => [...all, { name: '', counts: '' }])}
+            >
+              طقم جديد
+            </Button>
+            <Button loading={saving} onClick={() => void save()}>
+              احفظ الأطقم
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /** The line's cost text for `pieces` at the typed cost of one, in whole minor units. */
@@ -85,6 +245,9 @@ export function SizeGrid({
           <p className="text-sm text-ink-muted">اكتب كمية كل قطعة، ثم كلفة القطعة الواحدة.</p>
         </div>
       </div>
+      <SizeRuns
+        onFill={(counts, sets) => setQty((all) => ({ ...all, ...sizeRunQuantities(live, counts, sets) }))}
+      />
       <div className="w-fit max-w-full overflow-x-auto rounded-control border border-line bg-surface">
         <table className="border-collapse">
           <thead>

@@ -75,6 +75,13 @@ describe('the start wizard', () => {
     openWizard(owner(), store());
     expect(await screen.findByRole('heading', { name: 'ما نشاط محلّك؟', level: 1 })).toBeInTheDocument();
     expect(screen.getByText('الخطوة', { exact: false })).toHaveTextContent('الخطوة 1 من 4');
+    // Each activity card carries its icon from the design system's table (tab 14)
+    const cards = await screen.findAllByRole('checkbox');
+    expect(cards).toHaveLength(13);
+    for (const card of cards) expect(card.closest('label')?.querySelector('svg')).not.toBeNull();
+    expect(
+      screen.getByRole('checkbox', { name: 'صيدلية' }).closest('label')?.querySelector('svg'),
+    ).toHaveClass('lucide-pill');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 

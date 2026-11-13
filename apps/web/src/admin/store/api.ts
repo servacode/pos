@@ -1,4 +1,5 @@
 import type {
+  CatalogOptions,
   OnboardingInput,
   PharmacySettings,
   TillSettings,
@@ -45,3 +46,7 @@ export const savePharmacy = (input: PharmacySettings) =>
 /** `PUT /v1/store/till`: the return window and whether a card payment needs its approval number (settings.manage) */
 export const saveTill = (input: TillSettings) =>
   apiFetch<StoreResponse>('/v1/store/till', { method: 'PUT', body: input, auth: true });
+
+/** `PUT /v1/store/catalog-options`: barcode generation for new variants and the size runs (catalog.manage) */
+export const saveCatalogOptions = (input: CatalogOptions) =>
+  apiFetch<StoreResponse>('/v1/store/catalog-options', { method: 'PUT', body: input, auth: true });

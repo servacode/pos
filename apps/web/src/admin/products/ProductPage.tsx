@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
-import type { Category, CurrencyCode, ProductDetail, TaxRate, Unit } from '@serva/core';
+import { catalogOptionsOf } from '@serva/core';
+import type { CatalogOptions, Category, CurrencyCode, ProductDetail, TaxRate, Unit } from '@serva/core';
 import {
   Alert,
   ArchiveIcon,
@@ -44,6 +45,7 @@ import {
   setProductArchived,
   updateProduct,
 } from '../catalog/api';
+import { saveCatalogOptions } from '../store/api';
 import { barcodeOf, canManageCatalog, categoryOptionLabel, categoryTree } from '../catalog/catalog';
 import {
   applyAxes,
@@ -66,6 +68,8 @@ import { normalizeArabic, type SectorKey } from '@serva/core';
 import { MODIFIER_SECTORS, SERIAL_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors';
 import { ModifiersEditor } from './ModifiersEditor';
 import { ImagesEditor } from './ImagesEditor';
+import { RecipeSection } from './RecipeSection';
+import { ShopTextSection } from './ShopTextSection';
 import { BulkApply } from './BulkApply';
 import { OptionsEditor } from './OptionsEditor';
 import { ButtonLink, Fact, SectionCard } from './parts';
@@ -84,6 +88,7 @@ const TOP_FIELDS = [
   'nameEn',
   'categoryId',
   'brand',
+  'season',
   'genericName',
   'requiresPrescription',
   'controlled',
@@ -193,21 +198,15 @@ function ProductCard() {
   const [askFree, setAskFree] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState('');
   const freeOk = useRef(false);
-  // «ولّد باركود عند الحفظ»: a per-browser choice (the store has no setting for it yet).
-  const [autoBarcode, setAutoBarcodeState] = useState(() => {
-    try {
-      return localStorage.getItem('serva.autoBarcode') === '1';
-    } catch {
-      return false;
-    }
-  });
+  // «ولّد باركود عند الحفظ»: the store's setting (catalogOptions), saved when it is switched
+  const [options, setOptions] = useState<CatalogOptions>(() => catalogOptionsOf(me.settings.catalogOptions));
+  const autoBarcode = options.autoBarcode;
   const setAutoBarcode = (on: boolean) => {
-    setAutoBarcodeState(on);
-    try {
-      localStorage.setItem('serva.autoBarcode', on ? '1' : '0');
-    } catch {
-      /* the choice just does not stay */
-    }
+    const next = { ...options, autoBarcode: on };
+    setOptions(next);
+    saveCatalogOptions(next)
+      .then((store) => setOptions(catalogOptionsOf(store.catalogOptions)))
+      .catch((error: unknown) => setNotice(errorMessage(error)));
   };
   const [notice, setNotice] = useState<string | null>(
     (location.state as { saved?: boolean } | null)?.saved
@@ -565,6 +564,16 @@ function ProductCard() {
                     onChange={(event) => update({ brand: event.target.value })}
                     error={errors.brand}
                   />
+                  {fits(['clothing']) || draft.season ? (
+                    <TextField
+                      name="season"
+                      label="الموسم/التشكيلة (اختياري)"
+                      hint="مثل صيف 2026: تفلتر به القائمة والتقارير"
+                      value={draft.season ?? ''}
+                      onChange={(event) => update({ season: event.target.value })}
+                      error={errors.season}
+                    />
+                  ) : null}
                   {fits(['pharmacy']) || draft.genericName ? (
                     <TextField
                       name="genericName"
@@ -684,6 +693,12 @@ function ProductCard() {
                 />
               </SectionCard>
 
+              <ShopTextSection
+                productId={product?.id ?? null}
+                productName={product?.nameAr ?? ''}
+                disabled={!canManage}
+              />
+
               {fits(MODIFIER_SECTORS) || (draft.modifiers?.length ?? 0) > 0 ? (
                 <SectionCard
                   title="الإضافات والخيارات (للمطاعم والمقاهي)"
@@ -698,6 +713,10 @@ function ProductCard() {
                   />
                   {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
                 </SectionCard>
+              ) : null}
+
+              {product && fits(MODIFIER_SECTORS) ? (
+                <RecipeSection productId={product.id} disabled={!canManage} />
               ) : null}
             </fieldset>
 

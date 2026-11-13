@@ -13,11 +13,27 @@ import { isoDateSchema } from './common';
 export const PRESCRIPTION_MODES = ['required', 'optional'] as const;
 
 /**
+ * «مرتجع الأدوية»: no medicine comes back (`none`), only a sealed box the cashier confirms is
+ * unopened (`sealed`, the default), or any (`allowed`).
+ */
+export const MEDICINE_RETURN_POLICIES = ['none', 'sealed', 'allowed'] as const;
+export type MedicineReturnPolicy = (typeof MEDICINE_RETURN_POLICIES)[number];
+
+/**
  * «الوصفة»: whether a prescription medicine's number and doctor must be written before the sale
  * closes (`required`) or may be left empty (`optional`). A controlled drug always needs them.
+ *
+ * Also kept here, and used by pharmacies and medical-supply stores alike:
+ *   returns            the medicine return policy (default `sealed`)
+ *   controlledReturns  a controlled drug may be returned at all (default no)
+ *   autoBatch          the till picks the nearest unexpired batch and refuses an expired one
+ *                      (default on for a pharmacy; a store that is not one writes it explicitly)
  */
 export const pharmacySettingsSchema = z.object({
   prescription: z.enum(PRESCRIPTION_MODES),
+  returns: z.enum(MEDICINE_RETURN_POLICIES).optional(),
+  controlledReturns: z.boolean().optional(),
+  autoBatch: z.boolean().optional(),
 });
 export type PharmacySettings = z.output<typeof pharmacySettingsSchema>;
 

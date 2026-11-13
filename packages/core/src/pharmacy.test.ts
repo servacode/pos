@@ -4,7 +4,14 @@ import {
   pharmacySettingsSchema,
   DEFAULT_PHARMACY_SETTINGS,
 } from './contracts/pharmacy';
-import { missingPrescription, pickBatch, prescriptionNeed } from './pharmacy';
+import {
+  medicineReturnPolicy,
+  medicineReturnRule,
+  missingPrescription,
+  pickBatch,
+  prescriptionNeed,
+  usesAutoBatch,
+} from './pharmacy';
 
 describe('pickBatch: nearest expiry first, never an expired one', () => {
   const a = { batchNo: 'A-01', expiry: '2026-11-01' };
@@ -87,12 +94,65 @@ describe('what a cart asks for in prescription details', () => {
   });
 });
 
+describe('the batch setting', () => {
+  it('is on for any store with pharmacy settings unless it was turned off, and off with none', () => {
+    expect(usesAutoBatch(null)).toBe(false);
+    expect(usesAutoBatch(undefined)).toBe(false);
+    expect(usesAutoBatch({ prescription: 'optional' })).toBe(true);
+    expect(usesAutoBatch({ prescription: 'optional', autoBatch: true })).toBe(true);
+    expect(usesAutoBatch({ prescription: 'optional', autoBatch: false })).toBe(false);
+  });
+});
+
+describe('the medicine return rule', () => {
+  const plain = { medicine: false, controlled: false };
+  const medicine = { medicine: true, controlled: false };
+  const controlled = { medicine: true, controlled: true };
+  const base = { prescription: 'optional' } as const;
+
+  it('defaults to sealed boxes only', () => {
+    expect(medicineReturnPolicy(base)).toBe('sealed');
+    expect(medicineReturnPolicy(null)).toBe('sealed');
+    expect(medicineReturnRule(base, medicine)).toEqual({ kind: 'sealed' });
+  });
+
+  it('leaves a store with no pharmacy settings, and a non-medicine, alone', () => {
+    expect(medicineReturnRule(null, controlled)).toEqual({ kind: 'free' });
+    expect(medicineReturnRule(undefined, medicine)).toEqual({ kind: 'free' });
+    expect(medicineReturnRule({ ...base, returns: 'none' }, plain)).toEqual({ kind: 'free' });
+  });
+
+  it('refuses every medicine under «لا مرتجع», and takes any under «مسموح»', () => {
+    expect(medicineReturnRule({ ...base, returns: 'none' }, medicine).kind).toBe('blocked');
+    expect(medicineReturnRule({ ...base, returns: 'allowed' }, medicine)).toEqual({ kind: 'free' });
+  });
+
+  it('never takes a controlled drug back unless the store allows it explicitly', () => {
+    for (const returns of ['none', 'sealed', 'allowed'] as const) {
+      expect(medicineReturnRule({ ...base, returns }, controlled).kind).toBe('blocked');
+    }
+    expect(medicineReturnRule({ ...base, returns: 'none', controlledReturns: false }, controlled).kind).toBe(
+      'blocked',
+    );
+    expect(medicineReturnRule({ ...base, controlledReturns: true }, controlled)).toEqual({ kind: 'sealed' });
+    expect(medicineReturnRule({ ...base, returns: 'none', controlledReturns: true }, controlled)).toEqual({
+      kind: 'sealed',
+    });
+    expect(medicineReturnRule({ ...base, returns: 'allowed', controlledReturns: true }, controlled)).toEqual({
+      kind: 'free',
+    });
+  });
+});
+
 describe('the pharmacy contracts', () => {
   it('accepts only the two prescription modes, and defaults to optional', () => {
     expect(pharmacySettingsSchema.safeParse({ prescription: 'required' }).success).toBe(true);
     expect(pharmacySettingsSchema.safeParse({ prescription: 'optional' }).success).toBe(true);
     expect(pharmacySettingsSchema.safeParse({ prescription: 'maybe' }).success).toBe(false);
     expect(DEFAULT_PHARMACY_SETTINGS).toEqual({ prescription: 'optional' });
+    const full = { prescription: 'optional', returns: 'none', controlledReturns: true, autoBatch: false };
+    expect(pharmacySettingsSchema.parse(full)).toEqual(full);
+    expect(pharmacySettingsSchema.safeParse({ prescription: 'optional', returns: 'x' }).success).toBe(false);
   });
 
   it('takes a register window that does not run backwards', () => {

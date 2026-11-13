@@ -1,10 +1,12 @@
 import type { ComponentProps } from 'react';
 import { cn } from './cn';
 import { CONTROL_HEIGHT, useDensity, type Density } from './context';
-import { CheckIcon } from './icons';
+import { CheckIcon, type Icon } from './icons';
 
 interface ToggleChipProps extends Omit<ComponentProps<'input'>, 'type' | 'size'> {
   label: string;
+  /** A glyph before the label (the activity icons) */
+  icon?: Icon;
   type?: 'checkbox' | 'radio';
 }
 
@@ -21,7 +23,13 @@ const CHIP: Record<Density, string> = {
  * when on. The little box at the start keeps its place either way, so a row of chips never shifts
  * under the finger; it is round for a single choice and square for several.
  */
-export function ToggleChip({ label, type = 'checkbox', className, ...inputProps }: ToggleChipProps) {
+export function ToggleChip({
+  label,
+  icon: Glyph,
+  type = 'checkbox',
+  className,
+  ...inputProps
+}: ToggleChipProps) {
   const density = useDensity();
   return (
     <label
@@ -49,6 +57,7 @@ export function ToggleChip({ label, type = 'checkbox', className, ...inputProps 
           className="size-3 opacity-0 transition-opacity duration-120 ease-standard group-has-checked/chip:opacity-100"
         />
       </span>
+      {Glyph ? <Glyph size={16} /> : null}
       {label}
     </label>
   );

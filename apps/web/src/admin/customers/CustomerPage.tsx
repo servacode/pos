@@ -30,7 +30,7 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { dayText, isoDay } from '../../lib/dates';
-import { getCustomer, getPurchases, updateCustomer } from './api';
+import { archiveDuplicate, getCustomer, getPurchases, updateCustomer } from './api';
 import { CustomerForm } from './CustomerForm';
 import { CustomerMoneyDialog } from './CustomerMoneyDialog';
 
@@ -277,6 +277,17 @@ export function CustomerPage() {
     }
   }
 
+  /** «أرشف هذا الزبون المكرر»: refused with its reason when money or a cheque is still open on them */
+  async function archiveAsDuplicate() {
+    if (!customer) return;
+    try {
+      setCustomer(await archiveDuplicate(customer.id));
+      setError(null);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
   const base = customer?.baseCurrency ?? 'SYP';
   // On a phone «عليه» and «له» share one column, and the date moves under the entry.
   const columns: DataColumn<StatementLine>[] = [
@@ -390,6 +401,15 @@ export function CustomerPage() {
                     >
                       {customer.archived ? 'أرجعه' : 'أرشفه'}
                     </Button>
+                    {customer.archived ? null : (
+                      <Button
+                        variant="ghost"
+                        icon={<ArchiveIcon />}
+                        onClick={() => void archiveAsDuplicate()}
+                      >
+                        أرشف هذا الزبون المكرر
+                      </Button>
+                    )}
                   </div>
                 ) : null}
               </div>

@@ -118,6 +118,7 @@ async function loadMembers(tx: Transaction, onlyId?: string): Promise<StaffMembe
       hasLogin: u.passwordHash !== null && u.phone !== null,
       lastLoginAt: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
       createdAt: u.createdAt.toISOString(),
+      commissionBp: u.commissionBp,
     };
   });
 }
@@ -231,6 +232,7 @@ export async function createStaff(
           pinHash,
           pinLength: input.pin.length,
           pinVersion: 1,
+          commissionBp: input.commissionBp ?? null,
         })
         .returning({ id: users.id });
       await giveRole(tx, auth.tenantId, created!.id, role.id, input.branchIds);
@@ -303,6 +305,7 @@ export async function updateStaff(
       }
       if (input.fullName !== undefined) patch.fullName = input.fullName;
       if (input.phone !== undefined) patch.phone = input.phone;
+      if (input.commissionBp !== undefined) patch.commissionBp = input.commissionBp;
       if (passwordHash) patch.passwordHash = passwordHash;
       const phoneAfter = input.phone === undefined ? row!.phone : input.phone;
       if ((passwordHash ?? row!.passwordHash) !== null && phoneAfter === null) {
@@ -336,6 +339,9 @@ export async function updateStaff(
           changes: {
             ...(input.fullName !== undefined ? { fullName: [before.fullName, input.fullName] } : {}),
             ...(input.phone !== undefined ? { phone: [before.phone, input.phone] } : {}),
+            ...(input.commissionBp !== undefined
+              ? { commissionBp: [before.commissionBp, input.commissionBp] }
+              : {}),
             ...(roleChanged
               ? { role: [before.roleKey, roleKey], branchIds: [before.branchIds, branchIds] }
               : {}),

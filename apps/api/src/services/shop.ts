@@ -29,6 +29,7 @@ import {
   uuidv7,
   withTenant,
   type Database,
+  type OnlineOrderCouponRule,
   type OnlineOrderLine,
   type Transaction,
 } from '@serva/db';
@@ -55,20 +56,20 @@ const CODE_TTL_SECONDS = 600;
 const MAX_CODE_ATTEMPTS = 5;
 
 const SHOP = 'هذا المتجر غير موجود أو غير مفعّل.';
-const notFound = (message: string) => new AppError(404, 'not_found', message);
-const fieldError = (field: string, message: string) =>
+export const notFound = (message: string) => new AppError(404, 'not_found', message);
+export const fieldError = (field: string, message: string) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', { [field]: message });
 
 const money = (minor: number, currency: CurrencyCode) => stripBidiControls(formatMoney(minor, currency));
 
 /** The store behind a shop link, or 404 (also when its shop is off). */
-async function tenantOf(db: Database, slug: string): Promise<string> {
+export async function tenantOf(db: Database, slug: string): Promise<string> {
   const [row] = await db.execute<{ id: string | null }>(sql`select shop_find_by_slug(${slug}) as id`);
   if (!row?.id) throw notFound(SHOP);
   return row.id;
 }
 
-async function storeOf(tx: Transaction, tenantId: string) {
+export async function storeOf(tx: Transaction, tenantId: string) {
   const [row] = await tx.execute<{
     name: string;
     base: string;
@@ -82,10 +83,14 @@ async function storeOf(tx: Transaction, tenantId: string) {
     show_prices: boolean;
     delivery_fee_minor: string;
     delivery_areas: { name: string; feeMinor: number }[];
+    tagline: string | null;
+    accent: 'emerald' | 'teal' | 'blue';
+    logo_upload_id: string | null;
+    cover_upload_id: string | null;
   }>(sql`
     select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
            o.show_out_of_stock, o.order_mode, o.show_prices, o.delivery_fee_minor::text as delivery_fee_minor,
-           o.delivery_areas
+           o.delivery_areas, o.tagline, o.accent, o.logo_upload_id, o.cover_upload_id
     from online_stores o
     join tenants t on t.id = o.tenant_id
     join tenant_settings s on s.tenant_id = o.tenant_id
@@ -127,6 +132,7 @@ interface Priced {
 async function pricerOf(
   tx: Transaction,
   base: CurrencyCode,
+  coupon: string | null = null,
 ): Promise<
   (row: {
     productId: string;
@@ -137,6 +143,31 @@ async function pricerOf(
   }) => Priced | null
 > {
   const rates = await ratesOf(tx);
+  const rules = await runningRules(tx, coupon, true);
+  const parent = new Map<string, string | null>();
+  if (rules.some((r) => r.scope === 'categories')) {
+    const cats = await tx.execute<{ id: string; parent_id: string | null }>(
+      sql`select id, parent_id from categories`,
+    );
+    for (const c of cats) parent.set(c.id, c.parent_id);
+  }
+  const pathOf = (id: string | null): string[] => {
+    const path: string[] = [];
+    for (let at = id; at && path.length < 10; at = parent.get(at) ?? null) path.push(at);
+    return path;
+  };
+  return pricing(rates, rules, pathOf, base);
+}
+
+/**
+ * The promotions running now: the ones without a code, and the one whose «كود الخصم» was typed.
+ * A coupon promotion is never in the public prices, only in an order that carries its code.
+ */
+export async function runningRules(
+  tx: Transaction,
+  coupon: string | null,
+  percentOnly: boolean,
+): Promise<PromotionRule[]> {
   const [tenant] = await tx.execute<{ timezone: string | null }>(sql`select timezone from tenants limit 1`);
   const rows = await tx.execute<{
     id: string;
@@ -150,21 +181,28 @@ async function pricerOf(
     days_of_week: number[] | null;
     from_time: string | null;
     to_time: string | null;
+    kind: PromotionRule['kind'];
+    buy_qty: number | null;
+    get_qty: number | null;
+    coupon_code: string | null;
   }>(sql`
     select id, name, percent_bp, scope, category_ids, product_ids,
            to_char(starts_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as starts_at,
            to_char(ends_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as ends_at,
-           days_of_week, from_time, to_time
-    from promotions where archived_at is null and kind = 'percent'`);
+           days_of_week, from_time, to_time, kind, buy_qty, get_qty, coupon_code
+    from promotions where archived_at is null
+      and (${percentOnly ? sql`kind = 'percent'` : sql`true`})
+      and (${coupon ? sql`coupon_code is null or lower(coupon_code) = lower(${coupon})` : sql`coupon_code is null`})`);
   const now = new Date();
-  const rules: PromotionRule[] = rows
+  return rows
     .map((r) => ({
       id: r.id,
       name: r.name,
-      kind: 'percent' as const,
+      kind: r.kind,
       percentBp: r.percent_bp,
-      buyQty: null,
-      getQty: null,
+      buyQty: r.buy_qty,
+      getQty: r.get_qty,
+      couponCode: r.coupon_code,
       scope: r.scope as PromotionRule['scope'],
       categoryIds: r.category_ids ?? [],
       productIds: r.product_ids ?? [],
@@ -176,18 +214,28 @@ async function pricerOf(
       archived: false,
     }))
     .filter((r) => promotionActive(r, now, tenant?.timezone ?? 'Asia/Damascus'));
-  const parent = new Map<string, string | null>();
-  if (rules.some((r) => r.scope === 'categories')) {
-    const cats = await tx.execute<{ id: string; parent_id: string | null }>(
-      sql`select id, parent_id from categories`,
-    );
-    for (const c of cats) parent.set(c.id, c.parent_id);
-  }
-  const pathOf = (id: string | null): string[] => {
-    const path: string[] = [];
-    for (let at = id; at && path.length < 10; at = parent.get(at) ?? null) path.push(at);
-    return path;
-  };
+}
+
+/** The offer a coupon code opens (running now), or null: the code is wrong, ended or not started */
+export async function couponRule(tx: Transaction, code: string): Promise<PromotionRule | null> {
+  const rules = await runningRules(tx, code, false);
+  return rules.find((r) => r.couponCode) ?? null;
+}
+
+export const COUPON_BAD = 'هذا الكود غير صحيح أو انتهت مدته.';
+
+function pricing(
+  rates: TradeRate[],
+  rules: PromotionRule[],
+  pathOf: (id: string | null) => string[],
+  base: CurrencyCode,
+): (row: {
+  productId: string;
+  categoryId: string | null;
+  currency: string;
+  price: string;
+  was: string | null;
+}) => Priced | null {
   return (row) => {
     const price = inBase(Number(row.price), row.currency as CurrencyCode, base, rates);
     if (price === null) return null;
@@ -331,6 +379,10 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           deliveryAreas: show
             ? store.delivery_areas
             : store.delivery_areas.map((a) => ({ name: a.name, feeMinor: 0 })),
+          tagline: store.tagline,
+          accent: store.accent,
+          logoUrl: store.logo_upload_id ? imageUrl(tenantId, store.logo_upload_id, true) : null,
+          coverUrl: store.cover_upload_id ? imageUrl(tenantId, store.cover_upload_id) : null,
         },
         categories: categories
           .filter((c) => shown.has(c.id))
@@ -397,7 +449,12 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
       const images = await tx.execute<{ upload_id: string; option_value: string | null }>(sql`
         select upload_id, option_value from product_images where product_id = ${productId}
         order by sort_order, created_at, id`);
+      const [texts] = await tx.execute<{ description: string | null; size_guide: string | null }>(
+        sql`select description, size_guide from product_texts where product_id = ${productId}`,
+      );
       return {
+        description: texts?.description ?? null,
+        sizeGuide: texts?.size_guide ?? null,
         id: productId,
         name: rows[0]!.product_name,
         categoryId: rows[0]!.category_id,
@@ -426,8 +483,9 @@ async function priceLines(
   base: CurrencyCode,
   input: { variantId: string; qty: number }[],
   needOnShelf: boolean,
+  coupon: string | null = null,
 ): Promise<OnlineOrderLine[]> {
-  const priceOf = await pricerOf(tx, base);
+  const priceOf = await pricerOf(tx, base, coupon);
   const ids = [...new Set(input.map((l) => l.variantId))];
   const rows = await tx.execute<{
     id: string;
@@ -504,7 +562,10 @@ export function orderMessage(order: {
   lines: OnlineOrderLine[];
   /** False: the store hides its prices, so the message is an inquiry with no price in it */
   showPrices?: boolean;
+  /** «كود الخصم» the customer typed, for the store to see */
+  coupon?: string | null;
 }): string {
+  const couponLine = order.coupon ? [`كود الخصم: ${order.coupon}`] : [];
   if (order.showPrices === false) {
     return [
       `طلب جديد من المتجر: ${order.number}`,
@@ -514,6 +575,7 @@ export function orderMessage(order: {
       ...order.lines.map((l) => `• ${l.name}${l.label ? ` (${l.label})` : ''} × ${l.qty}`),
       '',
       'أرجو إعلامي بالسعر.',
+      ...couponLine,
       order.fulfilment === 'delivery'
         ? `التوصيل إلى: ${order.address ?? '—'}${order.deliveryArea ? ` (${order.deliveryArea})` : ''}`
         : 'الاستلام من المحل',
@@ -531,6 +593,7 @@ export function orderMessage(order: {
     ),
     '',
     `المجموع: ${money(order.totalMinor, order.currency)}`,
+    ...couponLine,
     ...(order.deliveryFeeMinor > 0
       ? [
           `أجرة التوصيل${order.deliveryArea ? ` (${order.deliveryArea})` : ''}: ${money(order.deliveryFeeMinor, order.currency)}`,
@@ -636,7 +699,27 @@ export function placeShopOrder(
           deliveryFeeMinor = Number(store.delivery_fee_minor);
         }
       }
-      const lines = await priceLines(tx, base, input.lines, true);
+      // «كود الخصم»: a code of an offer running now, or the customer is told it is not
+      let coupon: string | null = null;
+      let couponSnapshot: OnlineOrderCouponRule | null = null;
+      if (input.coupon) {
+        const rule = await couponRule(tx, input.coupon);
+        if (!rule?.couponCode) throw fieldError('coupon', COUPON_BAD);
+        coupon = rule.couponCode;
+        couponSnapshot = {
+          id: rule.id,
+          name: rule.name,
+          kind: rule.kind,
+          percentBp: rule.percentBp,
+          buyQty: rule.buyQty,
+          getQty: rule.getQty,
+          scope: rule.scope,
+          categoryIds: rule.categoryIds,
+          productIds: rule.productIds,
+          couponCode: rule.couponCode,
+        };
+      }
+      const lines = await priceLines(tx, base, input.lines, true, coupon);
       const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
       const { seq, number } = await nextOrderNumber(tx, tenantId);
       const order = {
@@ -654,9 +737,9 @@ export function placeShopOrder(
       };
       const [made] = await tx
         .insert(onlineOrders)
-        .values({ tenantId, seq, source: mode, ...order })
+        .values({ tenantId, seq, source: mode, couponCode: coupon, couponRule: couponSnapshot, ...order })
         .returning({ token: onlineOrders.trackToken });
-      const message = orderMessage({ ...order, showPrices: store.show_prices });
+      const message = orderMessage({ ...order, showPrices: store.show_prices, coupon });
       return {
         trackPath: `/shop/${store.slug}/o/${made!.token}`,
         number,
@@ -738,6 +821,8 @@ async function trackOf(
   return {
     number: row.number,
     status: row.status as ShopOrderTrack['status'],
+    deliveryStage: row.deliveryStage as ShopOrderTrack['deliveryStage'],
+    coupon: row.couponCode,
     customerName: row.customerName,
     fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
     area: row.deliveryArea,
@@ -817,6 +902,10 @@ const DEFAULTS = (slug: string): OnlineStoreSettings => ({
   showPrices: true,
   deliveryFeeMinor: 0,
   deliveryAreas: [],
+  tagline: null,
+  accent: 'emerald',
+  logoUrl: null,
+  coverUrl: null,
 });
 
 export function getOnlineStore(db: Database, auth: AccessClaims): Promise<OnlineStoreSettings> {
@@ -842,6 +931,10 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       showPrices: row.showPrices,
       deliveryFeeMinor: row.deliveryFeeMinor,
       deliveryAreas: row.deliveryAreas,
+      tagline: row.tagline,
+      accent: row.accent as OnlineStoreSettings['accent'],
+      logoUrl: row.logoUploadId ? imageUrl(auth.tenantId, row.logoUploadId, true) : null,
+      coverUrl: row.coverUploadId ? imageUrl(auth.tenantId, row.coverUploadId) : null,
     };
   });
 }
@@ -871,6 +964,8 @@ export async function saveOnlineStore(
         showPrices: input.showPrices,
         deliveryFeeMinor: input.deliveryFeeMinor,
         deliveryAreas: input.deliveryAreas,
+        tagline: input.tagline || null,
+        accent: input.accent,
       };
       if (input.version === null) {
         const made = await tx
@@ -901,12 +996,12 @@ export async function saveOnlineStore(
   return getOnlineStore(db, auth);
 }
 
-const staleVersion = () =>
+export const staleVersion = () =>
   new AppError(409, 'stale_version', 'عدّل شخص آخر هذا السجل للتو. حدّثنا البيانات، راجعها ثم احفظ من جديد.');
 
-const orderChanged = (message: string) => new AppError(409, 'stale_version', message);
+export const orderChanged = (message: string) => new AppError(409, 'stale_version', message);
 
-const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
+export const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   id: r.id,
   number: r.number,
   status: r.status as OnlineOrder['status'],
@@ -922,6 +1017,11 @@ const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   currency: r.currency as CurrencyCode,
   totalMinor: r.totalMinor,
   lines: r.lines,
+  deliveryStage: r.deliveryStage as OnlineOrder['deliveryStage'],
+  courierName: r.courierName,
+  outAt: r.outAt?.toISOString() ?? null,
+  deliveredAt: r.deliveredAt?.toISOString() ?? null,
+  couponCode: r.couponCode,
   createdAt: r.createdAt.toISOString(),
   decidedAt: r.decidedAt?.toISOString() ?? null,
   version: r.version,

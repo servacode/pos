@@ -18,6 +18,8 @@ export const merchandiseQuery = z
     branchId: uuidSchema.optional(),
     /** One department (رجالي، نسائي، ولادي) and its sub-categories */
     categoryId: uuidSchema.optional(),
+    /** One season («صيف 2026»): the pieces of that season only */
+    season: z.string().trim().min(1).max(40).optional(),
     idleDays: z.coerce.number().int().min(7).max(365).default(60),
     /** «يوشك على النفاد»: a piece that sells is short at this many pieces or fewer (its own minimum first) */
     lowQty: z.coerce.number().int().min(0).max(1000).default(2),
@@ -73,6 +75,8 @@ export interface MerchandiseReport {
     productId: string;
     name: string;
     label: string | null;
+    /** The piece's options (المقاس، اللون…): «المقاس M من قميص كذا نفد» reads the size from here */
+    attributes: { name: string; value: string }[];
     stockQty: number;
     soldQty: number;
     minStockQty: number | null;
@@ -100,5 +104,9 @@ export interface MerchandiseReport {
     invoiceCount: number;
     totalMinor: number;
     returnedMinor: number;
+    /** The seller's «نسبة العمولة» in basis points (staff page); null: none set */
+    commissionBp: number | null;
   }[];
+  /** The seasons the store's products carry, A→Z, for the filter */
+  seasons: string[];
 }

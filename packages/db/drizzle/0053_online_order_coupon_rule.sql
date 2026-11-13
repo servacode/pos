@@ -1,0 +1,1 @@
+ALTER TABLE "online_orders" ADD COLUMN "coupon_rule" jsonb;

@@ -24,6 +24,7 @@ import {
   type Database,
   type Transaction,
 } from '@serva/db';
+import type { PharmacySettings } from '@serva/core';
 import { CONTRACT_VERSION, INITIAL_CURSOR, type PullResponse, type PullSetPage } from '@serva/sync';
 import type { DeviceClaims } from '../auth/device-guard';
 import { AppError } from '../errors';
@@ -78,7 +79,7 @@ const PULL_SETS: Record<string, PullSet> = {
       service: tenantSettings.service,
       loyalty: tenantSettings.loyalty,
       // A pharmacy that never chose gets the defaults, so its tills enforce the batch rules
-      pharmacy: sql<{ prescription: 'required' | 'optional' } | null>`coalesce(tenant_settings.pharmacy,
+      pharmacy: sql<PharmacySettings | null>`coalesce(tenant_settings.pharmacy,
         case when exists (select 1 from tenants t
                           where t.id = tenant_settings.tenant_id and 'pharmacy' = any(t.sectors))
              then '{"prescription":"optional"}'::jsonb end)`,
@@ -323,7 +324,8 @@ const PULL_SETS: Record<string, PullSet> = {
       daysOfWeek: promotions.daysOfWeek,
       fromTime: promotions.fromTime,
       toTime: promotions.toTime,
-      archived: archivedFlag(promotions.archivedAt),
+      // A coupon's offer is not for every sale: it reaches the till on the order that carries its code
+      archived: sql<boolean>`(${promotions.archivedAt} is not null or ${promotions.couponCode} is not null)`,
       version: promotions.version,
     },
   },
@@ -347,6 +349,7 @@ const PULL_SETS: Record<string, PullSet> = {
       depositCode: onlineOrders.depositCode,
       deliveryFeeMinor: onlineOrders.deliveryFeeMinor,
       deliveryArea: onlineOrders.deliveryArea,
+      couponRule: onlineOrders.couponRule,
       version: onlineOrders.version,
     },
     scope: () =>

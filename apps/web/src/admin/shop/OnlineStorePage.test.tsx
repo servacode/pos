@@ -74,6 +74,7 @@ describe('«المتجر الإلكتروني» on the dashboard', () => {
         status: 200,
         body: { items: current.status === 'pending' ? [current] : [] },
       }),
+      'GET /v1/online-orders/cod': { status: 200, body: { currency: 'SYP', couriers: [] } },
       'POST /v1/online-orders/o-1/status': (r: MockRequest) => {
         current = { ...current, status: (r.body as { status: OnlineOrder['status'] }).status, version: 2 };
         return { status: 200, body: current };
@@ -214,6 +215,7 @@ describe('deciding an order', () => {
         status: 200,
         body: { items: current.status === 'cancel_requested' ? [current] : [] },
       }),
+      'GET /v1/online-orders/cod': { status: 200, body: { currency: 'SYP', couriers: [] } },
       'POST /v1/online-orders/o-1/status': (r: MockRequest) => {
         current = { ...current, status: (r.body as { status: OnlineOrder['status'] }).status, version: 2 };
         return { status: 200, body: current };

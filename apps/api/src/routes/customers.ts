@@ -12,6 +12,7 @@ import { clientIp } from '../http/client-ip';
 import { requireDevice } from '../auth/device-guard';
 import { openCustomerDebt, receiveCustomerPayment } from '../services/customer-money';
 import {
+  archiveDuplicateCustomer,
   createCustomer,
   customerPurchases,
   customerPurchasesForDevice,
@@ -71,6 +72,17 @@ export async function customerRoutes(app: FastifyInstance): Promise<void> {
       request.auth,
       idOf(request.params),
       parseBody(customerInput, request.body),
+      meta(request),
+      app.clock.now(),
+    );
+  });
+
+  app.post('/v1/customers/:id/archive-duplicate', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return archiveDuplicateCustomer(
+      app.db,
+      request.auth,
+      idOf(request.params),
       meta(request),
       app.clock.now(),
     );

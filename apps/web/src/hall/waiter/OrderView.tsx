@@ -39,7 +39,8 @@ export function CancelView({
   onConfirm,
   onBack,
 }: {
-  line: HallLine;
+  /** The line being cancelled: only its name is shown (the till passes a cart line's) */
+  line: { name: string };
   approvers: HallMenuResponse['approvers'];
   status: PinStatus;
   busy: boolean;
@@ -122,6 +123,7 @@ export function OrderView({
   onRemove,
   onServe,
   onCancel,
+  onMove,
   onBack,
 }: {
   order: HallOrder;
@@ -133,6 +135,8 @@ export function OrderView({
   onRemove: (line: HallLine) => void;
   onServe: (lines: HallLine[]) => void;
   onCancel: (line: HallLine) => void;
+  /** «انقل أو ادمج»; hidden when the till has charged a part of this table */
+  onMove?: () => void;
   onBack: () => void;
 }) {
   const live = order.lines.filter((l) => l.status !== 'cancelled' || l.cancelledAfterSend);
@@ -226,6 +230,11 @@ export function OrderView({
         >
           كشف حساب
         </Button>
+        {onMove && order.paidLineIds.length === 0 && !order.equal ? (
+          <Button size="lg" variant="ghost" disabled={busy} onClick={onMove}>
+            انقل أو ادمج الطاولة
+          </Button>
+        ) : null}
       </div>
     </section>
   );

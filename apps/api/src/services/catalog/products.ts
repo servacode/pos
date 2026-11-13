@@ -122,6 +122,7 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
     nameEn: product.nameEn,
     categoryId: product.categoryId,
     brand: product.brand,
+    season: product.season,
     genericName: product.genericName,
     requiresPrescription: product.requiresPrescription,
     controlled: product.controlled,
@@ -181,6 +182,7 @@ interface ListRow extends Record<string, unknown> {
   name_en: string | null;
   category_id: string | null;
   category_name: string | null;
+  season: string | null;
   type: ProductType;
   status: ProductStatus;
   archived_at: string | null;
@@ -235,6 +237,7 @@ export async function listProducts(
     if (query.status === 'archived') filters.push(sql`p.archived_at is not null`);
     else filters.push(sql`p.archived_at is null and p.status = ${query.status}`);
     if (query.categoryId) filters.push(sql`p.category_id = ${query.categoryId}`);
+    if (query.season) filters.push(sql`p.season = ${query.season}`);
     if (query.q) {
       const name = normalizeArabic(query.q);
       const code = query.q.replace(/\s+/g, '');
@@ -251,7 +254,7 @@ export async function listProducts(
     }
     const branchFilter = query.branchId ? sql`and s.branch_id = ${query.branchId}` : sql``;
     const rows = await tx.execute<ListRow>(sql`
-      select p.id, p.name_ar, p.name_en, p.category_id, c.name as category_name, p.type, p.status,
+      select p.id, p.name_ar, p.name_en, p.category_id, c.name as category_name, p.season, p.type, p.status,
              p.archived_at, p.version,
              lv.variant_count, lv.single_variant_id,
              pr.currencies, pr.currency, pr.min_price::text, pr.max_price::text,
@@ -284,6 +287,7 @@ export async function listProducts(
       nameEn: r.name_en,
       categoryId: r.category_id,
       categoryName: r.category_name,
+      season: r.season,
       type: r.type,
       status: r.status,
       archivedAt: r.archived_at ? new Date(r.archived_at).toISOString() : null,
@@ -499,6 +503,7 @@ export async function createProductTx(
       searchName: searchNameOf(input.nameAr, input.nameEn),
       categoryId: input.categoryId,
       brand: input.brand,
+      season: input.season,
       genericName: input.genericName,
       requiresPrescription: input.requiresPrescription,
       controlled: input.controlled,
@@ -619,6 +624,7 @@ export async function updateProductTx(
     nameEn: input.nameEn,
     categoryId: input.categoryId,
     brand: input.brand,
+    season: input.season,
     genericName: input.genericName,
     requiresPrescription: input.requiresPrescription,
     controlled: input.controlled,
@@ -778,6 +784,13 @@ export async function listOptionValues(db: Database, ctx: CatalogContext): Promi
       limit 2000`);
     const byName = new Map<string, string[]>();
     for (const r of rows) byName.set(r.name, [...(byName.get(r.name) ?? []), r.value]);
-    return { options: [...byName].map(([name, values]) => ({ name, values })) };
+    const seasonRows = await tx.execute<{ season: string }>(sql`
+      select distinct season from products
+      where tenant_id = ${ctx.auth.tenantId} and season is not null and archived_at is null
+      order by season limit 200`);
+    return {
+      options: [...byName].map(([name, values]) => ({ name, values })),
+      seasons: seasonRows.map((r) => r.season),
+    };
   });
 }

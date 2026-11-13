@@ -258,6 +258,8 @@ const productFields = {
   nameEn: optionalText(120, 'الاسم الإنجليزي طويل جداً'),
   categoryId: uuidSchema.nullable().default(null),
   brand: optionalText(60, 'اسم الماركة طويل جداً'),
+  /** «الموسم/التشكيلة» (صيف 2026): filters the list and groups the sales report; null: none */
+  season: optionalText(40, 'اسم الموسم طويل جداً'),
   /** «الاسم العلمي» (03 › الصيدليات): the till finds the medicine by it too */
   genericName: optionalText(120, 'الاسم العلمي طويل جداً'),
   /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
@@ -328,6 +330,7 @@ export const updateProductInput = z
     nameEn: patchText(120, 'الاسم الإنجليزي طويل جداً'),
     categoryId: uuidSchema.nullable().optional(),
     brand: patchText(60, 'اسم الماركة طويل جداً'),
+    season: patchText(40, 'اسم الموسم طويل جداً'),
     genericName: patchText(120, 'الاسم العلمي طويل جداً'),
     requiresPrescription: z.boolean().optional(),
     controlled: z.boolean().optional(),
@@ -361,6 +364,8 @@ export const productListQuery = z.object({
     .optional()
     .transform((v) => (v ? latinDigits(v) || undefined : undefined)),
   categoryId: uuidSchema.optional(),
+  /** Only this season (exact name) */
+  season: z.string().trim().min(1).max(40).optional(),
   status: z.enum(PRODUCT_LIST_STATUSES).default('active'),
   /** Stock of this branch only */
   branchId: uuidSchema.optional(),
@@ -418,6 +423,7 @@ export interface ProductDetail {
   nameEn: string | null;
   categoryId: string | null;
   brand: string | null;
+  season: string | null;
   genericName: string | null;
   requiresPrescription: boolean;
   controlled: boolean;
@@ -443,6 +449,7 @@ export interface ProductListItem {
   nameEn: string | null;
   categoryId: string | null;
   categoryName: string | null;
+  season: string | null;
   type: ProductType;
   status: ProductStatus;
   archivedAt: string | null;
@@ -468,6 +475,8 @@ export type ProductListResponse = ListResponse<ProductListItem>;
  */
 export interface OptionValuesResponse {
   options: { name: string; values: string[] }[];
+  /** The seasons the store's products carry, A→Z */
+  seasons: string[];
 }
 
 /** GET /v1/barcodes/{code}: the product behind a code (the cashier searches on its own device). */

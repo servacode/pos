@@ -8,10 +8,50 @@ import {
   type StoreProfileInput,
   type StoreResponse,
 } from '@serva/core';
-import { Button, CheckIcon, cn, FieldError, FieldGroup, Switch, TextField, ToggleChip } from '@serva/ui';
+import {
+  BakeryIcon,
+  BuildingMaterialsIcon,
+  Button,
+  CafeIcon,
+  CheckIcon,
+  cn,
+  FieldError,
+  FieldGroup,
+  MedicalSuppliesIcon,
+  PharmacyIcon,
+  PhoneIcon,
+  ProduceIcon,
+  RestaurantIcon,
+  ShirtIcon,
+  SparklesIcon,
+  StoreIcon,
+  SupermarketIcon,
+  Switch,
+  TextField,
+  ToggleChip,
+  WholesaleIcon,
+  type Icon,
+} from '@serva/ui';
 import { useForm } from '../../lib/useForm';
 import { saveCurrency, saveProfile } from './api';
 import { FailedNote, SavedNote, SettingsCard, type SettingsSection } from './parts';
+
+/** The icon of each activity, from tab 14 › أيقونة كل نشاط */
+export const SECTOR_ICONS: Record<SectorKey, Icon> = {
+  clothing: ShirtIcon,
+  supermarket: SupermarketIcon,
+  restaurant: RestaurantIcon,
+  cafe: CafeIcon,
+  pharmacy: PharmacyIcon,
+  electronics: PhoneIcon,
+  bakery: BakeryIcon,
+  building_materials: BuildingMaterialsIcon,
+  cosmetics: SparklesIcon,
+  medical_supplies: MedicalSuppliesIcon,
+  produce: ProduceIcon,
+  wholesale: WholesaleIcon,
+  general: StoreIcon,
+};
 
 /**
  * One activity as a big card (the start wizard): the whole card is the checkbox, picked with the
@@ -19,10 +59,12 @@ import { FailedNote, SavedNote, SettingsCard, type SettingsSection } from './par
  */
 function SectorCard({
   label,
+  icon: SectorGlyph,
   checked,
   onChange,
 }: {
   label: string;
+  icon: Icon;
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
@@ -41,6 +83,10 @@ function SectorCard({
         className="sr-only"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
+      />
+      <SectorGlyph
+        size={24}
+        className="text-ink-muted transition-colors duration-120 ease-standard group-has-checked/sector:text-brand-ink"
       />
       <span className="min-w-0 flex-1 font-semibold text-ink">{label}</span>
       <span className="grid size-5 shrink-0 place-items-center rounded-box border border-line-control bg-surface text-on-brand transition-colors duration-120 ease-standard group-hover/sector:border-ink-subtle group-has-checked/sector:border-brand group-has-checked/sector:bg-brand">
@@ -81,6 +127,7 @@ export function SectorPicker({
             <SectorCard
               key={s.key}
               label={s.labelAr}
+              icon={SECTOR_ICONS[s.key]}
               checked={value.includes(s.key)}
               onChange={(checked) => toggle(s.key, checked)}
             />
@@ -99,6 +146,7 @@ export function SectorPicker({
             key={s.key}
             name="sectors"
             label={s.labelAr}
+            icon={SECTOR_ICONS[s.key]}
             checked={value.includes(s.key)}
             onChange={(event) => toggle(s.key, event.target.checked)}
           />

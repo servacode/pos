@@ -23,8 +23,11 @@ const UiGallery = import.meta.env.DEV
 
 /** The pairing QR holds `<origin>/link#spq_…`: a device's camera opens the cashier's link screen. */
 function PairingLink() {
-  const { hash } = useLocation();
-  return <Navigate to={{ pathname: '/pos', hash }} replace />;
+  const { hash, search } = useLocation();
+  // A kitchen screen or a waiter's phone scans a link made for its kind (03 › وضع النادل)
+  const kind = new URLSearchParams(search).get('kind');
+  const pathname = kind === 'kitchen_screen' ? '/kitchen' : kind === 'waiter' ? '/waiter' : '/pos';
+  return <Navigate to={{ pathname, hash }} replace />;
 }
 
 export function App() {

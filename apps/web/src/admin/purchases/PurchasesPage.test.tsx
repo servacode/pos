@@ -1,12 +1,13 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { MeResponse, SupplierListResponse } from '@serva/core';
+import type { MeResponse, ProductDetail, SupplierListResponse } from '@serva/core';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
 import { productsPath } from '../catalog/api';
 import { moneyOf, qtyOf } from './api';
+import { parseRunCounts, sizeRunQuantities } from './SizeGrid';
 
 function owner(): MeResponse {
   const base = makeMe();
@@ -139,6 +140,70 @@ describe('typed amounts', () => {
         { variantId: 'v-L1', qty: 4000, costMinor: 5_000_000 },
       ],
     });
+  });
+});
+
+describe('size runs («طقم مقاسات»)', () => {
+  it('fills every colour with the run, sizes in the grid’s order, and a run never adds a missing piece', async () => {
+    const { user } = open();
+    await user.click(await screen.findByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'معمل');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'قميص');
+    await user.click(await screen.findByRole('button', { name: 'قميص كتان' }));
+    const grid = await screen.findByRole('group', { name: 'جدول قميص كتان' });
+    await user.clear(within(grid).getByLabelText('عدد الأطقم لكل لون'));
+    await user.type(within(grid).getByLabelText('عدد الأطقم لكل لون'), '2');
+    await user.click(within(grid).getByRole('button', { name: 'طقم 1-2-2-1' }));
+    // Sizes M, L: the run's 1 and 2, twice; the blue L was never made
+    expect(within(grid).getByLabelText('كمية M · أبيض')).toHaveValue('2');
+    expect(within(grid).getByLabelText('كمية L · أبيض')).toHaveValue('4');
+    expect(within(grid).getByLabelText('كمية M · أزرق')).toHaveValue('2');
+  });
+});
+
+describe('size run quantities and their text', () => {
+  const piece = (size: string, colour: string): ProductDetail['variants'][number] =>
+    ({
+      id: `${size}-${colour}`,
+      archivedAt: null,
+      label: `${size} · ${colour}`,
+      attributes: [
+        { name: 'المقاس', value: size },
+        { name: 'اللون', value: colour },
+      ],
+    }) as ProductDetail['variants'][number];
+
+  it('puts 1-2-2-1 on S-M-L-XL of each colour, and follows the sizes when they are the columns', () => {
+    const rows = ['S', 'M', 'L', 'XL'].flatMap((s) => ['أبيض', 'أسود'].map((c) => piece(s, c)));
+    expect(sizeRunQuantities(rows, [1, 2, 2, 1], 1)).toEqual({
+      'S-أبيض': '1',
+      'S-أسود': '1',
+      'M-أبيض': '2',
+      'M-أسود': '2',
+      'L-أبيض': '2',
+      'L-أسود': '2',
+      'XL-أبيض': '1',
+      'XL-أسود': '1',
+    });
+    // Colour first, size second: the sizes are the columns
+    const flipped = rows.map((v) => ({ ...v, attributes: [...v.attributes].reverse() }));
+    expect(sizeRunQuantities(flipped, [1, 0, 3], 2)).toEqual({
+      'S-أبيض': '2',
+      'S-أسود': '2',
+      'L-أبيض': '6',
+      'L-أسود': '6',
+    });
+  });
+
+  it('reads «1-2-2-1» with Arabic digits and refuses what is no list of counts', () => {
+    expect(parseRunCounts('1-2-2-1')).toEqual([1, 2, 2, 1]);
+    expect(parseRunCounts('١ - ٢ - ٢ - ١')).toEqual([1, 2, 2, 1]);
+    expect(parseRunCounts('0-0')).toBeNull();
+    expect(parseRunCounts('a-b')).toBeNull();
+    expect(parseRunCounts('')).toBeNull();
+    expect(parseRunCounts('1-2-3-4-5-6-7-8-9-1-2-3-4')).toBeNull();
   });
 });
 

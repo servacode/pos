@@ -181,6 +181,7 @@ describe('the clothing report', () => {
         invoiceCount: 1,
         totalMinor: 300_000,
         returnedMinor: 100_000,
+        commissionBp: null,
       },
     ]);
     // No category yet: one line for goods without a department
@@ -277,6 +278,7 @@ describe('the clothing report', () => {
         { name: 'المقاس', values: ['M', 'L', 'S'] },
         { name: 'اللون', values: ['أبيض', 'زيتي فاتح'] },
       ],
+      seasons: [],
     });
   });
 

@@ -41,6 +41,7 @@ import { usePos } from '../services';
 import { deviceDocuments, type OpenShift } from '../shift/shift';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
+import { hasBlockedPick, medicineRulesOf, MedicineReturnNote, sealedConfirmed } from './medicineReturn';
 import {
   matchesNumber,
   returnableSales,
@@ -107,7 +108,7 @@ export function ReturnScreen({
   onBack: () => void;
   onPrint: (saved: SavedReturn) => void;
   /** Back to the sale with the voucher just issued, to sell the other piece */
-  onExchange?: (voucherCode: string) => void;
+  onExchange?: (voucherCode: string | null) => void;
 }) {
   const pos = usePos();
   const digits = useDigits();
@@ -119,9 +120,13 @@ export function ReturnScreen({
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState<ReturnableSale | null>(null);
   const [qty, setQty] = useState<Record<number, number>>({});
+  // «العلبة مغلقة»: the sealed-box tick of a medicine line (03 › الصيدليات)
+  const [sealed, setSealed] = useState<Record<number, boolean>>({});
   const [reason, setReason] = useState<string>(REASONS[0]!);
   // «استبدال»: the piece goes back on a voucher and the sale of the other piece follows at once
   const [exchange, setExchange] = useState(false);
+  // «ردّ الفرق نقداً»: the piece's whole value leaves the drawer in cash and the other piece is paid in cash
+  const [exchangeCash, setExchangeCash] = useState(false);
   const [remote, setRemote] = useState<{ sale: ReturnableSale | null; note: string | null; busy: boolean }>({
     sale: null,
     note: null,
@@ -154,6 +159,10 @@ export function ReturnScreen({
   const current = picked ? (sales.find((s) => s.id === picked.id) ?? picked) : null;
   const isExchange = exchange && current !== null;
   const lines = current ? returnableLines(current.sale, current.returned) : [];
+  const medicineRules = useMemo(
+    () => (current ? medicineRulesOf(current.sale, catalog, settings.pharmacy) : new Map()),
+    [current, catalog, settings.pharmacy],
+  );
   const picks = Object.entries(qty)
     .map(([lineNo, q]) => ({ saleLineNo: Number(lineNo), qty: q }))
     .filter((p) => p.qty > 0);
@@ -180,7 +189,12 @@ export function ReturnScreen({
     }
   }, [current, picks, shift.id, session.userId, why, method, reference]);
 
-  const ready = draft !== null && why.length > 0 && (!needsReference || reference.trim().length > 0);
+  const ready =
+    draft !== null &&
+    why.length > 0 &&
+    (!needsReference || reference.trim().length > 0) &&
+    sealedConfirmed(picks, medicineRules, sealed) &&
+    !hasBlockedPick(picks, medicineRules);
   const canRefund = session.permissions.has('sale.refund');
 
   /** The invoice of another till or branch: asked of the server, by number or by the receipt's barcode */
@@ -221,7 +235,8 @@ export function ReturnScreen({
   function choose(sale: ReturnableSale) {
     setPicked(sale);
     setQty({});
-    setMethod(exchange ? 'voucher' : defaultRefundMethod(sale.sale));
+    setSealed({});
+    setMethod(exchange ? (exchangeCash ? 'cash' : 'voucher') : defaultRefundMethod(sale.sale));
     setReference('');
     setError(null);
     setSaved(null);
@@ -250,7 +265,7 @@ export function ReturnScreen({
       setQty({});
       setTick((t) => t + 1);
       onPrint(doc);
-      if (isExchange && doc.number && onExchange) onExchange(doc.number);
+      if (isExchange && doc.number && onExchange) onExchange(method === 'voucher' ? doc.number : null);
     } catch {
       setError('لم يُسجَّل المرتجع. لم يُحفظ شيء، حاول مرة أخرى.');
     } finally {
@@ -391,6 +406,9 @@ export function ReturnScreen({
                 {savedRefund(saved) === 'voucher' && onExchange && saved.number ? (
                   <Button onClick={() => onExchange(saved.number!)}>بيع البديل بالقسيمة</Button>
                 ) : null}
+                {savedRefund(saved) === 'cash' && saved.payload.reason === 'تبديل' && onExchange ? (
+                  <Button onClick={() => onExchange(null)}>بيع البديل نقداً</Button>
+                ) : null}
                 <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
                   اطبع الإيصال مرة أخرى
                 </Button>
@@ -463,8 +481,8 @@ export function ReturnScreen({
                           {line.returnedQty > 0 ? ` · رجع ${formatQuantity(line.returnedQty, digits)}` : ''}
                         </span>
                       </span>
-                      {line.remainingQty === 0 ? (
-                        <Badge>رجع كله</Badge>
+                      {line.remainingQty === 0 || medicineRules.get(line.saleLineNo)?.kind === 'blocked' ? (
+                        <Badge>{line.remainingQty === 0 ? 'رجع كله' : 'لا يُرجَع'}</Badge>
                       ) : (
                         <span
                           className="flex items-center gap-2"
@@ -505,6 +523,15 @@ export function ReturnScreen({
                           </Button>
                         </span>
                       )}
+                      {line.remainingQty > 0 && medicineRules.has(line.saleLineNo) ? (
+                        <MedicineReturnNote
+                          rule={medicineRules.get(line.saleLineNo)!}
+                          name={line.name}
+                          picked={q > 0}
+                          confirmed={sealed[line.saleLineNo] === true}
+                          onConfirm={(yes) => setSealed((all) => ({ ...all, [line.saleLineNo]: yes }))}
+                        />
+                      ) : null}
                     </li>
                   );
                 })}
@@ -523,7 +550,7 @@ export function ReturnScreen({
                   selected={exchange}
                   onClick={() => {
                     setExchange(true);
-                    setMethod('voucher');
+                    setMethod(exchangeCash ? 'cash' : 'voucher');
                     if (REASONS.includes('تبديل')) setReason('تبديل');
                   }}
                 >
@@ -548,10 +575,33 @@ export function ReturnScreen({
 
             <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 xl:sticky xl:top-0">
               {exchange ? (
-                <Alert tone="info">
-                  تُسجَّل القطعة مرتجعة على قسيمة بقيمتها، ثم تُباع القطعة الأخرى بالقسيمة: يدفع الزبون الفرق
-                  فقط، وإن كانت أرخص يبقى الباقي له على القسيمة.
-                </Alert>
+                <>
+                  <ChoiceGroup label="إن كانت البديلة أرخص" className="flex flex-wrap gap-2">
+                    <OptionChip
+                      selected={!exchangeCash}
+                      onClick={() => {
+                        setExchangeCash(false);
+                        setMethod('voucher');
+                      }}
+                    >
+                      يبقى الباقي على قسيمة
+                    </OptionChip>
+                    <OptionChip
+                      selected={exchangeCash}
+                      onClick={() => {
+                        setExchangeCash(true);
+                        setMethod('cash');
+                      }}
+                    >
+                      ردّ الفرق نقداً
+                    </OptionChip>
+                  </ChoiceGroup>
+                  <Alert tone="info">
+                    {exchangeCash
+                      ? 'تُسجَّل القطعة مرتجعة نقداً بكامل قيمتها، ثم تُباع القطعة الأخرى ويدفع الزبون ثمنها نقداً: يبقى في الدرج الفرق فقط.'
+                      : 'تُسجَّل القطعة مرتجعة على قسيمة بقيمتها، ثم تُباع القطعة الأخرى بالقسيمة: يدفع الزبون الفرق فقط، وإن كانت أرخص يبقى الباقي له على القسيمة.'}
+                  </Alert>
+                </>
               ) : (
                 <ChoiceGroup label="طريقة الرد" className="grid gap-2">
                   {refundMethods.map((m) => (
@@ -580,7 +630,7 @@ export function ReturnScreen({
                 className="flex flex-col gap-0.5 rounded-control bg-surface-total px-4 py-3"
               >
                 <span className="text-sm font-semibold text-ink-muted">
-                  {exchange
+                  {exchange && !exchangeCash
                     ? 'قيمة القطعة المرتجعة'
                     : method === 'voucher'
                       ? 'مبلغ القسيمة'

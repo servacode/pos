@@ -14,7 +14,13 @@ import {
 import { useAuth, useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
-import { MODIFIER_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors';
+import {
+  EXPIRY_SECTORS,
+  MEDICINAL_SECTORS,
+  MODIFIER_SECTORS,
+  storeSells,
+  WEIGHED_SECTORS,
+} from '../../lib/sectors';
 import { getStore } from './api';
 import { DataCard } from './DataCard';
 import { PharmacyForm } from './PharmacyForm';
@@ -149,14 +155,18 @@ export function SettingsPage() {
 
   const weighs = store ? store.scaleBarcode !== null || storeSells(store.sectors, WEIGHED_SECTORS) : false;
   const serves = store ? store.service !== null || storeSells(store.sectors, MODIFIER_SECTORS) : false;
-  const pharmacy = store ? storeSells(store.sectors, ['pharmacy']) : false;
+  // Medicine returns and batches: pharmacies and medical supplies; «الدفعات والصلاحية» for the other stores with expiry dates
+  const medicinal = store ? storeSells(store.sectors, MEDICINAL_SECTORS) : false;
+  const batches = store
+    ? medicinal || store.pharmacy !== null || storeSells(store.sectors, EXPIRY_SECTORS)
+    : false;
   const sections: SettingsSection[] = [
     SETTINGS_SECTIONS.profile,
     SETTINGS_SECTIONS.currency,
     ...(weighs ? [SETTINGS_SECTIONS.scale] : []),
     ...(serves ? [SETTINGS_SECTIONS.service] : []),
     SETTINGS_SECTIONS.till,
-    ...(pharmacy ? [SETTINGS_SECTIONS.pharmacy] : []),
+    ...(batches ? [medicinal ? SETTINGS_SECTIONS.pharmacy : SETTINGS_SECTIONS.batches] : []),
     SETTINGS_SECTIONS.loyalty,
     SETTINGS_SECTIONS.data,
   ];
@@ -182,7 +192,7 @@ export function SettingsPage() {
               {weighs ? <ScaleForm store={store} onSaved={saved} /> : null}
               {serves ? <ServiceForm store={store} onSaved={saved} /> : null}
               <TillForm store={store} onSaved={saved} />
-              {pharmacy ? <PharmacyForm store={store} onSaved={saved} /> : null}
+              {batches ? <PharmacyForm store={store} onSaved={saved} /> : null}
               <LoyaltyForm store={store} onSaved={saved} />
               <DataCard />
             </div>

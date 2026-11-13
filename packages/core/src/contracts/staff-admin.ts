@@ -21,6 +21,11 @@ import type { Permission } from '../permissions';
  */
 
 const fullName = z.string('الاسم مطلوب').trim().min(2, 'الاسم حرفان على الأقل').max(80, 'الاسم طويل جداً');
+/** «نسبة العمولة» of a seller in basis points of the net sales (250 = 2.5%); reports only */
+const commissionBp = z
+  .int('اكتب نسبة صحيحة')
+  .min(0, 'النسبة من 0 إلى 100')
+  .max(10_000, 'النسبة من 0 إلى 100');
 const branchIds = z.array(uuidSchema).min(1, 'اختر فرعاً واحداً على الأقل').max(200).nullable();
 
 export const staffCreateInput = z
@@ -33,6 +38,7 @@ export const staffCreateInput = z
     roleKey: z.string('اختر الدور').trim().min(1, 'اختر الدور').max(40),
     branchIds,
     pin: staffPinSchema,
+    commissionBp: commissionBp.nullable().optional(),
   })
   .superRefine((v, ctx) => {
     if (v.password && !v.phone) {
@@ -52,6 +58,7 @@ export const staffUpdateInput = z
     branchIds: branchIds.optional(),
     /** Needed when the new role asks for a 6-digit PIN and the person has a 4-digit one */
     pin: staffPinSchema.optional(),
+    commissionBp: commissionBp.nullable().optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), 'لا تغيير لحفظه');
 export type StaffUpdateInput = z.input<typeof staffUpdateInput>;
@@ -101,6 +108,8 @@ export interface StaffMember {
   hasLogin: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** «نسبة العمولة» in basis points; null: none set */
+  commissionBp: number | null;
 }
 
 export interface StaffListResponse {

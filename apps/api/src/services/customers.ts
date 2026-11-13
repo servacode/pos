@@ -351,3 +351,70 @@ export function customerPurchasesForDevice(
 ): Promise<CustomerPurchases> {
   return withTenant(db, device.tenantId, (tx) => purchasesOf(tx, id));
 }
+
+// ─── The duplicate customer (no merge: posted rows are never moved) ─────────────
+
+/**
+ * «أرشف هذا الزبون المكرر»: archives a customer entered twice. Two customers are never merged (their
+ * invoices and ledger lines are posted and stay as they are), so a duplicate that still owes or is
+ * owed, holds a cheque not yet cashed or keeps loyalty points is refused, with the reason: it has
+ * to be settled first, on the customer the owner keeps.
+ */
+export async function archiveDuplicateCustomer(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  meta: RequestMeta,
+  now: Date,
+): Promise<CustomerDetail> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'customers.manage');
+    const [row] = await tx.execute<{
+      archived_at: string | null;
+      loyalty_points: number;
+      balance: string;
+    }>(sql`
+      select c.archived_at, c.loyalty_points, coalesce(b.balance, 0)::text as balance
+      from customers c left join (${balances}) b on b.customer_id = c.id
+      where c.id = ${id}`);
+    if (!row) throw notFound();
+    const refuse = (reason: string) => new AppError(409, 'conflict', reason);
+    if (row.archived_at !== null) throw refuse('هذا الزبون مؤرشف من قبل.');
+    if (Number(row.balance) !== 0) {
+      throw refuse(
+        Number(row.balance) > 0
+          ? 'عليه دين غير مسدّد. سدّد حسابه أو حوّله قبل الأرشفة.'
+          : 'له رصيد عندنا. اصرفه له قبل الأرشفة.',
+      );
+    }
+    const [open] = await tx.execute<{ n: string }>(sql`
+      select count(*)::text as n from (
+        select i.id from invoice_payments p
+          join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
+          where p.method = 'cheque' and i.customer_id = ${id}
+            and not exists (select 1 from cheque_actions a where a.source_type = 'sale'
+              and a.source_id = i.id and a.payment_no = p.payment_no)
+        union all
+        select r.id from receipts r
+          where r.method = 'cheque' and r.customer_id = ${id}
+            and not exists (select 1 from cheque_actions a where a.source_type = 'receipt'
+              and a.source_id = r.id and a.payment_no = 1)
+      ) x`);
+    if (Number(open?.n ?? 0) > 0) throw refuse('عنده شيك لم يُصرف بعد. أنهِ أمره قبل الأرشفة.');
+    if (row.loyalty_points > 0) throw refuse('عنده نقاط ولاء. استعملها أو انقلها قبل الأرشفة.');
+    await tx.update(customers).set({ archivedAt: now, updatedAt: now }).where(eq(customers.id, id));
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'customer.archive_duplicate',
+        entity: 'customer',
+        entityId: id,
+        changes: { archived: [false, true] },
+      },
+      meta,
+    );
+    return detail(tx, id);
+  });
+}

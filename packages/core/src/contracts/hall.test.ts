@@ -86,6 +86,34 @@ describe('hall commands', () => {
     expect(hallCommand.safeParse({ type: 'pay', userId: ID }).success).toBe(false);
   });
 
+  it('reads moving, merging and the parts of a split bill', () => {
+    const base = { userId: ID, orderId: ID };
+    expect(hallCommand.safeParse({ ...base, type: 'move', table: 'VIP' }).success).toBe(true);
+    expect(hallCommand.safeParse({ ...base, type: 'move', table: ' ' }).success).toBe(false);
+    expect(hallCommand.safeParse({ ...base, type: 'merge', fromOrderId: OTHER }).success).toBe(true);
+    expect(hallCommand.safeParse({ ...base, type: 'merge' }).success).toBe(false);
+    expect(hallCommand.safeParse({ ...base, type: 'part', ref: 'INV-1', lineIds: [OTHER] }).success).toBe(
+      true,
+    );
+    expect(hallCommand.safeParse({ ...base, type: 'part', ref: 'INV-1', equal: { parts: 3 } }).success).toBe(
+      true,
+    );
+    expect(hallCommand.safeParse({ ...base, type: 'part', ref: '', lineIds: [OTHER] }).success).toBe(false);
+    expect(hallCommand.safeParse({ ...base, type: 'part', ref: 'x', lineIds: [] }).success).toBe(false);
+    expect(hallCommand.safeParse({ ...base, type: 'part', ref: 'x', equal: { parts: 1 } }).success).toBe(
+      false,
+    );
+  });
+
+  it('takes a cancellation with the manager’s code or with an offline approval', () => {
+    const cancel = { type: 'cancel', userId: ID, orderId: ID, lineId: OTHER, approverId: ID, reason: 'سبب' };
+    expect(hallCommand.safeParse({ ...cancel, approverPin: '285713' }).success).toBe(true);
+    expect(
+      hallCommand.safeParse({ ...cancel, offlineApproval: { at: '2026-11-12T10:00:00.000Z' } }).success,
+    ).toBe(true);
+    expect(hallCommand.safeParse({ ...cancel, offlineApproval: { at: 'yesterday' } }).success).toBe(false);
+  });
+
   it('reads the kitchen’s commands', () => {
     expect(kitchenCommand.safeParse({ type: 'status', lineIds: [ID], status: 'ready' }).success).toBe(true);
     expect(kitchenCommand.safeParse({ type: 'ack', lineIds: [ID] }).success).toBe(true);

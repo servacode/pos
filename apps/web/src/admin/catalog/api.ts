@@ -27,6 +27,7 @@ export function productsPath(query: ProductListQuery): string {
   const params = new URLSearchParams();
   if (query.q) params.set('q', query.q);
   if (query.categoryId) params.set('categoryId', query.categoryId);
+  if (query.season) params.set('season', query.season);
   if (query.status) params.set('status', query.status);
   if (query.branchId) params.set('branchId', query.branchId);
   if (query.cursor) params.set('cursor', query.cursor);

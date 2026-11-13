@@ -2,6 +2,7 @@ import { useId, type FormEvent, type ReactNode, type Ref } from 'react';
 import {
   AlertCircleIcon,
   ArchiveIcon,
+  CalendarIcon,
   CashIcon,
   Card,
   CheckCircleIcon,
@@ -66,6 +67,12 @@ export const SETTINGS_SECTIONS = {
     title: 'الصيدلية',
     description: 'الوصفة الطبية عند البيع، وسجل الأدوية المراقبة.',
     icon: ShieldCheckIcon,
+  },
+  batches: {
+    id: 'store-batches',
+    title: 'الدفعات والصلاحية',
+    description: 'هل يختار الكاشير الدفعة الأقرب انتهاءً ويحجب المنتهي منها.',
+    icon: CalendarIcon,
   },
   loyalty: {
     id: 'store-loyalty',

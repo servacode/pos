@@ -351,6 +351,48 @@
       "when": 1794573133881,
       "tag": "0049_devices_repull_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794583202004,
+      "tag": "0050_clothing_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1794583291852,
+      "tag": "0051_shop_growth",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1794583566609,
+      "tag": "0052_warranty_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1794584646341,
+      "tag": "0053_online_order_coupon_rule",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1794586011459,
+      "tag": "0054_recipes",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1794592524123,
+      "tag": "0055_product_texts_version",
+      "breakpoints": true
     }
   ]
 }

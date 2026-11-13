@@ -2,6 +2,7 @@ import type { CurrencyCode } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import type { Approval, OrderType, Prescription, SaleLine } from '@serva/core/contracts/documents';
 import type { TradeRate } from '@serva/core/contracts/common';
+import type { OrderCouponRule } from '@serva/core/contracts/shop';
 import type { PricedInvoice } from '@serva/core/pricing';
 import { bestPromotions, type PromotionRule } from '@serva/core/promotions';
 import {
@@ -89,13 +90,26 @@ export interface Cart {
    * The table's order on the server (03 › وضع النادل), when the till works online: its id and, for
    * each line, the quantity the server already has (so «للمطبخ» adds only the difference)
    */
-  hall?: { orderId: string; known: Record<number, number> };
+  hall?: {
+    orderId: string;
+    known: Record<number, number>;
+    /** The server's lines behind each cart line, to cancel them there when a sent line is removed here */
+    lineIds?: Record<number, string[]>;
+    /** This cart is one part of a split bill: the sale charges only these lines, or one equal share */
+    part?: { lineIds: string[] } | { equal: { parts: number; index: number } };
+  };
   /** «سعر الجملة» (03 › الجملة): every line at its wholesale price where it has one */
   priceTier?: 'retail' | 'wholesale';
   /** An exchange (03 › الملابس): the voucher of the return just saved, offered first at payment */
   voucher?: string;
   /** An online shop order opened at the till (26 › حياة الطلب): the sale closes it */
-  onlineOrder?: { id: string; number: string; customerName: string };
+  onlineOrder?: {
+    id: string;
+    number: string;
+    customerName: string;
+    /** The offer the customer's coupon code opened: it prices this sale's lines like a running promotion */
+    couponRule?: OrderCouponRule | null;
+  };
   /** A sale that delivers an alteration ticket (03 › التعديل والتقصير): the ticket turns delivered once it is saved */
   alteration?: { id: string; number: string; version: number };
   /** A pharmacy sale's prescription (03 › الصيدليات), asked before payment when an item needs it */
@@ -238,6 +252,19 @@ export function unitPriceOf(
 }
 
 /** The best promotion running for a line, or null. A discount the cashier typed replaces it. */
+/** The offer a shop order's coupon opened, as a promotion running for this sale only */
+export function couponPromotion(rule: OrderCouponRule): PromotionRule {
+  return {
+    ...rule,
+    startsAt: null,
+    endsAt: null,
+    daysOfWeek: [],
+    fromTime: null,
+    toTime: null,
+    archived: false,
+  };
+}
+
 export function linePromotion(line: CartLine, ctx: PricingContext) {
   if (line.adjustment || !ctx.promotions?.length) return null;
   const best = bestPromotions(

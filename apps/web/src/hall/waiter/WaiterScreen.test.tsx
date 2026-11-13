@@ -96,11 +96,21 @@ function fakeHall(initial: HallOrder[] = []) {
           openedByName: 'نادل أول',
           openedAt: '2026-11-12T10:00:00.000Z',
           billRequestedAt: null,
+          paidLineIds: [],
+          equal: null,
           version: 1,
           lines: [],
         };
         orders = [...orders, made];
         return ok({ order: made });
+      }
+      if (command.type === 'move') {
+        orders = orders.map((o) => (o.id === command.orderId ? { ...o, table: command.table } : o));
+        return ok({ order: orders.find((o) => o.id === command.orderId) ?? null });
+      }
+      if (command.type === 'merge') {
+        orders = orders.filter((o) => o.id !== command.fromOrderId);
+        return ok({ order: orders.find((o) => o.id === command.orderId) ?? null });
       }
       orders = orders.map((o) => {
         if (!('orderId' in command) || o.id !== command.orderId) return o;
@@ -314,6 +324,8 @@ describe('the waiter’s table', () => {
         openedByName: null,
         openedAt: '2026-11-12T10:00:00.000Z',
         billRequestedAt: null,
+        paidLineIds: [],
+        equal: null,
         version: 1,
         lines: [line({ id: 'l1', status: 'new' })],
       },
@@ -351,6 +363,8 @@ describe('the waiter’s table', () => {
       openedByName: null,
       openedAt: '2026-11-12T10:00:00.000Z',
       billRequestedAt: null,
+      paidLineIds: [],
+      equal: null,
       version: 1,
       lines: [line({ id: 'l1', status: 'preparing' })],
     };
@@ -377,6 +391,8 @@ describe('the waiter’s table', () => {
         openedByName: null,
         openedAt: '2026-11-12T10:00:00.000Z',
         billRequestedAt: null,
+        paidLineIds: [],
+        equal: null,
         version: 1,
         lines: [line({ id: 'l1', status: 'sent' })],
       },
@@ -456,5 +472,48 @@ describe('the waiter’s table', () => {
     await screen.findByRole('region', { name: 'الطاولات' });
     await user.click(screen.getByRole('button', { name: 'خروج' }));
     expect(await screen.findByText('من يعمل الآن؟')).toBeInTheDocument();
+  });
+});
+
+describe('moving and merging a table', () => {
+  const orderAt = (id: string, table: string, extra: Partial<HallOrder> = {}): HallOrder => ({
+    id,
+    table,
+    guests: 2,
+    status: 'open',
+    openedByName: null,
+    openedAt: '2026-11-12T10:00:00.000Z',
+    billRequestedAt: null,
+    paidLineIds: [],
+    equal: null,
+    version: 1,
+    lines: [line({ id: `${id}-l` })],
+    ...extra,
+  });
+
+  it('sends «move» to a free table and «merge» into a busy one, and hides it once a part was paid', async () => {
+    const user = userEvent.setup();
+    const { api, commands } = fakeHall([orderAt('o1', '1'), orderAt('o2', '2')]);
+    render(<WaiterScreen api={api} signIn={goodSignIn} />);
+    await signIn(user);
+    await user.click(await screen.findByRole('button', { name: /طاولة 1 مشغولة/ }));
+    await user.click(await screen.findByRole('button', { name: 'انقل أو ادمج الطاولة' }));
+    await user.click(await screen.findByRole('button', { name: 'انقل إلى الطاولة VIP' }));
+    expect(commands.at(-1)).toEqual({ type: 'move', userId: WAITER, orderId: 'o1', table: 'VIP' });
+
+    await user.click(await screen.findByRole('button', { name: 'انقل أو ادمج الطاولة' }));
+    await user.click(await screen.findByRole('button', { name: 'ادمج مع الطاولة 2' }));
+    // The order of the table being left joins the one picked
+    expect(commands.at(-1)).toEqual({ type: 'merge', userId: WAITER, orderId: 'o2', fromOrderId: 'o1' });
+  });
+
+  it('does not offer it for a table whose bill is already being paid in parts', async () => {
+    const user = userEvent.setup();
+    const { api } = fakeHall([orderAt('o1', '1', { paidLineIds: ['x'] })]);
+    render(<WaiterScreen api={api} signIn={goodSignIn} />);
+    await signIn(user);
+    await user.click(await screen.findByRole('button', { name: /طاولة 1 مشغولة/ }));
+    await screen.findByRole('region', { name: 'طلب الطاولة 1' });
+    expect(screen.queryByRole('button', { name: 'انقل أو ادمج الطاولة' })).toBeNull();
   });
 });

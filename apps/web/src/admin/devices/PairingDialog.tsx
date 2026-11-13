@@ -5,10 +5,11 @@ import {
   type DeviceSummary,
   type MeResponse,
   type PairingCodeResponse,
+  type CreatePairingCodeInput,
 } from '@serva/core';
 import { Alert, Button, ClockIcon, DeviceIcon, ProgressBar, RetryIcon, Select, Skeleton } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
-import { formatCountdown, formatPairingCode } from '../../lib/devices';
+import { DEVICE_KIND_LABELS, formatCountdown, formatPairingCode } from '../../lib/devices';
 import { useNow } from '../../lib/useNow';
 import { createPairingCode } from './api';
 import { PendingDevice } from './PendingDevice';
@@ -29,27 +30,36 @@ interface PairingDialogBodyProps {
  */
 export function PairingDialogBody({ branches, pending, busyId, onDecide }: PairingDialogBodyProps) {
   const [branchId, setBranchId] = useState(branches[0]?.id ?? '');
+  const [kind, setKind] = useState<NonNullable<CreatePairingCodeInput['kind']>>('cashier');
   const [code, setCode] = useState<PairingCodeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const now = useNow(1000, code !== null);
 
-  const create = useCallback(async (forBranch: string) => {
-    setCreating(true);
-    setError(null);
-    setCode(null);
-    try {
-      setCode(await createPairingCode({ branchId: forBranch }));
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setCreating(false);
-    }
-  }, []);
+  const create = useCallback(
+    async (forBranch: string, forKind: NonNullable<CreatePairingCodeInput['kind']>) => {
+      setCreating(true);
+      setError(null);
+      setCode(null);
+      try {
+        setCode(
+          await createPairingCode({
+            branchId: forBranch,
+            ...(forKind === 'cashier' ? {} : { kind: forKind }),
+          }),
+        );
+      } catch (cause) {
+        setError(errorMessage(cause));
+      } finally {
+        setCreating(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    if (branchId) void create(branchId);
-  }, [branchId, create]);
+    if (branchId) void create(branchId, kind);
+  }, [branchId, kind, create]);
 
   const left = code ? Date.parse(code.expiresAt) - now : 0;
   const expired = code !== null && left <= 0;
@@ -89,6 +99,19 @@ export function PairingDialogBody({ branches, pending, busyId, onDecide }: Pairi
           ))}
         </Select>
       ) : null}
+
+      <Select
+        label="نوع الجهاز"
+        value={kind}
+        onChange={(e) => setKind(e.target.value as typeof kind)}
+        hint="جوال النادل وشاشة المطبخ يفتحان صفحتيهما من الرابط نفسه."
+      >
+        {(['cashier', 'waiter', 'kitchen_screen', 'call_screen'] as const).map((k) => (
+          <option key={k} value={k}>
+            {DEVICE_KIND_LABELS[k]}
+          </option>
+        ))}
+      </Select>
 
       {error ? <Alert tone="error">{error}</Alert> : null}
 
@@ -147,7 +170,7 @@ export function PairingDialogBody({ branches, pending, busyId, onDecide }: Pairi
                 variant={expired ? 'primary' : 'ghost'}
                 size="sm"
                 icon={<RetryIcon size={16} />}
-                onClick={() => void create(branchId)}
+                onClick={() => void create(branchId, kind)}
                 className="-me-2"
               >
                 رمز جديد

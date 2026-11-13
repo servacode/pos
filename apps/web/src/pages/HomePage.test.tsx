@@ -1,10 +1,17 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
 import { daysAgo } from '../admin/reports/MerchandisePage';
 import { dayReport, meWith, OWNER_KEYS, TODAY, NOW } from '../test/reports';
+
+/** The first day of the week the home page asks the sales report for: six days before */
+const shiftWeek = (day: string) => {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 6);
+  return d.toISOString().slice(0, 10);
+};
 
 describe('HomePage', () => {
   it('shows the trial days left, the store and its sectors', async () => {
@@ -100,6 +107,68 @@ describe('HomePage', () => {
       expect(screen.getByRole('link', { name: 'افتح الكاشير' })).toHaveAttribute('href', '/pos');
     });
 
+    it('a clothing store sees the week’s top five and which size ran out', async () => {
+      const me = meWith([...OWNER_KEYS, 'catalog.manage']);
+      const row = (key: string, name: string, totalMinor: number) => ({
+        key,
+        name,
+        qty: 2000,
+        totalMinor,
+        returnedMinor: 0,
+        invoiceCount: 2,
+        previousQty: 0,
+        previousTotalMinor: 0,
+        commissionBp: null,
+        commissionMinor: null,
+      });
+      const week = `from=${shiftWeek(TODAY)}&to=${TODAY}&by=product`;
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: { ...me, tenant: { ...me.tenant, sectors: ['clothing'] } } },
+        [`GET /v1/reports/day?date=${TODAY}`]: {
+          status: 200,
+          body: dayReport({
+            topProducts: [{ productId: 'p-1', name: 'قميص كتان', qty: 2000, totalMinor: 900_000 }],
+          }),
+        },
+        [`GET /v1/reports/sales-breakdown?${week}`]: {
+          status: 200,
+          body: {
+            rows: [row('p-1', 'قميص كتان', 900_000), row('p-2', 'بنطال جينز', 500_000)],
+            baseCurrency: 'SYP',
+          },
+        },
+        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
+          status: 200,
+          body: {
+            lowStock: [
+              {
+                variantId: 'v-1',
+                productId: 'p-1',
+                name: 'قميص كتان',
+                label: 'M · أبيض',
+                attributes: [
+                  { name: 'المقاس', value: 'M' },
+                  { name: 'اللون', value: 'أبيض' },
+                ],
+                stockQty: 0,
+                soldQty: 6000,
+                minStockQty: null,
+              },
+            ],
+          },
+        },
+      });
+      renderApp('/');
+
+      const top = await screen.findByRole('list', { name: 'الأكثر مبيعاً هذا الأسبوع' });
+      expect(within(top).getAllByRole('listitem')).toHaveLength(2);
+      expect(within(top).getByRole('link', { name: 'بنطال جينز' })).toHaveAttribute('href', '/products/p-2');
+      expect(
+        await screen.findByText('المقاس M (أبيض) من قميص كتان نفد', { exact: false }),
+      ).toBeInTheDocument();
+    });
+
     it('compares today with yesterday, shows the payment mix and the expiring batches', async () => {
       const days = [6, 5, 4, 3, 2].map((back) => `2026-10-${String(31 - back).padStart(2, '0')}`);
       const routes: Parameters<typeof mockFetch>[0] = {
@@ -161,6 +230,8 @@ describe('HomePage', () => {
       // The hero's week, and the two tiles that would have drawn a line
       expect((await within(sales).findAllByText('لا بيانات قبل اليوم')).length).toBe(3);
       expect(within(sales).queryByText('آخر 7 أيام')).not.toBeInTheDocument();
+      // The trend chart draws the single point and adds the same note, with no line to zero
+      await waitFor(() => expect(screen.getAllByText('لا بيانات قبل اليوم')).toHaveLength(4));
     });
 
     it('greets «أبو» and «أم» names whole', async () => {

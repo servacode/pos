@@ -167,7 +167,7 @@ const deviceFields = (data: ActivateDeviceData) => ({
 export async function createPairingCode(
   db: Database,
   auth: AccessClaims,
-  input: { branchId: CreatePairingCodeInput['branchId'] },
+  input: { branchId: CreatePairingCodeInput['branchId']; kind?: CreatePairingCodeInput['kind'] },
   { now, webOrigin }: { now: Date; webOrigin: string },
   meta: RequestMeta,
 ): Promise<PairingCodeResponse> {
@@ -205,7 +205,8 @@ export async function createPairingCode(
       pairingId: pairing!.id,
       branchId: branch.id,
       branchName: branch.name,
-      qrPayload: `${webOrigin}/link#${qrToken}`,
+      // A hall device's link carries its kind so the page it opens is its own (kitchen, waiter)
+      qrPayload: `${webOrigin}/link${input.kind && input.kind !== 'cashier' ? `?kind=${input.kind}` : ''}#${qrToken}`,
       qrToken,
       manualCode,
       storeCode: tenant!.storeCode,

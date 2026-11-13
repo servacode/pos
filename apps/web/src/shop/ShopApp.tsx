@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, Route, Routes, useNavigate, useParams } from 'react-router';
-import type { ShopCodeSent, ShopHome, ShopOrderPlaced, ShopOrderTrack, ShopProduct } from '@serva/core';
+import type {
+  ShopCodeSent,
+  ShopCoupon,
+  ShopHome,
+  ShopOrderPlaced,
+  ShopOrderTrack,
+  ShopProduct,
+} from '@serva/core';
 import {
   AddIcon,
   Alert,
@@ -19,7 +26,6 @@ import {
   IconButton,
   IconChip,
   InfoIcon,
-  initialsOf,
   LogoMark,
   Money,
   OfferIcon,
@@ -41,10 +47,11 @@ import {
 } from '@serva/ui';
 import { ApiError, apiFetch, errorMessage } from '../lib/api';
 import { counted } from '../pos/format';
-import { canPick, cartCount, cartTotal, MAX_QTY, useShopCart, variantFor } from './cart';
+import { canChoose, canPick, cartCount, cartTotal, MAX_QTY, useShopCart, variantFor } from './cart';
 import { openWhatsApp, withTrackingLink } from './open';
 import { getOnce } from './getOnce';
 import { CatalogueFilters } from './CatalogueFilters';
+import { accentStyle, CouponBox, CoverBanner, NotifyMe, ProductNotes, StoreMark } from './ShopExtras';
 import {
   applyFilters,
   filterCount,
@@ -100,7 +107,7 @@ export function ShopApp() {
   const { store } = home;
 
   return (
-    <div dir="rtl" className="flex min-h-dvh flex-col bg-canvas text-ink">
+    <div dir="rtl" style={accentStyle(store.accent)} className="flex min-h-dvh flex-col bg-canvas text-ink">
       <title>{`${home.store.name} · المتجر`}</title>
       {store.note ? (
         <p className="border-b border-sidebar-line bg-sidebar px-4 py-2 text-center text-sm text-sidebar-ink">
@@ -110,10 +117,13 @@ export function ShopApp() {
       <header className="sticky top-0 z-20 border-b border-line bg-surface/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
           <Link to={base} className="me-auto flex min-h-11 min-w-0 items-center gap-3 rounded-control">
-            <IconChip>
-              <span className="text-sm font-bold">{initialsOf(store.name)}</span>
-            </IconChip>
-            <span className="truncate text-lg font-bold">{store.name}</span>
+            <StoreMark store={store} />
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-lg/6 font-bold">{store.name}</span>
+              {store.tagline ? (
+                <span className="truncate text-xs text-ink-muted">{store.tagline}</span>
+              ) : null}
+            </span>
           </Link>
           <Link
             to={`${base}/cart`}
@@ -136,6 +146,7 @@ export function ShopApp() {
           </Link>
         </div>
       </header>
+      <CoverBanner store={store} />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 pt-6 pb-16 sm:px-6 lg:pt-8">
         <Routes>
           <Route index element={<Catalogue home={home} base={base} />} />
@@ -561,13 +572,15 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                   <div className="flex flex-wrap gap-2">
                     {option.values.map((value) => {
                       const can = canPick(product, chosen, option.name, value);
+                      // A piece that ran out can be chosen, to leave a phone for when it is back
+                      const exists = can || canChoose(product, chosen, option.name, value);
                       const on = chosen[option.name] === value;
                       return (
                         <button
                           key={value}
                           type="button"
                           aria-pressed={on}
-                          disabled={!can}
+                          disabled={!exists}
                           onClick={() => {
                             setChosen((c) => ({ ...c, [option.name]: value }));
                             setShown(0);
@@ -578,7 +591,8 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                             'min-w-12 rounded-small border px-4 text-[0.9375rem] font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
                             !can
                               ? cn(
-                                  'cursor-not-allowed border-dashed text-ink-subtle',
+                                  exists ? 'cursor-pointer' : 'cursor-not-allowed',
+                                  'border-dashed text-ink-subtle',
                                   on ? 'border-brand' : 'border-line-control/50',
                                 )
                               : on
@@ -613,6 +627,9 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
               <AlertCircleIcon size={16} />
               هذه القطعة نفدت.
             </p>
+          ) : null}
+          {variant && !variant.available ? (
+            <NotifyMe slug={slug} productId={product.id} variantId={variant.id} />
           ) : null}
         </div>
 
@@ -692,6 +709,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
             </TextLink>
           </p>
         ) : null}
+        <ProductNotes product={product} />
       </article>
     </>
   );
@@ -721,6 +739,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [placed, setPlaced] = useState<ShopOrderPlaced | null>(null);
   const [challenge, setChallenge] = useState<ShopCodeSent | null>(null);
   const [code, setCode] = useState('');
+  const [coupon, setCoupon] = useState<{ code: string; coupon: ShopCoupon } | null>(null);
   const byCode = store.orderMode === 'shop';
 
   if (placed) {
@@ -851,6 +870,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           area: fulfilment === 'delivery' && byArea ? area || null : null,
           note: note || null,
           lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
+          ...(coupon ? { coupon: coupon.code } : {}),
           ...(byCode && challenge ? { challengeId: challenge.challengeId, code } : {}),
         },
       });
@@ -870,6 +890,9 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   }
 
   const subtotal = cartTotal(cart.lines);
+  // What the code takes off, as the cart can tell it (the store's own figure on the order is exact)
+  const percentBp = showPrices ? (coupon?.coupon.percentBp ?? null) : null;
+  const discount = percentBp ? Math.round((subtotal * percentBp) / 10_000) : 0;
 
   return (
     <div className="flex flex-col gap-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] lg:gap-8">
@@ -937,11 +960,17 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           ))}
         </ul>
         <div className="flex flex-col gap-2 rounded-b-card border-t border-line bg-surface-total px-5 py-4 sm:px-6">
+          {discount > 0 ? (
+            <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
+              <span>خصم الكود (تقريباً)</span>
+              <Money minor={-discount} currency={store.currency} />
+            </div>
+          ) : null}
           <div className="flex items-center justify-between gap-3">
             <span className={fee > 0 ? 'text-ink-muted' : 'font-semibold'}>المجموع</span>
             {showPrices ? (
               <Money
-                minor={subtotal}
+                minor={subtotal - discount}
                 currency={store.currency}
                 className={fee > 0 ? 'font-semibold' : 'text-xl font-bold'}
               />
@@ -957,7 +986,11 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-line pt-2">
                 <span className="font-semibold">الإجمالي</span>
-                <Money minor={subtotal + fee} currency={store.currency} className="text-xl font-bold" />
+                <Money
+                  minor={subtotal - discount + fee}
+                  currency={store.currency}
+                  className="text-xl font-bold"
+                />
               </div>
             </>
           ) : null}
@@ -1055,6 +1088,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           value={note}
           onChange={(e) => setNote(e.target.value.slice(0, 300))}
         />
+        <CouponBox slug={slug} applied={coupon} onApplied={setCoupon} onClear={() => setCoupon(null)} />
         {byCode && challenge ? (
           <TextField
             label="رمز التأكيد"
@@ -1112,6 +1146,12 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   );
 }
 
+/** Where a delivery order is on its way (apart from the store's decision and the sale) */
+const DELIVERY_STEPS = {
+  out: { title: 'خرج طلبك للتوصيل', text: 'المندوب في طريقه إليك. جهّز المبلغ إن كان الدفع عند الاستلام.' },
+  delivered: { title: 'سُلّم طلبك', text: 'شكراً لك! نتمنى أن تعجبك قطعك.' },
+} as const;
+
 const TRACK_STEPS: Record<ShopOrderTrack['status'], { title: string; text: string }> = {
   pending: { title: 'بانتظار تأكيد المحل', text: 'وصل طلبك، وسيراجعه المحل قريباً.' },
   accepted: { title: 'أكّد المحل طلبك', text: 'قطعك محجوزة لك ويجري تجهيزها.' },
@@ -1129,6 +1169,9 @@ const TRACK_PATH: readonly { status: ShopOrderTrack['status']; label: string }[]
   { status: 'accepted', label: 'أكّده المحل' },
   { status: 'done', label: 'تمّ التسليم' },
 ];
+
+/** A delivery order the store has sent out follows its own way: out for delivery, then delivered */
+const DELIVERY_PATH = ['وصل الطلب', 'أكّده المحل', 'خرج للتوصيل', 'سُلّم'] as const;
 
 /** The customer's page for one order, by the unguessable link given when it was placed. */
 function TrackView({ home, slug, base }: { home: ShopHome; slug: string; base: string }) {
@@ -1165,7 +1208,8 @@ function TrackView({ home, slug, base }: { home: ShopHome; slug: string; base: s
       </div>
     );
   }
-  const step = TRACK_STEPS[order.status];
+  const stage = order.deliveryStage ?? null;
+  const step = stage ? DELIVERY_STEPS[stage] : TRACK_STEPS[order.status];
   const rejected = order.status === 'rejected';
   const whatsapp = home.store.whatsapp;
 
@@ -1186,14 +1230,22 @@ function TrackView({ home, slug, base }: { home: ShopHome; slug: string; base: s
     }
   }
   // A cancel request is still the first step: the store has not decided
-  const reached =
-    order.status === 'cancel_requested' ? 0 : TRACK_PATH.findIndex((s) => s.status === order.status);
+  const path: readonly string[] = stage ? DELIVERY_PATH : TRACK_PATH.map((s) => s.label);
+  const reached = stage
+    ? stage === 'out'
+      ? 2
+      : 3
+    : order.status === 'cancel_requested'
+      ? 0
+      : TRACK_PATH.findIndex((s) => s.status === order.status);
   const StepIcon =
     rejected || order.status === 'cancel_requested'
       ? AlertCircleIcon
       : order.status === 'pending'
         ? ClockIcon
-        : CheckCircleIcon;
+        : stage === 'out'
+          ? TruckIcon
+          : CheckCircleIcon;
   return (
     <section
       aria-label="طلبك"
@@ -1232,15 +1284,15 @@ function TrackView({ home, slug, base }: { home: ShopHome; slug: string; base: s
         </div>
       </div>
       {!rejected ? (
-        <ol aria-label="مراحل الطلب" className="grid grid-cols-3 gap-2">
-          {TRACK_PATH.map((s, i) => (
-            <li key={s.status} className="flex flex-col gap-2">
+        <ol aria-label="مراحل الطلب" className={cn('grid gap-2', stage ? 'grid-cols-4' : 'grid-cols-3')}>
+          {path.map((label, i) => (
+            <li key={label} className="flex flex-col gap-2">
               <span
                 aria-hidden="true"
                 className={cn('h-1.5 rounded-full', i <= reached ? 'bg-brand' : 'bg-surface-muted')}
               />
               <span className={cn('text-xs font-semibold', i <= reached ? 'text-ink' : 'text-ink-subtle')}>
-                {s.label}
+                {label}
               </span>
             </li>
           ))}

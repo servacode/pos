@@ -26,6 +26,9 @@ export const EXPIRY_SECTORS: readonly SectorKey[] = [
   'general',
 ];
 
+/** Medicines and medical supplies: the prescription, the medicine return policy and the controlled register. */
+export const MEDICINAL_SECTORS: readonly SectorKey[] = ['pharmacy', 'medical_supplies'];
+
 /** The hall and the kitchen: tables, a waiter and cancellations after the kitchen. */
 export const HALL_SECTORS: readonly SectorKey[] = ['restaurant', 'cafe'];
 
@@ -36,6 +39,9 @@ export const SERIAL_SECTORS: readonly SectorKey[] = [
   'medical_supplies',
   'general',
 ];
+
+/** Warranty and maintenance claims on serial-tracked pieces. */
+export const WARRANTY_SECTORS: readonly SectorKey[] = ['electronics', 'medical_supplies'];
 
 /** Customers who pay with cheques. */
 export const CHEQUE_SECTORS: readonly SectorKey[] = [

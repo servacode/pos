@@ -114,6 +114,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'depositCode',
     'deliveryFeeMinor',
     'deliveryArea',
+    'couponRule',
     'version',
   ],
   promotions: [
