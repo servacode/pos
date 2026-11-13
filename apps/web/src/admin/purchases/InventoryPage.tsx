@@ -37,6 +37,8 @@ import { errorMessage } from '../../lib/api';
 import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 import { SectionHead } from './parts';
+import { downloadCsv } from '../exportCsv';
+import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
 
 const monthStart = () => `${today().slice(0, 8)}01`;
 
@@ -58,6 +60,8 @@ export function InventoryPage() {
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [result, setResult] = useState<StocktakeDetail | null>(null);
   const [saving, setSaving] = useState(false);
+  // The count is looked over (counted, expected, difference) before it is recorded
+  const [reviewing, setReviewing] = useState(false);
   // «سجّل هدراً» (03 › الخضار والمخابز: تسجيل الهدر): what spoiled, out of stock at its cost
   const [wasteKey, setWasteKey] = useState('');
   const [wasteQty, setWasteQty] = useState('');
@@ -89,6 +93,9 @@ export function InventoryPage() {
   const kinds = new Set(items.map((r) => r.variantId)).size;
   const soldOut = items.filter((r) => r.qty <= 0).length;
   const counted = Object.values(counts).filter((text) => qtyOf(text) !== null).length;
+  const countProblems = Object.values(counts).some((text) => countProblem(text) !== null);
+  const review = reviewing ? reviewCount(items, counts) : [];
+  const reviewTotal = review.reduce((sum, l) => sum + l.diffValueMinor, 0);
   const needle = query.trim();
   const shown = items.filter(
     (r) => (!branchShown || r.branchId === branchShown) && (!needle || r.name.includes(needle)),
@@ -151,6 +158,7 @@ export function InventoryPage() {
                 placeholder="—"
                 value={counts[r.variantId] ?? ''}
                 onChange={(e) => setCounts((c) => ({ ...c, [r.variantId]: e.target.value }))}
+                error={countProblem(counts[r.variantId] ?? '') ?? undefined}
                 className="relative w-28"
                 inputClassName="num"
               />
@@ -159,6 +167,57 @@ export function InventoryPage() {
         ]
       : []),
   ];
+
+  const reviewColumns: DataColumn<ReturnType<typeof reviewCount>[number]>[] = [
+    { key: 'name', header: 'الصنف', cell: (l) => <span className="font-semibold text-ink">{l.name}</span> },
+    {
+      key: 'counted',
+      header: 'المعدود',
+      numeric: true,
+      cell: (l) => <bdi className="num">{formatQuantity(l.countedQty, digits)}</bdi>,
+    },
+    {
+      key: 'expected',
+      header: 'المتوقع',
+      numeric: true,
+      cell: (l) => <bdi className="num">{formatQuantity(l.expectedQty, digits)}</bdi>,
+    },
+    {
+      key: 'diff',
+      header: 'الفرق',
+      numeric: true,
+      cell: (l) => (
+        <span className="inline-flex items-center gap-2">
+          <Badge tone={l.diffQty < 0 ? 'danger' : l.diffQty > 0 ? 'success' : 'neutral'}>
+            {differenceWord(l.diffQty)}
+          </Badge>
+          <bdi dir="ltr" className="num">
+            {formatQuantity(Math.abs(l.diffQty), digits)}
+          </bdi>
+        </span>
+      ),
+    },
+    {
+      key: 'value',
+      header: 'قيمة الفرق',
+      numeric: true,
+      cell: (l) => <Money minor={Math.abs(l.diffValueMinor)} currency={base} className="font-semibold" />,
+    },
+  ];
+
+  function exportStock() {
+    downloadCsv(
+      `المخزون-${today()}`,
+      ['الصنف', ...(manyBranches ? ['الفرع'] : []), 'الكمية', 'كلفة الوحدة', 'القيمة'],
+      shown.map((r) => [
+        r.name,
+        ...(manyBranches ? [branchName(r.branchId)] : []),
+        r.qty / 1000,
+        r.unitCostMinor === null ? '' : Math.round(r.unitCostMinor) / 100,
+        r.valueMinor / 100,
+      ]),
+    );
+  }
 
   async function addScan() {
     const code = scan.trim();
@@ -188,6 +247,7 @@ export function InventoryPage() {
     try {
       setResult(await createStocktake({ date: today(), note: null, lines }));
       setCounting(false);
+      setReviewing(false);
       setCounts({});
       load();
     } catch (e) {
@@ -249,12 +309,33 @@ export function InventoryPage() {
               ) : null}
               {counting ? (
                 <>
-                  <Button variant="ghost" onClick={() => setCounting(false)}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setCounting(false);
+                      setReviewing(false);
+                    }}
+                  >
                     إلغاء
                   </Button>
-                  <Button icon={<ListIcon />} onClick={() => void saveCount()} loading={saving}>
-                    سجّل الجرد
-                  </Button>
+                  {reviewing ? (
+                    <>
+                      <Button variant="secondary" onClick={() => setReviewing(false)}>
+                        ارجع للتعديل
+                      </Button>
+                      <Button icon={<ListIcon />} onClick={() => void saveCount()} loading={saving}>
+                        سجّل الجرد
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      icon={<ListIcon />}
+                      disabled={counted === 0 || countProblems}
+                      onClick={() => setReviewing(true)}
+                    >
+                      راجع الجرد
+                    </Button>
+                  )}
                 </>
               ) : null}
             </>
@@ -263,8 +344,18 @@ export function InventoryPage() {
         {error ? <Alert tone="error">{error}</Alert> : null}
         {result ? (
           <Alert tone={result.diffValueMinor < 0 ? 'info' : 'success'}>
-            سُجّل الجرد {result.number}. الفرق:{' '}
-            <Money minor={result.diffValueMinor} currency={base} className="font-bold" />
+            سُجّل الجرد {result.number}.{' '}
+            {result.diffValueMinor < 0
+              ? 'نقص بقيمة'
+              : result.diffValueMinor > 0
+                ? 'زيادة بقيمة'
+                : 'الجرد مطابق'}
+            {result.diffValueMinor !== 0 ? (
+              <>
+                {' '}
+                <Money minor={Math.abs(result.diffValueMinor)} currency={base} className="font-bold" />
+              </>
+            ) : null}
           </Alert>
         ) : null}
         {counting ? (
@@ -322,6 +413,28 @@ export function InventoryPage() {
               <Badge tone={counted ? 'brand' : 'neutral'}>
                 <bdi className="num">{counted}</bdi>
               </Badge>
+            </p>
+          </Card>
+        ) : null}
+        {reviewing ? (
+          <Card>
+            <CardHeader
+              icon={<ListIcon />}
+              title="راجع الجرد قبل التسجيل"
+              description="ما عددته مقابل ما يتوقعه النظام. الزيادة تدخل المخزون والنقص يخرج منه بكلفته."
+            />
+            <DataTable
+              caption="فروق الجرد"
+              columns={reviewColumns}
+              rows={review}
+              rowKey={(l) => l.variantId}
+              empty={<EmptyState icon={StockIcon} title="لم تعدّ أي صنف." />}
+            />
+            <p className="mt-4 text-sm text-ink-muted">
+              {reviewTotal < 0 ? 'مجموع النقص: ' : reviewTotal > 0 ? 'مجموع الزيادة: ' : 'لا فرق في القيمة. '}
+              {reviewTotal !== 0 ? (
+                <Money minor={Math.abs(reviewTotal)} currency={base} className="font-bold" />
+              ) : null}
             </p>
           </Card>
         ) : null}
@@ -396,14 +509,17 @@ export function InventoryPage() {
                       من صافي المبيعات
                       {profit.stockLossMinor ? (
                         <>
-                          {' · '}تلف وفقد: <Money minor={profit.stockLossMinor} currency={base} />
+                          {' · '}
+                          {profit.stockLossMinor > 0 ? 'تلف وفقد' : 'زيادة جرد'}:{' '}
+                          <Money minor={Math.abs(profit.stockLossMinor)} currency={base} />
                         </>
                       ) : null}
                     </p>
                   </div>
                 ) : profit.stockLossMinor ? (
                   <p className="mt-4 text-sm text-ink-muted">
-                    تلف وفقد: <Money minor={profit.stockLossMinor} currency={base} />
+                    {profit.stockLossMinor > 0 ? 'تلف وفقد' : 'زيادة جرد'}:{' '}
+                    <Money minor={Math.abs(profit.stockLossMinor)} currency={base} />
                   </p>
                 ) : null}
               </Card>
@@ -461,6 +577,9 @@ export function InventoryPage() {
               onValueChange={setQuery}
               className="w-full sm:w-64"
             />
+            <Button variant="secondary" disabled={shown.length === 0} onClick={exportStock}>
+              صدّر CSV
+            </Button>
             {manyBranches ? (
               <Select
                 label="الفرع"

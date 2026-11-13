@@ -7,6 +7,7 @@ import type {
   OnlineStoreSettings,
 } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
+import { normalizePhone } from '@serva/core/phone';
 import {
   AddIcon,
   Alert,
@@ -59,6 +60,7 @@ const setStatus = (order: OnlineOrder, status: 'accepted' | 'rejected' | 'done')
 
 const STATUS_TEXT: Record<OnlineOrderStatus, string> = {
   pending: 'بانتظار المحل',
+  cancel_requested: 'طلب الزبون الإلغاء',
   accepted: 'مقبول',
   rejected: 'مرفوض',
   done: 'سُلّم',
@@ -66,6 +68,7 @@ const STATUS_TEXT: Record<OnlineOrderStatus, string> = {
 
 const STATUS_TONE: Record<OnlineOrderStatus, BadgeTone> = {
   pending: 'warning',
+  cancel_requested: 'danger',
   accepted: 'success',
   rejected: 'danger',
   done: 'success',
@@ -366,12 +369,24 @@ function SettingsCard() {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  // What the server holds, to tell an unsaved change from none
+  const [kept, setKept] = useState('');
 
   useEffect(() => {
     getSettings()
-      .then(setForm)
+      .then((s) => {
+        setForm(s);
+        setKept(JSON.stringify(s));
+      })
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
+
+  // «حُفظ» stays a few seconds, then the save bar leaves until the next change
+  useEffect(() => {
+    if (!saved) return;
+    const timer = setTimeout(() => setSaved(false), 6_000);
+    return () => clearTimeout(timer);
+  }, [saved]);
 
   if (!form) {
     return error ? (
@@ -388,18 +403,27 @@ function SettingsCard() {
     );
   }
   const link = `${window.location.origin}/shop/${form.slug}`;
+  const dirty = JSON.stringify(form) !== kept;
+  // The number is checked as it is typed: letters are an error, not something silently dropped
+  const whatsappText = form.whatsapp ?? '';
+  const whatsappError =
+    whatsappText.trim() && !normalizePhone(whatsappText)
+      ? 'رقم غير صحيح: اكتب أرقاماً فقط، مثل 0933123456'
+      : undefined;
   const set = (patch: Partial<OnlineStoreSettings>) => {
     setForm({ ...form, ...patch });
     setSaved(false);
   };
 
   async function save() {
-    if (!form) return;
+    if (!form || whatsappError) return;
     setSaving(true);
     setError(null);
     setFields({});
     try {
-      setForm(await saveSettings(form));
+      const done = await saveSettings(form);
+      setForm(done);
+      setKept(JSON.stringify(done));
       setSaved(true);
     } catch (e) {
       setError(errorMessage(e));
@@ -473,7 +497,7 @@ function SettingsCard() {
               inputMode="tel"
               value={form.whatsapp ?? ''}
               onChange={(e) => set({ whatsapp: e.target.value || null })}
-              error={fields.whatsapp}
+              error={fields.whatsapp ?? whatsappError}
               inputClassName="num"
               className="sm:max-w-sm"
             />
@@ -536,29 +560,33 @@ function SettingsCard() {
             </div>
           </div>
         </Card>
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3 shadow-e2 sm:ps-5">
-          <div className="min-w-0 flex-1 basis-60">
-            {error ? (
-              <Alert tone="error">{error}</Alert>
-            ) : saved ? (
-              <Alert tone="success">
-                حُفظ.{' '}
-                {form.enabled ? (
-                  <a href={link} target="_blank" rel="noreferrer" className="font-semibold underline">
-                    افتح المتجر
-                  </a>
-                ) : (
-                  'المتجر مطفأ.'
-                )}
-              </Alert>
-            ) : (
-              <p className="text-sm text-ink-muted">التغييرات لا تصل إلى المتجر حتى تحفظها.</p>
-            )}
+        {dirty || saved || error ? (
+          <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface p-3 shadow-e2 sm:ps-5">
+            <div className="min-w-0 flex-1 basis-60">
+              {error ? (
+                <Alert tone="error">{error}</Alert>
+              ) : saved ? (
+                <Alert tone="success">
+                  حُفظ.{' '}
+                  {form.enabled ? (
+                    <a href={link} target="_blank" rel="noreferrer" className="font-semibold underline">
+                      افتح المتجر
+                    </a>
+                  ) : (
+                    'المتجر مطفأ.'
+                  )}
+                </Alert>
+              ) : (
+                <p className="text-sm text-ink-muted">التغييرات لا تصل إلى المتجر حتى تحفظها.</p>
+              )}
+            </div>
+            {dirty ? (
+              <Button loading={saving} disabled={Boolean(whatsappError)} onClick={() => void save()}>
+                احفظ
+              </Button>
+            ) : null}
           </div>
-          <Button loading={saving} onClick={() => void save()}>
-            احفظ
-          </Button>
-        </div>
+        ) : null}
       </div>
       <aside className="lg:sticky lg:top-24">
         <ShopPreview store={me.tenant.name} settings={form} link={link} />
@@ -579,11 +607,22 @@ function OrdersCard() {
   }, [status]);
   useEffect(load, [load]);
 
+  // The orders being decided: their buttons are off until the answer, so a double click is one request
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+
   async function move(order: OnlineOrder, next: 'accepted' | 'rejected' | 'done') {
+    if (busy.has(order.id)) return;
+    setBusy((b) => new Set(b).add(order.id));
     try {
       await setStatus(order, next);
     } catch (e) {
       setError(errorMessage(e));
+    } finally {
+      setBusy((b) => {
+        const rest = new Set(b);
+        rest.delete(order.id);
+        return rest;
+      });
     }
     load();
   }
@@ -628,7 +667,9 @@ function OrdersCard() {
               className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1"
             >
               <div className="flex flex-wrap items-start gap-3">
-                <IconChip tone={o.status === 'pending' ? 'warning' : 'brand'}>
+                <IconChip
+                  tone={o.status === 'pending' || o.status === 'cancel_requested' ? 'warning' : 'brand'}
+                >
                   {o.fulfilment === 'delivery' ? <TruckIcon /> : <StoreIcon />}
                 </IconChip>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -686,18 +727,48 @@ function OrdersCard() {
                   {o.note}
                 </p>
               ) : null}
-              {o.status === 'pending' || o.status === 'accepted' ? (
+              {o.status === 'pending' || o.status === 'cancel_requested' || o.status === 'accepted' ? (
                 <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-4">
-                  {o.status === 'pending' ? (
+                  {o.status === 'cancel_requested' ? (
+                    <>
+                      <span className="min-w-0 basis-full text-sm font-semibold text-danger-ink">
+                        الزبون يطلب إلغاء هذا الطلب.
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={busy.has(o.id)}
+                        disabled={busy.has(o.id)}
+                        onClick={() => void move(o, 'rejected')}
+                      >
+                        وافق على الإلغاء
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy.has(o.id)}
+                        onClick={() => void move(o, 'accepted')}
+                      >
+                        أبقِ الطلب واقبله
+                      </Button>
+                    </>
+                  ) : o.status === 'pending' ? (
                     <>
                       <Button
                         size="sm"
                         icon={<CheckIcon size={16} />}
+                        loading={busy.has(o.id)}
+                        disabled={busy.has(o.id)}
                         onClick={() => void move(o, 'accepted')}
                       >
                         اقبل
                       </Button>
-                      <Button size="sm" variant="secondary" onClick={() => void move(o, 'rejected')}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={busy.has(o.id)}
+                        onClick={() => void move(o, 'rejected')}
+                      >
                         ارفض
                       </Button>
                     </>
@@ -706,7 +777,12 @@ function OrdersCard() {
                       <span className="min-w-0 flex-1 text-sm text-ink-muted">
                         قطعه محجوزة، ويبيعه الكاشير من «طلبات المتجر».
                       </span>
-                      <Button size="sm" variant="secondary" onClick={() => void move(o, 'done')}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={busy.has(o.id)}
+                        onClick={() => void move(o, 'done')}
+                      >
                         سُلّم دون بيع على الكاشير
                       </Button>
                     </>

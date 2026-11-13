@@ -3,6 +3,10 @@ import { createProductInput, updateProductInput } from '@serva/core';
 import { ids, product, variant } from '../../test/catalog';
 import {
   applyAxes,
+  applyToVariants,
+  checkPendingCodes,
+  variantsWithoutBarcode,
+  withGeneratedBarcodes,
   axesOf,
   buildCreate,
   buildUpdate,
@@ -339,5 +343,56 @@ describe('the pharmacy flags of a product', () => {
       requiresPrescription: false,
       controlled: false,
     });
+  });
+});
+
+describe('bulk entry on the size × colour matrix', () => {
+  function matrix(): ProductDraft {
+    const draft = simpleDraft();
+    draft.axes = [axis('المقاس', ['S', 'M']), axis('اللون', ['أحمر', 'أزرق'])];
+    draft.variants = applyAxes(draft.variants, draft.axes);
+    return draft;
+  }
+
+  it('new combinations take the model price, so no row needs hand entry', () => {
+    const draft = matrix();
+    expect(draft.variants).toHaveLength(4);
+    expect(draft.variants.every((v) => v.priceMinor === 12000)).toBe(true);
+  });
+
+  it('applies a price to all variants, or to one colour or one size', () => {
+    const { variants } = matrix();
+    const all = applyToVariants(variants, { all: true }, 'wholesalePriceMinor', 9000);
+    expect(all.every((v) => v.wholesalePriceMinor === 9000)).toBe(true);
+    const red = applyToVariants(variants, { name: 'اللون', value: 'أحمر' }, 'priceMinor', 15000);
+    expect(red.filter((v) => v.priceMinor === 15000)).toHaveLength(2);
+    expect(red.filter((v) => v.priceMinor === 12000)).toHaveLength(2);
+    const size = applyToVariants(variants, { name: 'المقاس', value: 'S' }, 'minPriceMinor', 100);
+    expect(size.filter((v) => v.minPriceMinor === 100).every((v) => v.attributes[0]!.value === 'S')).toBe(
+      true,
+    );
+  });
+
+  it('leaves archived variants alone and generates barcodes only where there is none', () => {
+    const { variants } = matrix();
+    const withOne = variants.map((v, i) =>
+      i === 0 ? { ...v, barcodes: [newBarcode('standard', '123')] } : v,
+    );
+    withOne[1] = { ...withOne[1]!, archived: true };
+    withOne[2] = { ...withOne[2]!, pendingCode: '999' };
+    expect(variantsWithoutBarcode(withOne)).toBe(2);
+    const made = withGeneratedBarcodes(withOne);
+    expect(made[0]!.barcodes.map((b) => b.code)).toEqual(['123']);
+    expect(made[1]!.barcodes).toHaveLength(0);
+    expect(made[2]!.barcodes).toHaveLength(0);
+    expect(made[3]!.barcodes.map((b) => b.kind)).toEqual(['internal']);
+    expect(applyToVariants(withOne, { all: true }, 'priceMinor', 1)[1]!.priceMinor).toBe(12000);
+  });
+
+  it('refuses a code left in the scan box on save', () => {
+    const { variants } = matrix();
+    const typed = variants.map((v, i) => (i === 1 ? { ...v, pendingCode: ' 6291 ' } : v));
+    expect(Object.keys(checkPendingCodes(typed))).toEqual([`v.${variants[1]!.key}.pending`]);
+    expect(checkPendingCodes(variants)).toEqual({});
   });
 });

@@ -3,6 +3,7 @@ import type {
   StaffCreateInput,
   StaffListResponse,
   StaffMember,
+  StaffPinCheck,
   StaffUpdateInput,
 } from '@serva/core';
 
@@ -33,5 +34,13 @@ export const resetStaffPin = (id: string, pin: string) =>
 export const setStaffActive = (id: string, active: boolean) =>
   apiFetch<StaffMember>(`/v1/staff/${id}/${active ? 'reactivate' : 'deactivate'}`, {
     method: 'POST',
+    auth: true,
+  });
+
+/** `POST /v1/staff/pin-check`: who already has this till code, a warning only (users.manage) */
+export const checkPin = (pin: string, exceptId?: string) =>
+  apiFetch<StaffPinCheck>('/v1/staff/pin-check', {
+    method: 'POST',
+    body: { pin, ...(exceptId ? { exceptId } : {}) },
     auth: true,
   });

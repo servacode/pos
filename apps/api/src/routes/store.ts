@@ -7,6 +7,7 @@ import {
   storeScaleInput,
   storeLoyaltyInput,
   storeServiceInput,
+  tillSettingsSchema,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { unauthorized } from '../errors';
@@ -20,6 +21,7 @@ import {
   updateLoyalty,
   updatePharmacy,
   updateService,
+  updateTill,
 } from '../services/store';
 import { parseBody } from './validation';
 
@@ -69,6 +71,11 @@ export async function storeRoutes(app: FastifyInstance): Promise<void> {
   app.put('/v1/store/loyalty', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return updateLoyalty(app.db, request.auth, parseBody(storeLoyaltyInput, request.body), meta(request));
+  });
+
+  app.put('/v1/store/till', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updateTill(app.db, request.auth, parseBody(tillSettingsSchema, request.body), meta(request));
   });
 
   app.put('/v1/store/pharmacy', { preHandler: requireAuth }, async (request) => {

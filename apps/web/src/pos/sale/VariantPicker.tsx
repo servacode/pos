@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { AddIcon, Button, CloseIcon, cn, CONTROL_HEIGHT, Money } from '@serva/ui';
+import { useId, useState } from 'react';
+import { AddIcon, Button, CloseIcon, cn, formatQuantity, Money, useDigits } from '@serva/ui';
 import type { CatalogItem } from '../catalog';
 import { Kbd } from './Kbd';
-import { canChoose, lowestPrice, optionsOf, pieceFor, piecesText } from './models';
+import { canChoose, lowestPrice, optionsOf, pieceFor, piecesText, stockFor } from './models';
 import { SalePanel } from './SalePanel';
 
 /**
@@ -14,14 +14,19 @@ import { SalePanel } from './SalePanel';
 export function VariantPicker({
   name,
   pieces,
+  inCart,
   onAdd,
   onCancel,
 }: {
   name: string;
   pieces: readonly CatalogItem[];
+  /** What the open cart already holds of each piece (thousandths), taken off the stock shown */
+  inCart?: ReadonlyMap<string, number>;
   onAdd: (piece: CatalogItem) => void;
   onCancel: () => void;
 }) {
+  const digits = useDigits();
+  const idBase = useId();
   const options = optionsOf(pieces);
   const [chosen, setChosen] = useState<Record<string, string>>(() =>
     // An option with a single value («أبيض» only) starts chosen.
@@ -116,16 +121,19 @@ export function VariantPicker({
             {option.values.map((value) => {
               const on = chosen[option.name] === value;
               const possible = canChoose(pieces, { ...chosen, [option.name]: value }, option.name, value);
+              const left = stockFor(pieces, chosen, option.name, value, inCart);
+              const stockId = `${idBase}-${option.name}-${value}`;
               return (
                 <button
                   key={value}
                   type="button"
                   aria-pressed={on}
+                  aria-label={value}
+                  aria-describedby={left === null || !possible ? undefined : stockId}
                   disabled={!possible}
                   onClick={() => choose(option.name, value)}
                   className={cn(
-                    CONTROL_HEIGHT.touch,
-                    'min-w-16 rounded-small border px-4 text-lg font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
+                    'min-h-14 min-w-16 rounded-small border px-4 text-lg font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
                     on
                       ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
                       : possible
@@ -133,7 +141,24 @@ export function VariantPicker({
                         : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
                   )}
                 >
-                  {value}
+                  <span aria-hidden="true" className="flex flex-col items-center leading-tight">
+                    {value}
+                    {left !== null && possible ? (
+                      <span
+                        className={cn(
+                          'num text-xs font-medium',
+                          left <= 0 ? 'text-danger-ink' : 'text-ink-subtle',
+                        )}
+                      >
+                        {left <= 0 ? 'نفد' : formatQuantity(left, digits)}
+                      </span>
+                    ) : null}
+                  </span>
+                  {left !== null && possible ? (
+                    <span id={stockId} className="sr-only">
+                      {left <= 0 ? 'نفد' : `المتوفر ${formatQuantity(left, digits)}`}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}

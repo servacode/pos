@@ -58,7 +58,7 @@ export function parseAdjust(
     if (!fractions && frac) return null;
     if (frac.length > 3) return null;
     const qty = Number(whole) * 1000 + Number(frac.padEnd(3, '0'));
-    return qty > 0 && qty <= 100_000_000 ? { mode, qty } : null;
+    return qty > 0 && qty <= MAX_QTY ? { mode, qty } : null;
   }
   if (mode === 'percent') {
     const bp = Math.round(value * 100);
@@ -70,6 +70,42 @@ export function parseAdjust(
   } catch {
     return null;
   }
+}
+
+/** The most one line may hold: 100,000 (thousandths). */
+export const MAX_QTY = 100_000_000;
+
+/**
+ * Why a typed text is not a usable value, in words the cashier can act on («صفر» says it is zero,
+ * a too-large quantity names the maximum); null while the text is fine or empty.
+ */
+export function explainAdjust(
+  mode: AdjustMode,
+  text: string,
+  currency: CurrencyCode,
+  fractions: boolean,
+): string | null {
+  if (!text) return null;
+  if (text.startsWith('-')) {
+    return mode === 'qty'
+      ? 'الكمية لا تكون سالبة. لإرجاع قطعة استعمل «مرتجع».'
+      : 'القيمة لا تكون سالبة. اكتب رقماً موجباً.';
+  }
+  if (!/^\d+(\.\d*)?$/.test(text)) return 'اكتب أرقاماً فقط.';
+  if (parseAdjust(mode, text, currency, fractions)) return null;
+  const [, frac = ''] = text.split('.');
+  const zero = Number(text.endsWith('.') ? text.slice(0, -1) : text) === 0;
+  if (mode === 'qty') {
+    if (!fractions && frac) return 'هذا الصنف يُباع بالقطعة: اكتب عدداً صحيحاً دون كسور.';
+    if (frac.length > 3) return 'ثلاث منازل عشرية على الأكثر.';
+    if (zero) return 'الكمية صفر: لا يُباع شيء. اكتب كمية أكبر من صفر، أو احذف السطر.';
+    return `الكمية أكبر من الحد الأقصى للسطر الواحد (${MAX_QTY / 1000}). اكتب كمية أقل.`;
+  }
+  if (mode === 'percent') {
+    if (frac.length > 2) return 'منزلتان عشريتان على الأكثر.';
+    return zero ? 'اكتب نسبة أكبر من صفر.' : 'النسبة لا تزيد على 100%.';
+  }
+  return zero && mode === 'amount' ? 'اكتب مبلغاً أكبر من صفر.' : 'اكتب مبلغاً صحيحاً.';
 }
 
 export interface AdjustPanelProps {
@@ -128,9 +164,11 @@ export function AdjustPanel({
     });
   };
 
+  const hint = explainAdjust(mode, text, currency, fractions);
+
   function apply() {
     if (!value) {
-      setError('اكتب قيمة صحيحة أولاً.');
+      setError(hint ?? 'اكتب قيمة صحيحة أولاً.');
       return;
     }
     const result = check(value);
@@ -147,7 +185,11 @@ export function AdjustPanel({
       const digit = digitOf(event.key);
       if (digit) type(digit);
       else if (event.key === '.' || event.key === '٫') type('.');
-      else if (event.key === 'Backspace') setText((t) => t.slice(0, -1));
+      else if (event.key === '-' || event.key === '−') {
+        // Never turned positive in silence: the minus stays in view with the reason it is refused
+        setText((t) => (t === '' ? '-' : t));
+        setError(null);
+      } else if (event.key === 'Backspace') setText((t) => t.slice(0, -1));
       else if (event.key === 'Enter') {
         event.preventDefault();
         apply();
@@ -239,6 +281,14 @@ export function AdjustPanel({
                 <span className="shrink-0 text-lg font-semibold text-ink-subtle">{unit}</span>
               </output>
               {preview ? <div className="text-sm text-ink-muted">{preview(value)}</div> : null}
+              {hint && !error ? (
+                <p
+                  role={text.startsWith('-') ? 'alert' : undefined}
+                  className="text-sm font-semibold text-warning-ink"
+                >
+                  {hint}
+                </p>
+              ) : null}
               {error ? (
                 <p role="alert" className="flex items-start gap-2 text-sm font-semibold text-danger-ink">
                   <AlertCircleIcon size={20} className="shrink-0" />
@@ -252,7 +302,7 @@ export function AdjustPanel({
                 icon={<CheckIcon size={20} />}
                 aria-keyshortcuts="Enter"
                 onClick={apply}
-                disabled={!value}
+                disabled={text === ''}
               >
                 طبّق
                 <Kbd tone="brand">Enter</Kbd>

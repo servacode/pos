@@ -7,6 +7,7 @@ import {
   type StaffCreateData,
   type StaffListResponse,
   type StaffMember,
+  type StaffPinCheck,
   type StaffPinData,
   type StaffRoleOption,
   type StaffUpdateData,
@@ -434,4 +435,32 @@ export async function setStaffActive(
   });
   for (const family of new Set(families)) forget(family);
   return member;
+}
+
+/** The active staff who already use this till code, by name: a warning for the owner, never a refusal. */
+export async function checkPinShared(
+  db: Database,
+  passwords: PasswordHasher,
+  auth: AccessClaims,
+  input: { pin: string; exceptId?: string | undefined },
+): Promise<StaffPinCheck> {
+  const others = await withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'users.manage');
+    return tx
+      .select({ id: users.id, fullName: users.fullName, pinHash: users.pinHash })
+      .from(users)
+      .where(
+        and(
+          eq(users.status, 'active'),
+          sql`${users.pinHash} is not null`,
+          sql`${users.pinLength} = ${input.pin.length}`,
+        ),
+      );
+  });
+  const same: string[] = [];
+  for (const person of others) {
+    if (person.id === input.exceptId || !person.pinHash) continue;
+    if (await passwords.verify(person.pinHash, input.pin)) same.push(person.fullName);
+  }
+  return { sharedWith: same };
 }

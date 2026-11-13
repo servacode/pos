@@ -261,6 +261,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'reports',
+    to: '/reports/sales',
+    label: 'تقرير المبيعات',
+    icon: ReportsIcon,
+    permission: ['report.view'],
+  },
+  {
+    section: 'reports',
     to: '/reports/merchandise',
     label: 'حركة الأصناف',
     icon: ReportsIcon,
@@ -294,6 +301,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     to: '/settings',
     label: 'إعدادات المتجر',
     icon: SettingsIcon,
+    permission: ['settings.manage'],
+  },
+  {
+    section: 'settings',
+    to: '/branches',
+    label: 'الفروع',
+    icon: StoreIcon,
     permission: ['settings.manage'],
   },
   {

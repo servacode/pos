@@ -35,6 +35,7 @@ import {
   SalesIcon,
   SegmentedControl,
   ShareBar,
+  SnapRow,
   Skeleton,
   StatTile,
   StoreIcon,
@@ -182,24 +183,36 @@ function SectionTitle({
 
 // ─── The KPI band ────────────────────────────────────────────────────────────
 
-/** The last seven days as small columns on the hero: the oldest at the right, today solid. */
+/**
+ * The last seven days as small columns on the hero: the oldest at the right, today solid. A day
+ * without sales is a thin baseline tick, not a column; when only today has sold there is no week to
+ * compare, and it says so instead of drawing one tall column among dashes.
+ */
 function WeekBars({ values }: { values: readonly number[] }) {
   const top = Math.max(...values, 1);
+  const today = values.length - 1;
+  const noHistory = values.slice(0, today).every((v) => v <= 0);
   return (
-    <div className="flex flex-col gap-2" aria-hidden="true">
-      <div className="flex h-16 items-end gap-1.5">
+    <div className="flex flex-col gap-2">
+      <div aria-hidden="true" className="flex h-16 items-end gap-1.5 border-b border-on-brand/25">
         {values.map((value, index) => (
           <span
             key={index}
             className={cn(
-              'w-3 rounded-t-small sm:w-4',
-              index === values.length - 1 ? 'bg-on-brand' : 'bg-on-brand/35',
+              'w-3 sm:w-4',
+              value <= 0
+                ? 'h-0.5 rounded-full bg-on-brand/30'
+                : cn('rounded-t-small', index === today ? 'bg-on-brand' : 'bg-on-brand/45'),
             )}
-            style={{ height: `${Math.max(8, Math.round((value / top) * 100))}%` }}
+            style={
+              value <= 0
+                ? undefined
+                : { height: `${noHistory ? 56 : Math.max(10, Math.round((value / top) * 100))}%` }
+            }
           />
         ))}
       </div>
-      <span className="text-xs opacity-80">آخر 7 أيام</span>
+      <span className="text-xs opacity-80">{noHistory ? 'لا بيانات قبل اليوم' : 'آخر 7 أيام'}</span>
     </div>
   );
 }
@@ -215,7 +228,7 @@ function HeroTile({
 }) {
   const TrendIcon = trend?.direction === 'down' ? TrendDownIcon : TrendUpIcon;
   return (
-    <div className="relative flex flex-wrap items-end justify-between gap-x-8 gap-y-5 overflow-hidden rounded-panel bg-brand bg-[radial-gradient(120%_120%_at_0%_0%,color-mix(in_oklab,var(--color-brand-hover)_80%,transparent),transparent_60%)] p-5 text-on-brand shadow-e2 sm:p-7">
+    <div className="relative flex flex-wrap items-end justify-between gap-x-8 gap-y-5 overflow-hidden rounded-panel bg-brand bg-[radial-gradient(120%_120%_at_0%_0%,color-mix(in_oklab,var(--color-brand-hover)_80%,transparent),transparent_60%)] p-5 text-on-brand shadow-e2 sm:p-7 dark:[--color-brand-hover:var(--color-mark-to)] dark:[--color-brand:var(--color-mark-from)] dark:[--color-on-brand:var(--color-on-mark)]">
       <div className="flex min-w-0 flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <p className="flex items-center gap-2 text-sm font-semibold opacity-90">
@@ -312,6 +325,8 @@ function KpiBand({
   const averages = points.map((p) => (p.count ? Math.round((p.total ?? 0) / p.count) : 0));
   // The week's lines are drawn only when every earlier day loaded; a gap would lie about the trend.
   const weekReady = points.slice(0, -1).every((p) => p.total !== null);
+  // Nothing sold in the days before today: the tiles say so rather than draw a climb from zero
+  const noHistory = weekReady && points.slice(0, -1).every((p) => !p.total);
   const average = data && data.invoiceCount > 0 ? Math.round(data.totalMinor / data.invoiceCount) : 0;
   const yesterdayAverage = yesterday?.count ? Math.round((yesterday.total ?? 0) / yesterday.count) : null;
 
@@ -322,7 +337,10 @@ function KpiBand({
         trend={data ? changeOf(data.totalMinor, yesterday?.total, digits) : undefined}
         week={weekReady && data ? totals : null}
       />
-      <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-1 sm:grid sm:auto-cols-fr sm:grid-flow-col sm:overflow-visible sm:pb-0">
+      <SnapRow
+        label="مؤشرات اليوم"
+        className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-1 sm:grid sm:auto-cols-fr sm:grid-flow-col sm:overflow-visible sm:pb-0"
+      >
         {data ? (
           <>
             <StatTile
@@ -331,6 +349,7 @@ function KpiBand({
               value={<span className="num">{formatNumber(data.invoiceCount, digits)}</span>}
               trend={changeOf(data.invoiceCount, yesterday?.count, digits)}
               sparkline={weekReady ? counts : undefined}
+              footnote={noHistory ? 'لا بيانات قبل اليوم' : undefined}
             />
             <StatTile
               className={TILE_CLASS}
@@ -338,6 +357,7 @@ function KpiBand({
               value={<Money minor={average} currency={data.baseCurrency} />}
               trend={changeOf(average, yesterdayAverage, digits)}
               sparkline={weekReady ? averages : undefined}
+              footnote={noHistory ? 'لا بيانات قبل اليوم' : undefined}
             />
           </>
         ) : (
@@ -362,7 +382,7 @@ function KpiBand({
             <TileSkeleton />
           )
         ) : null}
-      </div>
+      </SnapRow>
     </section>
   );
 }
@@ -442,7 +462,7 @@ function SalesTrend({
         loading={loading}
         empty={
           <p className="py-10 text-center text-sm text-ink-muted">
-            {allZero ? 'ما في مبيعات بهالفترة بعد.' : 'تعذّر تحميل أيام هالفترة.'}
+            {allZero ? 'لا مبيعات في هذه الفترة بعد.' : 'تعذّر تحميل أيام هذه الفترة.'}
           </p>
         }
       />
@@ -465,7 +485,7 @@ function BestSellers({ report }: { report: DayState }) {
           <Skeleton className="h-9" />
         </div>
       ) : top.length === 0 ? (
-        <p className="text-ink-muted">لا مبيعات بعد اليوم. أول فاتورة بتظهر هون.</p>
+        <p className="text-ink-muted">لا مبيعات بعد اليوم. ستظهر هنا أول فاتورة.</p>
       ) : (
         <ol className="flex flex-col gap-4">
           {top.map((product, index) => (
@@ -517,7 +537,7 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
         parts={parts}
         loading={report.loading}
         formatValue={(value) => formatMoney(Math.round(value * factor), base, { digits })}
-        empty={<p className="text-ink-muted">ما في دفعات بعد اليوم.</p>}
+        empty={<p className="text-ink-muted">لا دفعات بعد اليوم.</p>}
       />
     </Card>
   );
@@ -602,7 +622,7 @@ function Waiting({
       {loading && empty ? (
         <Skeleton className="h-14" />
       ) : empty ? (
-        <p className="text-ink-muted">ما في شي ينتظرك هلق.</p>
+        <p className="text-ink-muted">لا شيء ينتظرك الآن.</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {online > 0 ? (
@@ -617,12 +637,12 @@ function Waiting({
           ) : null}
           {low > 0 ? (
             <WaitingRow to="/reports/merchandise" count={low} tone="danger" icon={<WarningIcon />}>
-              {low === 1 ? 'صنف قرّب يخلص مخزونه' : 'أصناف قرّب يخلص مخزونها'}
+              {low === 1 ? 'صنف يوشك مخزونه على النفاد' : 'أصناف يوشك مخزونها على النفاد'}
             </WaitingRow>
           ) : null}
           {expiring > 0 ? (
             <WaitingRow to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
-              {expiring === 1 ? 'دفعة قرّب انتهاؤها' : 'دفعات قرّب انتهاؤها'}
+              {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
             </WaitingRow>
           ) : null}
         </ul>
@@ -637,7 +657,7 @@ function RunningLow({ report }: { report: MerchState }) {
     <Card className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <SectionTitle icon={<WarningIcon size={20} />} tone="danger">
-          قرّب يخلص
+          يوشك على النفاد
         </SectionTitle>
         <Link to="/reports/merchandise" className="text-sm font-semibold text-brand-ink hover:underline">
           كل القائمة
@@ -802,8 +822,8 @@ export function HomePage() {
             {seesSales && brandNew ? (
               <EmptyState
                 icon={CartIcon}
-                title="ما في مبيعات بعد"
-                description="أول فاتورة بتبيعها بتظهر هون: المبيعات، الربح، الأكثر مبيعاً وطرق الدفع."
+                title="لا مبيعات بعد"
+                description="أول فاتورة تبيعها تظهر هنا: المبيعات، الربح، الأكثر مبيعاً وطرق الدفع."
                 action={
                   <ButtonLink to="/pos" reloadDocument variant="primary" icon={<CartIcon />}>
                     ابدأ أول عملية بيع

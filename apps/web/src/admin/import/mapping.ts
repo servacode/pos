@@ -270,3 +270,25 @@ export function reportCsv(type: ImportType, rows: readonly ReportRow[]): string 
   );
   return `${BOM}${[header, ...body].join('\r\n')}\r\n`;
 }
+
+/**
+ * What a row that repeats an earlier row's barcode (or phone) answers. A product row that says a
+ * different size or colour than the first one is refused and named (its size would be lost
+ * otherwise); an identical repeat is just skipped.
+ */
+export function duplicateAnswer(
+  type: ImportType,
+  row: PreparedRow,
+  first: PreparedRow | undefined,
+): { status: 'skip' | 'error'; message: string } {
+  const text = (r: PreparedRow | undefined, k: string) => String(r?.values[k] ?? '').trim();
+  const wanted = [text(row, 'size'), text(row, 'colour')].filter(Boolean).join(' · ');
+  const earlier = [text(first, 'size'), text(first, 'colour')].filter(Boolean).join(' · ');
+  if (type === 'products' && wanted !== earlier) {
+    return {
+      status: 'error',
+      message: `الباركود مكرر: سبق في السطر ${String(row.duplicateOf)}${wanted ? ` فلم يُستورد «${wanted}»` : ''}. أعطِ كل مقاس ولون باركوداً خاصاً به`,
+    };
+  }
+  return { status: 'skip', message: `مكرر في الملف: سبق في السطر ${String(row.duplicateOf)}` };
+}

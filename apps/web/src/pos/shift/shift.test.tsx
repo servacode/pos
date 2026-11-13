@@ -91,6 +91,18 @@ describe('shift', () => {
     expect(screen.getByText('المتوقع والفرق يراهما المدير فقط.')).toBeInTheDocument();
     expect(screen.queryByText(/المتوقع/, { selector: 'span' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'أغلق الوردية' }));
+    // A confirmation first, then the Z report, then the cashier leaves
+    expect(screen.getByRole('alertdialog', { name: 'تأكيد إغلاق الوردية' })).toBeInTheDocument();
+    expect(outbox.some((e) => e.type === 'shift_close')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'نعم، أغلق الوردية' }));
+    const z = await screen.findByLabelText('تقرير إغلاق الوردية');
+    // The cashier has no «shift.view_difference»: the slip carries the count, not the expected cash
+    expect(z).toHaveTextContent('المعدود');
+    expect(z).not.toHaveTextContent('المتوقع');
+    expect(z).not.toHaveTextContent('الفرق');
+    await user.click(screen.getByRole('button', { name: 'اطبع تقرير الإغلاق' }));
+    expect(window.print).toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'تمّ، اخرج' }));
 
     expect(await screen.findByRole('heading', { name: 'من يعمل الآن؟' })).toBeInTheDocument();
     const [close] = docsOf<ShiftClosePayload>(outbox, 'shift_close');

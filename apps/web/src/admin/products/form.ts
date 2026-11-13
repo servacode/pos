@@ -50,6 +50,8 @@ export interface VariantDraft {
   minStock: string;
   barcodes: BarcodeDraft[];
   archived: boolean;
+  /** A code typed in the scan box and not added yet: saving with it would drop it silently. */
+  pendingCode?: string;
 }
 
 /** One option axis of the matrix: «المقاس» with S, M, L. */
@@ -333,6 +335,16 @@ function fullVariant(variant: VariantDraft) {
   };
 }
 
+/** A code left in a scan box is refused on save: it would otherwise be dropped without a word. */
+export function checkPendingCodes(variants: readonly VariantDraft[]): FieldErrors {
+  const errors: FieldErrors = {};
+  for (const v of variants) {
+    if (!v.archived && v.pendingCode?.trim())
+      errors[`v.${v.key}.pending`] = 'الباركود المكتوب لم يُضف بعد: اضغط «أضف» ليُفحص، أو امسحه من الخانة.';
+  }
+  return errors;
+}
+
 export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
   const errors: FieldErrors = {};
   const variants = draft.variants.filter((v) => !v.archived);
@@ -529,3 +541,37 @@ export function changedParts(before: ProductDetail, after: ProductDetail): strin
   if (before.archivedAt !== after.archivedAt) parts.push('الأرشفة');
   return parts;
 }
+
+// ─── Bulk entry on the size × colour matrix ───────────────────────────────────
+
+export type BulkField = 'priceMinor' | 'wholesalePriceMinor' | 'minPriceMinor';
+
+/** Which rows a bulk entry reaches: every live variant, or the ones holding one option value. */
+export type BulkScope = { all: true } | { name: string; value: string };
+
+const inScope = (v: VariantDraft, scope: BulkScope) =>
+  !v.archived &&
+  ('all' in scope || v.attributes.some((a) => a.name === scope.name && a.value === scope.value));
+
+/** «طبّق على الكل»: sets one price field of every variant in the scope (null clears it). */
+export function applyToVariants(
+  variants: readonly VariantDraft[],
+  scope: BulkScope,
+  field: BulkField,
+  value: number | null,
+): VariantDraft[] {
+  return variants.map((v) => (inScope(v, scope) ? { ...v, [field]: value } : v));
+}
+
+/** «ولّد باركود للكل»: an internal barcode (made by the server on save) for each live variant without one. */
+export function withGeneratedBarcodes(variants: readonly VariantDraft[]): VariantDraft[] {
+  return variants.map((v) =>
+    v.archived || v.barcodes.length > 0 || v.pendingCode?.trim()
+      ? v
+      : { ...v, barcodes: [newBarcode('internal')] },
+  );
+}
+
+/** How many live variants have no barcode yet. */
+export const variantsWithoutBarcode = (variants: readonly VariantDraft[]) =>
+  variants.filter((v) => !v.archived && v.barcodes.length === 0).length;

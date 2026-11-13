@@ -5,7 +5,10 @@ import type { PriceListFileRow } from './priceList';
 export const previewPriceList = (rows: PriceListFileRow[]) =>
   apiFetch<PriceListPreview>('/v1/prices/list/preview', { method: 'POST', body: { rows }, auth: true });
 
-export const applyPriceList = (fileName: string, changes: { variantId: string; newMinor: number }[]) =>
+export const applyPriceList = (
+  fileName: string,
+  changes: { variantId: string; newMinor: number; wholeModel?: boolean }[],
+) =>
   apiFetch<PriceListApplied>('/v1/prices/list/apply', {
     method: 'POST',
     body: { fileName, changes },

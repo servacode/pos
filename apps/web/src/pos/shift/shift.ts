@@ -160,6 +160,12 @@ export interface ShiftActivity {
   /** Per drawer currency, the terms of the formula the device knows */
   terms: Map<Code, Terms>;
   byMethod: ShiftClosePayload['summary']['byMethod'];
+  /** Returns saved in this shift, and what each paid back, per refund method and currency */
+  returns: { count: number; byMethod: { method: string; currency: Code; amountMinor: number }[] };
+  /** Gift vouchers sold in this shift, per currency */
+  vouchers: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** Drawer movements of this shift in the order they were made */
+  movements: { kind: CashMovementKind; currency: Code; amountMinor: number; reason: string }[];
 }
 
 /** Sums the shift's sales and drawer movements (10 › مطابقة الصندوق) from its documents. */
@@ -178,6 +184,11 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     { method: PaymentMethod; currency: Code; count: number; amountMinor: number }
   >();
   let saleCount = 0;
+  const refunds = new Map<string, { method: string; currency: Code; amountMinor: number }>();
+  let returnCount = 0;
+  const gifts = new Map<Code, number>();
+  let giftCount = 0;
+  const movements: ShiftActivity['movements'] = [];
   for (const { doc } of entries) {
     const payload = doc.payload as Record<string, unknown>;
     if (payload.shiftId !== shiftId) continue;
@@ -206,8 +217,13 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       }
     } else if (doc.type === 'return') {
       // Cash paid back for goods returned comes out of this drawer
+      returnCount += 1;
       for (const r of (payload as unknown as ReturnPayload).refunds) {
         if (r.method === 'cash') termsOf(r.currency).refundsMinor += r.amountMinor;
+        const key = `${r.method}:${r.currency}`;
+        const row = refunds.get(key) ?? { method: r.method, currency: r.currency, amountMinor: 0 };
+        row.amountMinor += r.amountMinor;
+        refunds.set(key, row);
       }
     } else if (doc.type === 'receipt') {
       // A customer's payment in cash goes into this drawer
@@ -217,15 +233,33 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       // A gift voucher sold for cash goes into this drawer, as money received
       const g = payload as unknown as GiftVoucherPayload;
       if (g.method === 'cash') termsOf(g.currency).receiptsMinor += g.amountMinor;
+      giftCount += 1;
+      gifts.set(g.currency, (gifts.get(g.currency) ?? 0) + g.amountMinor);
     } else if (doc.type === 'cash_movement') {
       const move = payload as unknown as CashMovementPayload;
       const t = termsOf(move.currency);
+      movements.push({
+        kind: move.kind,
+        currency: move.currency,
+        amountMinor: move.amountMinor,
+        reason: move.reason,
+      });
       if (move.kind === 'pay_in') t.payInMinor += move.amountMinor;
       else if (move.kind === 'safe_drop') t.dropsMinor += move.amountMinor;
       else t.payOutMinor += move.amountMinor;
     }
   }
-  return { saleCount, terms, byMethod: [...byMethod.values()] };
+  return {
+    saleCount,
+    terms,
+    byMethod: [...byMethod.values()],
+    returns: { count: returnCount, byMethod: [...refunds.values()] },
+    vouchers: {
+      count: giftCount,
+      byCurrency: [...gifts].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+    },
+    movements,
+  };
 }
 
 /** One drawer at close, with every term of the formula, the expected amount and the difference. */

@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { StaffListResponse, StaffMember, StaffUpdateInput } from '@serva/core';
 import { Alert, Button, Checkbox, PasswordField, Select, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
-import { createStaff, updateStaff } from './api';
+import { useMe } from '../../auth/useAuth';
+import { HALL_SECTORS, storeSells } from '../../lib/sectors';
+import { checkPin, createStaff, updateStaff } from './api';
 import { pinDigits } from './pin';
 
 /** +963933111222 shown as 0933111222, the way it is typed */
@@ -24,7 +26,16 @@ export function StaffForm({
   onSaved: (saved: StaffMember) => void;
   onCancel: () => void;
 }) {
-  const roles = options.roles.filter((r) => r.assignable || r.key === member?.roleKey);
+  const me = useMe();
+  // A role of one business type is offered only to a store that has it: the waiter to a restaurant
+  // or café, the pharmacist to a pharmacy. A person who already holds one keeps it in the list.
+  const roles = options.roles.filter(
+    (r) =>
+      r.key === member?.roleKey ||
+      (r.assignable &&
+        (r.key !== 'waiter' || storeSells(me.tenant.sectors, HALL_SECTORS)) &&
+        (r.key !== 'pharmacist' || storeSells(me.tenant.sectors, ['pharmacy']))),
+  );
   const [fullName, setFullName] = useState(member?.fullName ?? '');
   const [roleKey, setRoleKey] = useState(
     member?.roleKey ?? roles.find((r) => r.key === 'cashier')?.key ?? '',
@@ -41,6 +52,23 @@ export function StaffForm({
 
   const role = options.roles.find((r) => r.key === roleKey);
   const digits = role?.pinLength ?? 4;
+
+  // Two people on one till code is allowed, but the owner is told who else has it
+  const [sharedWith, setSharedWith] = useState<string[]>([]);
+  useEffect(() => {
+    const code = pinDigits(pin);
+    if (!/^\d{4,6}$/.test(code) || code.length !== digits) {
+      setSharedWith([]);
+      return;
+    }
+    let alive = true;
+    checkPin(code, member?.id)
+      .then((r) => alive && setSharedWith(r.sharedWith))
+      .catch(() => alive && setSharedWith([]));
+    return () => {
+      alive = false;
+    };
+  }, [pin, digits, member?.id]);
 
   function toggleBranch(id: string, on: boolean) {
     setBranchIds((ids) => (on ? [...ids, id] : ids.filter((x) => x !== id)));
@@ -155,6 +183,12 @@ export function StaffForm({
         onChange={(e) => setPin(e.target.value)}
         error={fields.pin}
       />
+      {sharedWith.length > 0 ? (
+        <Alert tone="warning">
+          هذا الرمز يستعمله أيضاً: {sharedWith.join('، ')}. يمكنك المتابعة، لكن الأفضل رمز لكل شخص ليُعرف من
+          باع.
+        </Alert>
+      ) : null}
 
       <Switch
         label="يدخل لوحة الإدارة"

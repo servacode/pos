@@ -357,7 +357,7 @@ async function checkBarcodesFree(tx: Transaction, writes: BarcodeWrite[], replac
   const held = holders[0];
   if (held) {
     const write = coded.find((w) => w.data.code === held.code)!;
-    throw fieldError(write.path, `الباركود ${held.code} مستخدم في المنتج «${held.productName}»`);
+    throw barcodeInUse(write.path, `الباركود ${held.code} مستخدم في المنتج «${held.productName}»`);
   }
 }
 
@@ -441,8 +441,17 @@ async function checkLiveVariants(tx: Transaction, productId: string): Promise<vo
   if (new Set(keys).size !== keys.length) throw fieldError('variants', 'هذا المتغير مكرر');
 }
 
+/** 409 conflict on one barcode field: nothing of the request is saved (the form marks that field). */
+export function barcodeInUse(path: string, message: string): AppError {
+  const top = path.split('.')[0]!;
+  return new AppError(409, 'conflict', message, {
+    [top]: message,
+    ...(top === path ? {} : { [path]: message }),
+  });
+}
+
 export const barcodeConflict = () =>
-  fieldError('variants', 'أحد الباركودات أُضيف لمنتج آخر في اللحظة نفسها. حدّث الصفحة وأعد المحاولة.');
+  barcodeInUse('variants', 'أحد الباركودات أُضيف لمنتج آخر في اللحظة نفسها. حدّث الصفحة وأعد المحاولة.');
 
 /** POST /v1/products: the product with its variants, prices and barcodes in one transaction. */
 export async function createProduct(

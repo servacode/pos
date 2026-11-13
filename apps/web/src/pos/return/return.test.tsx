@@ -84,6 +84,8 @@ describe('«مرتجع» on the till', () => {
     await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '250');
     await user.click(screen.getByRole('button', { name: 'تابع للملخّص' }));
     await user.click(await screen.findByRole('button', { name: 'أغلق الوردية' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، أغلق الوردية' }));
+    await user.click(await screen.findByRole('button', { name: 'تمّ، اخرج' }));
     await screen.findByRole('heading', { name: 'من يعمل الآن؟' });
     const close = outbox.find((e) => e.type === 'shift_close')!.doc.payload as unknown as ShiftClosePayload;
     expect(close.cash[0]).toMatchObject({

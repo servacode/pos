@@ -24,6 +24,12 @@ export function formatDays(count: number, numberFormat: NumberFormat = 'latn'): 
   }
 }
 
+/** «أبو سامر», «أم خالد», «عبد الله»: the first word alone would be only half of the name. */
+const NAME_PREFIXES = new Set(['أبو', 'ابو', 'أم', 'ام', 'عبد']);
+
 export function firstName(fullName: string): string {
-  return fullName.trim().split(/\s+/)[0] ?? fullName;
+  const words = fullName.trim().split(/\s+/);
+  const first = words[0] ?? fullName;
+  const second = words[1];
+  return NAME_PREFIXES.has(first) && second ? `${first} ${second}` : first;
 }

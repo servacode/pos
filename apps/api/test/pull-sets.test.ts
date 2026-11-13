@@ -89,6 +89,8 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'service',
     'loyalty',
     'pharmacy',
+    'till',
+    'sectors',
     'version',
   ],
   users: ['id', 'fullName', 'status', 'pinLength', 'pinVersion', 'version'],

@@ -385,7 +385,7 @@ export function MerchandisePage() {
 
         {data && data.lowStock.length > 0 ? (
           <DataTable
-            caption="قرّب يخلص"
+            caption="يوشك على النفاد"
             columns={[
               {
                 key: 'name',

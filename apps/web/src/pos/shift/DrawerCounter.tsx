@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { toLatinDigits } from '@serva/core/text';
 import { AddIcon, Button, CashIcon, cn, IconChip, Money, RemoveIcon, TextField } from '@serva/ui';
@@ -74,6 +74,26 @@ export function useCountKeypad(
     },
     [target, setCounts],
   );
+
+  // The physical keyboard types into the picked row too (digits, Arabic-Indic digits, Backspace),
+  // unless the cashier is typing in a field of their own
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      const digit = /^[0-9٠-٩]$/.test(e.key) ? toLatinDigits(e.key) : null;
+      if (digit !== null) {
+        e.preventDefault();
+        edit((c, key) => typeDigits(c, key, digit));
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        edit(eraseDigit);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [edit]);
 
   const count = target ? counts.find((c) => c.currency === target.currency) : undefined;
   const typingTotal = target?.key === 'total';

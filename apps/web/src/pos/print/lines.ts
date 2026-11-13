@@ -9,7 +9,7 @@ import { formatMoney } from '@serva/core/money';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { clockText, dateText } from '../format';
-import { methodLabel, type ReceiptData } from '../receipt/Receipt';
+import { methodLabel, needsThanks, type ReceiptData } from '../receipt/Receipt';
 
 /**
  * What a thermal printer prints, line by line (21 › إيصال 80 مم): the same receipt as the screen's,
@@ -53,7 +53,9 @@ function header(data: ReceiptData, title: string, number: string | null, at: num
 const footer = (data: ReceiptData, thanks = true): PrintLine[] => [
   { kind: 'rule' },
   ...(data.settings.receiptFooter ? [{ kind: 'center' as const, text: data.settings.receiptFooter }] : []),
-  ...(thanks ? [{ kind: 'center' as const, text: 'شكراً لزيارتكم' }] : []),
+  ...(thanks && needsThanks(data.settings.receiptFooter)
+    ? [{ kind: 'center' as const, text: 'شكراً لزيارتكم' }]
+    : []),
   { kind: 'center', text: 'سيرفا · Serva' },
 ];
 
@@ -117,6 +119,10 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
   lines.push(...header(data, 'فاتورة مبيعات', data.doc.number, at));
+  if (data.sellerName && data.sellerName !== data.cashierName) {
+    lines.push({ kind: 'center', text: `البائع: ${data.sellerName}` });
+  }
+  if (sale.customerName) lines.push({ kind: 'center', text: `الزبون: ${sale.customerName}` });
   lines.push(...serviceLines(sale));
   for (const l of sale.lines) {
     lines.push({ kind: 'text', text: l.name, bold: true });
@@ -142,6 +148,9 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
   }
   lines.push({ kind: 'rule' });
   const t = sale.totals;
+  if (t.discountMinor > 0) {
+    lines.push({ kind: 'pair', start: 'المجموع', end: money(t.grossMinor - t.lineDiscountMinor, base) });
+  }
   if (t.invoiceDiscountMinor > 0) {
     lines.push({ kind: 'pair', start: 'خصم الفاتورة', end: `−${money(t.invoiceDiscountMinor, base)}` });
   }
@@ -162,6 +171,9 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     });
     if (p.reference) lines.push({ kind: 'pair', start: 'المرجع', end: p.reference });
   }
+  for (const v of data.vouchersAfter ?? []) {
+    lines.push({ kind: 'pair', start: 'الباقي على القسيمة', end: money(v.balanceMinor, v.currency) });
+  }
   if (sale.change) {
     lines.push({
       kind: 'pair',
@@ -176,6 +188,12 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     if (rx.ref) lines.push({ kind: 'pair', start: 'رقم الوصفة', end: rx.ref });
     if (rx.doctor) lines.push({ kind: 'pair', start: 'الطبيب', end: rx.doctor });
     if (rx.patientName) lines.push({ kind: 'pair', start: 'المريض', end: rx.patientName });
+  }
+  if (data.doc.number) {
+    // The return screen scans this to find the invoice, from any till of the store
+    lines.push({ kind: 'rule' });
+    lines.push({ kind: 'barcode', code: data.doc.number });
+    lines.push({ kind: 'center', text: data.doc.number });
   }
   return [...lines, ...footer(data)];
 }

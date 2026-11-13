@@ -1,16 +1,26 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useContext, type ReactNode } from 'react';
+import { AdminReaderContext } from './audience';
 import { BLANK_LABELS, LEGAL, PLACEHOLDER, type LegalKey, type LegalValues } from './config';
 
 const MARKER = /\{(\w+)\}/g;
 
-/** A blank the owner has not filled yet: loud on purpose, so it cannot slip into a launch. */
+/**
+ * A blank the owner has not filled yet. Loud for the platform admin reading the page, so it cannot
+ * slip into a launch; for the public a quiet, muted mark: the visitor reads the text, and the blank
+ * is plainly open without alarming anyone.
+ */
 export function Blank({ name }: { name: LegalKey }) {
+  const admin = useContext(AdminReaderContext);
   const label = BLANK_LABELS[name] ?? name;
   return (
     <mark
       data-blank={name}
-      title={`يُملأ من لوحة المنصة › بيانات الشركة: ${label}`}
-      className="rounded-small bg-warning-soft px-1 font-semibold text-warning-ink"
+      title={admin ? `يُملأ من لوحة المنصة › بيانات الشركة: ${label}` : undefined}
+      className={
+        admin
+          ? 'rounded-small bg-warning-soft px-1 font-semibold text-warning-ink'
+          : 'border-b border-dashed border-line-control bg-transparent px-0.5 text-ink-muted'
+      }
     >
       {PLACEHOLDER}
     </mark>

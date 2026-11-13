@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { normalizePhone } from '../phone';
+import { normalizeContactPhone } from '../phone';
 
 /**
  * The company and contact details the public terms and privacy pages (and every place that shows
@@ -23,7 +23,7 @@ const phone = z
   .default('')
   .transform((value, ctx) => {
     if (value === '') return '';
-    const normal = normalizePhone(value);
+    const normal = normalizeContactPhone(value);
     if (normal === null) ctx.addIssue({ code: 'custom', message: 'رقم هاتف غير صالح' });
     return normal ?? value;
   });

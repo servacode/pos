@@ -54,6 +54,8 @@ import {
 } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead } from './parts';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
+import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRules';
+import { downloadCsv } from '../exportCsv';
 
 const PAYMENT_TEXT: Record<PurchasePayment, string> = {
   credit: 'على حساب المورد',
@@ -274,6 +276,13 @@ export function PurchasesPage() {
                   onValueChange={setQuery}
                   className="w-full sm:w-72"
                 />
+                <Button
+                  variant="secondary"
+                  disabled={shownPurchases.length === 0}
+                  onClick={() => exportPurchases(shownPurchases)}
+                >
+                  صدّر CSV
+                </Button>
               </SectionHead>
               <DataTable
                 caption="فواتير الشراء"
@@ -302,7 +311,11 @@ export function PurchasesPage() {
           </>
         )}
         {mode === 'supplier' ? (
-          <SupplierForm onSaved={() => done('أُضيف المورد.')} onCancel={() => setMode('list')} />
+          <SupplierForm
+            suppliers={suppliers?.items ?? []}
+            onSaved={() => done('أُضيف المورد.')}
+            onCancel={() => setMode('list')}
+          />
         ) : null}
         {mode === 'pay' && suppliers ? (
           <PaymentForm
@@ -314,6 +327,33 @@ export function PurchasesPage() {
         ) : null}
       </div>
     </AppShell>
+  );
+}
+
+const pounds = (minor: number) => minor / 100;
+
+/** The purchases on screen as a CSV file (Excel opens it in Arabic). */
+function exportPurchases(rows: PurchaseRow[]) {
+  downloadCsv(
+    `المشتريات-${today()}`,
+    ['الرقم', 'التاريخ', 'المورد', 'رقمها عند المورد', 'طريقة الدفع', 'الإجمالي'],
+    rows.map((p) => [
+      p.number,
+      p.date,
+      p.supplierName,
+      p.reference ?? '',
+      PAYMENT_TEXT[p.payment],
+      pounds(p.totalMinor),
+    ]),
+  );
+}
+
+/** The suppliers with what is owed to each as a CSV file. */
+function exportSuppliers(rows: SupplierRow[]) {
+  downloadCsv(
+    `الموردون-${today()}`,
+    ['المورد', 'الجوال', 'ما له عليك', 'ملاحظات'],
+    rows.map((x) => [x.name, x.phone ?? '', pounds(x.balanceMinor), x.notes ?? '']),
   );
 }
 
@@ -330,7 +370,15 @@ function Suppliers({
   const owed = suppliers?.totalOwedMinor ?? 0;
   return (
     <section aria-label="الموردون" className="flex flex-col gap-3">
-      <SectionHead title="الموردون" description="وما لكل منهم عليك، ونصيبه من المستحق." />
+      <SectionHead title="الموردون" description="وما لكل منهم عليك، ونصيبه من المستحق.">
+        <Button
+          variant="secondary"
+          disabled={!suppliers?.items.length}
+          onClick={() => exportSuppliers(suppliers?.items ?? [])}
+        >
+          صدّر CSV
+        </Button>
+      </SectionHead>
       {!suppliers ? (
         failed ? (
           <p className="text-sm text-ink-muted">لا تظهر القائمة الآن.</p>
@@ -425,10 +473,20 @@ function useSaving() {
   return { saving, error, fields, run, setFields };
 }
 
-function SupplierForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: () => void }) {
+function SupplierForm({
+  suppliers,
+  onSaved,
+  onCancel,
+}: {
+  suppliers: SupplierRow[];
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
   const s = useSaving();
+  const duplicate = findSupplierDuplicate(suppliers, name, phone);
   return (
     <Dialog
       open
@@ -443,10 +501,25 @@ function SupplierForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: ()
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
+          if (duplicate && !confirmed) {
+            setConfirmed(true);
+            return;
+          }
           void s.run(() => createSupplier({ name, phone })).then((r) => r && onSaved());
         }}
       >
         {s.error && !Object.keys(s.fields).length ? <Alert tone="error">{s.error}</Alert> : null}
+        {duplicate ? (
+          <Alert tone="warning">
+            {duplicate.by === 'phone'
+              ? `هذا الرقم مسجّل للمورد «${duplicate.supplier.name}».`
+              : `يوجد مورد بالاسم نفسه «${duplicate.supplier.name}».`}{' '}
+            <Link className="font-semibold underline" to={`/suppliers/${duplicate.supplier.id}/statement`}>
+              افتح المورد
+            </Link>
+            {confirmed ? ' اضغط «أضِفه رغم ذلك» لتأكيد أنه مورد آخر.' : ''}
+          </Alert>
+        ) : null}
         <TextField
           label="اسم المورد"
           autoFocus
@@ -467,7 +540,7 @@ function SupplierForm({ onSaved, onCancel }: { onSaved: () => void; onCancel: ()
             إلغاء
           </Button>
           <Button type="submit" loading={s.saving}>
-            احفظ
+            {duplicate && confirmed ? 'أضِفه رغم ذلك' : 'احفظ'}
           </Button>
         </div>
       </form>
@@ -849,9 +922,12 @@ function PaymentForm({
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<'cash' | 'bank'>('cash');
   const [date, setDate] = useState(today());
+  const [advance, setAdvance] = useState(false);
   const s = useSaving();
   const minor = moneyOf(amount);
   const supplier = suppliers.find((x) => x.id === supplierId);
+  const problem = paymentProblem(amount, minor);
+  const over = minor !== null && supplier ? isAdvance(minor, supplier.balanceMinor) : false;
   return (
     <Dialog
       open
@@ -866,9 +942,18 @@ function PaymentForm({
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!minor) return;
+          if (!minor || (over && !advance)) return;
           void s
-            .run(() => paySupplier({ supplierId, date, amountMinor: minor, method, note: null }))
+            .run(() =>
+              paySupplier({
+                supplierId,
+                date,
+                amountMinor: minor,
+                method,
+                note: null,
+                ...(over ? { advance: true } : {}),
+              }),
+            )
             .then((r) => r && onSaved(r.number));
         }}
       >
@@ -898,7 +983,11 @@ function PaymentForm({
             dir="ltr"
             autoFocus
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => {
+              setAmount(e.target.value);
+              setAdvance(false);
+            }}
+            error={problem ?? s.fields.amountMinor}
             inputClassName="num"
           />
           <TextField
@@ -909,6 +998,12 @@ function PaymentForm({
             onChange={(e) => setDate(e.target.value)}
           />
         </div>
+        {over ? (
+          <Alert tone="warning">
+            المبلغ أكبر مما للمورد عليك. الفرق يبقى دفعة مقدّمة له عندك، فيصير رصيده لك عنده.
+            <Switch label="نعم، هذه دفعة مقدّمة" checked={advance} onCheckedChange={setAdvance} />
+          </Alert>
+        ) : null}
         <RadioGroup legend="من أين">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {(['cash', 'bank'] as const).map((m) => (
@@ -928,7 +1023,7 @@ function PaymentForm({
           <Button variant="secondary" onClick={onCancel}>
             إلغاء
           </Button>
-          <Button type="submit" loading={s.saving} disabled={!minor}>
+          <Button type="submit" loading={s.saving} disabled={!minor || (over && !advance)}>
             سجّل الدفعة
           </Button>
         </div>

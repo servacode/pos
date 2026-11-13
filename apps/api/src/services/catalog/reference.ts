@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { normalizeArabic } from '@serva/core';
 import type {
   Category,
   TaxKind,
@@ -13,6 +14,7 @@ import type {
 } from '@serva/core';
 import { categories, taxRates, units, withTenant, type Database, type Transaction } from '@serva/db';
 import type { z } from 'zod';
+import { AppError } from '../../errors';
 import { audit } from '../audit';
 import {
   diff,
@@ -39,6 +41,31 @@ const archivedAtOf = (archived: boolean | undefined, current: Date | null, now: 
   archived === undefined ? undefined : archived ? (current ?? now) : null;
 
 // ─── Categories ──────────────────────────────────────────────────────────────
+
+/** A live category of this name under the same parent is refused: two «قمصان» side by side hide each other. */
+async function checkNameFree(
+  tx: Transaction,
+  name: string,
+  parentId: string | null | undefined,
+  exceptId?: string,
+): Promise<void> {
+  const rows = await tx
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(
+      and(
+        isNull(categories.archivedAt),
+        parentId ? eq(categories.parentId, parentId) : isNull(categories.parentId),
+      ),
+    );
+  const wanted = normalizeArabic(name.trim());
+  if (rows.some((r) => r.id !== exceptId && normalizeArabic(r.name.trim()) === wanted)) {
+    const message = parentId
+      ? `يوجد تصنيف فرعي باسم «${name.trim()}» في هذا التصنيف. اختر اسماً آخر.`
+      : `يوجد تصنيف باسم «${name.trim()}». اختر اسماً آخر.`;
+    throw new AppError(409, 'conflict', message, { name: message });
+  }
+}
 
 const categoryNotFound = () => notFound('هذا التصنيف غير موجود.');
 
@@ -102,6 +129,7 @@ export async function createCategoryTx(
   ctx: CatalogContext,
 ): Promise<Category> {
   await checkParent(tx, input.parentId);
+  await checkNameFree(tx, input.name, input.parentId);
   const [row] = await tx
     .insert(categories)
     .values({ tenantId: ctx.auth.tenantId, ...input })
@@ -133,6 +161,18 @@ export async function updateCategory(
     if (!current) throw categoryNotFound();
     if (current.version !== input.version) throw staleVersion();
     if (input.parentId !== undefined) await checkParent(tx, input.parentId, id);
+    const archiving = input.archived === true;
+    if (
+      !archiving &&
+      (input.name !== undefined || input.parentId !== undefined || input.archived === false)
+    ) {
+      await checkNameFree(
+        tx,
+        input.name ?? current.name,
+        input.parentId === undefined ? current.parentId : input.parentId,
+        id,
+      );
+    }
     const next = {
       name: input.name,
       parentId: input.parentId,

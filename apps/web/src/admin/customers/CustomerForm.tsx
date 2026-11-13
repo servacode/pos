@@ -1,5 +1,11 @@
 import { useState, type ReactNode } from 'react';
-import type { CustomerDetail } from '@serva/core';
+import { Link } from 'react-router';
+import {
+  normalizeArabic,
+  normalizeContactPhone,
+  type CustomerDetail,
+  type CustomerListItem,
+} from '@serva/core';
 import { Alert, Button, Card, CardHeader, Switch, TextField, UserIcon } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { createCustomer, updateCustomer } from './api';
@@ -33,13 +39,36 @@ function FormSection({
   );
 }
 
+/**
+ * Customers already in the store with the same phone, or the same name: the owner is told before a
+ * second one is made, and can open the one that exists.
+ */
+export function sameCustomers(
+  existing: readonly CustomerListItem[],
+  name: string,
+  phone: string,
+  selfId?: string,
+): CustomerListItem[] {
+  const wantedPhone = phone.trim() ? normalizeContactPhone(phone) : null;
+  const wantedName = normalizeArabic(name);
+  return existing.filter(
+    (c) =>
+      c.id !== selfId &&
+      ((wantedPhone !== null && c.phone === wantedPhone) ||
+        (wantedName.length >= 2 && normalizeArabic(c.name) === wantedName)),
+  );
+}
+
 /** Adds a customer, or edits one: name, phone, tax number, address, notes and the credit limit. */
 export function CustomerForm({
   customer,
+  existing = [],
   onSaved,
   onCancel,
 }: {
   customer?: CustomerDetail;
+  /** The store's customers, to warn about a duplicate */
+  existing?: readonly CustomerListItem[];
   onSaved: (saved: CustomerDetail) => void;
   onCancel: () => void;
 }) {
@@ -58,6 +87,8 @@ export function CustomerForm({
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const same = sameCustomers(existing, name, phone, customer?.id);
 
   async function save() {
     const creditLimitMinor = limitOf(limit);
@@ -105,6 +136,28 @@ export function CustomerForm({
         />
         <div className="flex flex-col gap-6">
           {error ? <Alert tone="error">{error}</Alert> : null}
+          {same.length > 0 ? (
+            <Alert tone="warning" title="يوجد زبون بالاسم أو الرقم نفسه">
+              <ul className="flex flex-col gap-1">
+                {same.slice(0, 3).map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/customers/${c.id}`} className="font-semibold underline underline-offset-4">
+                      افتح {c.name}
+                    </Link>
+                    {c.phone ? (
+                      <>
+                        {' · '}
+                        <bdi dir="ltr" className="num">
+                          {c.phone}
+                        </bdi>
+                      </>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1">يمكنك الحفظ رغم ذلك إن كان زبوناً آخر فعلاً.</p>
+            </Alert>
+          ) : null}
           <FormSection title="البيانات" description="كيف تعرفه وتصل إليه.">
             <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
               <TextField

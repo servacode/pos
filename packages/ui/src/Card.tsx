@@ -206,9 +206,12 @@ function Sparkline({ values }: { values: readonly number[] }) {
   const fill = `spark-${useId().replace(/[^\w-]/g, '')}`;
   const low = Math.min(...values);
   const range = Math.max(...values) - low || 1;
+  // Nothing before the latest day: a line climbing from zero to it is only the jump between two
+  // days, not a trend. A level dashed baseline says «no history».
+  const flat = values.slice(0, -1).every((v) => v === 0) && (values.at(-1) ?? 0) > 0;
   const points = values.map((v, index) => {
     const x = (index / (values.length - 1)) * SPARK_WIDTH;
-    const y = 2 + (1 - (v - low) / range) * (SPARK_HEIGHT - 4);
+    const y = flat ? SPARK_HEIGHT / 2 : 2 + (1 - (v - low) / range) * (SPARK_HEIGHT - 4);
     return `${x.toFixed(1)} ${y.toFixed(1)}`;
   });
   const line = `M${points.join(' L')}`;
@@ -226,12 +229,15 @@ function Sparkline({ values }: { values: readonly number[] }) {
           <stop offset="1" stopColor="currentColor" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={`${line} L${SPARK_WIDTH} ${SPARK_HEIGHT} L0 ${SPARK_HEIGHT} Z`} fill={`url(#${fill})`} />
+      {flat ? null : (
+        <path d={`${line} L${SPARK_WIDTH} ${SPARK_HEIGHT} L0 ${SPARK_HEIGHT} Z`} fill={`url(#${fill})`} />
+      )}
       <path
         d={line}
         fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
+        stroke={flat ? 'var(--color-line-control)' : 'currentColor'}
+        strokeDasharray={flat ? '4 5' : undefined}
+        strokeWidth={flat ? '1.5' : '2'}
         strokeLinecap="round"
         strokeLinejoin="round"
         vectorEffect="non-scaling-stroke"

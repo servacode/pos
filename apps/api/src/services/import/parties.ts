@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import {
   customerInput,
   normalizeArabic,
-  phoneSchema,
+  contactPhoneSchema,
   supplierInput,
   type CurrencyCode,
   type CustomerInput,
@@ -36,10 +36,9 @@ function parseRow(kind: Kind, row: ImportRow, base: CurrencyCode, issues: Issues
   const fields: Record<string, unknown> = { name: name ?? '' };
   const phone = textOf(row.values.phone);
   if (phone !== null) {
-    // The screens’ union schema answers a bare «Invalid input»; the phone schema says what is wrong
-    const checked = phoneSchema.safeParse(phone);
+    const checked = contactPhoneSchema.safeParse(phone);
     if (checked.success) fields.phone = checked.data;
-    else issues.add('phone', checked.error.issues[0]?.message ?? 'رقم الجوال غير صحيح');
+    else issues.add('phone', checked.error.issues[0]?.message ?? 'رقم الهاتف غير صحيح');
   }
   const notes = shortText(row, 'notes', 500, 'الملاحظات', issues);
   if (notes !== null) fields.notes = notes;
@@ -126,6 +125,13 @@ export async function importParties(
           }
           fresh = true;
           results.set(row.line, 'create');
+          if (kind === 'supplier') {
+            const same = await sp.execute<{ n: number }>(
+              sql`select count(*)::int as n from suppliers where lower(name) = lower(${data.name}) and id <> ${partyId}`,
+            );
+            if ((same[0]?.n ?? 0) > 0)
+              results.note(row.line, `يوجد مورد آخر بالاسم نفسه «${data.name}»: راجع أنه ليس مكرراً`);
+          }
         } else if (input.existing === 'skip') {
           results.set(row.line, 'skip', ['موجود في المتجر، تُرك كما هو']);
           return;

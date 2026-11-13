@@ -57,6 +57,19 @@ export const staffUpdateInput = z
 export type StaffUpdateInput = z.input<typeof staffUpdateInput>;
 export type StaffUpdateData = z.output<typeof staffUpdateInput>;
 
+/**
+ *   POST /v1/staff/pin-check   { pin, exceptId? } → { sharedWith } (users.manage)
+ * Who else has this till code, so the owner is warned (not stopped) before two people share one.
+ */
+export const staffPinCheckInput = z.object({
+  pin: z.string().regex(/^\d{4,6}$/, 'رمز الدخول 4 أو 6 أرقام'),
+  exceptId: z.uuid().optional(),
+});
+export interface StaffPinCheck {
+  /** The names of the active staff who already use this code */
+  sharedWith: string[];
+}
+
 export const staffPinInput = z.object({ pin: staffPinSchema });
 export type StaffPinInput = z.input<typeof staffPinInput>;
 export type StaffPinData = z.output<typeof staffPinInput>;

@@ -1,9 +1,22 @@
 import type { FastifyInstance } from 'fastify';
-import { staffCreateInput, staffPinInput, staffUpdateInput, uuidSchema } from '@serva/core';
+import {
+  staffCreateInput,
+  staffPinCheckInput,
+  staffPinInput,
+  staffUpdateInput,
+  uuidSchema,
+} from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
-import { createStaff, listStaff, resetStaffPin, setStaffActive, updateStaff } from '../services/staff-admin';
+import {
+  checkPinShared,
+  createStaff,
+  listStaff,
+  resetStaffPin,
+  setStaffActive,
+  updateStaff,
+} from '../services/staff-admin';
 import { parseBody } from './validation';
 
 /** The store's staff «الموظفون» (packages/core › contracts/staff-admin.ts), under `users.manage`. */
@@ -47,6 +60,11 @@ export async function staffAdminRoutes(app: FastifyInstance): Promise<void> {
       app.clock.now(),
       (sessionId) => app.sessionGate.forget(sessionId),
     );
+  });
+
+  app.post('/v1/staff/pin-check', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return checkPinShared(app.db, app.passwords, request.auth, parseBody(staffPinCheckInput, request.body));
   });
 
   app.post('/v1/staff/:id/pin', { preHandler: requireAuth }, async (request, reply) => {

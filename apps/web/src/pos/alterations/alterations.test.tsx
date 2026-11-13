@@ -24,6 +24,8 @@ const TICKET: AlterationTicket = {
   priceMinor: 150_000,
   dueDate: '2026-11-06',
   note: null,
+  depositMinor: 0,
+  depositVoucher: null,
   createdAt: '2026-11-04T10:00:00.000Z',
   readyAt: null,
   deliveredAt: null,

@@ -2,6 +2,7 @@ import { gunzipSync } from 'node:zlib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { createUuidV7, parseSnapshot, payloadHash, type SyncDocumentBody } from '@serva/sync';
+import { cartLine, documents, openStore, push, sale, shiftOpen } from './accounting-fixtures';
 import { createDevice, deviceFields, firstBranch } from './devices';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
 
@@ -32,6 +33,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/device/customers/:id/purchases': 'device',
   'GET /v1/device/subscription': 'device',
   'PUT /v1/customers/:id': 'signed-in',
+  'POST /v1/customers/:id/payments': 'signed-in',
+  'POST /v1/customers/:id/opening-debt': 'signed-in',
   'GET /v1/suppliers': 'signed-in',
   'POST /v1/suppliers': 'signed-in',
   'PUT /v1/suppliers/:id': 'signed-in',
@@ -80,8 +83,13 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/cheques': 'signed-in',
   'POST /v1/cheques/actions': 'signed-in',
   'POST /v1/device/staff-sessions': 'device',
+  'GET /v1/branches': 'signed-in',
+  'POST /v1/branches': 'signed-in',
+  'PATCH /v1/branches/:id': 'signed-in',
+  'POST /v1/branches/:id/active': 'signed-in',
   'GET /v1/staff': 'signed-in',
   'POST /v1/staff': 'signed-in',
+  'POST /v1/staff/pin-check': 'signed-in',
   'PATCH /v1/staff/:id': 'signed-in',
   'POST /v1/staff/:id/pin': 'signed-in',
   'POST /v1/staff/:id/deactivate': 'signed-in',
@@ -121,6 +129,8 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/products/options': 'signed-in',
   'PUT /v1/store/loyalty': 'signed-in',
   'PUT /v1/store/pharmacy': 'signed-in',
+  'PUT /v1/store/till': 'signed-in',
+  'GET /v1/device/invoices/lookup': 'device',
   'GET /v1/pharmacy/controlled-register': 'signed-in',
   'GET /v1/transfers': 'signed-in',
   'GET /v1/supplier-returns': 'signed-in',
@@ -140,6 +150,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/shop/:slug/orders': 'public',
   'POST /v1/shop/:slug/orders/code': 'public',
   'GET /v1/shop/:slug/orders/:token': 'public',
+  'POST /v1/shop/:slug/orders/:token/cancel-request': 'public',
   'GET /v1/online-store': 'signed-in',
   'PUT /v1/online-store': 'signed-in',
   'GET /v1/online-orders': 'signed-in',
@@ -160,6 +171,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/accounts': 'signed-in',
   'GET /v1/reports/day': 'signed-in',
   'GET /v1/reports/merchandise': 'signed-in',
+  'GET /v1/reports/sales-breakdown': 'signed-in',
   'GET /v1/shifts': 'signed-in',
   'GET /v1/shifts/:id': 'signed-in',
   'GET /v1/sales': 'signed-in',
@@ -277,7 +289,7 @@ const makeReference =
 
 /** Routes with an id in the path, each with a probe using another store's record. */
 /** Store B's owner on store A's customer: 404, and the customer is untouched. */
-function customerIdor(method: 'GET' | 'PUT') {
+function customerIdor(method: 'GET' | 'PUT' | 'POST', suffix = '', body?: Record<string, unknown>) {
   return async (app: FastifyInstance, { a, b }: Stores) => {
     const made = await app.inject({
       method: 'POST',
@@ -288,13 +300,31 @@ function customerIdor(method: 'GET' | 'PUT') {
     const id = made.json<{ id: string }>().id;
     const res = await app.inject({
       method,
-      url: `/v1/customers/${id}`,
+      url: `/v1/customers/${id}${suffix}`,
       headers: owner(b),
       ...(method === 'PUT' ? { payload: { name: 'مسروق' } } : {}),
+      ...(body ? { payload: body } : {}),
     });
-    expect(res.statusCode, `${method} /v1/customers/:id`).toBe(404);
+    expect(res.statusCode, `${method} /v1/customers/:id${suffix}`).toBe(404);
     const [row] = await ownerDb()<{ name: string }[]>`select name from customers where id = ${id}`;
     expect(row!.name).toBe('زبون أ');
+  };
+}
+
+/** Store B's owner on store A's branch: 404, and the branch is untouched. */
+function branchIdor(url: (id: string) => string, method: 'PATCH' | 'POST', payload: Record<string, unknown>) {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    // The store's own first branch: the plan may not allow a second one
+    const [first] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    const id = first!.id;
+    const [before] = await ownerDb()<{ name: string; is_active: boolean }[]>`
+      select name, is_active from branches where id = ${id}`;
+    const res = await app.inject({ method, url: url(id), headers: owner(b), payload });
+    expect(res.statusCode, `${method} ${url(':id')}`).toBe(404);
+    const [row] = await ownerDb()<{ name: string; is_active: boolean }[]>`
+      select name, is_active from branches where id = ${id}`;
+    expect(row).toEqual(before);
   };
 }
 
@@ -474,6 +504,37 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect((await at('a-shop')).statusCode).toBe(200);
     // A's order is not on B's link
     expect((await at('b-shop')).statusCode).toBe(404);
+  },
+  'POST /v1/shop/:slug/orders/:token/cancel-request': async (app, stores) => {
+    await twoShops(app, stores);
+    const service = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: owner(stores.a),
+      payload: {
+        nameAr: 'تقصير',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 100 } }],
+      },
+    });
+    const placed = await app.inject({
+      method: 'POST',
+      url: '/v1/shop/a-shop/orders',
+      payload: {
+        name: 'زبون',
+        phone: '0944555666',
+        fulfilment: 'pickup',
+        lines: [{ variantId: service.json<{ variants: { id: string }[] }>().variants[0]!.id, qty: 1 }],
+      },
+    });
+    const token = placed.json<{ trackPath: string }>().trackPath.split('/').at(-1)!;
+    const ask = (slug: string) =>
+      app.inject({ method: 'POST', url: `/v1/shop/${slug}/orders/${token}/cancel-request` });
+    // A's order cannot be cancelled through B's link, and the failed try changes nothing
+    expect((await ask('b-shop')).statusCode).toBe(404);
+    const still = await app.inject({ method: 'GET', url: `/v1/shop/a-shop/orders/${token}` });
+    expect(still.json<{ status: string }>().status).toBe('pending');
+    expect((await ask('a-shop')).statusCode).toBe(200);
   },
   'POST /v1/online-orders/:id/status': async (app, stores) => {
     const product = await twoShops(app, stores);
@@ -741,6 +802,10 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     expect(res.statusCode).toBe(404);
   },
   'PUT /v1/customers/:id': customerIdor('PUT'),
+  'POST /v1/customers/:id/payments': customerIdor('POST', '/payments', { amountMinor: 1000, method: 'cash' }),
+  'POST /v1/customers/:id/opening-debt': customerIdor('POST', '/opening-debt', { amountMinor: 1000 }),
+  'PATCH /v1/branches/:id': branchIdor((id) => `/v1/branches/${id}`, 'PATCH', { name: 'مسروق' }),
+  'POST /v1/branches/:id/active': branchIdor((id) => `/v1/branches/${id}/active`, 'POST', { active: false }),
   'PATCH /v1/staff/:id': staffIdor('PATCH', '', { fullName: 'مسروق' }),
   'POST /v1/staff/:id/pin': staffIdor('POST', '/pin', { pin: '7391' }),
   'POST /v1/staff/:id/deactivate': staffIdor('POST', '/deactivate'),
@@ -1042,6 +1107,30 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
   },
   'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
     await IDOR_PROBES['POST /v1/device/alterations/:id/status']!(app, { a, b });
+  },
+  // An invoice is found by its number only inside its own store: another store's till gets 404
+  'GET /v1/device/invoices/lookup': async (app) => {
+    const owner = await openStore(app, '0933333333');
+    const doc = documents(owner.device);
+    const open = doc('shift_open', shiftOpen(owner.userId));
+    const sold = doc(
+      'sale',
+      sale({ userId: owner.userId }, open.id, {
+        lines: [cartLine(1, 15_000, { qty: 1000 })],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 15_000 }],
+      }),
+    );
+    await push(app, owner.device, [open, sold]);
+    const find = (authorization: string) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/device/invoices/lookup?q=${encodeURIComponent(sold.number!)}`,
+        headers: { authorization },
+      });
+    expect((await find(owner.device.authorization)).statusCode).toBe(200);
+    const other = await registerStore(app, { phone: '0944444444' });
+    const stranger = await createDevice(other.body.tenant.id as string);
+    expect((await find(stranger.authorization)).statusCode).toBe(404);
   },
   // A till is told about its own store's subscription: A's lapse never reaches B's till
   'GET /v1/device/subscription': async (app, { a, b }) => {

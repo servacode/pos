@@ -130,6 +130,14 @@ export function CustomersPage() {
   const [search, setSearch] = useState('');
   const [owing, setOwing] = useState(false);
   const [adding, setAdding] = useState(false);
+  // Every customer, whatever the search says, for the duplicate warning of the new-customer form
+  const [everyone, setEveryone] = useState<CustomerListItem[]>([]);
+  useEffect(() => {
+    if (!adding) return;
+    listCustomers()
+      .then((all) => setEveryone(all.items))
+      .catch(() => setEveryone([]));
+  }, [adding]);
 
   const load = useCallback(() => {
     setError(null);
@@ -257,7 +265,11 @@ export function CustomersPage() {
           }
         />
         {adding ? (
-          <CustomerForm onSaved={(c) => navigate(`/customers/${c.id}`)} onCancel={() => setAdding(false)} />
+          <CustomerForm
+            existing={everyone}
+            onSaved={(c) => navigate(`/customers/${c.id}`)}
+            onCancel={() => setAdding(false)}
+          />
         ) : null}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatTile

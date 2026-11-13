@@ -353,3 +353,33 @@ describe('deactivate and reactivate', () => {
     );
   });
 });
+
+describe('POST /v1/staff/pin-check and the default roles', () => {
+  it('names who already uses a till code, and offers the accountant and storekeeper roles', async () => {
+    const made = await create(s.accessToken, { fullName: 'سامر', pin: '4829' });
+    expect(made.statusCode, made.body).toBe(201);
+
+    const same = await call(s.accessToken, 'POST', '/v1/staff/pin-check', { pin: '4829' });
+    expect(same.statusCode).toBe(200);
+    expect(same.json()).toEqual({ sharedWith: ['سامر'] });
+    const mine = await call(s.accessToken, 'POST', '/v1/staff/pin-check', {
+      pin: '4829',
+      exceptId: made.json<StaffMember>().id,
+    });
+    expect(mine.json()).toEqual({ sharedWith: [] });
+    expect((await call(s.accessToken, 'POST', '/v1/staff/pin-check', { pin: '7391' })).json()).toEqual({
+      sharedWith: [],
+    });
+    expect((await call(s.accessToken, 'POST', '/v1/staff/pin-check', { pin: 'ab' })).statusCode).toBe(400);
+
+    const list = (await call(s.accessToken, 'GET', '/v1/staff')).json<StaffListResponse>();
+    const roles = list.roles.filter((r) => ['accountant', 'storekeeper'].includes(r.key));
+    expect(roles.map((r) => [r.key, r.name, r.assignable]).sort()).toEqual([
+      ['accountant', 'محاسب', true],
+      ['storekeeper', 'أمين مستودع', true],
+    ]);
+    const hired = await create(s.accessToken, { fullName: 'هبة', roleKey: 'accountant', pin: '6032' });
+    expect(hired.statusCode, hired.body).toBe(201);
+    expect(hired.json<StaffMember>().roleName).toBe('محاسب');
+  });
+});

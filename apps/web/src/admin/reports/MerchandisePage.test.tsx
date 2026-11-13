@@ -128,7 +128,7 @@ describe('«حركة الأصناف»', () => {
     expect(screen.getByText('رأس مال نائم فيها')).toBeInTheDocument();
 
     // One M white left of six sold: reorder it
-    const low = screen.getByRole('table', { name: 'قرّب يخلص' });
+    const low = screen.getByRole('table', { name: 'يوشك على النفاد' });
     expect(within(low).getByRole('link', { name: 'قميص كتان M · أبيض' })).toHaveAttribute(
       'href',
       '/products/p-shirt',

@@ -5,6 +5,8 @@ import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
 import type { LoyaltySettings, ServiceSettings } from './store';
 import type { PharmacySettings, ShelfBatch } from './pharmacy';
+import type { TillSettings } from './till';
+import type { SectorKey } from '../sectors';
 import type { CurrencyCode } from '../currencies';
 import type { Permission } from '../permissions';
 import type { ShiftMode } from './documents';
@@ -774,6 +776,10 @@ export interface SettingsRow {
   loyalty: LoyaltySettings | null;
   /** «الصيدلية» (contracts/pharmacy.ts); null when the store is not a pharmacy */
   pharmacy?: PharmacySettings | null;
+  /** «الصندوق» (contracts/till.ts): the return window and the card approval rule; null: the defaults */
+  till?: TillSettings | null;
+  /** The store's business types, from tenants (the till words return reasons by them) */
+  sectors?: SectorKey[];
   version: number;
 }
 

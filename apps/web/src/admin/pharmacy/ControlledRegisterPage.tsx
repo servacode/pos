@@ -22,6 +22,7 @@ import { dayText, isoDay } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { useReport } from '../reports/useReport';
 import { getControlledRegister } from './api';
+import { DateField } from '../../lib/DateField';
 
 type Period = 'day' | 'month';
 
@@ -190,14 +191,7 @@ export function ControlledRegisterPage() {
               ]}
             />
             {period === 'day' ? (
-              <TextField
-                label="اليوم"
-                type="date"
-                dir="ltr"
-                value={day}
-                max={today}
-                onChange={(e) => e.target.value && setDay(e.target.value)}
-              />
+              <DateField label="اليوم" value={day} max={today} required onChange={setDay} />
             ) : (
               <TextField
                 label="الشهر"

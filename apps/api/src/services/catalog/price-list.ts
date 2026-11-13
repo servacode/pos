@@ -164,6 +164,7 @@ export function previewPriceList(
         currency: null,
         oldMinor: null,
         newMinor: r.priceMinor,
+        modelSize: null,
       } as const;
       let piece = code ? byCode.get(code) : undefined;
       let matchedBy: 'barcode' | 'name' = 'barcode';
@@ -189,6 +190,20 @@ export function previewPriceList(
       if (piece.currency !== base) return { ...matched, status: 'other_currency' };
       return { ...matched, status: piece.price === r.priceMinor ? 'same' : 'change' };
     });
+    // How many sizes and colours each matched model has, so the screen can offer the whole model
+    const productIds = [...new Set(items.flatMap((i) => (i.productId ? [i.productId] : [])))];
+    if (productIds.length > 0) {
+      const counts = await tx.execute<{ product_id: string; n: number }>(sql`
+        select p.id as product_id, count(*)::int as n
+        from products p join variants v on v.product_id = p.id and v.archived_at is null
+        where p.id in (${sql.join(
+          productIds.map((id) => sql`${id}::uuid`),
+          sql`, `,
+        )})
+        group by p.id`);
+      const size = new Map(counts.map((c) => [c.product_id, c.n]));
+      for (const i of items) if (i.productId) i.modelSize = size.get(i.productId) ?? 1;
+    }
     return { items };
   });
 }
@@ -204,6 +219,21 @@ export function applyPriceList(
     const base = await baseCurrency(tx);
     // The last price asked for a piece wins
     const wanted = new Map(input.changes.map((c) => [c.variantId, c.newMinor]));
+    // A row for the whole model reaches the model's other live variants too, unless the file named them
+    const modelWide = input.changes.filter((c) => c.wholeModel);
+    if (modelWide.length > 0) {
+      const siblings = await tx.execute<{ variant_id: string; asked: string }>(sql`
+        select v2.id as variant_id, v1.id as asked
+        from variants v1
+        join variants v2 on v2.product_id = v1.product_id and v2.archived_at is null
+        where v1.id in (${sql.join(
+          modelWide.map((c) => sql`${c.variantId}::uuid`),
+          sql`, `,
+        )})`);
+      const askedPrice = new Map(modelWide.map((c) => [c.variantId, c.newMinor]));
+      for (const s of siblings)
+        if (!wanted.has(s.variant_id)) wanted.set(s.variant_id, askedPrice.get(s.asked)!);
+    }
     const ids = [...wanted.keys()];
     const rows = await tx.execute<PieceRow>(sql`
       select l.* from (${live}) l

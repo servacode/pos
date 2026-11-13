@@ -288,3 +288,103 @@ describe('«احجز» at the till', () => {
     expect(boxed).toMatchObject({ source: 'hold', status: 'accepted', fulfilment: 'pickup' });
   });
 });
+
+describe('the customer asks to cancel a pending order', () => {
+  async function pending(store: Store) {
+    await openShop(store, 'shop');
+    const { variantId } = await dress(store);
+    const placed = await placeWithCode(variantId, 1);
+    return { placed, token: placed.trackPath.split('/').at(-1)!, variantId };
+  }
+  const cancelAsk = (token: string) =>
+    app.inject({ method: 'POST', url: `/v1/shop/nour-fashion/orders/${token}/cancel-request` });
+
+  it('moves it to «cancel_requested», shows it in the owner’s waiting box, and the owner decides', async () => {
+    const store = await openStore(app);
+    const { token } = await pending(store);
+
+    const asked = await cancelAsk(token);
+    expect(asked.statusCode, asked.body).toBe(200);
+    expect(asked.json<ShopOrderTrack>()).toMatchObject({
+      status: 'cancel_requested',
+      customerName: 'ريم',
+      area: null,
+    });
+    // Asking again is the same as asking once
+    expect((await cancelAsk(token)).json<ShopOrderTrack>().status).toBe('cancel_requested');
+
+    const waiting = (
+      await app.inject({ method: 'GET', url: '/v1/online-orders?status=pending', headers: as(store) })
+    ).json<{ items: OnlineOrder[] }>().items;
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0]).toMatchObject({ status: 'cancel_requested' });
+
+    // The owner agrees: the order is rejected and the customer sees that
+    const agreed = await decide(store, waiting[0]!, 'rejected');
+    expect(agreed.statusCode, agreed.body).toBe(200);
+    const page = await app.inject({ method: 'GET', url: `/v1/shop/nour-fashion/orders/${token}` });
+    expect(page.json<ShopOrderTrack>().status).toBe('rejected');
+  });
+
+  it('lets the owner keep an order its customer asked to cancel', async () => {
+    const store = await openStore(app);
+    const { token } = await pending(store);
+    await cancelAsk(token);
+    const [asked] = await ordersBox(store);
+    expect((await decide(store, asked!, 'accepted')).statusCode).toBe(200);
+  });
+
+  it('refuses once the store has decided, and for a link that is not an order', async () => {
+    const store = await openStore(app);
+    const { token } = await pending(store);
+    const [first] = await ordersBox(store);
+    expect((await decide(store, first!, 'accepted')).statusCode).toBe(200);
+    const late = await cancelAsk(token);
+    expect(late.statusCode).toBe(409);
+    expect(late.json<{ error: { message: string } }>().error.message).toContain('قرّر المحل');
+    expect((await cancelAsk('nope')).statusCode).toBe(404);
+    expect((await cancelAsk('a'.repeat(32))).statusCode).toBe(404);
+  });
+
+  it('says what really happened when the same decision is sent twice', async () => {
+    const store = await openStore(app);
+    await pending(store);
+    const [first] = await ordersBox(store);
+    expect((await decide(store, first!, 'accepted')).statusCode).toBe(200);
+    // A double click: the second carries the old version
+    const again = await decide(store, first!, 'accepted');
+    expect(again.statusCode).toBe(409);
+    expect(again.json<{ error: { message: string } }>().error.message).toBe('تم هذا الإجراء على الطلب للتو.');
+    // A different decision on the old version: the order changed under the screen
+    const other = await decide(store, first!, 'rejected');
+    expect(other.statusCode).toBe(409);
+    expect(other.json<{ error: { message: string } }>().error.message).toContain('تغيّر هذا الطلب');
+  });
+});
+
+describe('what the shop shows to filter and warn', () => {
+  it('gives each card its date and the options on the shelf, and the page the pieces left when few', async () => {
+    const store = await openStore(app);
+    await openShop(store, 'whatsapp');
+    const { productId } = await dress(store);
+    const home = (await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' })).json<ShopHome>();
+    expect(home.products[0]).toMatchObject({ id: productId, options: [] });
+    expect(new Date(home.products[0]!.createdAt).getTime()).not.toBeNaN();
+    // Two on the shelf: «بقي 2 فقط»
+    const page = await app.inject({ method: 'GET', url: `/v1/shop/nour-fashion/products/${productId}` });
+    expect(page.json<{ variants: { left: number | null }[] }>().variants[0]!.left).toBe(2);
+  });
+
+  it('tells «بقي 1 فقط» when one is left, never a bigger count', async () => {
+    const store = await openStore(app);
+    await openShop(store, 'whatsapp');
+    const { productId, variantId } = await dress(store);
+    // Two in stock; an accepted order holds one of them
+    const placed = await order([{ variantId, qty: 1 }]);
+    expect(placed.statusCode, placed.body).toBe(201);
+    const [saved] = await ordersBox(store);
+    expect((await decide(store, saved!, 'accepted')).statusCode).toBe(200);
+    const page = await app.inject({ method: 'GET', url: `/v1/shop/nour-fashion/products/${productId}` });
+    expect(page.json<{ variants: { left: number | null }[] }>().variants[0]!.left).toBe(1);
+  });
+});

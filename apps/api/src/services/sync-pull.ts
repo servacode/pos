@@ -82,6 +82,8 @@ const PULL_SETS: Record<string, PullSet> = {
         case when exists (select 1 from tenants t
                           where t.id = tenant_settings.tenant_id and 'pharmacy' = any(t.sectors))
              then '{"prescription":"optional"}'::jsonb end)`,
+      till: tenantSettings.till,
+      sectors: sql<string[]>`(select t.sectors from tenants t where t.id = tenant_settings.tenant_id)`,
       version: tenantSettings.version,
     },
   },

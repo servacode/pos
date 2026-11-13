@@ -284,6 +284,19 @@ describe('Card and StatTile', () => {
     expect(spark).toHaveClass('rtl:-scale-x-100');
   });
 
+  it('draws a level dashed baseline, not a climb from zero, when only the latest day has a value', () => {
+    const { container, rerender } = renderUi(
+      <StatTile label="الفواتير" value="3" sparkline={[0, 0, 0, 0, 0, 0, 3]} />,
+    );
+    const flat = container.querySelector('svg path[stroke]')!;
+    expect(flat).toHaveAttribute('stroke-dasharray');
+    // No wash under it
+    expect(container.querySelector('path[fill^="url("]')).toBeNull();
+    rerender(<StatTile label="الفواتير" value="3" sparkline={[0, 1, 0, 3]} />);
+    expect(container.querySelector('svg path[stroke]')).not.toHaveAttribute('stroke-dasharray');
+    expect(container.querySelector('path[fill^="url("]')).not.toBeNull();
+  });
+
   it('keeps the reading order: the label, its number right after it, then the change and its comparison together', () => {
     renderUi(
       <StatTile

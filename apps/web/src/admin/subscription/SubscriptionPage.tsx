@@ -6,6 +6,7 @@ import type {
   SubscriptionPage as Page,
   SubscriptionPayment,
 } from '@serva/core';
+import { COUNT_NOUNS, countNoun, type CountForms } from '@serva/core';
 import {
   Alert,
   Badge,
@@ -66,16 +67,15 @@ const INVOICE_STATUS: Record<SubscriptionInvoice['status'], Status> = {
 const CYCLE_TEXT: Record<BillingCycle, string> = { monthly: 'شهري', yearly: 'سنوي' };
 
 /** What a plan allows, in the platform's limit keys, as the plan card lists them. */
-const LIMITS: readonly { key: string; one: string; many: (count: string) => string; unlimited: string }[] = [
-  { key: 'branches', one: 'فرع واحد', many: (n) => `حتى ${n} فروع`, unlimited: 'فروع بلا حد' },
+const LIMITS: readonly { key: string; forms: CountForms; unlimited: string }[] = [
+  { key: 'branches', forms: COUNT_NOUNS.branch, unlimited: 'فروع بلا حد' },
   {
     key: 'registers',
-    one: 'جهاز كاشير واحد',
-    many: (n) => `حتى ${n} أجهزة كاشير`,
+    forms: { one: 'جهاز كاشير واحد', two: 'جهازان للكاشير', few: 'أجهزة كاشير', many: 'جهازاً للكاشير' },
     unlimited: 'أجهزة كاشير بلا حد',
   },
-  { key: 'users', one: 'مستخدم واحد', many: (n) => `حتى ${n} مستخدمين`, unlimited: 'مستخدمون بلا حد' },
-  { key: 'products', one: 'صنف واحد', many: (n) => `حتى ${n} صنف`, unlimited: 'أصناف بلا حد' },
+  { key: 'users', forms: COUNT_NOUNS.user, unlimited: 'مستخدمون بلا حد' },
+  { key: 'products', forms: COUNT_NOUNS.item, unlimited: 'أصناف بلا حد' },
 ];
 
 const count = new Intl.NumberFormat('ar-u-nu-latn');
@@ -85,7 +85,9 @@ function limitLines(plan: PlanRow): string[] {
     if (!(limit.key in plan.limits)) return [];
     const value = plan.limits[limit.key];
     if (value === null || value === undefined) return [limit.unlimited];
-    return [value === 1 ? limit.one : limit.many(count.format(value))];
+    return [
+      value === 1 ? limit.forms.one : `حتى ${countNoun(value, limit.forms, count.format(value), true)}`,
+    ];
   });
 }
 

@@ -149,6 +149,29 @@ describe('price list: preview', () => {
     expect(item).toMatchObject({ status: 'change', variantId: zero.variants[0]!.id, matchedBy: 'barcode' });
   });
 
+  it('reports how many sizes a matched model has, and a whole-model change reaches every live variant', async () => {
+    const shirt = await post('/v1/products', {
+      nameAr: 'قميص',
+      variants: ['S', 'M', 'L'].map((size, i) => ({
+        attributes: [{ name: 'المقاس', value: size }],
+        price: { currency: 'SYP', priceMinor: 1_000 },
+        barcodes: [{ kind: 'standard', code: `55500000000${String(i)}` }],
+      })),
+    });
+    const p = shirt.json<ProductDetail>();
+    const [item] = await preview([{ row: 1, barcode: '555000000000', priceMinor: 2_000 }]);
+    expect(item).toMatchObject({ status: 'change', modelSize: 3, variantId: p.variants[0]!.id });
+    const one = await post('/v1/prices/list/apply', {
+      changes: [{ variantId: p.variants[0]!.id, newMinor: 2_000 }],
+    });
+    expect(one.json<PriceListApplied>().changed).toBe(1);
+    const all = await post('/v1/prices/list/apply', {
+      changes: [{ variantId: p.variants[0]!.id, newMinor: 3_000, wholeModel: true }],
+    });
+    expect(all.json<PriceListApplied>().changed).toBe(3);
+    for (const v of p.variants) expect(await priceOf(v.id)).toBe('3000');
+  });
+
   it('flags a piece priced in another currency and changes nothing', async () => {
     const usd = await product('دواء بالدولار', 500, {}, { price: { currency: 'USD', priceMinor: 500 } });
     const [item] = await preview([{ row: 1, name: 'دواء بالدولار', priceMinor: 600 }]);

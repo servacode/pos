@@ -174,9 +174,9 @@ describe('products: create and read', () => {
         ],
       }),
     );
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(409);
     expect(res.json().error).toMatchObject({
-      code: 'validation_failed',
+      code: 'conflict',
       fields: {
         variants: 'الباركود 6281234500012 مستخدم في المنتج «شاي الربيع ٤٥٠ غ»',
         'variants.0.barcodes.0.code': 'الباركود 6281234500012 مستخدم في المنتج «شاي الربيع ٤٥٠ غ»',
@@ -435,6 +435,31 @@ describe('categories, units and tax rates', () => {
       version: 2,
       productCount: 1,
     });
+  });
+
+  it('refuses a second live category of the same name under the same parent, even renamed or restored into it', async () => {
+    const shirts = (await call('POST', '/v1/categories', { name: 'قمصان' })).json<Category>();
+    const dup = await call('POST', '/v1/categories', { name: ' قمصان ' });
+    expect(dup.statusCode).toBe(409);
+    expect(dup.json().error).toMatchObject({
+      code: 'conflict',
+      fields: { name: expect.stringContaining('قمصان') },
+    });
+    // The same name under another parent is fine
+    const kids = (await call('POST', '/v1/categories', { name: 'أطفال' })).json<Category>();
+    expect((await call('POST', '/v1/categories', { name: 'قمصان', parentId: kids.id })).statusCode).toBe(201);
+    const pants = (await call('POST', '/v1/categories', { name: 'بناطيل' })).json<Category>();
+    const rename = await call('PATCH', `/v1/categories/${pants.id}`, {
+      version: pants.version,
+      name: 'قمصان',
+    });
+    expect(rename.statusCode).toBe(409);
+    // An archived one frees its name, and may not come back over a live one
+    await call('PATCH', `/v1/categories/${shirts.id}`, { version: shirts.version, archived: true });
+    const again = (await call('POST', '/v1/categories', { name: 'قمصان' })).json<Category>();
+    expect(again.name).toBe('قمصان');
+    const restore = await call('PATCH', `/v1/categories/${shirts.id}`, { version: 2, archived: false });
+    expect(restore.statusCode).toBe(409);
   });
 
   it('units: two system units that rename but never archive, and the owner’s own', async () => {

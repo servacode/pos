@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   Avatar,
   CashierStatusBar,
+  CloseIcon,
   ConnectionPill,
   Logo,
   LogoMark,
@@ -37,6 +38,17 @@ export interface StatusBarProps {
   menu?: ReactNode;
   /** The subscription chip (trial ending, grace, read-only) */
   notice?: ReactNode;
+}
+
+/** Where the cashier's «understood» for the browser warning is kept (this browser, not the store's data). */
+export const INSTALL_HINT_KEY = 'serva.installHintDismissed';
+
+function installHintDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(INSTALL_HINT_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 /** A hairline between the bar's groups. */
@@ -82,6 +94,7 @@ export function StatusBar({
   notice,
 }: StatusBarProps) {
   const digits = useDigits();
+  const [hintHidden, setHintHidden] = useState(installHintDismissed);
   return (
     <CashierStatusBar>
       {/* The whole logo where the bar is wide; the mark alone where the store and the person need room */}
@@ -113,18 +126,34 @@ export function StatusBar({
         </>
       ) : null}
       <span className="flex-1" />
-      {persisted === false ? (
-        // Tab 15 › ما يراه الكاشير: the browser may wipe this device's data. The whole sentence on
-        // wide screens; the step to take, with the reason on hover, where the bar is short.
+      {persisted === false && !hintHidden ? (
+        // Tab 15 › ما يراه الكاشير: the browser may wipe this device's data. Said quietly (a soft
+        // chip, not a warning colour) and once understood it stays away: the whole sentence on wide
+        // screens; the step to take, with the reason on hover, where the bar is short.
         <span
           role="alert"
           title="هذا المتصفح قد يمسح البيانات، ثبّت التطبيق"
-          className="inline-flex min-h-8 min-w-0 items-center gap-1.5 rounded-full bg-warning-soft px-3 text-sm font-semibold text-warning-ink"
+          className="inline-flex min-h-8 min-w-0 items-center gap-1 rounded-full bg-surface-muted ps-3 pe-1 text-sm font-medium text-ink-muted"
         >
           <WarningIcon size={16} className="shrink-0" />
           <span className="truncate">
             <span className="sr-only 2xl:not-sr-only">هذا المتصفح قد يمسح البيانات، </span>ثبّت التطبيق
           </span>
+          <button
+            type="button"
+            aria-label="أخفِ تنبيه التثبيت"
+            onClick={() => {
+              setHintHidden(true);
+              try {
+                window.localStorage.setItem(INSTALL_HINT_KEY, '1');
+              } catch {
+                // The browser keeps nothing: it will say so again next time.
+              }
+            }}
+            className="grid size-8 shrink-0 place-items-center rounded-full transition-colors duration-120 ease-standard hover:bg-line"
+          >
+            <CloseIcon size={16} />
+          </button>
         </span>
       ) : null}
       {notice}

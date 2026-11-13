@@ -17,6 +17,7 @@ import {
   listOnlineOrders,
   placeHold,
   placeShopOrder,
+  requestOrderCancel,
   requestShopCode,
   saveOnlineStore,
   setOnlineOrderStatus,
@@ -70,6 +71,18 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
       slugOf(request.params),
       String((request.params as { token?: string }).token ?? '').slice(0, 64),
     ),
+  );
+
+  // A few a minute from one address: a customer asks once
+  app.post(
+    '/v1/shop/:slug/orders/:token/cancel-request',
+    { config: { rateLimit: { max: 10, timeWindow: 60_000 } } },
+    async (request) =>
+      requestOrderCancel(
+        app.db,
+        slugOf(request.params),
+        String((request.params as { token?: string }).token ?? '').slice(0, 64),
+      ),
   );
 
   // ─── The till: «احجز» ────────────────────────────────────────────────────

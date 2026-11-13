@@ -55,15 +55,18 @@ import {
   errorsFromServer,
   isEmptyUpdate,
   validateBuilt,
+  checkPendingCodes,
+  withGeneratedBarcodes,
   type Axis,
   type FieldErrors,
   type ProductDraft,
   type VariantDraft,
 } from './form';
-import type { SectorKey } from '@serva/core';
+import { normalizeArabic, type SectorKey } from '@serva/core';
 import { MODIFIER_SECTORS, SERIAL_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors';
 import { ModifiersEditor } from './ModifiersEditor';
 import { ImagesEditor } from './ImagesEditor';
+import { BulkApply } from './BulkApply';
 import { OptionsEditor } from './OptionsEditor';
 import { ButtonLink, Fact, SectionCard } from './parts';
 import { StockGrid } from './StockGrid';
@@ -186,6 +189,26 @@ function ProductCard() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
+  // A price of 0 is saved only after the owner says the item is free.
+  const [askFree, setAskFree] = useState(false);
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const freeOk = useRef(false);
+  // «ولّد باركود عند الحفظ»: a per-browser choice (the store has no setting for it yet).
+  const [autoBarcode, setAutoBarcodeState] = useState(() => {
+    try {
+      return localStorage.getItem('serva.autoBarcode') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setAutoBarcode = (on: boolean) => {
+    setAutoBarcodeState(on);
+    try {
+      localStorage.setItem('serva.autoBarcode', on ? '1' : '0');
+    } catch {
+      /* the choice just does not stay */
+    }
+  };
   const [notice, setNotice] = useState<string | null>(
     (location.state as { saved?: boolean } | null)?.saved
       ? 'حُفظ المنتج، ويصل إلى أجهزة الكاشير مع أول اتصال.'
@@ -294,8 +317,15 @@ function ProductCard() {
     setNotice(null);
     setConflict(null);
     setFormError(null);
-    const built = product ? buildUpdate(draft, product) : buildCreate(draft);
-    const clientErrors = validateBuilt(built, product ? 'update' : 'create');
+    const toSave: ProductDraft =
+      autoBarcode && draft.axes.length > 0
+        ? { ...draft, variants: withGeneratedBarcodes(draft.variants) }
+        : draft;
+    const built = product ? buildUpdate(toSave, product) : buildCreate(toSave);
+    const clientErrors = {
+      ...validateBuilt(built, product ? 'update' : 'create'),
+      ...checkPendingCodes(draft.variants),
+    };
     if (Object.keys(clientErrors).length > 0) {
       showErrors(clientErrors);
       return;
@@ -304,6 +334,18 @@ function ProductCard() {
       setNotice('لا تغييرات لحفظها.');
       return;
     }
+    const zero = draft.variants.filter((v) => !v.archived && v.priceMinor === 0);
+    if (zero.length > 0 && !freeOk.current) {
+      setAskFree(true);
+      setFormError(
+        zero.length === 1 && draft.variants.length === 1
+          ? 'سعر البيع صفر: سيُباع المنتج مجاناً. هل هذا مقصود؟'
+          : `سعر البيع صفر في ${String(zero.length)} من المتغيّرات: ستُباع مجاناً. هل هذا مقصود؟`,
+      );
+      return;
+    }
+    freeOk.current = false;
+    setAskFree(false);
     setErrors({});
     setSaving(true);
     try {
@@ -413,6 +455,12 @@ function ProductCard() {
   const archivedVariants = draft.variants.filter((v) => v.archived);
   const titled = draft.axes.length > 0 && liveVariants.some((v) => v.attributes.length > 0);
   const tree = categoryTree(lookups.categories.filter((c) => !c.archivedAt || c.id === draft.categoryId));
+  const needle = normalizeArabic(categoryQuery.trim());
+  const shownTree = needle
+    ? tree.filter(
+        (n) => n.category.id === draft.categoryId || normalizeArabic(n.category.name).includes(needle),
+      )
+    : tree;
   const archived = Boolean(product?.archivedAt);
   const barcodeCount = liveVariants.reduce((sum, v) => sum + v.barcodes.length, 0);
 
@@ -586,6 +634,16 @@ function ProductCard() {
               >
                 {titled ? (
                   <>
+                    {canManage ? (
+                      <BulkApply
+                        axes={draft.axes}
+                        variants={draft.variants}
+                        currency={liveVariants[0]?.currency ?? 'SYP'}
+                        autoBarcode={autoBarcode}
+                        onAutoBarcode={setAutoBarcode}
+                        onChange={(variants) => update({ variants })}
+                      />
+                    ) : null}
                     <VariantGrid currencies={currencies}>{liveVariants.map(variantBlock)}</VariantGrid>
                     <ul className="flex flex-col gap-1 text-sm text-ink-subtle">
                       <li>الأدنى للمفاصلة: الكاشير ينزل حتى هذا السعر دون رمز المدير.</li>
@@ -684,20 +742,30 @@ function ProductCard() {
 
               <SectionCard title="التنظيم" icon={<CategoriesIcon />}>
                 <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-1">
-                  <Select
-                    name="categoryId"
-                    label="التصنيف"
-                    value={draft.categoryId}
-                    onChange={(event) => update({ categoryId: event.target.value })}
-                    error={errors.categoryId}
-                  >
-                    <option value="">بلا تصنيف</option>
-                    {tree.map((node) => (
-                      <option key={node.category.id} value={node.category.id}>
-                        {categoryOptionLabel(node)}
-                      </option>
-                    ))}
-                  </Select>
+                  <div className="flex flex-col gap-2">
+                    {tree.length > 6 ? (
+                      <TextField
+                        label="ابحث في التصنيفات"
+                        placeholder="اكتب جزءاً من اسم التصنيف"
+                        value={categoryQuery}
+                        onChange={(event) => setCategoryQuery(event.target.value)}
+                      />
+                    ) : null}
+                    <Select
+                      name="categoryId"
+                      label="التصنيف"
+                      value={draft.categoryId}
+                      onChange={(event) => update({ categoryId: event.target.value })}
+                      error={errors.categoryId}
+                    >
+                      <option value="">بلا تصنيف</option>
+                      {shownTree.map((node) => (
+                        <option key={node.category.id} value={node.category.id}>
+                          {categoryOptionLabel(node)}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
                   <Select
                     name="type"
                     label="نوع المنتج"
@@ -780,6 +848,18 @@ function ProductCard() {
             {formError ? (
               <Alert tone="error" className="shadow-e2">
                 {formError}
+                {askFree ? (
+                  <Button
+                    variant="secondary"
+                    className="mt-2"
+                    onClick={() => {
+                      freeOk.current = true;
+                      formRef.current?.requestSubmit();
+                    }}
+                  >
+                    نعم، مجاني: احفظ
+                  </Button>
+                ) : null}
               </Alert>
             ) : null}
             {canManage ? (

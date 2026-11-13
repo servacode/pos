@@ -3,6 +3,7 @@ import { useId, useRef, type ReactNode } from 'react';
 import { cn } from './cn';
 import { CONTROL_HEIGHT, useDensity } from './context';
 import { nextIndex } from './rovingFocus';
+import { ScrollStrip } from './Scroller';
 import { SEGMENT_SIZE, segmentClass, segmentTrackClass } from './SegmentedControl';
 
 export interface TabItem<V extends string> {
@@ -120,7 +121,7 @@ export function Tabs<V extends string>({
 
   return (
     <div className={cn('flex flex-col gap-4', className)}>
-      {underline ? <div className="scrollbar-none overflow-x-auto">{list}</div> : list}
+      {underline ? <ScrollStrip>{list}</ScrollStrip> : list}
       {active ? (
         <div
           role="tabpanel"

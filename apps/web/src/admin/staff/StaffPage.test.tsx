@@ -40,7 +40,11 @@ const ownerRow = person({
   hasLogin: true,
 });
 
-function open(initial: StaffMember[] = [ownerRow, person()], me: MeResponse = owner()) {
+function open(
+  initial: StaffMember[] = [ownerRow, person()],
+  me: MeResponse = owner(),
+  shared: string[] = [],
+) {
   let staff = initial;
   const list = (): StaffListResponse => ({
     staff,
@@ -48,6 +52,9 @@ function open(initial: StaffMember[] = [ownerRow, person()], me: MeResponse = ow
       { key: 'owner', name: 'المالك', permissions: [], pinLength: 6, assignable: false },
       { key: 'manager', name: 'مدير الفرع', permissions: [], pinLength: 6, assignable: true },
       { key: 'cashier', name: 'كاشير', permissions: [], pinLength: 4, assignable: true },
+      { key: 'waiter', name: 'نادل', permissions: [], pinLength: 4, assignable: true },
+      { key: 'pharmacist', name: 'صيدلاني', permissions: [], pinLength: 4, assignable: true },
+      { key: 'accountant', name: 'محاسب', permissions: [], pinLength: 4, assignable: true },
     ],
     branches: [
       { id: 'branch-1', name: 'الفرع الرئيسي' },
@@ -58,6 +65,7 @@ function open(initial: StaffMember[] = [ownerRow, person()], me: MeResponse = ow
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: me }),
     'GET /v1/staff': () => ({ status: 200, body: list() }),
+    'POST /v1/staff/pin-check': () => ({ status: 200, body: { sharedWith: shared } }),
     'POST /v1/staff': (r: MockRequest) => {
       const body = r.body as { fullName: string; pin: string };
       if (body.pin === '1234')
@@ -171,5 +179,36 @@ describe('«الموظفون»', () => {
   it('shows the menu entry only to whoever holds users.manage', () => {
     expect(navFor(owner()).some((e) => e.to === '/staff')).toBe(true);
     expect(navFor(makeMe()).some((e) => e.to === '/staff')).toBe(false);
+  });
+
+  it('offers the waiter to a store with a café and the pharmacist only to a pharmacy', async () => {
+    const base = owner();
+    const withSectors = (sectors: MeResponse['tenant']['sectors']): MeResponse => ({
+      ...base,
+      tenant: { ...base.tenant, sectors },
+    });
+    const first = open([ownerRow], withSectors(['cafe']));
+    await first.user.click(await screen.findByRole('button', { name: 'موظف جديد' }));
+    const roles = within(await screen.findByLabelText('الدور'));
+    expect(roles.getByRole('option', { name: 'نادل' })).toBeInTheDocument();
+    expect(roles.getByRole('option', { name: 'محاسب' })).toBeInTheDocument();
+    expect(roles.queryByRole('option', { name: 'صيدلاني' })).toBeNull();
+  });
+
+  it('hides the waiter from a clothing store', async () => {
+    const base = owner();
+    const { user } = open([ownerRow], { ...base, tenant: { ...base.tenant, sectors: ['clothing'] } });
+    await user.click(await screen.findByRole('button', { name: 'موظف جديد' }));
+    const roles = within(await screen.findByLabelText('الدور'));
+    expect(roles.queryByRole('option', { name: 'نادل' })).toBeNull();
+    expect(roles.getByRole('option', { name: 'كاشير' })).toBeInTheDocument();
+  });
+
+  it('warns, without blocking, when the till code is already used by someone', async () => {
+    const { user } = open([ownerRow, person()], owner(), ['سامر الكاشير']);
+    await user.click(await screen.findByRole('button', { name: 'موظف جديد' }));
+    await user.type(screen.getByLabelText('رمز الدخول للكاشير'), '4829');
+    expect(await screen.findByText(/هذا الرمز يستعمله أيضاً: سامر الكاشير/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^احفظ|أضف/ })).toBeEnabled();
   });
 });

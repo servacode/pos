@@ -55,6 +55,12 @@ export const SETTINGS_SECTIONS = {
     description: 'استورد منتجاتك وزبائنك من ملف، أو صدّر كل بيانات المتجر.',
     icon: ArchiveIcon,
   },
+  till: {
+    id: 'store-till',
+    title: 'الصندوق',
+    description: 'مدة قبول المرتجع، ورقم الموافقة عند الدفع بالبطاقة.',
+    icon: CashIcon,
+  },
   pharmacy: {
     id: 'store-pharmacy',
     title: 'الصيدلية',

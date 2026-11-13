@@ -6,6 +6,7 @@ import type {
   PlatformSettings,
   PlatformStore,
 } from '@serva/core';
+import { COUNT_NOUNS, countNoun, type CountForms } from '@serva/core';
 import {
   AdminShell,
   Alert,
@@ -142,7 +143,16 @@ function usePlatform(token: string, onSignOut: () => void) {
 }
 
 /** The panel's four parts, in the sidebar: their names, pictures and the line under each title. */
-const SECTIONS: readonly { value: string; label: string; icon: Icon; description: string }[] = [
+interface PanelSection {
+  value: string;
+  label: string;
+  /** The page's own heading when the sidebar's name is shortened */
+  title?: string;
+  icon: Icon;
+  description: string;
+}
+
+const SECTIONS: readonly PanelSection[] = [
   {
     value: 'payments',
     label: 'الدفعات',
@@ -169,7 +179,8 @@ const SECTIONS: readonly { value: string; label: string; icon: Icon; description
   },
   {
     value: 'legal',
-    label: 'بيانات الشركة والصفحات القانونية',
+    label: 'بيانات الشركة',
+    title: 'بيانات الشركة والصفحات القانونية',
     icon: BookIcon,
     description: 'اسم الشركة وصاحب المشروع وعنوانها ووسائل التواصل والمزوّدون، كما تظهر في الشروط والخصوصية.',
   },
@@ -238,7 +249,7 @@ function Panel({ token, onSignOut }: { token: string; onSignOut: () => void }) {
         }
       >
         <div className="flex flex-col gap-6">
-          <PageHeader title={section.label} description={section.description} />
+          <PageHeader title={section.title ?? section.label} description={section.description} />
           {tab === 'stores' ? (
             <Stores call={call} />
           ) : tab === 'plans' ? (
@@ -623,16 +634,15 @@ const centsText = (v: number | null) => (v === null ? '' : String(v / 100));
 const centsOf = (t: string) => (t.trim() === '' ? null : Math.round(Number(t) * 100) || null);
 
 /** What a plan allows, in the platform's limit keys, in the words of the store's plan card. */
-const LIMITS: readonly { key: string; one: string; many: (count: string) => string; unlimited: string }[] = [
-  { key: 'branches', one: 'فرع واحد', many: (n) => `حتى ${n} فروع`, unlimited: 'فروع بلا حد' },
+const LIMITS: readonly { key: string; forms: CountForms; unlimited: string }[] = [
+  { key: 'branches', forms: COUNT_NOUNS.branch, unlimited: 'فروع بلا حد' },
   {
     key: 'registers',
-    one: 'جهاز كاشير واحد',
-    many: (n) => `حتى ${n} أجهزة كاشير`,
+    forms: { one: 'جهاز كاشير واحد', two: 'جهازان للكاشير', few: 'أجهزة كاشير', many: 'جهازاً للكاشير' },
     unlimited: 'أجهزة كاشير بلا حد',
   },
-  { key: 'users', one: 'مستخدم واحد', many: (n) => `حتى ${n} مستخدمين`, unlimited: 'مستخدمون بلا حد' },
-  { key: 'products', one: 'صنف واحد', many: (n) => `حتى ${n} صنف`, unlimited: 'أصناف بلا حد' },
+  { key: 'users', forms: COUNT_NOUNS.user, unlimited: 'مستخدمون بلا حد' },
+  { key: 'products', forms: COUNT_NOUNS.item, unlimited: 'أصناف بلا حد' },
 ];
 
 const countText = new Intl.NumberFormat('ar-u-nu-latn');
@@ -642,7 +652,9 @@ function limitLines(plan: PlanRow): string[] {
     if (!(limit.key in plan.limits)) return [];
     const value = plan.limits[limit.key];
     if (value === null || value === undefined) return [limit.unlimited];
-    return [value === 1 ? limit.one : limit.many(countText.format(value))];
+    return [
+      value === 1 ? limit.forms.one : `حتى ${countNoun(value, limit.forms, countText.format(value), true)}`,
+    ];
   });
 }
 

@@ -29,7 +29,7 @@ export {
 } from './Button';
 export { TextLink, textLinkClass } from './TextLink';
 
-export { TextField, type TextFieldProps } from './TextField';
+export { TextField, FieldButton, type TextFieldProps, type FieldButtonProps } from './TextField';
 export { PasswordField } from './PasswordField';
 export {
   canonicalNumber,
@@ -64,6 +64,7 @@ export { Card, CardHeader, IconChip, StatTile, type CardProps, type StatTileProp
 export { PageHeader, type PageHeaderProps } from './PageHeader';
 export { DataTable, type DataColumn, type DataTableProps } from './DataTable';
 export { Tabs, type TabItem, type TabsProps } from './Tabs';
+export { ScrollStrip, SnapDots, SnapRow } from './Scroller';
 export { Dialog, Sheet, type DialogProps, type SheetProps } from './Dialog';
 export { TOAST_DURATION_MS, ToastProvider, useToast, type ToastOptions, type ToastTone } from './Toast';
 export { Tooltip, type FloatingSide, type TooltipProps } from './Tooltip';

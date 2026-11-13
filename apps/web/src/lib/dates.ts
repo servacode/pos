@@ -87,3 +87,31 @@ export function zonedDateTime(iso: string, timeZone: string, digits: Digits = 'l
   const ms = Date.parse(iso);
   return `${dayText(isoDay(ms, timeZone), digits)}، ${zonedClock(iso, timeZone, digits)}`;
 }
+
+/** «31/10/2026» for an ISO day «2026-10-31»: the field format, day first, whatever the browser's locale. */
+export function slashDay(iso: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : '';
+}
+
+/**
+ * The ISO day of what was typed: «31/10/2026», «31-10-2026», «٣١/١٠/٢٠٢٦», «1 5 2026» (day, month,
+ * year) or already «2026-10-31». Null when it is not a real calendar day.
+ */
+export function parseDayInput(text: string): string | null {
+  const latin = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).trim();
+  let year: number;
+  let month: number;
+  let day: number;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(latin);
+  const local = /^(\d{1,2})[\s/.-](\d{1,2})[\s/.-](\d{4})$/.exec(latin);
+  if (iso) [year, month, day] = [Number(iso[1]), Number(iso[2]), Number(iso[3])] as [number, number, number];
+  else if (local)
+    [day, month, year] = [Number(local[1]), Number(local[2]), Number(local[3])] as [number, number, number];
+  else return null;
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
+    return null;
+  }
+  return `${year}-${pad(month)}-${pad(day)}`;
+}

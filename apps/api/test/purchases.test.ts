@@ -154,6 +154,39 @@ describe('a purchase', () => {
     expect(b.get('1300')?.base).toBe(40_000);
   });
 
+  it('refuses a payment above what is owed until it is confirmed as an advance, and absurd amounts', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const milk = await makeProduct(app, store, 'حليب', 25_000);
+    await buy(store, {
+      supplierId: s.id,
+      date: '2026-10-30',
+      payment: 'credit',
+      lines: [{ variantId: milk.variantId, qty: PIECE, costMinor: 20_000 }],
+    });
+    const pay = (extra: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/supplier-payments',
+        headers: as(store),
+        payload: { supplierId: s.id, date: '2026-10-31', method: 'cash', ...extra },
+      });
+    const over = await pay({ amountMinor: 50_000 });
+    expect(over.statusCode).toBe(409);
+    expect(over.json().error.code).toBe('conflict');
+    expect(over.json().error.fields.amountMinor).toContain('دفعة مقدّمة');
+    const absurd = await pay({ amountMinor: 8_829_999_900_000_000 });
+    expect(absurd.statusCode).toBe(400);
+    expect(absurd.json().error.fields.amountMinor).toContain('كبير جداً');
+    const b = await balances(store.tenantId);
+    expect(b.get('2100')?.base).toBe(-20_000);
+    const ok = await pay({ amountMinor: 50_000, advance: true });
+    expect(ok.statusCode, ok.body).toBe(201);
+    const nothing = await pay({ amountMinor: 1 });
+    expect(nothing.statusCode).toBe(409);
+    expect(nothing.json().error.fields.amountMinor).toContain('لا شيء مستحق');
+  });
+
   it('refuses a service, an unknown supplier and the same item twice, in Arabic', async () => {
     const store = await openStore(app);
     const milk = await makeProduct(app, store, 'حليب', 25_000);

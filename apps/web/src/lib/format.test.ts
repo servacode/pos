@@ -21,4 +21,13 @@ describe('firstName', () => {
   it('returns the first word of a full name', () => {
     expect(firstName('  أحمد الخطيب ')).toBe('أحمد');
   });
+
+  it('keeps «أبو», «أم» and «عبد» with the word after them', () => {
+    expect(firstName('أبو سامر الحلبي')).toBe('أبو سامر');
+    expect(firstName('أم خالد')).toBe('أم خالد');
+    expect(firstName('عبد الله العلي')).toBe('عبد الله');
+    expect(firstName('عبدالله العلي')).toBe('عبدالله');
+    // Nothing after the prefix: the prefix alone is all there is
+    expect(firstName('أبو')).toBe('أبو');
+  });
 });

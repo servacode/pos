@@ -48,18 +48,30 @@ export function Sparkline({
     const low = Math.min(...known);
     const range = Math.max(...known) - low;
     const rtl = direction === 'rtl';
+    // Nothing before the latest day: a line climbing from zero to it would only be the jump between two
+    // days, not a trend. A level dashed baseline says «no history», with the latest value marked on it.
+    const flat = known.length === n && known.slice(0, -1).every((v) => v === 0) && (known.at(-1) ?? 0) > 0;
     const points: { x: number; y: number }[] = [];
     values.forEach((value, index) => {
       if (!isValue(value)) return;
       const t = index / (n - 1);
-      const y = range === 0 ? HEIGHT / 2 : INSET + (1 - (value - low) / range) * (HEIGHT - 2 * INSET);
+      const y = flat
+        ? HEIGHT / 2
+        : range === 0
+          ? HEIGHT / 2
+          : INSET + (1 - (value - low) / range) * (HEIGHT - 2 * INSET);
       points.push({ x: (rtl ? 1 - t : t) * WIDTH, y });
     });
     const first = points[0];
     const last = points[points.length - 1];
     if (!first || !last) return null;
     const line = points.map((p, j) => `${j ? 'L' : 'M'}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join('');
-    return { line, fill: `${line}L${last.x.toFixed(2)} ${HEIGHT}L${first.x.toFixed(2)} ${HEIGHT}Z`, last };
+    return {
+      line,
+      fill: `${line}L${last.x.toFixed(2)} ${HEIGHT}L${first.x.toFixed(2)} ${HEIGHT}Z`,
+      last,
+      flat,
+    };
   }, [values, direction]);
 
   if (!drawing) return null;
@@ -77,7 +89,7 @@ export function Sparkline({
         preserveAspectRatio="none"
         className={cn('absolute inset-0 size-full overflow-visible', colour.text)}
       >
-        {area ? (
+        {area && !drawing.flat ? (
           <>
             <defs>
               <linearGradient id={fillId} x1="0" x2="0" y1="0" y2="1">
@@ -91,8 +103,9 @@ export function Sparkline({
         <path
           d={drawing.line}
           fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
+          stroke={drawing.flat ? 'var(--color-line-control)' : 'currentColor'}
+          strokeWidth={drawing.flat ? 1.5 : 2}
+          strokeDasharray={drawing.flat ? '3 4' : undefined}
           strokeLinecap="round"
           strokeLinejoin="round"
           vectorEffect="non-scaling-stroke"

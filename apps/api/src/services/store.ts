@@ -1,6 +1,7 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import {
   DEFAULT_PHARMACY_SETTINGS,
+  type TillSettings,
   type CurrencyCode,
   type OnboardingInput,
   type PharmacySettings,
@@ -75,6 +76,7 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
     pharmacy: tenant.sectors.includes('pharmacy')
       ? (settings.pharmacy ?? DEFAULT_PHARMACY_SETTINGS)
       : (settings.pharmacy ?? null),
+    till: settings.till ?? null,
   };
 }
 
@@ -285,6 +287,34 @@ export function updateLoyalty(
         entity: 'tenant_settings',
         entityId: auth.tenantId,
         changes: changesOf(before, after, ['loyalty']),
+      },
+      meta,
+    );
+    return after;
+  });
+}
+
+/** «الصندوق»: the return window and whether a card payment needs the terminal's approval number. */
+export function updateTill(
+  db: Database,
+  auth: AccessClaims,
+  input: TillSettings,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'settings.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ till: input });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.till_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['till']),
       },
       meta,
     );

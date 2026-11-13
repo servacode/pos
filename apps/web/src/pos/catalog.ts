@@ -53,6 +53,11 @@ export interface CatalogItem {
   controlled?: boolean;
   /** The piece's thumbnail on the grid (03 › الألبسة: صورة القطعة على الكاشير) */
   imageUrl?: string | null;
+  /**
+   * What this branch has of the piece, in thousandths of its unit, as last pulled (the device's own
+   * branch only); null when no level was pulled for it. The till shows it and never blocks a sale on it.
+   */
+  stockQty?: number | null;
   /** Each piece is sold by its serial number or IMEI (03 › الإلكترونيات) */
   tracksSerial?: boolean;
   warrantyMonths?: number | null;
@@ -171,6 +176,11 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     return path;
   };
 
+  const stock = new Map<string, number>();
+  for (const level of sets.stock_levels ?? []) {
+    stock.set(level.variantId, (stock.get(level.variantId) ?? 0) + level.qty);
+  }
+
   const items: CatalogItem[] = [];
   const byVariant = new Map<string, CatalogItem>();
   const variants = [...sets.variants].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -196,6 +206,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       requiresPrescription: product.requiresPrescription ?? false,
       controlled: product.controlled ?? false,
       imageUrl: variant.imageUrl ?? null,
+      stockQty: stock.get(variant.id) ?? null,
       tracksSerial: product.tracksSerial ?? false,
       warrantyMonths: product.warrantyMonths ?? null,
       unit: units.get(product.unitId) ?? null,

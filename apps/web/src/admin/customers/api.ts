@@ -1,4 +1,12 @@
-import type { CustomerDetail, CustomerInput, CustomerListResponse, CustomerPurchases } from '@serva/core';
+import type {
+  CustomerDetail,
+  CustomerInput,
+  CustomerListResponse,
+  CustomerMoneyResult,
+  CustomerOpeningDebtInput,
+  CustomerPaymentInput,
+  CustomerPurchases,
+} from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
 /** `GET /v1/customers`: every customer with what they owe (customers.view) */
@@ -24,3 +32,15 @@ export const updateCustomer = (id: string, input: Partial<CustomerInput>) =>
 /** `GET /v1/customers/{id}/purchases`: the sizes they buy most and their latest invoices */
 export const getPurchases = (id: string) =>
   apiFetch<CustomerPurchases>(`/v1/customers/${id}/purchases`, { auth: true });
+
+/** `POST /v1/customers/{id}/payments`: a payment received at the desk (receipt.create) */
+export const receivePayment = (id: string, input: CustomerPaymentInput) =>
+  apiFetch<CustomerMoneyResult>(`/v1/customers/${id}/payments`, { method: 'POST', body: input, auth: true });
+
+/** `POST /v1/customers/{id}/opening-debt`: a debt from before the system (accounting.post) */
+export const openDebt = (id: string, input: CustomerOpeningDebtInput) =>
+  apiFetch<CustomerMoneyResult>(`/v1/customers/${id}/opening-debt`, {
+    method: 'POST',
+    body: input,
+    auth: true,
+  });

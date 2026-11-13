@@ -1,5 +1,6 @@
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import type { OptionValuesResponse } from '@serva/core';
+import { COUNT_NOUNS, countNoun } from '@serva/core';
 import {
   AddIcon,
   Button,
@@ -151,7 +152,7 @@ export const OptionsEditor = memo(function OptionsEditor({
               )}
               role="status"
             >
-              {variantCount > 1 ? `${variantCount} متغيّرات` : 'أضف القيم لتظهر المتغيّرات'}
+              {variantCount > 1 ? countNoun(variantCount, COUNT_NOUNS.variant) : 'أضف القيم لتظهر المتغيّرات'}
             </p>
           </div>
         </>

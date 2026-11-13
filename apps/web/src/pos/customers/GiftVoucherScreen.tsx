@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { GIFT_VOUCHER_METHODS, type GiftVoucherPayload } from '@serva/core/contracts/documents';
 import { CURRENCIES } from '@serva/core/currencies';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
@@ -69,6 +69,11 @@ export function GiftVoucherScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedGiftVoucher | null>(null);
+  // The amount is the first thing typed: the field is focused when the screen opens and after each voucher
+  const amountRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!saved) amountRef.current?.focus();
+  }, [saved]);
 
   const minor = parseAmount(amount, base);
   const ready = minor !== null && minor > 0 && (method === 'cash' || reference.trim().length > 0);
@@ -159,6 +164,7 @@ export function GiftVoucherScreen({
             className="flex flex-col gap-5 rounded-card border border-line bg-surface p-5 shadow-e1 sm:p-6"
           >
             <TextField
+              ref={amountRef}
               label="المبلغ"
               inputMode="decimal"
               dir="ltr"

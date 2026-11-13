@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { Category, ProductListItem, ProductListQuery } from '@serva/core';
+import { COUNT_NOUNS, countNoun, getCurrency } from '@serva/core';
 import {
   AddIcon,
   Alert,
@@ -24,6 +25,7 @@ import {
   SegmentedControl,
   Select,
   Skeleton,
+  SnapRow,
   StatTile,
   StatusChip,
   StockIcon,
@@ -46,6 +48,7 @@ import {
   searchTerm,
 } from '../catalog/catalog';
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
+import { downloadCsv } from '../exportCsv';
 import { ButtonLink } from './parts';
 
 /** Typing pauses this long before the list is asked again. */
@@ -68,6 +71,23 @@ interface Filters {
 }
 
 const NO_FILTERS: Filters = { q: '', categoryId: '', status: 'active' };
+
+/** A phone-width screen (under Tailwind's `sm`): the list becomes cards, as a table does not fit. */
+function useIsPhone(): boolean {
+  const query = '(max-width: 639px)';
+  const [phone, setPhone] = useState(
+    () => typeof window.matchMedia === 'function' && window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(query);
+    const change = () => setPhone(media.matches);
+    change();
+    media.addEventListener('change', change);
+    return () => media.removeEventListener('change', change);
+  }, []);
+  return phone;
+}
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -241,6 +261,8 @@ function ProductsList() {
   const navigate = useNavigate();
   const canManage = canManageCatalog(me);
   const digits = me.settings.numberFormat;
+  const phone = useIsPhone();
+  const [exporting, setExporting] = useState(false);
   const [params] = useSearchParams();
   // «التصنيفات» links here with ?category=
   const [filters, setFilters] = useState<Filters>(() => ({
@@ -290,6 +312,42 @@ function ProductsList() {
       // The filter is a convenience: the list works without it.
       .catch(() => setCategories([]));
   }, []);
+
+  /** «صدّر Excel/CSV»: every page of the current search, not only what is on screen. */
+  async function exportAll() {
+    setExporting(true);
+    try {
+      const all: ProductListItem[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: Awaited<ReturnType<typeof listProducts>> = await listProducts({
+          ...(JSON.parse(queryKey) as ProductListQuery),
+          ...(cursor ? { cursor } : {}),
+          limit: 200,
+        });
+        all.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor && all.length < 50_000);
+      downloadCsv(
+        'products',
+        ['المنتج', 'الباركود', 'التصنيف', 'المتغيّرات', 'العملة', 'أدنى سعر', 'أعلى سعر', 'الكمية'],
+        all.map((i) => [
+          i.nameAr,
+          i.barcode ?? '',
+          i.categoryName ?? '',
+          i.variantCount,
+          i.price?.currency ?? '',
+          i.price ? i.price.minMinor / 10 ** getCurrency(i.price.currency).decimals : '',
+          i.price ? i.price.maxMinor / 10 ** getCurrency(i.price.currency).decimals : '',
+          i.type === 'service' ? '' : i.stockQty / 1000,
+        ]),
+      );
+    } catch (error) {
+      setNotice({ tone: 'error', text: errorMessage(error) });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function loadMore() {
     if (!nextCursor) return;
@@ -356,7 +414,9 @@ function ProductsList() {
             </Link>
             {item.variantCount > 1 || item.barcode ? (
               <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-subtle">
-                {item.variantCount > 1 ? <span>{item.variantCount} متغيّرات</span> : null}
+                {item.variantCount > 1 ? (
+                  <span>{countNoun(item.variantCount, COUNT_NOUNS.variant)}</span>
+                ) : null}
                 {item.variantCount > 1 && item.barcode ? <span aria-hidden="true">·</span> : null}
                 {item.barcode ? (
                   <bdi dir="ltr" className="num">
@@ -464,6 +524,9 @@ function ProductsList() {
 
   const addProduct = (
     <div className="flex flex-wrap items-center gap-2">
+      <Button variant="secondary" loading={exporting} onClick={() => void exportAll()}>
+        صدّر Excel/CSV
+      </Button>
       <ButtonLink to="/import?type=products" icon={<PackageOpenIcon />}>
         استيراد من Excel
       </ButtonLink>
@@ -486,7 +549,7 @@ function ProductsList() {
 
         {showSummary ? (
           // On a phone the tiles slide sideways in one row instead of filling the screen.
-          <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:pb-0">
+          <SnapRow className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:pb-0">
             <StatTile
               className={TILE}
               label="المنتجات"
@@ -542,7 +605,7 @@ function ProductsList() {
                 ) : undefined
               }
             />
-          </div>
+          </SnapRow>
         ) : null}
 
         <div className="flex flex-col gap-4">
@@ -608,36 +671,73 @@ function ProductsList() {
             </Alert>
           ) : null}
 
-          <DataTable
-            caption="المنتجات"
-            columns={columns}
-            rows={items ?? []}
-            rowKey={(item) => item.id}
-            loading={items === null && !loadError}
-            error={loadError ?? undefined}
-            onRetry={() => void load()}
-            empty={
-              filtered ? (
-                <EmptyState
-                  icon={ProductsIcon}
-                  title="لا منتجات تطابق بحثك."
-                  description="جرّب كلمة أخرى أو تصنيفاً آخر."
-                  action={
-                    <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
-                      امسح البحث والتصفية
-                    </Button>
-                  }
-                />
-              ) : (
-                <EmptyState
-                  icon={ProductsIcon}
-                  title="لا منتجات بعد."
-                  description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
-                  action={canManage ? addProduct : null}
-                />
-              )
-            }
-          />
+          {phone && items && items.length > 0 ? (
+            <ul aria-label="المنتجات" className="flex flex-col gap-3">
+              {items.map((item) => {
+                const cell = (key: string) => columns.find((c) => c.key === key)?.cell?.(item);
+                return (
+                  <li
+                    key={item.id}
+                    className="flex flex-col gap-3 rounded-card border border-line bg-surface p-3 shadow-e1"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">{cell('name')}</div>
+                      {cell('actions')}
+                    </div>
+                    <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-xs text-ink-subtle">سعر البيع</dt>
+                        <dd className="font-semibold">{cell('price')}</dd>
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-xs text-ink-subtle">الكمية</dt>
+                        <dd>{cell('stock')}</dd>
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-xs text-ink-subtle">التصنيف</dt>
+                        <dd>{cell('category')}</dd>
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        <dt className="text-xs text-ink-subtle">الحالة</dt>
+                        <dd>{cell('status')}</dd>
+                      </div>
+                    </dl>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <DataTable
+              caption="المنتجات"
+              columns={columns}
+              rows={items ?? []}
+              rowKey={(item) => item.id}
+              loading={items === null && !loadError}
+              error={loadError ?? undefined}
+              onRetry={() => void load()}
+              empty={
+                filtered ? (
+                  <EmptyState
+                    icon={ProductsIcon}
+                    title="لا منتجات تطابق بحثك."
+                    description="جرّب كلمة أخرى أو تصنيفاً آخر."
+                    action={
+                      <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
+                        امسح البحث والتصفية
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    icon={ProductsIcon}
+                    title="لا منتجات بعد."
+                    description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
+                    action={canManage ? addProduct : null}
+                  />
+                )
+              }
+            />
+          )}
 
           {nextCursor && items ? (
             <div className="flex justify-center">

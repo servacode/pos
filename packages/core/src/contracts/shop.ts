@@ -124,6 +124,10 @@ export interface ShopProductCard {
   /** The running offer's name («تنزيلات الصيف −30٪»); null: none */
   offer: string | null;
   available: boolean;
+  /** When the piece was added to the catalogue: «الأحدث» */
+  createdAt: string;
+  /** The options of the pieces on the shelf («المقاس»، «اللون») with their values: the shop's filters */
+  options: { name: string; values: string[] }[];
 }
 
 export interface ShopHome {
@@ -150,6 +154,8 @@ export interface ShopProduct {
     /** Before the markdown or offer, struck through; null: none */
     wasPriceMinor: number | null;
     available: boolean;
+    /** «بقي 2 فقط»: the pieces left, only when 3 or fewer are (the shop never gives a bigger count) */
+    left: number | null;
   }[];
   /** The running offer's name on any of its pieces; null: none */
   offer: string | null;
@@ -178,6 +184,7 @@ export type ShopOrderInput = z.input<typeof shopOrderInput>;
 /**
  *   POST /v1/shop/{slug}/orders/code   { phone } → ShopCodeSent   (the shop's order mode is «shop»)
  *   GET  /v1/shop/{slug}/orders/{token}            → ShopOrderTrack
+ *   POST /v1/shop/{slug}/orders/{token}/cancel-request → ShopOrderTrack   (a pending order only)
  */
 export const shopCodeInput = z.object({ phone: phoneSchema });
 export interface ShopCodeSent {
@@ -190,7 +197,10 @@ export interface ShopCodeSent {
 export interface ShopOrderTrack {
   number: string;
   status: OnlineOrderStatus;
+  customerName: string;
   fulfilment: 'delivery' | 'pickup';
+  /** The delivery area the customer picked; null: none (or a pickup) */
+  area: string | null;
   currency: CurrencyCode;
   /** Prices are null when the store hides them (showPrices false) */
   showPrices: boolean;
@@ -217,7 +227,11 @@ export interface ShopOrderPlaced {
   whatsappUrl: string | null;
 }
 
-export const ONLINE_ORDER_STATUSES = ['pending', 'accepted', 'rejected', 'done'] as const;
+/**
+ * cancel_requested: the customer asked, from the order's page, to cancel it while it was still
+ * pending; the owner sees it in the orders box and agrees (rejected) or keeps the order (accepted).
+ */
+export const ONLINE_ORDER_STATUSES = ['pending', 'cancel_requested', 'accepted', 'rejected', 'done'] as const;
 export type OnlineOrderStatus = (typeof ONLINE_ORDER_STATUSES)[number];
 
 export interface OnlineOrder {

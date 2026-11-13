@@ -28,6 +28,7 @@ import {
   cn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { categoryExamples } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { createCategory, listCategories, updateCategory } from '../catalog/api';
@@ -411,7 +412,9 @@ export function CategoriesPage() {
           <EmptyState
             icon={CategoriesIcon}
             title="لا تصنيفات بعد."
-            description="التصنيفات مثل «ألبان وأجبان» و«منظفات» تسرّع البحث على الكاشير."
+            description={`التصنيفات تسرّع البحث على الكاشير، مثل ${categoryExamples(me.tenant.sectors)
+              .map((n) => `«${n}»`)
+              .join('، ')}.`}
             action={
               canManage ? (
                 <Button icon={<AddIcon />} onClick={() => setEditing({ mode: 'new', parentId: '' })}>

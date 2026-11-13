@@ -41,6 +41,7 @@ import { listAccounts } from '../reports/api';
 import { useReport } from '../reports/useReport';
 import { createExpense, listExpenses, voidExpense } from './api';
 import { expensesCsv } from './csv';
+import { DateField } from '../../lib/DateField';
 
 /** The default 61xx accounts, used when the caller may not read the chart (no accounting.view). */
 const DEFAULT_EXPENSE_ACCOUNTS: Pick<AccountRow, 'code' | 'name'>[] = [
@@ -155,13 +156,12 @@ function NewExpense({
       >
         {error && Object.keys(fields).length === 0 ? <Alert tone="error">{error}</Alert> : null}
         <div className="grid gap-4 sm:grid-cols-2">
-          <TextField
+          <DateField
             label="التاريخ"
-            type="date"
-            dir="ltr"
             value={date}
             max={today}
-            onChange={(e) => e.target.value && setDate(e.target.value)}
+            required
+            onChange={setDate}
             error={fields.date}
           />
           <Select

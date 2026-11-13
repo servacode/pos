@@ -7,6 +7,8 @@ import { HomePage } from '../pages/HomePage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
+import { SectorGate } from './SectorGate';
+import { CHEQUE_SECTORS, EXPIRY_SECTORS, HALL_SECTORS, SERIAL_SECTORS } from '../lib/sectors';
 
 // The devices page carries the QR generator: loaded when opened, not with every admin page.
 const DevicesPage = lazy(() => import('./devices/DevicesPage').then((m) => ({ default: m.DevicesPage })));
@@ -17,6 +19,9 @@ const LabelsPage = lazy(() => import('./labels/LabelsPage').then((m) => ({ defau
 const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ default: m.SerialsPage })));
 const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
+);
+const SalesReportPage = lazy(() =>
+  import('./reports/SalesReportPage').then((m) => ({ default: m.SalesReportPage })),
 );
 const CancellationsPage = lazy(() =>
   import('./reports/CancellationsPage').then((m) => ({ default: m.CancellationsPage })),
@@ -69,6 +74,7 @@ const InventoryPage = lazy(() =>
 const SubscriptionPage = lazy(() =>
   import('./subscription/SubscriptionPage').then((m) => ({ default: m.SubscriptionPage })),
 );
+const BranchesPage = lazy(() => import('./branches/BranchesPage').then((m) => ({ default: m.BranchesPage })));
 const StaffPage = lazy(() => import('./staff/StaffPage').then((m) => ({ default: m.StaffPage })));
 const PinPage = lazy(() => import('./staff/PinPage').then((m) => ({ default: m.PinPage })));
 // The reports: «مبيعات اليوم», the shifts and their close report, «شاشة الدليل», and the books.
@@ -123,27 +129,64 @@ export function AdminApp() {
           <Route path="/products/:id" element={page(<ProductRoute />)} />
           <Route path="/categories" element={page(<CategoriesPage />)} />
           <Route path="/promotions" element={page(<PromotionsPage />)} />
-          <Route path="/cheques" element={page(<ChequesPage />)} />
+          <Route
+            path="/cheques"
+            element={page(
+              <SectorGate sectors={CHEQUE_SECTORS}>
+                <ChequesPage />
+              </SectorGate>,
+            )}
+          />
           <Route path="/customers" element={page(<CustomersPage />)} />
           <Route path="/messages" element={page(<BroadcastsPage />)} />
           <Route path="/purchases" element={page(<PurchasesPage />)} />
           <Route path="/inventory" element={page(<InventoryPage />)} />
-          <Route path="/expiry" element={page(<ExpiryPage />)} />
-          <Route path="/controlled-register" element={page(<ControlledRegisterPage />)} />
+          <Route
+            path="/expiry"
+            element={page(
+              <SectorGate sectors={EXPIRY_SECTORS}>
+                <ExpiryPage />
+              </SectorGate>,
+            )}
+          />
+          <Route
+            path="/controlled-register"
+            element={page(
+              <SectorGate sectors={['pharmacy']}>
+                <ControlledRegisterPage />
+              </SectorGate>,
+            )}
+          />
           <Route path="/online-store" element={page(<OnlineStorePage />)} />
           <Route path="/prices" element={page(<BulkPricesPage />)} />
           <Route path="/price-list" element={page(<PriceListPage />)} />
           <Route path="/import" element={page(<ImportPage />)} />
           <Route path="/transfers" element={page(<TransfersPage />)} />
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
+          <Route path="/reports/sales" element={page(<SalesReportPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
-          <Route path="/reports/cancellations" element={page(<CancellationsPage />)} />
-          <Route path="/serials" element={page(<SerialsPage />)} />
+          <Route
+            path="/reports/cancellations"
+            element={page(
+              <SectorGate sectors={HALL_SECTORS}>
+                <CancellationsPage />
+              </SectorGate>,
+            )}
+          />
+          <Route
+            path="/serials"
+            element={page(
+              <SectorGate sectors={SERIAL_SECTORS}>
+                <SerialsPage />
+              </SectorGate>,
+            )}
+          />
           <Route path="/labels" element={page(<LabelsPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />
           <Route path="/customers/:id/statement" element={page(<CustomerStatementPage />)} />
           <Route path="/suppliers/:id/statement" element={page(<SupplierStatementPage />)} />
           <Route path="/expenses" element={page(<ExpensesPage />)} />
+          <Route path="/branches" element={page(<BranchesPage />)} />
           <Route path="/staff" element={page(<StaffPage />)} />
           <Route path="/me/pin" element={page(<PinPage />)} />
           <Route path="/welcome" element={page(<WelcomePage />)} />

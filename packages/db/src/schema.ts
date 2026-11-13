@@ -376,6 +376,8 @@ export const tenantSettings = pgTable(
     loyalty: jsonb('loyalty').$type<{ earnEveryMinor: number; pointValueMinor: number }>(),
     /** «الصيدلية» (packages/core › contracts/pharmacy.ts); null: not set, a pharmacy gets the defaults */
     pharmacy: jsonb('pharmacy').$type<{ prescription: 'required' | 'optional' }>(),
+    /** «الصندوق» (packages/core › contracts/till.ts): return window and card approval number; null: defaults */
+    till: jsonb('till').$type<{ returnWindowDays: number | null; cardApprovalRequired: boolean }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1875,6 +1877,9 @@ export const alterationTickets = pgTable(
     priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
     dueDate: date('due_date').notNull(),
     note: text('note'),
+    /** A deposit paid when the ticket was made: taken as a gift voucher (its code below), spent at delivery */
+    depositMinor: bigint('deposit_minor', { mode: 'number' }).notNull().default(0),
+    depositVoucher: text('deposit_voucher'),
     readyAt: timestamp('ready_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     version: version(),

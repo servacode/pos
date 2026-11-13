@@ -107,6 +107,46 @@ describe('a new product', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
+  it('refuses to save while a barcode is typed in the scan box and not added, and keeps the other product named', async () => {
+    const { user, requestsTo } = openCard('/products/new', {
+      'GET /v1/barcodes/6291041500213': {
+        status: 200,
+        body: { productId: ids.milk, variantId: 'x', barcode: {} },
+      },
+    });
+    await screen.findByLabelText('اسم المنتج');
+    await user.type(screen.getByLabelText('اسم المنتج'), 'محفظة');
+    await user.type(screen.getByLabelText('سعر البيع'), '4000');
+    await user.type(screen.getByRole('textbox', { name: 'باركود جديد' }), '6291041500213{Enter}');
+    expect(await screen.findByText('هذا الباركود على منتج آخر.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/لم يُضف بعد|هذا الباركود على منتج آخر/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/products')).toHaveLength(0);
+  });
+
+  it('asks before saving a price of zero', async () => {
+    const saved = product({ nameAr: 'هدية', version: 1 });
+    const { user, requestsTo } = openCard('/products/new', {
+      'POST /v1/products': { status: 201, body: saved },
+      [`GET ${productPath}`]: { status: 200, body: saved },
+    });
+    await screen.findByLabelText('اسم المنتج');
+    await user.type(screen.getByLabelText('اسم المنتج'), 'هدية');
+    await user.type(screen.getByLabelText('سعر البيع'), '0');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/سعر البيع صفر/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/products')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'نعم، مجاني: احفظ' }));
+    await vi.waitFor(() => expect(requestsTo('POST', '/v1/products')).toHaveLength(1));
+  });
+
+  it('says a currency without fractions dropped the part after the point', async () => {
+    const { user } = openCard('/products/new');
+    await screen.findByLabelText('اسم المنتج');
+    await user.type(screen.getByLabelText('سعر البيع'), '60000.50');
+    expect(await screen.findByText(/تُعرض بلا كسور/)).toBeInTheDocument();
+  });
+
   it('starts with the barcode scanned on the list', async () => {
     openCard('/products/new?barcode=6290360100125');
     expect(await screen.findByText('6290360100125')).toBeInTheDocument();
@@ -218,7 +258,7 @@ describe('a new product', () => {
     await user.type(screen.getByRole('textbox', { name: 'قيمة جديدة لـالمقاس' }), 'S، M{Enter}');
     await user.type(screen.getByRole('textbox', { name: 'قيمة جديدة لـاللون' }), 'أحمر{Enter}');
 
-    expect(screen.getByText('2 متغيّرات')).toHaveAttribute('role', 'status');
+    expect(screen.getByText('متغيّران')).toHaveAttribute('role', 'status');
     expect(screen.getByRole('group', { name: 'S · أحمر' })).toBeInTheDocument();
     const second = screen.getByRole('group', { name: 'M · أحمر' });
     // A new combination starts at the first variant's price.

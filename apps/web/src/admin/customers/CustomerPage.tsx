@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import type { CurrencyCode, CustomerDetail, CustomerPurchases, StatementLine } from '@serva/core';
 import {
+  AddIcon,
   Alert,
   ArchiveIcon,
   Avatar,
@@ -31,6 +32,7 @@ import { errorMessage } from '../../lib/api';
 import { dayText, isoDay } from '../../lib/dates';
 import { getCustomer, getPurchases, updateCustomer } from './api';
 import { CustomerForm } from './CustomerForm';
+import { CustomerMoneyDialog } from './CustomerMoneyDialog';
 
 const SOURCE_TEXT: Record<string, string> = {
   sale: 'فاتورة آجل',
@@ -249,6 +251,9 @@ export function CustomerPage() {
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [money, setMoney] = useState<'payment' | 'opening' | null>(null);
+  const canReceive = me.user.permissions.includes('receipt.create');
+  const canOpen = me.user.permissions.includes('accounting.post');
 
   const [purchases, setPurchases] = useState<CustomerPurchases | null>(null);
 
@@ -286,7 +291,9 @@ export function CustomerPage() {
       header: 'البيان',
       cell: (l) => (
         <div className="flex flex-col gap-0.5 py-2">
-          <span className="font-semibold">{SOURCE_TEXT[l.sourceType] ?? l.memo}</span>
+          <span className="font-semibold">
+            {l.sourceType === 'manual' ? l.memo : (SOURCE_TEXT[l.sourceType] ?? l.memo)}
+          </span>
           {l.number ? (
             <span className="text-xs text-ink-muted">
               <DocNumber value={l.number} />
@@ -484,12 +491,24 @@ export function CustomerPage() {
                       title="كشف الحساب"
                       description="كل بيع بالآجل وكل دفعة ومرتجع، والرصيد بعد كل حركة."
                     />
-                    <Link
-                      to={`/customers/${customer.id}/statement`}
-                      className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-sm font-semibold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
-                    >
-                      <BookIcon size={16} /> كشف حساب بفترة، للطباعة
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {canReceive ? (
+                        <Button icon={<AddIcon />} onClick={() => setMoney('payment')}>
+                          استلم دفعة
+                        </Button>
+                      ) : null}
+                      {canOpen ? (
+                        <Button variant="secondary" onClick={() => setMoney('opening')}>
+                          سجّل دين افتتاحي
+                        </Button>
+                      ) : null}
+                      <Link
+                        to={`/customers/${customer.id}/statement`}
+                        className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-sm font-semibold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                      >
+                        <BookIcon size={16} /> كشف حساب بفترة، للطباعة
+                      </Link>
+                    </div>
                   </div>
                   <DataTable
                     caption="كشف الحساب"
@@ -507,6 +526,17 @@ export function CustomerPage() {
                 </section>
               </div>
             </div>
+            {money ? (
+              <CustomerMoneyDialog
+                kind={money}
+                customer={customer}
+                onCancel={() => setMoney(null)}
+                onDone={() => {
+                  setMoney(null);
+                  load();
+                }}
+              />
+            ) : null}
           </>
         ) : null}
       </div>

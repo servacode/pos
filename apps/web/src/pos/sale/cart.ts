@@ -96,10 +96,16 @@ export interface Cart {
   voucher?: string;
   /** An online shop order opened at the till (26 › حياة الطلب): the sale closes it */
   onlineOrder?: { id: string; number: string; customerName: string };
+  /** A sale that delivers an alteration ticket (03 › التعديل والتقصير): the ticket turns delivered once it is saved */
+  alteration?: { id: string; number: string; version: number };
   /** A pharmacy sale's prescription (03 › الصيدليات), asked before payment when an item needs it */
   prescription?: Prescription;
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
   invoiceApproval: Approval | null;
+  /** The customer the cart is for, when one is attached before payment (prefills a held cart's name) */
+  customer?: { id: string; name: string };
+  /** Set while the cart is held: the name it was put aside under and when (the held carts' list) */
+  held?: { name: string; at: number };
 }
 
 export const EMPTY_CART: Cart = { lines: [], nextLineNo: 1, invoiceDiscount: null, invoiceApproval: null };

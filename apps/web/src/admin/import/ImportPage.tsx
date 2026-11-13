@@ -22,19 +22,20 @@ import {
   SegmentedControl,
   Select,
   StatTile,
-  TextField,
   type BadgeTone,
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { MONTHS } from '../../lib/dates';
 import { downloadText } from '../accounting/csv';
 import { postImport } from './api';
 import { FileProblem, readSpreadsheet, type Sheet } from './file';
 import {
   assign,
   chunkRows,
+  duplicateAnswer,
   initialMapping,
   missingRequired,
   prepareRows,
@@ -50,6 +51,7 @@ import {
   type ReportRow,
   type Table,
 } from './mapping';
+import { DateField } from '../../lib/DateField';
 
 type Step = 'file' | 'columns' | 'review';
 type Phase = 'idle' | 'checking' | 'checked' | 'importing' | 'done';
@@ -68,6 +70,11 @@ const TONE: Record<ImportRowResult['status'], BadgeTone> = {
 };
 
 const SHOWN_ROWS = 300;
+/** «2026-10-30» as «30 تشرين الأول 2026», the way the boards and receipts write dates. */
+const arabicDate = (iso: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? `${String(Number(m[3]))} ${MONTHS[Number(m[2]) - 1] ?? ''} ${m[1]}` : undefined;
+};
 const todayText = () => {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -175,15 +182,23 @@ function Import() {
     new Map(
       rows
         .filter((r) => r.duplicateOf !== undefined)
-        .map((r) => [
-          r.line,
-          {
-            line: r.line,
-            status: 'skip' as const,
-            errors: [],
-            notes: [`مكرر في الملف: سبق في السطر ${String(r.duplicateOf)}`],
-          },
-        ]),
+        .map((r) => {
+          const answer = duplicateAnswer(
+            type,
+            r,
+            rows.find((x) => x.line === r.duplicateOf),
+          );
+          const result: ImportRowResult =
+            answer.status === 'error'
+              ? {
+                  line: r.line,
+                  status: 'error',
+                  errors: [{ field: type === 'products' ? 'barcode' : 'phone', message: answer.message }],
+                  notes: [],
+                }
+              : { line: r.line, status: 'skip', errors: [], notes: [answer.message] };
+          return [r.line, result] as const;
+        }),
     );
 
   /** Sends the file in chunks, dry or real; the answers fill the table as they come. */
@@ -436,8 +451,28 @@ function Import() {
               <div>
                 <h2 className="text-lg font-semibold text-ink">خيارات الاستيراد</h2>
                 <p className="text-sm text-ink-muted">
-                  <bdi className="num">{prepared.length}</bdi> صف جاهز. اضغط «افحص الملف» لترى ما سيحدث دون أن
-                  يتغيّر شيء.
+                  {phase === 'idle' || results.size === 0 ? (
+                    <>
+                      <bdi className="num">{prepared.length}</bdi> صف في الملف. اضغط «افحص الملف» لترى ما
+                      سيحدث دون أن يتغيّر شيء.
+                    </>
+                  ) : (
+                    <>
+                      <bdi className="num">{totals.create + totals.update}</bdi> صف جاهز من{' '}
+                      <bdi className="num">{prepared.length}</bdi>
+                      {totals.skip > 0 ? (
+                        <>
+                          ، <bdi className="num">{totals.skip}</bdi> سيُترك
+                        </>
+                      ) : null}
+                      {totals.error > 0 ? (
+                        <>
+                          ، <bdi className="num">{totals.error}</bdi> فيه خطأ
+                        </>
+                      ) : null}
+                      .
+                    </>
+                  )}
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -454,13 +489,13 @@ function Import() {
                     setResults(new Map());
                   }}
                 />
-                <TextField
+                <DateField
                   label="تاريخ الأرصدة الافتتاحية"
-                  type="date"
-                  dir="ltr"
                   value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
+                  required
+                  hint={arabicDate(date)}
+                  onChange={(day) => {
+                    setDate(day);
                     setPhase('idle');
                     setResults(new Map());
                   }}

@@ -59,6 +59,8 @@ export interface PriceListItem {
   currency: CurrencyCode | null;
   oldMinor: number | null;
   newMinor: number;
+  /** Live sizes and colours of the matched model (1 = a model with one variant); null when unmatched */
+  modelSize?: number | null;
 }
 
 export interface PriceListPreview {
@@ -68,7 +70,14 @@ export interface PriceListPreview {
 export const priceListApplyInput = z.object({
   fileName: z.string().trim().max(200).nullable().default(null),
   changes: z
-    .array(z.object({ variantId: uuidSchema, newMinor: z.int().min(1).max(Number.MAX_SAFE_INTEGER) }))
+    .array(
+      z.object({
+        variantId: uuidSchema,
+        newMinor: z.int().min(1).max(Number.MAX_SAFE_INTEGER),
+        /** «طبّق على كل قياسات وألوان هذا الموديل»: every live variant of the product gets the price */
+        wholeModel: z.boolean().default(false),
+      }),
+    )
     .min(1)
     .max(PRICE_LIST_CHUNK_MAX),
 });

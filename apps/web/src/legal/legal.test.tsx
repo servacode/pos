@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { TERMS_VERSION } from '@serva/core';
 import { mockFetch } from '../test/fetchMock';
 import { signedOutRefresh } from '../test/fixtures';
@@ -69,6 +69,8 @@ describe('the legal config', () => {
   });
 });
 
+afterEach(() => sessionStorage.clear());
+
 describe('the legal pages', () => {
   it('shows the terms at /terms with the version, a contents list and numbered clauses', async () => {
     mockFetch({ 'GET /v1/legal': { status: 200, body: SAVED } });
@@ -103,7 +105,10 @@ describe('the legal pages', () => {
     mockFetch({ 'GET /v1/legal': { status: 500, body: { code: 'internal', message: 'x' } } });
     renderApp('/terms');
 
-    expect(await screen.findByText('مسودة قيد المراجعة القانونية')).toBeInTheDocument();
+    // The public sees a small neutral line, never a count of what is missing
+    expect(await screen.findByText('نسخة قيد المراجعة')).toBeInTheDocument();
+    expect(screen.queryByText(/بقيت \d+ خانات/)).not.toBeInTheDocument();
+    expect(screen.queryByText('مسودة قيد المراجعة القانونية')).not.toBeInTheDocument();
     const marks = [...document.querySelectorAll('mark[data-blank]')];
     expect(marks.length).toBeGreaterThan(0);
     for (const mark of marks) expect(mark).toHaveTextContent('[يُحدَّد لاحقاً]');
@@ -114,13 +119,13 @@ describe('the legal pages', () => {
   it('does not crash when the request fails outright', async () => {
     mockFetch({});
     renderApp('/privacy');
-    expect(await screen.findByText('مسودة قيد المراجعة القانونية')).toBeInTheDocument();
+    expect(await screen.findByText('نسخة قيد المراجعة')).toBeInTheDocument();
   });
 
   it('does not crash when the answer is not the details', async () => {
     mockFetch({ 'GET /v1/legal': { status: 200, body: { companyName: 5 } } });
     renderApp('/privacy');
-    expect(await screen.findByText('مسودة قيد المراجعة القانونية')).toBeInTheDocument();
+    expect(await screen.findByText('نسخة قيد المراجعة')).toBeInTheDocument();
   });
 
   it('shows a loading note first, then the platform’s details in the texts', async () => {
@@ -140,6 +145,7 @@ describe('the legal pages', () => {
     expect(contact).not.toContain('الهاتف');
     // Every blank is filled and the lawyer reviewed it: no draft notice.
     expect(screen.queryByText('مسودة قيد المراجعة القانونية')).toBeNull();
+    expect(screen.queryByText('نسخة قيد المراجعة')).toBeNull();
   });
 
   it('names the commercial register and the phone when they are filled', async () => {
@@ -158,13 +164,32 @@ describe('the legal pages', () => {
     expect(document.querySelector('#contact')!.textContent).toContain('، الهاتف +963933111222');
   });
 
-  it('keeps the draft notice for a blank that was cleared, or a text the lawyer has not reviewed', async () => {
+  it('shows the public a quiet mark for a cleared blank and no count of what is missing', async () => {
     mockFetch({
       'GET /v1/legal': { status: 200, body: { ...SAVED, hostingProvider: '', reviewedByLawyer: false } },
     });
     renderApp('/privacy');
-    expect(await screen.findByText(/بقيت 1 خانات فارغة/)).toBeInTheDocument();
-    expect(document.querySelector('mark[data-blank="hostingProvider"]')).not.toBeNull();
+    expect(await screen.findByText('نسخة قيد المراجعة')).toBeInTheDocument();
+    expect(screen.queryByText(/بقيت 1 خانات فارغة/)).not.toBeInTheDocument();
+    const blank = document.querySelector('mark[data-blank="hostingProvider"]')!;
+    expect(blank).not.toBeNull();
+    // Quiet: no warning colour, and no hint about the platform panel
+    expect(blank.className).not.toContain('warning');
+    expect(blank).not.toHaveAttribute('title');
+  });
+
+  it('shows the detailed draft notice, and loud blanks, only to a platform admin signed in', async () => {
+    sessionStorage.setItem('servaPlatformToken', 'pt');
+    mockFetch({
+      'GET /v1/legal': { status: 200, body: { ...SAVED, hostingProvider: '', reviewedByLawyer: false } },
+    });
+    renderApp('/privacy');
+    expect(await screen.findByText('مسودة قيد المراجعة القانونية')).toBeInTheDocument();
+    expect(screen.getByText(/بقيت 1 خانات فارغة/)).toBeInTheDocument();
+    expect(screen.queryByText('نسخة قيد المراجعة')).not.toBeInTheDocument();
+    const blank = document.querySelector('mark[data-blank="hostingProvider"]')!;
+    expect(blank.className).toContain('warning');
+    expect(blank).toHaveAttribute('title');
   });
 });
 

@@ -89,6 +89,7 @@ export function LabelsPage() {
     }
   });
   const [showStore, setShowStore] = useState(true);
+  const [qr, setQr] = useState(false);
   const [q, setQ] = useState('');
   const [found, setFound] = useState<ProductListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -388,6 +389,7 @@ export function LabelsPage() {
                 ))}
               </Select>
               <Switch label="اسم المحل على الملصق" checked={showStore} onCheckedChange={setShowStore} />
+              <Switch label="رمز QR بدل الأعمدة" checked={qr} onCheckedChange={setQr} />
               <figure>
                 {/* The paper: each piece's label at its real size, with how many copies print. On a
                     wide screen the panel stays in view, so the paper takes the height that is left. */}
@@ -402,7 +404,7 @@ export function LabelsPage() {
                           className="overflow-hidden rounded-small shadow-e2 ring-1 ring-line"
                           style={{ width: `${spec.width}mm`, height: `${spec.height}mm` }}
                         >
-                          <Label item={item} store={me.tenant.name} showStore={showStore} />
+                          <Label item={item} store={me.tenant.name} showStore={showStore} qr={qr} />
                         </div>
                         <bdi
                           dir="ltr"
@@ -437,7 +439,7 @@ export function LabelsPage() {
         </div>
       </div>
       {printing ? (
-        <PrintableLabels items={items} layout={layout} store={me.tenant.name} showStore={showStore} />
+        <PrintableLabels items={items} layout={layout} store={me.tenant.name} showStore={showStore} qr={qr} />
       ) : null}
     </AppShell>
   );

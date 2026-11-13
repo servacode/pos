@@ -212,6 +212,42 @@ describe('products', () => {
     expect(await count('variants')).toBe(4);
   });
 
+  it('a row repeating a barcode for another size is refused and named, a barcode of another size is noted', async () => {
+    const res = await imported('products', [
+      { name: 'قميص', size: 'M', colour: 'أزرق', price: '85000', barcode: '6290000000011' },
+      { name: 'قميص', size: 'L', colour: 'أزرق', price: '85000', barcode: '6290000000011' },
+    ]);
+    expect(res.results[0]!.status).toBe('create');
+    expect(res.results[1]!.status).toBe('error');
+    expect(res.results[1]!.errors[0]!.message).toContain('السطر 2');
+    expect(res.results[1]!.errors[0]!.message).toContain('L · أزرق');
+    expect(await count('variants')).toBe(1);
+
+    const later = await imported('products', [
+      { name: 'قميص', size: 'XL', colour: 'أحمر', price: '85000', barcode: '6290000000011' },
+    ]);
+    expect(later.results[0]!.notes.join(' ')).toContain('XL · أحمر');
+  });
+
+  it('a single row with a size and a colour becomes a product with one variant', async () => {
+    const res = await imported('products', [
+      { name: 'حذاء رياضي', size: '42', colour: 'أسود', price: '250000', barcode: '6290000000099' },
+    ]);
+    expect(res.totals.create).toBe(1);
+    const labels = await ownerDb()`select label from variants where tenant_id = ${s.tenantId}`;
+    expect(labels.map((l) => l.label)).toEqual(['42 · أسود']);
+  });
+
+  it('a barcode another product holds, met while adding a size, is reported on its row', async () => {
+    await imported('products', [{ name: 'شاي', price: '1000', barcode: '6290000000200' }]);
+    const res = await imported('products', [
+      { name: 'قميص', size: 'S', price: '1000', barcode: '6290000000211' },
+      { name: 'قميص', size: 'M', price: '1000', barcode: '6290000000200' },
+    ]);
+    expect(res.results.some((r) => r.status === 'error' && r.errors[0]!.field === 'barcode')).toBe(true);
+    expect(await count('products')).toBe(1);
+  });
+
   it('a problem in one size names that row and the others of the product wait', async () => {
     const res = await imported('products', [
       { name: 'بنطال', size: '32', price: '70000' },
@@ -345,7 +381,7 @@ describe('customers and suppliers', () => {
     ]);
     expect(res.totals.error).toBe(2);
     expect(res.results[0]!.errors.map((e) => e.field).sort()).toEqual(['name', 'phone']);
-    expect(res.results[1]!.errors[0]!.message).toContain('رقم الجوال');
+    expect(res.results[1]!.errors[0]!.message).toContain('رقم الهاتف');
   });
 
   it('an opening balance is an entry against 3900 and shows as the customer’s balance, once', async () => {
@@ -403,6 +439,13 @@ describe('customers and suppliers', () => {
     ]);
     expect(again.totals).toEqual({ create: 0, update: 0, skip: 2, error: 0 });
     expect(await problems()).toEqual([]);
+  });
+
+  it('suppliers: a new row with the name of another supplier is created with a duplicate note', async () => {
+    await imported('suppliers', [{ name: 'شركة السلام', phone: '0933111111' }]);
+    const res = await imported('suppliers', [{ name: 'شركة السلام', phone: '0933222222' }]);
+    expect(res.totals.create).toBe(1);
+    expect(res.results[0]!.notes.join(' ')).toContain('بالاسم نفسه');
   });
 
   it('customers of one store are not found by another', async () => {

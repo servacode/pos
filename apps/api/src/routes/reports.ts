@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   dayReportQuery,
   merchandiseQuery,
+  salesBreakdownQuery,
+  type SalesBreakdown,
   journalQuery,
   shiftListQuery,
   syncEvidenceQuery,
@@ -29,6 +31,7 @@ import {
   trialBalance,
 } from '../services/reports';
 import { merchandiseReport } from '../services/merchandise';
+import { salesBreakdown } from '../services/sales-breakdown';
 import { parseBody } from './validation';
 
 const authOf = (request: FastifyRequest): AccessClaims => {
@@ -56,6 +59,10 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/v1/reports/merchandise', signedIn, async (request): Promise<MerchandiseReport> =>
     merchandiseReport(db, authOf(request), parseBody(merchandiseQuery, request.query), app.clock.now()),
+  );
+
+  app.get('/v1/reports/sales-breakdown', signedIn, async (request): Promise<SalesBreakdown> =>
+    salesBreakdown(db, authOf(request), parseBody(salesBreakdownQuery, request.query)),
   );
 
   app.get('/v1/shifts', signedIn, async (request): Promise<ShiftListResponse> =>

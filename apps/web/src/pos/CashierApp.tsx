@@ -31,12 +31,14 @@ import { DEFAULT_PRINTER, PRINTER_KEY, PrinterScreen, type PrinterSetting } from
 import { renderLines } from './print/render';
 import { sendToPrinter } from './print/usb';
 import { SaleDone } from './receipt/SaleDone';
-import { EMPTY_CART, type Cart } from './sale/cart';
+import { deliverTicket } from './alterations/api';
+import { addItem, EMPTY_CART, type Cart } from './sale/cart';
 import { cartFromOrder } from './hall/hallCart';
 import { useServerHall } from './hall/useServerHall';
 import { SaleScreen } from './sale/SaleScreen';
 import { PosProvider, usePos } from './services';
 import { validated } from './validate';
+import { voucherBalancesAfter } from './pay/vouchers';
 import { readShift, type OpenShift } from './shift/shift';
 import { staffRoster, type StaffSession } from './staff/staff';
 import { SubscriptionChip, useTillSubscription } from '../layout/subscription-banner';
@@ -89,7 +91,15 @@ interface PendingHallClose {
 }
 const LAST_SALE_KEY = 'lastSale';
 const PAPER_KEY = 'paperWidth';
+/** The legacy per-cashier key (a cart kept only when the screen was locked); read once, then dropped */
 const cartKey = (userId: string) => `cart:${userId}`;
+/** The cart in progress on this device, written on every change so a refresh or a power cut loses nothing */
+const CURRENT_CART_KEY = 'currentCart';
+
+interface SavedCurrentCart {
+  userId: string;
+  cart: Cart;
+}
 
 interface LastSale {
   doc: Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
@@ -138,31 +148,57 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const cartRef = useRef(cart);
   cartRef.current = cart;
   const [held, setHeld] = useState<Cart[]>([]);
+  // The cart is written to the device only after the saved one was read back (an empty cart at start must not erase it)
+  const [cartRestored, setCartRestored] = useState(false);
+  // Writes to the cart key run one after another, so a late write never lands after a clear
+  const cartWrites = useRef<Promise<unknown>>(Promise.resolve());
+  const writeCart = useCallback((job: () => Promise<unknown>) => {
+    cartWrites.current = cartWrites.current.then(job, job).catch(() => undefined);
+  }, []);
+  const staffRef = useRef<{ id: string; fullName: string }[]>([]);
   const [lastSale, setLastSale] = useState<LastSale | null>(null);
   const [done, setDone] = useState<ReceiptData | null>(null);
   const [paper, setPaper] = useState<PaperWidth>(80);
   const [printJob, setPrintJob] = useState<{ data: ReceiptData; copy: boolean } | null>(null);
   const [printer, setPrinter] = useState<PrinterSetting>(DEFAULT_PRINTER);
 
+  staffRef.current = staff;
   const shiftMode = settings?.shiftMode ?? null;
   useEffect(() => {
     if (!shiftMode) return;
     let alive = true;
     void Promise.all([
       readShift(pos.local, shiftMode, session.userId),
-      pos.local.get<Cart>(cartKey(session.userId)),
+      pos.local.get<SavedCurrentCart>(CURRENT_CART_KEY),
       pos.local.get<Cart[]>(HELD_KEY),
       pos.local.get<LastSale>(LAST_SALE_KEY),
       pos.local.get<PaperWidth>(PAPER_KEY),
       pos.local.get<PrinterSetting>(PRINTER_KEY),
-    ]).then(([openShift, savedCart, heldCarts, last, width, printerSetting]) => {
+    ]).then(async ([openShift, saved, heldCarts, last, width, printerSetting]) => {
       if (!alive) return;
       setShift(openShift);
-      if (savedCart) {
-        setCartState(savedCart);
-        void pos.local.remove(cartKey(session.userId));
+      let nextHeld = heldCarts ?? [];
+      // A cart kept by the old lock (one per cashier) is read once and moved to the new place
+      const legacy = await pos.local.get<Cart>(cartKey(session.userId));
+      if (legacy) void pos.local.remove(cartKey(session.userId));
+      const mine = saved && saved.userId === session.userId ? saved.cart : null;
+      if (!alive) return;
+      if (mine && mine.lines.length > 0) {
+        setCartState(mine);
+      } else if (legacy && legacy.lines.length > 0) {
+        setCartState(legacy);
+      } else if (saved && saved.userId !== session.userId && saved.cart.lines.length > 0) {
+        // Another cashier's unfinished cart: kept, offered with the held ones, never lost
+        const who = staffRef.current.find((m) => m.id === saved.userId)?.fullName;
+        nextHeld = [
+          ...nextHeld,
+          { ...saved.cart, held: { name: who ? `فاتورة ${who}` : 'فاتورة غير مكتملة', at: Date.now() } },
+        ];
+        void pos.local.set(HELD_KEY, nextHeld);
+        void pos.local.remove(CURRENT_CART_KEY);
       }
-      setHeld(heldCarts ?? []);
+      setHeld(nextHeld);
+      setCartRestored(true);
       setLastSale(last);
       if (width) setPaper(width);
       if (printerSetting) setPrinter(printerSetting);
@@ -173,6 +209,16 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   }, [pos.local, shiftMode, session.userId]);
 
   const setCart = useCallback((update: (cart: Cart) => Cart) => setCartState(update), []);
+
+  // The cart in progress is kept on the device on every change and dropped once it is empty (sold, held, cleared)
+  useEffect(() => {
+    if (!cartRestored) return;
+    if (cart.lines.length > 0) {
+      writeCart(() => pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart }));
+    } else {
+      writeCart(() => pos.local.remove(CURRENT_CART_KEY));
+    }
+  }, [cart, cartRestored, pos.local, session.userId, writeCart]);
 
   // 03 › وضع النادل: online, the table board also shows the orders on the server (a waiter's too)
   const hallTables = settings?.service?.tables ?? [];
@@ -218,13 +264,16 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       .filter((c) => c.lines.length > 0);
   }, [serverHall.orders, held, cart, catalog]);
 
-  /** Signs out, keeping an unfinished cart for this cashier's next sign-in. */
+  /** Signs out; an unfinished cart is already on the device (written on every change) for the next sign-in. */
   const lock = useCallback(() => {
     const current = cartRef.current;
-    void (
-      current.lines.length > 0 ? pos.local.set(cartKey(session.userId), current) : Promise.resolve()
-    ).finally(onSignOut);
-  }, [pos.local, session.userId, onSignOut]);
+    writeCart(() =>
+      current.lines.length > 0
+        ? pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart: current })
+        : Promise.resolve(),
+    );
+    void cartWrites.current.finally(onSignOut);
+  }, [pos.local, session.userId, onSignOut, writeCart]);
 
   const idleMinutes = settings?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
   useIdle(idleMinutes * 60_000, lock);
@@ -290,7 +339,14 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     branchName: pos.device.branchName,
     deviceName: pos.device.deviceName,
     cashierName,
+    sellerName: sellerOf(doc),
   });
+
+  /** The salesperson of a sale, when it is named */
+  function sellerOf(doc: LastSale['doc']): string | null {
+    const id = (doc.payload as { salespersonId?: string | null }).salespersonId;
+    return (id && staff.find((m) => m.id === id)?.fullName) || null;
+  }
 
   function saved(entry: OutboxEntry) {
     const last: LastSale = {
@@ -305,28 +361,62 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     setLastSale(last);
     void pos.local.set(LAST_SALE_KEY, last);
     closeHallOrder(cartRef.current, entry.doc.number ?? '');
+    // A sale that delivers an alteration ticket: the ticket turns delivered now that its fee is sold
+    const delivering = cartRef.current.alteration;
+    if (delivering && pos.device.token) void deliverTicket(delivering, pos.device.token, pos.fetch);
+    // The sale is in the outbox: the kept cart goes now, so a refresh cannot bring it back as a second sale
+    writeCart(() => pos.local.remove(CURRENT_CART_KEY));
     setCartState(EMPTY_CART);
     const data = receiptData(last.doc, session.fullName);
-    setDone(data);
-    setPrintJob({ data, copy: false });
+    // A sale paid with a voucher prints what is left on it, counted once the sale is in the outbox
+    const paidByVoucher = (last.doc.payload as unknown as SalePayload).payments?.some(
+      (p) => p.method === 'voucher',
+    );
+    if (!paidByVoucher) {
+      setDone(data);
+      setPrintJob({ data, copy: false });
+      return;
+    }
+    void voucherBalancesAfter(pos.store, catalog.vouchers, last.doc).then((vouchersAfter) => {
+      const withBalance = { ...data, vouchersAfter };
+      setDone(withBalance);
+      setPrintJob({ data: withBalance, copy: false });
+    });
   }
 
-  function hold() {
+  /** Puts the cart aside under a name (the customer's, when attached); several can wait together. */
+  function hold(name?: string) {
     if (cart.lines.length === 0) return;
-    const next = [...held, cart];
+    const label = (name ?? '').trim() || cart.customer?.name || cart.onlineOrder?.customerName || '';
+    const next = [...held, { ...cart, held: { name: label, at: Date.now() } }];
     setHeld(next);
     void pos.local.set(HELD_KEY, next);
     setCartState(EMPTY_CART);
     setDone(null);
   }
 
-  function resume() {
-    if (held.length === 0 || cart.lines.length > 0) return;
-    const next = held.slice(0, -1);
-    setCartState(held[held.length - 1]!);
+  /** Brings a held cart back (the last one when no index is given); a cart being taken is held first. */
+  function resume(index: number = held.length - 1) {
+    const picked = held[index];
+    if (!picked) return;
+    const back: Cart = { ...picked };
+    delete back.held;
+    const rest = held.filter((_, i) => i !== index);
+    const next =
+      cart.lines.length > 0
+        ? [...rest, { ...cart, held: { name: cart.customer?.name ?? '', at: Date.now() } }]
+        : rest;
+    setCartState(back);
     setHeld(next);
     void pos.local.set(HELD_KEY, next);
     setDone(null);
+  }
+
+  /** Drops a held cart the cashier no longer needs. */
+  function discardHeld(index: number) {
+    const next = held.filter((_, i) => i !== index);
+    setHeld(next);
+    void pos.local.set(HELD_KEY, next);
   }
 
   /**
@@ -599,7 +689,35 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               }
             />
           ) : view === 'alterations' ? (
-            <AlterationsScreen catalog={catalog} onBack={() => setView('sale')} />
+            <AlterationsScreen
+              catalog={catalog}
+              session={session}
+              shift={shift}
+              onBack={() => setView('sale')}
+              onDeliver={(ticket) => {
+                // The fee is sold as the «تقصير» service: what is left after the deposit voucher
+                const service = catalog.items.find((i) => i.name.includes('تقصير'));
+                if (!service) return false;
+                const fee = ticket.priceMinor;
+                const line = addItem(EMPTY_CART, service);
+                setCart(() => ({
+                  ...line,
+                  lines: line.lines.map((l) => ({
+                    ...l,
+                    name: `${l.name} · ${ticket.number}`,
+                    priceMinor: fee,
+                    retailPriceMinor: fee,
+                    wholesalePriceMinor: null,
+                    priceCurrency: ticket.currency,
+                  })),
+                  ...(ticket.depositVoucher ? { voucher: ticket.depositVoucher } : {}),
+                  alteration: { id: ticket.id, number: ticket.number, version: ticket.version },
+                }));
+                setDone(null);
+                setView('sale');
+                return true;
+              }}
+            />
           ) : view === 'gift' ? (
             <GiftVoucherScreen
               session={session}
@@ -653,8 +771,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         cart={cart}
         setCart={setCart}
         heldCount={held.length}
+        heldList={held}
         onHold={hold}
         onResume={resume}
+        onDiscardHeld={discardHeld}
         heldCarts={[...held, ...serverOnly]}
         onOpenTable={openTable}
         onKitchenSent={(sent) => void sendToHall(sent)}

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { CurrencyCode } from '../currencies';
-import { phoneSchema } from './auth';
+import { contactPhoneSchema } from './auth';
 import { isoDateSchema, nonNegativeMinorSchema, positiveMinorSchema, uuidSchema } from './common';
 
 /**
@@ -32,10 +32,7 @@ const optionalText = (max: number, message: string) =>
 
 export const supplierInput = z.object({
   name: z.string('اسم المورد مطلوب').trim().min(2, 'اكتب اسم المورد').max(120, 'الاسم طويل'),
-  phone: z
-    .union([z.literal('').transform(() => null), phoneSchema])
-    .nullable()
-    .optional(),
+  phone: contactPhoneSchema,
   notes: optionalText(500, 'الملاحظات طويلة'),
   archived: z.boolean().optional(),
 });
@@ -140,12 +137,17 @@ export const purchaseListQuery = z.object({
   supplierId: uuidSchema.optional(),
 });
 
+/** The largest single payment to a supplier, minor units (100 billion pounds): above it is a typing slip */
+export const MAX_PAYMENT_MINOR = 10_000_000_000_000;
+
 export const supplierPaymentInput = z.object({
   supplierId: uuidSchema,
   date: isoDateSchema,
-  amountMinor: positiveMinorSchema,
+  amountMinor: positiveMinorSchema.max(MAX_PAYMENT_MINOR, 'المبلغ كبير جداً. تحقّق من الأصفار'),
   method: z.enum(['cash', 'bank']),
   note: optionalText(200, 'الملاحظة طويلة'),
+  /** The owner confirmed the payment is more than what is owed: it stays as an advance with the supplier */
+  advance: z.boolean().optional(),
 });
 export type SupplierPaymentInput = z.output<typeof supplierPaymentInput>;
 

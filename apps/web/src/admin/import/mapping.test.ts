@@ -5,6 +5,7 @@ import {
   assign,
   chunkRows,
   csvField,
+  duplicateAnswer,
   initialMapping,
   missingRequired,
   prepareRows,
@@ -222,5 +223,17 @@ describe('reading files', () => {
     await expect(readSpreadsheet(new File(['x'], 'a.xls'))).rejects.toThrow('xls');
     await expect(readSpreadsheet(new File(['x'], 'a.pdf'))).rejects.toThrow('xlsx أو csv');
     await expect(readSpreadsheet(new File([''], 'a.csv'))).rejects.toThrow('فارغ');
+  });
+});
+
+describe('duplicateAnswer', () => {
+  const first = { line: 2, values: { name: 'قميص', size: 'M' } };
+  it('refuses a repeated barcode that carries another size, skips an identical repeat', () => {
+    const other = { line: 3, values: { name: 'قميص', size: 'L' }, duplicateOf: 2 };
+    expect(duplicateAnswer('products', other, first)).toMatchObject({ status: 'error' });
+    expect(duplicateAnswer('products', other, first).message).toContain('«L»');
+    const same = { line: 4, values: { name: 'قميص', size: 'M' }, duplicateOf: 2 };
+    expect(duplicateAnswer('products', same, first)).toMatchObject({ status: 'skip' });
+    expect(duplicateAnswer('customers', other, first).status).toBe('skip');
   });
 });

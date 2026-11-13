@@ -136,9 +136,42 @@ describe('HomePage', () => {
         (await within(sales).findAllByText('عن أمس', { exact: false }, { timeout: 5000 })).length,
       ).toBeGreaterThan(0);
       expect(within(sales).getAllByText('50%', { exact: false }).length).toBeGreaterThan(0);
-      expect(await screen.findByText('دفعة قرّب انتهاؤها')).toBeInTheDocument();
+      expect(await screen.findByText('دفعة يقترب انتهاؤها')).toBeInTheDocument();
       expect(screen.getByRole('radiogroup', { name: 'الفترة' })).toBeInTheDocument();
       expect(screen.getByText('طرق الدفع اليوم')).toBeInTheDocument();
+    });
+
+    it('says there is no history instead of drawing a climb from zero when only today has sold', async () => {
+      const earlier = [6, 5, 4, 3, 2].map((back) => `2026-10-${String(31 - back).padStart(2, '0')}`);
+      earlier.push('2026-10-30');
+      const routes: Parameters<typeof mockFetch>[0] = {
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({ totalMinor: 1_500_000 }) },
+      };
+      for (const date of earlier)
+        routes[`GET /v1/reports/day?date=${date}`] = {
+          status: 200,
+          body: dayReport({ totalMinor: 0, invoiceCount: 0 }),
+        };
+      mockFetch(routes);
+      renderApp('/');
+
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      // The hero's week, and the two tiles that would have drawn a line
+      expect((await within(sales).findAllByText('لا بيانات قبل اليوم')).length).toBe(3);
+      expect(within(sales).queryByText('آخر 7 أيام')).not.toBeInTheDocument();
+    });
+
+    it('greets «أبو» and «أم» names whole', async () => {
+      const me = meWith(OWNER_KEYS);
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: { ...me, user: { ...me.user, fullName: 'أبو سامر الحلبي' } } },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+      });
+      renderApp('/');
+      expect(await screen.findByRole('heading', { name: 'أهلاً، أبو سامر' })).toBeInTheDocument();
     });
 
     it('welcomes a store with no sales yet', async () => {
@@ -152,7 +185,7 @@ describe('HomePage', () => {
       });
       renderApp('/');
 
-      expect(await screen.findByText('ما في مبيعات بعد')).toBeInTheDocument();
+      expect(await screen.findByText('لا مبيعات بعد')).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'ابدأ أول عملية بيع' })).toHaveAttribute('href', '/pos');
     });
 

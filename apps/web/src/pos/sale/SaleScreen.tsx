@@ -5,7 +5,6 @@ import type { Approval } from '@serva/core/contracts/documents';
 import { businessDateOf, rateFor } from '@serva/core/sale';
 import { promotionActive } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
-import { toLatinDigits } from '@serva/core/text';
 import { missingPrescription, pickBatch, prescriptionNeed } from '@serva/core/pharmacy';
 import type { OutboxEntry } from '@serva/sync';
 import {
@@ -20,7 +19,6 @@ import {
   ClockIcon,
   CloseIcon,
   cn,
-  CONTROL_HEIGHT,
   DeleteIcon,
   displayNumber,
   EmptyState,
@@ -28,20 +26,14 @@ import {
   IconButton,
   IconChip,
   InboxIcon,
-  InfoIcon,
-  ItemTile,
   KeyIcon,
   Money,
   OfferIcon,
   PercentIcon,
   PrintIcon,
-  ProductsIcon,
   RemoveIcon,
-  RetryIcon,
-  SearchIcon,
   Select,
   SendIcon,
-  TextField,
   Tooltip,
   TotalPanel,
   UndoIcon,
@@ -49,7 +41,7 @@ import {
   WarningIcon,
   WeighedIcon,
 } from '@serva/ui';
-import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
+import { barcodeKey, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
 import { counted } from '../format';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
@@ -82,11 +74,13 @@ import { usePos } from '../services';
 import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
-import { gridEntries, lowestPrice, modelPieces, piecesText } from './models';
+import { modelPieces, orderPieces } from './models';
 import { VariantPicker } from './VariantPicker';
 import { TableBoard } from './TableBoard';
 import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
 import { HoldPanel } from './HoldPanel';
+import { HeldList, HoldNamePanel } from './HeldList';
+import { ItemsArea, type PriceCheck } from './ItemsArea';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
@@ -108,6 +102,9 @@ export type SaleMode =
   | { kind: 'tables' }
   | { kind: 'online' }
   | { kind: 'hold' }
+  | { kind: 'holdName' }
+  | { kind: 'heldList' }
+  | { kind: 'check' }
   | { kind: 'serial'; lineNo: number }
   | { kind: 'rx' }
   | { kind: 'pick'; productId: string };
@@ -121,8 +118,13 @@ export interface SaleScreenProps {
   cart: Cart;
   setCart: (update: (cart: Cart) => Cart) => void;
   heldCount: number;
-  onHold: () => void;
-  onResume: () => void;
+  /** The held carts, for the list to pick from */
+  heldList?: readonly Cart[];
+  /** Puts the cart aside under an optional name */
+  onHold: (name?: string) => void;
+  /** Brings a held cart back (the last one when none is named) */
+  onResume: (index?: number) => void;
+  onDiscardHeld?: (index: number) => void;
   /** The held orders, for the table board */
   heldCarts?: readonly Cart[];
   /** Opens a table's order, or starts one there (CashierApp keeps the held orders) */
@@ -145,7 +147,8 @@ const SELLER_KEY = 'salesperson';
 
 const SHORTCUTS: [string, string][] = [
   ['ابحث أو امسح', 'F2 أو /'],
-  ['علّق الفاتورة أو استرجعها', 'F4 أو Alt+3'],
+  ['علّق الفاتورة، أو افتح المعلّقة', 'F4 أو Alt+3'],
+  ['اسأل عن سعر صنف', 'F9'],
   ['ادفع', 'F12 أو +'],
   ['أتمّ الدفع', 'Enter'],
   ['خصم على الفاتورة', 'Alt+1'],
@@ -198,14 +201,19 @@ export function SaleScreen(props: SaleScreenProps) {
   );
   const [mode, setMode] = useState<SaleMode>({ kind: 'items' });
   const [selected, setSelected] = useState<number | null>(null);
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<string | null>(null);
   const [multiplier, setMultiplier] = useState<number | null>(null);
   const [notice, setNotice] = useState<{ tone: 'warning' | 'info'; text: string } | null>(null);
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
   const [quote, setQuote] = useState<QuoteData | null>(null);
   const [kitchen, setKitchen] = useState<KitchenData | null>(null);
+  // «سعر صنف»: looks an item up (price per size and colour, stock) without adding it to the cart
+  const [checking, setChecking] = useState(false);
+  const [check, setCheck] = useState<PriceCheck | null>(null);
+  const checkingRef = useRef(false);
+  checkingRef.current = checking;
+  // On a phone the cart and the items are two tabs; anything that opens in the items area shows it
+  const [phoneView, setPhoneView] = useState<'items' | 'cart'>('items');
   // «البائع» (03 › الملابس: عمولة البائع): the last one picked on this device stays picked
   const pos = usePos();
   const [seller, setSeller] = useState<string>(session.userId);
@@ -361,8 +369,13 @@ export function SaleScreen(props: SaleScreenProps) {
     (raw: string) => {
       const code = barcodeKey(raw);
       const hit = catalog.byBarcode.get(code);
+      // «سعر صنف»: a scan shows the item's price and stock, and adds nothing
+      const take = (item: CatalogItem, h: BarcodeHit | null, qty?: number) => {
+        if (checkingRef.current) handlers.current.showPrice(item);
+        else add(item, h, qty);
+      };
       if (hit) {
-        add(hit.item, hit);
+        take(hit.item, hit);
         return;
       }
       // A scale label: the item's number on the scale, then its weight or its price.
@@ -370,7 +383,7 @@ export function SaleScreen(props: SaleScreenProps) {
       const weighed = reading ? catalog.byBarcode.get(reading.itemCode) : undefined;
       if (reading && weighed) {
         if (reading.kind === 'weight') {
-          add(weighed.item, weighed, reading.qty);
+          take(weighed.item, weighed, reading.qty);
           return;
         }
         const { currency, priceMinor } = weighed.item.price;
@@ -381,7 +394,7 @@ export function SaleScreen(props: SaleScreenProps) {
           unitMinor = 0;
         }
         if (unitMinor > 0) {
-          add(weighed.item, weighed, qtyForPrice(reading.priceMinor, unitMinor));
+          take(weighed.item, weighed, qtyForPrice(reading.priceMinor, unitMinor));
           return;
         }
       }
@@ -405,7 +418,9 @@ export function SaleScreen(props: SaleScreenProps) {
     mode.kind === 'invoice' ||
     mode.kind === 'approve' ||
     mode.kind === 'serial' ||
-    mode.kind === 'rx';
+    mode.kind === 'rx' ||
+    mode.kind === 'holdName' ||
+    mode.kind === 'heldList';
   // While paying, amounts are typed and confirmed with Enter: only a full barcode counts as a scan.
   useScanner({
     enabled: !keypadOpen,
@@ -425,6 +440,10 @@ export function SaleScreen(props: SaleScreenProps) {
     window.print();
     setKitchen(null);
   }, [kitchen]);
+  // A panel (quantity, discount, payment…) opens in the items area: on a phone, show that tab
+  useEffect(() => {
+    if (mode.kind !== 'items') setPhoneView('items');
+  }, [mode.kind]);
   useEffect(() => {
     if (bump === null) return;
     const timer = setTimeout(() => setBump(null), 900);
@@ -436,45 +455,76 @@ export function SaleScreen(props: SaleScreenProps) {
     return () => clearTimeout(timer);
   }, [removed]);
 
-  const results = useMemo(
-    () => searchCatalog(catalog, query, { categoryId: category, limit: 60 }),
-    [catalog, query, category],
-  );
   const pieces = useMemo(() => modelPieces(catalog.items), [catalog.items]);
   // «سعر الجملة» shows only where some item has a wholesale price (a clothing shop has none).
   const hasWholesale = useMemo(
     () => catalog.items.some((item) => (item.price.wholesalePriceMinor ?? null) !== null),
     [catalog.items],
   );
-  const entries = useMemo(() => gridEntries(results, pieces), [results, pieces]);
-  // Where some tile has a photo, the others keep the picture's place; with none, a model shows its
-  // first letter instead (هوية 4 › بطاقة الصنف).
-  const gridHasPhotos = useMemo(
-    () => entries.some((e) => Boolean(e.kind === 'model' ? e.lead.imageUrl : e.item.imageUrl)),
-    [entries],
+  const inCart = useMemo(() => new Set(cart.lines.map((l) => l.variantId)), [cart.lines]);
+  /** What the cart holds of each piece, thousandths (taken off the stock the picker shows) */
+  const inCartQty = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const l of cart.lines)
+      map.set(l.variantId, (map.get(l.variantId) ?? 0) + (l.qty * l.packQty) / 1000);
+    return map;
+  }, [cart.lines]);
+
+  /** Shows an item's price and stock (all its sizes and colours) and adds nothing */
+  const showPrice = useCallback(
+    (item: CatalogItem) => {
+      const model = pieces.get(item.productId);
+      setCheck({
+        name: model ? (model[0]!.productName ?? item.name) : item.name,
+        pieces: model ? orderPieces(model) : [item],
+        focus: item.variantId,
+      });
+    },
+    [pieces],
   );
 
-  function onSearchKey(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'Escape') {
-      setQuery('');
-      return;
+  // The tiles and the search field call these; they stay the same function while the cart changes,
+  // so the memoised grid is not drawn again for it.
+  const handlers = useRef({ add, scan, showPrice });
+  handlers.current = { add, scan, showPrice };
+  const pickItem = useCallback((item: CatalogItem, hit?: BarcodeHit | null) => {
+    if (checkingRef.current) handlers.current.showPrice(item);
+    else handlers.current.add(item, hit);
+  }, []);
+  const pickModel = useCallback(
+    (productId: string) => {
+      if (checkingRef.current) {
+        const model = pieces.get(productId);
+        if (model)
+          setCheck({
+            name: model[0]!.productName ?? model[0]!.name,
+            pieces: orderPieces(model),
+            focus: null,
+          });
+      } else setMode({ kind: 'pick', productId });
+    },
+    [pieces],
+  );
+  const scanCode = useCallback((code: string) => handlers.current.scan(code), []);
+  const dismissNotice = useCallback(() => setNotice(null), []);
+  const repeatLast = useCallback(() => {
+    for (const l of props.lastLines) {
+      const hit = l.barcode ? catalog.byBarcode.get(l.barcode) : undefined;
+      const item = hit?.item ?? catalog.byVariant.get(l.variantId);
+      if (item) setCart((c) => addItem(c, item, hit ?? null, l.qty));
     }
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    const value = toLatinDigits(query.trim());
-    const qty = /^(\d{1,3})\s*[*×]$/.exec(value);
-    if (qty) {
-      setMultiplier(Number(qty[1]));
-      setQuery('');
-      return;
-    }
-    const hit = catalog.byBarcode.get(barcodeKey(value));
-    if (hit) add(hit.item, hit);
-    else if (results.length === 1) add(results[0]!);
-    else if (/^\d{6,}$/.test(value)) scan(value);
-    else return;
-    setQuery('');
-  }
+    if (props.done) props.onNextSale();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the props of this render
+  }, [props.lastLines, props.done, catalog, setCart]);
+  const startChecking = useCallback(() => {
+    setMode({ kind: 'items' });
+    setChecking(true);
+    searchRef.current?.focus();
+  }, []);
+  const stopChecking = useCallback(() => {
+    setChecking(false);
+    setCheck(null);
+  }, []);
 
   // ── Line and invoice changes ────────────────────────────────────────────────────────────────
   function remove(lineNo: number) {
@@ -580,6 +630,10 @@ export function SaleScreen(props: SaleScreenProps) {
       setMode({ kind: 'items' });
       return;
     }
+    if (event.key === 'Escape' && checking) {
+      stopChecking();
+      return;
+    }
     if (keypadOpen || mode.kind === 'pay') return;
     if (event.key === 'F2' || (event.key === '/' && !typing)) {
       event.preventDefault();
@@ -588,7 +642,11 @@ export function SaleScreen(props: SaleScreenProps) {
     } else if (event.key === 'F4' || (event.altKey && event.code === 'Digit3')) {
       event.preventDefault();
       if (cart.lines.length > 0) props.onHold();
-      else props.onResume();
+      else if ((props.heldList?.length ?? props.heldCount) > 0) setMode({ kind: 'heldList' });
+    } else if (event.key === 'F9') {
+      event.preventDefault();
+      if (checking) stopChecking();
+      else startChecking();
     } else if (event.key === 'F12' || (event.key === '+' && !typing)) {
       event.preventDefault();
       if (canPay) startPay();
@@ -680,16 +738,17 @@ export function SaleScreen(props: SaleScreenProps) {
           <div className="flex flex-wrap items-center gap-1.5">
             {waitingOnline.length > 0 ? (
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="md"
                 icon={<InboxIcon size={20} />}
                 aria-label={`طلبات المتجر (${waitingOnline.length})`}
                 onClick={() => setMode({ kind: 'online' })}
+                className="border-brand/40 bg-brand-soft text-brand-ink"
               >
                 طلبات المتجر
                 <span
                   aria-hidden="true"
-                  className="num grid h-6 min-w-6 place-items-center rounded-full bg-brand px-1.5 text-xs font-bold text-on-brand"
+                  className="num grid h-7 min-w-7 place-items-center rounded-full bg-brand px-2 text-sm font-bold text-on-brand shadow-e1"
                 >
                   {displayNumber(String(waitingOnline.length), digits)}
                 </span>
@@ -738,9 +797,16 @@ export function SaleScreen(props: SaleScreenProps) {
             ) : null}
             <span className="flex-1" />
             {props.heldCount > 0 ? (
-              <Badge tone="warning">
-                {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
-              </Badge>
+              <button
+                type="button"
+                aria-label="افتح الفواتير المعلّقة"
+                onClick={() => setMode({ kind: 'heldList' })}
+                className="min-h-11 rounded-full transition-opacity duration-120 ease-standard hover:opacity-80"
+              >
+                <Badge tone="warning">
+                  {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
+                </Badge>
+              </button>
             ) : null}
           </div>
         ) : null}
@@ -860,12 +926,31 @@ export function SaleScreen(props: SaleScreenProps) {
             {cart.lines.map((line, i) => {
               const p = priced?.lines[i];
               const need = needs.get(line.lineNo);
+              const adj = line.adjustment;
+              const discounted = p !== undefined && p.priced.lineDiscountMinor > 0;
+              const percent =
+                adj?.kind === 'discount' && adj.discount.type === 'percent' ? adj.discount.bp : null;
               const meta = [
                 line.packName ? line.packName : null,
-                line.adjustment?.kind === 'price' ? 'سعر معدّل' : null,
-                p && p.priced.lineDiscountMinor > 0 && line.adjustment?.kind === 'discount' ? (
-                  <span key="d" className="font-semibold text-info-ink">
-                    خصم <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                adj?.kind === 'price' ? 'سعر معدّل' : null,
+                // A discount on the line: the price before it struck through, then what was taken off
+                discounted && p ? (
+                  <span key="was" className="whitespace-nowrap text-ink-subtle">
+                    <s>
+                      <Money minor={p.priced.grossMinor} currency={ctx.currency} symbol={false} />
+                    </s>
+                  </span>
+                ) : null,
+                discounted && p && adj?.kind === 'discount' ? (
+                  <span key="d" className="inline-flex items-center gap-1 font-semibold text-info-ink">
+                    <PercentIcon size={16} className="shrink-0" aria-hidden="true" />
+                    خصم{percent !== null ? ` ${displayNumber(String(percent / 100), digits)}%` : ''}{' '}
+                    <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  </span>
+                ) : null,
+                discounted && p && adj?.kind === 'price' ? (
+                  <span key="pd" className="font-semibold text-info-ink">
+                    −<Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
                 p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
@@ -1010,6 +1095,32 @@ export function SaleScreen(props: SaleScreenProps) {
           </ul>
         )}
       </div>
+      {cart.invoiceDiscount && totals && totals.invoiceDiscountMinor > 0 ? (
+        <div
+          role="status"
+          aria-label="خصم الفاتورة"
+          className="mx-3 mb-2 flex shrink-0 items-center gap-3 rounded-card border border-info/20 bg-info-soft py-2 ps-3 pe-2 text-sm text-info-ink"
+        >
+          <PercentIcon size={20} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">
+              خصم الفاتورة{' '}
+              {cart.invoiceDiscount.type === 'percent'
+                ? `${displayNumber(String(cart.invoiceDiscount.bp / 100), digits)}%`
+                : ''}{' '}
+              <Money minor={totals.invoiceDiscountMinor} currency={ctx.currency} symbol={false} />
+            </span>
+            <span className="block text-xs text-info-ink/80">يشمل كل الأسطر، وما تضيفه بعد الآن.</span>
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCart((c) => ({ ...c, invoiceDiscount: null, invoiceApproval: null }))}
+          >
+            أزله
+          </Button>
+        </div>
+      ) : null}
       {removed ? (
         <div
           role="status"
@@ -1082,7 +1193,11 @@ export function SaleScreen(props: SaleScreenProps) {
               size="md"
               icon={lineCount === 0 && props.heldCount > 0 ? <UndoIcon size={20} /> : <ClockIcon size={20} />}
               aria-keyshortcuts="F4"
-              onClick={() => (lineCount > 0 ? props.onHold() : props.onResume())}
+              onClick={() => {
+                if (lineCount > 0) setMode({ kind: 'holdName' });
+                else if (props.heldCount === 1) props.onResume(0);
+                else setMode({ kind: 'heldList' });
+              }}
               disabled={lineCount === 0 && props.heldCount === 0}
             >
               {lineCount === 0 && props.heldCount > 0 ? 'استرجع المعلّقة' : 'علّق'}
@@ -1109,7 +1224,13 @@ export function SaleScreen(props: SaleScreenProps) {
   );
 
   return (
-    <CashierShell statusBar={props.statusBar} cart={cartPanel}>
+    <CashierShell
+      statusBar={props.statusBar}
+      cart={cartPanel}
+      mobileView={phoneView}
+      onMobileView={setPhoneView}
+      cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
+    >
       {quote ? <PrintableQuote data={quote} width={80} /> : null}
       {kitchen ? <PrintableKitchenTicket data={kitchen} /> : null}
       {effectiveMode.kind === 'pay' && priced ? (
@@ -1122,6 +1243,7 @@ export function SaleScreen(props: SaleScreenProps) {
             shiftId={props.shiftId}
             cashierId={session.userId}
             canCredit={session.permissions.has('sale.credit')}
+            staff={staff}
             salespersonId={seller !== session.userId ? seller : null}
             onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
             onBack={() => setMode({ kind: 'items' })}
@@ -1196,7 +1318,7 @@ export function SaleScreen(props: SaleScreenProps) {
       ) : effectiveMode.kind === 'invoice' ? (
         <AdjustPanel
           title="خصم على الفاتورة"
-          subtitle={`على ${counted(lineCount, ['سطر واحد', 'سطرين', 'أسطر', 'سطراً'], digits)}`}
+          subtitle={`يشمل كل أسطر الفاتورة (${displayNumber(String(lineCount), digits)}) وما تضيفه بعدها`}
           modes={['percent', 'amount']}
           initialMode="percent"
           currency={ctx.currency}
@@ -1270,6 +1392,7 @@ export function SaleScreen(props: SaleScreenProps) {
           key={effectiveMode.productId}
           name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
           pieces={pieces.get(effectiveMode.productId)!}
+          inCart={inCartQty}
           onAdd={(piece) => {
             setMode({ kind: 'items' });
             add(piece);
@@ -1309,6 +1432,36 @@ export function SaleScreen(props: SaleScreenProps) {
                 : `حُجز ${hold.number}. يجده الكاشير في «طلبات المتجر» عند الاستلام.`,
             });
           }}
+        />
+      ) : effectiveMode.kind === 'holdName' && priced ? (
+        <HoldNamePanel
+          initial={cart.customer?.name ?? cart.onlineOrder?.customerName ?? ''}
+          onHold={(name) => {
+            setMode({ kind: 'items' });
+            setSelected(null);
+            props.onHold(name);
+          }}
+          onClose={() => setMode({ kind: 'items' })}
+        />
+      ) : effectiveMode.kind === 'heldList' ? (
+        <HeldList
+          carts={props.heldList ?? []}
+          currency={ctx.currency}
+          totalOf={(c) => {
+            try {
+              return c.lines.length > 0 ? priceCart(c, ctx).priced.totals.totalMinor : 0;
+            } catch {
+              return 0;
+            }
+          }}
+          currentHasLines={cart.lines.length > 0}
+          onPick={(index) => {
+            setMode({ kind: 'items' });
+            setSelected(null);
+            props.onResume(index);
+          }}
+          onDiscard={(index) => props.onDiscardHeld?.(index)}
+          onClose={() => setMode({ kind: 'items' })}
         />
       ) : effectiveMode.kind === 'online' ? (
         <OnlineOrdersPanel
@@ -1372,182 +1525,26 @@ export function SaleScreen(props: SaleScreenProps) {
           </ul>
         </SalePanel>
       ) : (
-        <>
-          {/* The items: search or scan, the categories, then the grid */}
-          <div className="flex shrink-0 gap-3">
-            <TextField
-              ref={searchRef}
-              type="search"
-              label="ابحث أو امسح الباركود"
-              hideLabel
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={onSearchKey}
-              placeholder="ابحث باسم الصنف أو امسح الباركود"
-              autoComplete="off"
-              aria-keyshortcuts="F2"
-              className="min-w-0 flex-1"
-              inputClassName="[&::-webkit-search-cancel-button]:appearance-none"
-              startAdornment={<SearchIcon size={20} className="ms-4" />}
-              endAdornment={
-                <span className="me-1 flex shrink-0 items-center gap-2">
-                  {multiplier ? (
-                    <span
-                      className="num rounded-small bg-brand-soft px-2.5 py-1 text-base font-bold text-brand-ink"
-                      aria-label={`الكمية التالية ${multiplier}`}
-                    >
-                      ×{displayNumber(String(multiplier), digits)}
-                    </span>
-                  ) : null}
-                  {query ? (
-                    <IconButton
-                      label="امسح البحث"
-                      size="md"
-                      icon={<CloseIcon size={20} />}
-                      onClick={() => setQuery('')}
-                    />
-                  ) : (
-                    <span className="hidden items-center gap-2 pe-3 text-sm whitespace-nowrap text-ink-subtle lg:flex">
-                      <span aria-hidden="true" className="size-2 rounded-full bg-success" />
-                      القارئ جاهز
-                      <Kbd>F2</Kbd>
-                    </span>
-                  )}
-                </span>
-              }
-            />
-            {props.lastLines.length > 0 ? (
-              <Button
-                variant="secondary"
-                icon={<RetryIcon size={20} />}
-                onClick={() => {
-                  for (const l of props.lastLines) {
-                    const hit = l.barcode ? catalog.byBarcode.get(l.barcode) : undefined;
-                    const item = hit?.item ?? catalog.byVariant.get(l.variantId);
-                    if (item) setCart((c) => addItem(c, item, hit ?? null, l.qty));
-                  }
-                  if (props.done) props.onNextSale();
-                }}
-              >
-                كرّر آخر طلب
-              </Button>
-            ) : null}
-          </div>
-          {notice ? (
-            <div
-              role="alert"
-              className={cn(
-                'flex shrink-0 items-center gap-3 rounded-card border py-1 ps-4 pe-1 text-sm motion-safe:animate-rise',
-                notice.tone === 'warning'
-                  ? 'border-warning/20 bg-warning-soft text-warning-ink'
-                  : 'border-info/20 bg-info-soft text-info-ink',
-              )}
-            >
-              {notice.tone === 'warning' ? (
-                <WarningIcon size={20} className="shrink-0" />
-              ) : (
-                <InfoIcon size={20} className="shrink-0" />
-              )}
-              <span className="min-w-0 flex-1 py-2 font-semibold">{notice.text}</span>
-              <IconButton
-                label="أخفِ التنبيه"
-                size="md"
-                icon={<CloseIcon size={20} />}
-                onClick={() => setNotice(null)}
-              />
-            </div>
-          ) : null}
-          {catalog.categories.length > 0 ? (
-            <div
-              role="group"
-              aria-label="التصنيفات"
-              className="-m-1 flex shrink-0 gap-2 overflow-x-auto p-1 scrollbar-none"
-            >
-              {[{ id: null, name: 'الكل' }, ...catalog.categories].map((c) => {
-                const on = !query && category === c.id;
-                return (
-                  <button
-                    key={c.id ?? 'all'}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => {
-                      setCategory(c.id);
-                      setQuery('');
-                    }}
-                    className={cn(
-                      CONTROL_HEIGHT.touch,
-                      'shrink-0 rounded-small border px-5 text-base font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard',
-                      on
-                        ? 'border-brand/30 bg-brand-soft text-brand-ink'
-                        : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
-                    )}
-                  >
-                    {c.name}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {results.length === 0 ? (
-            <EmptyState
-              icon={catalog.items.length === 0 ? ProductsIcon : SearchIcon}
-              title={catalog.items.length === 0 ? 'لا أصناف على هذا الجهاز بعد' : 'لا يوجد صنف بهذا الاسم'}
-              description={
-                catalog.items.length === 0
-                  ? 'تصل الأصناف مع أول اتصال بالإنترنت.'
-                  : 'جرّب كلمة أقصر، أو امسح الباركود.'
-              }
-            />
-          ) : (
-            <div className="-m-1 min-h-0 flex-1 overflow-y-auto p-1">
-              <ul
-                aria-label="الأصناف"
-                className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] content-start gap-3"
-              >
-                {entries.map((entry) => {
-                  if (entry.kind === 'model') {
-                    const price = lowestPrice(entry.pieces);
-                    return (
-                      <li key={entry.productId}>
-                        <ItemTile
-                          name={entry.name}
-                          priceMinor={price.priceMinor}
-                          currency={price.currency}
-                          detail={piecesText(entry.pieces.length)}
-                          pictureSlot={gridHasPhotos}
-                          initial={!gridHasPhotos}
-                          {...(entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
-                          selected={
-                            (effectiveMode.kind === 'pick' && effectiveMode.productId === entry.productId) ||
-                            cart.lines.some((l) => entry.pieces.some((p) => p.variantId === l.variantId))
-                          }
-                          onSelect={() => setMode({ kind: 'pick', productId: entry.productId })}
-                          className="h-full w-full"
-                        />
-                      </li>
-                    );
-                  }
-                  const { item } = entry;
-                  return (
-                    <li key={item.variantId}>
-                      <ItemTile
-                        name={item.name}
-                        priceMinor={item.price.priceMinor}
-                        currency={item.price.currency}
-                        weighed={item.unit?.allowsFraction ?? false}
-                        {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
-                        pictureSlot={gridHasPhotos}
-                        selected={cart.lines.some((l) => l.variantId === item.variantId)}
-                        onSelect={() => add(item)}
-                        className="h-full w-full"
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-        </>
+        <ItemsArea
+          catalog={catalog}
+          pieces={pieces}
+          searchRef={searchRef}
+          inCart={inCart}
+          pickingProduct={effectiveMode.kind === 'pick' ? effectiveMode.productId : null}
+          multiplier={multiplier}
+          notice={notice}
+          onDismissNotice={dismissNotice}
+          hasLastLines={props.lastLines.length > 0}
+          onRepeatLast={repeatLast}
+          onPickItem={pickItem}
+          onPickModel={pickModel}
+          onScanCode={scanCode}
+          onMultiplier={setMultiplier}
+          checking={checking}
+          check={check}
+          onStopChecking={stopChecking}
+          onStartChecking={startChecking}
+        />
       )}
     </CashierShell>
   );

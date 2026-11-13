@@ -21,6 +21,7 @@ import {
   PrintIcon,
   ProgressBar,
   Select,
+  Switch,
   Tabs,
   type DataColumn,
 } from '@serva/ui';
@@ -42,6 +43,17 @@ import {
 } from './priceList';
 import { applyPriceList, previewPriceList } from './priceListApi';
 import { ButtonLink } from './parts';
+
+/** A row matched by a barcode of one variant of a model that has other sizes or colours. */
+function multiVariantByBarcode(i: PriceListItem): boolean {
+  return i.matchedBy === 'barcode' && (i.modelSize ?? 1) > 1 && i.variantId !== null;
+}
+
+/** True when the file has one row for each model it names (the usual model price list). */
+function oneRowPerModel(items: readonly PriceListItem[]): boolean {
+  const rows = items.filter(multiVariantByBarcode);
+  return rows.length > 0 && new Set(rows.map((i) => i.productId)).size === rows.length;
+}
 
 /** Rows of a table shown at once; «اعرض المزيد» adds the next ones, so 3,000 rows stay light. */
 const PAGE = 200;
@@ -82,6 +94,8 @@ function PriceList() {
   const [applied, setApplied] = useState<PriceListApplied | null>(null);
   const [tab, setTab] = useState<Tab>('change');
   const [shown, setShown] = useState(PAGE);
+  // «طبّق على كل قياسات وألوان هذا الموديل»
+  const [wholeModel, setWholeModel] = useState(false);
 
   const sheet = sheets[sheetIndex];
   const table = useMemo(() => (sheet ? tableAt(sheet.rows, headerRow) : null), [sheet, headerRow]);
@@ -149,6 +163,7 @@ function PriceList() {
       setItems(checked);
       setInvalid(bad);
       setPicked(new Set(checked.filter((i) => i.status === 'change').map((i) => i.variantId!)));
+      setWholeModel(oneRowPerModel(checked));
       setTab('change');
       setShown(PAGE);
       setStep('preview');
@@ -160,11 +175,18 @@ function PriceList() {
   }
 
   const groups = useMemo(() => group(items), [items]);
+  const modelRows = useMemo(() => items.filter(multiVariantByBarcode).length, [items]);
 
   async function apply() {
-    const changes = groups.change
-      .filter((i) => picked.has(i.variantId!))
-      .map((i) => ({ variantId: i.variantId!, newMinor: i.newMinor }));
+    const changes = [
+      ...groups.change.filter((i) => picked.has(i.variantId!)),
+      // A row already at the price still carries it to the model's other sizes and colours
+      ...(wholeModel ? groups.same.filter(multiVariantByBarcode) : []),
+    ].map((i) => ({
+      variantId: i.variantId!,
+      newMinor: i.newMinor,
+      ...(wholeModel && multiVariantByBarcode(i) ? { wholeModel: true } : {}),
+    }));
     if (changes.length === 0) return;
     setError(null);
     setBusy(true);
@@ -403,6 +425,14 @@ function PriceList() {
                 {invalid.length} صفاً بلا سعر صالح أو بلا باركود واسم لم نرسلها
                 {`: الصفوف ${invalid.slice(0, 8).join('، ')}${invalid.length > 8 ? '…' : ''}`}.
               </Alert>
+            ) : null}
+            {modelRows > 0 ? (
+              <Switch
+                label="طبّق على كل قياسات وألوان هذا الموديل"
+                description={`${String(modelRows)} صفاً طابق باركود قياس واحد من موديل له قياسات وألوان أخرى. عند التفعيل يأخذ كل قياس ولون الموديل السعر نفسه.`}
+                checked={wholeModel}
+                onCheckedChange={setWholeModel}
+              />
             ) : null}
             <Tabs
               label="نتيجة المطابقة"

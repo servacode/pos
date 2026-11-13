@@ -1,6 +1,7 @@
 import type {
   OnboardingInput,
   PharmacySettings,
+  TillSettings,
   StoreCurrencyInput,
   StoreProfileInput,
   StoreLoyaltyInput,
@@ -40,3 +41,7 @@ export const saveLoyalty = (input: StoreLoyaltyInput) =>
 /** `PUT /v1/store/pharmacy`: is a prescription's number and doctor required at the till (settings.manage) */
 export const savePharmacy = (input: PharmacySettings) =>
   apiFetch<StoreResponse>('/v1/store/pharmacy', { method: 'PUT', body: input, auth: true });
+
+/** `PUT /v1/store/till`: the return window and whether a card payment needs its approval number (settings.manage) */
+export const saveTill = (input: TillSettings) =>
+  apiFetch<StoreResponse>('/v1/store/till', { method: 'PUT', body: input, auth: true });

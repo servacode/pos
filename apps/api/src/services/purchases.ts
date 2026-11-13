@@ -512,6 +512,14 @@ export async function paySupplier(
     await requirePermission(tx, auth.userId, 'purchases.manage');
     const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
     if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
+    const owed = (await supplierRows(tx, supplier.id))[0]!.balanceMinor;
+    if (input.amountMinor > Math.max(0, owed) && !input.advance) {
+      const message =
+        owed > 0
+          ? 'المبلغ أكبر مما للمورد عليك. إن كانت دفعة مقدّمة فأكّد ذلك'
+          : 'لا شيء مستحق لهذا المورد الآن. إن كانت دفعة مقدّمة فأكّد ذلك';
+      throw new AppError(409, 'conflict', message, { amountMinor: message });
+    }
     const id = newId();
     const number = await nextNumber(tx, auth.tenantId, 'PAY', input.date);
     await tx.insert(supplierPayments).values({

@@ -141,3 +141,81 @@ describe('typed amounts', () => {
     });
   });
 });
+
+describe('payments and duplicate suppliers', () => {
+  function openWithSupplier() {
+    const suppliers: SupplierListResponse = {
+      items: [
+        {
+          id: 's-1',
+          name: 'شركة النور',
+          phone: '0933123456',
+          notes: null,
+          balanceMinor: 100_000,
+          archived: false,
+        },
+      ],
+      totalOwedMinor: 100_000,
+      baseCurrency: 'SYP',
+    };
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
+      'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+      'POST /v1/supplier-payments': () => ({
+        status: 201,
+        body: {
+          id: 'sp-1',
+          number: 'PAY-1',
+          supplierId: 's-1',
+          date: '2026-10-30',
+          amountMinor: 1,
+          method: 'cash',
+        },
+      }),
+      'POST /v1/suppliers': () => ({
+        status: 201,
+        body: { id: 's-2', name: 'شركة النور', phone: null, notes: null, balanceMinor: 0, archived: false },
+      }),
+    });
+    return { ...mock, ...renderApp('/purchases') };
+  }
+
+  it('asks to confirm a payment above what is owed and sends it as an advance', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '5000');
+    expect(await screen.findByText(/أكبر مما للمورد عليك/)).toBeInTheDocument();
+    const submit = screen.getByRole('button', { name: 'سجّل الدفعة' });
+    expect(submit).toBeDisabled();
+    await user.click(screen.getByRole('switch', { name: 'نعم، هذه دفعة مقدّمة' }));
+    await user.click(submit);
+    expect(await screen.findByText('سُجّل سند الدفع PAY-1.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/supplier-payments')[0]?.body).toMatchObject({
+      amountMinor: 500_000,
+      advance: true,
+    });
+  });
+
+  it('refuses an absurd amount with a message and warns about a supplier with the same name', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '88299999999999999');
+    expect(await screen.findByText(/كبير جداً/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'إلغاء' }));
+
+    await user.click(screen.getByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'شركة النور');
+    expect(await screen.findByText(/يوجد مورد بالاسم نفسه/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'افتح المورد' })).toHaveAttribute(
+      'href',
+      '/suppliers/s-1/statement',
+    );
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(requestsTo('POST', '/v1/suppliers')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'أضِفه رغم ذلك' }));
+    expect(await screen.findByText('أُضيف المورد.')).toBeInTheDocument();
+  });
+});

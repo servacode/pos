@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import type { CurrencyCode } from '../currencies';
-import { phoneSchema } from './auth';
-import { isoDateSchema, nonNegativeMinorSchema, uuidSchema } from './common';
+import { contactPhoneSchema } from './auth';
+import {
+  isoDateSchema,
+  nonNegativeMinorSchema,
+  positiveMinorSchema,
+  shortTextSchema,
+  uuidSchema,
+} from './common';
 
 /**
  * Customers and what they owe (09 › customers، party_balances; 10 › الذمم): the owner adds and
@@ -30,10 +36,7 @@ const optionalText = (max: number, message: string) =>
 
 export const customerInput = z.object({
   name: z.string('اسم الزبون مطلوب').trim().min(2, 'اكتب اسم الزبون').max(120, 'الاسم طويل'),
-  phone: z
-    .union([z.literal('').transform(() => null), phoneSchema])
-    .nullable()
-    .optional(),
+  phone: contactPhoneSchema,
   taxNumber: optionalText(40, 'الرقم الضريبي طويل'),
   address: optionalText(200, 'العنوان طويل'),
   notes: optionalText(500, 'الملاحظات طويلة'),
@@ -108,6 +111,67 @@ export interface CustomerDetail extends CustomerListItem {
   notes: string | null;
   createdAt: string;
   statement: StatementLine[];
+  baseCurrency: CurrencyCode;
+}
+
+// ─── Money from the admin: a payment received, a debt opened ────────────────────
+
+/** Where a payment received at the desk goes: the safe, the bank, a wallet, a card account. */
+export const CUSTOMER_PAYMENT_METHODS = ['cash', 'transfer', 'wallet', 'card'] as const;
+export type CustomerPaymentMethod = (typeof CUSTOMER_PAYMENT_METHODS)[number];
+
+export const CUSTOMER_PAYMENT_LABEL: Record<CustomerPaymentMethod, string> = {
+  cash: 'نقداً (الخزنة)',
+  transfer: 'حوالة بنكية',
+  wallet: 'محفظة إلكترونية',
+  card: 'بطاقة',
+};
+
+/**
+ *   POST /v1/customers/{id}/payments       customerPaymentInput → CustomerMoneyResult (receipt.create)
+ *   POST /v1/customers/{id}/opening-debt   customerOpeningDebtInput → CustomerMoneyResult (accounting.post)
+ *
+ * A payment is the receipt of 08 › سند قبض taken from the admin: Dr the safe (or the bank, wallet,
+ * card account), Cr 1200 for the customer. An opening debt is the opening balance of the import
+ * (Dr 1200 against 3900 الأرصدة الافتتاحية). Neither changes a posted entry.
+ */
+export const customerPaymentInput = z
+  .object({
+    amountMinor: positiveMinorSchema.max(1_000_000_000_000, 'المبلغ كبير جداً'),
+    method: z.enum(CUSTOMER_PAYMENT_METHODS, 'اختر طريقة الدفع'),
+    reference: shortTextSchema(64).nullable().optional(),
+    note: shortTextSchema(200).nullable().optional(),
+    date: isoDateSchema.optional(),
+    /** Sent again after a lost answer, it posts once */
+    id: uuidSchema.optional(),
+  })
+  .refine((p) => p.method === 'cash' || !!p.reference, {
+    path: ['reference'],
+    message: 'اكتب رقم الحوالة أو العملية',
+  });
+export type CustomerPaymentInput = z.output<typeof customerPaymentInput>;
+
+export const customerOpeningDebtInput = z.object({
+  amountMinor: positiveMinorSchema.max(1_000_000_000_000, 'المبلغ كبير جداً'),
+  date: isoDateSchema.optional(),
+});
+export type CustomerOpeningDebtInput = z.output<typeof customerOpeningDebtInput>;
+
+/** What was posted, enough to print the voucher: «سند قبض» or «سند رصيد افتتاحي». */
+export interface CustomerMoneyResult {
+  kind: 'payment' | 'opening_debt';
+  /** The voucher's number, RCA-2026-000001 or the journal entry's for an opening debt */
+  number: string;
+  date: string;
+  customerId: string;
+  customerName: string;
+  amountMinor: number;
+  method: CustomerPaymentMethod | null;
+  reference: string | null;
+  note: string | null;
+  /** What the customer owed before and owes after, base currency */
+  balanceBeforeMinor: number;
+  balanceAfterMinor: number;
   baseCurrency: CurrencyCode;
 }
 

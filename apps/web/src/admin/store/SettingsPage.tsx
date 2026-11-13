@@ -18,6 +18,7 @@ import { MODIFIER_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors
 import { getStore } from './api';
 import { DataCard } from './DataCard';
 import { PharmacyForm } from './PharmacyForm';
+import { TillForm } from './TillForm';
 import { LoyaltyForm } from './LoyaltyForm';
 import { SETTINGS_SECTIONS, type SettingsSection } from './parts';
 import { ScaleForm } from './ScaleForm';
@@ -154,6 +155,7 @@ export function SettingsPage() {
     SETTINGS_SECTIONS.currency,
     ...(weighs ? [SETTINGS_SECTIONS.scale] : []),
     ...(serves ? [SETTINGS_SECTIONS.service] : []),
+    SETTINGS_SECTIONS.till,
     ...(pharmacy ? [SETTINGS_SECTIONS.pharmacy] : []),
     SETTINGS_SECTIONS.loyalty,
     SETTINGS_SECTIONS.data,
@@ -179,6 +181,7 @@ export function SettingsPage() {
               <CurrencyForm store={store} onSaved={saved} section={SETTINGS_SECTIONS.currency} />
               {weighs ? <ScaleForm store={store} onSaved={saved} /> : null}
               {serves ? <ServiceForm store={store} onSaved={saved} /> : null}
+              <TillForm store={store} onSaved={saved} />
               {pharmacy ? <PharmacyForm store={store} onSaved={saved} /> : null}
               <LoyaltyForm store={store} onSaved={saved} />
               <DataCard />

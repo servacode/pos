@@ -58,6 +58,14 @@ export function OnlineOrdersPanel({
                   ) : null}
                   {o.note ? ` · ${o.note}` : ''}
                 </span>
+                {o.fulfilment === 'delivery' ? (
+                  <span className="text-sm text-ink-muted">
+                    جوال الزبون:{' '}
+                    <bdi dir="ltr" className="num font-semibold text-ink">
+                      {o.phone}
+                    </bdi>
+                  </span>
+                ) : null}
                 {o.depositCode ? (
                   <span className="text-sm font-semibold text-brand-ink">
                     عربون بالقسيمة{' '}

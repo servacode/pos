@@ -143,7 +143,7 @@ export const VariantBlock = memo(function VariantBlock({
     } finally {
       setChecking(false);
     }
-    set({ barcodes: [...variant.barcodes, newBarcode('standard', code)] });
+    set({ barcodes: [...variant.barcodes, newBarcode('standard', code)], pendingCode: '' });
     setNewCode('');
     setAddError(null);
   }
@@ -271,6 +271,7 @@ export const VariantBlock = memo(function VariantBlock({
             onChange={(event) => {
               setNewCode(event.target.value);
               setAddError(null);
+              set({ pendingCode: event.target.value });
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
@@ -278,7 +279,7 @@ export const VariantBlock = memo(function VariantBlock({
                 void addCode();
               }
             }}
-            error={addError?.text}
+            error={addError?.text ?? errors[k('pending')]}
             startAdornment={<BarcodeIcon className="ms-3 text-ink-subtle" />}
             className="min-w-48 flex-1"
           />

@@ -101,10 +101,27 @@ describe('counting the shelf by scanning (03 › الألبسة)', () => {
     expect(screen.getByLabelText('المعدود من بندورة')).toHaveValue('14');
     await user.type(field, '999{Enter}');
     expect(await screen.findByText('لا صنف بالباركود 999.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'راجع الجرد' }));
+    expect(await screen.findByRole('table', { name: 'فروق الجرد' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'سجّل الجرد' }));
     expect(await screen.findByText(/سُجّل الجرد STK-0002/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/stocktakes')[0]?.body).toMatchObject({
       lines: [{ variantId: 'v-1', countedQty: 14_000 }],
     });
+  });
+});
+
+describe('counting the shelf by hand', () => {
+  it('refuses a negative count with a message and keeps the review closed', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({ status: 200, body: stock }),
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('button', { name: 'جرد الرفوف' }));
+    await user.type(screen.getByLabelText('المعدود من بندورة'), '-3');
+    expect(await screen.findByText(/العدد لا يكون سالباً/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'راجع الجرد' })).toBeDisabled();
   });
 });

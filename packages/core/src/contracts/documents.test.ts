@@ -72,6 +72,12 @@ function saleCart(overrides: Partial<SaleCart> = {}): SaleCart {
 
 const validSale = (): SalePayload => buildSalePayload(saleCart());
 
+it('accepts a card payment without its approval number (the store decides at the till)', () => {
+  const sale = validSale();
+  sale.payments[0]!.reference = null;
+  expect(issuesOf('sale', sale)).toEqual([]);
+});
+
 const issuesOf = (type: string, payload: unknown) => {
   const result = validateDocumentPayload(type, payload);
   return result.ok ? [] : result.issues.map((i) => i.path);
@@ -156,8 +162,8 @@ describe('sale payload', () => {
     ['a dollar payment without a rate', (s) => void (s.payments[1]!.rate = null), 'payments.1.rate'],
     ['a pound payment with a rate', (s) => void (s.payments[2]!.rate = { ...USD }), 'payments.2.rate'],
     [
-      'a card without its approval code',
-      (s) => void (s.payments[0]!.reference = null),
+      'a wallet payment without its transaction number',
+      (s) => void Object.assign(s.payments[0]!, { method: 'wallet', reference: null, cardLast4: null }),
       'payments.0.reference',
     ],
     ['card digits on cash', (s) => void (s.payments[2]!.cardLast4 = '1234'), 'payments.2.cardLast4'],

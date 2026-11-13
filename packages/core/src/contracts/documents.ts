@@ -68,14 +68,12 @@ export const NON_CASH_METHODS: readonly PaymentMethod[] = [
   'points',
 ];
 
-/** Methods whose reference is mandatory: approval code, wallet transaction, transfer or cheque number (27). */
-export const REFERENCE_METHODS: readonly PaymentMethod[] = [
-  'card',
-  'wallet',
-  'transfer',
-  'cheque',
-  'voucher',
-];
+/**
+ * Methods whose reference is mandatory: wallet transaction, transfer, cheque or voucher number (27).
+ * A card's approval number is the store's choice (settings.till.cardApprovalRequired, enforced at
+ * the till), so the document accepts a card payment without it.
+ */
+export const REFERENCE_METHODS: readonly PaymentMethod[] = ['wallet', 'transfer', 'cheque', 'voucher'];
 
 /** Methods that put the amount on a named customer: credit (1200) and cheque (1160, party). */
 export const CUSTOMER_METHODS: readonly PaymentMethod[] = ['credit', 'cheque', 'points'];
@@ -316,6 +314,8 @@ export const salePayloadSchema = z
     salespersonId: userId.nullable(),
     /** Optional (12 › الزبون); required for a credit payment */
     customerId: uuidSchema.nullable(),
+    /** The manager who allowed a sale on account by a cashier without «البيع بالآجل»; absent otherwise */
+    creditApproval: approvalSchema.nullable().optional(),
     /** The customer's name as printed, a snapshot */
     customerName: z.string().trim().min(1).max(120).nullable(),
     /** Invoice currency: the store's base currency when the sale was made */

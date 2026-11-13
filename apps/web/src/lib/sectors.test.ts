@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHEQUE_SECTORS, EXPIRY_SECTORS, SERIAL_SECTORS, storeSells } from './sectors';
+import { CHEQUE_SECTORS, categoryExamples, EXPIRY_SECTORS, SERIAL_SECTORS, storeSells } from './sectors';
 
 describe('what a medical supplies store sees', () => {
   const store = ['medical_supplies' as const];
@@ -15,5 +15,18 @@ describe('what a medical supplies store sees', () => {
     expect(storeSells(['clothing'], SERIAL_SECTORS)).toBe(false);
     expect(storeSells([], SERIAL_SECTORS)).toBe(true);
     expect(storeSells(undefined, CHEQUE_SECTORS)).toBe(true);
+  });
+});
+
+describe('categoryExamples', () => {
+  it('suggests clothing names to a clothing store, and a few of each type to a mixed store', () => {
+    expect(categoryExamples(['clothing'])).toEqual(
+      expect.arrayContaining(['قمصان', 'بناطيل', 'أحذية رجالي']),
+    );
+    const mixed = categoryExamples(['clothing', 'cafe']);
+    expect(mixed).toContain('قمصان');
+    expect(mixed).toContain('قهوة');
+    expect(categoryExamples(undefined)).toContain('منظفات');
+    expect(categoryExamples([])).toContain('منظفات');
   });
 });

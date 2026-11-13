@@ -10,7 +10,7 @@ import {
   type SaleSettlement,
   type SaleTender,
 } from '@serva/core/sale';
-import type { PaymentMethod } from '@serva/core/contracts/documents';
+import type { Approval, PaymentMethod } from '@serva/core/contracts/documents';
 import type { OutboxEntry } from '@serva/sync';
 import {
   AddIcon,
@@ -45,6 +45,8 @@ import { Kbd } from '../sale/Kbd';
 import { nextOrderNo } from '../sale/orders';
 import { digitOf } from '../PinScreen';
 import { usePos } from '../services';
+import { ManagerCode } from '../staff/ManagerCode';
+import type { StaffMember } from '../staff/staff';
 import { deviceDocuments } from '../shift/shift';
 import { pricingInput, type Cart, type PricingContext } from '../sale/cart';
 import {
@@ -68,6 +70,8 @@ export interface PaymentPanelProps {
   cashierId: string;
   /** «البيع بالآجل» (sale.credit): the credit method shows once a customer is picked */
   canCredit?: boolean;
+  /** The branch's staff: a cashier without «البيع بالآجل» sells on account with a manager's code */
+  staff?: readonly StaffMember[];
   /** «البائع» when it is not the cashier (03 › عمولة البائع) */
   salespersonId?: string | null;
   /** A customer the owner marked «زبون جملة» was picked: the cart moves to the wholesale price */
@@ -115,6 +119,7 @@ export function PaymentPanel({
   shiftId,
   cashierId,
   canCredit = false,
+  staff,
   onWholesaleCustomer,
   salespersonId = null,
   onBack,
@@ -151,6 +156,15 @@ export function PaymentPanel({
     if (customer && canCredit) {
       list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
       list.push({ key: 'cheque', method: 'cheque', currency: base, label: 'شيك', rate: null });
+    } else if (customer && staff) {
+      // Without the permission the sale on account still goes, once a manager allows it
+      list.push({
+        key: 'credit',
+        method: 'credit',
+        currency: base,
+        label: 'على الحساب (بموافقة المدير)',
+        rate: null,
+      });
     }
     return list;
   }, [
@@ -160,12 +174,14 @@ export function PaymentPanel({
     catalog.collectRates,
     customer,
     canCredit,
+    staff,
     hasVouchers,
     loyalty,
     points,
   ]);
   // An exchange opens on the voucher of the return just saved
   const [option, setOption] = useState<PayOption>(cart.voucher ? VOUCHER_OPTION(base) : options[0]!);
+  const [approving, setApproving] = useState(false);
   const [split, setSplit] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
   const [text, setText] = useState('');
@@ -232,10 +248,13 @@ export function PaymentPanel({
             : null);
   const tenders = [...parts.map((p) => p.tender), ...(current ? [current] : [])];
   const settlement = settleWith(tenders);
+  // A card's approval number is asked for only when the store's settings say so
+  const cardApproval = settings.till?.cardApprovalRequired ?? false;
   const needsReference =
     nonCash &&
     option.method !== 'credit' &&
     option.method !== 'points' &&
+    (option.method !== 'card' || cardApproval) &&
     current !== null &&
     current.reference === null;
   const onAccount = (method: string) => method === 'credit' || method === 'cheque' || method === 'points';
@@ -280,11 +299,16 @@ export function PaymentPanel({
     setReference('');
   }
 
-  async function complete() {
+  async function complete(approved: Approval | null = null) {
     if (!canComplete) {
       if ('error' in settlement) setError(settlement.error);
       else if (voucherProblem) setError(voucherProblem);
       else if (needsReference) setError(`اكتب ${REFERENCE_LABEL[option.method]}.`);
+      return;
+    }
+    // A cashier without «البيع بالآجل» needs a manager's code before a sale goes on account
+    if (!canCredit && !approved && tenders.some((t) => t.method === 'credit')) {
+      setApproving(true);
       return;
     }
     setSaving(true);
@@ -300,7 +324,7 @@ export function PaymentPanel({
             orderNo: settings.service.orderNumbers ? await nextOrderNo(pos.local, businessDate) : null,
           }
         : null;
-      const payload = buildSalePayload({
+      const built = buildSalePayload({
         ...pricingInput(cart, ctx),
         shiftId,
         cashierId,
@@ -314,6 +338,7 @@ export function PaymentPanel({
         prescription:
           cart.prescription && Object.values(cart.prescription).some(Boolean) ? cart.prescription : null,
       });
+      const payload = approved ? { ...built, creditApproval: approved } : built;
       const entry = await pos.save({
         type: 'sale',
         payload: payload as unknown as Record<string, unknown>,
@@ -332,9 +357,13 @@ export function PaymentPanel({
   // While the customer picker is open, its own fields take the keys
   const pickingRef = useRef(picking);
   pickingRef.current = picking;
+  // While the manager types their code, the keys are theirs
+  const approvingRef = useRef(approving);
+  approvingRef.current = approving;
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.altKey || event.ctrlKey || event.metaKey || pickingRef.current) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || pickingRef.current || approvingRef.current)
+        return;
       if (event.key === 'Escape') {
         onBack();
         return;
@@ -607,7 +636,9 @@ export function PaymentPanel({
               <>
                 <TextField
                   ref={referenceRef}
-                  label={REFERENCE_LABEL[option.method] ?? 'المرجع'}
+                  label={`${REFERENCE_LABEL[option.method] ?? 'المرجع'}${
+                    option.method === 'card' && !cardApproval ? ' (اختياري)' : ''
+                  }`}
                   hint={option.method === 'voucher' ? 'امسح باركود القسيمة أو اكتب آخر أرقامها' : undefined}
                   value={reference}
                   onChange={(event) => setReference(event.target.value.slice(0, 64))}
@@ -637,12 +668,26 @@ export function PaymentPanel({
                 ) : null}
               </>
             ) : (
-              <div className="grid grid-cols-2 gap-2 @xs:grid-cols-3">
+              // An even grid whatever the count: 3 and 6 in threes, 2 and 4 in twos, 5 as 3 over 2
+              // (six columns, the second row's two wider), never a hole or a lone button on a row
+              <div
+                className={cn(
+                  'grid gap-2',
+                  quick.length === 1
+                    ? 'grid-cols-1'
+                    : quick.length === 2 || quick.length === 4
+                      ? 'grid-cols-2'
+                      : quick.length === 5
+                        ? 'grid-cols-6'
+                        : 'grid-cols-3',
+                )}
+              >
                 {quick.map((value, index) => (
                   <Button
                     key={value}
                     variant="secondary"
                     size="md"
+                    className={quick.length === 5 ? (index < 3 ? 'col-span-2' : 'col-span-3') : undefined}
                     onClick={() => setText(amountText(value, option.currency))}
                   >
                     <span className="flex flex-col items-center">
@@ -709,17 +754,30 @@ export function PaymentPanel({
             أضف الجزء
           </Button>
         ) : null}
-        <Button
-          size="lg"
-          icon={option.method === 'cash' ? <CashIcon size={20} /> : <CheckIcon size={20} />}
-          aria-keyshortcuts="Enter"
-          onClick={complete}
-          disabled={!canComplete}
-          loading={saving}
-        >
-          أتمّ الدفع
-          <Kbd tone="brand">Enter</Kbd>
-        </Button>
+        {approving && staff ? (
+          <ManagerCode
+            staff={staff}
+            permission="sale.credit"
+            reason="البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه."
+            onApproved={(approval) => {
+              setApproving(false);
+              void complete(approval);
+            }}
+            onCancel={() => setApproving(false)}
+          />
+        ) : (
+          <Button
+            size="lg"
+            icon={option.method === 'cash' ? <CashIcon size={20} /> : <CheckIcon size={20} />}
+            aria-keyshortcuts="Enter"
+            onClick={() => void complete()}
+            disabled={!canComplete}
+            loading={saving}
+          >
+            أتمّ الدفع
+            <Kbd tone="brand">Enter</Kbd>
+          </Button>
+        )}
       </footer>
     </section>
   );

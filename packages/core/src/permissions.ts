@@ -45,7 +45,8 @@ export type Permission = keyof typeof PERMISSIONS;
 
 export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
-export type SystemRoleKey = 'owner' | 'manager' | 'cashier' | 'waiter' | 'pharmacist';
+export type SystemRoleKey =
+  'owner' | 'manager' | 'cashier' | 'waiter' | 'pharmacist' | 'accountant' | 'storekeeper';
 
 export interface RoleTemplate {
   key: SystemRoleKey;
@@ -92,5 +93,26 @@ export const DEFAULT_ROLES: readonly RoleTemplate[] = [
     nameAr: 'صيدلاني',
     permissions: ['sale.create', 'sale.discount', 'shift.close_own', 'receipt.create', 'pharmacy.controlled'],
     maxDiscountBp: 1000,
+  },
+  // «محاسب»: reads the books and the reports, records expenses; the hand-written entries stay the owner's
+  {
+    key: 'accountant',
+    nameAr: 'محاسب',
+    permissions: [
+      'customers.view',
+      'report.view',
+      'reports.financial',
+      'accounting.view',
+      'expenses.manage',
+      'cost.view',
+    ],
+    maxDiscountBp: 0,
+  },
+  // «أمين مستودع»: receives purchases and counts the stock; no sales, no money reports
+  {
+    key: 'storekeeper',
+    nameAr: 'أمين مستودع',
+    permissions: ['purchases.manage', 'inventory.adjust'],
+    maxDiscountBp: 0,
   },
 ];

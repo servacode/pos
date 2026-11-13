@@ -1,9 +1,32 @@
 import { z } from 'zod';
-import { normalizePhone } from '../phone';
+import { normalizeContactPhone, normalizePhone } from '../phone';
 import type { SectorKey } from '../sectors';
 import type { CurrencyCode } from '../currencies';
 import { toLatinDigits } from '../text';
 import type { Permission, SystemRoleKey } from '../permissions';
+
+/**
+ * An optional contact phone (store, customer, supplier): empty becomes null, a mobile or a Syrian
+ * landline is kept in international form. A single schema, so an empty or wrong value always
+ * answers in Arabic (a union of schemas answers «Invalid input»).
+ */
+export const contactPhoneSchema = z
+  .string('رقم الهاتف غير صحيح')
+  .trim()
+  .transform((value, ctx): string | null => {
+    if (value === '') return null;
+    const normalized = normalizeContactPhone(value);
+    if (!normalized) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'رقم الهاتف غير صحيح. مثال: 0912345678 أو 0112345678',
+      });
+      return z.NEVER;
+    }
+    return normalized;
+  })
+  .nullable()
+  .optional();
 
 export const phoneSchema = z
   .string('رقم الجوال مطلوب')

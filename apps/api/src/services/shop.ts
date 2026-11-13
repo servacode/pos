@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   convert,
   formatMoney,
@@ -219,6 +219,15 @@ const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online
   where o.status = 'accepted' and x->>'variantId' = v.id::text), 0)`;
 /** On the shelf in any branch, less what accepted orders hold; or a service that has no stock */
 const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} > 0)`;
+/** What is left of the piece, in stock units; null for a service. Only «بقي 2 فقط» comes out of it. */
+const unitsLeftSql = sql`(case when p.type = 'service' then null else coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} end)`;
+/** At most this many pieces left shows «بقي 2 فقط» */
+const LOW_STOCK = 3;
+const leftOf = (units: string | null): number | null => {
+  if (units === null) return null;
+  const n = Number(units);
+  return n > 0 && n <= LOW_STOCK * 1000 ? Math.ceil(n / 1000) : null;
+};
 
 export function shopHome(db: Database, slug: string): Promise<ShopHome> {
   return tenantOf(db, slug).then((tenantId) =>
@@ -236,9 +245,12 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         was: string | null;
         available: boolean;
         upload_id: string | null;
+        created_at: Date;
+        attributes: { name: string; value: string }[] | null;
       }>(sql`
         select p.id, p.name_ar as name, p.category_id, pr.currency, pr.price_minor::text as price,
                pr.was_price_minor::text as was, ${availableSql} as available,
+               p.created_at, v.attributes,
                (select i.upload_id from product_images i where i.product_id = p.id
                 order by i.sort_order, i.created_at limit 1) as upload_id
         from products p
@@ -265,6 +277,8 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
             wasPriceMinor: show ? priced.wasPriceMinor : null,
             offer: show ? priced.offer : null,
             available: r.available,
+            createdAt: new Date(r.created_at).toISOString(),
+            options: [],
           });
         } else {
           // The card shows the cheapest piece, and what that one was before
@@ -277,6 +291,15 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
             card.offer ??= priced.offer;
           }
           card.available ||= r.available;
+        }
+        // The filters offer what is on the shelf: the values of the pieces that can be bought
+        if (r.available) {
+          const card = byProduct.get(r.id)!;
+          for (const a of r.attributes ?? []) {
+            let option = card.options.find((o) => o.name === a.name);
+            if (!option) card.options.push((option = { name: a.name, values: [] }));
+            if (!option.values.includes(a.value)) option.values.push(a.value);
+          }
         }
       }
       const products = [...byProduct.values()].filter((p) => p.available || store.show_out_of_stock);
@@ -334,9 +357,11 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
         price: string;
         was: string | null;
         available: boolean;
+        units: string | null;
       }>(sql`
         select p.name_ar as product_name, p.category_id, v.id, v.label, v.attributes, pr.currency,
-               pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available
+               pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available,
+               ${unitsLeftSql}::text as units
         from products p
         join variants v on v.product_id = p.id and ${liveVariant}
         join prices pr on pr.id = v.id
@@ -356,6 +381,7 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
             priceMinor: store.show_prices ? priced.priceMinor : null,
             wasPriceMinor: store.show_prices ? priced.wasPriceMinor : null,
             available: r.available,
+            left: r.available ? leftOf(r.units) : null,
           },
         ];
       });
@@ -698,6 +724,37 @@ function isTrackToken(token: string): boolean {
   return true;
 }
 
+/** What the customer's page shows of an order; prices only when the store shows prices. */
+async function trackOf(
+  tx: Transaction,
+  tenantId: string,
+  row: typeof onlineOrders.$inferSelect,
+): Promise<ShopOrderTrack> {
+  const [shop] = await tx
+    .select({ show: onlineStores.showPrices })
+    .from(onlineStores)
+    .where(eq(onlineStores.tenantId, tenantId));
+  const show = shop?.show ?? true;
+  return {
+    number: row.number,
+    status: row.status as ShopOrderTrack['status'],
+    customerName: row.customerName,
+    fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
+    area: row.deliveryArea,
+    currency: row.currency as CurrencyCode,
+    showPrices: show,
+    totalMinor: show ? row.totalMinor : null,
+    deliveryFeeMinor: show ? row.deliveryFeeMinor : null,
+    lines: row.lines.map((l) => ({
+      name: l.name,
+      label: l.label,
+      qty: l.qty,
+      totalMinor: show ? l.totalMinor : null,
+    })),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 /** The customer's page for one order: its state and lines, by the unguessable token in its link. */
 export function shopOrderTrack(db: Database, slug: string, token: string): Promise<ShopOrderTrack> {
   const gone = () => notFound('هذا الطلب غير موجود.');
@@ -709,27 +766,38 @@ export function shopOrderTrack(db: Database, slug: string, token: string): Promi
         .from(onlineOrders)
         .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)));
       if (!row) throw gone();
-      const [shop] = await tx
-        .select({ show: onlineStores.showPrices })
-        .from(onlineStores)
-        .where(eq(onlineStores.tenantId, tenantId));
-      const show = shop?.show ?? true;
-      return {
-        number: row.number,
-        status: row.status as ShopOrderTrack['status'],
-        fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
-        currency: row.currency as CurrencyCode,
-        showPrices: show,
-        totalMinor: show ? row.totalMinor : null,
-        deliveryFeeMinor: show ? row.deliveryFeeMinor : null,
-        lines: row.lines.map((l) => ({
-          name: l.name,
-          label: l.label,
-          qty: l.qty,
-          totalMinor: show ? l.totalMinor : null,
-        })),
-        createdAt: row.createdAt.toISOString(),
-      };
+      return trackOf(tx, tenantId, row);
+    }),
+  );
+}
+
+/**
+ * «اطلب إلغاء الطلب»: the customer asks, from the order's own page, to cancel an order the store has
+ * not decided yet. The order becomes cancel_requested and waits in the owner's box; asking twice is
+ * the same as once. An order the store already accepted, rejected or delivered is not the
+ * customer's to cancel here: they talk to the store.
+ */
+export function requestOrderCancel(db: Database, slug: string, token: string): Promise<ShopOrderTrack> {
+  const gone = () => notFound('هذا الطلب غير موجود.');
+  if (!isTrackToken(token)) return Promise.reject(gone());
+  return tenantOf(db, slug).then((tenantId) =>
+    withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(onlineOrders)
+        .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)))
+        .for('update');
+      if (!row) throw gone();
+      if (row.status === 'cancel_requested') return trackOf(tx, tenantId, row);
+      if (row.status !== 'pending') {
+        throw new AppError(409, 'conflict', 'قرّر المحل في طلبك، فلم يعد الإلغاء من هنا. تواصل مع المحل.');
+      }
+      const [done] = await tx
+        .update(onlineOrders)
+        .set({ status: 'cancel_requested', updatedAt: sql`now()` })
+        .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.id, row.id)))
+        .returning();
+      return trackOf(tx, tenantId, done!);
     }),
   );
 }
@@ -836,6 +904,8 @@ export async function saveOnlineStore(
 const staleVersion = () =>
   new AppError(409, 'stale_version', 'عدّل شخص آخر هذا السجل للتو. حدّثنا البيانات، راجعها ثم احفظ من جديد.');
 
+const orderChanged = (message: string) => new AppError(409, 'stale_version', message);
+
 const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   id: r.id,
   number: r.number,
@@ -868,7 +938,15 @@ export function listOnlineOrders(
       .select()
       .from(onlineOrders)
       .where(
-        and(eq(onlineOrders.tenantId, auth.tenantId), ...(status ? [eq(onlineOrders.status, status)] : [])),
+        and(
+          eq(onlineOrders.tenantId, auth.tenantId),
+          // The box of orders waiting for the store also holds the ones their customer asked to cancel
+          ...(status === 'pending'
+            ? [inArray(onlineOrders.status, ['pending', 'cancel_requested'])]
+            : status
+              ? [eq(onlineOrders.status, status)]
+              : []),
+        ),
       )
       .orderBy(desc(onlineOrders.createdAt), desc(onlineOrders.seq))
       .limit(200);
@@ -878,6 +956,8 @@ export function listOnlineOrders(
 
 const NEXT: Record<OnlineOrder['status'], readonly OnlineOrder['status'][]> = {
   pending: ['accepted', 'rejected'],
+  // The customer asked to cancel: agree (rejected) or keep the order (accepted)
+  cancel_requested: ['accepted', 'rejected'],
   accepted: ['done', 'rejected'],
   rejected: [],
   done: [],
@@ -897,7 +977,11 @@ export function setOnlineOrderStatus(
       .from(onlineOrders)
       .where(and(eq(onlineOrders.tenantId, auth.tenantId), eq(onlineOrders.id, id)));
     if (!row) throw notFound('هذا الطلب غير موجود.');
-    if (row.version !== input.version) throw staleVersion();
+    if (row.version !== input.version) {
+      // The same order decided twice (a double click, or two people at the till and the desk): say so
+      if (row.status === input.status) throw orderChanged('تم هذا الإجراء على الطلب للتو.');
+      throw orderChanged('تغيّر هذا الطلب للتو. حدّث الصفحة وراجعه.');
+    }
     if (!NEXT[row.status as OnlineOrder['status']].includes(input.status)) {
       throw fieldError('status', 'لا يمكن نقل الطلب إلى هذه الحالة.');
     }

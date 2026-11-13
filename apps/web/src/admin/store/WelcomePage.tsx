@@ -23,7 +23,7 @@ import { getStore, saveOnboarding, saveProfile } from './api';
 import { CardBar } from './parts';
 import { CurrencyForm, ProfileForm, SectorPicker } from './StoreForms';
 
-const TITLES = ['شو بتشتغل؟', 'معلومات محلّك', 'العملة والأسعار', 'جاهز تبدأ'];
+const TITLES = ['ما نشاط محلّك؟', 'معلومات محلّك', 'العملة والأسعار', 'جاهز تبدأ'];
 
 /** Each step's short name in the step list, and the line under its title. */
 const STEPS: readonly { label: string; description: string }[] = [
@@ -157,7 +157,7 @@ export function WelcomePage() {
   async function saveSectors() {
     if (!store) return;
     if (sectors.length === 0) {
-      setError('اختر نشاطاً واحداً على الأقل، أو اضغط «تخطَّ».');
+      setError('اختر نشاطاً واحداً على الأقل، أو اضغط «تخط».');
       return;
     }
     setBusy(true);
@@ -188,7 +188,7 @@ export function WelcomePage() {
 
   const skip = (next: number) => (
     <Button variant="ghost" onClick={() => void go(next)}>
-      تخطَّ هذه الخطوة
+      تخط هذه الخطوة
     </Button>
   );
 
@@ -218,7 +218,7 @@ export function WelcomePage() {
               </p>
               <div className="flex flex-wrap items-center gap-2 max-sm:w-full max-sm:flex-col-reverse max-sm:*:w-full">
                 <Button variant="ghost" onClick={() => void go(1)}>
-                  تخطَّ
+                  تخط
                 </Button>
                 <Button onClick={() => void saveSectors()} loading={busy}>
                   التالي
@@ -267,7 +267,7 @@ export function WelcomePage() {
                 icon={DeviceIcon}
                 to="/devices"
                 title="اربط جهاز الكاشير"
-                text="جوال أو تابلت أو كمبيوتر على نفس الشبكة"
+                text="جوال أو تابلت أو كمبيوتر متصل بالإنترنت"
               />
             </ul>
             <Card className="flex flex-wrap items-center justify-between gap-4">

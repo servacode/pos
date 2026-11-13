@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { saleListQuery, type SaleDetail, type SaleListPage } from '@serva/core';
+import { invoiceLookupQuery, saleListQuery, type SaleDetail, type SaleListPage } from '@serva/core';
+import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
+import { lookupInvoice } from '../services/invoice-lookup';
 import { getSale, listSales } from '../services/sales';
 import { parseBody } from './validation';
 
@@ -16,6 +18,12 @@ export async function saleRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/sales', signedIn, async (request): Promise<SaleListPage> => {
     if (!request.auth) throw unauthorized();
     return listSales(db, request.auth, parseBody(saleListQuery, request.query));
+  });
+
+  // The till finds an invoice of any till of the store to return from (contracts/till.ts)
+  app.get('/v1/device/invoices/lookup', { onRequest: requireDevice() }, async (request) => {
+    if (!request.device) throw unauthorized();
+    return lookupInvoice(db, request.device, parseBody(invoiceLookupQuery, request.query).q);
   });
 
   app.get('/v1/sales/:id', signedIn, async (request): Promise<SaleDetail> => {

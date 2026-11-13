@@ -171,7 +171,7 @@ function DayReportBody({ report }: { report: DayReport }) {
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           hero
           className="sm:col-span-2"
@@ -188,7 +188,7 @@ function DayReportBody({ report }: { report: DayReport }) {
         <StatTile label="الضريبة" value={<Money minor={report.taxMinor} currency={base} />} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <Section title="تفصيل المبيعات">
           <Breakdown report={report} />
         </Section>
@@ -238,7 +238,7 @@ function DayReportBody({ report }: { report: DayReport }) {
       ) : null}
 
       {(report.byCategory ?? []).length > 0 ? (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-2">
           <Section title="حسب القسم">
             <DataTable
               caption="المبيعات حسب القسم"

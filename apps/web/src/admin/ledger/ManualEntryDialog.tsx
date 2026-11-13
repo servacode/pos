@@ -7,6 +7,7 @@ import { isoDay } from '../../lib/dates';
 import { listAccounts } from '../reports/api';
 import { defaultBranch } from '../reports/parts';
 import { createManualEntry, reverseEntry } from './api';
+import { DateField } from '../../lib/DateField';
 
 /** Accounts only their own documents move (the server refuses them too). */
 const DOCUMENT_ONLY = new Set(['1200', '2100', '2300', '1300', '1310', '1160', '1110']);
@@ -134,14 +135,7 @@ export function ManualEntryDialog({
       >
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="grid gap-4 sm:grid-cols-2">
-          <TextField
-            label="التاريخ"
-            type="date"
-            dir="ltr"
-            value={date}
-            onChange={(e) => e.target.value && setDate(e.target.value)}
-            error={fields.date}
-          />
+          <DateField label="التاريخ" value={date} required onChange={setDate} error={fields.date} />
           <Select
             label="الفرع"
             value={branchId}

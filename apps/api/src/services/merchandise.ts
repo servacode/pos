@@ -37,7 +37,7 @@ export function optionOrder(values: { value: string; position: number }[]): stri
     .map((x) => x.v);
 }
 
-async function branchesOf(tx: Transaction, auth: AccessClaims, branchId: string | undefined) {
+export async function branchesOf(tx: Transaction, auth: AccessClaims, branchId: string | undefined) {
   const scope = await permissionScope(tx, auth.userId, 'report.view');
   if (branchId) {
     if (!inScope(scope, branchId)) throw forbidden();

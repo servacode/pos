@@ -41,9 +41,19 @@ import { usePos } from '../services';
 import { deviceDocuments, type OpenShift } from '../shift/shift';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
-import { matchesNumber, RETURN_WINDOW_DAYS, returnableSales, type ReturnableSale } from './returns';
+import {
+  matchesNumber,
+  returnableSales,
+  returnReasons,
+  returnWindowOf,
+  saleFromServer,
+  searchInvoice,
+  type ReturnableSale,
+} from './returns';
 
-const REASONS = ['تالف أو منتهي الصلاحية', 'الزبون غيّر رأيه', 'خطأ في الفاتورة'] as const;
+/** The day count as the cashier reads it: «30 يوماً» */
+const daysText = (n: number) =>
+  n === 1 ? 'يوم واحد' : n === 2 ? 'يومين' : `${n} ${n <= 10 ? 'أيام' : 'يوماً'}`;
 
 const REFUND_TEXT: Record<RefundMethod, string> = {
   cash: 'نقداً من الدرج',
@@ -102,12 +112,21 @@ export function ReturnScreen({
   const pos = usePos();
   const digits = useDigits();
   const settings = catalog.settings!;
+  const windowDays = returnWindowOf(settings);
+  const REASONS = useMemo(() => returnReasons(settings.sectors), [settings.sectors]);
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
   const [tick, setTick] = useState(0);
   const [search, setSearch] = useState('');
   const [picked, setPicked] = useState<ReturnableSale | null>(null);
   const [qty, setQty] = useState<Record<number, number>>({});
-  const [reason, setReason] = useState<string>(REASONS[0]);
+  const [reason, setReason] = useState<string>(REASONS[0]!);
+  // «استبدال»: the piece goes back on a voucher and the sale of the other piece follows at once
+  const [exchange, setExchange] = useState(false);
+  const [remote, setRemote] = useState<{ sale: ReturnableSale | null; note: string | null; busy: boolean }>({
+    sale: null,
+    note: null,
+    busy: false,
+  });
   const [otherReason, setOtherReason] = useState('');
   const [method, setMethod] = useState<RefundMethod>('cash');
   const [reference, setReference] = useState('');
@@ -124,11 +143,16 @@ export function ReturnScreen({
     };
   }, [pos.store, tick]);
 
-  const sales = useMemo(() => (entries ? returnableSales(entries, pos.now()) : []), [entries, pos]);
+  const sales = useMemo(
+    () => (entries ? returnableSales(entries, pos.now(), windowDays) : []),
+    [entries, pos, windowDays],
+  );
+  const online = pos.online();
   const shown = sales.filter((s) => matchesNumber(s.number, search)).slice(0, 30);
 
   // The picked invoice as it is now (a return saved here a moment ago counts)
   const current = picked ? (sales.find((s) => s.id === picked.id) ?? picked) : null;
+  const isExchange = exchange && current !== null;
   const lines = current ? returnableLines(current.sale, current.returned) : [];
   const picks = Object.entries(qty)
     .map(([lineNo, q]) => ({ saleLineNo: Number(lineNo), qty: q }))
@@ -159,10 +183,45 @@ export function ReturnScreen({
   const ready = draft !== null && why.length > 0 && (!needsReference || reference.trim().length > 0);
   const canRefund = session.permissions.has('sale.refund');
 
+  /** The invoice of another till or branch: asked of the server, by number or by the receipt's barcode */
+  async function findInStore() {
+    const typed = search.trim();
+    if (!typed) return;
+    const token = pos.device.token;
+    if (!pos.online() || !token) {
+      setRemote({ sale: null, busy: false, note: 'لا إنترنت الآن: تظهر فواتير هذا الجهاز فقط.' });
+      return;
+    }
+    setRemote({ sale: null, busy: true, note: null });
+    const result = await searchInvoice(typed, token, pos.fetch);
+    if (result.found === null) {
+      setRemote({
+        sale: null,
+        busy: false,
+        note:
+          result.reason === 'missing'
+            ? 'لا فاتورة بهذا الرقم في المحل. اكتب الرقم كاملاً كما هو على الإيصال.'
+            : 'تعذّر الوصول إلى المحل الآن: تظهر فواتير هذا الجهاز فقط.',
+      });
+      return;
+    }
+    const sale = saleFromServer(result.found, entries ?? [], pos.now(), windowDays);
+    if (!sale) {
+      setRemote({
+        sale: null,
+        busy: false,
+        note: `الفاتورة أقدم من ${daysText(windowDays)}، فلا يُقبل مرتجعها.`,
+      });
+      return;
+    }
+    setRemote({ sale, busy: false, note: null });
+    choose(sale);
+  }
+
   function choose(sale: ReturnableSale) {
     setPicked(sale);
     setQty({});
-    setMethod(defaultRefundMethod(sale.sale));
+    setMethod(exchange ? 'voucher' : defaultRefundMethod(sale.sale));
     setReference('');
     setError(null);
     setSaved(null);
@@ -191,6 +250,7 @@ export function ReturnScreen({
       setQty({});
       setTick((t) => t + 1);
       onPrint(doc);
+      if (isExchange && doc.number && onExchange) onExchange(doc.number);
     } catch {
       setError('لم يُسجَّل المرتجع. لم يُحفظ شيء، حاول مرة أخرى.');
     } finally {
@@ -218,7 +278,7 @@ export function ReturnScreen({
         onBack={onBack}
         icon={<UndoIcon size={24} />}
         title="مرتجع"
-        description={`اختر فاتورة من هذا الجهاز خلال آخر ${RETURN_WINDOW_DAYS} أيام، ثم ما يرجع منها. المبلغ من الفاتورة نفسها.`}
+        description={`اختر فاتورة من آخر ${daysText(windowDays)}، من أي جهاز في المحل، ثم ما يرجع منها. المبلغ من الفاتورة نفسها.`}
       />
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
         <section
@@ -227,14 +287,41 @@ export function ReturnScreen({
         >
           <TextField
             label="رقم الفاتورة"
-            hint="آخر أرقامها تكفي"
+            hint={
+              online
+                ? 'آخر أرقامها تكفي، أو امسح باركود الإيصال'
+                : 'آخر أرقامها تكفي. بلا إنترنت: فواتير هذا الجهاز فقط'
+            }
             inputMode="numeric"
             dir="ltr"
             value={search}
-            onChange={(e) => setSearch(e.target.value.slice(0, 40))}
+            onChange={(e) => {
+              setSearch(e.target.value.slice(0, 40));
+              setRemote({ sale: null, busy: false, note: null });
+            }}
+            onKeyDown={(e) => {
+              // A scanner types the barcode and presses Enter: the whole number goes to the store
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const here = shown.length === 1 && matchesNumber(shown[0]!.number, search);
+                if (here && shown[0]!.number.toUpperCase() === search.trim().toUpperCase()) choose(shown[0]!);
+                else void findInStore();
+              }
+            }}
             inputClassName="num"
             startAdornment={<SearchIcon className="ms-4 shrink-0" />}
           />
+          {search.trim() && shown.length === 0 ? (
+            <Button
+              variant="secondary"
+              icon={<SearchIcon />}
+              loading={remote.busy}
+              onClick={() => void findInStore()}
+            >
+              ابحث في المحل كله
+            </Button>
+          ) : null}
+          {remote.note ? <Alert tone="info">{remote.note}</Alert> : null}
           {entries === null ? (
             <div aria-hidden="true" className="flex flex-col gap-2 py-1">
               {[0, 1, 2].map((i) => (
@@ -263,7 +350,7 @@ export function ReturnScreen({
                     )}
                   >
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <bdi dir="ltr" className="num truncate font-semibold text-ink">
+                      <bdi dir="ltr" className="num font-semibold break-all text-ink">
                         {s.number}
                       </bdi>
                       <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
@@ -422,6 +509,27 @@ export function ReturnScreen({
                   );
                 })}
               </ul>
+              <ChoiceGroup label="ماذا يريد الزبون؟" className="flex flex-wrap gap-2">
+                <OptionChip
+                  selected={!exchange}
+                  onClick={() => {
+                    setExchange(false);
+                    if (current) setMethod(defaultRefundMethod(current.sale));
+                  }}
+                >
+                  رد المبلغ
+                </OptionChip>
+                <OptionChip
+                  selected={exchange}
+                  onClick={() => {
+                    setExchange(true);
+                    setMethod('voucher');
+                    if (REASONS.includes('تبديل')) setReason('تبديل');
+                  }}
+                >
+                  استبدال بقطعة أخرى
+                </OptionChip>
+              </ChoiceGroup>
               <ChoiceGroup label="السبب" className="flex flex-wrap gap-2">
                 {[...REASONS, 'other' as const].map((r) => (
                   <OptionChip key={r} selected={reason === r} onClick={() => setReason(r)}>
@@ -439,17 +547,24 @@ export function ReturnScreen({
             </div>
 
             <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 xl:sticky xl:top-0">
-              <ChoiceGroup label="طريقة الرد" className="grid gap-2">
-                {refundMethods.map((m) => (
-                  <OptionTile
-                    key={m}
-                    selected={method === m}
-                    onClick={() => setMethod(m)}
-                    icon={REFUND_ICON[m]}
-                    title={REFUND_TEXT[m]}
-                  />
-                ))}
-              </ChoiceGroup>
+              {exchange ? (
+                <Alert tone="info">
+                  تُسجَّل القطعة مرتجعة على قسيمة بقيمتها، ثم تُباع القطعة الأخرى بالقسيمة: يدفع الزبون الفرق
+                  فقط، وإن كانت أرخص يبقى الباقي له على القسيمة.
+                </Alert>
+              ) : (
+                <ChoiceGroup label="طريقة الرد" className="grid gap-2">
+                  {refundMethods.map((m) => (
+                    <OptionTile
+                      key={m}
+                      selected={method === m}
+                      onClick={() => setMethod(m)}
+                      icon={REFUND_ICON[m]}
+                      title={REFUND_TEXT[m]}
+                    />
+                  ))}
+                </ChoiceGroup>
+              )}
               {needsReference ? (
                 <TextField
                   label="رقم العملية"
@@ -465,11 +580,13 @@ export function ReturnScreen({
                 className="flex flex-col gap-0.5 rounded-control bg-surface-total px-4 py-3"
               >
                 <span className="text-sm font-semibold text-ink-muted">
-                  {method === 'voucher'
-                    ? 'مبلغ القسيمة'
-                    : method === 'account'
-                      ? 'يُحسم من دين الزبون'
-                      : 'المبلغ المردود'}
+                  {exchange
+                    ? 'قيمة القطعة المرتجعة'
+                    : method === 'voucher'
+                      ? 'مبلغ القسيمة'
+                      : method === 'account'
+                        ? 'يُحسم من دين الزبون'
+                        : 'المبلغ المردود'}
                 </span>
                 <Money
                   minor={draft?.totals.totalMinor ?? 0}
@@ -501,7 +618,7 @@ export function ReturnScreen({
                   disabled={!ready || saving}
                   onClick={() => (canRefund ? void record(null) : setApproving(true))}
                 >
-                  سجّل المرتجع
+                  {exchange ? 'سجّل وبِع البديل' : 'سجّل المرتجع'}
                 </Button>
               )}
             </div>

@@ -28,13 +28,15 @@ import {
   type DataColumn,
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
-import { clockText } from '../format';
+import { PrintSheet, usePrint } from '../../lib/print';
+import { clockText, counted, INVOICES } from '../format';
 import { ChoiceGroup, FlowHeader, OptionTile } from '../FlowParts';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
 import { DrawerCounter, emptyCount, useCountKeypad } from './DrawerCounter';
+import { ZReport } from './ZReport';
 import {
   cashMovementPayload,
   closeDrawer,
@@ -236,7 +238,10 @@ export function ShiftCloseScreen({
   const digits = useDigits();
   const settings = catalog.settings!;
   const businessDate = useBusinessDate(catalog);
-  const [step, setStep] = useState<'count' | 'summary'>('count');
+  const [step, setStep] = useState<'count' | 'summary' | 'done'>('count');
+  const [confirming, setConfirming] = useState(false);
+  const [closedAt, setClosedAt] = useState(0);
+  const { paper, print } = usePrint();
   const [counts, setCounts] = useState<DrawerCount[]>(() => drawerCurrencies(catalog).map(emptyCount));
   const [activity, setActivity] = useState<ShiftActivity | null>(null);
   const [saving, setSaving] = useState(false);
@@ -291,12 +296,27 @@ export function ShiftCloseScreen({
       });
       await pos.local.remove(shift.key);
       await pos.local.set(LAST_CLOSED_KEY, shift.id);
-      onClosed();
+      // The Z report follows: printed from here, then the cashier leaves
+      setClosedAt(pos.now());
+      setConfirming(false);
+      setSaving(false);
+      setStep('done');
     } catch {
       setSaving(false);
       setError('لم تُغلق الوردية. لم يُحفظ شيء، حاول مرة أخرى.');
     }
   }
+
+  const zProps = (a: ShiftActivity) => ({
+    shift,
+    closedAt,
+    closedByName: session.fullName,
+    activity: a,
+    cash,
+    baseCurrency: settings.baseCurrency,
+    storeName: settings.storeName || pos.device.storeName,
+    showDifference: canSeeDifference,
+  });
 
   const columns: DataColumn<MethodRow>[] = [
     {
@@ -307,7 +327,7 @@ export function ShiftCloseScreen({
           row.method === 'cash' && row.currency !== settings.baseCurrency ? ' بالدولار' : ''
         }`,
     },
-    { key: 'count', header: 'فواتير', numeric: true, cell: (row) => row.count },
+    { key: 'count', header: 'دفعات', numeric: true, cell: (row) => row.count },
     {
       key: 'amount',
       header: 'الصافي',
@@ -319,21 +339,23 @@ export function ShiftCloseScreen({
   return (
     <div className="flex w-full max-w-6xl flex-col gap-6">
       <FlowHeader
-        onBack={step === 'count' ? onBack : () => setStep('count')}
-        backLabel={step === 'count' ? 'ارجع للبيع' : 'ارجع للعدّ'}
+        onBack={step === 'count' ? onBack : step === 'done' ? onClosed : () => setStep('count')}
+        backLabel={step === 'count' ? 'ارجع للبيع' : step === 'done' ? 'اخرج' : 'ارجع للعدّ'}
         icon={step === 'count' ? <LockIcon size={24} /> : <ReportsIcon size={24} />}
-        title={step === 'count' ? 'إغلاق الوردية' : 'ملخّص الوردية'}
+        title={step === 'count' ? 'إغلاق الوردية' : step === 'done' ? 'أُغلقت الوردية' : 'ملخّص الوردية'}
         description={
           <>
             {shift.openedByName} · منذ {clockText(shift.openedAt, digits)} ·{' '}
             <bdi dir="ltr" className="num">
               {shift.number}
             </bdi>
-            {activity ? ` · ${activity.saleCount} فاتورة` : ''}
+            {activity ? ` · ${counted(activity.saleCount, INVOICES, digits)}` : ''}
           </>
         }
         actions={
-          <Badge tone="brand">{step === 'count' ? 'الخطوة 1 من 2: العدّ' : 'الخطوة 2 من 2: الملخّص'}</Badge>
+          step === 'done' ? null : (
+            <Badge tone="brand">{step === 'count' ? 'الخطوة 1 من 2: العدّ' : 'الخطوة 2 من 2: الملخّص'}</Badge>
+          )
         }
       />
       {step === 'count' ? (
@@ -346,6 +368,26 @@ export function ShiftCloseScreen({
             تابع للملخّص
           </Button>
         </CountLayout>
+      ) : step === 'done' && activity ? (
+        <section aria-label="تقرير الإغلاق" className="flex flex-col items-start gap-4">
+          <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع تقرير الإغلاق ثم اخرج.</Alert>
+          <div className="rounded-card border border-line bg-surface p-3 shadow-e1">
+            <ZReport {...zProps(activity)} />
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button size="lg" icon={<ReportsIcon />} onClick={() => print('80mm')}>
+              اطبع تقرير الإغلاق
+            </Button>
+            <Button size="lg" variant="secondary" onClick={onClosed}>
+              تمّ، اخرج
+            </Button>
+          </div>
+          {paper ? (
+            <PrintSheet paper={paper}>
+              <ZReport {...zProps(activity)} />
+            </PrintSheet>
+          ) : null}
+        </section>
       ) : (
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
           <section aria-label="الملخّص حسب طريقة الدفع" className="flex flex-col gap-3">
@@ -354,11 +396,7 @@ export function ShiftCloseScreen({
                 <SalesIcon />
               </IconChip>
               <h2 className="flex-1 text-lg font-semibold text-ink">حسب طريقة الدفع</h2>
-              {activity ? (
-                <Badge>
-                  <span className="num">{activity.saleCount}</span> فاتورة
-                </Badge>
-              ) : null}
+              {activity ? <Badge>{counted(activity.saleCount, INVOICES, digits)}</Badge> : null}
             </div>
             <DataTable
               caption="الملخّص حسب طريقة الدفع"
@@ -370,6 +408,25 @@ export function ShiftCloseScreen({
                 <EmptyState icon={SalesIcon} title="لا مبيعات في هذه الوردية." className="border-0 py-8" />
               }
             />
+            {activity && (activity.returns.count > 0 || activity.vouchers.count > 0) ? (
+              <ul aria-label="مرتجعات وقسائم" className="flex flex-col gap-1 text-sm text-ink-muted">
+                {activity.returns.count > 0 ? (
+                  <li>
+                    المرتجعات:{' '}
+                    {counted(activity.returns.count, ['مرتجع واحد', 'مرتجعان', 'مرتجعات', 'مرتجعاً'], digits)}
+                  </li>
+                ) : null}
+                {activity.vouchers.count > 0 ? (
+                  <li className="flex flex-wrap items-center gap-x-1">
+                    قسائم الهدية المباعة:{' '}
+                    {counted(activity.vouchers.count, ['قسيمة واحدة', 'قسيمتان', 'قسائم', 'قسيمة'], digits)} ·{' '}
+                    {activity.vouchers.byCurrency.map((v) => (
+                      <Money key={v.currency} minor={v.amountMinor} currency={v.currency} />
+                    ))}
+                  </li>
+                ) : null}
+              </ul>
+            ) : null}
           </section>
           <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 lg:sticky lg:top-0">
             <h2 className="text-sm font-semibold text-ink-muted">النقد المعدود</h2>
@@ -411,16 +468,33 @@ export function ShiftCloseScreen({
               </p>
             ) : null}
             {error ? <Alert tone="error">{error}</Alert> : null}
-            <Button
-              size="lg"
-              fullWidth
-              icon={<LockIcon />}
-              onClick={close}
-              loading={saving}
-              disabled={!canClose}
-            >
-              أغلق الوردية
-            </Button>
+            {confirming ? (
+              <div
+                role="alertdialog"
+                aria-label="تأكيد إغلاق الوردية"
+                className="flex flex-col gap-3 rounded-card border border-warning/20 bg-warning-soft p-4"
+              >
+                <p className="font-semibold text-warning-ink">
+                  تغلق الوردية الآن؟ بعد الإغلاق لا يُعدَّل العدّ ولا تُضاف مبيعات إلى هذه الوردية.
+                </p>
+                <Button size="lg" fullWidth icon={<LockIcon />} onClick={close} loading={saving}>
+                  نعم، أغلق الوردية
+                </Button>
+                <Button variant="ghost" fullWidth onClick={() => setConfirming(false)} disabled={saving}>
+                  لا، ارجع
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="lg"
+                fullWidth
+                icon={<LockIcon />}
+                onClick={() => setConfirming(true)}
+                disabled={!canClose}
+              >
+                أغلق الوردية
+              </Button>
+            )}
           </aside>
         </div>
       )}

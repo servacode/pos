@@ -12,7 +12,10 @@ const join = (rows: string[][]) => `${BOM}${rows.map((cells) => cells.join(','))
 
 /** What a statement line is called: its document's kind, falling back to the entry's memo. */
 export const statementWhat = (line: { sourceType: string; memo: string }) =>
-  STATEMENT_SOURCE_LABEL[line.sourceType] ?? line.memo;
+  // A manual entry says what it is in its memo: «سند قبض …», «رصيد افتتاحي — …»
+  line.sourceType === 'manual' && line.memo
+    ? line.memo
+    : (STATEMENT_SOURCE_LABEL[line.sourceType] ?? line.memo);
 
 /**
  * A party's statement as CSV for Excel: the party and the period first, then the opening balance,

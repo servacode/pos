@@ -1,9 +1,16 @@
 import type { FastifyInstance } from 'fastify';
-import { customerInput, customerListQuery, uuidSchema } from '@serva/core';
+import {
+  customerInput,
+  customerListQuery,
+  customerOpeningDebtInput,
+  customerPaymentInput,
+  uuidSchema,
+} from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import { requireDevice } from '../auth/device-guard';
+import { openCustomerDebt, receiveCustomerPayment } from '../services/customer-money';
 import {
   createCustomer,
   customerPurchases,
@@ -67,5 +74,31 @@ export async function customerRoutes(app: FastifyInstance): Promise<void> {
       meta(request),
       app.clock.now(),
     );
+  });
+
+  app.post('/v1/customers/:id/payments', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const result = await receiveCustomerPayment(
+      app.db,
+      request.auth,
+      idOf(request.params),
+      parseBody(customerPaymentInput, request.body),
+      meta(request),
+      app.clock.now(),
+    );
+    return reply.code(201).send(result);
+  });
+
+  app.post('/v1/customers/:id/opening-debt', { preHandler: requireAuth }, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const result = await openCustomerDebt(
+      app.db,
+      request.auth,
+      idOf(request.params),
+      parseBody(customerOpeningDebtInput, request.body),
+      meta(request),
+      app.clock.now(),
+    );
+    return reply.code(201).send(result);
   });
 }

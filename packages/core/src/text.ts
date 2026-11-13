@@ -71,3 +71,57 @@ export function normalizeArabic(input: string): string {
   }
   return out.replace(/\s+/g, ' ').trim();
 }
+
+/** The forms of a counted noun: «فاتورة واحدة», «فاتورتان», «فواتير» (3-10), «فاتورة» (11 and up). */
+export interface CountForms {
+  /** Exactly one, with its own «واحد/واحدة» */
+  one: string;
+  /** Exactly two (the dual) */
+  two: string;
+  /** From three to ten (and zero), the plural */
+  few: string;
+  /** Eleven and more: the singular, in the accusative («15 متغيراً») */
+  many: string;
+}
+
+const countRules = new Intl.PluralRules('ar');
+
+/**
+ * A count with its noun in correct Arabic number agreement: one, two, 3-10 plural, 11 and up
+ * singular accusative. The one helper every screen uses for «N أصناف», «حتى N مستخدماً»…; `shown` is
+ * the number as the screen writes it (Latin or Arabic-Indic digits), the count itself by default, and
+ * `oblique` writes the dual after a preposition («حتى فرعين»).
+ */
+export function countNoun(
+  count: number,
+  forms: CountForms,
+  shown: string = String(count),
+  oblique = false,
+): string {
+  switch (countRules.select(count)) {
+    case 'one':
+      return forms.one;
+    case 'two':
+      // After «حتى» or a preposition the dual ends in «ين»: «حتى فرعين»
+      return oblique ? forms.two.replace(/ان(?= |$)/, 'ين') : forms.two;
+    case 'zero':
+    case 'few':
+      return `${shown} ${forms.few}`;
+    default:
+      return `${shown} ${forms.many}`;
+  }
+}
+
+/** The nouns the screens count. Add one here rather than writing a plural in a screen. */
+export const COUNT_NOUNS = {
+  invoice: { one: 'فاتورة واحدة', two: 'فاتورتان', few: 'فواتير', many: 'فاتورة' },
+  variant: { one: 'متغيّر واحد', two: 'متغيّران', few: 'متغيّرات', many: 'متغيّراً' },
+  user: { one: 'مستخدم واحد', two: 'مستخدمان', few: 'مستخدمين', many: 'مستخدماً' },
+  device: { one: 'جهاز واحد', two: 'جهازان', few: 'أجهزة', many: 'جهازاً' },
+  branch: { one: 'فرع واحد', two: 'فرعان', few: 'فروع', many: 'فرعاً' },
+  item: { one: 'صنف واحد', two: 'صنفان', few: 'أصناف', many: 'صنفاً' },
+  customer: { one: 'زبون واحد', two: 'زبونان', few: 'زبائن', many: 'زبوناً' },
+  piece: { one: 'قطعة واحدة', two: 'قطعتان', few: 'قطع', many: 'قطعة' },
+  batch: { one: 'دفعة واحدة', two: 'دفعتان', few: 'دفعات', many: 'دفعة' },
+  row: { one: 'سطر واحد', two: 'سطران', few: 'أسطر', many: 'سطراً' },
+} as const satisfies Record<string, CountForms>;

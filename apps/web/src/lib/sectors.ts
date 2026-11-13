@@ -62,3 +62,27 @@ export const WEIGHED_SECTORS: readonly SectorKey[] = [
 
 /** Items with choices and extras for the kitchen. */
 export const MODIFIER_SECTORS: readonly SectorKey[] = ['restaurant', 'cafe', 'bakery'];
+
+/** Example category names for an empty categories page, by business type. */
+const CATEGORY_EXAMPLES: Record<SectorKey, readonly string[]> = {
+  clothing: ['قمصان', 'بناطيل', 'أحذية رجالي', 'أحذية نسائي', 'إكسسوارات'],
+  supermarket: ['ألبان وأجبان', 'منظفات', 'معلبات', 'مشروبات'],
+  restaurant: ['مقبلات', 'أطباق رئيسية', 'مشروبات', 'حلويات'],
+  cafe: ['قهوة', 'شاي', 'عصائر', 'حلويات'],
+  pharmacy: ['مسكنات', 'مضادات حيوية', 'فيتامينات', 'عناية بالطفل'],
+  electronics: ['جوالات', 'إكسسوارات جوال', 'سماعات', 'شواحن'],
+  bakery: ['خبز', 'معجنات', 'حلويات شرقية', 'كعك'],
+  building_materials: ['أدوات كهربائية', 'دهانات', 'أنابيب', 'عدد يدوية'],
+  cosmetics: ['عطور', 'مكياج', 'عناية بالبشرة', 'عناية بالشعر'],
+  medical_supplies: ['مستهلكات', 'أجهزة قياس', 'كراسي متحركة', 'ضمادات'],
+  produce: ['خضار', 'فواكه', 'ورقيات', 'أعشاب'],
+  wholesale: ['مواد غذائية', 'منظفات', 'ورقيات', 'مشروبات'],
+  general: ['ألبان وأجبان', 'منظفات', 'قرطاسية', 'أدوات منزلية'],
+};
+
+/** Up to four example category names for the store's business types; a few for each type it sells. */
+export function categoryExamples(storeSectors: readonly SectorKey[] | undefined): string[] {
+  const keys = storeSectors && storeSectors.length > 0 ? storeSectors : (['general'] as SectorKey[]);
+  const per = keys.length === 1 ? 5 : 3;
+  return [...new Set(keys.flatMap((k) => CATEGORY_EXAMPLES[k].slice(0, per)))];
+}

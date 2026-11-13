@@ -55,7 +55,7 @@ function SectorCard({
 }
 
 /**
- * The activities, one or more (04 › شو بتشتغل؟): chips inside the settings form, or big cards on
+ * The activities, one or more (04 › ما نشاط محلّك؟): chips inside the settings form, or big cards on
  * the wizard's first step, where the choice is the whole page.
  */
 export function SectorPicker({
@@ -92,7 +92,7 @@ export function SectorPicker({
   }
 
   return (
-    <FieldGroup legend="شو بتشتغل؟ اختر نشاطاً واحداً أو أكثر" error={error}>
+    <FieldGroup legend="ما نشاط محلّك؟ اختر نشاطاً واحداً أو أكثر" error={error}>
       <div className="flex flex-wrap gap-2">
         {SECTORS.map((s) => (
           <ToggleChip
@@ -192,7 +192,7 @@ export function ProfileForm({
   showSectors?: boolean;
   /** The card's title on «إعدادات المتجر»; the wizard's step names the form instead. */
   section?: SettingsSection;
-  /** A second button in the save bar, before the save (the wizard's «تخطَّ هذه الخطوة»). */
+  /** A second button in the save bar, before the save (the wizard's «تخط هذه الخطوة»). */
   secondaryAction?: ReactNode;
 }) {
   const [saved, setSaved] = useState(false);
@@ -310,7 +310,7 @@ export function CurrencyForm({
   submitLabel?: string;
   /** The card's title on «إعدادات المتجر»; the wizard's step names the form instead. */
   section?: SettingsSection;
-  /** A second button in the save bar, before the save (the wizard's «تخطَّ هذه الخطوة»). */
+  /** A second button in the save bar, before the save (the wizard's «تخط هذه الخطوة»). */
   secondaryAction?: ReactNode;
 }) {
   const [saved, setSaved] = useState(false);
@@ -366,7 +366,8 @@ export function CurrencyForm({
             <TextField
               name="usdRate"
               label="سعر الدولار اليوم بالليرة"
-              hint="تعدّله كلما تغيّر. الفواتير السابقة تبقى بالسعر الذي بيعت به"
+              hint="مثل 13,000 أو ١٣٠٠٠. تعدّله كلما تغيّر، والفواتير السابقة تبقى بالسعر الذي بيعت به"
+              placeholder="13,000"
               inputMode="decimal"
               dir="ltr"
               inputClassName="num"

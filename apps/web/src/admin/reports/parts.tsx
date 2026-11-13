@@ -10,8 +10,8 @@ import {
   RetryIcon,
   Select,
   SkeletonText,
-  TextField,
 } from '@serva/ui';
+import { DateField } from '../../lib/DateField';
 import { AppShell } from '../../layout/AppShell';
 import { holdsAny, type AccessRule } from './access';
 
@@ -142,17 +142,7 @@ export function DayField({
   max?: string;
 }) {
   return (
-    <TextField
-      label={label}
-      type="date"
-      value={value}
-      max={max}
-      dir="ltr"
-      onChange={(event) => {
-        if (event.target.value) onChange(event.target.value);
-      }}
-      className="min-w-44"
-    />
+    <DateField label={label} value={value} max={max} required onChange={onChange} className="min-w-44" />
   );
 }
 

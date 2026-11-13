@@ -30,6 +30,23 @@ describe('Sparkline', () => {
     expect(dot(ltr.container).style.left).toBe('100%');
   });
 
+  it('draws a level dashed baseline, with no wash, when only the latest day has a value', () => {
+    const { container } = renderUi(<Sparkline values={[0, 0, 0, 0, 0, 0, 5]} />);
+    const line = container.querySelector('svg path[stroke]') as SVGPathElement;
+    expect(line.getAttribute('stroke-dasharray')).toBeTruthy();
+    expect(line.getAttribute('d')).toMatch(/^M[\d.]+ 18\.00L/);
+    expect(container.querySelector('linearGradient')).not.toBeInTheDocument();
+    expect(dot(container).style.left).toBe('0%');
+    expect(parseFloat(dot(container).style.top)).toBe(50);
+  });
+
+  it('draws a real trend when earlier days have values', () => {
+    const { container } = renderUi(<Sparkline values={[0, 2, 0, 5]} />);
+    const line = container.querySelector('svg path[stroke]') as SVGPathElement;
+    expect(line.getAttribute('stroke-dasharray')).toBeNull();
+    expect(container.querySelector('linearGradient')).toBeInTheDocument();
+  });
+
   it('draws nothing with fewer than two values', () => {
     const { container } = renderUi(<Sparkline values={[5]} label="المبيعات" />);
     expect(container.querySelector('svg')).not.toBeInTheDocument();

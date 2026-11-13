@@ -37,12 +37,19 @@ export function useScanner({
 }: ScannerOptions) {
   // `burst`: keys typed with no pause (a scan); `digits`: digits typed at any speed (for «3 ثم *»).
   const buffer = useRef({ burst: '', digits: '', last: 0 });
-  const latest = useRef({ onScan, onMultiplier, now, minLength });
-  latest.current = { onScan, onMultiplier, now, minLength };
+  // Read at the key, not when an effect runs: a listener added and removed by effects leaves gaps
+  // (after a panel closes, or a hold) in which the first key of the next scan has no listener.
+  const latest = useRef({ enabled, onScan, onMultiplier, now, minLength });
+  latest.current = { enabled, onScan, onMultiplier, now, minLength };
 
   useEffect(() => {
-    if (!enabled) return;
     function onKeyDown(event: KeyboardEvent) {
+      if (!latest.current.enabled) {
+        // A keypad is open and takes the keys: what was typed before it must not join a later scan.
+        buffer.current.burst = '';
+        buffer.current.digits = '';
+        return;
+      }
       if (event.ctrlKey || event.metaKey || event.altKey || isEditable(event.target)) return;
       const { onScan, onMultiplier, now, minLength } = latest.current;
       const b = buffer.current;
@@ -73,5 +80,5 @@ export function useScanner({
     }
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [enabled]);
+  }, []);
 }

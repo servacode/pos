@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import type { PartyStatement, PartyStatementLine } from '@serva/core';
 import {
+  AddIcon,
   Balance,
   BackIcon,
   BookIcon,
@@ -22,6 +23,7 @@ import { PrintSheet, usePrint } from '../../lib/print';
 import { downloadText } from '../accounting/csv';
 import { DayField, PageHead, ReportScreen } from '../reports/parts';
 import { useReport } from '../reports/useReport';
+import { CustomerMoneyDialog } from '../customers/CustomerMoneyDialog';
 import { getStatement } from './api';
 import { statementCsv, statementWhat } from './csv';
 
@@ -161,6 +163,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
     getStatement(type, id, { from, to }),
   );
   const { paper, print } = usePrint();
+  const [money, setMoney] = useState<'payment' | 'opening' | null>(null);
   const base = data?.baseCurrency ?? me.settings.baseCurrency;
 
   const columns: DataColumn<PartyStatementLine>[] = [
@@ -243,6 +246,16 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
         subtitle={data ? data.party.name : undefined}
         actions={
           <>
+            {type === 'customer' && me.user.permissions.includes('receipt.create') ? (
+              <Button icon={<AddIcon />} disabled={!data} onClick={() => setMoney('payment')}>
+                استلم دفعة
+              </Button>
+            ) : null}
+            {type === 'customer' && me.user.permissions.includes('accounting.post') ? (
+              <Button variant="secondary" disabled={!data} onClick={() => setMoney('opening')}>
+                سجّل دين افتتاحي
+              </Button>
+            ) : null}
             <Button
               variant="secondary"
               disabled={!data}
@@ -316,6 +329,17 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
           </p>
         ) : null}
       </div>
+      {data && money ? (
+        <CustomerMoneyDialog
+          kind={money}
+          customer={{ id: data.party.id, name: data.party.name }}
+          onCancel={() => setMoney(null)}
+          onDone={() => {
+            setMoney(null);
+            retry();
+          }}
+        />
+      ) : null}
       {data && paper ? (
         <PrintSheet paper={paper}>
           <StatementSheet s={data} store={me.tenant.name} copy={copy} />

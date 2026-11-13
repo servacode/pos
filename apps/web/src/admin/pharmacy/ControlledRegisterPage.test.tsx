@@ -15,6 +15,7 @@ function pharmacist(): MeResponse {
   const base = makeMe();
   return {
     ...base,
+    tenant: { ...base.tenant, sectors: ['pharmacy'] },
     settings: { ...base.settings },
     user: { ...base.user, permissions: [...base.user.permissions, 'pharmacy.controlled'] },
   };

@@ -25,6 +25,7 @@ import {
   OfferIcon,
   ProductsIcon,
   RemoveIcon,
+  ScrollStrip,
   SearchField,
   Select,
   SendIcon,
@@ -41,7 +42,17 @@ import {
 import { ApiError, apiFetch, errorMessage } from '../lib/api';
 import { counted } from '../pos/format';
 import { canPick, cartCount, cartTotal, MAX_QTY, useShopCart, variantFor } from './cart';
-import { openWhatsApp } from './open';
+import { openWhatsApp, withTrackingLink } from './open';
+import { getOnce } from './getOnce';
+import { CatalogueFilters } from './CatalogueFilters';
+import {
+  applyFilters,
+  filterCount,
+  NO_FILTERS,
+  sortProducts,
+  type ShopFilters,
+  type ShopSort,
+} from './filters';
 
 /**
  * The store's online shop (26 › المتجر الإلكتروني): its goods with their pictures, sizes and
@@ -62,7 +73,7 @@ export function ShopApp() {
 
   useEffect(() => {
     let alive = true;
-    apiFetch<ShopHome>(`/v1/shop/${encodeURIComponent(slug)}`)
+    getOnce<ShopHome>(`/v1/shop/${encodeURIComponent(slug)}`)
       .then((h) => alive && setHome(h))
       .catch((e: unknown) => alive && setError(errorMessage(e)));
     return () => {
@@ -98,7 +109,7 @@ export function ShopApp() {
       ) : null}
       <header className="sticky top-0 z-20 border-b border-line bg-surface/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
-          <Link to={base} className="me-auto flex min-w-0 items-center gap-3 rounded-control">
+          <Link to={base} className="me-auto flex min-h-11 min-w-0 items-center gap-3 rounded-control">
             <IconChip>
               <span className="text-sm font-bold">{initialsOf(store.name)}</span>
             </IconChip>
@@ -109,7 +120,7 @@ export function ShopApp() {
             aria-label={`السلة، ${count} قطعة`}
             className={cn(
               CONTROL_HEIGHT[density],
-              'inline-flex shrink-0 items-center gap-2 rounded-control border border-line-control/50 bg-surface ps-3 pe-2.5 text-sm font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted',
+              'min-h-11! inline-flex shrink-0 items-center gap-2 rounded-control border border-line-control/50 bg-surface ps-3 pe-2.5 text-sm font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted',
             )}
           >
             <CartIcon className="text-brand-ink" />
@@ -130,7 +141,7 @@ export function ShopApp() {
           <Route index element={<Catalogue home={home} base={base} />} />
           <Route path="p/:id" element={<ProductView home={home} slug={slug} base={base} cart={cart} />} />
           <Route path="cart" element={<CartView home={home} slug={slug} base={base} cart={cart} />} />
-          <Route path="o/:token" element={<TrackView slug={slug} base={base} />} />
+          <Route path="o/:token" element={<TrackView home={home} slug={slug} base={base} />} />
         </Routes>
       </main>
       <footer className="border-t border-line bg-surface">
@@ -150,10 +161,20 @@ export function ShopApp() {
             </span>
           </p>
           <span className="flex items-center gap-4 text-sm">
-            <TextLink href="/terms" target="_blank" rel="noopener">
+            <TextLink
+              href="/terms"
+              target="_blank"
+              rel="noopener"
+              className="inline-flex min-h-11 items-center"
+            >
               الشروط
             </TextLink>
-            <TextLink href="/privacy" target="_blank" rel="noopener">
+            <TextLink
+              href="/privacy"
+              target="_blank"
+              rel="noopener"
+              className="inline-flex min-h-11 items-center"
+            >
               الخصوصية
             </TextLink>
           </span>
@@ -207,13 +228,14 @@ function NoPicture({ large = false }: { large?: boolean }) {
 function OfferTag({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <span
+      title={typeof children === 'string' ? children : undefined}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-xs font-semibold text-on-accent',
+        'inline-flex items-start gap-1 rounded-2xl bg-accent px-2.5 py-0.5 text-xs/5 font-semibold text-on-accent',
         className,
       )}
     >
-      <OfferIcon size={16} />
-      <span className="truncate">{children}</span>
+      <OfferIcon size={16} className="mt-0.5 shrink-0" />
+      <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
     </span>
   );
 }
@@ -222,6 +244,8 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
   const density = useDensity();
   const [category, setCategory] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<ShopFilters>(NO_FILTERS);
+  const [sort, setSort] = useState<ShopSort>('newest');
   const tops = home.categories.filter((c) => c.parentId === null);
   const rootOf = useMemo(() => {
     const parent = new Map(home.categories.map((c) => [c.id, c.parentId]));
@@ -240,7 +264,8 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
     : home.products;
   // The search box narrows what the department shows, by the piece's name.
   const words = query.trim().toLocaleLowerCase('ar');
-  const shown = words ? inCategory.filter((p) => p.name.toLocaleLowerCase('ar').includes(words)) : inCategory;
+  const named = words ? inCategory.filter((p) => p.name.toLocaleLowerCase('ar').includes(words)) : inCategory;
+  const shown = sortProducts(applyFilters(named, filters), sort);
   const title = (category ? tops.find((c) => c.id === category)?.name : null) ?? 'كل البضاعة';
   // A shop without a single picture yet gets shorter tiles: a wall of tall empty frames looks unfinished.
   const media = home.products.some((p) => p.imageUrl) ? 'aspect-[4/5]' : 'aspect-[4/3]';
@@ -261,40 +286,57 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
             placeholder="ابحث عن قطعة…"
             value={query}
             onValueChange={setQuery}
-            className="w-full sm:w-80"
+            className="w-full sm:w-80 [&>div]:min-h-11!"
           />
         </div>
+        <CatalogueFilters
+          products={inCategory}
+          currency={home.store.currency}
+          showPrices={home.store.showPrices}
+          filters={filters}
+          onFilters={setFilters}
+          sort={sort}
+          onSort={setSort}
+        />
         {tops.length > 0 ? (
-          <div
-            role="group"
-            aria-label="الأقسام"
-            className="scrollbar-none -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0"
-          >
-            {[{ id: null, name: 'الكل' }, ...tops].map((c) => (
-              <button
-                key={c.id ?? 'all'}
-                type="button"
-                aria-pressed={category === c.id}
-                onClick={() => setCategory(c.id)}
-                className={cn(
-                  CONTROL_HEIGHT[density],
-                  'shrink-0 rounded-small border px-4 text-sm font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
-                  category === c.id
-                    ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
-                    : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
-                )}
-              >
-                {c.name}
-              </button>
-            ))}
-          </div>
+          <ScrollStrip className="-mx-4 px-4 pb-1 sm:mx-0 sm:px-0">
+            <div role="group" aria-label="الأقسام" className="flex w-max gap-2 sm:w-auto sm:flex-wrap">
+              {[{ id: null, name: 'الكل' }, ...tops].map((c) => (
+                <button
+                  key={c.id ?? 'all'}
+                  type="button"
+                  aria-pressed={category === c.id}
+                  onClick={() => {
+                    setCategory(c.id);
+                    // Sizes and colours of the other department no longer apply
+                    setFilters((f) => ({ ...f, options: {} }));
+                  }}
+                  className={cn(
+                    CONTROL_HEIGHT[density],
+                    'min-h-11! shrink-0 rounded-small border px-4 text-sm font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
+                    category === c.id
+                      ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
+                      : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
+                  )}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          </ScrollStrip>
         ) : null}
       </div>
       {shown.length === 0 ? (
         <EmptyState
           icon={StoreIcon}
           title="لا بضاعة هنا الآن"
-          description={words ? 'لا قطعة بهذا الاسم. جرّب كلمة أخرى.' : 'جرّب قسماً آخر، أو عد لاحقاً.'}
+          description={
+            words
+              ? 'لا قطعة بهذا الاسم. جرّب كلمة أخرى.'
+              : filterCount(filters) > 0
+                ? 'لا قطعة تناسب هذه التصفية. خفّف شروطها.'
+                : 'جرّب قسماً آخر، أو عد لاحقاً.'
+          }
         />
       ) : (
         <ul
@@ -382,7 +424,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
   useEffect(() => {
     let alive = true;
     setProduct(null);
-    apiFetch<ShopProduct>(`/v1/shop/${encodeURIComponent(slug)}/products/${encodeURIComponent(id)}`)
+    getOnce<ShopProduct>(`/v1/shop/${encodeURIComponent(slug)}/products/${encodeURIComponent(id)}`)
       .then((p) => {
         if (!alive) return;
         setProduct(p);
@@ -536,7 +578,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                             'min-w-12 rounded-small border px-4 text-[0.9375rem] font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
                             !can
                               ? cn(
-                                  'cursor-not-allowed border-dashed text-ink-subtle line-through',
+                                  'cursor-not-allowed border-dashed text-ink-subtle',
                                   on ? 'border-brand' : 'border-line-control/50',
                                 )
                               : on
@@ -545,6 +587,11 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                           )}
                         >
                           {value}
+                          {!can ? (
+                            <span aria-hidden="true" className="ms-1.5 text-xs font-semibold no-underline">
+                              نفد
+                            </span>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -552,6 +599,14 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                 </div>
               ))}
             </div>
+          ) : null}
+          {variant && variant.available && variant.left !== null ? (
+            <p className="flex items-center gap-2 text-sm font-semibold text-warning-ink">
+              <AlertCircleIcon size={16} />
+              <span>
+                بقي <span className="num">{variant.left}</span> فقط
+              </span>
+            </p>
           ) : null}
           {variant && !variant.available ? (
             <p className="flex items-center gap-2 text-sm font-semibold text-danger-ink">
@@ -720,7 +775,12 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
         </dl>
         <div className="flex w-full flex-col gap-3">
           {placed.whatsappUrl ? (
-            <a href={placed.whatsappUrl} className={linkButton('primary', density)}>
+            <a
+              href={placed.whatsappUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={linkButton('primary', density)}
+            >
               <SendIcon />
               أرسل الطلب على واتساب
             </a>
@@ -795,8 +855,12 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
         },
       });
       cart.clear();
-      setPlaced(done);
-      if (done.whatsappUrl) openWhatsApp(done.whatsappUrl);
+      // WhatsApp opens in a new tab with the order's page linked in the message; the shop stays here
+      const whatsappUrl = done.whatsappUrl
+        ? withTrackingLink(done.whatsappUrl, `${window.location.origin}${done.trackPath}`)
+        : null;
+      setPlaced({ ...done, whatsappUrl });
+      if (whatsappUrl) openWhatsApp(whatsappUrl);
     } catch (e) {
       setError(errorMessage(e));
       setFields(e instanceof ApiError ? (e.fields ?? {}) : {});
@@ -923,6 +987,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               setChallenge(null);
             }}
             error={fields.phone}
+            hint="مثال: 0944555666"
           />
         </div>
         {store.delivery && store.pickup ? (
@@ -1052,6 +1117,10 @@ const TRACK_STEPS: Record<ShopOrderTrack['status'], { title: string; text: strin
   accepted: { title: 'أكّد المحل طلبك', text: 'قطعك محجوزة لك ويجري تجهيزها.' },
   done: { title: 'تمّ التسليم', text: 'شكراً لك! نتمنى أن تعجبك قطعك.' },
   rejected: { title: 'اعتذر المحل عن الطلب', text: 'تواصل مع المحل لتعرف السبب أو اطلب قطعاً أخرى.' },
+  cancel_requested: {
+    title: 'طلبت إلغاء الطلب',
+    text: 'وصل طلب الإلغاء إلى المحل، وسيؤكده لك قريباً.',
+  },
 };
 
 /** The way of an order, as the customer follows it: received, confirmed, handed over. */
@@ -1062,14 +1131,17 @@ const TRACK_PATH: readonly { status: ShopOrderTrack['status']; label: string }[]
 ];
 
 /** The customer's page for one order, by the unguessable link given when it was placed. */
-function TrackView({ slug, base }: { slug: string; base: string }) {
+function TrackView({ home, slug, base }: { home: ShopHome; slug: string; base: string }) {
   const { token = '' } = useParams();
+  const density = useDensity();
   const [order, setOrder] = useState<ShopOrderTrack | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    apiFetch<ShopOrderTrack>(`/v1/shop/${encodeURIComponent(slug)}/orders/${encodeURIComponent(token)}`)
+    getOnce<ShopOrderTrack>(`/v1/shop/${encodeURIComponent(slug)}/orders/${encodeURIComponent(token)}`)
       .then((o) => alive && setOrder(o))
       .catch((e: unknown) => alive && setError(errorMessage(e)));
     return () => {
@@ -1095,8 +1167,33 @@ function TrackView({ slug, base }: { slug: string; base: string }) {
   }
   const step = TRACK_STEPS[order.status];
   const rejected = order.status === 'rejected';
-  const reached = TRACK_PATH.findIndex((s) => s.status === order.status);
-  const StepIcon = rejected ? AlertCircleIcon : order.status === 'pending' ? ClockIcon : CheckCircleIcon;
+  const whatsapp = home.store.whatsapp;
+
+  async function askCancel() {
+    setAsking(true);
+    setCancelError(null);
+    try {
+      setOrder(
+        await apiFetch<ShopOrderTrack>(
+          `/v1/shop/${encodeURIComponent(slug)}/orders/${encodeURIComponent(token)}/cancel-request`,
+          { method: 'POST' },
+        ),
+      );
+    } catch (e) {
+      setCancelError(errorMessage(e));
+    } finally {
+      setAsking(false);
+    }
+  }
+  // A cancel request is still the first step: the store has not decided
+  const reached =
+    order.status === 'cancel_requested' ? 0 : TRACK_PATH.findIndex((s) => s.status === order.status);
+  const StepIcon =
+    rejected || order.status === 'cancel_requested'
+      ? AlertCircleIcon
+      : order.status === 'pending'
+        ? ClockIcon
+        : CheckCircleIcon;
   return (
     <section
       aria-label="طلبك"
@@ -1109,8 +1206,16 @@ function TrackView({ slug, base }: { slug: string; base: string }) {
             {order.number}
           </bdi>
         </h1>
-        <Badge>{order.fulfilment === 'delivery' ? 'توصيل' : 'استلام من المحل'}</Badge>
+        <Badge>
+          {order.fulfilment === 'delivery'
+            ? `توصيل${order.area ? ` · ${order.area}` : ''}`
+            : 'استلام من المحل'}
+        </Badge>
       </div>
+      <p className="-mt-3 text-sm text-ink-muted">
+        باسم <span className="font-semibold text-ink">{order.customerName}</span>
+        {order.fulfilment === 'pickup' ? ' · تستلمه من المحل' : ''}
+      </p>
       <div
         role="status"
         className={cn(
@@ -1171,7 +1276,26 @@ function TrackView({ slug, base }: { slug: string; base: string }) {
           </div>
         ) : null}
       </div>
-      <TextLink as={Link} to={base} className="w-fit text-sm">
+      {cancelError ? <Alert tone="error">{cancelError}</Alert> : null}
+      <div className="flex flex-wrap items-center gap-3">
+        {whatsapp ? (
+          <a
+            href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(`مرحباً، بخصوص طلبي ${order.number}`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={linkButton('secondary', density)}
+          >
+            <SendIcon />
+            تواصل مع المحل
+          </a>
+        ) : null}
+        {order.status === 'pending' ? (
+          <Button variant="ghost" loading={asking} onClick={() => void askCancel()}>
+            اطلب إلغاء الطلب
+          </Button>
+        ) : null}
+      </div>
+      <TextLink as={Link} to={base} className="inline-flex min-h-11 w-fit items-center text-sm">
         عد إلى المتجر
       </TextLink>
     </section>

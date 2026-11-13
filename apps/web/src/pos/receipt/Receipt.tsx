@@ -46,7 +46,14 @@ export interface ReceiptData {
   branchName: string;
   deviceName: string;
   cashierName: string;
+  /** The salesperson of a sale, named when it is not the cashier (the receipt says «البائع») */
+  sellerName?: string | null;
+  /** What is left on each voucher a sale paid with, once the sale is counted */
+  vouchersAfter?: { code: string; balanceMinor: number; currency: CurrencyCode }[];
 }
+
+/** The store's own footer usually thanks the customer already: the fixed thanks only follows one that does not */
+export const needsThanks = (footer: string | null | undefined): boolean => !footer || !footer.includes('شكر');
 
 function Row({
   label,
@@ -340,6 +347,10 @@ export function Receipt({
         <span>
           الكاشير: {data.cashierName} · {data.deviceName}
         </span>
+        {data.sellerName && data.sellerName !== data.cashierName ? (
+          <span>البائع: {data.sellerName}</span>
+        ) : null}
+        {sale.customerName ? <span>الزبون: {sale.customerName}</span> : null}
       </div>
       <Rule />
       {sale.service ? (
@@ -369,8 +380,7 @@ export function Receipt({
             </div>
             {line.priced.lineDiscountMinor > 0 ? (
               <Row label={discountLabel(line.discount)}>
-                <bdi dir="ltr">−</bdi>
-                {amount(line.priced.lineDiscountMinor)}
+                <bdi dir="ltr">−{amount(line.priced.lineDiscountMinor)}</bdi>
               </Row>
             ) : null}
             {line.serials?.length ? (
@@ -398,8 +408,7 @@ export function Receipt({
           <Row label="المجموع">{amount(t.grossMinor - t.lineDiscountMinor)}</Row>
           {t.invoiceDiscountMinor > 0 ? (
             <Row label="خصم الفاتورة">
-              <bdi dir="ltr">−</bdi>
-              {amount(t.invoiceDiscountMinor)}
+              <bdi dir="ltr">−{amount(t.invoiceDiscountMinor)}</bdi>
             </Row>
           ) : null}
         </>
@@ -437,6 +446,11 @@ export function Receipt({
           ) : null}
         </div>
       ))}
+      {data.vouchersAfter?.map((v) => (
+        <Row key={v.code} label={<span className="text-xs">الباقي على القسيمة</span>}>
+          <Money minor={v.balanceMinor} currency={v.currency} />
+        </Row>
+      ))}
       {sale.cashRounding && sale.cashRounding.roundingMinor !== 0 ? (
         <Row label={<span className="text-xs">تقريب النقد</span>}>
           <Money minor={sale.cashRounding.roundingMinor} currency={sale.cashRounding.currency} />
@@ -464,7 +478,17 @@ export function Receipt({
       {data.settings.receiptFooter ? (
         <p className="text-center text-xs whitespace-pre-line">{data.settings.receiptFooter}</p>
       ) : null}
-      <p className="text-center">شكراً لزيارتكم</p>
+      {needsThanks(data.settings.receiptFooter) ? <p className="text-center">شكراً لزيارتكم</p> : null}
+      {data.doc.number ? (
+        <div className="flex flex-col items-center gap-0.5" aria-label="باركود الفاتورة">
+          <div className="h-12 w-full px-2">
+            <Bars code={data.doc.number} height={40} />
+          </div>
+          <bdi dir="ltr" className="num text-[10px]">
+            {data.doc.number}
+          </bdi>
+        </div>
+      ) : null}
       <p className="text-center text-[10px]">
         سيرفا ·{' '}
         <span lang="en" dir="ltr">

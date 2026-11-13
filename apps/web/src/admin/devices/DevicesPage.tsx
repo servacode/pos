@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { DeviceSummary } from '@serva/core';
+import { COUNT_NOUNS, countNoun } from '@serva/core';
 import {
   AlertCircleIcon,
   Alert,
@@ -150,7 +151,7 @@ export function DevicesPage() {
                 <bdi className="num">{pending.length}</bdi>
               </Badge>
             </div>
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
               {pending.map((device) => (
                 <PendingDevice
                   key={device.id}
@@ -165,7 +166,10 @@ export function DevicesPage() {
         ) : null}
 
         {devices === null && !loadError ? (
-          <div aria-busy="true" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            aria-busy="true"
+            className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2 xl:grid-cols-3"
+          >
             <span className="sr-only">نحمّل الأجهزة…</span>
             {Array.from({ length: 3 }, (_, index) => (
               <Card key={index} className="flex flex-col gap-4">
@@ -211,7 +215,7 @@ export function DevicesPage() {
               </h2>
               <Badge dot={false}>{devicesCount(group.devices.length)}</Badge>
             </div>
-            <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <ul className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2 xl:grid-cols-3">
               {group.devices.map((device) => (
                 <DeviceRow
                   key={device.id}
@@ -285,23 +289,8 @@ export function DevicesPage() {
   );
 }
 
-const plural = new Intl.PluralRules('ar');
-
 /** «جهاز واحد», «جهازان», «3 أجهزة», «11 جهازاً». */
-function devicesCount(count: number): string {
-  switch (plural.select(count)) {
-    case 'one':
-      return 'جهاز واحد';
-    case 'two':
-      return 'جهازان';
-    case 'few':
-      return `${count} أجهزة`;
-    case 'many':
-      return `${count} جهازاً`;
-    default:
-      return `${count} جهاز`;
-  }
-}
+const devicesCount = (count: number): string => countNoun(count, COUNT_NOUNS.device);
 
 /** What happens to the documents still on the device (16 › ضياع جهاز الكاشير). */
 function RevokeDetails({ device }: { device: DeviceSummary }) {

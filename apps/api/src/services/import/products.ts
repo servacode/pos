@@ -311,6 +311,27 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
     if (issues.any) results.fail(row.line, issues.list);
     else parsed.push(p);
   }
+  // A barcode belongs to one variant: a later row repeating it (maybe for another size or colour)
+  // is refused and named, never merged into the first row and lost
+  const seenCodes = new Map<string, Parsed>();
+  for (const p of [...parsed]) {
+    if (p.barcode === null) continue;
+    const first = seenCodes.get(p.barcode);
+    if (!first) {
+      seenCodes.set(p.barcode, p);
+      continue;
+    }
+    const wanted = p.attributes.map((a) => a.value).join(' · ');
+    results.fail(p.line, [
+      {
+        field: 'barcode',
+        message:
+          `الباركود ${p.barcode} مكرر: سبق في السطر ${String(first.line)}` +
+          (wanted ? ` فلم يُستورد «${wanted}». أعطِ كل مقاس ولون باركوداً خاصاً به` : ''),
+      },
+    ]);
+    parsed.splice(parsed.indexOf(p), 1);
+  }
 
   const openings: Opening[] = [];
   const createdCategories: string[] = [];
@@ -433,6 +454,18 @@ async function processGroup(
     matched.set(p, found);
     productId = found.productId;
   }
+  // The code of a size belongs to that model: another product's barcode is not a size of this one
+  if (productId !== null && first.attributes.length > 0) {
+    const owner = await productDetail(tx, productId);
+    if (normalizeArabic(owner.nameAr) !== normalizeArabic(first.name)) {
+      const bad = group.find((p) => matched.has(p))!;
+      state.sent = group;
+      throw fieldError(
+        `variants.${String(group.indexOf(bad))}.barcodes.0.code`,
+        `الباركود ${bad.barcode ?? ''} مستخدم في المنتج «${owner.nameAr}»`,
+      );
+    }
+  }
   const byNameAllowed = first.attributes.length > 0 || first.barcode === null;
   if (productId === null && byNameAllowed) productId = await productOfName(tx, first.name);
 
@@ -461,6 +494,12 @@ async function processGroup(
     const { variantId } = matched.get(p)!;
     const variant = current!.variants.find((v) => v.id === variantId)!;
     const label = `${current!.nameAr} ${variant.label ?? ''}`.trim();
+    if (p.attributes.length > 0 && attrKey(p.attributes) !== attrKey(variant.attributes)) {
+      results.note(
+        p.line,
+        `الباركود لـ«${variant.label ?? 'بلا مقاس'}» في المتجر، والملف يقول «${p.attributes.map((a) => a.value).join(' · ')}»: تحقق من الصف`,
+      );
+    }
     if (input.existing === 'skip') {
       results.set(p.line, 'skip', ['موجود في المتجر، تُرك كما هو']);
       continue;
