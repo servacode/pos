@@ -73,8 +73,15 @@ function openWizard(me: MeResponse, initial: StoreResponse, path = '/') {
 describe('the start wizard', () => {
   it('opens for a new store instead of the home page, at step 1', async () => {
     openWizard(owner(), store());
-    expect(await screen.findByRole('heading', { name: 'شو بتشتغل؟', level: 1 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'ما نشاط محلّك؟', level: 1 })).toBeInTheDocument();
     expect(screen.getByText('الخطوة', { exact: false })).toHaveTextContent('الخطوة 1 من 4');
+    // Each activity card carries its icon from the design system's table (tab 14)
+    const cards = await screen.findAllByRole('checkbox');
+    expect(cards).toHaveLength(13);
+    for (const card of cards) expect(card.closest('label')?.querySelector('svg')).not.toBeNull();
+    expect(
+      screen.getByRole('checkbox', { name: 'صيدلية' }).closest('label')?.querySelector('svg'),
+    ).toHaveClass('lucide-pill');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
@@ -134,7 +141,7 @@ describe('the start wizard', () => {
 
   it('lets every step be skipped, and «لاحقاً» ends it', async () => {
     const { user, requestsTo } = openWizard(owner(), store());
-    await user.click(await screen.findByRole('button', { name: 'تخطَّ' }));
+    await user.click(await screen.findByRole('button', { name: 'تخط' }));
     expect(await screen.findByRole('heading', { name: 'معلومات محلّك', level: 1 })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'لاحقاً، خذني إلى الرئيسية' }));
     await waitFor(() =>
@@ -145,7 +152,7 @@ describe('the start wizard', () => {
   it('does not open for a store that finished it, nor for staff who cannot change the store', async () => {
     openWizard(owner(4, true), store());
     expect(await screen.findByRole('heading', { name: /^أهلاً، /, level: 1 })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'شو بتشتغل؟' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'ما نشاط محلّك؟' })).not.toBeInTheDocument();
   });
 });
 

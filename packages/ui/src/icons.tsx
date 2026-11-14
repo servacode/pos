@@ -8,7 +8,16 @@ import {
   Bell,
   BookOpen,
   CalendarClock,
+  Boxes,
   Camera,
+  Carrot,
+  Coffee,
+  Croissant,
+  Hammer,
+  Pill,
+  ShoppingBasket,
+  Stethoscope,
+  UtensilsCrossed,
   ChartColumn,
   Check,
   ChevronDown,
@@ -40,8 +49,11 @@ import {
   Minus,
   Monitor,
   MonitorSmartphone,
+  Moon,
   Package,
   PackageOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRight,
   Pencil,
   Percent,
@@ -61,6 +73,7 @@ import {
   Smartphone,
   Sparkles,
   Store,
+  Sun,
   Tablet,
   Tag,
   Trash,
@@ -209,3 +222,25 @@ export const ShirtIcon = defineIcon(Shirt);
 export const NoImageIcon = defineIcon(ImageOff);
 export const PackageOpenIcon = defineIcon(PackageOpen);
 export const PanelIcon = defineIcon(PanelRight);
+
+// The activity (sector) icons of tab 14 › أيقونة كل نشاط. Clothing, electronics, cosmetics and the
+// general shop reuse ShirtIcon, PhoneIcon, SparklesIcon and StoreIcon above.
+export const SupermarketIcon = defineIcon(ShoppingBasket);
+export const RestaurantIcon = defineIcon(UtensilsCrossed);
+export const CafeIcon = defineIcon(Coffee);
+export const PharmacyIcon = defineIcon(Pill);
+export const BakeryIcon = defineIcon(Croissant);
+export const BuildingMaterialsIcon = defineIcon(Hammer);
+export const MedicalSuppliesIcon = defineIcon(Stethoscope);
+export const ProduceIcon = defineIcon(Carrot);
+export const WholesaleIcon = defineIcon(Boxes);
+
+// The theme switch (هوية 4 › الوضع الداكن): light, dark, and «حسب الجهاز» (follow the device).
+export const SunIcon = defineIcon(Sun);
+export const MoonIcon = defineIcon(Moon);
+export const SystemThemeIcon = defineIcon(Monitor);
+// Fold and unfold the sidebar. Drawn, like every directional glyph here, for a left-to-right page
+// (the panel on the left) and mirrored in RTL, where the sidebar sits on the right: in Arabic they
+// show lucide's PanelRightClose and PanelRightOpen.
+export const PanelCollapseIcon = defineIcon(PanelLeftClose, { directional: true });
+export const PanelExpandIcon = defineIcon(PanelLeftOpen, { directional: true });

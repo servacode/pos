@@ -18,6 +18,7 @@ export const EXPIRY_SECTORS: readonly SectorKey[] = [
   'pharmacy',
   'bakery',
   'cosmetics',
+  'medical_supplies',
   'produce',
   'wholesale',
   'restaurant',
@@ -25,8 +26,39 @@ export const EXPIRY_SECTORS: readonly SectorKey[] = [
   'general',
 ];
 
+/** Medicines and medical supplies: the prescription, the medicine return policy and the controlled register. */
+export const MEDICINAL_SECTORS: readonly SectorKey[] = ['pharmacy', 'medical_supplies'];
+
+/** The hall and the kitchen: tables, a waiter and cancellations after the kitchen. */
+export const HALL_SECTORS: readonly SectorKey[] = ['restaurant', 'cafe'];
+
 /** Pieces sold by their serial number or IMEI, with a warranty. */
-export const SERIAL_SECTORS: readonly SectorKey[] = ['electronics', 'building_materials', 'general'];
+export const SERIAL_SECTORS: readonly SectorKey[] = [
+  'electronics',
+  'building_materials',
+  'medical_supplies',
+  'general',
+];
+
+/** Warranty and maintenance claims on serial-tracked pieces. */
+export const WARRANTY_SECTORS: readonly SectorKey[] = ['electronics', 'medical_supplies'];
+
+/** Device rentals and maintenance contracts: lent and serviced devices, by serial number. */
+export const RENTAL_SECTORS: readonly SectorKey[] = [
+  'medical_supplies',
+  'electronics',
+  'building_materials',
+  'general',
+];
+
+/** Contract prices: what a hospital, a clinic or a regular customer is quoted on a tender or contract. */
+export const CONTRACT_PRICE_SECTORS: readonly SectorKey[] = [
+  'medical_supplies',
+  'pharmacy',
+  'wholesale',
+  'building_materials',
+  'general',
+];
 
 /** Customers who pay with cheques. */
 export const CHEQUE_SECTORS: readonly SectorKey[] = [
@@ -35,6 +67,7 @@ export const CHEQUE_SECTORS: readonly SectorKey[] = [
   'electronics',
   'supermarket',
   'pharmacy',
+  'medical_supplies',
   'general',
 ];
 
@@ -52,3 +85,39 @@ export const WEIGHED_SECTORS: readonly SectorKey[] = [
 
 /** Items with choices and extras for the kitchen. */
 export const MODIFIER_SECTORS: readonly SectorKey[] = ['restaurant', 'cafe', 'bakery'];
+
+/** Example category names for an empty categories page, by business type. */
+const CATEGORY_EXAMPLES: Record<SectorKey, readonly string[]> = {
+  clothing: ['قمصان', 'بناطيل', 'أحذية رجالي', 'أحذية نسائي', 'إكسسوارات'],
+  supermarket: ['ألبان وأجبان', 'منظفات', 'معلبات', 'مشروبات'],
+  restaurant: ['مقبلات', 'أطباق رئيسية', 'مشروبات', 'حلويات'],
+  cafe: ['قهوة', 'شاي', 'عصائر', 'حلويات'],
+  pharmacy: ['مسكنات', 'مضادات حيوية', 'فيتامينات', 'عناية بالطفل'],
+  electronics: ['جوالات', 'إكسسوارات جوال', 'سماعات', 'شواحن'],
+  bakery: ['خبز', 'معجنات', 'حلويات شرقية', 'كعك'],
+  building_materials: ['أدوات كهربائية', 'دهانات', 'أنابيب', 'عدد يدوية'],
+  cosmetics: ['عطور', 'مكياج', 'عناية بالبشرة', 'عناية بالشعر'],
+  medical_supplies: ['مستهلكات', 'أجهزة قياس', 'كراسي متحركة', 'ضمادات'],
+  produce: ['خضار', 'فواكه', 'ورقيات', 'أعشاب'],
+  wholesale: ['مواد غذائية', 'منظفات', 'ورقيات', 'مشروبات'],
+  general: ['ألبان وأجبان', 'منظفات', 'قرطاسية', 'أدوات منزلية'],
+};
+
+/** Up to four example category names for the store's business types; a few for each type it sells. */
+export function categoryExamples(storeSectors: readonly SectorKey[] | undefined): string[] {
+  const keys = storeSectors && storeSectors.length > 0 ? storeSectors : (['general'] as SectorKey[]);
+  const per = keys.length === 1 ? 5 : 3;
+  return [...new Set(keys.flatMap((k) => CATEGORY_EXAMPLES[k].slice(0, per)))];
+}
+
+/** Shortening and altering a piece left with the shop. */
+export const ALTERATION_SECTORS: readonly SectorKey[] = ['clothing'];
+
+/** Gift vouchers sold at the till: shops people buy presents in (no gift voucher at a pharmacy or a clinic supplier). */
+export const GIFT_SECTORS: readonly SectorKey[] = [
+  'clothing',
+  'cosmetics',
+  'electronics',
+  'supermarket',
+  'general',
+];

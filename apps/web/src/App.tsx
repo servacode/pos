@@ -1,15 +1,18 @@
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router';
-import { FullScreenLoader, TestModeRibbon } from '@serva/ui';
+import { FullScreenLoader, TestModeRibbon, useThemeSync } from '@serva/ui';
 import { useTestMode } from './lib/testMode';
 
 // Two apps, two code-split entries. The cashier (/pos) boots from what the device keeps locally
 // and asks for the login code, with no network request; the store admin restores its session
 // from the server. Neither loads the other's code.
 const PosApp = lazy(() => import('./pos/PosApp').then((m) => ({ default: m.PosApp })));
+const KitchenApp = lazy(() => import('./hall/kitchen/KitchenApp').then((m) => ({ default: m.KitchenApp })));
+const WaiterApp = lazy(() => import('./hall/waiter/WaiterApp').then((m) => ({ default: m.WaiterApp })));
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })));
 const ShopApp = lazy(() => import('./shop/ShopApp').then((m) => ({ default: m.ShopApp })));
+const LegalPage = lazy(() => import('./legal/LegalPage').then((m) => ({ default: m.LegalPage })));
 const PlatformApp = lazy(() => import('./platform/PlatformApp').then((m) => ({ default: m.PlatformApp })));
 
 // The component gallery (tab 14 › معرض المكوّنات) exists in dev builds only: in a production build
@@ -20,12 +23,17 @@ const UiGallery = import.meta.env.DEV
 
 /** The pairing QR holds `<origin>/link#spq_…`: a device's camera opens the cashier's link screen. */
 function PairingLink() {
-  const { hash } = useLocation();
-  return <Navigate to={{ pathname: '/pos', hash }} replace />;
+  const { hash, search } = useLocation();
+  // A kitchen screen or a waiter's phone scans a link made for its kind (03 › وضع النادل)
+  const kind = new URLSearchParams(search).get('kind');
+  const pathname = kind === 'kitchen_screen' ? '/kitchen' : kind === 'waiter' ? '/waiter' : '/pos';
+  return <Navigate to={{ pathname, hash }} replace />;
 }
 
 export function App() {
   const testMode = useTestMode();
+  // A theme chosen in another tab is painted here at once, on every screen (the cashier too).
+  useThemeSync();
   // Radix primitives read the reading direction from this provider (arrow keys in menus, tabs,
   // radio groups and sliders); the document itself is <html dir="rtl">.
   return (
@@ -35,7 +43,13 @@ export function App() {
       <Suspense fallback={<FullScreenLoader />}>
         <Routes>
           {UiGallery ? <Route path="/dev/ui" element={<UiGallery />} /> : null}
+          {/* The legal texts (24 › الشروط القانونية): public, linked from sign-in, sign-up and the shop */}
+          <Route path="/terms" element={<LegalPage document="terms" />} />
+          <Route path="/privacy" element={<LegalPage document="privacy" />} />
           <Route path="/pos/*" element={<PosApp />} />
+          {/* The restaurant's kitchen screen and the waiter's phone: devices of their own kind */}
+          <Route path="/kitchen" element={<KitchenApp />} />
+          <Route path="/waiter" element={<WaiterApp />} />
           <Route path="/link" element={<PairingLink />} />
           <Route path="/platform/*" element={<PlatformApp />} />
           {/* A store's online shop: public, no sign-in (26 › المتجر الإلكتروني) */}

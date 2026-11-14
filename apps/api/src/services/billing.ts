@@ -5,11 +5,14 @@ import type {
   PlatformLoginResponse,
   PlatformPayment,
   PlatformSettings,
+  LegalDetails,
+  PublicLegal,
   PlatformStore,
   SubscriptionInvoice,
   SubscriptionPage,
   SubscriptionPayment,
 } from '@serva/core';
+import { DEFAULT_GRACE_DAYS, TERMS_VERSION, legalInput, lifecycleOf } from '@serva/core';
 import { withTenant, type Database, type Transaction } from '@serva/db';
 import type { PasswordHasher } from '../auth/passwords';
 import { requirePermission } from '../auth/permissions';
@@ -246,7 +249,44 @@ export async function platformLogin(
   };
 }
 
-export async function platformStores(db: Database): Promise<{ items: PlatformStore[] }> {
+/**
+ * The stored status says what the platform team set; the dates say what is true now (nothing moves
+ * a store to past_due or suspended in the background). The list shows the truth: a store past its
+ * period but inside its grace is «past_due», one beyond it is «suspended» (read-only).
+ */
+function effectiveStatus(
+  r: {
+    status: PlatformStore['status'];
+    trial_ends_at: string | null;
+    current_period_end: string | null;
+    grace_ends_at: string | null;
+    updated_at: string | null;
+    grace_days: number | null;
+  },
+  now: Date,
+): PlatformStore['status'] {
+  if (!r.status) return r.status;
+  const d = (v: string | null) => (v === null ? null : new Date(v));
+  const life = lifecycleOf(
+    {
+      status: r.status,
+      trialEndsAt: d(r.trial_ends_at),
+      currentPeriodEnd: d(r.current_period_end),
+      graceEndsAt: d(r.grace_ends_at),
+      updatedAt: d(r.updated_at),
+      graceDays: r.grace_days ?? DEFAULT_GRACE_DAYS,
+    },
+    now,
+  );
+  if (life.readOnly) return r.status === 'cancelled' ? 'cancelled' : 'suspended';
+  if (life.state === 'grace') return 'past_due';
+  return r.status === 'past_due' ? 'active' : r.status;
+}
+
+export async function platformStores(
+  db: Database,
+  now: Date = new Date(),
+): Promise<{ items: PlatformStore[] }> {
   const rows = await db.execute<{
     tenant_id: string;
     name: string;
@@ -263,7 +303,13 @@ export async function platformStores(db: Database): Promise<{ items: PlatformSto
     grace_ends_at: string | null;
     pending_payments: string;
     last_sale: string | null;
-  }>(sql`select * from platform_stores()`);
+    grace_days: number | null;
+    updated_at: string | null;
+  }>(sql`
+    select s.*, p.grace_days, sub.updated_at
+    from platform_stores() s
+    left join subscriptions sub on sub.tenant_id = s.tenant_id
+    left join plans p on p.id = sub.plan_id`);
   return {
     items: rows.map((r) => ({
       tenantId: r.tenant_id,
@@ -274,7 +320,7 @@ export async function platformStores(db: Database): Promise<{ items: PlatformSto
       tenantStatus: r.tenant_status,
       planCode: r.plan_code,
       planName: r.plan_name,
-      status: r.status,
+      status: effectiveStatus(r, now),
       billingCycle: r.billing_cycle,
       trialEndsAt: iso(r.trial_ends_at),
       currentPeriodEnd: iso(r.current_period_end),
@@ -341,13 +387,17 @@ export async function decidePayment(
   confirm: boolean,
   reason: string | null,
   now: Date,
-): Promise<void> {
+): Promise<{ tenantId: string | null }> {
   mayDecide(claims);
+  // Whose payment it is, to release that store's held documents once it can write again
+  const pending = await platformPayments(db, 'pending');
+  const tenantId = pending.items.find((p) => p.id === paymentId)?.tenantId ?? null;
   await db
     .execute(
       sql`select platform_payment_decide(${paymentId}::uuid, ${claims.platformUserId}::uuid, ${confirm}, ${reason}, ${now.toISOString()}::timestamptz)`,
     )
     .catch(fromDb);
+  return { tenantId };
 }
 
 export async function setSubscription(
@@ -403,5 +453,27 @@ export async function savePlatformSettings(
     throw new AppError(403, 'forbidden', 'طرق الدفع وسعر الصرف للمدير العام.');
   await db.execute(
     sql`select platform_settings_save(${JSON.stringify(input.paymentMethods)}::jsonb, ${input.sypPerUsd}::numeric, ${claims.platformUserId}::uuid)`,
+  );
+}
+
+/** The company details as stored: a key never written reads as a blank, and the day defaults to the texts' version. */
+export async function legalDetails(db: Database): Promise<LegalDetails> {
+  const [row] = await db.execute<{ legal: unknown }>(sql`select legal from platform_settings where id = 1`);
+  return legalInput.parse({ updatedAt: TERMS_VERSION, ...(row?.legal as object | undefined) });
+}
+
+/** What the public pages may read: the details and the version of the texts, nothing else from the settings row. */
+export async function publicLegal(db: Database): Promise<PublicLegal> {
+  return { ...(await legalDetails(db)), version: TERMS_VERSION };
+}
+
+export async function saveLegalDetails(
+  db: Database,
+  claims: PlatformClaims,
+  input: LegalDetails,
+): Promise<void> {
+  if (claims.role !== 'super_admin') throw new AppError(403, 'forbidden', 'بيانات الشركة للمدير العام.');
+  await db.execute(
+    sql`select platform_legal_save(${JSON.stringify(input)}::jsonb, ${claims.platformUserId}::uuid)`,
   );
 }

@@ -31,6 +31,7 @@
 /apps/api/src/services/reprocess.ts @servacode
 /apps/api/src/services/rebuild.ts @servacode
 /apps/api/src/services/costing.ts @servacode
+/apps/api/src/services/batches.ts @servacode
 /apps/api/src/services/expiry.ts @servacode
 /apps/api/src/services/serials.ts @servacode
 /apps/api/src/services/purchases.ts @servacode
@@ -69,6 +70,7 @@
 # shared shapes of the document and accounting contracts
 /packages/core/src/contracts/common.ts @servacode
 /packages/core/src/contracts/customers.ts @servacode
+/packages/core/src/contracts/cheques.ts @servacode
 # the document types the protocol and the local store accept
 /packages/sync/src/doc-types.ts @servacode
 # identifiers the protocol deduplicates on
@@ -95,6 +97,8 @@
 /apps/api/src/services/sync-state.ts @servacode
 # the database connection and withTenant(), which the maintenance steps sit beside
 /packages/db/src/client.ts @servacode
+# the read-only rule sync push applies to a lapsed subscription
+/apps/api/src/services/subscription-gate.ts @servacode
 # what the posting tests assert against
 /apps/api/test/accounting-fixtures.ts @servacode
 # the shared harness of the financial tests

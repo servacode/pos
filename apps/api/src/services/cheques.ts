@@ -19,7 +19,7 @@ import { postEntry } from './posting';
 const newId = createUuidV7();
 
 type Row = {
-  source_type: 'sale' | 'receipt';
+  source_type: 'sale' | 'receipt' | 'supplier_payment';
   source_id: string;
   payment_no: number;
   number: string;
@@ -33,22 +33,36 @@ type Row = {
   action: 'cleared' | 'bounced' | null;
   action_date: string | null;
   note: string | null;
+  cheque: { bank?: string; number?: string; dueDate?: string; drawer?: string | null } | null;
+  supplier_name: string | null;
 };
 
 const all = sql`
   select 'sale' as source_type, i.id as source_id, p.payment_no, i.number, i.business_date::text as date,
          i.branch_id, i.customer_id, coalesce(c.name, i.customer_name) as customer_name, p.reference,
-         p.amount_minor::text as amount, p.currency
+         p.amount_minor::text as amount, p.currency,
+         (select e->'cheque' from jsonb_array_elements(i.payload->'payments') e
+           where (e->>'paymentNo')::int = p.payment_no limit 1) as cheque,
+         null::text as supplier_name
   from invoice_payments p
   join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
   left join customers c on c.tenant_id = i.tenant_id and c.id = i.customer_id
   where p.method = 'cheque'
   union all
   select 'receipt', r.id, 1, r.number, r.business_date::text, r.branch_id, r.customer_id,
-         coalesce(c.name, r.payload->>'customerName'), r.reference, r.amount_minor::text, r.currency
+         coalesce(c.name, r.payload->>'customerName'), r.reference, r.amount_minor::text, r.currency,
+         r.payload->'cheque', null::text
   from receipts r
   left join customers c on c.tenant_id = r.tenant_id and c.id = r.customer_id
-  where r.method = 'cheque'`;
+  where r.method = 'cheque'
+  union all
+  select 'supplier_payment', sp.id, 1, sp.number, sp.business_date::text,
+         (select id from branches order by id limit 1), null::uuid, null::text,
+         sp.cheque->>'number', sp.amount_minor::text, (select base_currency from tenant_settings limit 1),
+         sp.cheque, s.name
+  from supplier_payments sp
+  join suppliers s on s.tenant_id = sp.tenant_id and s.id = sp.supplier_id
+  where sp.cheque is not null`;
 
 const view = (r: Row): Cheque => ({
   sourceType: r.source_type,
@@ -64,6 +78,11 @@ const view = (r: Row): Cheque => ({
   status: r.action ?? 'pending',
   actionDate: r.action_date,
   note: r.note,
+  direction: r.source_type === 'supplier_payment' ? 'out' : 'in',
+  bank: r.cheque?.bank ?? null,
+  dueDate: r.cheque?.dueDate ?? null,
+  drawer: r.cheque?.drawer ?? null,
+  supplierName: r.supplier_name,
 });
 
 async function rows(tx: Transaction, where = sql`true`): Promise<Row[]> {
@@ -109,7 +128,9 @@ export function actOnCheque(
       sql`x.source_type = ${input.sourceType} and x.source_id = ${input.sourceId}
           and x.payment_no = ${input.paymentNo}`,
     );
-    if (!row) throw new AppError(404, 'not_found', 'هذا الشيك غير موجود.');
+    if (!row || row.source_type === 'supplier_payment') {
+      throw new AppError(404, 'not_found', 'هذا الشيك غير موجود.');
+    }
     if (row.action) {
       throw new AppError(409, 'conflict', 'سُجّل هذا الشيك من قبل، ولا يُسجّل مرتين.');
     }

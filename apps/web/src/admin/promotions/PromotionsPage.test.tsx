@@ -83,13 +83,14 @@ describe('«العروض»', () => {
   it('lists promotions with what they give and when, and stops one', async () => {
     const { user, requestsTo } = open('/promotions');
     expect(await screen.findByRole('heading', { name: 'العروض', level: 1 })).toBeInTheDocument();
-    const table = await screen.findByRole('table', { name: 'العروض' });
-    expect(await within(table).findByText('خصم الألبان')).toBeInTheDocument();
-    expect(table).toHaveTextContent('خصم 10% على 1 تصنيف');
-    expect(table).toHaveTextContent('من 2026-11-01 · حتى 2026-11-30 · الخميس، الجمعة · 18:00–22:00');
+    // One card per promotion, in a list named «العروض».
+    const list = await screen.findByRole('list', { name: 'العروض' });
+    expect(await within(list).findByText('خصم الألبان')).toBeInTheDocument();
+    expect(list).toHaveTextContent('خصم 10% على 1 تصنيف');
+    expect(list).toHaveTextContent('من 2026-11-01 · حتى 2026-11-30 · الخميس، الجمعة · 18:00–22:00');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
-    await user.click(within(table).getByRole('button', { name: 'أوقف' }));
-    expect(await within(table).findByText('متوقف')).toBeInTheDocument();
+    await user.click(within(list).getByRole('button', { name: 'أوقف' }));
+    expect(await within(list).findByText('متوقف')).toBeInTheDocument();
     expect(requestsTo('PUT', '/v1/promotions/p-1').at(-1)?.body).toMatchObject({
       version: 1,
       archived: true,

@@ -36,6 +36,7 @@ describe('/categories', () => {
     openCategories();
 
     expect(await screen.findByRole('heading', { name: 'التصنيفات', level: 1 })).toBeInTheDocument();
+    await screen.findByRole('list', { name: 'التصنيفات' });
     expect(rowNames()).toEqual(['ألبان وأجبان', 'أجبان', 'منظفات']);
     const [dairy, cheese, cleaning] = within(screen.getByRole('list', { name: 'التصنيفات' })).getAllByRole(
       'listitem',
@@ -48,7 +49,9 @@ describe('/categories', () => {
       `/products?category=${ids.dairy}`,
     );
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
-    expect(within(nav).getByRole('link', { name: 'التصنيفات' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'المنتجات' })).toHaveAttribute('aria-current', 'page');
+    const tabs = screen.getByRole('navigation', { name: 'صفحات المنتجات' });
+    expect(within(tabs).getByRole('link', { name: 'التصنيفات' })).toHaveAttribute('aria-current', 'page');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
@@ -83,7 +86,9 @@ describe('/categories', () => {
       'POST /v1/categories': { status: 201, body: created },
     });
 
-    await user.click(await screen.findByRole('button', { name: 'أضف تصنيفاً تحت «ألبان وأجبان»' }));
+    // A row's actions are in its menu (إجراءات «…»).
+    await user.click(await screen.findByRole('button', { name: 'إجراءات «ألبان وأجبان»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'أضف تصنيفاً تحت «ألبان وأجبان»' }));
     const dialog = await screen.findByRole('dialog', { name: 'أضف تصنيفاً' });
     expect(within(dialog).getByLabelText('يتبع')).toHaveValue(ids.dairy);
     await user.click(within(dialog).getByRole('button', { name: 'احفظ' }));
@@ -108,7 +113,8 @@ describe('/categories', () => {
       }),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'عدّل «ألبان وأجبان»' }));
+    await user.click(await screen.findByRole('button', { name: 'إجراءات «ألبان وأجبان»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'عدّل «ألبان وأجبان»' }));
     const dialog = await screen.findByRole('dialog', { name: 'عدّل «ألبان وأجبان»' });
     const parent = within(dialog).getByLabelText('يتبع');
     expect(
@@ -141,13 +147,15 @@ describe('/categories', () => {
       }),
     });
 
-    await user.click(await screen.findByRole('button', { name: 'أرشف «منظفات»' }));
+    await user.click(await screen.findByRole('button', { name: 'إجراءات «منظفات»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'أرشف «منظفات»' }));
     expect(await screen.findByText('مؤرشف')).toBeInTheDocument();
     expect(requestsTo('PATCH', `/v1/categories/${ids.cleaning}`)[0]!.body).toEqual({
       version: 1,
       archived: true,
     });
-    await user.click(screen.getByRole('button', { name: 'أعد «منظفات»' }));
+    await user.click(screen.getByRole('button', { name: 'إجراءات «منظفات»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'أعد «منظفات»' }));
     await vi.waitFor(() => expect(screen.queryByText('مؤرشف')).not.toBeInTheDocument());
   });
 
@@ -155,7 +163,8 @@ describe('/categories', () => {
     const { user, requestsTo } = openCategories(categories, {
       [`PATCH /v1/categories/${ids.cleaning}`]: apiError(409, 'stale_version', 'تغيّر السجل.'),
     });
-    await user.click(await screen.findByRole('button', { name: 'أرشف «منظفات»' }));
+    await user.click(await screen.findByRole('button', { name: 'إجراءات «منظفات»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'أرشف «منظفات»' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'غيّر أحدٌ هذا التصنيف للتو. حدّثنا القائمة، جرّب مرة أخرى.',
     );
@@ -179,5 +188,6 @@ describe('/categories', () => {
     openCategories(categories, {}, ['sale.create']);
     await screen.findByText('منظفات');
     expect(screen.queryByRole('button', { name: /أضف|عدّل|أرشف/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /إجراءات/ })).not.toBeInTheDocument();
   });
 });

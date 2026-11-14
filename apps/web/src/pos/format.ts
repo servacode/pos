@@ -29,7 +29,16 @@ export function sinceText(from: number, now: number, digits: Digits = 'latn'): s
   return h > 0 ? `${n(h)} س ${n(m)} د` : `${n(m)} د`;
 }
 
-const pluralRules = new Intl.PluralRules('ar');
+/** The number of the noun's form (never the engine's rules, which differ between browsers) */
+function form(n: number): 'one' | 'two' | 'few' | 'many' {
+  if (n === 1) return 'one';
+  if (n === 2) return 'two';
+  // 3 to 10 take the plural; 11 and over take the singular after the number («11 فاتورة»)
+  return Number.isInteger(n) && n >= 3 && n <= 10 ? 'few' : 'many';
+}
+
+/** «فاتورة واحدة، فاتورتان، 6 فواتير، 12 فاتورة» */
+export const INVOICES = ['فاتورة واحدة', 'فاتورتان', 'فواتير', 'فاتورة'] as const;
 
 /** Arabic counted noun: count(3, ['قطعة واحدة','قطعتان','قطع','قطعة']) → «3 قطع». */
 export function counted(
@@ -38,15 +47,13 @@ export function counted(
   digits: Digits = 'latn',
 ): string {
   const v = displayNumber(String(n), digits);
-  switch (pluralRules.select(n)) {
+  switch (form(n)) {
     case 'one':
       return one;
     case 'two':
       return two;
     case 'few':
       return `${v} ${few}`;
-    case 'many':
-      return `${v} ${many}`;
     default:
       return `${v} ${many}`;
   }

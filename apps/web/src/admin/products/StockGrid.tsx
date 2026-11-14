@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { ProductDetail } from '@serva/core';
-import { cn, formatQuantity, Select } from '@serva/ui';
+import { cn, formatQuantity, GridIcon, Select } from '@serva/ui';
 import { gridOf } from '../purchases/SizeGrid';
+import { SectionCard } from './parts';
 
 /**
  * «المخزون حسب المقاس واللون» (03 › الألبسة): what is left of each piece of a model, sizes down and
  * colours across, in every branch together or in one, so «في M أسود؟» is one look. Empty cells
- * are pieces never made; zero is a piece that ran out.
+ * are pieces never made; zero is a piece that ran out. A card of its own, or nothing for a product
+ * of one piece.
  */
-export function StockGrid({
+export const StockGrid = memo(function StockGrid({
   product,
   numberFormat,
 }: {
@@ -25,27 +27,44 @@ export function StockGrid({
     v.stock.filter((s) => branch === 'all' || s.branchId === branch).reduce((n, s) => n + s.qty, 0);
 
   return (
-    <div className="flex flex-col gap-3">
-      {branches.size > 1 ? (
-        <Select label="الفرع" value={branch} onChange={(e) => setBranch(e.target.value)} className="w-56">
-          <option value="all">كل الفروع</option>
-          {[...branches].map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </Select>
-      ) : null}
-      <div className="overflow-x-auto">
-        <table aria-label="المخزون حسب المقاس واللون" className="border-separate border-spacing-1">
+    <SectionCard
+      title="المخزون حسب المقاس واللون"
+      icon={<GridIcon />}
+      description="ما بقي من كل قطعة. الخانة الفارغة قطعة لم تُصنع، والصفر قطعة نفدت."
+      action={
+        branches.size > 1 ? (
+          <Select
+            label="الفرع"
+            hideLabel
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            className="w-48"
+          >
+            <option value="all">كل الفروع</option>
+            {[...branches].map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </Select>
+        ) : undefined
+      }
+    >
+      {/* `relative` keeps hidden text inside the sideways scroll on a phone. */}
+      <div className="relative -mx-5 overflow-x-auto px-5 sm:-mx-6 sm:px-6">
+        <table aria-label="المخزون حسب المقاس واللون" className="border-separate border-spacing-1.5">
           <thead>
             <tr>
-              <th className="text-start text-sm text-ink-muted">
+              <th className="pe-3 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle">
                 {grid.rowName}
                 {grid.colName ? ` \\ ${grid.colName}` : ''}
               </th>
               {grid.cols.map((col) => (
-                <th key={col || '_'} scope="col" className="px-2 text-sm font-semibold">
+                <th
+                  key={col || '_'}
+                  scope="col"
+                  className="px-2 pb-1 text-center text-xs font-semibold whitespace-nowrap text-ink-subtle"
+                >
                   {col || 'الكمية'}
                 </th>
               ))}
@@ -54,14 +73,17 @@ export function StockGrid({
           <tbody>
             {grid.rows.map((row) => (
               <tr key={row}>
-                <th scope="row" className="pe-2 text-start font-semibold">
+                <th scope="row" className="pe-3 text-start font-semibold whitespace-nowrap text-ink">
                   {row}
                 </th>
                 {grid.cols.map((col) => {
                   const v = grid.cell(row, col);
                   if (!v) {
                     return (
-                      <td key={col || '_'} className="min-w-14 text-center text-ink-muted">
+                      <td
+                        key={col || '_'}
+                        className="min-w-16 rounded-small border border-dashed border-line text-center text-ink-subtle"
+                      >
                         —
                       </td>
                     );
@@ -72,7 +94,7 @@ export function StockGrid({
                       key={col || '_'}
                       aria-label={`${v.label ?? row}: ${formatQuantity(qty, numberFormat)}`}
                       className={cn(
-                        'num min-w-14 rounded-control px-2 py-2 text-center font-semibold',
+                        'num min-w-16 rounded-small px-3 py-2.5 text-center font-semibold',
                         qty <= 0 ? 'bg-danger-soft text-danger-ink' : 'bg-surface-muted text-ink',
                       )}
                     >
@@ -85,6 +107,6 @@ export function StockGrid({
           </tbody>
         </table>
       </div>
-    </div>
+    </SectionCard>
   );
-}
+});

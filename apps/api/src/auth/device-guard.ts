@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AppError, unauthorized } from '../errors';
 import { enforceLimits } from '../http/rate-limit';
+import { assertStoreWritable } from '../services/subscription-gate';
 
 /** Device tokens look like sdt_<43 base64url chars>: 256 random bits (17 › الجهاز). */
 export const DEVICE_TOKEN_PATTERN = /^sdt_[A-Za-z0-9_-]{43}$/;
@@ -30,7 +31,12 @@ export const deviceRevoked = () =>
  * documents are quarantined) when `allowRevoked` is set; every other route refuses it.
  */
 export function requireDevice(
-  options: { allowRevoked?: boolean; extraLimits?: (d: DeviceClaims) => { key: string; max: number }[] } = {},
+  options: {
+    allowRevoked?: boolean;
+    /** A route that creates something: refused with 402 once the store is read-only */
+    write?: boolean;
+    extraLimits?: (d: DeviceClaims) => { key: string; max: number }[];
+  } = {},
 ) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const header = request.headers.authorization;
@@ -62,5 +68,12 @@ export function requireDevice(
       ...(options.extraLimits?.(device) ?? []),
     ]);
     request.device = device;
+    if (options.write)
+      await assertStoreWritable(
+        db,
+        device.tenantId,
+        request.server.clock.now(),
+        env.SUBSCRIPTION_ENFORCEMENT,
+      );
   };
 }

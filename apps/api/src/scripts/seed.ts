@@ -11,7 +11,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { and, eq, isNull } from 'drizzle-orm';
 import { createDb, plans, platformUsers, type PlanLimits } from '@serva/db';
-import { hashSecret } from '../auth/passwords';
+import { hashSecret, verifySecret } from '../auth/passwords';
 import { demoStore, seedDemoCatalog } from './demo-catalog';
 
 const args = process.argv.slice(2);
@@ -111,8 +111,25 @@ try {
         email: email.toLowerCase(),
         passwordHash: await hashSecret(password),
         role: 'super_admin',
+        mustChangePassword: true,
       })
       .onConflictDoNothing({ target: platformUsers.email });
+    // An admin seeded earlier whose password still equals the bootstrap one must change it at the
+    // next sign-in. The plain value is only compared here, never stored.
+    const [existing] = await db
+      .select({
+        id: platformUsers.id,
+        hash: platformUsers.passwordHash,
+        flagged: platformUsers.mustChangePassword,
+      })
+      .from(platformUsers)
+      .where(eq(platformUsers.email, email.toLowerCase()));
+    if (existing && !existing.flagged && (await verifySecret(existing.hash, password))) {
+      await db
+        .update(platformUsers)
+        .set({ mustChangePassword: true })
+        .where(eq(platformUsers.id, existing.id));
+    }
     console.log(`Platform admin ready: ${email}`);
   } else {
     console.log('PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD not set; skipped platform admin.');

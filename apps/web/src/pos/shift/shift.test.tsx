@@ -10,7 +10,7 @@ import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
 import { ids, PINS, PRODUCTS } from '../../test/pos';
 import { openShift, renderPos, scan, SHIFT_ID } from '../../test/renderPos';
-import { closeDrawer, shiftActivity } from './shift';
+import { closeDrawer, netMethodRows, shiftActivity } from './shift';
 
 beforeEach(() => {
   vi.spyOn(window, 'print').mockImplementation(() => undefined);
@@ -65,6 +65,30 @@ describe('shift', () => {
     expect(screen.getByText(/وردية منذ/)).toBeInTheDocument();
   });
 
+  it('a double click on «افتح الوردية» opens one shift, not two', async () => {
+    const { user, outbox } = renderPos();
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await user.dblClick(screen.getByRole('button', { name: 'افتح الوردية' }));
+    expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(1);
+  });
+
+  it('asks again before saving an opening count far above the usual one', async () => {
+    const { user, outbox, local } = renderPos();
+    // Last time the drawer opened with 1,100 ل.س; now a slipped key makes it 100 times that
+    await local.set('lastOpeningCount', { SYP: 110_000, USD: 0 });
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await user.type(screen.getByLabelText('عدد أوراق 500 ل.س'), '300');
+    await user.click(screen.getByRole('button', { name: 'افتح الوردية' }));
+    expect(await screen.findByText(/أكبر بكثير من المعتاد/)).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: /نعم، المبلغ صحيح/ }));
+    expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(1);
+  });
+
   it('closes blind for a cashier: no expected amount, and shift_close carries every term', async () => {
     const local = memoryLocal();
     await openShift(local);
@@ -91,6 +115,18 @@ describe('shift', () => {
     expect(screen.getByText('المتوقع والفرق يراهما المدير فقط.')).toBeInTheDocument();
     expect(screen.queryByText(/المتوقع/, { selector: 'span' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'أغلق الوردية' }));
+    // A confirmation first, then the Z report, then the cashier leaves
+    expect(screen.getByRole('alertdialog', { name: 'تأكيد إغلاق الوردية' })).toBeInTheDocument();
+    expect(outbox.some((e) => e.type === 'shift_close')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'نعم، أغلق الوردية' }));
+    const z = await screen.findByLabelText('تقرير إغلاق الوردية');
+    // The cashier has no «shift.view_difference»: the slip carries the count, not the expected cash
+    expect(z).toHaveTextContent('المعدود');
+    expect(z).not.toHaveTextContent('المتوقع');
+    expect(z).not.toHaveTextContent('الفرق');
+    await user.click(screen.getByRole('button', { name: 'اطبع تقرير الإغلاق' }));
+    expect(window.print).toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'تمّ، اخرج' }));
 
     expect(await screen.findByRole('heading', { name: 'من يعمل الآن؟' })).toBeInTheDocument();
     const [close] = docsOf<ShiftClosePayload>(outbox, 'shift_close');
@@ -208,5 +244,44 @@ describe('the drawer formula (10 › مطابقة الصندوق)', () => {
       totalMinor: 300,
     });
     expect(usd).toMatchObject({ expectedMinor: 400, differenceMinor: -100, differenceBaseMinor: -13_000 });
+  });
+});
+
+describe('the close summary rows', () => {
+  it('takes the cash paid back for returns off the cash row and leaves the saved summary alone', () => {
+    const doc = (type: string, payload: Record<string, unknown>, seq: number) =>
+      ({ seq, type, doc: { type, payload } }) as never;
+    const activity = shiftActivity(SHIFT_ID, [
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 174_100 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 27_000 }] },
+        2,
+      ),
+    ]);
+    expect(netMethodRows(activity)).toEqual([
+      { method: 'cash', currency: 'SYP', count: 1, amountMinor: 147_100 },
+    ]);
+    // The saved summary and the drawer's expected cash are what they were
+    expect(activity.byMethod[0]!.amountMinor).toBe(174_100);
+    expect(activity.terms.get('SYP')!.refundsMinor).toBe(27_000);
+    // Cash paid back with no cash sale in the shift still shows, as a minus
+    const only = shiftActivity(SHIFT_ID, [
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 5_000 }] },
+        1,
+      ),
+    ]);
+    expect(netMethodRows(only)).toEqual([{ method: 'cash', currency: 'SYP', count: 0, amountMinor: -5_000 }]);
+    expect(netMethodRows(null)).toEqual([]);
   });
 });

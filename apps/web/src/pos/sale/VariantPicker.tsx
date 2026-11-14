@@ -1,24 +1,32 @@
-import { useState } from 'react';
-import { Button, cn, Money } from '@serva/ui';
+import { useId, useState } from 'react';
+import { AddIcon, Button, CloseIcon, cn, formatQuantity, Money, useDigits } from '@serva/ui';
 import type { CatalogItem } from '../catalog';
-import { canChoose, optionsOf, pieceFor } from './models';
+import { Kbd } from './Kbd';
+import { canChoose, lowestPrice, optionsOf, pieceFor, piecesText, stockFor } from './models';
+import { SalePanel } from './SalePanel';
 
 /**
- * «اختر المقاس واللون» (هوية 2): a model's pieces, picked beside the cart. A value no piece has with
- * the other choices is struck through. A model with one option (sizes only) adds on the first tap;
- * with two, «أضف» names the piece and its price.
+ * «اختر المقاس واللون» (هوية 2; هوية 4): a model's pieces, picked beside the cart. Each option is a
+ * row of large chips; a value no piece has with the other choices is struck through and cannot be
+ * pressed. A model with one option (sizes only) adds on the first tap; with two, «أضف» names the
+ * piece and its price.
  */
 export function VariantPicker({
   name,
   pieces,
+  inCart,
   onAdd,
   onCancel,
 }: {
   name: string;
   pieces: readonly CatalogItem[];
+  /** What the open cart already holds of each piece (thousandths), taken off the stock shown */
+  inCart?: ReadonlyMap<string, number>;
   onAdd: (piece: CatalogItem) => void;
   onCancel: () => void;
 }) {
+  const digits = useDigits();
+  const idBase = useId();
   const options = optionsOf(pieces);
   const [chosen, setChosen] = useState<Record<string, string>>(() =>
     // An option with a single value («أبيض» only) starts chosen.
@@ -26,6 +34,7 @@ export function VariantPicker({
   );
   const piece = pieceFor(pieces, chosen, options.length);
   const image = (piece ?? pieces.find((p) => p.imageUrl))?.imageUrl ?? null;
+  const from = lowestPrice(pieces);
 
   function choose(option: string, value: string) {
     const next = { ...chosen, [option]: value };
@@ -45,48 +54,50 @@ export function VariantPicker({
   }
 
   return (
-    <section
-      aria-label={`اختر من ${name}`}
-      className="flex flex-col gap-5 rounded-card border border-line bg-surface p-5 shadow-e2"
-    >
-      <div className="flex items-center gap-4">
-        {image ? <img src={image} alt="" className="size-18 shrink-0 rounded-control object-cover" /> : null}
-        <div className="flex min-w-0 flex-col gap-1">
-          <h2 className="truncate text-lg font-bold text-ink">{name}</h2>
-          <p className="text-sm text-ink-muted">اختر {options.map((o) => o.name).join(' و')}</p>
-        </div>
-      </div>
-      {options.map((option) => (
-        <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-2">
-          <p className="text-sm font-semibold text-ink-muted">{option.name}</p>
-          <div className="flex flex-wrap gap-2">
-            {option.values.map((value) => {
-              const on = chosen[option.name] === value;
-              const possible = canChoose(pieces, { ...chosen, [option.name]: value }, option.name, value);
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={on}
-                  disabled={!possible}
-                  onClick={() => choose(option.name, value)}
-                  className={cn(
-                    'min-h-12 min-w-14 rounded-control border px-4 font-semibold transition-colors duration-120',
-                    on
-                      ? 'border-brand bg-brand text-on-brand'
-                      : 'border-line-control bg-surface text-ink hover:bg-surface-muted',
-                    !possible && 'cursor-not-allowed border-dashed text-ink-subtle line-through opacity-60',
-                  )}
-                >
-                  {value}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-      <div className="flex gap-3">
-        <Button className="flex-1" disabled={!piece} onClick={() => piece && onAdd(piece)}>
+    <SalePanel
+      label={`اختر من ${name}`}
+      title={name}
+      subtitle={
+        <>
+          {piecesText(pieces.length)} · من <Money minor={from.priceMinor} currency={from.currency} />
+        </>
+      }
+      media={
+        image ? (
+          <img
+            src={image}
+            alt=""
+            className="size-14 shrink-0 rounded-control bg-surface-muted object-cover"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="grid size-14 shrink-0 place-items-center rounded-control bg-brand-soft text-2xl font-bold text-brand-ink"
+          >
+            {Array.from(name.trim())[0] ?? ''}
+          </span>
+        )
+      }
+      actions={
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<CloseIcon size={20} />}
+          aria-keyshortcuts="Escape"
+          onClick={onCancel}
+        >
+          إلغاء
+          <Kbd>Esc</Kbd>
+        </Button>
+      }
+      footer={
+        <Button
+          size="lg"
+          fullWidth
+          icon={<AddIcon size={20} />}
+          disabled={!piece}
+          onClick={() => piece && onAdd(piece)}
+        >
           {piece ? (
             <>
               أضف {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
@@ -96,10 +107,64 @@ export function VariantPicker({
             'اختر لتضيف'
           )}
         </Button>
-        <Button variant="secondary" onClick={onCancel}>
-          إلغاء
-        </Button>
-      </div>
-    </section>
+      }
+    >
+      {options.map((option) => (
+        <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-3">
+          <p className="flex items-center gap-2 text-sm font-semibold text-ink-muted">
+            {option.name}
+            {chosen[option.name] ? (
+              <span className="font-normal text-ink-subtle">· {chosen[option.name]}</span>
+            ) : null}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {option.values.map((value) => {
+              const on = chosen[option.name] === value;
+              const possible = canChoose(pieces, { ...chosen, [option.name]: value }, option.name, value);
+              const left = stockFor(pieces, chosen, option.name, value, inCart);
+              const stockId = `${idBase}-${option.name}-${value}`;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={on}
+                  aria-label={value}
+                  aria-describedby={left === null || !possible ? undefined : stockId}
+                  disabled={!possible}
+                  onClick={() => choose(option.name, value)}
+                  className={cn(
+                    'min-h-14 min-w-16 rounded-small border px-4 text-lg font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
+                    on
+                      ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
+                      : possible
+                        ? 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted'
+                        : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
+                  )}
+                >
+                  <span aria-hidden="true" className="flex flex-col items-center leading-tight">
+                    {value}
+                    {left !== null && possible ? (
+                      <span
+                        className={cn(
+                          'num text-xs font-medium',
+                          left <= 0 ? 'text-danger-ink' : 'text-ink-subtle',
+                        )}
+                      >
+                        {left <= 0 ? 'نفد' : formatQuantity(left, digits)}
+                      </span>
+                    ) : null}
+                  </span>
+                  {left !== null && possible ? (
+                    <span id={stockId} className="sr-only">
+                      {left <= 0 ? 'نفد' : `المتوفر ${formatQuantity(left, digits)}`}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </SalePanel>
   );
 }

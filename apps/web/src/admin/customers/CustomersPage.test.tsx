@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { CustomerDetail, CustomerListResponse, MeResponse } from '@serva/core';
 import { apiError, mockFetch, type MockRequest } from '../../test/fetchMock';
@@ -10,7 +10,16 @@ function owner(): MeResponse {
   const base = makeMe();
   return {
     ...base,
-    user: { ...base.user, permissions: [...base.user.permissions, 'customers.view', 'customers.manage'] },
+    user: {
+      ...base.user,
+      permissions: [
+        ...base.user.permissions,
+        'customers.view',
+        'customers.manage',
+        'receipt.create',
+        'accounting.post',
+      ],
+    },
   };
 }
 
@@ -23,6 +32,9 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   priceTier: 'retail',
   noMessages: false,
   archived: false,
+  kind: null,
+  contactName: null,
+  contactPhone: null,
   taxNumber: null,
   address: null,
   notes: null,
@@ -53,10 +65,11 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   ...over,
 });
 
-function open(path: string) {
-  let current = detail();
+function open(path: string, start: CustomerDetail = detail(), twin = false) {
+  let current = start;
   const list = (): CustomerListResponse => ({
-    items: [current],
+    // The same person typed twice: «أرشف هذا الزبون المكرر» shows only then
+    items: twin ? [current, { ...current, id: 'c-2', balanceMinor: 0 }] : [current],
     totalOwedMinor: Math.max(0, current.balanceMinor),
     baseCurrency: 'SYP',
   });
@@ -64,6 +77,8 @@ function open(path: string) {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
     'GET /v1/customers': () => ({ status: 200, body: list() }),
+    // The customer page asks whether another customer has the same name
+    [`GET /v1/customers?${new URLSearchParams({ q: start.name })}`]: () => ({ status: 200, body: list() }),
     'GET /v1/customers/c-1': () => ({ status: 200, body: current }),
     'POST /v1/customers': (r: MockRequest) => {
       const body = r.body as { name: string };
@@ -71,6 +86,54 @@ function open(path: string) {
         return apiError(400, 'validation_failed', 'تحقّق من الحقول', { name: 'اكتب اسم الزبون' });
       current = detail({ name: body.name, balanceMinor: 0, statement: [] });
       return { status: 201, body: current };
+    },
+    'POST /v1/customers/c-1/payments': (r: MockRequest) => {
+      const body = r.body as { amountMinor: number; method: string; reference: string | null };
+      current = { ...current, balanceMinor: current.balanceMinor - body.amountMinor };
+      return {
+        status: 201,
+        body: {
+          kind: 'payment',
+          number: 'RCA-2026-000001',
+          date: '2026-11-13',
+          customerId: 'c-1',
+          customerName: 'أبو خالد',
+          amountMinor: body.amountMinor,
+          method: body.method,
+          reference: body.reference,
+          note: null,
+          balanceBeforeMinor: current.balanceMinor + body.amountMinor,
+          balanceAfterMinor: current.balanceMinor,
+          baseCurrency: 'SYP',
+        },
+      };
+    },
+    'POST /v1/customers/c-1/opening-debt': (r: MockRequest) => {
+      const body = r.body as { amountMinor: number };
+      current = { ...current, balanceMinor: current.balanceMinor + body.amountMinor };
+      return {
+        status: 201,
+        body: {
+          kind: 'opening_debt',
+          number: 'JE-2026-000009',
+          date: '2026-11-13',
+          customerId: 'c-1',
+          customerName: 'أبو خالد',
+          amountMinor: body.amountMinor,
+          method: null,
+          reference: null,
+          note: null,
+          balanceBeforeMinor: current.balanceMinor - body.amountMinor,
+          balanceAfterMinor: current.balanceMinor,
+          baseCurrency: 'SYP',
+        },
+      };
+    },
+    'POST /v1/customers/c-1/archive-duplicate': () => {
+      if (current.balanceMinor !== 0)
+        return apiError(409, 'conflict', 'عليه دين غير مسدّد. سدّد حسابه أو حوّله قبل الأرشفة.');
+      current = { ...current, archived: true };
+      return { status: 200, body: current };
     },
     'PUT /v1/customers/c-1': (r: MockRequest) => {
       current = { ...current, ...(r.body as Partial<CustomerDetail>) };
@@ -109,5 +172,74 @@ describe('«الزبائن»', () => {
       name: 'مطعم الياسمين',
       creditLimitMinor: 5_000_000,
     });
+  });
+
+  it('receives a payment from the customer page, asks for the reference of a transfer, and shows the new balance', async () => {
+    const { user, requestsTo } = open('/customers/c-1');
+    await user.click(await screen.findByRole('button', { name: 'استلم دفعة' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/المبلغ/), '٥٠٠٠');
+    await user.selectOptions(within(dialog).getByLabelText('طريقة الدفع'), 'transfer');
+    expect(within(dialog).getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    await user.type(within(dialog).getByLabelText('رقم الحوالة أو العملية'), 'TR-1');
+    await user.click(within(dialog).getByRole('button', { name: 'سجّل الدفعة' }));
+    expect(await screen.findByText('سُجّلت الدفعة')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/customers/c-1/payments').at(-1)?.body).toMatchObject({
+      amountMinor: 500_000,
+      method: 'transfer',
+      reference: 'TR-1',
+    });
+    expect(screen.getByRole('button', { name: 'اطبع السند' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'تم' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('records an opening debt from the customer page', async () => {
+    const { user, requestsTo } = open('/customers/c-1');
+    await user.click(await screen.findByRole('button', { name: 'سجّل دين افتتاحي' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/المبلغ/), '120000');
+    await user.click(within(dialog).getByRole('button', { name: 'سجّل الدين' }));
+    expect(await screen.findByText('سُجّل الدين الافتتاحي')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/customers/c-1/opening-debt').at(-1)?.body).toMatchObject({
+      amountMinor: 12_000_000,
+    });
+  });
+
+  it('says why a duplicate that still owes is not archived', async () => {
+    const { user } = open('/customers/c-1', detail(), true);
+    await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
+    expect(await screen.findByText(/عليه دين غير مسدّد/)).toBeInTheDocument();
+    expect(screen.queryByText('مؤرشف')).not.toBeInTheDocument();
+  });
+
+  it('offers «أرشف هذا الزبون المكرر» only when a duplicate exists', async () => {
+    open('/customers/c-1');
+    await screen.findByRole('button', { name: 'أرشفه' });
+    expect(screen.queryByRole('button', { name: 'أرشف هذا الزبون المكرر' })).not.toBeInTheDocument();
+  });
+
+  it('offers «أرشف هذا الزبون المكرر» only when a duplicate exists', async () => {
+    open('/customers/c-1');
+    await screen.findByRole('button', { name: 'أرشفه' });
+    expect(screen.queryByRole('button', { name: 'أرشف هذا الزبون المكرر' })).not.toBeInTheDocument();
+  });
+
+  it('archives a duplicate with nothing open on them', async () => {
+    const { user, requestsTo } = open('/customers/c-1', detail({ balanceMinor: 0, statement: [] }), true);
+    await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
+    expect(await screen.findByText('مؤرشف')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/customers/c-1/archive-duplicate')).toHaveLength(1);
+  });
+
+  it('warns about a customer with the same phone or name, and offers to open them', async () => {
+    const { user } = open('/customers');
+    await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
+    await user.type(screen.getByLabelText('اسم الزبون'), 'ابو خالد');
+    expect(await screen.findByText('يوجد زبون بالاسم أو الرقم نفسه')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'افتح أبو خالد' })).toHaveAttribute('href', '/customers/c-1');
+    await user.clear(screen.getByLabelText('اسم الزبون'));
+    await user.type(screen.getByLabelText('الجوال'), '٠٩٣٣-١١١-٢٢٢');
+    expect(await screen.findByText('يوجد زبون بالاسم أو الرقم نفسه')).toBeInTheDocument();
   });
 });

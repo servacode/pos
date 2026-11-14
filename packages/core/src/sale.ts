@@ -1,6 +1,7 @@
 import type { CurrencyCode, CurrencyId } from './currencies';
 import type {
   DocumentDiscount,
+  Prescription,
   PaymentMethod,
   SaleCashRounding,
   SaleChange,
@@ -10,6 +11,7 @@ import type {
   ServiceInfo,
 } from './contracts/documents';
 import type { TradeRate } from './contracts/common';
+import type { ChequeDetails } from './contracts/cheques';
 import { convert, lineGross, roundDiv, sumMinor } from './money';
 import { priceInvoice, roundCashDue, type PricedInvoice } from './pricing';
 
@@ -51,6 +53,16 @@ export interface SaleCartLine {
   discount?: SaleDiscount | null;
   /** Serial numbers or IMEIs of the pieces, one each (left out of a line without them) */
   serials?: readonly string[];
+  /** Numbers a manager let through though the store never received them, and who (03 › الإلكترونيات) */
+  serialOverrides?: readonly string[];
+  serialApprovedBy?: string | null;
+  /** The warranty of the product in months, printed as its end date on the receipt */
+  warrantyMonths?: number | null;
+  /** The batch the till picked (03 › الصيدليات) and its expiry; metadata, left out of other lines */
+  batchNo?: string | null;
+  batchExpiry?: string | null;
+  /** What the line took from each batch, base units (FEFO; 03 › الصيدليات) */
+  batches?: readonly { batchNo: string | null; expiry: string | null; qty: number }[];
 }
 
 export interface SalePricingInput {
@@ -74,6 +86,8 @@ export interface SaleTender {
   cardLast4?: string | null;
   cardBrand?: string | null;
   providerAccountId?: string | null;
+  /** A cheque's bank, number, due date and drawer */
+  cheque?: ChequeDetails | null;
 }
 
 export interface SettlementInput {
@@ -118,6 +132,8 @@ export interface SaleCart
   service?: ServiceInfo | null;
   /** An online shop order this sale delivers (26 › حياة الطلب); left out of an ordinary sale */
   onlineOrderId?: string | null;
+  /** A pharmacy sale's prescription (03 › الصيدليات); left out of an ordinary sale */
+  prescription?: Prescription | null;
 }
 
 /** The rate pairing `currency` with the invoice currency, or undefined for the invoice currency itself. */
@@ -207,6 +223,12 @@ export function priceSale(input: SalePricingInput): { lines: SaleLine[]; priced:
       taxRateBp: line.taxRateBp,
       discount: line.discount ?? null,
       ...(line.serials?.length ? { serials: [...line.serials] } : {}),
+      ...(line.serials?.length && line.warrantyMonths ? { warrantyMonths: line.warrantyMonths } : {}),
+      ...(line.serialOverrides?.length
+        ? { serialOverrides: [...line.serialOverrides], serialApprovedBy: line.serialApprovedBy ?? null }
+        : {}),
+      ...(line.batchNo ? { batchNo: line.batchNo, batchExpiry: line.batchExpiry ?? null } : {}),
+      ...(line.batches?.length ? { batches: line.batches.map((b) => ({ ...b })) } : {}),
       priced: result,
     };
   });
@@ -260,6 +282,7 @@ export function settleSale(input: SettlementInput): SaleSettlement {
       cardLast4: p.cardLast4 ?? null,
       cardBrand: p.cardBrand ?? null,
       providerAccountId: p.providerAccountId ?? null,
+      ...(p.cheque ? { cheque: p.cheque } : {}),
     };
   });
 
@@ -389,6 +412,7 @@ export function buildSalePayload(cart: SaleCart): SalePayload {
     note: cart.note ?? null,
     ...(cart.service ? { service: cart.service } : {}),
     ...(cart.onlineOrderId ? { onlineOrderId: cart.onlineOrderId } : {}),
+    ...(cart.prescription ? { prescription: cart.prescription } : {}),
   };
 }
 

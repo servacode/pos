@@ -6,17 +6,20 @@ import {
   PAIRING_TTL_SECONDS,
   parsePairingQr,
   storeCodeSchema,
+  type DeviceKind,
 } from '@serva/core';
 import {
   Alert,
   Badge,
   Button,
   CameraIcon,
+  CheckIcon,
   ClockIcon,
-  cn,
   DeviceIcon,
+  IconChip,
   InfoIcon,
   KeyIcon,
+  LinkIcon,
   NextIcon,
   PasswordField,
   QrCodeIcon,
@@ -41,12 +44,105 @@ interface MethodStepProps {
   onNext: (credentials: LinkCredentials) => void;
   /** Filled again after «رجوع» from step 2 */
   initialCode?: { storeCode: string; manualCode: string };
+  /** What this device is for: the first question and its note name it (a till by default) */
+  kind?: DeviceKind;
 }
+
+const KIND_QUESTION: Partial<Record<DeviceKind, { title: string; note: string }>> = {
+  kitchen_screen: {
+    title: 'هل هذه شاشة المطبخ؟',
+    note: 'اربطها بمتجرك مرة واحدة. بعدها تعرض أوراق الأقسام وتنتظر الطلبات الجديدة.',
+  },
+  waiter: {
+    title: 'هل هذا جوال النادل؟',
+    note: 'اربطه بمتجرك مرة واحدة. بعدها يفتح الطاولات ويأخذ الطلبات ويرسلها للمطبخ.',
+  },
+  call_screen: {
+    title: 'هل هذه شاشة النداء؟',
+    note: 'اربطها بمتجرك مرة واحدة. بعدها تعرض أرقام الطلبات الجاهزة.',
+  },
+};
 
 const TTL_MINUTES = PAIRING_TTL_SECONDS / 60;
 
+/**
+ * One way in, drawn as the ChoiceCard of هوية 4 (a card that is a radio): the picture in a soft
+ * square that takes the brand once chosen, the title with an optional badge, a line under it, and
+ * the round check at the end.
+ */
+function MethodCard({
+  value,
+  checked,
+  onChange,
+  icon,
+  title,
+  description,
+  badge,
+}: {
+  value: LinkMethod;
+  checked: boolean;
+  onChange: () => void;
+  icon: ReactNode;
+  title: string;
+  description: string;
+  badge?: ReactNode;
+}) {
+  return (
+    <label className="group/card flex min-h-20 cursor-pointer items-center gap-4 rounded-card border border-line bg-surface p-4 shadow-e1 transition-[border-color,background-color,box-shadow] duration-120 ease-standard select-none hover:border-line-control has-checked:border-brand has-checked:bg-brand-soft/40 has-checked:ring-4 has-checked:ring-brand/10 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring">
+      <input
+        type="radio"
+        name="link-method"
+        value={value}
+        checked={checked}
+        onChange={onChange}
+        className="sr-only"
+      />
+      <span className="grid size-12 shrink-0 place-items-center rounded-control bg-surface-muted text-ink-muted transition-colors duration-120 ease-standard group-has-checked/card:bg-brand group-has-checked/card:text-on-brand">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-lg font-semibold text-ink">{title}</span>
+          {badge}
+        </span>
+        <span className="text-sm text-ink-muted">{description}</span>
+      </span>
+      <span
+        aria-hidden="true"
+        className="grid size-5 shrink-0 place-items-center rounded-full border border-line-control bg-surface text-on-brand transition-colors duration-120 ease-standard group-hover/card:border-ink-subtle group-has-checked/card:border-brand group-has-checked/card:bg-brand"
+      >
+        <CheckIcon
+          size={16}
+          strokeWidth={3}
+          className="size-3.5 opacity-0 transition-opacity duration-120 ease-standard group-has-checked/card:opacity-100"
+        />
+      </span>
+    </label>
+  );
+}
+
+/** The head of the form beside the ways in: its picture, its title, and a note at the end. */
+function FormHead({ icon, title, aside }: { icon: ReactNode; title: string; aside?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <IconChip>{icon}</IconChip>
+        <h2 className="text-xl font-semibold text-ink">{title}</h2>
+      </div>
+      {aside}
+    </div>
+  );
+}
+
 /** Step 1 «هل هذا جهاز كاشير؟»: three ways in, the chosen one's form beside them. */
-export function MethodStep({ method, onMethodChange, onNext, initialCode }: MethodStepProps) {
+export function MethodStep({
+  method,
+  onMethodChange,
+  onNext,
+  initialCode,
+  kind = 'cashier',
+}: MethodStepProps) {
+  const question = KIND_QUESTION[kind];
   const scan = canScanQr();
   const options: {
     key: LinkMethod;
@@ -59,7 +155,7 @@ export function MethodStep({ method, onMethodChange, onNext, initialCode }: Meth
       key: 'qr',
       title: scan ? 'امسح رمز QR من الإدارة' : 'الصق رابط الربط',
       description: 'من الإدارة أو جوال المالك: الأجهزة ← «اربط جهازاً جديداً».',
-      icon: <QrCodeIcon size={24} />,
+      icon: scan ? <QrCodeIcon size={24} /> : <LinkIcon size={24} />,
       fastest: scan,
     },
     {
@@ -77,65 +173,42 @@ export function MethodStep({ method, onMethodChange, onNext, initialCode }: Meth
   ];
 
   return (
-    <div className="grid w-full max-w-6xl items-center gap-8 lg:grid-cols-[minmax(0,32.5rem)_minmax(0,1fr)] lg:gap-12">
+    <div className="grid w-full max-w-6xl grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,32.5rem)_minmax(0,1fr)] lg:gap-12">
       <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2.5">
-          <Badge tone="info" className="gap-1.5 self-start py-1 text-sm">
+        <div className="flex flex-col items-start gap-3">
+          <Badge tone="info">
             <DeviceIcon size={16} />
             جهاز جديد · متصفح
           </Badge>
-          <h1 className="text-3xl/tight font-bold text-ink">هل هذا جهاز كاشير؟</h1>
-          <p className="text-lg text-ink-muted">
-            اربطه بمتجرك مرة واحدة. بعدها يبيع ويطبع ويحفظ الفواتير حتى دون إنترنت.
-          </p>
+          <div className="flex flex-col gap-2">
+            <h1 className="text-3xl/tight font-bold text-ink">{question?.title ?? 'هل هذا جهاز كاشير؟'}</h1>
+            <p className="text-lg text-ink-muted">
+              {question?.note ?? 'اربطه بمتجرك مرة واحدة. بعدها يبيع ويطبع ويحفظ الفواتير حتى دون إنترنت.'}
+            </p>
+          </div>
         </div>
         <fieldset className="flex flex-col gap-3">
           <legend className="sr-only">طريقة الربط</legend>
-          {options.map((option) => {
-            const checked = option.key === method;
-            return (
-              <label
-                key={option.key}
-                className={cn(
-                  'flex min-h-20 cursor-pointer items-center gap-4 rounded-card border bg-surface px-5 py-4 shadow-e1 transition-[border-color,box-shadow] duration-120',
-                  'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ring',
-                  checked ? 'border-2 border-brand bg-brand-soft' : 'border-line hover:border-line-control',
-                )}
-              >
-                <span
-                  className={cn(
-                    'grid size-13 shrink-0 place-items-center rounded-control',
-                    checked ? 'bg-brand text-on-brand' : 'bg-brand-soft text-brand-ink',
-                  )}
-                >
-                  {option.icon}
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="text-lg font-semibold text-ink">{option.title}</span>
-                    {option.fastest ? <Badge tone="success">الأسرع</Badge> : null}
-                  </span>
-                  <span className="text-sm text-ink-muted">{option.description}</span>
-                </span>
-                <input
-                  type="radio"
-                  name="link-method"
-                  value={option.key}
-                  checked={checked}
-                  onChange={() => onMethodChange(option.key)}
-                  className="size-5 shrink-0 accent-brand"
-                />
-              </label>
-            );
-          })}
+          {options.map((option) => (
+            <MethodCard
+              key={option.key}
+              value={option.key}
+              checked={option.key === method}
+              onChange={() => onMethodChange(option.key)}
+              icon={option.icon}
+              title={option.title}
+              description={option.description}
+              badge={option.fastest ? <Badge tone="success">الأسرع</Badge> : null}
+            />
+          ))}
         </fieldset>
         <p className="flex items-center gap-2.5 text-sm text-ink-muted">
-          <InfoIcon />
+          <InfoIcon className="text-ink-subtle" />
           الربط وحده يحتاج إنترنت، مرة واحدة لكل جهاز.
         </p>
       </div>
 
-      <section className="flex flex-col gap-5 rounded-card border border-line bg-surface p-6 shadow-e2 sm:p-8">
+      <section className="flex flex-col gap-6 rounded-card border border-line bg-surface p-6 shadow-e2 sm:p-8">
         {method === 'code' ? <CodeForm onNext={onNext} initial={initialCode} /> : null}
         {method === 'qr' ? <QrForm scan={scan} onNext={onNext} /> : null}
         {method === 'owner' ? <OwnerForm onNext={onNext} /> : null}
@@ -171,14 +244,17 @@ function CodeForm({
 
   return (
     <form noValidate onSubmit={submit} className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold text-ink">رمز الربط</h2>
-        <Badge tone="warning" className="gap-1.5 py-1 text-sm">
-          <ClockIcon size={16} />
-          صالح <span className="num">{TTL_MINUTES}</span> دقائق ·{' '}
-          <span className="num">{PAIRING_MAX_ATTEMPTS}</span> محاولات
-        </Badge>
-      </div>
+      <FormHead
+        icon={<KeyIcon />}
+        title="رمز الربط"
+        aside={
+          <Badge tone="warning">
+            <ClockIcon size={16} />
+            صالح <span className="num">{TTL_MINUTES}</span> دقائق ·{' '}
+            <span className="num">{PAIRING_MAX_ATTEMPTS}</span> محاولات
+          </Badge>
+        }
+      />
       <TextField
         name="storeCode"
         label="رمز المتجر"
@@ -210,7 +286,7 @@ function CodeForm({
         }}
         hint="حروف لاتينية وأرقام، ولا فرق بين الحرف الكبير والصغير."
         error={errors.manualCode}
-        inputClassName="num h-16 text-[1.625rem] font-bold tracking-[0.2em]"
+        inputClassName="num text-[1.625rem] font-bold tracking-[0.2em]"
       />
       <Button type="submit" size="lg" fullWidth icon={<NextIcon />}>
         التالي: سمِّ الجهاز
@@ -238,7 +314,7 @@ function QrForm({ scan, onNext }: { scan: boolean; onNext: MethodStepProps['onNe
 
   return (
     <div className="flex flex-col gap-5">
-      <h2 className="text-xl font-semibold text-ink">{scan ? 'رمز QR' : 'رابط الربط'}</h2>
+      <FormHead icon={scan ? <QrCodeIcon /> : <LinkIcon />} title={scan ? 'رمز QR' : 'رابط الربط'} />
       {scan ? (
         scanning ? (
           <QrScanner
@@ -246,14 +322,22 @@ function QrForm({ scan, onNext }: { scan: boolean; onNext: MethodStepProps['onNe
             onClose={() => setScanning(false)}
           />
         ) : (
-          <Button size="lg" fullWidth icon={<CameraIcon />} onClick={() => setScanning(true)}>
-            افتح الكاميرا وامسح الرمز
-          </Button>
+          <div className="flex flex-col items-center gap-4 rounded-card border border-dashed border-line-control/50 bg-surface-muted/50 px-6 py-7 text-center">
+            <span className="grid size-16 place-items-center rounded-card bg-brand-soft text-brand-ink">
+              <QrCodeIcon size={32} />
+            </span>
+            <p className="max-w-sm text-sm text-ink-muted">
+              من الإدارة أو جوال المالك: الأجهزة ← «اربط جهازاً جديداً».
+            </p>
+            <Button size="lg" fullWidth icon={<CameraIcon />} onClick={() => setScanning(true)}>
+              افتح الكاميرا وامسح الرمز
+            </Button>
+          </div>
         )
       ) : (
-        <p className="text-ink-muted">
+        <Alert tone="info">
           هذا المتصفح لا يقرأ رمز QR من الكاميرا. افتح الرابط من جوال المالك وانسخه هنا، أو اكتب رمز الربط.
-        </p>
+        </Alert>
       )}
       <form noValidate onSubmit={submit} className="flex flex-col gap-4">
         <TextField
@@ -326,7 +410,7 @@ function OwnerForm({ onNext }: { onNext: MethodStepProps['onNext'] }) {
 
   return (
     <form noValidate onSubmit={submit} className="flex flex-col gap-5">
-      <h2 className="text-xl font-semibold text-ink">حساب المالك</h2>
+      <FormHead icon={<UserIcon />} title="حساب المالك" />
       {formError ? <Alert tone="error">{formError}</Alert> : null}
       <TextField
         name="phone"
@@ -342,6 +426,7 @@ function OwnerForm({ onNext }: { onNext: MethodStepProps['onNext'] }) {
           setErrors((current) => ({ ...current, phone: undefined }));
         }}
         error={errors.phone}
+        inputClassName="num"
       />
       <PasswordField
         name="password"
@@ -354,7 +439,10 @@ function OwnerForm({ onNext }: { onNext: MethodStepProps['onNext'] }) {
         }}
         error={errors.password}
       />
-      <p className="text-sm text-ink-muted">لا يبقى حساب المالك مفتوحاً على هذا الجهاز بعد الربط.</p>
+      <p className="flex items-center gap-2 text-sm text-ink-muted">
+        <InfoIcon size={16} className="text-ink-subtle" />
+        لا يبقى حساب المالك مفتوحاً على هذا الجهاز بعد الربط.
+      </p>
       <Button type="submit" size="lg" fullWidth loading={submitting}>
         دخول
       </Button>

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   convert,
   formatMoney,
@@ -29,6 +29,7 @@ import {
   uuidv7,
   withTenant,
   type Database,
+  type OnlineOrderCouponRule,
   type OnlineOrderLine,
   type Transaction,
 } from '@serva/db';
@@ -55,20 +56,20 @@ const CODE_TTL_SECONDS = 600;
 const MAX_CODE_ATTEMPTS = 5;
 
 const SHOP = 'هذا المتجر غير موجود أو غير مفعّل.';
-const notFound = (message: string) => new AppError(404, 'not_found', message);
-const fieldError = (field: string, message: string) =>
+export const notFound = (message: string) => new AppError(404, 'not_found', message);
+export const fieldError = (field: string, message: string) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', { [field]: message });
 
 const money = (minor: number, currency: CurrencyCode) => stripBidiControls(formatMoney(minor, currency));
 
 /** The store behind a shop link, or 404 (also when its shop is off). */
-async function tenantOf(db: Database, slug: string): Promise<string> {
+export async function tenantOf(db: Database, slug: string): Promise<string> {
   const [row] = await db.execute<{ id: string | null }>(sql`select shop_find_by_slug(${slug}) as id`);
   if (!row?.id) throw notFound(SHOP);
   return row.id;
 }
 
-async function storeOf(tx: Transaction, tenantId: string) {
+export async function storeOf(tx: Transaction, tenantId: string) {
   const [row] = await tx.execute<{
     name: string;
     base: string;
@@ -79,12 +80,17 @@ async function storeOf(tx: Transaction, tenantId: string) {
     note: string | null;
     show_out_of_stock: boolean;
     order_mode: 'whatsapp' | 'shop';
+    show_prices: boolean;
     delivery_fee_minor: string;
     delivery_areas: { name: string; feeMinor: number }[];
+    tagline: string | null;
+    accent: 'emerald' | 'teal' | 'blue';
+    logo_upload_id: string | null;
+    cover_upload_id: string | null;
   }>(sql`
     select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
-           o.show_out_of_stock, o.order_mode, o.delivery_fee_minor::text as delivery_fee_minor,
-           o.delivery_areas
+           o.show_out_of_stock, o.order_mode, o.show_prices, o.delivery_fee_minor::text as delivery_fee_minor,
+           o.delivery_areas, o.tagline, o.accent, o.logo_upload_id, o.cover_upload_id
     from online_stores o
     join tenants t on t.id = o.tenant_id
     join tenant_settings s on s.tenant_id = o.tenant_id
@@ -126,6 +132,7 @@ interface Priced {
 async function pricerOf(
   tx: Transaction,
   base: CurrencyCode,
+  coupon: string | null = null,
 ): Promise<
   (row: {
     productId: string;
@@ -136,6 +143,31 @@ async function pricerOf(
   }) => Priced | null
 > {
   const rates = await ratesOf(tx);
+  const rules = await runningRules(tx, coupon, true);
+  const parent = new Map<string, string | null>();
+  if (rules.some((r) => r.scope === 'categories')) {
+    const cats = await tx.execute<{ id: string; parent_id: string | null }>(
+      sql`select id, parent_id from categories`,
+    );
+    for (const c of cats) parent.set(c.id, c.parent_id);
+  }
+  const pathOf = (id: string | null): string[] => {
+    const path: string[] = [];
+    for (let at = id; at && path.length < 10; at = parent.get(at) ?? null) path.push(at);
+    return path;
+  };
+  return pricing(rates, rules, pathOf, base);
+}
+
+/**
+ * The promotions running now: the ones without a code, and the one whose «كود الخصم» was typed.
+ * A coupon promotion is never in the public prices, only in an order that carries its code.
+ */
+export async function runningRules(
+  tx: Transaction,
+  coupon: string | null,
+  percentOnly: boolean,
+): Promise<PromotionRule[]> {
   const [tenant] = await tx.execute<{ timezone: string | null }>(sql`select timezone from tenants limit 1`);
   const rows = await tx.execute<{
     id: string;
@@ -149,21 +181,28 @@ async function pricerOf(
     days_of_week: number[] | null;
     from_time: string | null;
     to_time: string | null;
+    kind: PromotionRule['kind'];
+    buy_qty: number | null;
+    get_qty: number | null;
+    coupon_code: string | null;
   }>(sql`
     select id, name, percent_bp, scope, category_ids, product_ids,
            to_char(starts_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as starts_at,
            to_char(ends_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as ends_at,
-           days_of_week, from_time, to_time
-    from promotions where archived_at is null and kind = 'percent'`);
+           days_of_week, from_time, to_time, kind, buy_qty, get_qty, coupon_code
+    from promotions where archived_at is null
+      and (${percentOnly ? sql`kind = 'percent'` : sql`true`})
+      and (${coupon ? sql`coupon_code is null or lower(coupon_code) = lower(${coupon})` : sql`coupon_code is null`})`);
   const now = new Date();
-  const rules: PromotionRule[] = rows
+  return rows
     .map((r) => ({
       id: r.id,
       name: r.name,
-      kind: 'percent' as const,
+      kind: r.kind,
       percentBp: r.percent_bp,
-      buyQty: null,
-      getQty: null,
+      buyQty: r.buy_qty,
+      getQty: r.get_qty,
+      couponCode: r.coupon_code,
       scope: r.scope as PromotionRule['scope'],
       categoryIds: r.category_ids ?? [],
       productIds: r.product_ids ?? [],
@@ -175,18 +214,28 @@ async function pricerOf(
       archived: false,
     }))
     .filter((r) => promotionActive(r, now, tenant?.timezone ?? 'Asia/Damascus'));
-  const parent = new Map<string, string | null>();
-  if (rules.some((r) => r.scope === 'categories')) {
-    const cats = await tx.execute<{ id: string; parent_id: string | null }>(
-      sql`select id, parent_id from categories`,
-    );
-    for (const c of cats) parent.set(c.id, c.parent_id);
-  }
-  const pathOf = (id: string | null): string[] => {
-    const path: string[] = [];
-    for (let at = id; at && path.length < 10; at = parent.get(at) ?? null) path.push(at);
-    return path;
-  };
+}
+
+/** The offer a coupon code opens (running now), or null: the code is wrong, ended or not started */
+export async function couponRule(tx: Transaction, code: string): Promise<PromotionRule | null> {
+  const rules = await runningRules(tx, code, false);
+  return rules.find((r) => r.couponCode) ?? null;
+}
+
+export const COUPON_BAD = 'هذا الكود غير صحيح أو انتهت مدته.';
+
+function pricing(
+  rates: TradeRate[],
+  rules: PromotionRule[],
+  pathOf: (id: string | null) => string[],
+  base: CurrencyCode,
+): (row: {
+  productId: string;
+  categoryId: string | null;
+  currency: string;
+  price: string;
+  was: string | null;
+}) => Priced | null {
   return (row) => {
     const price = inBase(Number(row.price), row.currency as CurrencyCode, base, rates);
     if (price === null) return null;
@@ -218,6 +267,15 @@ const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online
   where o.status = 'accepted' and x->>'variantId' = v.id::text), 0)`;
 /** On the shelf in any branch, less what accepted orders hold; or a service that has no stock */
 const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} > 0)`;
+/** What is left of the piece, in stock units; null for a service. Only «بقي 2 فقط» comes out of it. */
+const unitsLeftSql = sql`(case when p.type = 'service' then null else coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} end)`;
+/** At most this many pieces left shows «بقي 2 فقط» */
+const LOW_STOCK = 3;
+const leftOf = (units: string | null): number | null => {
+  if (units === null) return null;
+  const n = Number(units);
+  return n > 0 && n <= LOW_STOCK * 1000 ? Math.ceil(n / 1000) : null;
+};
 
 export function shopHome(db: Database, slug: string): Promise<ShopHome> {
   return tenantOf(db, slug).then((tenantId) =>
@@ -225,6 +283,7 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
       const store = await storeOf(tx, tenantId);
       const base = store.base as CurrencyCode;
       const priceOf = await pricerOf(tx, base);
+      const show = store.show_prices;
       const rows = await tx.execute<{
         id: string;
         name: string;
@@ -234,9 +293,12 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         was: string | null;
         available: boolean;
         upload_id: string | null;
+        created_at: Date;
+        attributes: { name: string; value: string }[] | null;
       }>(sql`
         select p.id, p.name_ar as name, p.category_id, pr.currency, pr.price_minor::text as price,
                pr.was_price_minor::text as was, ${availableSql} as available,
+               p.created_at, v.attributes,
                (select i.upload_id from product_images i where i.product_id = p.id
                 order by i.sort_order, i.created_at limit 1) as upload_id
         from products p
@@ -258,21 +320,34 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
             categoryId: r.category_id,
             imageUrl: r.upload_id ? imageUrl(tenantId, r.upload_id, true) : null,
             currency: base,
-            priceMinor: price,
-            maxPriceMinor: price,
-            wasPriceMinor: priced.wasPriceMinor,
-            offer: priced.offer,
+            priceMinor: show ? price : null,
+            maxPriceMinor: show ? price : null,
+            wasPriceMinor: show ? priced.wasPriceMinor : null,
+            offer: show ? priced.offer : null,
             available: r.available,
+            createdAt: new Date(r.created_at).toISOString(),
+            options: [],
           });
         } else {
           // The card shows the cheapest piece, and what that one was before
-          if (price < card.priceMinor) {
-            card.priceMinor = price;
-            card.wasPriceMinor = priced.wasPriceMinor;
+          if (show && card.priceMinor !== null && card.maxPriceMinor !== null) {
+            if (price < card.priceMinor) {
+              card.priceMinor = price;
+              card.wasPriceMinor = priced.wasPriceMinor;
+            }
+            card.maxPriceMinor = Math.max(card.maxPriceMinor, price);
+            card.offer ??= priced.offer;
           }
-          card.maxPriceMinor = Math.max(card.maxPriceMinor, price);
-          card.offer ??= priced.offer;
           card.available ||= r.available;
+        }
+        // The filters offer what is on the shelf: the values of the pieces that can be bought
+        if (r.available) {
+          const card = byProduct.get(r.id)!;
+          for (const a of r.attributes ?? []) {
+            let option = card.options.find((o) => o.name === a.name);
+            if (!option) card.options.push((option = { name: a.name, values: [] }));
+            if (!option.values.includes(a.value)) option.values.push(a.value);
+          }
         }
       }
       const products = [...byProduct.values()].filter((p) => p.available || store.show_out_of_stock);
@@ -299,8 +374,15 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           pickup: store.pickup,
           note: store.note,
           orderMode: store.order_mode,
-          deliveryFeeMinor: Number(store.delivery_fee_minor),
-          deliveryAreas: store.delivery_areas,
+          showPrices: show,
+          deliveryFeeMinor: show ? Number(store.delivery_fee_minor) : 0,
+          deliveryAreas: show
+            ? store.delivery_areas
+            : store.delivery_areas.map((a) => ({ name: a.name, feeMinor: 0 })),
+          tagline: store.tagline,
+          accent: store.accent,
+          logoUrl: store.logo_upload_id ? imageUrl(tenantId, store.logo_upload_id, true) : null,
+          coverUrl: store.cover_upload_id ? imageUrl(tenantId, store.cover_upload_id) : null,
         },
         categories: categories
           .filter((c) => shown.has(c.id))
@@ -327,9 +409,11 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
         price: string;
         was: string | null;
         available: boolean;
+        units: string | null;
       }>(sql`
         select p.name_ar as product_name, p.category_id, v.id, v.label, v.attributes, pr.currency,
-               pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available
+               pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available,
+               ${unitsLeftSql}::text as units
         from products p
         join variants v on v.product_id = p.id and ${liveVariant}
         join prices pr on pr.id = v.id
@@ -340,15 +424,16 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
       const variants = rows.flatMap((r) => {
         const priced = priceOf({ productId, categoryId: r.category_id, ...r });
         if (priced === null || (!r.available && !store.show_out_of_stock)) return [];
-        offer ??= priced.offer;
+        if (store.show_prices) offer ??= priced.offer;
         return [
           {
             id: r.id,
             label: r.label,
             attributes: r.attributes ?? [],
-            priceMinor: priced.priceMinor,
-            wasPriceMinor: priced.wasPriceMinor,
+            priceMinor: store.show_prices ? priced.priceMinor : null,
+            wasPriceMinor: store.show_prices ? priced.wasPriceMinor : null,
             available: r.available,
+            left: r.available ? leftOf(r.units) : null,
           },
         ];
       });
@@ -364,11 +449,17 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
       const images = await tx.execute<{ upload_id: string; option_value: string | null }>(sql`
         select upload_id, option_value from product_images where product_id = ${productId}
         order by sort_order, created_at, id`);
+      const [texts] = await tx.execute<{ description: string | null; size_guide: string | null }>(
+        sql`select description, size_guide from product_texts where product_id = ${productId}`,
+      );
       return {
+        description: texts?.description ?? null,
+        sizeGuide: texts?.size_guide ?? null,
         id: productId,
         name: rows[0]!.product_name,
         categoryId: rows[0]!.category_id,
         currency: base,
+        showPrices: store.show_prices,
         images: images.map((i) => ({
           url: imageUrl(tenantId, i.upload_id),
           thumbUrl: imageUrl(tenantId, i.upload_id, true),
@@ -392,8 +483,9 @@ async function priceLines(
   base: CurrencyCode,
   input: { variantId: string; qty: number }[],
   needOnShelf: boolean,
+  coupon: string | null = null,
 ): Promise<OnlineOrderLine[]> {
-  const priceOf = await pricerOf(tx, base);
+  const priceOf = await pricerOf(tx, base, coupon);
   const ids = [...new Set(input.map((l) => l.variantId))];
   const rows = await tx.execute<{
     id: string;
@@ -468,7 +560,28 @@ export function orderMessage(order: {
   deliveryFeeMinor: number;
   deliveryArea: string | null;
   lines: OnlineOrderLine[];
+  /** False: the store hides its prices, so the message is an inquiry with no price in it */
+  showPrices?: boolean;
+  /** «كود الخصم» the customer typed, for the store to see */
+  coupon?: string | null;
 }): string {
+  const couponLine = order.coupon ? [`كود الخصم: ${order.coupon}`] : [];
+  if (order.showPrices === false) {
+    return [
+      `طلب جديد من المتجر: ${order.number}`,
+      `الاسم: ${order.customerName}`,
+      `الجوال: ${order.phone}`,
+      '',
+      ...order.lines.map((l) => `• ${l.name}${l.label ? ` (${l.label})` : ''} × ${l.qty}`),
+      '',
+      'أرجو إعلامي بالسعر.',
+      ...couponLine,
+      order.fulfilment === 'delivery'
+        ? `التوصيل إلى: ${order.address ?? '—'}${order.deliveryArea ? ` (${order.deliveryArea})` : ''}`
+        : 'الاستلام من المحل',
+      ...(order.note ? [`ملاحظة: ${order.note}`] : []),
+    ].join('\n');
+  }
   return [
     `طلب جديد من المتجر: ${order.number}`,
     `الاسم: ${order.customerName}`,
@@ -480,6 +593,7 @@ export function orderMessage(order: {
     ),
     '',
     `المجموع: ${money(order.totalMinor, order.currency)}`,
+    ...couponLine,
     ...(order.deliveryFeeMinor > 0
       ? [
           `أجرة التوصيل${order.deliveryArea ? ` (${order.deliveryArea})` : ''}: ${money(order.deliveryFeeMinor, order.currency)}`,
@@ -585,7 +699,27 @@ export function placeShopOrder(
           deliveryFeeMinor = Number(store.delivery_fee_minor);
         }
       }
-      const lines = await priceLines(tx, base, input.lines, true);
+      // «كود الخصم»: a code of an offer running now, or the customer is told it is not
+      let coupon: string | null = null;
+      let couponSnapshot: OnlineOrderCouponRule | null = null;
+      if (input.coupon) {
+        const rule = await couponRule(tx, input.coupon);
+        if (!rule?.couponCode) throw fieldError('coupon', COUPON_BAD);
+        coupon = rule.couponCode;
+        couponSnapshot = {
+          id: rule.id,
+          name: rule.name,
+          kind: rule.kind,
+          percentBp: rule.percentBp,
+          buyQty: rule.buyQty,
+          getQty: rule.getQty,
+          scope: rule.scope,
+          categoryIds: rule.categoryIds,
+          productIds: rule.productIds,
+          couponCode: rule.couponCode,
+        };
+      }
+      const lines = await priceLines(tx, base, input.lines, true, coupon);
       const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
       const { seq, number } = await nextOrderNumber(tx, tenantId);
       const order = {
@@ -603,15 +737,17 @@ export function placeShopOrder(
       };
       const [made] = await tx
         .insert(onlineOrders)
-        .values({ tenantId, seq, source: mode, ...order })
+        .values({ tenantId, seq, source: mode, couponCode: coupon, couponRule: couponSnapshot, ...order })
         .returning({ token: onlineOrders.trackToken });
-      const message = orderMessage(order);
+      const message = orderMessage({ ...order, showPrices: store.show_prices, coupon });
       return {
         trackPath: `/shop/${store.slug}/o/${made!.token}`,
         number,
         currency: base,
-        totalMinor,
-        deliveryFeeMinor,
+        showPrices: store.show_prices,
+        // The order keeps its server-side prices for the store; the customer is told none of them
+        totalMinor: store.show_prices ? totalMinor : null,
+        deliveryFeeMinor: store.show_prices ? deliveryFeeMinor : null,
         message,
         whatsappUrl:
           mode === 'whatsapp' && store.whatsapp
@@ -671,6 +807,39 @@ function isTrackToken(token: string): boolean {
   return true;
 }
 
+/** What the customer's page shows of an order; prices only when the store shows prices. */
+async function trackOf(
+  tx: Transaction,
+  tenantId: string,
+  row: typeof onlineOrders.$inferSelect,
+): Promise<ShopOrderTrack> {
+  const [shop] = await tx
+    .select({ show: onlineStores.showPrices })
+    .from(onlineStores)
+    .where(eq(onlineStores.tenantId, tenantId));
+  const show = shop?.show ?? true;
+  return {
+    number: row.number,
+    status: row.status as ShopOrderTrack['status'],
+    deliveryStage: row.deliveryStage as ShopOrderTrack['deliveryStage'],
+    coupon: row.couponCode,
+    customerName: row.customerName,
+    fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
+    area: row.deliveryArea,
+    currency: row.currency as CurrencyCode,
+    showPrices: show,
+    totalMinor: show ? row.totalMinor : null,
+    deliveryFeeMinor: show ? row.deliveryFeeMinor : null,
+    lines: row.lines.map((l) => ({
+      name: l.name,
+      label: l.label,
+      qty: l.qty,
+      totalMinor: show ? l.totalMinor : null,
+    })),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 /** The customer's page for one order: its state and lines, by the unguessable token in its link. */
 export function shopOrderTrack(db: Database, slug: string, token: string): Promise<ShopOrderTrack> {
   const gone = () => notFound('هذا الطلب غير موجود.');
@@ -682,16 +851,38 @@ export function shopOrderTrack(db: Database, slug: string, token: string): Promi
         .from(onlineOrders)
         .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)));
       if (!row) throw gone();
-      return {
-        number: row.number,
-        status: row.status as ShopOrderTrack['status'],
-        fulfilment: row.fulfilment as ShopOrderTrack['fulfilment'],
-        currency: row.currency as CurrencyCode,
-        totalMinor: row.totalMinor,
-        deliveryFeeMinor: row.deliveryFeeMinor,
-        lines: row.lines.map((l) => ({ name: l.name, label: l.label, qty: l.qty, totalMinor: l.totalMinor })),
-        createdAt: row.createdAt.toISOString(),
-      };
+      return trackOf(tx, tenantId, row);
+    }),
+  );
+}
+
+/**
+ * «اطلب إلغاء الطلب»: the customer asks, from the order's own page, to cancel an order the store has
+ * not decided yet. The order becomes cancel_requested and waits in the owner's box; asking twice is
+ * the same as once. An order the store already accepted, rejected or delivered is not the
+ * customer's to cancel here: they talk to the store.
+ */
+export function requestOrderCancel(db: Database, slug: string, token: string): Promise<ShopOrderTrack> {
+  const gone = () => notFound('هذا الطلب غير موجود.');
+  if (!isTrackToken(token)) return Promise.reject(gone());
+  return tenantOf(db, slug).then((tenantId) =>
+    withTenant(db, tenantId, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(onlineOrders)
+        .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.trackToken, token)))
+        .for('update');
+      if (!row) throw gone();
+      if (row.status === 'cancel_requested') return trackOf(tx, tenantId, row);
+      if (row.status !== 'pending') {
+        throw new AppError(409, 'conflict', 'قرّر المحل في طلبك، فلم يعد الإلغاء من هنا. تواصل مع المحل.');
+      }
+      const [done] = await tx
+        .update(onlineOrders)
+        .set({ status: 'cancel_requested', updatedAt: sql`now()` })
+        .where(and(eq(onlineOrders.tenantId, tenantId), eq(onlineOrders.id, row.id)))
+        .returning();
+      return trackOf(tx, tenantId, done!);
     }),
   );
 }
@@ -708,8 +899,13 @@ const DEFAULTS = (slug: string): OnlineStoreSettings => ({
   note: null,
   showOutOfStock: false,
   orderMode: 'whatsapp',
+  showPrices: true,
   deliveryFeeMinor: 0,
   deliveryAreas: [],
+  tagline: null,
+  accent: 'emerald',
+  logoUrl: null,
+  coverUrl: null,
 });
 
 export function getOnlineStore(db: Database, auth: AccessClaims): Promise<OnlineStoreSettings> {
@@ -732,8 +928,13 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       note: row.note,
       showOutOfStock: row.showOutOfStock,
       orderMode: row.orderMode as OnlineStoreSettings['orderMode'],
+      showPrices: row.showPrices,
       deliveryFeeMinor: row.deliveryFeeMinor,
       deliveryAreas: row.deliveryAreas,
+      tagline: row.tagline,
+      accent: row.accent as OnlineStoreSettings['accent'],
+      logoUrl: row.logoUploadId ? imageUrl(auth.tenantId, row.logoUploadId, true) : null,
+      coverUrl: row.coverUploadId ? imageUrl(auth.tenantId, row.coverUploadId) : null,
     };
   });
 }
@@ -760,8 +961,11 @@ export async function saveOnlineStore(
         note: input.note || null,
         showOutOfStock: input.showOutOfStock,
         orderMode: input.orderMode,
+        showPrices: input.showPrices,
         deliveryFeeMinor: input.deliveryFeeMinor,
         deliveryAreas: input.deliveryAreas,
+        tagline: input.tagline || null,
+        accent: input.accent,
       };
       if (input.version === null) {
         const made = await tx
@@ -792,10 +996,12 @@ export async function saveOnlineStore(
   return getOnlineStore(db, auth);
 }
 
-const staleVersion = () =>
+export const staleVersion = () =>
   new AppError(409, 'stale_version', 'عدّل شخص آخر هذا السجل للتو. حدّثنا البيانات، راجعها ثم احفظ من جديد.');
 
-const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
+export const orderChanged = (message: string) => new AppError(409, 'stale_version', message);
+
+export const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   id: r.id,
   number: r.number,
   status: r.status as OnlineOrder['status'],
@@ -811,6 +1017,11 @@ const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
   currency: r.currency as CurrencyCode,
   totalMinor: r.totalMinor,
   lines: r.lines,
+  deliveryStage: r.deliveryStage as OnlineOrder['deliveryStage'],
+  courierName: r.courierName,
+  outAt: r.outAt?.toISOString() ?? null,
+  deliveredAt: r.deliveredAt?.toISOString() ?? null,
+  couponCode: r.couponCode,
   createdAt: r.createdAt.toISOString(),
   decidedAt: r.decidedAt?.toISOString() ?? null,
   version: r.version,
@@ -827,7 +1038,15 @@ export function listOnlineOrders(
       .select()
       .from(onlineOrders)
       .where(
-        and(eq(onlineOrders.tenantId, auth.tenantId), ...(status ? [eq(onlineOrders.status, status)] : [])),
+        and(
+          eq(onlineOrders.tenantId, auth.tenantId),
+          // The box of orders waiting for the store also holds the ones their customer asked to cancel
+          ...(status === 'pending'
+            ? [inArray(onlineOrders.status, ['pending', 'cancel_requested'])]
+            : status
+              ? [eq(onlineOrders.status, status)]
+              : []),
+        ),
       )
       .orderBy(desc(onlineOrders.createdAt), desc(onlineOrders.seq))
       .limit(200);
@@ -837,6 +1056,8 @@ export function listOnlineOrders(
 
 const NEXT: Record<OnlineOrder['status'], readonly OnlineOrder['status'][]> = {
   pending: ['accepted', 'rejected'],
+  // The customer asked to cancel: agree (rejected) or keep the order (accepted)
+  cancel_requested: ['accepted', 'rejected'],
   accepted: ['done', 'rejected'],
   rejected: [],
   done: [],
@@ -856,7 +1077,11 @@ export function setOnlineOrderStatus(
       .from(onlineOrders)
       .where(and(eq(onlineOrders.tenantId, auth.tenantId), eq(onlineOrders.id, id)));
     if (!row) throw notFound('هذا الطلب غير موجود.');
-    if (row.version !== input.version) throw staleVersion();
+    if (row.version !== input.version) {
+      // The same order decided twice (a double click, or two people at the till and the desk): say so
+      if (row.status === input.status) throw orderChanged('تم هذا الإجراء على الطلب للتو.');
+      throw orderChanged('تغيّر هذا الطلب للتو. حدّث الصفحة وراجعه.');
+    }
     if (!NEXT[row.status as OnlineOrder['status']].includes(input.status)) {
       throw fieldError('status', 'لا يمكن نقل الطلب إلى هذه الحالة.');
     }

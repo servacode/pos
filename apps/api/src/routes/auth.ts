@@ -1,8 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { eq, sql } from 'drizzle-orm';
 import {
+  forgotPasswordInput,
   loginInput,
   registerStoreInput,
+  resetPasswordInput,
   verifyRegistrationInput,
   type AuthResponse,
   type RefreshResponse,
@@ -20,6 +22,7 @@ import {
   type IssuedSession,
   type SessionPolicy,
 } from '../services/sessions';
+import { completePasswordReset, startPasswordReset } from '../services/password-reset';
 import { completeRegistration, startRegistration } from '../services/registration';
 import type { RequestMeta } from '../types';
 import { parseBody } from './validation';
@@ -134,6 +137,34 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       expiresIn: env.ACCESS_TOKEN_TTL_SECONDS,
       user: { id: account.user_id, fullName: account.full_name, phone: data.phone },
       tenant: { id: account.tenant_id, name: tenantName },
+    };
+    return reply.send(body);
+  });
+
+  // Forgotten password, step 1: always "we sent a code" (202), whether or not the number has an account.
+  app.post('/v1/auth/forgot', { config: authLimit }, async (request, reply) => {
+    const data = parseBody(forgotPasswordInput, request.body);
+    await enforceLimits(request, reply, 3_600_000, [
+      { key: `forgot:phone:${data.phone}`, max: env.RESET_PHONE_LIMIT_PER_HOUR },
+      { key: `forgot:ip:${clientIp(request)}`, max: env.RESET_IP_LIMIT_PER_HOUR },
+    ]);
+    return reply.status(202).send(await startPasswordReset(app, data, metaOf(request)));
+  });
+
+  // Step 2: the code and the new password; every other session of that person ends, this one opens.
+  app.post('/v1/auth/forgot/reset', { config: authLimit }, async (request, reply) => {
+    const data = parseBody(resetPasswordInput, request.body);
+    await enforceLimits(request, reply, 3_600_000, [
+      { key: `reset:ip:${clientIp(request)}`, max: env.RESET_IP_LIMIT_PER_HOUR * 3 },
+      { key: `reset:id:${data.resetId}`, max: 20 },
+    ]);
+    const result = await completePasswordReset(app, data, sessionPolicy, metaOf(request));
+    setRefreshCookie(reply, result.session);
+    const body: AuthResponse = {
+      accessToken: await accessTokenFor(result.session),
+      expiresIn: env.ACCESS_TOKEN_TTL_SECONDS,
+      user: result.user,
+      tenant: result.tenant,
     };
     return reply.send(body);
   });

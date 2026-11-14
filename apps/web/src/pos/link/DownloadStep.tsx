@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SyncStore } from '@serva/sync/client';
-import { Alert, Button, CheckCircleIcon, ProgressBar, RetryIcon, Spinner } from '@serva/ui';
+import { Alert, Button, CheckCircleIcon, cn, ProgressBar, RetryIcon, Spinner } from '@serva/ui';
 import type { BootstrapProgress, LinkHelpers } from '../../offline/link';
 import { deviceTransport } from '../../offline/sync';
 
@@ -55,34 +55,48 @@ export function DownloadStep({ store, helpers, storeName, onDone }: DownloadStep
     <section
       aria-labelledby="download-title"
       aria-busy={!done && !failed}
-      className="flex w-full max-w-xl flex-col items-center gap-5 rounded-card border border-line bg-surface p-8 text-center shadow-e2"
+      className="flex w-full max-w-xl flex-col items-center gap-6 rounded-card border border-line bg-surface px-8 py-10 text-center shadow-e2"
     >
-      <span className="grid size-20 place-items-center rounded-full bg-brand-soft text-brand-ink">
+      <span
+        className={cn(
+          'grid size-20 place-items-center rounded-full ring-8',
+          done
+            ? 'bg-success-soft text-success-ink ring-success-soft/40'
+            : 'bg-brand-soft text-brand-ink ring-brand-soft/40',
+        )}
+      >
         {done ? <CheckCircleIcon size={48} /> : <Spinner className="size-10" />}
       </span>
-      <h1 id="download-title" className="text-2xl font-bold text-ink">
-        {done ? 'هذا الجهاز جاهز للعمل دون إنترنت' : 'جارٍ تنزيل بيانات المحل…'}
-      </h1>
-      <p className="text-ink-muted">
-        رُبط الجهاز بـ«{storeName}». ننزّل الأصناف والأسعار والموظفين مرة واحدة، ويكمل من حيث توقف إن انقطع
-        الإنترنت.
-      </p>
-      <ProgressBar
-        label="تنزيل بيانات المحل"
-        value={done ? 1 : progress && progress.total > 0 ? progress.received : undefined}
-        max={done ? 1 : progress?.total || undefined}
-        valueText={done ? 'اكتمل' : progress ? `${percent(progress)}%` : undefined}
-      />
-      {progress && progress.total > 0 && !done ? (
-        <p className="num text-sm font-semibold text-ink-muted">{percent(progress)}%</p>
-      ) : null}
+      <div className="flex flex-col gap-2">
+        <h1 id="download-title" className="text-2xl font-bold text-ink">
+          {done ? 'هذا الجهاز جاهز للعمل دون إنترنت' : 'جارٍ تنزيل بيانات المحل…'}
+        </h1>
+        <p className="text-ink-muted">
+          رُبط الجهاز بـ«{storeName}». ننزّل الأصناف والأسعار والموظفين مرة واحدة، ويكمل من حيث توقف إن انقطع
+          الإنترنت.
+        </p>
+      </div>
+      <div className="flex w-full flex-col gap-2">
+        <ProgressBar
+          label="تنزيل بيانات المحل"
+          value={done ? 1 : progress && progress.total > 0 ? progress.received : undefined}
+          max={done ? 1 : progress?.total || undefined}
+          valueText={done ? 'اكتمل' : progress ? `${percent(progress)}%` : undefined}
+          tone={done ? 'success' : 'brand'}
+        />
+        {progress && progress.total > 0 && !done ? (
+          <p className="num self-end text-sm font-semibold text-ink-muted">{percent(progress)}%</p>
+        ) : null}
+      </div>
       {failed ? (
-        <>
-          <Alert tone="error">توقف التنزيل. تحقّق من الإنترنت، ثم أكمل من حيث توقف.</Alert>
+        <div className="flex w-full flex-col items-center gap-4">
+          <Alert tone="error" className="w-full text-start">
+            توقف التنزيل. تحقّق من الإنترنت، ثم أكمل من حيث توقف.
+          </Alert>
           <Button size="lg" icon={<RetryIcon />} onClick={retry}>
             أكمل التنزيل
           </Button>
-        </>
+        </div>
       ) : null}
     </section>
   );

@@ -34,6 +34,8 @@ export interface BarcodeDraft {
   packName: string;
   /** The pack's own price; null = pieces × the unit price. */
   packPriceMinor: number | null;
+  /** The pack's own wholesale price; null = the piece wholesale price × pieces. */
+  packWholesaleMinor: number | null;
 }
 
 export interface VariantDraft {
@@ -50,6 +52,8 @@ export interface VariantDraft {
   minStock: string;
   barcodes: BarcodeDraft[];
   archived: boolean;
+  /** A code typed in the scan box and not added yet: saving with it would drop it silently. */
+  pendingCode?: string;
 }
 
 /** One option axis of the matrix: «المقاس» with S, M, L. */
@@ -63,10 +67,19 @@ export interface ProductDraft {
   nameAr: string;
   nameEn: string;
   brand: string;
+  /** «الموسم/التشكيلة»; "" = none */
+  season?: string;
   /** «الاسم العلمي» (pharmacies); "" = none */
   genericName?: string;
+  /** «يحتاج وصفة» and «مراقَب» (pharmacies) */
+  requiresPrescription?: boolean;
+  controlled?: boolean;
+  /** «يتطلب صلاحية»: a purchase line of it must carry an expiry date */
+  requiresExpiry?: boolean;
   /** «له رقم تسلسلي أو IMEI» and «الكفالة» in months as typed ("" = none) */
   tracksSerial?: boolean;
+  /** «قابل للتأجير»: its serial-tracked pieces can be rented out */
+  rentable?: boolean;
   warranty?: string;
   /** "" = بلا تصنيف */
   categoryId: string;
@@ -110,7 +123,15 @@ export function qtyFromText(text: string): number | null {
 }
 
 export function newBarcode(kind: BarcodeKind, code = ''): BarcodeDraft {
-  return { key: newKey('b'), kind, code, packCount: '1', packName: '', packPriceMinor: null };
+  return {
+    key: newKey('b'),
+    kind,
+    code,
+    packCount: '1',
+    packName: '',
+    packPriceMinor: null,
+    packWholesaleMinor: null,
+  };
 }
 
 export function emptyDraft(options: {
@@ -123,6 +144,7 @@ export function emptyDraft(options: {
     nameAr: '',
     nameEn: '',
     brand: '',
+    season: '',
     categoryId: options.categoryId ?? '',
     type: 'stock',
     unitId: options.unitId,
@@ -165,6 +187,7 @@ function variantDraft(variant: VariantDetail): VariantDraft {
       packCount: qtyText(b.packQty),
       packName: b.packName ?? '',
       packPriceMinor: b.packPriceMinor,
+      packWholesaleMinor: b.packWholesaleMinor ?? null,
     })),
     archived: variant.archivedAt !== null,
   };
@@ -188,8 +211,13 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     nameAr: detail.nameAr,
     nameEn: detail.nameEn ?? '',
     brand: detail.brand ?? '',
+    season: detail.season ?? '',
     genericName: detail.genericName ?? '',
+    requiresPrescription: detail.requiresPrescription ?? false,
+    controlled: detail.controlled ?? false,
+    requiresExpiry: detail.requiresExpiry ?? false,
     tracksSerial: detail.tracksSerial ?? false,
+    rentable: detail.rentable ?? false,
     warranty: detail.warrantyMonths ? String(detail.warrantyMonths) : '',
     categoryId: detail.categoryId ?? '',
     type: detail.type,
@@ -302,6 +330,7 @@ function barcodeInput(barcode: BarcodeDraft): BarcodeInput {
     packQty: qtyFromText(barcode.packCount) ?? 1000,
     packName: textOrNull(barcode.packName),
     packPriceMinor: barcode.packPriceMinor,
+    packWholesaleMinor: barcode.packWholesaleMinor,
   };
   const id = barcode.id ? { id: barcode.id } : {};
   if (barcode.kind === 'internal') {
@@ -328,6 +357,16 @@ function fullVariant(variant: VariantDraft) {
   };
 }
 
+/** A code left in a scan box is refused on save: it would otherwise be dropped without a word. */
+export function checkPendingCodes(variants: readonly VariantDraft[]): FieldErrors {
+  const errors: FieldErrors = {};
+  for (const v of variants) {
+    if (!v.archived && v.pendingCode?.trim())
+      errors[`v.${v.key}.pending`] = 'الباركود المكتوب لم يُضف بعد: اضغط «أضف» ليُفحص، أو امسحه من الخانة.';
+  }
+  return errors;
+}
+
 export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
   const errors: FieldErrors = {};
   const variants = draft.variants.filter((v) => !v.archived);
@@ -337,8 +376,13 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       nameAr: draft.nameAr.trim(),
       nameEn: textOrNull(draft.nameEn),
       brand: textOrNull(draft.brand),
+      ...(textOrNull(draft.season ?? '') ? { season: textOrNull(draft.season ?? '') } : {}),
       ...(textOrNull(draft.genericName ?? '') ? { genericName: textOrNull(draft.genericName ?? '') } : {}),
+      ...(draft.requiresPrescription ? { requiresPrescription: true } : {}),
+      ...(draft.controlled ? { controlled: true } : {}),
+      ...(draft.requiresExpiry ? { requiresExpiry: true } : {}),
       ...(draft.tracksSerial ? { tracksSerial: true } : {}),
+      ...(draft.rentable ? { rentable: true } : {}),
       ...(warrantyOf(draft.warranty) !== null ? { warrantyMonths: warrantyOf(draft.warranty) } : {}),
       categoryId: draft.categoryId || null,
       type: draft.type,
@@ -365,6 +409,7 @@ function barcodesOfDetail(variant: VariantDetail) {
       packCount: qtyText(b.packQty),
       packName: b.packName ?? '',
       packPriceMinor: b.packPriceMinor,
+      packWholesaleMinor: b.packWholesaleMinor ?? null,
     }),
   );
 }
@@ -404,8 +449,22 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   if (nameAr !== original.nameAr) body.nameAr = nameAr;
   if (textOrNull(draft.nameEn) !== original.nameEn) body.nameEn = textOrNull(draft.nameEn);
   if (textOrNull(draft.brand) !== original.brand) body.brand = textOrNull(draft.brand);
+  if (textOrNull(draft.season ?? '') !== (original.season ?? null))
+    body.season = textOrNull(draft.season ?? '');
+  if ((draft.requiresPrescription ?? false) !== (original.requiresPrescription ?? false)) {
+    body.requiresPrescription = draft.requiresPrescription ?? false;
+  }
+  if ((draft.controlled ?? false) !== (original.controlled ?? false)) {
+    body.controlled = draft.controlled ?? false;
+  }
+  if ((draft.requiresExpiry ?? false) !== (original.requiresExpiry ?? false)) {
+    body.requiresExpiry = draft.requiresExpiry ?? false;
+  }
   if ((draft.tracksSerial ?? false) !== (original.tracksSerial ?? false)) {
     body.tracksSerial = draft.tracksSerial ?? false;
+  }
+  if ((draft.rentable ?? false) !== (original.rentable ?? false)) {
+    body.rentable = draft.rentable ?? false;
   }
   if (warrantyOf(draft.warranty) !== (original.warrantyMonths ?? null)) {
     body.warrantyMonths = warrantyOf(draft.warranty);
@@ -516,3 +575,37 @@ export function changedParts(before: ProductDetail, after: ProductDetail): strin
   if (before.archivedAt !== after.archivedAt) parts.push('الأرشفة');
   return parts;
 }
+
+// ─── Bulk entry on the size × colour matrix ───────────────────────────────────
+
+export type BulkField = 'priceMinor' | 'wholesalePriceMinor' | 'minPriceMinor';
+
+/** Which rows a bulk entry reaches: every live variant, or the ones holding one option value. */
+export type BulkScope = { all: true } | { name: string; value: string };
+
+const inScope = (v: VariantDraft, scope: BulkScope) =>
+  !v.archived &&
+  ('all' in scope || v.attributes.some((a) => a.name === scope.name && a.value === scope.value));
+
+/** «طبّق على الكل»: sets one price field of every variant in the scope (null clears it). */
+export function applyToVariants(
+  variants: readonly VariantDraft[],
+  scope: BulkScope,
+  field: BulkField,
+  value: number | null,
+): VariantDraft[] {
+  return variants.map((v) => (inScope(v, scope) ? { ...v, [field]: value } : v));
+}
+
+/** «ولّد باركود للكل»: an internal barcode (made by the server on save) for each live variant without one. */
+export function withGeneratedBarcodes(variants: readonly VariantDraft[]): VariantDraft[] {
+  return variants.map((v) =>
+    v.archived || v.barcodes.length > 0 || v.pendingCode?.trim()
+      ? v
+      : { ...v, barcodes: [newBarcode('internal')] },
+  );
+}
+
+/** How many live variants have no barcode yet. */
+export const variantsWithoutBarcode = (variants: readonly VariantDraft[]) =>
+  variants.filter((v) => !v.archived && v.barcodes.length === 0).length;

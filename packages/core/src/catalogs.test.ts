@@ -7,6 +7,8 @@ describe('sectors', () => {
     expect(new Set(SECTOR_KEYS).size).toBe(SECTORS.length);
     expect(SECTOR_KEYS).toContain('general');
     expect(sectorLabel('cafe')).toBe('مقهى وكافتيريا');
+    expect(sectorLabel('clothing')).toBe('ألبسة وأحذية وإكسسوارات');
+    expect(sectorLabel('medical_supplies')).toBe('أدوات وتجهيزات طبية');
   });
 
   it('falls back to the key for an unknown sector', () => {
@@ -35,7 +37,25 @@ describe('default roles', () => {
     expect(manager).toContain('accounting.view');
     expect(role('cashier')?.permissions).not.toContain('report.view');
     expect(manager).not.toContain('settings.manage');
-    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 5);
+    // users, WhatsApp, subscription, devices, settings, the hand-written journal (accounting.post)
+    // and the controlled medicines (pharmacy.controlled)
+    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 7);
+    expect(manager).not.toContain('pharmacy.controlled');
+    expect(role('pharmacist')?.permissions).toContain('pharmacy.controlled');
+    expect(role('cashier')?.permissions).not.toContain('pharmacy.controlled');
+  });
+
+  it('gives the waiter the hall alone, and the manager the right to approve a cancellation after the kitchen', () => {
+    expect(role('waiter')).toEqual({
+      key: 'waiter',
+      nameAr: 'نادل',
+      permissions: ['hall.order'],
+      maxDiscountBp: 0,
+    });
+    expect(role('manager')?.permissions).toEqual(
+      expect.arrayContaining(['hall.order', 'hall.cancel_approve']),
+    );
+    expect(role('cashier')?.permissions).not.toContain('hall.cancel_approve');
   });
 
   it('limits the cashier to selling with a 10% discount and taking customers’ payments', () => {

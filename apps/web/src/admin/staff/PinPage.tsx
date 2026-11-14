@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Button, Card, InfoIcon, KeyIcon, PasswordField, TextField } from '@serva/ui';
+import { Alert, Button, Card, IconChip, KeyIcon, LockIcon, PasswordField, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError } from '../../lib/api';
@@ -72,56 +72,53 @@ export function PinPage() {
 
   return (
     <AppShell>
-      <title>رمز الدخول للكاشير · Serva POS</title>
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-5">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold text-ink">رمز الدخول للكاشير</h1>
-          <p className="text-ink-muted">تكتبه على أجهزة الكاشير لتدخل باسمك، بدل كلمة السر.</p>
+      <title>رمز الدخول للكاشير · SERFA</title>
+      <div className="mx-auto flex w-full max-w-md flex-col gap-6 pt-2 sm:pt-6">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <IconChip size="lg">
+            <KeyIcon size={24} />
+          </IconChip>
+          <div className="flex flex-col gap-1.5">
+            <h1 className="text-2xl font-bold text-ink">رمز الدخول للكاشير</h1>
+            <p className="text-ink-muted">تكتبه على أجهزة الكاشير لتدخل باسمك، بدل كلمة السر.</p>
+          </div>
         </div>
 
-        <Card className="flex flex-col gap-3">
-          <p className="flex items-start gap-2 text-ink">
-            <InfoIcon className="mt-1 text-info-ink" />
-            <span>
-              الكاشير يكفيه 4 أرقام. المالك والمدير ومن يوافق على خصم أو إرجاع أو سحب نقد يحتاج 6 أرقام، لأن
-              رمزه يفتح عمليات غيره.
-            </span>
-          </p>
-          <p className="font-semibold text-ink">{sixDigits ? 'رمزك 6 أرقام.' : 'رمزك 4 أرقام أو 6.'}</p>
-          <p className="text-sm text-ink-muted">
-            لا تختر أرقاماً متتالية مثل 1234 ولا مكررة مثل 0000. بعد 5 محاولات خاطئة يُقفل الجهاز دقيقة،
-            وتتضاعف المدة مع كل خطأ بعدها.
-          </p>
-        </Card>
-
-        {saved ? (
-          <Alert tone="success">
-            حُفظ رمز الدخول. استعمله على أجهزة الكاشير من الآن، والرمز القديم لم يعد يعمل.
+        <Card className="flex flex-col gap-6">
+          <Alert tone="info" title={sixDigits ? 'رمزك 6 أرقام.' : 'رمزك 4 أرقام أو 6.'}>
+            الكاشير يكفيه 4 أرقام. المالك والمدير ومن يوافق على خصم أو إرجاع أو سحب نقد يحتاج 6 أرقام، لأن
+            رمزه يفتح عمليات غيره.
           </Alert>
-        ) : null}
-        {formError ? <Alert tone="error">{formError}</Alert> : null}
 
-        <Card>
-          <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <TextField
-              {...pinInput}
-              name="pin"
-              label="رمز الدخول الجديد"
-              hint={sixDigits ? '6 أرقام' : '4 أرقام أو 6'}
-              placeholder={'•'.repeat(length)}
-              value={values.pin}
-              onChange={(event) => setValue('pin', event.target.value)}
-              error={errors.pin}
-            />
-            <TextField
-              {...pinInput}
-              name="confirm"
-              label="أعد كتابة الرمز"
-              placeholder={'•'.repeat(length)}
-              value={values.confirm}
-              onChange={(event) => setValue('confirm', event.target.value)}
-              error={errors.confirm}
-            />
+          {saved ? (
+            <Alert tone="success">
+              حُفظ رمز الدخول. استعمله على أجهزة الكاشير من الآن، والرمز القديم لم يعد يعمل.
+            </Alert>
+          ) : null}
+          {formError ? <Alert tone="error">{formError}</Alert> : null}
+
+          <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <TextField
+                {...pinInput}
+                name="pin"
+                label="رمز الدخول الجديد"
+                hint={sixDigits ? '6 أرقام' : '4 أرقام أو 6'}
+                placeholder={'•'.repeat(length)}
+                value={values.pin}
+                onChange={(event) => setValue('pin', event.target.value)}
+                error={errors.pin}
+              />
+              <TextField
+                {...pinInput}
+                name="confirm"
+                label="أعد كتابة الرمز"
+                placeholder={'•'.repeat(length)}
+                value={values.confirm}
+                onChange={(event) => setValue('confirm', event.target.value)}
+                error={errors.confirm}
+              />
+            </div>
             <PasswordField
               name="password"
               label="كلمة السر"
@@ -131,16 +128,17 @@ export function PinPage() {
               onChange={(event) => setValue('password', event.target.value)}
               error={errors.password}
             />
-            <Button
-              type="submit"
-              icon={<KeyIcon />}
-              loading={submitting}
-              className="self-start max-sm:w-full"
-            >
+            <Button type="submit" size="lg" icon={<KeyIcon />} loading={submitting} fullWidth>
               احفظ الرمز
             </Button>
           </form>
         </Card>
+
+        <p className="flex items-start gap-2 px-1 text-sm text-ink-muted">
+          <LockIcon size={16} className="mt-0.5 text-ink-subtle" />
+          لا تختر أرقاماً متتالية مثل 1234 ولا مكررة مثل 0000. بعد 5 محاولات خاطئة يُقفل الجهاز دقيقة، وتتضاعف
+          المدة مع كل خطأ بعدها.
+        </p>
       </div>
     </AppShell>
   );

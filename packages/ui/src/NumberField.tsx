@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ChangeEvent } from 'react';
 import { getCurrency, stripBidiControls, toLatinDigits, toMinor, type CurrencyId } from '@serva/core';
 import { cn } from './cn';
-import { useDigits, type Digits } from './context';
-import { TextField, type TextFieldProps } from './TextField';
+import { useDensity, useDigits, type Digits } from './context';
+import { ADORNMENT_INSET, TextField, type TextFieldProps } from './TextField';
 
 const ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
@@ -64,6 +64,8 @@ export interface NumberFieldProps extends Omit<
   allowNegative?: boolean;
   /** A unit or currency symbol shown inside the field, at its end. */
   unit?: string;
+  /** Called when the typed text had a fraction the field cannot keep (the currency has none). */
+  onFractionDropped?: () => void;
 }
 
 /**
@@ -77,10 +79,12 @@ export function NumberField({
   decimals = 0,
   allowNegative = false,
   unit,
+  onFractionDropped,
   inputClassName,
   ...rest
 }: NumberFieldProps) {
   const digits = useDigits();
+  const density = useDensity();
   const inputRef = useRef<HTMLInputElement>(null);
   const caret = useRef<number | null>(null);
   const shown = displayNumber(value, digits);
@@ -96,6 +100,7 @@ export function NumberField({
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     const { value: typed, selectionStart } = event.target;
     caret.current = significantBefore(typed, selectionStart ?? typed.length);
+    if (onFractionDropped && decimals === 0 && /[.٫]/.test(typed)) onFractionDropped();
     onValueChange(canonicalNumber(typed, decimals, allowNegative));
   }
 
@@ -112,7 +117,15 @@ export function NumberField({
       inputClassName={cn('num', inputClassName)}
       endAdornment={
         unit ? (
-          <span aria-hidden="true" className="pe-3.5 text-sm text-ink-muted">
+          // At the end of the box, in the subtle ink the box gives its icons and units.
+          <span
+            aria-hidden="true"
+            className={cn(
+              'shrink-0 whitespace-nowrap select-none',
+              density === 'touch' ? 'text-base' : 'text-sm',
+              ADORNMENT_INSET[density].end,
+            )}
+          >
             {unit}
           </span>
         ) : undefined
@@ -138,6 +151,9 @@ function minorToCanonical(minor: number | null, currency: CurrencyId, shown: num
   return `${negative ? '-' : ''}${int}${fraction ? `.${fraction}` : ''}`;
 }
 
+/** The largest amount a field accepts: above it is almost surely a typo (extra zeros). */
+const MAX_MINOR = 9_999_999_999_999;
+
 function canonicalToMinor(canonical: string, currency: CurrencyId): number | null {
   if (![...canonical].some((c) => c >= '0' && c <= '9')) return null;
   return toMinor(canonical.replace(/\.$/, ''), currency);
@@ -154,8 +170,17 @@ export interface MoneyFieldProps extends Omit<NumberFieldProps, 'value' | 'onVal
  * Prices and payments: the currency symbol inside, fraction digits by currency (none for the new
  * pound, two for the dollar) and the value as integer minor units.
  */
-export function MoneyField({ currency, valueMinor, onValueChange, decimals, ...rest }: MoneyFieldProps) {
+export function MoneyField({
+  currency,
+  valueMinor,
+  onValueChange,
+  decimals,
+  hint,
+  ...rest
+}: MoneyFieldProps) {
   const info = getCurrency(currency);
+  const [noFraction, setNoFraction] = useState(false);
+  const [tooLarge, setTooLarge] = useState(false);
   const shown = decimals ?? info.displayDecimals;
   const [text, setText] = useState(() => minorToCanonical(valueMinor, currency, shown));
   const [lastMinor, setLastMinor] = useState(valueMinor);
@@ -173,9 +198,29 @@ export function MoneyField({ currency, valueMinor, onValueChange, decimals, ...r
       value={text}
       decimals={shown}
       unit={info.symbolAr}
+      hint={
+        tooLarge
+          ? 'المبلغ كبير جداً: تحقّق من الأصفار'
+          : noFraction
+            ? 'هذه العملة تُعرض بلا كسور: النقطة تُحذف. اكتب المبلغ كاملاً بلا جزء عشري.'
+            : hint
+      }
+      onFractionDropped={() => setNoFraction(true)}
       onValueChange={(next) => {
         setText(next);
-        const minor = canonicalToMinor(next, currency);
+        let minor: number | null = null;
+        try {
+          minor = canonicalToMinor(next, currency);
+          setTooLarge(false);
+        } catch {
+          setTooLarge(true);
+          return;
+        }
+        if (minor !== null && minor > MAX_MINOR) {
+          setTooLarge(true);
+          return;
+        }
+        setTooLarge(false);
         setLastMinor(minor);
         onValueChange(minor);
       }}

@@ -1,6 +1,15 @@
-import { useState } from 'react';
-import type { CustomerDetail } from '@serva/core';
-import { Alert, Button, Switch, TextField } from '@serva/ui';
+import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router';
+import {
+  CUSTOMER_KIND_LABELS,
+  CUSTOMER_KINDS,
+  normalizeArabic,
+  normalizeContactPhone,
+  type CustomerDetail,
+  type CustomerKind,
+  type CustomerListItem,
+} from '@serva/core';
+import { Alert, Button, Card, CardHeader, Select, Switch, TextField, UserIcon } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { createCustomer, updateCustomer } from './api';
 
@@ -12,13 +21,57 @@ function limitOf(text: string): number | null | 'bad' {
   return Number(clean) * 100;
 }
 
+/** A part of the form: its title and a line of help at the start, its fields beside them. */
+function FormSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="grid gap-x-8 gap-y-4 border-t border-line pt-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="flex flex-col gap-1">
+        <h4 className="text-[0.9375rem] font-semibold text-ink">{title}</h4>
+        <p className="text-sm text-ink-muted">{description}</p>
+      </div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Customers already in the store with the same phone, or the same name: the owner is told before a
+ * second one is made, and can open the one that exists.
+ */
+export function sameCustomers(
+  existing: readonly CustomerListItem[],
+  name: string,
+  phone: string,
+  selfId?: string,
+): CustomerListItem[] {
+  const wantedPhone = phone.trim() ? normalizeContactPhone(phone) : null;
+  const wantedName = normalizeArabic(name);
+  return existing.filter(
+    (c) =>
+      c.id !== selfId &&
+      ((wantedPhone !== null && c.phone === wantedPhone) ||
+        (wantedName.length >= 2 && normalizeArabic(c.name) === wantedName)),
+  );
+}
+
 /** Adds a customer, or edits one: name, phone, tax number, address, notes and the credit limit. */
 export function CustomerForm({
   customer,
+  existing = [],
   onSaved,
   onCancel,
 }: {
   customer?: CustomerDetail;
+  /** The store's customers, to warn about a duplicate */
+  existing?: readonly CustomerListItem[];
   onSaved: (saved: CustomerDetail) => void;
   onCancel: () => void;
 }) {
@@ -34,9 +87,14 @@ export function CustomerForm({
   );
   const [wholesale, setWholesale] = useState(customer?.priceTier === 'wholesale');
   const [noMessages, setNoMessages] = useState(customer?.noMessages ?? false);
+  const [kind, setKind] = useState<CustomerKind | ''>(customer?.kind ?? '');
+  const [contactName, setContactName] = useState(customer?.contactName ?? '');
+  const [contactPhone, setContactPhone] = useState(customer?.contactPhone ?? '');
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const same = sameCustomers(existing, name, phone, customer?.id);
 
   async function save() {
     const creditLimitMinor = limitOf(limit);
@@ -56,6 +114,9 @@ export function CustomerForm({
       creditLimitMinor,
       priceTier: wholesale ? ('wholesale' as const) : ('retail' as const),
       noMessages,
+      kind: kind || null,
+      contactName,
+      contactPhone,
     };
     try {
       onSaved(customer ? await updateCustomer(customer.id, input) : await createCustomer(input));
@@ -69,76 +130,147 @@ export function CustomerForm({
   return (
     <form
       aria-label={customer ? 'عدّل الزبون' : 'زبون جديد'}
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5"
       onSubmit={(e) => {
         e.preventDefault();
         void save();
       }}
     >
-      {error ? <Alert tone="error">{error}</Alert> : null}
-      <div className="grid gap-4 md:grid-cols-2">
-        <TextField
-          label="اسم الزبون"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          error={fields.name}
+      <Card>
+        <CardHeader
+          icon={<UserIcon />}
+          title={customer ? 'بيانات الزبون' : 'زبون جديد'}
+          description={
+            customer ? 'عدّل ما تغيّر، ثم احفظ.' : 'الاسم وحده يكفي للبدء، والباقي تضيفه حين تحتاجه.'
+          }
         />
-        <TextField
-          label="الجوال"
-          inputMode="tel"
-          dir="ltr"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          error={fields.phone}
-        />
-        <TextField
-          label="حد الدين بالليرة"
-          hint="فارغ: بلا حد. البيع فوق الحد يُقبل ويظهر تنبيه."
-          inputMode="numeric"
-          dir="ltr"
-          value={limit}
-          onChange={(e) => setLimit(e.target.value)}
-          error={fields.creditLimitMinor}
-        />
-        <TextField
-          label="الرقم الضريبي"
-          value={taxNumber}
-          onChange={(e) => setTaxNumber(e.target.value)}
-          error={fields.taxNumber}
-        />
-        <TextField
-          label="العنوان"
-          value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          error={fields.address}
-        />
-        <TextField
-          label="ملاحظات"
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          error={fields.notes}
-        />
-      </div>
-      <Switch
-        label="زبون جملة"
-        description="عند اختياره على الكاشير تتحوّل الفاتورة إلى سعر الجملة"
-        checked={wholesale}
-        onCheckedChange={setWholesale}
-      />
-      <Switch
-        label="لا يريد رسائل"
-        description="لا تصله رسائل المحل على واتساب (العروض والتشكيلات الجديدة)"
-        checked={noMessages}
-        onCheckedChange={setNoMessages}
-      />
-      <div className="flex gap-3">
-        <Button type="submit" loading={saving}>
-          احفظ
-        </Button>
-        <Button variant="secondary" onClick={onCancel}>
-          إلغاء
-        </Button>
-      </div>
+        <div className="flex flex-col gap-6">
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          {same.length > 0 ? (
+            <Alert tone="warning" title="يوجد زبون بالاسم أو الرقم نفسه">
+              <ul className="flex flex-col gap-1">
+                {same.slice(0, 3).map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/customers/${c.id}`} className="font-semibold underline underline-offset-4">
+                      افتح {c.name}
+                    </Link>
+                    {c.phone ? (
+                      <>
+                        {' · '}
+                        <bdi dir="ltr" className="num">
+                          {c.phone}
+                        </bdi>
+                      </>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1">يمكنك الحفظ رغم ذلك إن كان زبوناً آخر فعلاً.</p>
+            </Alert>
+          ) : null}
+          <FormSection title="البيانات" description="كيف تعرفه وتصل إليه.">
+            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+              <TextField
+                label="اسم الزبون"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                error={fields.name}
+              />
+              <TextField
+                label="الجوال"
+                inputMode="tel"
+                dir="ltr"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                error={fields.phone}
+              />
+              <TextField
+                label="العنوان"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                error={fields.address}
+              />
+              <TextField
+                label="الرقم الضريبي"
+                value={taxNumber}
+                onChange={(e) => setTaxNumber(e.target.value)}
+                error={fields.taxNumber}
+              />
+              <Select
+                label="نوع الزبون"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as CustomerKind | '')}
+                error={fields.kind}
+              >
+                <option value="">غير محدد</option>
+                {CUSTOMER_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {CUSTOMER_KIND_LABELS[k]}
+                  </option>
+                ))}
+              </Select>
+              <TextField
+                label="المسؤول للتواصل"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                error={fields.contactName}
+              />
+              <TextField
+                label="جوال المسؤول"
+                inputMode="tel"
+                dir="ltr"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                error={fields.contactPhone}
+              />
+              <TextField
+                label="ملاحظات"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                error={fields.notes}
+                className="sm:col-span-2"
+              />
+            </div>
+          </FormSection>
+          <FormSection title="البيع بالآجل" description="حدّ دينه، والسعر الذي يشتري به.">
+            <div className="flex flex-col gap-4">
+              <TextField
+                label="حد الدين بالليرة"
+                hint="فارغ: بلا حد. البيع فوق الحد يُقبل ويظهر تنبيه."
+                inputMode="numeric"
+                dir="ltr"
+                value={limit}
+                onChange={(e) => setLimit(e.target.value)}
+                error={fields.creditLimitMinor}
+                className="sm:max-w-xs"
+              />
+              <div className="flex flex-col divide-y divide-line rounded-control border border-line px-4">
+                <Switch
+                  label="زبون جملة"
+                  description="عند اختياره على الكاشير تتحوّل الفاتورة إلى سعر الجملة"
+                  checked={wholesale}
+                  onCheckedChange={setWholesale}
+                  className="py-3"
+                />
+                <Switch
+                  label="لا يريد رسائل"
+                  description="لا تصله رسائل المحل على واتساب (العروض والتشكيلات الجديدة)"
+                  checked={noMessages}
+                  onCheckedChange={setNoMessages}
+                  className="py-3"
+                />
+              </div>
+            </div>
+          </FormSection>
+          <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-5">
+            <Button variant="secondary" onClick={onCancel}>
+              إلغاء
+            </Button>
+            <Button type="submit" loading={saving}>
+              احفظ
+            </Button>
+          </div>
+        </div>
+      </Card>
     </form>
   );
 }

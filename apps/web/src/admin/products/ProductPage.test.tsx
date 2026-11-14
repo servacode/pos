@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MeResponse, Permission } from '@serva/core';
-import { catalogMe, ids, lookupRoutes, product, shownText, variant } from '../../test/catalog';
+import { catalogMe, ids, lookupRoutes, product, shownText, taxRates, variant } from '../../test/catalog';
 import { apiError, mockFetch, type MockReply, type MockRequest } from '../../test/fetchMock';
 import { signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
@@ -28,7 +28,8 @@ function openCard(
   return { ...mock, ...renderApp(path) };
 }
 
-const notFound = apiError(404, 'not_found', 'لا يوجد.');
+/** A clothing store: its product card talks about sizes and colours */
+const openClothes = (path: string, routes: Routes = {}) => openCard(path, routes, undefined, ['clothing']);
 
 describe('the fields each business type uses', () => {
   it('shows a clothing shop no scientific name, weight, IMEI or kitchen extras', async () => {
@@ -41,18 +42,54 @@ describe('the fields each business type uses', () => {
     expect(screen.queryByRole('heading', { name: /الإضافات والخيارات/ })).not.toBeInTheDocument();
   });
 
+  it('starts a new product of a medical supplies store as «يتطلب صلاحية»', async () => {
+    openCard('/products/new', {}, undefined, ['medical_supplies']);
+    expect(await screen.findByRole('switch', { name: 'يتطلب صلاحية' })).toBeChecked();
+  });
+
+  it('starts a new product of a pharmacy without «يتطلب صلاحية» (only medical supplies default to it)', async () => {
+    openCard('/products/new', {}, undefined, ['pharmacy']);
+    expect(await screen.findByRole('switch', { name: 'يتطلب صلاحية' })).not.toBeChecked();
+  });
+
   it('shows a pharmacy the scientific name, and an electronics shop the IMEI', async () => {
     openCard('/products/new', {}, undefined, ['pharmacy', 'electronics']);
     expect(await screen.findByLabelText(/الاسم العلمي/)).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'له رقم تسلسلي أو IMEI' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'يحتاج وصفة' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'مراقَب' })).toBeInTheDocument();
+  });
+
+  it('does not show a supermarket the prescription switches', async () => {
+    openCard('/products/new', {}, undefined, ['supermarket']);
+    await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
+    expect(screen.queryByRole('switch', { name: 'يحتاج وصفة' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'مراقَب' })).not.toBeInTheDocument();
   });
 });
 
 describe('a new product', () => {
+  it('starts with the store’s default tax rate, and points to «الضرائب» while there are none', async () => {
+    openCard('/products/new', {
+      'GET /v1/tax-rates': { status: 200, body: { items: taxRates, defaultRateBp: 500 } },
+    });
+    await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
+    expect(screen.getByLabelText('الضريبة')).toHaveValue(ids.tax);
+  });
+
+  it('shows a new product no tax when the store chose no default, with a link to add rates when it has none', async () => {
+    openCard('/products/new', {
+      'GET /v1/tax-rates': { status: 200, body: { items: [], defaultRateBp: 0 } },
+    });
+    await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
+    expect(screen.getByLabelText('الضريبة')).toHaveValue('');
+    expect(screen.getByRole('link', { name: /لا ضرائب بعد/ })).toHaveAttribute('href', '/tax-rates');
+  });
+
   it('saves the name, category, price and barcodes in one request, then opens the saved card', async () => {
     const saved = product({ nameAr: 'سكر أبيض 1 كغ', version: 1 });
     const { user, requestsTo } = openCard('/products/new', {
-      'GET /v1/barcodes/6290360100125': notFound,
+      'GET /v1/barcodes/6290360100125?free=1': { status: 200, body: { exists: false } },
       'POST /v1/products': { status: 201, body: saved },
       [`GET ${productPath}`]: { status: 200, body: saved },
     });
@@ -89,13 +126,66 @@ describe('a new product', () => {
           wholesalePriceMinor: null,
           minStockQty: null,
           barcodes: [
-            { kind: 'standard', code: '6290360100125', packQty: 1000, packName: null, packPriceMinor: null },
-            { kind: 'internal', packQty: 1000, packName: null, packPriceMinor: null },
+            {
+              kind: 'standard',
+              code: '6290360100125',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
+            {
+              kind: 'internal',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
           ],
         },
       ],
     });
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
+  });
+
+  it('refuses to save while a barcode is typed in the scan box and not added, and keeps the other product named', async () => {
+    const { user, requestsTo } = openCard('/products/new', {
+      'GET /v1/barcodes/6291041500213?free=1': {
+        status: 200,
+        body: { productId: ids.milk, variantId: 'x', barcode: {} },
+      },
+    });
+    await screen.findByLabelText('اسم المنتج');
+    await user.type(screen.getByLabelText('اسم المنتج'), 'محفظة');
+    await user.type(screen.getByLabelText('سعر البيع'), '4000');
+    await user.type(screen.getByRole('textbox', { name: 'باركود جديد' }), '6291041500213{Enter}');
+    expect(await screen.findByText('هذا الباركود على منتج آخر.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/لم يُضف بعد|هذا الباركود على منتج آخر/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/products')).toHaveLength(0);
+  });
+
+  it('asks before saving a price of zero', async () => {
+    const saved = product({ nameAr: 'هدية', version: 1 });
+    const { user, requestsTo } = openCard('/products/new', {
+      'POST /v1/products': { status: 201, body: saved },
+      [`GET ${productPath}`]: { status: 200, body: saved },
+    });
+    await screen.findByLabelText('اسم المنتج');
+    await user.type(screen.getByLabelText('اسم المنتج'), 'هدية');
+    await user.type(screen.getByLabelText('سعر البيع'), '0');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/سعر البيع صفر/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/products')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'نعم، مجاني: احفظ' }));
+    await vi.waitFor(() => expect(requestsTo('POST', '/v1/products')).toHaveLength(1));
+  });
+
+  it('says a currency without fractions dropped the part after the point', async () => {
+    const { user } = openCard('/products/new');
+    await screen.findByLabelText('اسم المنتج');
+    await user.type(screen.getByLabelText('سعر البيع'), '60000.50');
+    expect(await screen.findByText(/تُعرض بلا كسور/)).toBeInTheDocument();
   });
 
   it('starts with the barcode scanned on the list', async () => {
@@ -133,7 +223,7 @@ describe('a new product', () => {
 
   it('refuses a barcode another product holds, with a link to it', async () => {
     const { user } = openCard('/products/new', {
-      'GET /v1/barcodes/6281007035105': {
+      'GET /v1/barcodes/6281007035105?free=1': {
         status: 200,
         body: { productId: ids.milk, variantId: ids.milkVariant, barcode: variant().barcodes[0] },
       },
@@ -158,7 +248,7 @@ describe('a new product', () => {
     await user.clear(field);
     await user.type(field, '٦٢٩٠٣٦٠١٠٠١٢٥{Enter}');
     expect(screen.getByText('الباركود مكرر في هذا المنتج')).toBeInTheDocument();
-    expect(requestsTo('GET', '/v1/barcodes/6290360100125')).toHaveLength(0);
+    expect(requestsTo('GET', '/v1/barcodes/6290360100125?free=1')).toHaveLength(0);
   });
 
   it('prices in dollars and says the cashier converts at the day’s rate', async () => {
@@ -200,7 +290,7 @@ describe('a new product', () => {
   });
 
   it('builds the size × colour matrix and sends every combination', async () => {
-    const { user, requestsTo } = openCard('/products/new', {
+    const { user, requestsTo } = openClothes('/products/new', {
       'POST /v1/products': { status: 201, body: product() },
     });
     await user.type(await screen.findByLabelText('اسم المنتج'), 'قميص قطن');
@@ -209,7 +299,7 @@ describe('a new product', () => {
     await user.type(screen.getByRole('textbox', { name: 'قيمة جديدة لـالمقاس' }), 'S، M{Enter}');
     await user.type(screen.getByRole('textbox', { name: 'قيمة جديدة لـاللون' }), 'أحمر{Enter}');
 
-    expect(screen.getByText('2 متغيّرات')).toHaveAttribute('role', 'status');
+    expect(screen.getByText('متغيّران')).toHaveAttribute('role', 'status');
     expect(screen.getByRole('group', { name: 'S · أحمر' })).toBeInTheDocument();
     const second = screen.getByRole('group', { name: 'M · أحمر' });
     // A new combination starts at the first variant's price.
@@ -233,7 +323,7 @@ describe('a new product', () => {
 
 describe('ready sizes, shoe numbers, ages and colours', () => {
   it('taps the built-in values in shop order, and offers the store’s own beside them', async () => {
-    const { user, requestsTo } = openCard('/products/new', {
+    const { user, requestsTo } = openClothes('/products/new', {
       'POST /v1/products': { status: 201, body: product() },
       'GET /v1/products/options': {
         status: 200,
@@ -271,7 +361,7 @@ describe('ready sizes, shoe numbers, ages and colours', () => {
   });
 
   it('lists children’s ages, and takes a whole group at once', async () => {
-    const { user } = openCard('/products/new');
+    const { user } = openClothes('/products/new');
     await user.type(await screen.findByLabelText('اسم المنتج'), 'بيجاما أطفال');
     await user.click(screen.getByRole('switch', { name: 'له مقاسات أو ألوان' }));
     await user.click(screen.getByRole('button', { name: 'عمر (أطفال)' }));
@@ -387,7 +477,7 @@ describe('an existing product', () => {
   });
 
   it('shows a product with sizes as one block per variant', async () => {
-    openCard(`/products/${ids.milk}`, {
+    openClothes(`/products/${ids.milk}`, {
       [`GET ${productPath}`]: {
         status: 200,
         body: product({

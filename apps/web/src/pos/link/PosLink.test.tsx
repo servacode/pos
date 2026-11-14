@@ -63,4 +63,19 @@ describe('/pos on a new device', () => {
     expect(screen.getByText('مقهى الياسمين')).toBeInTheDocument();
     expect(screen.getByText('الرقة · شارع تل أبيض · كاشير 3')).toBeInTheDocument();
   });
+
+  it('a link made for a waiter or a kitchen screen lands on its own page, naming that kind', async () => {
+    for (const [kind, label] of [
+      ['waiter', 'جوال النادل · متصفح'],
+      ['kitchen_screen', 'شاشة المطبخ · متصفح'],
+    ] as const) {
+      helpers.current = fakeLinkHelpers();
+      mockFetch({});
+      renderApp(`/link?kind=${kind}#${QR_TOKEN}`);
+      expect(await screen.findByRole('heading', { name: 'سمِّ هذا الجهاز' })).toBeInTheDocument();
+      expect(screen.getByText(label)).toBeInTheDocument();
+      cleanup();
+      await resetDeviceStore();
+    }
+  });
 });

@@ -1,18 +1,30 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { normalizeArabic } from '@serva/core';
 import type {
   Category,
   TaxKind,
   TaxRate,
+  TaxRateList,
   Unit,
   createCategoryInput,
   createTaxRateInput,
   createUnitInput,
+  defaultTaxRateInput,
   updateCategoryInput,
   updateTaxRateInput,
   updateUnitInput,
 } from '@serva/core';
-import { categories, taxRates, units, withTenant, type Database, type Transaction } from '@serva/db';
+import {
+  categories,
+  taxRates,
+  tenantSettings,
+  units,
+  withTenant,
+  type Database,
+  type Transaction,
+} from '@serva/db';
 import type { z } from 'zod';
+import { AppError } from '../../errors';
 import { audit } from '../audit';
 import {
   diff,
@@ -39,6 +51,31 @@ const archivedAtOf = (archived: boolean | undefined, current: Date | null, now: 
   archived === undefined ? undefined : archived ? (current ?? now) : null;
 
 // ─── Categories ──────────────────────────────────────────────────────────────
+
+/** A live category of this name under the same parent is refused: two «قمصان» side by side hide each other. */
+async function checkNameFree(
+  tx: Transaction,
+  name: string,
+  parentId: string | null | undefined,
+  exceptId?: string,
+): Promise<void> {
+  const rows = await tx
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(
+      and(
+        isNull(categories.archivedAt),
+        parentId ? eq(categories.parentId, parentId) : isNull(categories.parentId),
+      ),
+    );
+  const wanted = normalizeArabic(name.trim());
+  if (rows.some((r) => r.id !== exceptId && normalizeArabic(r.name.trim()) === wanted)) {
+    const message = parentId
+      ? `يوجد تصنيف فرعي باسم «${name.trim()}» في هذا التصنيف. اختر اسماً آخر.`
+      : `يوجد تصنيف باسم «${name.trim()}». اختر اسماً آخر.`;
+    throw new AppError(409, 'conflict', message, { name: message });
+  }
+}
 
 const categoryNotFound = () => notFound('هذا التصنيف غير موجود.');
 
@@ -91,25 +128,35 @@ export async function createCategory(
 ): Promise<Category> {
   return withTenant(db, ctx.auth.tenantId, async (tx) => {
     await requireCatalogManager(tx, ctx.auth.userId);
-    await checkParent(tx, input.parentId);
-    const [row] = await tx
-      .insert(categories)
-      .values({ tenantId: ctx.auth.tenantId, ...input })
-      .returning({ id: categories.id });
-    await audit(
-      tx,
-      {
-        tenantId: ctx.auth.tenantId,
-        userId: ctx.auth.userId,
-        action: 'category.created',
-        entity: 'category',
-        entityId: row!.id,
-        data: input,
-      },
-      ctx.meta,
-    );
-    return (await categoryViews(tx, row!.id))[0]!;
+    return createCategoryTx(tx, input, ctx);
   });
+}
+
+/** The write of createCategory inside the caller's transaction (the import); permission checked by the caller. */
+export async function createCategoryTx(
+  tx: Transaction,
+  input: CategoryCreate,
+  ctx: CatalogContext,
+): Promise<Category> {
+  await checkParent(tx, input.parentId);
+  await checkNameFree(tx, input.name, input.parentId);
+  const [row] = await tx
+    .insert(categories)
+    .values({ tenantId: ctx.auth.tenantId, ...input })
+    .returning({ id: categories.id });
+  await audit(
+    tx,
+    {
+      tenantId: ctx.auth.tenantId,
+      userId: ctx.auth.userId,
+      action: 'category.created',
+      entity: 'category',
+      entityId: row!.id,
+      data: input,
+    },
+    ctx.meta,
+  );
+  return (await categoryViews(tx, row!.id))[0]!;
 }
 
 export async function updateCategory(
@@ -124,6 +171,18 @@ export async function updateCategory(
     if (!current) throw categoryNotFound();
     if (current.version !== input.version) throw staleVersion();
     if (input.parentId !== undefined) await checkParent(tx, input.parentId, id);
+    const archiving = input.archived === true;
+    if (
+      !archiving &&
+      (input.name !== undefined || input.parentId !== undefined || input.archived === false)
+    ) {
+      await checkNameFree(
+        tx,
+        input.name ?? current.name,
+        input.parentId === undefined ? current.parentId : input.parentId,
+        id,
+      );
+    }
     const next = {
       name: input.name,
       parentId: input.parentId,
@@ -254,11 +313,48 @@ const taxRateView = (r: typeof taxRates.$inferSelect): TaxRate => ({
   version: r.version,
 });
 
-export async function listTaxRates(db: Database, ctx: CatalogContext): Promise<{ items: TaxRate[] }> {
+export async function listTaxRates(db: Database, ctx: CatalogContext): Promise<TaxRateList> {
   return withTenant(db, ctx.auth.tenantId, async (tx) => {
     await requireCatalogReader(tx, ctx.auth.userId);
-    const rows = await tx.select().from(taxRates).orderBy(asc(taxRates.createdAt), asc(taxRates.id));
-    return { items: rows.map(taxRateView) };
+    return readTaxRates(tx);
+  });
+}
+
+async function readTaxRates(tx: Transaction): Promise<TaxRateList> {
+  const rows = await tx.select().from(taxRates).orderBy(asc(taxRates.createdAt), asc(taxRates.id));
+  const [settings] = await tx.select({ bp: tenantSettings.defaultTaxRateBp }).from(tenantSettings);
+  return { items: rows.map(taxRateView), defaultRateBp: settings?.bp ?? 0 };
+}
+
+/** «الضريبة الافتراضية»: stores the chosen rate's percentage as the store's default (null: no tax) */
+export async function setDefaultTaxRate(
+  db: Database,
+  input: z.output<typeof defaultTaxRateInput>,
+  ctx: CatalogContext,
+): Promise<TaxRateList> {
+  return withTenant(db, ctx.auth.tenantId, async (tx) => {
+    await requireOwner(tx, ctx.auth.userId);
+    let bp = 0;
+    if (input.taxRateId) {
+      const [rate] = await tx.select().from(taxRates).where(eq(taxRates.id, input.taxRateId));
+      if (!rate) throw notFound('هذه الضريبة غير موجودة.');
+      if (rate.archivedAt) throw fieldError('taxRateId', 'هذه الضريبة مؤرشفة');
+      bp = rate.rateBp;
+    }
+    await tx.update(tenantSettings).set({ defaultTaxRateBp: bp });
+    await audit(
+      tx,
+      {
+        tenantId: ctx.auth.tenantId,
+        userId: ctx.auth.userId,
+        action: 'tax_rate.default_set',
+        entity: 'tenant_settings',
+        entityId: ctx.auth.tenantId,
+        data: { taxRateId: input.taxRateId, rateBp: bp },
+      },
+      ctx.meta,
+    );
+    return readTaxRates(tx);
   });
 }
 

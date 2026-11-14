@@ -9,7 +9,7 @@ export function hashSecret(secret: string): Promise<string> {
   return hash(secret, OPTIONS);
 }
 
-async function verifySecret(hashed: string, secret: string): Promise<boolean> {
+export async function verifySecret(hashed: string, secret: string): Promise<boolean> {
   try {
     return await verify(hashed, secret);
   } catch {

@@ -7,6 +7,7 @@ import type { AccessClaims, TokenKeys } from './auth/tokens';
 import type { Clock } from './clock';
 import type { Env } from './env';
 import type { ClientAddressing } from './http/client-ip';
+import type { ErrorReporter } from './http/error-reporting';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -19,6 +20,8 @@ declare module 'fastify' {
     tokenKeys: TokenKeys;
     /** null when no channel is configured: sign-up answers 503 */
     otpSender: OtpSender | null;
+    /** Sends server errors to the tracker when SENTRY_DSN is set; does nothing otherwise */
+    reporter: ErrorReporter;
     /** "METHOD /url" of every registered route */
     routeList: readonly string[];
   }

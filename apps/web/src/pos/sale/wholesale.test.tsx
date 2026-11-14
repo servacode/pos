@@ -73,25 +73,57 @@ describe('the wholesale price', () => {
 });
 
 describe('cheques at the till', () => {
-  it('takes a cheque with its number for a named customer, and only then', async () => {
-    const { user, outbox } = await signedIn('مريم');
+  /** A named customer and one cheque of the oil's 250.00, details typed */
+  async function toCheque(name: 'سامر' | 'مريم', buttonName: string) {
+    const pos = await signedIn(name);
+    const { user } = pos;
     await scan(user, PRODUCTS.oil.barcode!.code);
     await user.keyboard('{F12}');
     const pay = await screen.findByRole('region', { name: 'الدفع' });
-    expect(within(pay).queryByRole('button', { name: 'شيك' })).not.toBeInTheDocument();
+    expect(within(pay).queryByRole('button', { name: /شيك/ })).not.toBeInTheDocument();
     await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
     await user.type(within(pay).getByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
     await user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
-    await user.click(within(pay).getByRole('button', { name: 'شيك' }));
+    await user.click(within(pay).getByRole('button', { name: buttonName }));
     expect(within(pay).getByRole('button', { name: 'أتمّ الدفع' })).toBeDisabled();
-    await user.type(within(pay).getByLabelText('رقم الشيك وتاريخ استحقاقه'), 'CHQ-5512 30/11');
+    await user.type(within(pay).getByLabelText('البنك'), 'بنك سورية');
+    await user.type(within(pay).getByLabelText('رقم الشيك'), '5512');
+    expect(within(pay).getByRole('button', { name: 'أتمّ الدفع' })).toBeDisabled();
+    await user.type(within(pay).getByLabelText('تاريخ الاستحقاق'), '30/11/2030');
+    await user.type(within(pay).getByLabelText('اسم الساحب (اختياري)'), 'أبو خالد');
+    return { ...pos, pay };
+  }
+
+  it('takes a cheque with its bank, number and due date for a named customer, and only then', async () => {
+    const { user, outbox, pay } = await toCheque('مريم', 'شيك');
+    expect(within(pay).getByRole('button', { name: 'أتمّ الدفع' })).toBeEnabled();
     await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
     await screen.findByRole('region', { name: 'تمت البيعة' });
+    expect(plain(screen.getByRole('region', { name: 'تمت البيعة' }))).toContain('بشيك');
     const sale = outbox.find((e) => e.type === 'sale')!.doc.payload as unknown as SalePayload;
     expect(validateDocumentPayload('sale', sale)).toEqual({ ok: true, checked: true });
     expect(sale.payments).toEqual([
-      expect.objectContaining({ method: 'cheque', amountMinor: 25_000, reference: 'CHQ-5512 30/11' }),
+      expect.objectContaining({
+        method: 'cheque',
+        amountMinor: 25_000,
+        reference: 'بنك سورية · 5512 · 2030-11-30',
+        cheque: { bank: 'بنك سورية', number: '5512', dueDate: '2030-11-30', drawer: 'أبو خالد' },
+      }),
     ]);
+  });
+
+  it('a cashier takes the cheque with a manager’s code, recorded on the sale', async () => {
+    const { user, outbox, pay } = await toCheque('سامر', 'شيك (بموافقة المدير)');
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    expect(await screen.findByRole('region', { name: 'رمز المدير' })).toBeInTheDocument();
+    expect(outbox.some((e) => e.type === 'sale')).toBe(false);
+    await user.keyboard(PINS[ids.maryam]!);
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    const sale = outbox.find((e) => e.type === 'sale')!.doc.payload as unknown as SalePayload & {
+      creditApproval: { userId: string };
+    };
+    expect(sale.payments[0]).toMatchObject({ method: 'cheque' });
+    expect(sale.creditApproval.userId).toBe(ids.maryam);
   });
 });
 

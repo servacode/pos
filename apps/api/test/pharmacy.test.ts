@@ -1,9 +1,20 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import type { ExpiryResponse, ProductDetail, PullSetRows, PurchaseDetail, SupplierRow } from '@serva/core';
+import {
+  buildReturnPayload,
+  type ControlledRegisterResponse,
+  type ExpiryResponse,
+  type ProductDetail,
+  type PullSetRows,
+  type PurchaseDetail,
+  type SalePayload,
+  type StoreResponse,
+  type SupplierRow,
+} from '@serva/core';
 import type { PullResponse } from '@serva/sync';
 import { cartLine, documents, openStore, push, sale, shiftOpen, type Store } from './accounting-fixtures';
-import { closeAppDb, closeOwnerDb, makeApp, resetDatabase, settled } from './helpers';
+import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase, settled } from './helpers';
+import { staffUser } from './staff';
 
 /**
  * Pharmacies on the server (03 › الصيدليات): the scientific name, the batch and expiry of what was
@@ -24,7 +35,7 @@ beforeEach(resetDatabase);
 const as = (store: Pick<Store, 'accessToken'>) => ({ authorization: `Bearer ${store.accessToken}` });
 const BOX = 1000;
 
-async function medicine(store: Store) {
+async function medicine(store: Store, flags: { requiresPrescription?: boolean; controlled?: boolean } = {}) {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/products',
@@ -32,6 +43,7 @@ async function medicine(store: Store) {
     payload: {
       nameAr: 'بانادول 500',
       genericName: 'باراسيتامول',
+      ...flags,
       variants: [{ price: { currency: 'SYP', priceMinor: 15_000 } }],
     },
   });
@@ -114,7 +126,8 @@ describe('batches and expiry', () => {
       ['B-07', '2026-11-15', 5 * BOX, 16],
     ]);
 
-    // Twelve boxes sold: the oldest go first, three of the new batch are left
+    // Twelve boxes sold with no batch on the line (an older till): the expired batch is never taken,
+    // so all five good boxes go and the expired ten stay on the report until they are written off
     const doc = documents(store.device);
     const open = doc('shift_open', shiftOpen(store.userId));
     const sold = doc(
@@ -133,11 +146,11 @@ describe('batches and expiry', () => {
     );
     await push(app, store.device, [open, sold]);
     report = await expiry(store);
-    expect(report.items.map((r) => [r.batchNo, r.qty])).toEqual([['B-07', 3 * BOX]]);
+    expect(report.items.map((r) => [r.batchNo, r.qty])).toEqual([['A-01', 10 * BOX]]);
     sets = await pull(store);
-    expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.nearestExpiry).toBe('2026-11-15');
-    // Within 10 days, nothing
-    expect((await expiry(store, 10)).items).toEqual([]);
+    expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.nearestExpiry).toBe('2026-10-25');
+    // The expired batch is still listed within 10 days; a batch ending later is not
+    expect((await expiry(store, 10)).items.map((r) => r.batchNo)).toEqual(['A-01']);
   });
 
   it('a purchase line without an expiry changes nothing, and a cashier cannot read the report', async () => {
@@ -168,5 +181,349 @@ describe('batches and expiry', () => {
     expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.nearestExpiry).toBeNull();
     const bad = await app.inject({ method: 'GET', url: '/v1/inventory/expiry?days=0', headers: as(store) });
     expect(bad.statusCode).toBe(400);
+  });
+});
+
+/** A user with a system role (its branch is not needed: the role applies everywhere) */
+const staff = (store: Store, role: string, phone: string) =>
+  staffUser(app, { ...store, branchId: '' }, role, phone);
+
+const RX = { ref: 'RX-77', doctor: 'د. سامر', patientName: 'ليلى', patientId: '01020304' };
+
+async function supplier(store: Store) {
+  return (
+    await app.inject({
+      method: 'POST',
+      url: '/v1/suppliers',
+      headers: as(store),
+      payload: { name: 'مستودع الشفاء' },
+    })
+  ).json<SupplierRow>();
+}
+
+describe('batches the till picks from, and the prescription flags', () => {
+  it('keeps the flags on the product, pulls them with the batches on the shelf, and lets them change', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { requiresPrescription: true, controlled: true });
+    expect(med.product).toMatchObject({ requiresPrescription: true, controlled: true });
+    await receive(store, s.id, med.variantId, '2026-10-20', 10, 'A-01', '2026-10-25');
+    await receive(store, s.id, med.variantId, '2026-10-28', 5, 'B-07', '2026-11-15');
+
+    let sets = await pull(store);
+    expect(sets.products.upserts.find((p) => p.id === med.productId)).toMatchObject({
+      requiresPrescription: true,
+      controlled: true,
+    });
+    expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.shelfBatches).toEqual([
+      { batchNo: 'A-01', expiry: '2026-10-25' },
+      { batchNo: 'B-07', expiry: '2026-11-15' },
+    ]);
+
+    // Eleven boxes sold: the old batch is expired so five good boxes go, and the expired one stays
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const sold = doc(
+      'sale',
+      sale(store, open.id, {
+        lines: [
+          cartLine(1, 15_000, {
+            productId: med.productId,
+            variantId: med.variantId,
+            name: med.name,
+            qty: 11 * BOX,
+          }),
+        ],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 165_000 }],
+        prescription: RX,
+      }),
+    );
+    await push(app, store.device, [open, sold]);
+    sets = await pull(store);
+    expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.shelfBatches).toEqual([
+      { batchNo: 'A-01', expiry: '2026-10-25' },
+    ]);
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/v1/products/${med.productId}`,
+      headers: as(store),
+      payload: { version: med.product.version, controlled: false },
+    });
+    expect(patched.json<ProductDetail>()).toMatchObject({ requiresPrescription: true, controlled: false });
+  });
+
+  it('a pharmacy store gets its prescription setting on the till, the owner changes it, others have none', async () => {
+    const store = await openStore(app);
+    const read = async () =>
+      (await app.inject({ method: 'GET', url: '/v1/store', headers: as(store) })).json<StoreResponse>();
+    expect((await read()).pharmacy).toBeNull();
+    let sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toBeNull();
+
+    await ownerDb()`update tenants set sectors = array['pharmacy'] where id = ${store.tenantId}`;
+    // Refusing a sale with no valid batch is the pharmacy's default until its owner turns it off
+    expect((await read()).pharmacy).toEqual({ prescription: 'optional', blockNoBatch: true });
+    sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'optional', blockNoBatch: true });
+
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/v1/store/pharmacy',
+      headers: as(store),
+      payload: { prescription: 'required' },
+    });
+    expect(put.statusCode, put.body).toBe(200);
+    expect(put.json<StoreResponse>().pharmacy).toEqual({ prescription: 'required', blockNoBatch: true });
+    sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'required', blockNoBatch: true });
+
+    const bad = await app.inject({
+      method: 'PUT',
+      url: '/v1/store/pharmacy',
+      headers: as(store),
+      payload: { prescription: 'sometimes' },
+    });
+    expect(bad.statusCode).toBe(400);
+    const cashier = await staff(store, 'cashier', '0955555555');
+    const denied = await app.inject({
+      method: 'PUT',
+      url: '/v1/store/pharmacy',
+      headers: as(cashier),
+      payload: { prescription: 'optional' },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+});
+
+describe('medicine returns and batch picking, for a pharmacy and for medical supplies', () => {
+  const put = (store: Store, payload: Record<string, unknown>) =>
+    app.inject({ method: 'PUT', url: '/v1/store/pharmacy', headers: as(store), payload });
+
+  it('keeps the return policy and the batch switch; a pharmacy picks batches until it turns that off', async () => {
+    const store = await openStore(app);
+    await ownerDb()`update tenants set sectors = array['pharmacy'] where id = ${store.tenantId}`;
+    const policy = { prescription: 'optional', returns: 'none', controlledReturns: true };
+    const res = await put(store, policy);
+    expect(res.statusCode, res.body).toBe(200);
+    // Not written: the pharmacy's default (batch picking on) holds
+    expect(res.json<StoreResponse>().pharmacy).toEqual({ ...policy, blockNoBatch: true });
+    let sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, blockNoBatch: true });
+
+    expect((await put(store, { ...policy, autoBatch: false })).statusCode).toBe(200);
+    sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, autoBatch: false, blockNoBatch: true });
+    // A pharmacy owner who turned the block off keeps it off
+    expect((await put(store, { ...policy, blockNoBatch: false })).statusCode).toBe(200);
+    sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, blockNoBatch: false });
+    expect((await put(store, { prescription: 'optional', returns: 'sometimes' })).statusCode).toBe(400);
+  });
+
+  it('a medical-supplies store has batch picking and the no-valid-batch block on until it turns them off, and its tills get the shelf batches', async () => {
+    const store = await openStore(app);
+    await ownerDb()`update tenants set sectors = array['medical_supplies'] where id = ${store.tenantId}`;
+    const read = async () =>
+      (await app.inject({ method: 'GET', url: '/v1/store', headers: as(store) })).json<StoreResponse>();
+    const on = { prescription: 'optional', autoBatch: true, blockNoBatch: true };
+    // The owner never chose: both are on, on the read and on what the tills pull
+    expect((await read()).pharmacy).toEqual(on);
+    expect((await pull(store)).settings.upserts[0]!.pharmacy).toEqual(on);
+
+    expect((await put(store, { prescription: 'optional', returns: 'allowed' })).statusCode).toBe(200);
+    expect((await read()).pharmacy).toEqual({ ...on, returns: 'allowed' });
+
+    // What the owner chose is kept
+    expect(
+      (await put(store, { prescription: 'optional', autoBatch: false, blockNoBatch: false })).statusCode,
+    ).toBe(200);
+    expect((await read()).pharmacy).toEqual({
+      prescription: 'optional',
+      autoBatch: false,
+      blockNoBatch: false,
+    });
+
+    expect((await put(store, { prescription: 'optional', autoBatch: true })).statusCode).toBe(200);
+    expect((await read()).pharmacy).toEqual(on);
+    const sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual(on);
+
+    const s = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/suppliers',
+        headers: as(store),
+        payload: { name: 'المورد' },
+      })
+    ).json<SupplierRow>();
+    const item = await medicine(store);
+    await receive(store, s.id, item.variantId, '2026-10-28', 5, 'M-01', '2026-12-15');
+    const pulled = await pull(store);
+    expect(pulled.variants.upserts.find((v) => v.id === item.variantId)!.shelfBatches).toEqual([
+      { batchNo: 'M-01', expiry: '2026-12-15' },
+    ]);
+  });
+});
+
+describe('controlled drugs on the server', () => {
+  /** One till for the test: its numbers keep counting, and its shift is opened once */
+  async function till(store: Store) {
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    await push(app, store.device, [open]);
+    return { doc, open };
+  }
+
+  async function sellControlled(
+    t: Awaited<ReturnType<typeof till>>,
+    store: Store,
+    med: Awaited<ReturnType<typeof medicine>>,
+    cashierId: string,
+    extra: { prescription?: Record<string, string | null> | null; batch?: boolean },
+  ) {
+    const { doc, open } = t;
+    const sold = doc(
+      'sale',
+      sale({ userId: cashierId }, open.id, {
+        lines: [
+          cartLine(1, 15_000, {
+            productId: med.productId,
+            variantId: med.variantId,
+            name: med.name,
+            qty: BOX,
+            ...(extra.batch ? { batchNo: 'B-07', batchExpiry: '2026-11-15' } : {}),
+          }),
+        ],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 15_000 }],
+        ...(extra.prescription ? { prescription: extra.prescription as typeof RX } : {}),
+      }),
+    );
+    const res = await push(app, store.device, [sold]);
+    return { sold, result: res.results[0]! };
+  }
+
+  it('flags a controlled sale by someone without the pharmacist permission, or without the details', async () => {
+    const store = await openStore(app);
+    const med = await medicine(store, { controlled: true });
+    await receive(store, (await supplier(store)).id, med.variantId, '2026-10-20', 10, 'B-07', '2026-11-15');
+    const cashier = await staff(store, 'cashier', '0955555555');
+    const pharmacist = await staff(store, 'pharmacist', '0966666666');
+    const t = await till(store);
+
+    const byCashier = await sellControlled(t, store, med, cashier.userId, { prescription: RX, batch: true });
+    expect(byCashier.result).toMatchObject({ status: 'accepted', flags: ['permission_stale'] });
+    const bare = await sellControlled(t, store, med, pharmacist.userId, { prescription: null });
+    expect(bare.result).toMatchObject({ status: 'accepted', flags: ['controlled_incomplete'] });
+    const half = await sellControlled(t, store, med, pharmacist.userId, {
+      prescription: { ...RX, patientId: null },
+    });
+    expect(half.result.flags).toEqual(['controlled_incomplete']);
+    const clean = await sellControlled(t, store, med, pharmacist.userId, { prescription: RX, batch: true });
+    expect(clean.result).toMatchObject({ status: 'accepted', flags: [] });
+
+    // The prescription and the batch are kept with the document
+    const [stored] = await ownerDb()<{ payload: SalePayload }[]>`
+      select payload from invoices where id = ${clean.sold.id}`;
+    expect(stored!.payload.prescription).toEqual(RX);
+    expect(stored!.payload.lines[0]).toMatchObject({ batchNo: 'B-07', batchExpiry: '2026-11-15' });
+  });
+
+  it('a medicine that is not controlled sells as before, with or without a prescription', async () => {
+    const store = await openStore(app);
+    const med = await medicine(store, { requiresPrescription: true });
+    await receive(store, (await supplier(store)).id, med.variantId, '2026-10-20', 10, 'B-07', '2026-11-15');
+    const cashier = await staff(store, 'cashier', '0955555555');
+    const t = await till(store);
+    const plain = await sellControlled(t, store, med, cashier.userId, { prescription: null });
+    expect(plain.result).toMatchObject({ status: 'accepted', flags: [] });
+  });
+
+  it('writes the register from the documents, in order, with its balance matching the stock', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { controlled: true });
+    const other = await medicine(store);
+    await receive(store, s.id, med.variantId, '2026-10-20', 10, 'A-01', '2027-01-01');
+    await receive(store, s.id, other.variantId, '2026-10-20', 4, 'Z-9', '2027-01-01');
+
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const soldPayload = sale(store, open.id, {
+      lines: [
+        cartLine(1, 15_000, {
+          productId: med.productId,
+          variantId: med.variantId,
+          name: med.name,
+          qty: 3 * BOX,
+          batchNo: 'A-01',
+          batchExpiry: '2027-01-01',
+        }),
+      ],
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 45_000 }],
+      prescription: RX,
+    });
+    const sold = doc('sale', soldPayload);
+    const back = doc(
+      'return',
+      buildReturnPayload({
+        sale: soldPayload as SalePayload,
+        saleId: sold.id,
+        saleNumber: sold.number!,
+        shiftId: open.id,
+        cashierId: store.userId,
+        reason: 'علبة مغلقة',
+        picks: [{ saleLineNo: 1, qty: BOX }],
+      }),
+    );
+    await push(app, store.device, [open, sold, back]);
+
+    const get = (token: Pick<Store, 'accessToken'>, q = 'from=2026-10-01&to=2026-10-31') =>
+      app.inject({ method: 'GET', url: `/v1/pharmacy/controlled-register?${q}`, headers: as(token) });
+    const res = await get(store);
+    expect(res.statusCode, res.body).toBe(200);
+    const r = res.json<ControlledRegisterResponse>();
+    expect(r.rows.map((x) => [x.kind, x.batchNo, x.qtyIn, x.qtyOut, x.balance])).toEqual([
+      ['purchase', 'A-01', 10 * BOX, 0, 10 * BOX],
+      ['sale', 'A-01', 0, 3 * BOX, 7 * BOX],
+      ['return', 'A-01', BOX, 0, 8 * BOX],
+    ]);
+    expect(r.rows[0]).toMatchObject({ item: 'بانادول 500', date: '2026-10-20' });
+    expect(r.rows[1]).toMatchObject({
+      document: sold.number,
+      prescriptionRef: 'RX-77',
+      doctor: 'د. سامر',
+      patientName: 'ليلى',
+      patientId: '01020304',
+    });
+    expect(r.rows[2]).toMatchObject({ document: back.number, prescriptionRef: 'RX-77' });
+    expect(r.balances).toEqual([
+      {
+        variantId: med.variantId,
+        item: 'بانادول 500',
+        registerQty: 8 * BOX,
+        stockQty: 8 * BOX,
+        matches: true,
+      },
+    ]);
+    expect(r.matches).toBe(true);
+
+    // A day's window keeps the running balance from before it
+    const day = (await get(store, 'from=2026-10-30&to=2026-10-30')).json<ControlledRegisterResponse>();
+    expect(day.rows.map((x) => x.balance)).toEqual([7 * BOX, 8 * BOX]);
+
+    // Stock changed by hand outside any document: the register says so
+    await ownerDb()`update stock_levels set qty = qty - 2000 where variant_id = ${med.variantId}`;
+    const off = (await get(store)).json<ControlledRegisterResponse>();
+    expect(off.matches).toBe(false);
+    expect(off.balances[0]).toMatchObject({ registerQty: 8 * BOX, stockQty: 8 * BOX - 2000, matches: false });
+
+    expect((await get(store, 'from=2026-10-31&to=2026-10-01')).statusCode).toBe(400);
+    const cashier = await staff(store, 'cashier', '0955555555');
+    expect((await get(cashier)).statusCode).toBe(403);
+    const manager = await staff(store, 'manager', '0977777777');
+    expect((await get(manager)).statusCode).toBe(403);
+    const pharmacist = await staff(store, 'pharmacist', '0966666666');
+    expect((await get(pharmacist)).statusCode).toBe(200);
   });
 });

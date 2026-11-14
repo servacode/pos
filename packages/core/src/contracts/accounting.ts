@@ -196,6 +196,7 @@ export const JOURNAL_SOURCE_TYPES = [
   'stocktake',
   'transfer',
   'cheque',
+  'expense',
   'shift_close',
   'cash_movement',
   'manual',

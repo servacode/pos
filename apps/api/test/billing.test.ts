@@ -297,3 +297,71 @@ describe('the platform panel', () => {
     expect(await page(store)).toMatchObject({ status: 'active', planCode: 'basic', currentPeriodEnd: end });
   });
 });
+
+describe('the company and legal details', () => {
+  const details = {
+    companyName: 'شركة المثال المحدودة',
+    ownerName: 'أحمد المثال',
+    commercialRegister: '',
+    address: 'دمشق، المزة',
+    email: 'legal@example.com',
+    supportWhatsapp: '0912345678',
+    phone: '',
+    governingCity: 'دمشق',
+    financialRetention: 'عشر سنوات',
+    paymentTolerance: '1%',
+    hostingProvider: 'مزوّد',
+    hostingCountry: 'ألمانيا',
+    backupProvider: '',
+    smsProvider: '',
+    aiProvider: '',
+    reviewedByLawyer: false,
+    updatedAt: '2026-11-13',
+  };
+  const save = (headers: Record<string, string>, payload: object) =>
+    app.inject({ method: 'PUT', url: '/v1/platform/legal', headers, payload });
+
+  beforeEach(async () => {
+    await ownerDb()`
+      update platform_settings set legal = ${ownerDb().json({ governingCity: 'دمشق' })} where id = 1`;
+  });
+
+  it('is readable without signing in, with only the public fields and a short cache', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/legal' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('public, max-age=60');
+    const body = res.json<Record<string, unknown>>();
+    expect(body).toMatchObject({ governingCity: 'دمشق', companyName: '', reviewedByLawyer: false });
+    expect(body.version).toBe('2026-10-30');
+    for (const secret of ['paymentMethods', 'sypPerUsd', 'id', 'legal'])
+      expect(body).not.toHaveProperty(secret);
+  });
+
+  it('is saved by the super admin, shown to the public and audited', async () => {
+    const admin = await platformAdmin();
+    expect((await save(admin, details)).statusCode).toBe(204);
+
+    const pub = (await app.inject({ method: 'GET', url: '/v1/legal' })).json<Record<string, unknown>>();
+    expect(pub).toMatchObject({ companyName: details.companyName, ownerName: details.ownerName });
+    expect(pub.supportWhatsapp).toBe('+963912345678');
+    const panel = await app.inject({ method: 'GET', url: '/v1/platform/legal', headers: admin });
+    expect(panel.json()).toMatchObject({ email: 'legal@example.com' });
+
+    const logs = await ownerDb()`select details from platform_audit_logs where action = 'legal.save'`;
+    expect(logs).toHaveLength(1);
+    expect(logs[0]!.details.changed).toEqual(
+      expect.arrayContaining(['companyName', 'ownerName', 'email', 'supportWhatsapp']),
+    );
+  });
+
+  it('refuses support staff, anonymous callers and invalid values', async () => {
+    const support = await platformAdmin('support');
+    expect((await save(support, details)).statusCode).toBe(403);
+    expect((await save({}, details)).statusCode).toBe(401);
+    const admin = await platformAdmin();
+    expect((await save(admin, { ...details, email: 'nope' })).statusCode).toBe(400);
+    expect((await save(admin, { ...details, supportWhatsapp: '12' })).statusCode).toBe(400);
+    expect((await save(admin, { ...details, updatedAt: 'yesterday' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/v1/platform/legal' })).statusCode).toBe(401);
+  });
+});

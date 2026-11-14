@@ -5,6 +5,7 @@ import {
   BackIcon,
   Button,
   Card,
+  ClockIcon,
   cn,
   DataTable,
   displayNumber,
@@ -52,7 +53,7 @@ function cashLines(withDifference: boolean): CashLine[] {
     { key: 'sales', label: 'المبيعات نقداً', value: money((r) => r.cashSalesMinor) },
     { key: 'change', label: 'الباقي المعطى', value: money((r) => r.changeGivenMinor, -1) },
     { key: 'refunds', label: 'المرتجعات نقداً', value: money((r) => r.refundsMinor, -1) },
-    { key: 'receipts', label: 'دفعات الزبائن نقداً', value: money((r) => r.receiptsMinor) },
+    { key: 'receipts', label: 'دفعات الزبائن نقداً (وعربون التأجير)', value: money((r) => r.receiptsMinor) },
     { key: 'payIn', label: 'الإيداع في الدرج', value: money((r) => r.payInMinor) },
     { key: 'payOut', label: 'السحب من الدرج', value: money((r) => r.payOutMinor, -1) },
     { key: 'drops', label: 'إلى الخزنة', value: money((r) => r.dropsMinor, -1) },
@@ -371,7 +372,7 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
   return (
     <>
       <PageHead
-        crumbs={['البيع', 'الورديات']}
+        icon={<ClockIcon />}
         title={report.status === 'closed' ? 'تقرير إغلاق الوردية' : 'تقرير الوردية'}
         subtitle={
           <>
@@ -416,6 +417,10 @@ function ShiftReportBody({ report, me }: { report: ShiftReport; me: MeResponse }
 
       <Section title="النقد لكل عملة">
         <CashTable report={report} withDifference={withDifference} />
+        <p className="text-sm text-ink-muted">
+          عربون التأجير المقبوض نقداً يُحسب هنا مع دفعات الزبائن. وإذا رُدّ العربون في وردية غير التي قُبض
+          فيها، ينقص من نقد وردية الرد، فيظهر نقدها المتوقع أقل.
+        </p>
         {withDifference ? null : (
           <p className="text-sm text-ink-muted">
             النقد المتوقع والفرق يظهران لمن يملك صلاحية رؤية فرق الصندوق.

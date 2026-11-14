@@ -3,6 +3,10 @@ import { createProductInput, updateProductInput } from '@serva/core';
 import { ids, product, variant } from '../../test/catalog';
 import {
   applyAxes,
+  applyToVariants,
+  checkPendingCodes,
+  variantsWithoutBarcode,
+  withGeneratedBarcodes,
   axesOf,
   buildCreate,
   buildUpdate,
@@ -73,9 +77,22 @@ describe('the create body', () => {
           wholesalePriceMinor: null,
           minStockQty: 5000,
           barcodes: [
-            { kind: 'standard', code: '6290360100125', packQty: 1000, packName: null, packPriceMinor: null },
+            {
+              kind: 'standard',
+              code: '6290360100125',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
             // No code: the server makes the next internal one (prefix 29).
-            { kind: 'internal', packQty: 1000, packName: null, packPriceMinor: null },
+            {
+              kind: 'internal',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
           ],
         },
       ],
@@ -149,8 +166,16 @@ describe('the PATCH body (17: only what changed)', () => {
             packQty: 1000,
             packName: null,
             packPriceMinor: null,
+            packWholesaleMinor: null,
           },
-          { kind: 'standard', code: '16281007035102', packQty: 1000, packName: null, packPriceMinor: null },
+          {
+            kind: 'standard',
+            code: '16281007035102',
+            packQty: 1000,
+            packName: null,
+            packPriceMinor: null,
+            packWholesaleMinor: null,
+          },
         ],
       },
     ]);
@@ -305,5 +330,113 @@ describe('what another person changed', () => {
     });
     expect(changedParts(before, after)).toEqual(['الاسم', 'السعر']);
     expect(changedParts(before, before)).toEqual([]);
+  });
+});
+
+describe('the pharmacy flags of a product', () => {
+  it('sends «يحتاج وصفة» and «مراقَب» when set on a new product, and nothing when they are off', () => {
+    const draft = simpleDraft();
+    expect('requiresPrescription' in buildCreate(draft).body).toBe(false);
+    expect('controlled' in buildCreate(draft).body).toBe(false);
+    draft.requiresPrescription = true;
+    draft.controlled = true;
+    expect(buildCreate(draft).body).toMatchObject({ requiresPrescription: true, controlled: true });
+  });
+
+  it('sends a changed flag alone in the PATCH, in both directions', () => {
+    const detail = product({ requiresPrescription: true, controlled: false });
+    const draft = draftFromDetail(detail);
+    expect(draft).toMatchObject({ requiresPrescription: true, controlled: false });
+    expect(buildUpdate(draft, detail).body).toEqual({ version: 3 });
+    draft.requiresPrescription = false;
+    draft.controlled = true;
+    const { body } = buildUpdate(draft, detail);
+    expect(body).toEqual({ version: 3, requiresPrescription: false, controlled: true });
+    expect(updateProductInput.safeParse(body).success).toBe(true);
+  });
+
+  it('reads a card from before the flags existed as off', () => {
+    const detail = product();
+    const old = { ...detail } as Partial<typeof detail>;
+    delete old.requiresPrescription;
+    delete old.controlled;
+    expect(draftFromDetail(old as typeof detail)).toMatchObject({
+      requiresPrescription: false,
+      controlled: false,
+    });
+  });
+});
+
+describe('«يتطلب صلاحية» on a product', () => {
+  it('is sent when set on a new product, and nothing when it is off', () => {
+    const draft = simpleDraft();
+    expect('requiresExpiry' in buildCreate(draft).body).toBe(false);
+    draft.requiresExpiry = true;
+    expect(buildCreate(draft).body).toMatchObject({ requiresExpiry: true });
+  });
+
+  it('is sent alone in the PATCH when changed, and a card from before it existed reads as off', () => {
+    const detail = product({ requiresExpiry: true });
+    const draft = draftFromDetail(detail);
+    expect(draft.requiresExpiry).toBe(true);
+    expect(buildUpdate(draft, detail).body).toEqual({ version: 3 });
+    draft.requiresExpiry = false;
+    const { body } = buildUpdate(draft, detail);
+    expect(body).toEqual({ version: 3, requiresExpiry: false });
+    expect(updateProductInput.safeParse(body).success).toBe(true);
+    const old = { ...product() } as Partial<ReturnType<typeof product>>;
+    delete old.requiresExpiry;
+    expect(draftFromDetail(old as ReturnType<typeof product>).requiresExpiry).toBe(false);
+  });
+});
+
+describe('bulk entry on the size × colour matrix', () => {
+  function matrix(): ProductDraft {
+    const draft = simpleDraft();
+    draft.axes = [axis('المقاس', ['S', 'M']), axis('اللون', ['أحمر', 'أزرق'])];
+    draft.variants = applyAxes(draft.variants, draft.axes);
+    return draft;
+  }
+
+  it('new combinations take the model price, so no row needs hand entry', () => {
+    const draft = matrix();
+    expect(draft.variants).toHaveLength(4);
+    expect(draft.variants.every((v) => v.priceMinor === 12000)).toBe(true);
+  });
+
+  it('applies a price to all variants, or to one colour or one size', () => {
+    const { variants } = matrix();
+    const all = applyToVariants(variants, { all: true }, 'wholesalePriceMinor', 9000);
+    expect(all.every((v) => v.wholesalePriceMinor === 9000)).toBe(true);
+    const red = applyToVariants(variants, { name: 'اللون', value: 'أحمر' }, 'priceMinor', 15000);
+    expect(red.filter((v) => v.priceMinor === 15000)).toHaveLength(2);
+    expect(red.filter((v) => v.priceMinor === 12000)).toHaveLength(2);
+    const size = applyToVariants(variants, { name: 'المقاس', value: 'S' }, 'minPriceMinor', 100);
+    expect(size.filter((v) => v.minPriceMinor === 100).every((v) => v.attributes[0]!.value === 'S')).toBe(
+      true,
+    );
+  });
+
+  it('leaves archived variants alone and generates barcodes only where there is none', () => {
+    const { variants } = matrix();
+    const withOne = variants.map((v, i) =>
+      i === 0 ? { ...v, barcodes: [newBarcode('standard', '123')] } : v,
+    );
+    withOne[1] = { ...withOne[1]!, archived: true };
+    withOne[2] = { ...withOne[2]!, pendingCode: '999' };
+    expect(variantsWithoutBarcode(withOne)).toBe(2);
+    const made = withGeneratedBarcodes(withOne);
+    expect(made[0]!.barcodes.map((b) => b.code)).toEqual(['123']);
+    expect(made[1]!.barcodes).toHaveLength(0);
+    expect(made[2]!.barcodes).toHaveLength(0);
+    expect(made[3]!.barcodes.map((b) => b.kind)).toEqual(['internal']);
+    expect(applyToVariants(withOne, { all: true }, 'priceMinor', 1)[1]!.priceMinor).toBe(12000);
+  });
+
+  it('refuses a code left in the scan box on save', () => {
+    const { variants } = matrix();
+    const typed = variants.map((v, i) => (i === 1 ? { ...v, pendingCode: ' 6291 ' } : v));
+    expect(Object.keys(checkPendingCodes(typed))).toEqual([`v.${variants[1]!.key}.pending`]);
+    expect(checkPendingCodes(variants)).toEqual({});
   });
 });

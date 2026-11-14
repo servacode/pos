@@ -75,6 +75,8 @@ describe('«قسيمة هدية» (03 › الألبسة)', () => {
     await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '500');
     await user.click(screen.getByRole('button', { name: 'تابع للملخّص' }));
     await user.click(await screen.findByRole('button', { name: 'أغلق الوردية' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، أغلق الوردية' }));
+    await user.click(await screen.findByRole('button', { name: 'تمّ، اخرج' }));
     await screen.findByRole('heading', { name: 'من يعمل الآن؟' });
     const close = outbox.find((e) => e.type === 'shift_close')!.doc.payload as unknown as ShiftClosePayload;
     expect(close.cash[0]).toMatchObject({ receiptsMinor: 50_000, expectedMinor: 50_000, differenceMinor: 0 });

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { CurrencyCode } from '@serva/core/currencies';
-import { Alert, Button, Money, TextField, ToggleChip } from '@serva/ui';
+import { AddIcon, Alert, Badge, Button, CloseIcon, Money, TextField, ToggleChip } from '@serva/ui';
 import type { CatalogItem } from '../catalog';
 import type { Choice, ItemChoice } from './cart';
+import { SalePanel } from './SalePanel';
 
 /**
  * «الإضافات والخيارات» (03 › المطاعم، المقاهي): the item's groups of choices, beside the cart.
@@ -52,17 +53,32 @@ export function ModifierPanel({
   }
 
   return (
-    <section
-      aria-label={`خيارات ${item.name}`}
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-4"
+    <SalePanel
+      label={`خيارات ${item.name}`}
+      title={item.name}
+      subtitle={<Money minor={item.price.priceMinor} currency={currency} />}
+      actions={
+        <Button variant="secondary" size="md" icon={<CloseIcon size={20} />} onClick={onCancel}>
+          إلغاء
+        </Button>
+      }
+      footer={
+        <Button size="lg" icon={<AddIcon size={20} />} onClick={add}>
+          أضف
+          {extra > 0 ? (
+            <span className="ms-1">
+              +<Money minor={extra} currency={currency} symbol={false} />
+            </span>
+          ) : null}
+        </Button>
+      }
     >
-      <h2 className="text-lg font-bold text-ink">{item.name}</h2>
       {error ? <Alert tone="error">{error}</Alert> : null}
       {groups.map((g) => (
-        <fieldset key={g.name} className="flex flex-col gap-2">
-          <legend className="mb-1 font-semibold text-ink">
+        <fieldset key={g.name} className="flex flex-col gap-3">
+          <legend className="mb-3 flex items-center gap-2 text-sm font-semibold text-ink-muted">
             {g.name}
-            {g.required ? <span className="ms-1 text-sm text-danger-ink">(مطلوب)</span> : null}
+            {g.required ? <Badge tone="neutral">مطلوب</Badge> : null}
           </legend>
           <div className="flex flex-wrap gap-2">
             {g.options.map((o) => (
@@ -86,19 +102,6 @@ export function ModifierPanel({
         onChange={(e) => setNote(e.target.value)}
         maxLength={60}
       />
-      <div className="flex items-center gap-3">
-        <Button onClick={add}>
-          أضف
-          {extra > 0 ? (
-            <span className="ms-2">
-              +<Money minor={extra} currency={currency} symbol={false} />
-            </span>
-          ) : null}
-        </Button>
-        <Button variant="secondary" onClick={onCancel}>
-          إلغاء
-        </Button>
-      </div>
-    </section>
+    </SalePanel>
   );
 }

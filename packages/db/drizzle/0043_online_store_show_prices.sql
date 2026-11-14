@@ -1,0 +1,1 @@
+ALTER TABLE "online_stores" ADD COLUMN "show_prices" boolean DEFAULT true NOT NULL;

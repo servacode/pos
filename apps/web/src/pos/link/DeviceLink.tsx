@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice } from '@serva/core';
+import { parsePairingQr, type ActivateDeviceInput, type ActivatedDevice, type DeviceKind } from '@serva/core';
 import type { SyncStore } from '@serva/sync/client';
-import { Alert } from '@serva/ui';
+import { Alert, DeviceIcon, IconChip } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
+import { DEVICE_KIND_LABELS } from '../../lib/devices';
 import { deviceStore } from '../../offline/database';
 import {
   clearPendingLink,
@@ -33,13 +34,20 @@ interface DeviceLinkProps {
   onLinked: () => void;
   store?: SyncStore;
   helpers?: LinkHelpers;
+  /** What this device is for: a till by default; the kitchen and waiter screens link as theirs */
+  kind?: DeviceKind;
 }
 
 /**
  * «ربط الجهاز» (12, kit cashier/DeviceLink): shown by the cashier while this device has no
  * activated record. Nothing is asked of the server until the person picks a way and goes on.
  */
-export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelpers }: DeviceLinkProps) {
+export function DeviceLink({
+  onLinked,
+  store = deviceStore(),
+  helpers = linkHelpers,
+  kind = 'cashier',
+}: DeviceLinkProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [stage, setStage] = useState<Stage>({ step: 'loading' });
@@ -80,7 +88,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
       const { publicKey } = await helpers.createDeviceKeys(store);
       const device = {
         name: named.name,
-        kind: 'cashier' as const,
+        kind,
         platform: 'browser' as const,
         publicKey,
         appVersion: APP_VERSION,
@@ -148,8 +156,13 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
 
   return (
     <div className="flex w-full flex-col items-center gap-8">
-      <div className="flex w-full max-w-6xl flex-wrap items-center justify-between gap-4">
-        <p className="text-lg font-semibold text-ink">إعداد جهاز الكاشير</p>
+      <div className="flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-card border border-line bg-surface px-5 py-3 shadow-e1">
+        <p className="flex items-center gap-3 font-semibold text-ink">
+          <IconChip size="sm">
+            <DeviceIcon size={16} />
+          </IconChip>
+          {kind === 'cashier' ? 'إعداد جهاز الكاشير' : `إعداد ${DEVICE_KIND_LABELS[kind]}`}
+        </p>
         <LinkSteps current={stage.step} ownerSignedIn={ownerSignedIn} />
       </div>
 
@@ -163,6 +176,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
         <MethodStep
           method={stage.method}
           initialCode={stage.code}
+          kind={kind}
           onMethodChange={(method) => setStage({ step: 'method', method })}
           onNext={(credentials) => {
             setError(null);
@@ -178,6 +192,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
           error={error}
           onBack={() => leaveName(stage.credentials)}
           onSubmit={(named) => void activate(stage.credentials, named)}
+          kind={kind}
         />
       ) : null}
 
@@ -190,6 +205,7 @@ export function DeviceLink({ onLinked, store = deviceStore(), helpers = linkHelp
             )
           }
           onRestart={(method) => void restart(method)}
+          kind={kind}
         />
       ) : null}
 

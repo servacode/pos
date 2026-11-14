@@ -37,7 +37,7 @@ export function optionOrder(values: { value: string; position: number }[]): stri
     .map((x) => x.v);
 }
 
-async function branchesOf(tx: Transaction, auth: AccessClaims, branchId: string | undefined) {
+export async function branchesOf(tx: Transaction, auth: AccessClaims, branchId: string | undefined) {
   const scope = await permissionScope(tx, auth.userId, 'report.view');
   if (branchId) {
     if (!inScope(scope, branchId)) throw forbidden();
@@ -58,6 +58,7 @@ export function merchandiseReport(
     to: string;
     branchId?: string;
     categoryId?: string;
+    season?: string;
     idleDays: number;
     lowQty: number;
   },
@@ -80,6 +81,8 @@ export function merchandiseReport(
             union all select c.id from categories c join tree t on c.parent_id = t.id
           ) select id from tree)`
         : sql`true`;
+    // One season («صيف 2026»); every product otherwise
+    const inSeason = (column: SQL): SQL => (query.season ? sql`${column} = ${query.season}` : sql`true`);
     const cost = await permissionScope(tx, auth.userId, 'cost.view');
     const canCost = cost.all || (ids !== null && ids.every((id) => cost.branchIds.has(id)));
     if (canCost) await costPending(tx, auth.tenantId);
@@ -95,6 +98,7 @@ export function merchandiseReport(
         join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
         where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`)}
           and ${inCategory(sql`(select p.category_id from products p where p.id = l.product_id)`)}
+          and ${inSeason(sql`(select p.season from products p where p.id = l.product_id)`)}
         group by l.variant_id
       ),
       back as (
@@ -103,6 +107,7 @@ export function merchandiseReport(
         join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
         where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
           and ${inCategory(sql`(select p.category_id from variants v2 join products p on p.id = v2.product_id where v2.id = rl.variant_id)`)}
+          and ${inSeason(sql`(select p.season from variants v2 join products p on p.id = v2.product_id where v2.id = rl.variant_id)`)}
         group by rl.variant_id
       )`;
 
@@ -227,13 +232,14 @@ export function merchandiseReport(
       left join last_sold ls on ls.variant_id = k.variant_id
       left join last_in li on li.variant_id = k.variant_id
       where coalesce(ls.d, '1900-01-01'::date) < ${cutoff} and coalesce(li.d, '1900-01-01'::date) < ${cutoff}
-        and ${inCategory(sql`p.category_id`)}
+        and ${inCategory(sql`p.category_id`)} and ${inSeason(sql`p.season`)}
       order by greatest(ls.d, li.d) nulls first, name, k.variant_id
       limit 300`);
 
     const sellers = await tx.execute<{
       id: string;
       name: string | null;
+      bp: number | null;
       n: string;
       total: string;
       back: string;
@@ -250,7 +256,8 @@ export function merchandiseReport(
         where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
         group by 1
       )
-      select s.id, u.full_name as name, s.n::text as n, s.total::text as total, coalesce(b.total, 0)::text as back
+      select s.id, u.full_name as name, u.commission_bp as bp, s.n::text as n, s.total::text as total,
+             coalesce(b.total, 0)::text as back
       from sold s left join back b on b.id = s.id left join users u on u.id = s.id
       order by s.total desc, s.id`);
 
@@ -259,6 +266,7 @@ export function merchandiseReport(
       product_id: string;
       name: string;
       label: string | null;
+      attributes: { name: string; value: string }[];
       stock: string;
       sold: string;
       min: string | null;
@@ -268,19 +276,23 @@ export function merchandiseReport(
         select variant_id, sum(qty) as qty from stock_levels
         where ${inBranches(sql`branch_id`)} group by variant_id
       )
-      select v.id as variant_id, v.product_id, p.name_ar as name, v.label,
+      select v.id as variant_id, v.product_id, p.name_ar as name, v.label, v.attributes,
              coalesce(k.qty, 0)::text as stock, coalesce(s.qty, 0)::text as sold, v.min_stock_qty::text as min
       from variants v
       join products p on p.id = v.product_id
       left join stock k on k.variant_id = v.id
       left join sold s on s.variant_id = v.id
       where v.archived_at is null and p.archived_at is null and p.type = 'stock'
-        and ${inCategory(sql`p.category_id`)}
+        and ${inCategory(sql`p.category_id`)} and ${inSeason(sql`p.season`)}
         and ((v.min_stock_qty is not null and coalesce(k.qty, 0) <= v.min_stock_qty)
           or (v.min_stock_qty is null and coalesce(s.qty, 0) > 0
               and coalesce(k.qty, 0) <= ${query.lowQty * 1000}))
       order by coalesce(s.qty, 0) desc, coalesce(k.qty, 0), p.name_ar, v.sort_order
       limit 100`);
+
+    const seasonRows = await tx.execute<{ season: string }>(sql`
+      select distinct season from products where season is not null and archived_at is null
+      order by season limit 200`);
 
     const departments = await tx.execute<{
       id: string | null;
@@ -354,6 +366,7 @@ export function merchandiseReport(
         productId: r.product_id,
         name: r.name,
         label: r.label,
+        attributes: r.attributes,
         stockQty: num(r.stock),
         soldQty: num(r.sold),
         minStockQty: r.min === null ? null : num(r.min),
@@ -372,7 +385,9 @@ export function merchandiseReport(
         invoiceCount: num(r.n),
         totalMinor: num(r.total),
         returnedMinor: num(r.back),
+        commissionBp: r.bp,
       })),
+      seasons: seasonRows.map((r) => r.season),
     };
   });
 }

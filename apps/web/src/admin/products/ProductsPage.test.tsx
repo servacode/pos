@@ -41,6 +41,34 @@ function openProducts(routes: Routes = {}, permissions?: Permission[], path = '/
   return { ...mock, ...renderApp(path) };
 }
 
+describe('/products list on a phone and the export', () => {
+  it('shows cards instead of a table that does not fit, with price, stock and category on each', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      openProducts();
+      const cards = await screen.findByRole('list', { name: 'المنتجات' });
+      expect(screen.queryByRole('table', { name: 'المنتجات' })).not.toBeInTheDocument();
+      const first = within(cards).getAllByRole('listitem')[0]!;
+      expect(first).toHaveTextContent('حليب المراعي 1 لتر');
+      expect(first).toHaveTextContent('ألبان وأجبان');
+      expect(shownText(first)).toContain('150 ل.س');
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('offers «صدّر Excel/CSV» for the whole search', async () => {
+    openProducts();
+    expect(await screen.findByRole('button', { name: 'صدّر Excel/CSV' })).toBeInTheDocument();
+  });
+});
+
 describe('/products list', () => {
   it('shows each product with its category, price, stock and barcode, and the menu item active', async () => {
     openProducts();

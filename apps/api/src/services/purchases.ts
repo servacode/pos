@@ -61,8 +61,8 @@ import {
   type StockKey,
 } from './costing';
 import { postEntry, type DraftLine } from './posting';
-import { refreshExpiry } from './expiry';
-import { receiveSerials } from './serials';
+import { recordBatchMovements, refreshBatches, batchPool, requiringExpiry, takeBatches } from './batches';
+import { outgoingSerials, receiveSerials, relocateSerials, returnSerialsToSupplier } from './serials';
 
 /**
  * Suppliers, purchases, payments to suppliers, counts, the stock's value and the profit
@@ -77,15 +77,15 @@ import { receiveSerials } from './serials';
 
 const newId = createUuidV7();
 const notFound = (what: string) => new AppError(404, 'not_found', `${what} غير موجود.`);
-const invalid = (fields: Record<string, string>) =>
+export const invalid = (fields: Record<string, string>) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', fields);
 
-async function baseCurrency(tx: Transaction): Promise<CurrencyCode> {
+export async function baseCurrency(tx: Transaction): Promise<CurrencyCode> {
   const [row] = await tx.execute<{ base: string }>(sql`select base_currency as base from tenant_settings`);
   return (row?.base ?? 'SYP') as CurrencyCode;
 }
 
-async function branchOf(tx: Transaction, branchId: string | undefined): Promise<string> {
+export async function branchOf(tx: Transaction, branchId: string | undefined): Promise<string> {
   const [row] = branchId
     ? await tx.select({ id: branches.id }).from(branches).where(eq(branches.id, branchId))
     : await tx.select({ id: branches.id }).from(branches).orderBy(asc(branches.code)).limit(1);
@@ -94,7 +94,12 @@ async function branchOf(tx: Transaction, branchId: string | undefined): Promise<
 }
 
 /** The next number of a dashboard series this year: «PUR-2026-000001». */
-async function nextNumber(tx: Transaction, tenantId: string, series: string, date: string): Promise<string> {
+export async function nextNumber(
+  tx: Transaction,
+  tenantId: string,
+  series: string,
+  date: string,
+): Promise<string> {
   const year = Number(date.slice(0, 4));
   const [row] = await tx
     .insert(documentSequences)
@@ -169,37 +174,49 @@ export async function saveSupplier(
 ): Promise<SupplierRow> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'purchases.manage');
-    const fields = {
-      name: input.name,
-      ...(input.phone !== undefined ? { phone: input.phone } : {}),
-      ...(input.notes !== undefined ? { notes: input.notes } : {}),
-      ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
-    };
-    const supplierId = id ?? newId();
-    if (id) {
-      const [found] = await tx
-        .update(suppliers)
-        .set({ ...fields, updatedAt: now })
-        .where(eq(suppliers.id, id))
-        .returning();
-      if (!found) throw notFound('هذا المورد');
-    } else {
-      await tx.insert(suppliers).values({ tenantId: auth.tenantId, id: supplierId, ...fields });
-    }
-    await audit(
-      tx,
-      {
-        tenantId: auth.tenantId,
-        userId: auth.userId,
-        action: id ? 'supplier.update' : 'supplier.create',
-        entity: 'supplier',
-        entityId: supplierId,
-        changes: { name: [null, input.name] },
-      },
-      meta,
-    );
-    return (await supplierRows(tx, supplierId))[0]!;
+    return saveSupplierTx(tx, auth, id, input, meta, now);
   });
+}
+
+/** The write of saveSupplier inside the caller's transaction (the import); permission checked by the caller. */
+export async function saveSupplierTx(
+  tx: Transaction,
+  auth: AccessClaims,
+  id: string | null,
+  input: SupplierInput,
+  meta: RequestMeta,
+  now: Date,
+): Promise<SupplierRow> {
+  const fields = {
+    name: input.name,
+    ...(input.phone !== undefined ? { phone: input.phone } : {}),
+    ...(input.notes !== undefined ? { notes: input.notes } : {}),
+    ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
+  };
+  const supplierId = id ?? newId();
+  if (id) {
+    const [found] = await tx
+      .update(suppliers)
+      .set({ ...fields, updatedAt: now })
+      .where(eq(suppliers.id, id))
+      .returning();
+    if (!found) throw notFound('هذا المورد');
+  } else {
+    await tx.insert(suppliers).values({ tenantId: auth.tenantId, id: supplierId, ...fields });
+  }
+  await audit(
+    tx,
+    {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      action: id ? 'supplier.update' : 'supplier.create',
+      entity: 'supplier',
+      entityId: supplierId,
+      changes: { name: [null, input.name] },
+    },
+    meta,
+  );
+  return (await supplierRows(tx, supplierId))[0]!;
 }
 
 // ─── Purchases ───────────────────────────────────────────────────────────────
@@ -276,7 +293,7 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
 }
 
 /** Moves stock for a dashboard document (purchase or count), once per line. */
-async function moveStock(
+export async function moveStock(
   tx: Transaction,
   tenantId: string,
   branchId: string,
@@ -324,6 +341,15 @@ export async function createPurchase(
     );
     const missing = input.lines.findIndex((l) => !names.has(l.variantId));
     if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
+    // An item that «يتطلب صلاحية» is not received without its expiry date
+    const dated = await requiringExpiry(
+      tx,
+      input.lines.map((l) => l.variantId),
+    );
+    const undated = input.lines.findIndex((l) => dated.has(l.variantId) && !l.expiryDate);
+    if (undated >= 0) {
+      throw invalid({ [`lines.${undated}.expiryDate`]: 'هذا الصنف يتطلب تاريخ صلاحية. اكتبه قبل الحفظ' });
+    }
 
     // What was sold until now is costed at the old average first
     await costPending(tx, auth.tenantId);
@@ -358,9 +384,24 @@ export async function createPurchase(
       })),
     );
     await moveStock(tx, auth.tenantId, branchId, id, 'purchase', input.date, lines);
-    await receiveSerials(tx, auth.tenantId, id, input.lines);
-    await refreshExpiry(
+    await receiveSerials(tx, auth.tenantId, id, branchId, input.lines);
+    // A batch's receipt: its own line in the batch ledger (the same item twice is two batches)
+    await recordBatchMovements(
       tx,
+      { tenantId: auth.tenantId, branchId, kind: 'receipt', docId: id, date: input.date },
+      lines
+        .filter((l) => l.batchNo || l.expiryDate)
+        .map((l) => ({
+          variantId: l.variantId,
+          batchNo: l.batchNo ?? null,
+          expiry: l.expiryDate ?? null,
+          qty: l.qty,
+          lineNo: l.lineNo,
+        })),
+    );
+    await refreshBatches(
+      tx,
+      [branchId],
       lines.map((l) => l.variantId),
     );
 
@@ -495,6 +536,14 @@ export async function paySupplier(
     await requirePermission(tx, auth.userId, 'purchases.manage');
     const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
     if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
+    const owed = (await supplierRows(tx, supplier.id))[0]!.balanceMinor;
+    if (input.amountMinor > Math.max(0, owed) && !input.advance) {
+      const message =
+        owed > 0
+          ? 'المبلغ أكبر مما للمورد عليك. إن كانت دفعة مقدّمة فأكّد ذلك'
+          : 'لا شيء مستحق لهذا المورد الآن. إن كانت دفعة مقدّمة فأكّد ذلك';
+      throw new AppError(409, 'conflict', message, { amountMinor: message });
+    }
     const id = newId();
     const number = await nextNumber(tx, auth.tenantId, 'PAY', input.date);
     await tx.insert(supplierPayments).values({
@@ -504,7 +553,8 @@ export async function paySupplier(
       supplierId: supplier.id,
       businessDate: input.date,
       amountMinor: input.amountMinor,
-      method: input.method,
+      method: input.cheque ? 'bank' : input.method,
+      cheque: input.cheque ?? null,
       note: input.note ?? null,
       createdBy: auth.userId,
     });
@@ -529,7 +579,7 @@ export async function paySupplier(
           memo: supplier.name,
         },
         {
-          account: PAY_ACCOUNT(input.method, currency),
+          account: PAY_ACCOUNT(input.cheque ? 'bank' : input.method, currency),
           baseMinor: -input.amountMinor,
           currency,
           amountMinor: -input.amountMinor,
@@ -555,7 +605,7 @@ export async function paySupplier(
       supplierId: supplier.id,
       date: input.date,
       amountMinor: input.amountMinor,
-      method: input.method,
+      method: input.cheque ? 'bank' : input.method,
     };
   });
 }
@@ -622,6 +672,36 @@ export async function createStocktake(
     if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
     await costPending(tx, auth.tenantId);
 
+    // A line with a batch counts (or writes off) that batch alone: the item's stock moves by the
+    // batch's difference. A line without one counts the whole item. An item is counted one way.
+    const isBatchLine = (l: (typeof input.lines)[number]) => Boolean(l.batchNo || l.expiryDate);
+    const wholeCounted = new Set(input.lines.filter((l) => !isBatchLine(l)).map((l) => l.variantId));
+    const mixed = input.lines.findIndex((l) => isBatchLine(l) && wholeCounted.has(l.variantId));
+    if (mixed >= 0) {
+      throw invalid({ [`lines.${mixed}.batchNo`]: 'عُدّ الصنف كاملاً أو دفعةً دفعة، لا الاثنين معاً' });
+    }
+    const batchLines = input.lines.filter(isBatchLine);
+    const pool = await batchPool(
+      tx,
+      branchId,
+      batchLines.map((l) => l.variantId),
+    );
+    const deltas: { variantId: string; batchNo: string | null; expiry: string | null; delta: number }[] = [];
+    for (const l of batchLines) {
+      const held = (pool.get(l.variantId) ?? []).find(
+        (b) => (b.batchNo ?? '') === (l.batchNo ?? '') && (b.expiry ?? null) === (l.expiryDate ?? null),
+      );
+      deltas.push({
+        variantId: l.variantId,
+        batchNo: l.batchNo ?? null,
+        expiry: l.expiryDate ?? null,
+        delta: l.countedQty - Math.max(0, held?.qty ?? 0),
+      });
+    }
+    const wholeLines = input.lines.filter((l) => !isBatchLine(l));
+    const sums = new Map<string, number>();
+    for (const d of deltas) sums.set(d.variantId, (sums.get(d.variantId) ?? 0) + d.delta);
+
     const levels = await tx
       .select({ variantId: stockLevels.variantId, qty: stockLevels.qty })
       .from(stockLevels)
@@ -632,13 +712,23 @@ export async function createStocktake(
         ),
       );
     const expected = new Map(levels.map((l) => [l.variantId, l.qty]));
-    const keys: StockKey[] = input.lines.map((l) => stockKey(branchId, l.variantId));
+    const keys: StockKey[] = [...new Set(input.lines.map((l) => l.variantId))].map((v) =>
+      stockKey(branchId, v),
+    );
     const values = await loadValues(tx, auth.tenantId, keys);
     const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
 
+    // One count line per item: the counted total of a whole count, or the stock plus its batches' differences
+    const countLines: { variantId: string; countedQty: number }[] = [
+      ...wholeLines.map((l) => ({ variantId: l.variantId, countedQty: l.countedQty })),
+      ...[...sums].map(([variantId, delta]) => ({
+        variantId,
+        countedQty: Math.max(0, (expected.get(variantId) ?? 0) + delta),
+      })),
+    ];
     const rows: StocktakeLineRow[] = [];
     const moves: { lineNo: number; variantId: string; qty: number }[] = [];
-    for (const [i, l] of input.lines.entries()) {
+    for (const [i, l] of countLines.entries()) {
       const was = expected.get(l.variantId) ?? 0;
       const diff = l.countedQty - was;
       const key = stockKey(branchId, l.variantId);
@@ -679,8 +769,36 @@ export async function createStocktake(
       createdBy: auth.userId,
     });
     await moveStock(tx, auth.tenantId, branchId, id, 'stocktake', input.date, moves);
-    await refreshExpiry(
+    // The batch ledger: a batch's own count or write-off, and a whole-item loss taken earliest-expiry first
+    const lineOf = new Map(moves.map((m) => [m.variantId, m.lineNo]));
+    const ledger = [
+      ...deltas.map((d, n) => ({
+        variantId: d.variantId,
+        batchNo: d.batchNo,
+        expiry: d.expiry,
+        qty: d.delta,
+        lineNo: lineOf.get(d.variantId)!,
+        allocNo: n,
+      })),
+      ...(
+        await takeBatches(
+          tx,
+          branchId,
+          moves
+            .filter((m) => m.qty < 0 && wholeCounted.has(m.variantId))
+            .map((m) => ({ lineNo: m.lineNo, variantId: m.variantId, qty: -m.qty })),
+          () => 'lines',
+        )
+      ).map((r) => ({ ...r, qty: -r.qty })),
+    ];
+    await recordBatchMovements(
       tx,
+      { tenantId: auth.tenantId, branchId, kind: 'count', docId: id, date: input.date },
+      ledger,
+    );
+    await refreshBatches(
+      tx,
+      [branchId],
       moves.map((m) => m.variantId),
     );
     const currency = await baseCurrency(tx);
@@ -734,6 +852,8 @@ export async function createTransfer(
     const missing = input.lines.findIndex((l) => !names.has(l.variantId));
     if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
     await costPending(tx, auth.tenantId);
+    // A tracked product travels with its serial numbers, which move to the receiving branch
+    const outgoing = await outgoingSerials(tx, from, input.lines);
 
     const keys: StockKey[] = input.lines.flatMap((l) => [
       stockKey(from, l.variantId),
@@ -777,12 +897,31 @@ export async function createTransfer(
       valueMinor,
       createdBy: auth.userId,
     });
+    await relocateSerials(tx, outgoing, to);
     const moves = (sign: 1 | -1) =>
       input.lines.map((l, i) => ({ lineNo: i + 1, variantId: l.variantId, qty: sign * l.qty }));
     await moveStock(tx, auth.tenantId, from, id, 'transfer', input.date, moves(-1));
     await moveStock(tx, auth.tenantId, to, inId, 'transfer', input.date, moves(1));
-    await refreshExpiry(
+    // The same batches leave the sender and arrive at the receiver (earliest expiry first when none is named)
+    const sent = await takeBatches(
       tx,
+      from,
+      input.lines.map((l, i) => ({ ...l, lineNo: i + 1 })),
+      (i) => `lines.${i}.qty`,
+    );
+    await recordBatchMovements(
+      tx,
+      { tenantId: auth.tenantId, branchId: from, kind: 'transfer_out', docId: id, date: input.date },
+      sent.map((r) => ({ ...r, qty: -r.qty })),
+    );
+    await recordBatchMovements(
+      tx,
+      { tenantId: auth.tenantId, branchId: to, kind: 'transfer_in', docId: inId, date: input.date },
+      sent,
+    );
+    await refreshBatches(
+      tx,
+      [from, to],
       input.lines.map((l) => l.variantId),
     );
     const currency = await baseCurrency(tx);
@@ -937,6 +1076,8 @@ export async function createSupplierReturn(
         costMinor,
       });
     }
+    // A tracked product goes back with its serial numbers: they leave the store's stock
+    const outgoing = await outgoingSerials(tx, branchId, input.lines);
     await saveValues(tx, auth.tenantId, values);
 
     const id = newId();
@@ -958,6 +1099,7 @@ export async function createSupplierReturn(
       costMinor,
       createdBy: auth.userId,
     });
+    await returnSerialsToSupplier(tx, outgoing);
     await moveStock(
       tx,
       auth.tenantId,
@@ -967,8 +1109,21 @@ export async function createSupplierReturn(
       input.date,
       input.lines.map((l, i) => ({ lineNo: i + 1, variantId: l.variantId, qty: -l.qty })),
     );
-    await refreshExpiry(
+    // The batch named goes down by what goes back to the supplier (else earliest expiry first)
+    const sentBack = await takeBatches(
       tx,
+      branchId,
+      input.lines.map((l, i) => ({ ...l, lineNo: i + 1 })),
+      (i) => `lines.${i}.batchNo`,
+    );
+    await recordBatchMovements(
+      tx,
+      { tenantId: auth.tenantId, branchId, kind: 'supplier_return', docId: id, date: input.date },
+      sentBack.map((r) => ({ ...r, qty: -r.qty })),
+    );
+    await refreshBatches(
+      tx,
+      [branchId],
       input.lines.map((l) => l.variantId),
     );
 

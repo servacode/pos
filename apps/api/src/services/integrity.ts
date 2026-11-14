@@ -355,7 +355,8 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
       select branch_id, business_date, 'net', -(total_minor - tax_minor)
       from sale_returns where tenant_id = ${tenantId}
       union all select branch_id, business_date, 'tax', -tax_minor from sale_returns where tenant_id = ${tenantId}
-      union all select branch_id, business_date, 'pay:' || refund_method, -total_minor
+      union all select branch_id, business_date,
+        'pay:' || case when refund_method = 'account' then 'credit' else refund_method end, -total_minor
       from sale_returns where tenant_id = ${tenantId} and refund_method is not null`
     : sql``;
   const rows = await tx.execute<{

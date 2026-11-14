@@ -251,3 +251,110 @@ describe('a customer added on the till', () => {
     expect(JSON.stringify(pulled.json())).toContain('أم سامر');
   });
 });
+
+describe('money taken from the admin: a payment and an opening debt', () => {
+  const pay = (store: Pick<Store, 'accessToken'>, id: string, body: Record<string, unknown>) =>
+    app.inject({ method: 'POST', url: `/v1/customers/${id}/payments`, headers: as(store), payload: body });
+
+  it('an opening debt and a payment move the balance, post balanced entries and show in the statement', async () => {
+    const store = await openStore(app);
+    const c = await addCustomer(store, { name: 'أبو خالد' });
+
+    const debt = await app.inject({
+      method: 'POST',
+      url: `/v1/customers/${c.id}/opening-debt`,
+      headers: as(store),
+      payload: { amountMinor: 80_000, date: '2026-11-01' },
+    });
+    expect(debt.statusCode, debt.body).toBe(201);
+    expect(debt.json()).toMatchObject({
+      kind: 'opening_debt',
+      balanceBeforeMinor: 0,
+      balanceAfterMinor: 80_000,
+    });
+
+    const paid = await pay(store, c.id, {
+      amountMinor: 30_000,
+      method: 'cash',
+      note: 'دفعة أولى',
+      date: '2026-11-02',
+    });
+    expect(paid.statusCode, paid.body).toBe(201);
+    const voucher = paid.json<{ number: string; balanceBeforeMinor: number; balanceAfterMinor: number }>();
+    expect(voucher.number).toMatch(/^RCA-\d{4}-000001$/);
+    expect(voucher).toMatchObject({ balanceBeforeMinor: 80_000, balanceAfterMinor: 50_000 });
+
+    const bank = await pay(store, c.id, {
+      amountMinor: 10_000,
+      method: 'transfer',
+      reference: 'TR-77',
+      date: '2026-11-03',
+    });
+    expect(bank.statusCode, bank.body).toBe(201);
+
+    const detail = (
+      await app.inject({ method: 'GET', url: `/v1/customers/${c.id}`, headers: as(store) })
+    ).json<CustomerDetail>();
+    expect(detail.balanceMinor).toBe(40_000);
+    expect(detail.statement.map((l) => [l.debitMinor, l.creditMinor])).toEqual([
+      [80_000, 0],
+      [0, 30_000],
+      [0, 10_000],
+    ]);
+
+    // The money went to the safe and the bank, against 1200; the entries balance
+    const rows = await ownerDb()<{ code: string; debit: string; credit: string }[]>`
+      select a.code, sum(l.debit_minor)::text as debit, sum(l.credit_minor)::text as credit
+      from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+      where l.tenant_id = ${store.tenantId} group by a.code order by a.code`;
+    const by = Object.fromEntries(rows.map((r) => [r.code, [Number(r.debit), Number(r.credit)]]));
+    const safe = Object.entries(by).find(([code]) => code.startsWith('1120'));
+    expect(safe?.[1]).toEqual([30_000, 0]);
+    expect(by['1130']).toEqual([10_000, 0]);
+    expect(by['1200']).toEqual([80_000, 40_000]);
+    expect(by['3900']).toEqual([0, 80_000]);
+    const report = await withTenant(appDb().db, store.tenantId, (tx) => checkIntegrity(tx, store.tenantId));
+    expect(report.checks.flatMap((x) => x.problems)).toEqual([]);
+  });
+
+  it('a payment sent twice with the same id posts once; wrong input and wrong people are refused in Arabic', async () => {
+    const store = await openStore(app);
+    const c = await addCustomer(store, { name: 'زبون' });
+    const id = '0190e2b0-0000-7000-8000-000000000001';
+    const first = await pay(store, c.id, { id, amountMinor: 5_000, method: 'cash' });
+    const again = await pay(store, c.id, { id, amountMinor: 5_000, method: 'cash' });
+    expect(first.statusCode).toBe(201);
+    expect(again.statusCode).toBe(201);
+    const [count] = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from journal_entries where tenant_id = ${store.tenantId} and source_id = ${id}`;
+    expect(count?.n).toBe('1');
+
+    const noRef = await pay(store, c.id, { amountMinor: 5_000, method: 'transfer' });
+    expect(noRef.statusCode).toBe(400);
+    expect(noRef.json().error.fields.reference).toBe('اكتب رقم الحوالة أو العملية');
+    const zero = await pay(store, c.id, { amountMinor: 0, method: 'cash' });
+    expect(zero.statusCode).toBe(400);
+    expect(JSON.stringify(zero.json())).not.toContain('Invalid');
+    const missing = await pay(store, '0190e2b0-0000-7000-8000-0000000000ff', {
+      amountMinor: 5,
+      method: 'cash',
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const cashier = await staffUser(
+      app,
+      { ...store, branchId: store.device.branchId },
+      'cashier',
+      '0944000003',
+    );
+    // A cashier may take a payment (receipt.create) but not post an opening balance (accounting.post)
+    expect((await pay(cashier, c.id, { amountMinor: 1_000, method: 'cash' })).statusCode).toBe(201);
+    const denied = await app.inject({
+      method: 'POST',
+      url: `/v1/customers/${c.id}/opening-debt`,
+      headers: as(cashier),
+      payload: { amountMinor: 1_000 },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+});

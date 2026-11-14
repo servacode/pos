@@ -54,3 +54,22 @@ export async function withTenant<T>(
     return fn(tx);
   });
 }
+
+/**
+ * withTenant as one consistent, read-only picture of the store (repeatable read): every query of
+ * `fn` sees the data of the same instant. For long reads that must agree with each other, such as
+ * the store export; it cannot write.
+ */
+export async function withTenantSnapshot<T>(
+  db: Database,
+  tenantId: string,
+  fn: (tx: Transaction) => Promise<T>,
+): Promise<T> {
+  return db.transaction(
+    async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      return fn(tx);
+    },
+    { isolationLevel: 'repeatable read', accessMode: 'read only' },
+  );
+}

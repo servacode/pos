@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import type { Category, MerchandiseReport, OptionSales } from '@serva/core';
+import { formatMoney, type Category, type MerchandiseReport, type OptionSales } from '@serva/core';
 import {
   Alert,
   Badge,
+  BarChart,
+  Card,
   DataTable,
   formatQuantity,
   Money,
+  PageHeader,
+  ReportsIcon,
   SegmentedControl,
   Select,
   StatTile,
   TextField,
+  useDigits,
   type DataColumn,
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
@@ -30,9 +35,9 @@ export function daysAgo(days: number, from: Date = new Date()): string {
   return d.toLocaleDateString('en-CA');
 }
 
-export const getMerchandise = (from: string, to: string, idleDays: number, categoryId = '') =>
+export const getMerchandise = (from: string, to: string, idleDays: number, categoryId = '', season = '') =>
   apiFetch<MerchandiseReport>(
-    `/v1/reports/merchandise?from=${from}&to=${to}&idleDays=${idleDays}${categoryId ? `&categoryId=${categoryId}` : ''}`,
+    `/v1/reports/merchandise?from=${from}&to=${to}&idleDays=${idleDays}${categoryId ? `&categoryId=${categoryId}` : ''}${season ? `&season=${encodeURIComponent(season)}` : ''}`,
     { auth: true },
   );
 
@@ -77,6 +82,9 @@ export function MerchandisePage() {
   const [departments, setDepartments] = useState<Category[]>([]);
   const [department, setDepartment] = useState('');
   const [commission, setCommission] = useState(readCommission);
+  const [season, setSeason] = useState('');
+  // The seasons are kept once known, so the filter stays when a season shows nothing
+  const [seasons, setSeasons] = useState<string[]>([]);
   useEffect(() => {
     listCategories()
       .then((r) => setDepartments(r.items.filter((c) => c.parentId === null && !c.archivedAt)))
@@ -89,12 +97,16 @@ export function MerchandisePage() {
   const load = useCallback(() => {
     setError(null);
     setData(null);
-    getMerchandise(daysAgo(Number(period)), daysAgo(0), Number(idle), department)
-      .then(setData)
+    getMerchandise(daysAgo(Number(period)), daysAgo(0), Number(idle), department, season)
+      .then((report) => {
+        setData(report);
+        setSeasons((known) => (report.seasons?.length ? report.seasons : known));
+      })
       .catch((e: unknown) => setError(errorMessage(e)));
-  }, [period, idle, department]);
+  }, [period, idle, department, season]);
   useEffect(load, [load]);
 
+  const digits = useDigits();
   const base = data?.baseCurrency ?? 'SYP';
   const optionColumns: DataColumn<OptionSales>[] = [
     { key: 'value', header: 'القيمة', cell: (r) => <span className="font-semibold">{r.value}</span> },
@@ -165,16 +177,16 @@ export function MerchandisePage() {
 
   return (
     <AppShell>
-      <title>حركة الأصناف · Serva POS</title>
+      <title>حركة الأصناف · SERFA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold text-ink">حركة الأصناف</h1>
-          <p className="text-ink-muted">
-            ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف.
-          </p>
-        </div>
+        <PageHeader
+          className="print:hidden"
+          icon={<ReportsIcon />}
+          title="حركة الأصناف"
+          description="ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف."
+        />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <div className="flex flex-wrap gap-4">
+        <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">
           {departments.length > 0 ? (
             <Select
               label="القسم"
@@ -199,6 +211,16 @@ export function MerchandisePage() {
               label: PERIODS[value],
             }))}
           />
+          {seasons.length > 0 ? (
+            <Select label="الموسم" value={season} onChange={(e) => setSeason(e.target.value)}>
+              <option value="">كل المواسم</option>
+              {seasons.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+          ) : null}
           <SegmentedControl
             label="راكد إن لم يُبع ولم يصل منذ"
             value={idle}
@@ -208,7 +230,7 @@ export function MerchandisePage() {
               label: IDLE[value],
             }))}
           />
-        </div>
+        </Card>
         <div className="grid gap-4 sm:grid-cols-2">
           <StatTile
             label="قطع راكدة"
@@ -222,6 +244,26 @@ export function MerchandisePage() {
             />
           ) : null}
         </div>
+
+        {data && data.byDepartment.length > 1 ? (
+          <Card className="flex flex-col gap-3">
+            <h2 className="text-lg font-semibold text-ink">المبيعات حسب القسم</h2>
+            <BarChart
+              label="صافي المبيعات حسب القسم بعد المرتجع"
+              orientation="horizontal"
+              labels={data.byDepartment.map((d) => d.name)}
+              series={[
+                {
+                  key: 'net',
+                  label: 'الصافي',
+                  values: data.byDepartment.map((d) => d.totalMinor - d.returnedMinor),
+                },
+              ]}
+              formatValue={(value) => formatMoney(value, base, { digits })}
+              labelHeader="القسم"
+            />
+          </Card>
+        ) : null}
 
         {data && data.byDepartment.length > 0 ? (
           <DataTable
@@ -300,6 +342,7 @@ export function MerchandisePage() {
               <h2 className="flex-1 text-xl font-bold text-ink">المبيعات حسب البائع والعمولة</h2>
               <TextField
                 label="نسبة العمولة ٪"
+                hint="احتياطية: لمن لا نسبة له في صفحة الموظفين"
                 dir="ltr"
                 inputMode="decimal"
                 value={commission}
@@ -346,7 +389,10 @@ export function MerchandisePage() {
                   header: 'العمولة',
                   numeric: true,
                   cell: (r) => {
-                    const c = commissionOf(r.totalMinor, r.returnedMinor, commission);
+                    const c =
+                      r.commissionBp !== null && r.commissionBp !== undefined
+                        ? Math.round(((r.totalMinor - r.returnedMinor) * r.commissionBp) / 10_000)
+                        : commissionOf(r.totalMinor, r.returnedMinor, commission);
                     return c === null ? '—' : <Money minor={c} currency={base} className="font-bold" />;
                   },
                 },
@@ -359,7 +405,7 @@ export function MerchandisePage() {
 
         {data && data.lowStock.length > 0 ? (
           <DataTable
-            caption="قرّب يخلص"
+            caption="يوشك على النفاد"
             columns={[
               {
                 key: 'name',

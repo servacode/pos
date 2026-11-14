@@ -18,6 +18,11 @@ info() { printf '%s\n' "› $*"; }
 ok() { printf '%s\n' "${C_GREEN}✔${C_RESET} $*"; }
 warn() { printf '%s\n' "${C_YELLOW}!${C_RESET} $*" >&2; }
 die() {
+  # shellcheck disable=SC2034
+  # Kept for the EXIT trap of scripts that send an alert (alert.sh): what stopped the run
+  SERVA_LAST_ERROR="$*"
+  # A script that starts others (backup.sh runs offsite-s3.sh) collects their reasons here
+  if [[ -n "${SERVA_ERROR_FILE:-}" ]]; then printf '%s\n' "$*" >> "$SERVA_ERROR_FILE" || true; fi
   printf '%s\n' "${C_RED}✘ $*${C_RESET}" >&2
   exit 1
 }
@@ -118,6 +123,27 @@ SERVA_OFFSITE_DIR=
 SERVA_OFFSITE_KEEP=30
 # Daily backup time for pnpm local:schedule (24-hour HH:MM, this computer's clock)
 SERVA_BACKUP_TIME=02:17
+
+# Off-site copy in an S3-compatible bucket (Backblaze B2, Wasabi, Cloudflare R2, MinIO…): off while
+# SERVA_S3_BUCKET is empty. The files are encrypted before they leave this computer.
+SERVA_S3_ENDPOINT=
+SERVA_S3_BUCKET=
+SERVA_S3_ACCESS_KEY_ID=
+SERVA_S3_SECRET_ACCESS_KEY=
+SERVA_S3_PREFIX=serva-backups
+SERVA_S3_KEEP=30
+
+# Alerts (failed or stale backup, server down): a webhook that takes a POST — Slack, Discord,
+# Telegram (+ SERVA_ALERT_FORMAT=form) or the WhatsApp gateway. Off while empty. Test: pnpm local:alert test
+SERVA_ALERT_WEBHOOK_URL=
+# SERVA_ALERT_FORMAT=json
+# SERVA_ALERT_AUTH_HEADER=Authorization: Bearer …
+# SERVA_BACKUP_PING_URL=   (a dead-man's switch such as healthchecks.io, called after each good backup)
+
+# More ways to deliver sign-up codes (docs/local-server.md › إرسال الرمز عبر رسالة نصية SMS):
+# SERVA_OTP_DELIVERY=sms with SERVA_SMS_GATEWAY_URL (and _AUTH_HEADER, _BODY …); SERVA_OTP_FALLBACK=gateway
+# tries the WhatsApp bot when the SMS fails.
+# Error reports to a Sentry-compatible server (GlitchTip): SERVA_SENTRY_DSN=
 EOF
   )
   ok "Secrets created."

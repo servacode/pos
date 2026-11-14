@@ -11,6 +11,7 @@ import {
   products,
   promotions,
   roles,
+  serials,
   stockLevels,
   syncTombstones,
   taxRates,
@@ -24,6 +25,7 @@ import {
   type Database,
   type Transaction,
 } from '@serva/db';
+import type { PharmacySettings } from '@serva/core';
 import { CONTRACT_VERSION, INITIAL_CURSOR, type PullResponse, type PullSetPage } from '@serva/sync';
 import type { DeviceClaims } from '../auth/device-guard';
 import { AppError } from '../errors';
@@ -77,6 +79,19 @@ const PULL_SETS: Record<string, PullSet> = {
       scaleBarcode: tenantSettings.scaleBarcode,
       service: tenantSettings.service,
       loyalty: tenantSettings.loyalty,
+      // A pharmacy or medical-supplies store gets the defaults for what its owner never chose, so its
+      // tills enforce the batch rules (same as services/store.ts › pharmacyOf): the owner's values win
+      pharmacy: sql<PharmacySettings | null>`case
+        when exists (select 1 from tenants t
+                     where t.id = tenant_settings.tenant_id and 'pharmacy' = any(t.sectors))
+          then '{"prescription":"optional","blockNoBatch":true}'::jsonb || coalesce(tenant_settings.pharmacy, '{}'::jsonb)
+        when exists (select 1 from tenants t
+                     where t.id = tenant_settings.tenant_id and 'medical_supplies' = any(t.sectors))
+          then '{"prescription":"optional","autoBatch":true,"blockNoBatch":true}'::jsonb
+               || coalesce(tenant_settings.pharmacy, '{}'::jsonb)
+        else tenant_settings.pharmacy end`,
+      till: tenantSettings.till,
+      sectors: sql<string[]>`(select t.sectors from tenants t where t.id = tenant_settings.tenant_id)`,
       version: tenantSettings.version,
     },
   },
@@ -144,6 +159,8 @@ const PULL_SETS: Record<string, PullSet> = {
       taxRateId: products.taxRateId,
       sellOnPos: products.sellOnPos,
       genericName: products.genericName,
+      requiresPrescription: products.requiresPrescription,
+      controlled: products.controlled,
       tracksSerial: products.tracksSerial,
       warrantyMonths: products.warrantyMonths,
       modifiers: products.modifiers,
@@ -162,6 +179,7 @@ const PULL_SETS: Record<string, PullSet> = {
       attributes: variants.attributes,
       sortOrder: variants.sortOrder,
       nearestExpiry: variants.nearestExpiry,
+      shelfBatches: variants.shelfBatches,
       // Its colour's picture (or any option value it has) first, else the product's main one
       imageUrl: sql<string | null>`(
         select '/v1/images/' || i.tenant_id || '/' || i.upload_id || '?size=thumb'
@@ -201,6 +219,7 @@ const PULL_SETS: Record<string, PullSet> = {
       packQty: barcodes.packQty,
       packName: barcodes.packName,
       packPriceMinor: barcodes.packPriceMinor,
+      packWholesaleMinor: barcodes.packWholesaleMinor,
       version: barcodes.version,
     },
   },
@@ -249,6 +268,8 @@ const PULL_SETS: Record<string, PullSet> = {
       variantId: stockLevels.variantId,
       qty: stockLevels.qty,
       reservedQty: stockLevels.reservedQty,
+      // What is left of each batch here (03 › الصيدليات): the till allocates a sale from it
+      batches: stockLevels.batches,
       version: stockLevels.version,
     },
     // The device's own branch only (17 › السحب).
@@ -313,7 +334,8 @@ const PULL_SETS: Record<string, PullSet> = {
       daysOfWeek: promotions.daysOfWeek,
       fromTime: promotions.fromTime,
       toTime: promotions.toTime,
-      archived: archivedFlag(promotions.archivedAt),
+      // A coupon's offer is not for every sale: it reaches the till on the order that carries its code
+      archived: sql<boolean>`(${promotions.archivedAt} is not null or ${promotions.couponCode} is not null)`,
       version: promotions.version,
     },
   },
@@ -337,10 +359,29 @@ const PULL_SETS: Record<string, PullSet> = {
       depositCode: onlineOrders.depositCode,
       deliveryFeeMinor: onlineOrders.deliveryFeeMinor,
       deliveryArea: onlineOrders.deliveryArea,
+      couponRule: onlineOrders.couponRule,
       version: onlineOrders.version,
     },
     scope: () =>
       sql`${onlineOrders.status} <> 'pending' and (${onlineOrders.status} = 'accepted' or ${onlineOrders.decidedAt} > now() - interval '30 days')`,
+  },
+  // The branch's pieces of serial-tracked products, in stock or sold lately (03 › الإلكترونيات): the
+  // till refuses a number that is not in stock, offline too.
+  serials: {
+    table: serials,
+    id: serials.id,
+    tenantId: serials.tenantId,
+    columns: {
+      variantId: serials.variantId,
+      serial: serials.serial,
+      status: serials.status,
+      saleNumber: sql<
+        string | null
+      >`(select i.number from invoices i where i.tenant_id = serials.tenant_id and i.id = serials.sale_id)`,
+      version: serials.version,
+    },
+    scope: (device) =>
+      sql`${serials.branchId} = ${device.branchId} and (${serials.status} in ('in_stock', 'rented') or ${serials.soldOn} > current_date - 45)`,
   },
 };
 

@@ -24,5 +24,8 @@ apps/api/test/urls.ts
 apps/api/test/devices.ts
 apps/api/test/staff.ts
 packages/core/src/contracts/customers.ts
+packages/core/src/contracts/cheques.ts
+apps/api/src/services/batches.ts
 apps/api/src/services/expiry.ts
 apps/api/src/services/serials.ts
+apps/api/src/services/subscription-gate.ts

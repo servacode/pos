@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import type { CurrencyCode } from '../currencies';
-import { phoneSchema } from './auth';
-import { isoDateSchema, nonNegativeMinorSchema, uuidSchema } from './common';
+import { contactPhoneSchema } from './auth';
+import {
+  isoDateSchema,
+  nonNegativeMinorSchema,
+  positiveMinorSchema,
+  shortTextSchema,
+  uuidSchema,
+} from './common';
 
 /**
  * Customers and what they owe (09 › customers، party_balances; 10 › الذمم): the owner adds and
@@ -19,6 +25,17 @@ import { isoDateSchema, nonNegativeMinorSchema, uuidSchema } from './common';
 export const PRICE_TIERS = ['retail', 'wholesale'] as const;
 export type PriceTier = (typeof PRICE_TIERS)[number];
 
+/** What kind of customer: clinic, hospital, pharmacy, individual, government body */
+export const CUSTOMER_KINDS = ['clinic', 'hospital', 'pharmacy', 'individual', 'government'] as const;
+export type CustomerKind = (typeof CUSTOMER_KINDS)[number];
+export const CUSTOMER_KIND_LABELS: Record<CustomerKind, string> = {
+  clinic: 'عيادة',
+  hospital: 'مشفى',
+  pharmacy: 'صيدلية',
+  individual: 'فرد',
+  government: 'جهة حكومية',
+};
+
 const optionalText = (max: number, message: string) =>
   z
     .string()
@@ -30,10 +47,7 @@ const optionalText = (max: number, message: string) =>
 
 export const customerInput = z.object({
   name: z.string('اسم الزبون مطلوب').trim().min(2, 'اكتب اسم الزبون').max(120, 'الاسم طويل'),
-  phone: z
-    .union([z.literal('').transform(() => null), phoneSchema])
-    .nullable()
-    .optional(),
+  phone: contactPhoneSchema,
   taxNumber: optionalText(40, 'الرقم الضريبي طويل'),
   address: optionalText(200, 'العنوان طويل'),
   notes: optionalText(500, 'الملاحظات طويلة'),
@@ -43,6 +57,11 @@ export const customerInput = z.object({
   priceTier: z.enum(PRICE_TIERS).optional(),
   /** «لا يريد رسائل»: left out of every message to customers */
   noMessages: z.boolean().optional(),
+  /** «نوع الزبون»; null clears it */
+  kind: z.enum(CUSTOMER_KINDS).nullable().optional(),
+  /** The person to ask for at a clinic, hospital or office, and their phone */
+  contactName: optionalText(80, 'الاسم طويل'),
+  contactPhone: optionalText(30, 'الرقم طويل'),
   archived: z.boolean().optional(),
 });
 export type CustomerInput = z.output<typeof customerInput>;
@@ -54,6 +73,8 @@ export const customerListQuery = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .optional(),
+  /** Only customers of one kind */
+  kind: z.enum(CUSTOMER_KINDS).optional(),
 });
 
 /** `customers` pull set: what a till needs to find a customer and sell to them on credit */
@@ -79,6 +100,9 @@ export interface CustomerListItem {
   priceTier: PriceTier;
   noMessages: boolean;
   archived: boolean;
+  kind: CustomerKind | null;
+  contactName: string | null;
+  contactPhone: string | null;
 }
 
 export interface CustomerListResponse {
@@ -108,6 +132,67 @@ export interface CustomerDetail extends CustomerListItem {
   notes: string | null;
   createdAt: string;
   statement: StatementLine[];
+  baseCurrency: CurrencyCode;
+}
+
+// ─── Money from the admin: a payment received, a debt opened ────────────────────
+
+/** Where a payment received at the desk goes: the safe, the bank, a wallet, a card account. */
+export const CUSTOMER_PAYMENT_METHODS = ['cash', 'transfer', 'wallet', 'card'] as const;
+export type CustomerPaymentMethod = (typeof CUSTOMER_PAYMENT_METHODS)[number];
+
+export const CUSTOMER_PAYMENT_LABEL: Record<CustomerPaymentMethod, string> = {
+  cash: 'نقداً (الخزنة)',
+  transfer: 'حوالة بنكية',
+  wallet: 'محفظة إلكترونية',
+  card: 'بطاقة',
+};
+
+/**
+ *   POST /v1/customers/{id}/payments       customerPaymentInput → CustomerMoneyResult (receipt.create)
+ *   POST /v1/customers/{id}/opening-debt   customerOpeningDebtInput → CustomerMoneyResult (accounting.post)
+ *
+ * A payment is the receipt of 08 › سند قبض taken from the admin: Dr the safe (or the bank, wallet,
+ * card account), Cr 1200 for the customer. An opening debt is the opening balance of the import
+ * (Dr 1200 against 3900 الأرصدة الافتتاحية). Neither changes a posted entry.
+ */
+export const customerPaymentInput = z
+  .object({
+    amountMinor: positiveMinorSchema.max(1_000_000_000_000, 'المبلغ كبير جداً'),
+    method: z.enum(CUSTOMER_PAYMENT_METHODS, 'اختر طريقة الدفع'),
+    reference: shortTextSchema(64).nullable().optional(),
+    note: shortTextSchema(200).nullable().optional(),
+    date: isoDateSchema.optional(),
+    /** Sent again after a lost answer, it posts once */
+    id: uuidSchema.optional(),
+  })
+  .refine((p) => p.method === 'cash' || !!p.reference, {
+    path: ['reference'],
+    message: 'اكتب رقم الحوالة أو العملية',
+  });
+export type CustomerPaymentInput = z.output<typeof customerPaymentInput>;
+
+export const customerOpeningDebtInput = z.object({
+  amountMinor: positiveMinorSchema.max(1_000_000_000_000, 'المبلغ كبير جداً'),
+  date: isoDateSchema.optional(),
+});
+export type CustomerOpeningDebtInput = z.output<typeof customerOpeningDebtInput>;
+
+/** What was posted, enough to print the voucher: «سند قبض» or «سند رصيد افتتاحي». */
+export interface CustomerMoneyResult {
+  kind: 'payment' | 'opening_debt';
+  /** The voucher's number, RCA-2026-000001 or the journal entry's for an opening debt */
+  number: string;
+  date: string;
+  customerId: string;
+  customerName: string;
+  amountMinor: number;
+  method: CustomerPaymentMethod | null;
+  reference: string | null;
+  note: string | null;
+  /** What the customer owed before and owes after, base currency */
+  balanceBeforeMinor: number;
+  balanceAfterMinor: number;
   baseCurrency: CurrencyCode;
 }
 
@@ -151,4 +236,6 @@ export interface CustomerPurchases {
   /** Pieces bought in all, and what they came to, net of returns */
   pieces: number;
   spentMinor: number;
+  /** What the customer owes the store now, base currency (negative: the store owes them) */
+  balanceMinor?: number;
 }

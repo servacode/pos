@@ -1,14 +1,19 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
-import type {
-  CurrencyCode,
-  OnboardingInput,
-  SectorKey,
-  StoreCurrencyData,
-  StoreProfileData,
-  StoreResponse,
-  StoreScaleData,
-  StoreLoyaltyData,
-  StoreServiceData,
+import {
+  catalogOptionsOf,
+  DEFAULT_PHARMACY_SETTINGS,
+  type CatalogOptions,
+  type TillSettings,
+  type CurrencyCode,
+  type OnboardingInput,
+  type PharmacySettings,
+  type SectorKey,
+  type StoreCurrencyData,
+  type StoreProfileData,
+  type StoreResponse,
+  type StoreScaleData,
+  type StoreLoyaltyData,
+  type StoreServiceData,
 } from '@serva/core';
 import {
   branches,
@@ -24,6 +29,8 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { ensureAlterationItem } from './catalog-defaults';
+import { ensureServiceItem, MAINTENANCE_ITEM_NAME, RENTAL_ITEM_NAME } from './contracts-common';
 
 /**
  * The store's own settings (packages/core › contracts/store.ts): the start wizard and the settings
@@ -69,6 +76,30 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
     scaleBarcode: settings.scaleBarcode ?? null,
     service: settings.service ?? null,
     loyalty: settings.loyalty ?? null,
+    // Only a pharmacy has it; one that never chose gets the defaults
+    pharmacy: pharmacyOf(tenant.sectors as SectorKey[], settings.pharmacy),
+    till: settings.till ?? null,
+    catalogOptions: catalogOptionsOf(settings.catalogOptions),
+  };
+}
+
+/**
+ * What the till gets as the store's batch rules. A pharmacy and a medical-supplies store both
+ * refuse a sale with no valid batch unless the owner switched that off; a medical-supplies store
+ * also picks the batch itself and blocks the expired unless the owner wrote `autoBatch: false`.
+ * Only a value the owner never saved is defaulted, so no data migration is needed.
+ */
+function pharmacyOf(
+  sectors: readonly SectorKey[],
+  stored: PharmacySettings | null | undefined,
+): PharmacySettings | null {
+  const pharmacy = sectors.includes('pharmacy');
+  const medical = sectors.includes('medical_supplies');
+  if (!pharmacy && !medical) return stored ?? null;
+  return {
+    ...(stored ?? DEFAULT_PHARMACY_SETTINGS),
+    ...(medical && !pharmacy && stored?.autoBatch === undefined ? { autoBatch: true } : {}),
+    ...(stored?.blockNoBatch === undefined ? { blockNoBatch: true } : {}),
   };
 }
 
@@ -94,6 +125,13 @@ export function updateProfile(
         ...(input.taxNumber !== undefined ? { taxNumber: input.taxNumber } : {}),
       })
       .where(eq(tenants.id, auth.tenantId));
+    // A clothing store sells alterations: the service item is there from the moment it is one
+    if (input.sectors.includes('clothing')) await ensureAlterationItem(tx, auth.tenantId);
+    // A medical-supplies store rents devices and sells maintenance contracts: their services too
+    if (input.sectors.includes('medical_supplies')) {
+      await ensureServiceItem(tx, auth.tenantId, RENTAL_ITEM_NAME);
+      await ensureServiceItem(tx, auth.tenantId, MAINTENANCE_ITEM_NAME);
+    }
     const branch = await mainBranch(tx);
     if (branch && (input.address !== undefined || input.phone !== undefined)) {
       await tx
@@ -279,6 +317,96 @@ export function updateLoyalty(
         entity: 'tenant_settings',
         entityId: auth.tenantId,
         changes: changesOf(before, after, ['loyalty']),
+      },
+      meta,
+    );
+    return after;
+  });
+}
+
+/** «الصندوق»: the return window and whether a card payment needs the terminal's approval number. */
+export function updateTill(
+  db: Database,
+  auth: AccessClaims,
+  input: TillSettings,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'settings.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ till: input });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.till_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['till']),
+      },
+      meta,
+    );
+    return after;
+  });
+}
+
+/** «خيارات الأصناف»: barcode generation for new variants and the size runs of the purchase grid. */
+export function updateCatalogOptions(
+  db: Database,
+  auth: AccessClaims,
+  input: CatalogOptions,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const before = await read(tx, auth.tenantId);
+    await tx.update(tenantSettings).set({ catalogOptions: input });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.catalog_options_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['catalogOptions']),
+      },
+      meta,
+    );
+    return after;
+  });
+}
+
+/** «الصيدلية»: the prescription, medicine return and batch settings (pharmacies and medical-supply stores). */
+export function updatePharmacy(
+  db: Database,
+  auth: AccessClaims,
+  input: PharmacySettings,
+  meta: RequestMeta,
+): Promise<StoreResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'settings.manage');
+    const before = await read(tx, auth.tenantId);
+    // The till's batch picking is on for a pharmacy unless turned off; elsewhere only when turned on
+    const isPharmacy = before.sectors.includes('pharmacy');
+    // A medical-supplies store also defaults on; any other store only when it turns it on
+    const medical = before.sectors.includes('medical_supplies');
+    await tx.update(tenantSettings).set({
+      pharmacy: isPharmacy ? input : { ...input, autoBatch: input.autoBatch ?? medical },
+    });
+    const after = await read(tx, auth.tenantId);
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'store.pharmacy_update',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes: changesOf(before, after, ['pharmacy']),
       },
       meta,
     );

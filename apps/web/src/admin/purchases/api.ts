@@ -1,4 +1,7 @@
 import type {
+  BatchBlockInput,
+  BatchBlockResult,
+  RecallResponse,
   SerialRow,
   ExpiryResponse,
   InventoryResponse,
@@ -8,6 +11,8 @@ import type {
   PurchaseListResponse,
   StocktakeDetail,
   StocktakeInput,
+  SupplierReturnDetail,
+  SupplierReturnInput,
   SupplierInput,
   SupplierListResponse,
   SupplierPaymentInput,
@@ -63,3 +68,26 @@ export const findSerials = (q: string) =>
 
 /** `GET /v1/purchases/{id}` (purchases.manage): one purchase with its lines */
 export const getPurchase = (id: string) => apiFetch<PurchaseDetail>(`/v1/purchases/${id}`, { auth: true });
+
+/** `GET /v1/inventory/expiry?variantId=` (purchases.manage): every batch of one item, whatever its date */
+export const listBatchesOf = (variantId: string, branchId?: string) =>
+  apiFetch<ExpiryResponse>(
+    `/v1/inventory/expiry?days=730&variantId=${variantId}${branchId ? `&branchId=${branchId}` : ''}`,
+    { auth: true },
+  );
+
+/** `POST /v1/batches/block|unblock` (purchases.manage): stops, or lets, every till sell a batch (a recall) */
+export const setBatchBlocked = (input: BatchBlockInput, blocked: boolean) =>
+  apiFetch<BatchBlockResult>(`/v1/batches/${blocked ? 'block' : 'unblock'}`, {
+    method: 'POST',
+    body: input,
+    auth: true,
+  });
+
+/** `GET /v1/batches/recall?batchNo=` (purchases.manage): where a batch came from and who got it */
+export const getRecall = (batchNo: string) =>
+  apiFetch<RecallResponse>(`/v1/batches/recall?batchNo=${encodeURIComponent(batchNo)}`, { auth: true });
+
+/** `POST /v1/supplier-returns` (purchases.manage): pieces back to their supplier, a batch named per line */
+export const createSupplierReturn = (input: SupplierReturnInput) =>
+  apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });

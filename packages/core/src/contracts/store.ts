@@ -1,8 +1,12 @@
 import { z } from 'zod';
 import { SECTOR_KEYS, type SectorKey } from '../sectors';
-import { phoneSchema } from './auth';
+import { toLatinDigits } from '../text';
+import { contactPhoneSchema } from './auth';
 import type { CurrencyCode } from '../currencies';
 import { scaleBarcodeSchema, type ScaleBarcodeConfig } from '../scale';
+import type { PharmacySettings } from './pharmacy';
+import type { TillSettings } from './till';
+import type { CatalogOptions } from './catalog-options';
 
 /**
  * The store's own settings (04 › معالج البداية، الإعدادات): what the receipt shows, the activity,
@@ -14,6 +18,7 @@ import { scaleBarcodeSchema, type ScaleBarcodeConfig } from '../scale';
  *   PUT /v1/store/onboarding     onboardingInput    → StoreResponse
  *   PUT /v1/store/scale          storeScaleInput    → StoreResponse
  *   PUT /v1/store/service        storeServiceInput  → StoreResponse
+ *   PUT /v1/store/pharmacy       pharmacySettingsSchema → StoreResponse
  */
 
 /** 0 النشاط · 1 معلومات المحل · 2 العملة · 3 ابدأ */
@@ -41,22 +46,33 @@ export const storeProfileInput = z.object({
   legalName: optionalText(120, 'الاسم التجاري طويل'),
   taxNumber: optionalText(40, 'الرقم الضريبي طويل'),
   address: optionalText(200, 'العنوان طويل'),
-  phone: z
-    .union([z.literal(''), phoneSchema])
-    .transform((v) => (v === '' ? null : v))
-    .nullable()
-    .optional(),
+  phone: contactPhoneSchema,
   receiptFooter: optionalText(200, 'سطر الفاتورة طويل'),
 });
 export type StoreProfileInput = z.input<typeof storeProfileInput>;
 export type StoreProfileData = z.output<typeof storeProfileInput>;
 
+/**
+ * What was typed as a rate, in plain Latin digits: Arabic digits are read, «14,500» and «14 500» are
+ * thousands, «130,5» (a comma not followed by three digits) is a decimal point.
+ */
+export function rateText(value: string): string {
+  const latin = toLatinDigits(value).replace(/[\s\u00a0]/g, '');
+  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(latin)) return latin.replace(/,/g, '');
+  return latin.replace(/,/g, '.');
+}
+
 /** «130» or «130.5»: pounds for one dollar */
 export const rateSchema = z
   .string('سعر الصرف مطلوب')
   .trim()
-  .regex(/^\d{1,7}(\.\d{1,4})?$/, 'اكتب سعر الدولار بالأرقام، مثل 130')
-  .refine((v) => Number(v) > 0, 'سعر الصرف أكبر من صفر');
+  .transform(rateText)
+  .pipe(
+    z
+      .string()
+      .regex(/^\d{1,7}(\.\d{1,4})?$/, 'اكتب سعر الدولار بالأرقام، مثل 13000 أو 13,000')
+      .refine((v) => Number(v) > 0, 'سعر الصرف أكبر من صفر'),
+  );
 
 export const storeCurrencyInput = z
   .object({
@@ -132,4 +148,10 @@ export interface StoreResponse {
   scaleBarcode: ScaleBarcodeConfig | null;
   service: ServiceSettings | null;
   loyalty: LoyaltySettings | null;
+  /** «الصيدلية» (contracts/pharmacy.ts); null for a store that is not a pharmacy */
+  pharmacy?: PharmacySettings | null;
+  /** «الصندوق» (contracts/till.ts); null until the owner chooses */
+  till?: TillSettings | null;
+  /** «خيارات الأصناف» (contracts/catalog-options.ts): always set, the defaults until the owner chooses */
+  catalogOptions?: CatalogOptions;
 }

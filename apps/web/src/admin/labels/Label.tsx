@@ -1,6 +1,28 @@
 import { createPortal } from 'react-dom';
 import { formatMoney, type CurrencyCode } from '@serva/core';
+import { create } from 'qrcode';
 import { Bars } from '../../lib/Bars';
+
+/** The code as a QR square (black modules on the paper's white, so a scanner reads it in dark mode too). */
+function Qr({ code }: { code: string }) {
+  const modules = create(code, { errorCorrectionLevel: 'M' }).modules;
+  const size = modules.size;
+  const cells: string[] = [];
+  for (let y = 0; y < size; y += 1)
+    for (let x = 0; x < size; x += 1) if (modules.get(y, x)) cells.push(`M${String(x)} ${String(y)}h1v1h-1z`);
+  return (
+    <svg
+      viewBox={`-1 -1 ${String(size + 2)} ${String(size + 2)}`}
+      role="img"
+      aria-label="رمز QR"
+      className="h-full max-w-full"
+      shapeRendering="crispEdges"
+    >
+      <rect x="-1" y="-1" width={size + 2} height={size + 2} className="fill-surface dark:fill-ink" />
+      <path d={cells.join('')} className="fill-ink dark:fill-surface" />
+    </svg>
+  );
+}
 
 /** One label to print: a piece of a product with its options, price and code. */
 export interface LabelItem {
@@ -37,12 +59,26 @@ export const LABEL_LAYOUTS = {
 } as const;
 export type LabelLayout = keyof typeof LABEL_LAYOUTS;
 
-/** One label: the store, the product and its options, the price big, the bars and their digits. */
-export function Label({ item, store, showStore }: { item: LabelItem; store: string; showStore: boolean }) {
+/**
+ * One label: the store, the product and its options, the price big, the bars and their digits. It is
+ * paper: light with dark ink in both modes (the on-screen preview, and a print made in dark mode,
+ * whose bars must stay dark for the scanner).
+ */
+export function Label({
+  item,
+  store,
+  showStore,
+  qr = false,
+}: {
+  item: LabelItem;
+  store: string;
+  showStore: boolean;
+  qr?: boolean;
+}) {
   return (
     <div
       dir="rtl"
-      className="flex h-full w-full flex-col items-center justify-between overflow-hidden bg-surface px-[1.5mm] py-[1mm] text-center text-ink"
+      className="flex h-full w-full flex-col items-center justify-between overflow-hidden bg-surface px-[1.5mm] py-[1mm] text-center text-ink dark:bg-ink dark:text-surface"
       style={{ fontSize: '2.6mm', lineHeight: 1.15 }}
     >
       {showStore ? <span className="w-full truncate font-semibold">{store}</span> : null}
@@ -58,8 +94,11 @@ export function Label({ item, store, showStore }: { item: LabelItem; store: stri
           {formatMoney(item.priceMinor, item.currency)}
         </span>
       </span>
-      <div className="w-full flex-1" style={{ minHeight: '5mm', maxHeight: '11mm' }}>
-        <Bars code={item.code} height={40} />
+      <div
+        className={qr ? 'flex w-full flex-1 justify-center' : 'w-full flex-1'}
+        style={{ minHeight: '5mm', maxHeight: qr ? '14mm' : '11mm' }}
+      >
+        {qr ? <Qr code={item.code} /> : <Bars code={item.code} height={40} />}
       </div>
       <bdi dir="ltr" style={{ fontSize: '2.4mm', letterSpacing: '0.3mm' }}>
         {item.code}
@@ -79,11 +118,13 @@ export function PrintableLabels({
   layout,
   store,
   showStore,
+  qr = false,
 }: {
   items: readonly LabelItem[];
   layout: LabelLayout;
   store: string;
   showStore: boolean;
+  qr?: boolean;
 }) {
   const spec = LABEL_LAYOUTS[layout];
   const all = expand(items);
@@ -100,7 +141,7 @@ export function PrintableLabels({
             key={`${item.key}-${i}`}
             style={{ width: `${spec.width}mm`, height: `${spec.height}mm`, breakAfter: 'page' }}
           >
-            <Label item={item} store={store} showStore={showStore} />
+            <Label item={item} store={store} showStore={showStore} qr={qr} />
           </div>
         ))
       ) : (
@@ -120,7 +161,7 @@ export function PrintableLabels({
                 ...(i > 0 && i % (spec.columns * spec.rows) === 0 ? { breakBefore: 'page' } : {}),
               }}
             >
-              <Label item={item} store={store} showStore={showStore} />
+              <Label item={item} store={store} showStore={showStore} qr={qr} />
             </div>
           ))}
         </div>

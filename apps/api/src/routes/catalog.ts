@@ -6,7 +6,10 @@ import {
   createCategoryInput,
   createProductInput,
   createTaxRateInput,
+  defaultTaxRateInput,
   createUnitInput,
+  priceListApplyInput,
+  priceListPreviewInput,
   productImageInput,
   productImageOrder,
   productImagePatch,
@@ -18,6 +21,7 @@ import {
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { bulkPrices } from '../services/catalog/bulk-prices';
+import { applyPriceList, previewPriceList } from '../services/catalog/price-list';
 import {
   addProductImage,
   deleteProductImage,
@@ -46,6 +50,7 @@ import {
   listTaxRates,
   listUnits,
   updateCategory,
+  setDefaultTaxRate,
   updateTaxRate,
   updateUnit,
 } from '../services/catalog/reference';
@@ -166,10 +171,21 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     bulkPrices(db, parseCatalog(bulkPriceInput, request.body), ctxOf(request)),
   );
 
+  // «تحديث الأسعار من ملف»: 5,000 rows of a price list are a megabyte or two
+  const priceList = { preHandler: requireAuth, bodyLimit: 4 * 1024 * 1024 };
+  app.post('/v1/prices/list/preview', priceList, async (request) =>
+    previewPriceList(db, parseCatalog(priceListPreviewInput, request.body), ctxOf(request)),
+  );
+  app.post('/v1/prices/list/apply', priceList, async (request) =>
+    applyPriceList(db, parseCatalog(priceListApplyInput, request.body), ctxOf(request)),
+  );
+
   app.get('/v1/barcodes/:code', signedIn, async (request) => {
     const code = barcodeCodeSchema.safeParse((request.params as { code?: string }).code);
     if (!code.success) throw fieldError('code', code.error.issues[0]?.message ?? 'الباركود غير صالح');
-    return lookupBarcode(db, code.data, ctxOf(request));
+    // ?free=1: a code nobody has answers 200 {exists:false} instead of 404 (the product form asks for every new code)
+    const soft = (request.query as { free?: string } | undefined)?.free === '1';
+    return lookupBarcode(db, code.data, ctxOf(request), soft);
   });
 
   // ─── Categories, units, tax rates ──────────────────────────────────────────
@@ -198,6 +214,9 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     const input = parseCatalog(createTaxRateInput, request.body);
     return reply.status(201).send(await createTaxRate(db, input, ctxOf(request)));
   });
+  app.put('/v1/tax-rates/default', signedIn, async (request) =>
+    setDefaultTaxRate(db, parseCatalog(defaultTaxRateInput, request.body), ctxOf(request)),
+  );
   app.patch('/v1/tax-rates/:id', signedIn, async (request) => {
     const id = idOf(request, 'هذه الضريبة غير موجودة.');
     return updateTaxRate(db, id, parseCatalog(updateTaxRateInput, request.body), ctxOf(request));

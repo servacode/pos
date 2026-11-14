@@ -28,13 +28,17 @@ export interface CartLineProps {
   meta?: ReactNode;
   selected?: boolean;
   onSelect: () => void;
+  /** A control that sits under the line, always in view, outside its button (a button cannot hold a button). */
+  extra?: ReactNode;
   /** The selected line's actions, shown under it in place (tab 14 › سلة الكاشير). */
   children?: ReactNode;
 }
 
 /**
- * One line of the cashier's cart (kit .cart-line): name, «quantity × price», the line total, and a
- * second line for options and discounts. The selected line opens in place with its actions.
+ * One line of the cashier's cart (kit .cart-line; هوية 4): the quantity in a small square, the name
+ * on up to two lines (a size and a colour at its end stay in view), «quantity × price» and the
+ * options or discount under it, the line total at the end. The selected line takes the brand tint
+ * and opens in place with its actions.
  */
 export function CartLine({
   name,
@@ -46,36 +50,37 @@ export function CartLine({
   meta,
   selected = false,
   onSelect,
+  extra,
   children,
 }: CartLineProps) {
   const digits = useDigits();
   return (
     <li
       className={cn(
-        'rounded-2xl transition-colors duration-120',
-        selected ? 'bg-brand-soft ring-1 ring-brand/30' : 'bg-canvas hover:bg-surface-muted',
+        'rounded-card transition-[background-color,box-shadow] duration-120 ease-standard',
+        selected ? 'bg-brand-soft ring-1 ring-brand/25' : 'hover:bg-surface-muted/70',
       )}
     >
       <button
         type="button"
         onClick={onSelect}
         aria-expanded={selected}
-        className="flex min-h-16 w-full items-center gap-3 px-3 py-2.5 text-start motion-safe:animate-rise"
+        className="flex min-h-16 w-full items-start gap-3 rounded-card px-3 py-3 text-start motion-safe:animate-rise"
       >
         <span
           aria-hidden="true"
           className={cn(
-            'num grid h-10 min-w-10 shrink-0 place-items-center rounded-xl px-1.5 text-sm font-bold',
-            selected ? 'bg-brand text-on-brand' : 'bg-surface text-ink shadow-e1',
+            'num grid h-7 min-w-7 shrink-0 place-items-center rounded-small px-1.5 text-sm font-bold transition-colors duration-120 ease-standard',
+            selected ? 'bg-brand text-on-brand' : 'bg-surface-muted text-ink',
           )}
         >
-          ×{formatQuantity(qtyThousandths, digits)}
+          {formatQuantity(qtyThousandths, digits)}
         </span>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-lg/7 font-semibold text-ink">
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="line-clamp-2 text-base/7 font-semibold text-ink">
             <bdi>{name}</bdi>
           </span>
-          <span className="text-[0.8125rem]/5 text-ink-muted">
+          <span className="text-sm text-ink-muted">
             {/* One right-to-left isolate: «1.250 كغ × 300» reads quantity, unit, ×, price. */}
             <bdi dir="rtl" className="num">
               {formatQuantity(qtyThousandths, digits)}
@@ -84,8 +89,9 @@ export function CartLine({
             {meta ? <> · {meta}</> : null}
           </span>
         </span>
-        <Money minor={lineTotalMinor} currency={currency} className="text-lg font-bold text-ink" />
+        <Money minor={lineTotalMinor} currency={currency} className="text-base/7 font-bold text-ink" />
       </button>
+      {extra ? <div className="px-3 pb-3 ps-[3.75rem] text-sm">{extra}</div> : null}
       {selected && children ? (
         <div className="flex flex-wrap items-center gap-2 px-3 pb-3">{children}</div>
       ) : null}

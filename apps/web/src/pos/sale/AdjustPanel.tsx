@@ -2,11 +2,26 @@ import { useEffect, useState } from 'react';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { toMinor } from '@serva/core/money';
 import type { Approval } from '@serva/core/contracts/documents';
-import { Button, cn, displayNumber, Keypad, Money, useDigits } from '@serva/ui';
+import {
+  AlertCircleIcon,
+  BackIcon,
+  Button,
+  CheckIcon,
+  cn,
+  DeleteIcon,
+  displayNumber,
+  Keypad,
+  Money,
+  OfferIcon,
+  PercentIcon,
+  useDigits,
+} from '@serva/ui';
 import { digitOf } from '../PinScreen';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember } from '../staff/staff';
 import type { ApprovalNeed } from './cart';
+import { Kbd } from './Kbd';
+import { SalePanel } from './SalePanel';
 
 export type AdjustMode = 'qty' | 'percent' | 'amount' | 'price';
 
@@ -43,7 +58,7 @@ export function parseAdjust(
     if (!fractions && frac) return null;
     if (frac.length > 3) return null;
     const qty = Number(whole) * 1000 + Number(frac.padEnd(3, '0'));
-    return qty > 0 && qty <= 100_000_000 ? { mode, qty } : null;
+    return qty > 0 && qty <= MAX_QTY ? { mode, qty } : null;
   }
   if (mode === 'percent') {
     const bp = Math.round(value * 100);
@@ -55,6 +70,42 @@ export function parseAdjust(
   } catch {
     return null;
   }
+}
+
+/** The most one line may hold: 100,000 (thousandths). */
+export const MAX_QTY = 100_000_000;
+
+/**
+ * Why a typed text is not a usable value, in words the cashier can act on («صفر» says it is zero,
+ * a too-large quantity names the maximum); null while the text is fine or empty.
+ */
+export function explainAdjust(
+  mode: AdjustMode,
+  text: string,
+  currency: CurrencyCode,
+  fractions: boolean,
+): string | null {
+  if (!text) return null;
+  if (text.startsWith('-')) {
+    return mode === 'qty'
+      ? 'الكمية لا تكون سالبة. لإرجاع قطعة استعمل «مرتجع».'
+      : 'القيمة لا تكون سالبة. اكتب رقماً موجباً.';
+  }
+  if (!/^\d+(\.\d*)?$/.test(text)) return 'اكتب أرقاماً فقط.';
+  if (parseAdjust(mode, text, currency, fractions)) return null;
+  const [, frac = ''] = text.split('.');
+  const zero = Number(text.endsWith('.') ? text.slice(0, -1) : text) === 0;
+  if (mode === 'qty') {
+    if (!fractions && frac) return 'هذا الصنف يُباع بالقطعة: اكتب عدداً صحيحاً دون كسور.';
+    if (frac.length > 3) return 'ثلاث منازل عشرية على الأكثر.';
+    if (zero) return 'الكمية صفر: لا يُباع شيء. اكتب كمية أكبر من صفر، أو احذف السطر.';
+    return `الكمية أكبر من الحد الأقصى للسطر الواحد (${MAX_QTY / 1000}). اكتب كمية أقل.`;
+  }
+  if (mode === 'percent') {
+    if (frac.length > 2) return 'منزلتان عشريتان على الأكثر.';
+    return zero ? 'اكتب نسبة أكبر من صفر.' : 'النسبة لا تزيد على 100%.';
+  }
+  return zero && mode === 'amount' ? 'اكتب مبلغاً أكبر من صفر.' : 'اكتب مبلغاً صحيحاً.';
 }
 
 export interface AdjustPanelProps {
@@ -113,9 +164,11 @@ export function AdjustPanel({
     });
   };
 
+  const hint = explainAdjust(mode, text, currency, fractions);
+
   function apply() {
     if (!value) {
-      setError('اكتب قيمة صحيحة أولاً.');
+      setError(hint ?? 'اكتب قيمة صحيحة أولاً.');
       return;
     }
     const result = check(value);
@@ -132,7 +185,11 @@ export function AdjustPanel({
       const digit = digitOf(event.key);
       if (digit) type(digit);
       else if (event.key === '.' || event.key === '٫') type('.');
-      else if (event.key === 'Backspace') setText((t) => t.slice(0, -1));
+      else if (event.key === '-' || event.key === '−') {
+        // Never turned positive in silence: the minus stays in view with the reason it is refused
+        setText((t) => (t === '' ? '-' : t));
+        setError(null);
+      } else if (event.key === 'Backspace') setText((t) => t.slice(0, -1));
       else if (event.key === 'Enter') {
         event.preventDefault();
         apply();
@@ -146,22 +203,32 @@ export function AdjustPanel({
   const unit =
     mode === 'percent' ? '%' : mode === 'qty' ? (fractions ? 'كغ' : '') : CURRENCIES[currency].symbolAr;
   return (
-    <section aria-label={title} className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-      <header className="flex items-start gap-3">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h2 className="text-2xl font-bold text-ink">{title}</h2>
-          {subtitle ? <p className="truncate text-ink-muted">{subtitle}</p> : null}
-        </div>
-        {onRemove ? (
-          <Button variant="danger-soft" onClick={onRemove}>
-            أزل الخصم
+    <SalePanel
+      label={title}
+      title={title}
+      subtitle={subtitle}
+      icon={mode === 'qty' ? null : mode === 'price' ? <OfferIcon size={20} /> : <PercentIcon size={20} />}
+      bodyClassName="@container"
+      actions={
+        <>
+          {onRemove ? (
+            <Button variant="danger-soft" size="md" icon={<DeleteIcon size={20} />} onClick={onRemove}>
+              أزل الخصم
+            </Button>
+          ) : null}
+          <Button
+            variant="secondary"
+            size="md"
+            icon={<BackIcon size={20} />}
+            aria-keyshortcuts="Escape"
+            onClick={onClose}
+          >
+            ارجع للأصناف
+            <Kbd>Esc</Kbd>
           </Button>
-        ) : null}
-        <Button variant="secondary" onClick={onClose}>
-          ارجع للأصناف
-        </Button>
-      </header>
-
+        </>
+      }
+    >
       {pending ? (
         <ManagerCode
           staff={staff}
@@ -171,60 +238,86 @@ export function AdjustPanel({
           onCancel={() => setPending(null)}
         />
       ) : (
-        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(0,22rem)] gap-5">
-          <div className="flex flex-col gap-3">
-            {modes.length > 1 ? (
-              <div role="group" aria-label="النوع" className="grid grid-cols-2 gap-2">
-                {modes.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    aria-pressed={mode === m}
-                    onClick={() => {
-                      setMode(m);
-                      setText('');
-                      setError(null);
-                    }}
-                    className={cn(
-                      'min-h-14 rounded-control border-2 px-3 font-semibold',
-                      mode === m
-                        ? 'border-brand bg-brand-soft text-brand-ink'
-                        : 'border-line bg-surface text-ink',
-                    )}
-                  >
-                    {MODE_LABEL[m]}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <output
-              aria-label={MODE_LABEL[mode]}
-              className="flex h-18 items-center justify-between rounded-control border-2 border-brand bg-surface px-5"
+        <>
+          {modes.length > 1 ? (
+            // One of a few, always one chosen (هوية 4 › Segmented control), drawn as its track
+            <div
+              role="group"
+              aria-label="النوع"
+              className="grid auto-cols-fr grid-flow-col gap-1 rounded-control bg-surface-muted p-1"
             >
-              <span className="num text-3xl font-bold text-ink" dir="ltr">
-                {text ? displayNumber(text, digits) : displayNumber('0', digits)}
-              </span>
-              <span className="text-lg text-ink-muted">{unit}</span>
-            </output>
-            {preview ? <div className="text-ink-muted">{preview(value)}</div> : null}
-            {error ? (
-              <p role="alert" className="font-semibold text-danger-ink">
-                {error}
-              </p>
-            ) : null}
-            <Button size="lg" onClick={apply} disabled={!value}>
-              طبّق
-            </Button>
+              {modes.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={mode === m}
+                  onClick={() => {
+                    setMode(m);
+                    setText('');
+                    setError(null);
+                  }}
+                  className={cn(
+                    'min-h-12 rounded-small px-3 text-base font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard',
+                    mode === m
+                      ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
+                      : 'text-ink-muted hover:text-ink',
+                  )}
+                >
+                  {MODE_LABEL[m]}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="grid gap-5 @lg:grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_21rem]">
+            <div className="flex flex-col gap-3">
+              {/* The value as typed: a field in focus, the number large at the start, its unit at the end */}
+              <output
+                aria-label={MODE_LABEL[mode]}
+                className="flex h-18 items-center justify-between gap-3 rounded-control border border-brand bg-surface px-5 ring-4 ring-brand/15"
+              >
+                <span className="num truncate text-3xl font-bold text-ink" dir="ltr">
+                  {text ? displayNumber(text, digits) : displayNumber('0', digits)}
+                </span>
+                <span className="shrink-0 text-lg font-semibold text-ink-subtle">{unit}</span>
+              </output>
+              {preview ? <div className="text-sm text-ink-muted">{preview(value)}</div> : null}
+              {hint && !error ? (
+                <p
+                  role={text.startsWith('-') ? 'alert' : undefined}
+                  className="text-sm font-semibold text-warning-ink"
+                >
+                  {hint}
+                </p>
+              ) : null}
+              {error ? (
+                <p role="alert" className="flex items-start gap-2 text-sm font-semibold text-danger-ink">
+                  <AlertCircleIcon size={20} className="shrink-0" />
+                  {error}
+                </p>
+              ) : null}
+              <span className="flex-1" />
+              <Button
+                size="lg"
+                fullWidth
+                icon={<CheckIcon size={20} />}
+                aria-keyshortcuts="Enter"
+                onClick={apply}
+                disabled={text === ''}
+              >
+                طبّق
+                <Kbd tone="brand">Enter</Kbd>
+              </Button>
+            </div>
+            <Keypad
+              onDigit={type}
+              onBackspace={() => setText((t) => t.slice(0, -1))}
+              extraKey={decimals > 0 ? '.' : null}
+              onExtraKey={() => type('.')}
+            />
           </div>
-          <Keypad
-            onDigit={type}
-            onBackspace={() => setText((t) => t.slice(0, -1))}
-            extraKey={decimals > 0 ? '.' : null}
-            onExtraKey={() => type('.')}
-          />
-        </div>
+        </>
       )}
-    </section>
+    </SalePanel>
   );
 }
 

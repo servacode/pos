@@ -52,6 +52,8 @@ const SOURCE_LABEL: Record<string, string> = {
   cash_movement: 'حركة درج',
   manual: 'قيد يدوي',
   return: 'مرتجع',
+  expense: 'مصروف',
+  reversal: 'قيد عكسي',
 };
 
 export function sourceLabel(type: JournalSourceType): string {

@@ -74,11 +74,16 @@ export const codes = new CapturedCodes();
  */
 export function makeApp(
   overrides: Record<string, string> = {},
-  options: { clock?: Clock; otpSender?: OtpSender | null; syncProcessors?: SyncProcessors } = {},
+  options: {
+    clock?: Clock;
+    otpSender?: OtpSender | null;
+    syncProcessors?: SyncProcessors;
+    database?: DbHandle;
+  } = {},
 ): Promise<FastifyInstance> {
   return buildApp({
     env: testEnv(overrides),
-    database: appDb(),
+    database: options.database ?? appDb(),
     clock: options.clock ?? new ManualClock(),
     otpSender: options.otpSender === undefined ? codes : options.otpSender,
     syncProcessors: options.syncProcessors,

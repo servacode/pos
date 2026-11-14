@@ -15,6 +15,7 @@ describe('built-in option values', () => {
     expect(presetGroups('النمرة').flatMap((g) => g.values)).toContain('42');
     expect(presetGroups('العمر')[1]!.values.slice(0, 3)).toEqual(['سنتان', '3 سنوات', '4 سنوات']);
     expect(presetGroups('القماش')).toEqual([]);
-    expect(SIZE_KINDS.map((k) => k.name)).toEqual(['المقاس', 'النمرة', 'العمر']);
+    expect(SIZE_KINDS.map((k) => k.name)).toEqual(['المقاس', 'النمرة', 'العمر', 'الحجم']);
+    expect(presetGroups('الحجم')[0]!.values).toContain('100 مل');
   });
 });

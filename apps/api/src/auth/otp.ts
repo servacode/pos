@@ -6,7 +6,7 @@ import { deriveKey } from './tokens';
 export interface OtpMessage {
   phone: string;
   code: string;
-  purpose: 'registration' | 'shop_order' | 'broadcast';
+  purpose: 'registration' | 'shop_order' | 'broadcast' | 'password_reset';
   /** A message to customers (purpose broadcast) carries its own text and no code */
   text?: string;
 }
@@ -47,7 +47,9 @@ export const OTP_GATEWAY_TIMEOUT_MS = 10_000;
 export const otpText = (code: string, purpose: OtpMessage['purpose'] = 'registration') =>
   purpose === 'shop_order'
     ? `رمز تأكيد طلبك من المتجر: ${code}\nصالح 10 دقائق.`
-    : `رمز التحقق في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق.`;
+    : purpose === 'password_reset'
+      ? `رمز استعادة كلمة السر في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق. إن لم تطلبه فتجاهل الرسالة.`
+      : `رمز التحقق في سيرفا: ${code}\nلا تعطه لأحد. صالح 10 دقائق.`;
 
 /**
  * OTP_DELIVERY=gateway: hands the code to a separate sending service (a WhatsApp bot today, an SMS
@@ -85,6 +87,112 @@ export function gatewayOtpSender(
   };
 }
 
+/** The placeholders an SMS request template may use */
+export const SMS_PLACEHOLDERS = ['phone', 'digits', 'code', 'message'] as const;
+const PLACEHOLDER = /\{(\w+)\}/g;
+
+/** Names between braces in a template that are not an SMS placeholder (checked when the env loads) */
+export function unknownPlaceholders(template: string): string[] {
+  return [...template.matchAll(PLACEHOLDER)]
+    .map((m) => m[1]!)
+    .filter((name) => !(SMS_PLACEHOLDERS as readonly string[]).includes(name));
+}
+
+export interface SmsGatewayConfig {
+  url: string;
+  method: 'POST' | 'PUT' | 'GET';
+  /** "Name: value", e.g. "Authorization: Bearer …" or "X-Api-Key: …" */
+  authHeader?: string | undefined;
+  /** Request body template; empty for GET */
+  body: string;
+  contentType: string;
+  /** Send broadcast texts too (each one is a paid SMS); default no */
+  allowBroadcasts: boolean;
+}
+
+type Escape = (value: string) => string;
+const jsonEscape: Escape = (value) => JSON.stringify(value).slice(1, -1);
+
+/** Fills {phone} {digits} {code} {message}; every value is escaped for where it lands. */
+export function fillTemplate(template: string, values: Record<string, string>, escape: Escape): string {
+  return template.replace(PLACEHOLDER, (whole, name: string) =>
+    Object.hasOwn(values, name) ? escape(values[name]!) : whole,
+  );
+}
+
+/**
+ * OTP_DELIVERY=sms: a generic HTTP SMS gateway. The request is described by environment variables
+ * (URL, method, auth header, content type, body template), so a provider is a configuration, not
+ * code. Values are escaped for their place: JSON strings in a JSON body, percent-encoding in a form
+ * body or the URL. A 2xx answer means accepted; anything else throws OtpDeliveryError and the
+ * reason (status only, never the code or the phone) goes to the log.
+ */
+export function smsOtpSender(
+  config: SmsGatewayConfig,
+  log: FastifyBaseLogger,
+  send: typeof fetch = fetch,
+): OtpSender {
+  const contentType = config.contentType.toLowerCase();
+  const isJson = contentType.includes('json');
+  const isForm = contentType.includes('x-www-form-urlencoded');
+  const bodyEscape: Escape = isJson ? jsonEscape : isForm ? encodeURIComponent : (v) => v;
+  return {
+    async send({ phone, code, purpose, text }) {
+      if (purpose === 'broadcast' && !config.allowBroadcasts) throw new OtpDeliveryError();
+      const values = {
+        phone,
+        digits: phone.replace(/\D/g, ''),
+        code,
+        message: text ?? otpText(code, purpose),
+      };
+      const headers: Record<string, string> = {};
+      if (config.authHeader) {
+        const at = config.authHeader.indexOf(':');
+        headers[config.authHeader.slice(0, at).trim()] = config.authHeader.slice(at + 1).trim();
+      }
+      const hasBody = config.method !== 'GET' && config.body !== '';
+      if (hasBody) headers['content-type'] = config.contentType;
+      let status: number;
+      try {
+        const res = await send(fillTemplate(config.url, values, encodeURIComponent), {
+          method: config.method,
+          headers,
+          ...(hasBody ? { body: fillTemplate(config.body, values, bodyEscape) } : {}),
+          signal: AbortSignal.timeout(OTP_GATEWAY_TIMEOUT_MS),
+        });
+        status = res.status;
+      } catch (error) {
+        log.warn({ err: (error as Error).name }, 'SMS gateway unreachable');
+        throw new OtpDeliveryError();
+      }
+      if (status < 200 || status >= 300) {
+        log.warn({ status }, 'SMS gateway refused the message');
+        throw new OtpDeliveryError();
+      }
+    },
+  };
+}
+
+/** Tries each channel in order; the first that accepts the message wins. */
+export function fallbackOtpSender(
+  channels: { name: string; sender: OtpSender }[],
+  log: FastifyBaseLogger,
+): OtpSender {
+  return {
+    async send(message) {
+      for (const [index, { name, sender }] of channels.entries()) {
+        try {
+          return await sender.send(message);
+        } catch (error) {
+          if (!(error instanceof OtpDeliveryError)) throw error;
+          if (index < channels.length - 1) log.warn({ channel: name }, 'OTP channel failed; trying the next');
+        }
+      }
+      throw new OtpDeliveryError();
+    },
+  };
+}
+
 /** The code could not be handed to its channel. */
 export class OtpDeliveryError extends Error {
   constructor() {
@@ -103,10 +211,37 @@ export function otpSenderFor(env: Env, log: FastifyBaseLogger): OtpSender | null
   const delivery = env.OTP_DELIVERY ?? (env.NODE_ENV === 'production' ? 'none' : 'log');
   if (delivery === 'log') return logOtpSender(log);
   if (delivery === 'screen' && isTestMode(env)) return screenOtpSender();
-  if (delivery === 'gateway' && env.OTP_GATEWAY_URL && env.OTP_GATEWAY_TOKEN) {
-    return gatewayOtpSender(env.OTP_GATEWAY_URL, env.OTP_GATEWAY_TOKEN, log);
-  }
-  return null;
+  const channel = (name: string): OtpSender | null => {
+    if (name === 'gateway' && env.OTP_GATEWAY_URL && env.OTP_GATEWAY_TOKEN) {
+      return gatewayOtpSender(env.OTP_GATEWAY_URL, env.OTP_GATEWAY_TOKEN, log);
+    }
+    if (name === 'sms' && env.SMS_GATEWAY_URL) {
+      return smsOtpSender(
+        {
+          url: env.SMS_GATEWAY_URL,
+          method: env.SMS_GATEWAY_METHOD,
+          authHeader: env.SMS_GATEWAY_AUTH_HEADER,
+          body: env.SMS_GATEWAY_BODY,
+          contentType: env.SMS_GATEWAY_CONTENT_TYPE,
+          allowBroadcasts: env.SMS_ALLOW_BROADCASTS,
+        },
+        log,
+      );
+    }
+    return null;
+  };
+  const primary = channel(delivery);
+  if (!primary) return null;
+  const fallback = env.OTP_FALLBACK ? channel(env.OTP_FALLBACK) : null;
+  return fallback
+    ? fallbackOtpSender(
+        [
+          { name: delivery, sender: primary },
+          { name: env.OTP_FALLBACK!, sender: fallback },
+        ],
+        log,
+      )
+    : primary;
 }
 
 export function newOtpCode(): string {

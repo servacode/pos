@@ -31,6 +31,15 @@ export const promotionInput = z
     daysOfWeek: z.array(z.int().min(0).max(6)).max(7).default([]),
     fromTime: timeSchema.nullable().default(null),
     toTime: timeSchema.nullable().default(null),
+    /** «كود الخصم»: the customer types it in the online shop's cart; blank: the promotion runs by itself */
+    couponCode: z
+      .string()
+      .trim()
+      .min(3, 'الكود من 3 أحرف على الأقل')
+      .max(20, 'الكود طويل')
+      .refine((c) => [...c].every((ch) => /[\p{L}\p{N}_-]/u.test(ch)), 'حروف وأرقام وشرطة فقط')
+      .nullable()
+      .default(null),
     archived: z.boolean().default(false),
   })
   .superRefine((p, ctx) => {

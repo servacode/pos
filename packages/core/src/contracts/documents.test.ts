@@ -72,6 +72,12 @@ function saleCart(overrides: Partial<SaleCart> = {}): SaleCart {
 
 const validSale = (): SalePayload => buildSalePayload(saleCart());
 
+it('accepts a card payment without its approval number (the store decides at the till)', () => {
+  const sale = validSale();
+  sale.payments[0]!.reference = null;
+  expect(issuesOf('sale', sale)).toEqual([]);
+});
+
 const issuesOf = (type: string, payload: unknown) => {
   const result = validateDocumentPayload(type, payload);
   return result.ok ? [] : result.issues.map((i) => i.path);
@@ -156,8 +162,8 @@ describe('sale payload', () => {
     ['a dollar payment without a rate', (s) => void (s.payments[1]!.rate = null), 'payments.1.rate'],
     ['a pound payment with a rate', (s) => void (s.payments[2]!.rate = { ...USD }), 'payments.2.rate'],
     [
-      'a card without its approval code',
-      (s) => void (s.payments[0]!.reference = null),
+      'a wallet payment without its transaction number',
+      (s) => void Object.assign(s.payments[0]!, { method: 'wallet', reference: null, cardLast4: null }),
       'payments.0.reference',
     ],
     ['card digits on cash', (s) => void (s.payments[2]!.cardLast4 = '1234'), 'payments.2.cardLast4'],
@@ -494,5 +500,77 @@ describe('validateDocumentPayload', () => {
       ok: false,
       code: 'invalid_payload',
     });
+  });
+});
+
+describe('a pharmacy sale carries its batch and prescription', () => {
+  const RX = { ref: 'RX-77', doctor: 'د. سامر', patientName: 'ليلى', patientId: '01020304' };
+
+  it('keeps the batch on its line and the prescription on the sale, and passes the contract', () => {
+    const line = { ...saleCart().lines[1]!, priceMinor: 30000, batchNo: 'B-07', batchExpiry: '2027-03-01' };
+    const sold = buildSalePayload(
+      saleCart({
+        lines: [line],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 40000 }],
+        prescription: RX,
+      }),
+    );
+    expect(sold.lines[0]).toMatchObject({ batchNo: 'B-07', batchExpiry: '2027-03-01' });
+    expect(sold.prescription).toEqual(RX);
+    expect(salePayloadSchema.safeParse(sold).error?.issues ?? []).toEqual([]);
+  });
+
+  it('writes a batch without a date as null, and leaves both out of an ordinary line and sale', () => {
+    const line = { ...saleCart().lines[1]!, batchNo: 'B-07' };
+    expect(
+      buildSalePayload(
+        saleCart({ lines: [line], payments: [{ method: 'cash', currency: 'SYP', amountMinor: 40000 }] }),
+      ).lines[0],
+    ).toMatchObject({
+      batchNo: 'B-07',
+      batchExpiry: null,
+    });
+    const plain = validSale();
+    expect('batchNo' in plain.lines[0]!).toBe(false);
+    expect('prescription' in plain).toBe(false);
+    expect('prescription' in buildSalePayload(saleCart({ prescription: null }))).toBe(false);
+  });
+
+  it('carries a line split over batches, and refuses an allocation with no quantity or a bad date', () => {
+    const batches = [
+      { batchNo: 'B-07', expiry: '2027-03-01', qty: 2000 },
+      { batchNo: null, expiry: null, qty: 1000 },
+    ];
+    const line = { ...saleCart().lines[1]!, priceMinor: 30000, qty: 3000, batches };
+    const sold = buildSalePayload(
+      saleCart({ lines: [line], payments: [{ method: 'cash', currency: 'SYP', amountMinor: 90000 }] }),
+    );
+    expect(sold.lines[0]!.batches).toEqual(batches);
+    expect(salePayloadSchema.safeParse(sold).error?.issues ?? []).toEqual([]);
+    expect('batches' in validSale().lines[0]!).toBe(false);
+    const empty = buildSalePayload(
+      saleCart({
+        lines: [{ ...line, batches: [] }],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 90000 }],
+      }),
+    );
+    expect('batches' in empty.lines[0]!).toBe(false);
+    const bad = structuredClone(sold);
+    bad.lines[0]!.batches = [{ batchNo: 'B', expiry: '2027-03-01', qty: 0 }];
+    expect(salePayloadSchema.safeParse(bad).success).toBe(false);
+    bad.lines[0]!.batches = [{ batchNo: 'B', expiry: 'soon', qty: 1000 }];
+    expect(salePayloadSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('refuses a prescription with a blank field or a batch date that is not a date', () => {
+    const base = validSale();
+    expect(salePayloadSchema.safeParse({ ...base, prescription: { ...RX, ref: ' ' } }).success).toBe(false);
+    expect(
+      salePayloadSchema.safeParse({ ...base, prescription: { ...RX, patientId: null, patientName: null } })
+        .success,
+    ).toBe(true);
+    expect(salePayloadSchema.safeParse({ ...base, prescription: null }).success).toBe(true);
+    const badDate = { ...base, lines: [{ ...base.lines[0]!, batchNo: 'B', batchExpiry: 'soon' }] };
+    expect(salePayloadSchema.safeParse(badDate).success).toBe(false);
   });
 });

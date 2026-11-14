@@ -50,7 +50,14 @@ export function useDevice(): DeviceState {
       const started = startSync(store, device, (sync) => alive && setState((s) => ({ ...s, sync })));
       engine.current = started;
       setHasEngine(started !== null);
-      stop = started ? () => started.stop() : null;
+      if (!started) return;
+      // Back online: send what waited now instead of after the next backoff delay (up to 5 min).
+      const onOnline = () => void started.syncNow().catch(() => undefined);
+      window.addEventListener('online', onOnline);
+      stop = () => {
+        window.removeEventListener('online', onOnline);
+        started.stop();
+      };
     });
     return () => {
       alive = false;

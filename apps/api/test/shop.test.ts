@@ -180,6 +180,11 @@ describe('the online shop', () => {
         wasPriceMinor: null,
         offer: null,
         available: true,
+        createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        options: [
+          { name: 'المقاس', values: ['L'] },
+          { name: 'اللون', values: ['أبيض'] },
+        ],
       },
     ]);
     expect(JSON.stringify(home)).not.toMatch(/cost|qty|stock|phone/i);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ACTIVATION_TTL_SECONDS, type ActivatedDevice } from '@serva/core';
+import { ACTIVATION_TTL_SECONDS, type ActivatedDevice, type DeviceKind } from '@serva/core';
 import {
   AlertCircleIcon,
   Banner,
@@ -19,6 +19,7 @@ import {
 } from '../../lib/devices';
 import { useNow } from '../../lib/useNow';
 import type { SavedLink } from '../../offline/link';
+import { SummaryRow } from '../FlowParts';
 import { activationStatus } from './api';
 
 type Waiting = 'pending' | 'rejected' | 'expired';
@@ -28,6 +29,8 @@ interface WaitingStepProps {
   onActive: (device: ActivatedDevice) => void;
   /** Back to step 1 (the request is forgotten on this device) */
   onRestart: (method?: 'owner') => void;
+  /** What the device is for; a till unless the kitchen or waiter screen is linking */
+  kind?: DeviceKind;
 }
 
 const MIN_POLL_MS = 2000;
@@ -37,7 +40,7 @@ const time = new Intl.DateTimeFormat('ar-u-nu-latn', { hour: 'numeric', minute: 
  * Step 3 «بانتظار موافقة المالك من جواله». Asks the server every `pollAfterSeconds` with the
  * activation secret; keeps waiting through a lost connection, and stops on «ارفض» or expiry.
  */
-export function WaitingStep({ link, onActive, onRestart }: WaitingStepProps) {
+export function WaitingStep({ link, onActive, onRestart, kind = 'cashier' }: WaitingStepProps) {
   const [state, setState] = useState<Waiting>('pending');
   const [offline, setOffline] = useState(false);
   const [expiresAt, setExpiresAt] = useState(link.expiresAt);
@@ -104,19 +107,21 @@ export function WaitingStep({ link, onActive, onRestart }: WaitingStepProps) {
     return (
       <section
         aria-labelledby="link-ended-title"
-        className="flex w-full max-w-xl flex-col items-center gap-5 rounded-card border border-line bg-surface p-8 text-center shadow-e2"
+        className="flex w-full max-w-xl flex-col items-center gap-5 rounded-card border border-line bg-surface px-8 py-10 text-center shadow-e2"
       >
-        <span className="grid size-20 place-items-center rounded-full bg-danger-soft text-danger-ink">
+        <span className="grid size-20 place-items-center rounded-full bg-danger-soft text-danger-ink ring-8 ring-danger-soft/40">
           <AlertCircleIcon size={48} />
         </span>
-        <h1 id="link-ended-title" className="text-2xl font-bold text-ink">
-          {rejected ? 'رفض المالك ربط هذا الجهاز' : 'انتهت مهلة الطلب'}
-        </h1>
-        <p className="text-ink-muted">
-          {rejected
-            ? 'إن كان الرفض خطأً، اطلب من المالك رمزاً جديداً وابدأ من جديد.'
-            : 'لم يصل رد المالك خلال 10 دقائق. اطلب رمزاً جديداً من الإدارة وابدأ من جديد.'}
-        </p>
+        <div className="flex flex-col gap-2">
+          <h1 id="link-ended-title" className="text-2xl font-bold text-ink">
+            {rejected ? 'رفض المالك ربط هذا الجهاز' : 'انتهت مهلة الطلب'}
+          </h1>
+          <p className="text-ink-muted">
+            {rejected
+              ? 'إن كان الرفض خطأً، اطلب من المالك رمزاً جديداً وابدأ من جديد.'
+              : 'لم يصل رد المالك خلال 10 دقائق. اطلب رمزاً جديداً من الإدارة وابدأ من جديد.'}
+          </p>
+        </div>
         <Button size="lg" icon={<RetryIcon />} onClick={() => onRestart()}>
           ابدأ من جديد
         </Button>
@@ -126,7 +131,7 @@ export function WaitingStep({ link, onActive, onRestart }: WaitingStepProps) {
 
   const rows: [string, string][] = [
     ['اسم الجهاز', link.deviceName],
-    ['نوع الجهاز', `${DEVICE_KIND_LABELS.cashier} · ${DEVICE_PLATFORM_LABELS.browser}`],
+    ['نوع الجهاز', `${DEVICE_KIND_LABELS[kind]} · ${DEVICE_PLATFORM_LABELS.browser}`],
     ['الفرع', link.branchName],
     [
       'طريقة الربط',
@@ -138,70 +143,77 @@ export function WaitingStep({ link, onActive, onRestart }: WaitingStepProps) {
   ];
 
   return (
-    <section aria-labelledby="waiting-title" className="flex w-full max-w-3xl flex-col gap-5">
-      <div className="flex items-center gap-5">
-        <span className="relative grid size-26 shrink-0 place-items-center">
-          <span
-            aria-hidden="true"
-            className="absolute inset-0 rounded-full bg-brand-soft motion-safe:animate-skeleton"
-          />
-          <span className="relative grid size-19 place-items-center rounded-full bg-brand text-on-brand">
-            <PhoneIcon size={32} />
+    <section
+      aria-labelledby="waiting-title"
+      className="grid w-full max-w-5xl grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]"
+    >
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center gap-5">
+          <span className="relative grid size-24 shrink-0 place-items-center">
+            <span
+              aria-hidden="true"
+              className="absolute inset-0 rounded-full bg-brand-soft motion-safe:animate-skeleton"
+            />
+            <span className="relative grid size-16 place-items-center rounded-full bg-brand text-on-brand shadow-e2">
+              <PhoneIcon size={32} />
+            </span>
           </span>
-        </span>
-        <div className="flex flex-col gap-1.5">
-          <h1 id="waiting-title" className="text-3xl/tight font-bold text-ink">
-            بانتظار موافقة المالك من جواله
-          </h1>
-          <p className="text-ink-muted">
-            أرسلنا الطلب إلى جوال مالك «{link.storeName}». حين يضغط «اسمح» يبدأ التنزيل وحده.
+          <div className="flex flex-col gap-2">
+            <h1 id="waiting-title" className="text-3xl/tight font-bold text-ink">
+              بانتظار موافقة المالك من جواله
+            </h1>
+            <p className="text-lg text-ink-muted">
+              أرسلنا الطلب إلى جوال مالك «{link.storeName}». حين يضغط «اسمح» يبدأ التنزيل وحده.
+            </p>
+          </div>
+        </div>
+
+        {offline ? (
+          <Banner tone="offline">انقطع الإنترنت. الطلب محفوظ، ونكمل الانتظار حين يعود الاتصال.</Banner>
+        ) : null}
+
+        <dl className="flex flex-col rounded-card border border-line bg-surface px-6 py-1 shadow-e1">
+          {rows.map(([label, value]) => (
+            <SummaryRow key={label} label={label}>
+              <bdi>{value}</bdi>
+            </SummaryRow>
+          ))}
+        </dl>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 rounded-card border border-line bg-surface p-5 shadow-e1">
+          <p className="flex flex-wrap items-center gap-x-2 text-sm font-semibold text-ink-muted">
+            <ClockIcon />
+            ينتهي الطلب بعد{' '}
+            <span className="num ms-auto text-kpi font-bold text-ink">{formatCountdown(left)}</span>
+          </p>
+          <ProgressBar
+            label="الوقت الباقي للموافقة"
+            value={Math.max(0, left)}
+            max={ACTIVATION_TTL_SECONDS * 1000}
+            valueText={`${formatCountdown(left)} دقيقة باقية`}
+            tone="warning"
+          />
+          <p className="text-xs text-ink-subtle">
+            الطلب صالح {ACTIVATION_TTL_SECONDS / 60} دقيقة. بعدها اطلب رمزاً جديداً من الإدارة.
           </p>
         </div>
-      </div>
 
-      {offline ? (
-        <Banner tone="offline">انقطع الإنترنت. الطلب محفوظ، ونكمل الانتظار حين يعود الاتصال.</Banner>
-      ) : null}
-
-      <dl className="flex flex-col rounded-card border border-line bg-surface px-6 py-2 shadow-e1">
-        {rows.map(([label, value]) => (
-          <div
-            key={label}
-            className="flex min-h-11 items-center justify-between gap-4 border-b border-line last:border-b-0"
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="secondary"
+            size="lg"
+            fullWidth
+            icon={<UserIcon />}
+            onClick={() => onRestart('owner')}
           >
-            <dt className="text-sm text-ink-muted">{label}</dt>
-            <dd className="text-sm font-semibold text-ink">
-              <bdi>{value}</bdi>
-            </dd>
-          </div>
-        ))}
-      </dl>
-
-      <div className="flex flex-col gap-2.5 rounded-card border border-line bg-surface px-5 py-4 shadow-e1">
-        <p className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <ClockIcon />
-          ينتهي الطلب بعد <span className="num text-lg">{formatCountdown(left)}</span>
-        </p>
-        <ProgressBar
-          label="الوقت الباقي للموافقة"
-          value={Math.max(0, left)}
-          max={ACTIVATION_TTL_SECONDS * 1000}
-          valueText={`${formatCountdown(left)} دقيقة باقية`}
-          tone="warning"
-        />
-        <p className="text-xs text-ink-muted">
-          الطلب صالح {ACTIVATION_TTL_SECONDS / 60} دقيقة. بعدها اطلب رمزاً جديداً من الإدارة.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="lg" icon={<UserIcon />} onClick={() => onRestart('owner')}>
-          المالك هنا؟ ادخل بحسابه
-        </Button>
-        <span className="flex-1" />
-        <Button variant="ghost" size="lg" className="text-danger-ink" onClick={() => onRestart()}>
-          ألغِ الربط
-        </Button>
+            المالك هنا؟ ادخل بحسابه
+          </Button>
+          <Button variant="ghost" size="lg" fullWidth onClick={() => onRestart()}>
+            ألغِ الربط
+          </Button>
+        </div>
       </div>
     </section>
   );

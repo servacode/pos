@@ -40,6 +40,11 @@ export interface PromotionRule {
   fromTime: string | null;
   toTime: string | null;
   archived: boolean;
+  /**
+   * «كود الخصم»: set, the promotion runs only on a shop order that carries this code (the till
+   * leaves it out of the running ones otherwise); the shop's public prices never include it.
+   */
+  couponCode?: string | null;
 }
 
 export interface PromotionLine {

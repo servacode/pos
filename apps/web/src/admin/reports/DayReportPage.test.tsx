@@ -91,7 +91,8 @@ describe('«مبيعات اليوم»', () => {
     fireEvent.change(screen.getByLabelText('اليوم'), { target: { value: '2026-10-30' } });
     expect(await screen.findByRole('heading', { name: 'مبيعات يوم', level: 1 })).toBeInTheDocument();
     expect(requestsTo('GET', '/v1/reports/day?date=2026-10-30')).toHaveLength(1);
-    expect(screen.getByLabelText('اليوم')).toHaveAttribute('max', TODAY);
+    // The field is day-first text; the calendar behind its button carries the limit
+    expect(document.querySelector('input[type="date"]')).toHaveAttribute('max', TODAY);
   });
 
   it('opens on the branch of a manager tied to one, with no «كل الفروع»', async () => {

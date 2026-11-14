@@ -198,12 +198,22 @@ export const SYNC_FLAGS = [
   'unknown_serial',
   /** A serial number already sold by another sale */
   'serial_sold_twice',
+  /** A serial number in stock under another product was sold as this one */
+  'serial_other_product',
   /** A sale spent a voucher the server does not know (03 › قسيمة الاستبدال) */
   'unknown_voucher',
   /** A sale spent more than was left on a voucher */
   'voucher_overdrawn',
   'points_overdrawn',
+  /** A controlled drug sold without the prescription, doctor and patient details (03 › الصيدليات) */
+  'controlled_incomplete',
+  /** A sale took more from a batch than its balance held (the till's list was behind): accepted, flagged */
+  'batch_over_balance',
+  /** A sale took from a batch that was blocked (a recall) or past its date */
+  'batch_blocked',
   'posted_to_open_period',
+  /** A refund to the customer's account named a customer other than the sale's (or the sale had none) */
+  'refund_customer_mismatch',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,
    * no stock, no drawer. "accepted" says the document arrived, never that it was posted; this

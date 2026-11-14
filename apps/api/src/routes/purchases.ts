@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  batchBlockInput,
   expiryQuery,
   inventoryQuery,
   profitQuery,
   purchaseInput,
   purchaseListQuery,
+  recallQuery,
   stocktakeInput,
   supplierInput,
   supplierPaymentInput,
@@ -31,6 +33,7 @@ import {
   saveSupplier,
 } from '../services/purchases';
 import { expiryReport } from '../services/expiry';
+import { recall, setBatchBlocked } from '../services/batches';
 import { parseBody } from './validation';
 
 /** Suppliers, purchases, payments, stock value, counts and profit (contracts/purchases.ts). */
@@ -110,7 +113,36 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   });
   app.get('/v1/inventory/expiry', opts, async (request) => {
     if (!request.auth) throw unauthorized();
-    return expiryReport(app.db, request.auth, parseBody(expiryQuery, request.query).days, app.clock.now());
+    const q = parseBody(expiryQuery, request.query);
+    return expiryReport(app.db, request.auth, q.days, app.clock.now(), {
+      variantId: q.variantId,
+      branchId: q.branchId,
+    });
+  });
+  // Recall (سحب دفعة): who got a batch, and stopping every till from selling it
+  app.get('/v1/batches/recall', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return recall(app.db, request.auth, parseBody(recallQuery, request.query).batchNo);
+  });
+  app.post('/v1/batches/block', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return setBatchBlocked(
+      app.db,
+      request.auth,
+      parseBody(batchBlockInput, request.body),
+      true,
+      meta(request),
+    );
+  });
+  app.post('/v1/batches/unblock', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return setBatchBlocked(
+      app.db,
+      request.auth,
+      parseBody(batchBlockInput, request.body),
+      false,
+      meta(request),
+    );
   });
   app.post('/v1/stocktakes', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();

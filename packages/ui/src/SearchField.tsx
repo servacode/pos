@@ -1,8 +1,7 @@
 import { useEffect, useRef, type ComponentProps } from 'react';
-import { IconButton } from './Button';
-import { cn } from './cn';
+import { useDensity } from './context';
 import { CloseIcon, SearchIcon } from './icons';
-import { TextField } from './TextField';
+import { ADORNMENT_INSET, FieldButton, TextField } from './TextField';
 
 export interface SearchFieldProps extends Omit<
   ComponentProps<'input'>,
@@ -21,7 +20,10 @@ function typingInAField(target: EventTarget | null): boolean {
   return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
-/** The search box at the head of lists and the sale screen: icon at the start, clear at the end. */
+/**
+ * The search box at the head of lists and the sale screen (هوية 4 › الحقول): the field's box with
+ * the search icon at the start and, once something is typed, a clear button at the end.
+ */
 export function SearchField({
   label,
   value,
@@ -31,7 +33,9 @@ export function SearchField({
   placeholder,
   ...rest
 }: SearchFieldProps) {
+  const density = useDensity();
   const inputRef = useRef<HTMLInputElement>(null);
+  const iconSize = density === 'dense' ? 16 : 20;
 
   useEffect(() => {
     if (!slashShortcut) return;
@@ -63,15 +67,15 @@ export function SearchField({
         rest.onKeyDown?.(event);
       }}
       className={className}
-      inputClassName="ps-1 [&::-webkit-search-cancel-button]:appearance-none"
-      startAdornment={<SearchIcon className={cn('ms-3.5 text-ink-subtle')} />}
+      // The browser's own clear cross would double the one drawn here.
+      inputClassName="[&::-webkit-search-cancel-button]:appearance-none"
+      startAdornment={<SearchIcon size={iconSize} className={ADORNMENT_INSET[density].start} />}
       endAdornment={
         value ? (
-          <IconButton
+          <FieldButton
             label="امسح البحث"
-            size="sm"
-            icon={<CloseIcon />}
-            className="me-1"
+            title="امسح البحث"
+            icon={<CloseIcon size={iconSize} />}
             onClick={() => {
               onValueChange('');
               inputRef.current?.focus();

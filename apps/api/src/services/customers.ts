@@ -3,6 +3,7 @@ import type {
   CurrencyCode,
   CustomerDetail,
   CustomerInput,
+  CustomerKind,
   CustomerListItem,
   CustomerListResponse,
   CustomerPurchases,
@@ -41,6 +42,9 @@ type Row = {
   price_tier: string;
   no_messages: boolean;
   archived_at: string | null;
+  kind: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
   balance: string;
 };
 
@@ -59,19 +63,23 @@ const item = (r: Row): CustomerListItem => ({
   priceTier: r.price_tier === 'wholesale' ? 'wholesale' : 'retail',
   noMessages: r.no_messages,
   archived: r.archived_at !== null,
+  kind: (r.kind as CustomerKind | null) ?? null,
+  contactName: r.contact_name,
+  contactPhone: r.contact_phone,
 });
 
 export async function listCustomers(
   db: Database,
   auth: AccessClaims,
-  query: { q?: string; owing?: boolean },
+  query: { q?: string; owing?: boolean; kind?: CustomerKind },
 ): Promise<CustomerListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
     const rows = await tx.execute<Row>(sql`
       select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
-             coalesce(b.balance, 0)::text as balance
+             c.kind, c.contact_name, c.contact_phone, coalesce(b.balance, 0)::text as balance
       from customers c left join (${balances}) b on b.customer_id = c.id
+      where ${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
       order by coalesce(b.balance, 0) desc, c.name, c.id`);
     const q = query.q ? normalizeArabic(query.q) : '';
     const digits = query.q?.replace(/\D/g, '') ?? '';
@@ -97,6 +105,7 @@ async function detail(tx: Transaction, id: string): Promise<CustomerDetail> {
     Row & { tax_number: string | null; address: string | null; notes: string | null; created_at: string }
   >(sql`
     select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at, c.tax_number, c.address,
+           c.kind, c.contact_name, c.contact_phone,
            c.notes, c.created_at, coalesce(b.balance, 0)::text as balance
     from customers c left join (${balances}) b on b.customer_id = c.id
     where c.id = ${id}`);
@@ -158,6 +167,9 @@ const fields = (input: CustomerInput, now: Date) => ({
   ...(input.creditLimitMinor !== undefined ? { creditLimitMinor: input.creditLimitMinor } : {}),
   ...(input.priceTier !== undefined ? { priceTier: input.priceTier } : {}),
   ...(input.noMessages !== undefined ? { noMessages: input.noMessages } : {}),
+  ...(input.kind !== undefined ? { kind: input.kind } : {}),
+  ...(input.contactName !== undefined ? { contactName: input.contactName } : {}),
+  ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
   ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
 });
 
@@ -170,23 +182,34 @@ export async function createCustomer(
 ): Promise<CustomerDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
-    const id = newId();
-    await tx.insert(customers).values({ tenantId: auth.tenantId, id, ...fields(input, now) });
-    const created = await detail(tx, id);
-    await audit(
-      tx,
-      {
-        tenantId: auth.tenantId,
-        userId: auth.userId,
-        action: 'customer.create',
-        entity: 'customer',
-        entityId: id,
-        changes: { name: [null, created.name], creditLimitMinor: [null, created.creditLimitMinor] },
-      },
-      meta,
-    );
-    return created;
+    return createCustomerTx(tx, auth, input, meta, now);
   });
+}
+
+/** The write of createCustomer inside the caller's transaction (the import); permission checked by the caller. */
+export async function createCustomerTx(
+  tx: Transaction,
+  auth: AccessClaims,
+  input: CustomerInput,
+  meta: RequestMeta,
+  now: Date,
+): Promise<CustomerDetail> {
+  const id = newId();
+  await tx.insert(customers).values({ tenantId: auth.tenantId, id, ...fields(input, now) });
+  const created = await detail(tx, id);
+  await audit(
+    tx,
+    {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      action: 'customer.create',
+      entity: 'customer',
+      entityId: id,
+      changes: { name: [null, created.name], creditLimitMinor: [null, created.creditLimitMinor] },
+    },
+    meta,
+  );
+  return created;
 }
 
 export async function updateCustomer(
@@ -199,39 +222,54 @@ export async function updateCustomer(
 ): Promise<CustomerDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
-    const before = await detail(tx, id);
-    await tx
-      .update(customers)
-      .set({ ...fields(input, now), updatedAt: now })
-      .where(eq(customers.id, id));
-    const after = await detail(tx, id);
-    const changes: Record<string, [unknown, unknown]> = {};
-    for (const key of [
-      'name',
-      'phone',
-      'taxNumber',
-      'address',
-      'notes',
-      'creditLimitMinor',
-      'priceTier',
-      'archived',
-    ] as const) {
-      if (before[key] !== after[key]) changes[key] = [before[key], after[key]];
-    }
-    await audit(
-      tx,
-      {
-        tenantId: auth.tenantId,
-        userId: auth.userId,
-        action: 'customer.update',
-        entity: 'customer',
-        entityId: id,
-        changes,
-      },
-      meta,
-    );
-    return after;
+    return updateCustomerTx(tx, auth, id, input, meta, now);
   });
+}
+
+/** The write of updateCustomer inside the caller's transaction (the import); permission checked by the caller. */
+export async function updateCustomerTx(
+  tx: Transaction,
+  auth: AccessClaims,
+  id: string,
+  input: CustomerInput,
+  meta: RequestMeta,
+  now: Date,
+): Promise<CustomerDetail> {
+  const before = await detail(tx, id);
+  await tx
+    .update(customers)
+    .set({ ...fields(input, now), updatedAt: now })
+    .where(eq(customers.id, id));
+  const after = await detail(tx, id);
+  const changes: Record<string, [unknown, unknown]> = {};
+  for (const key of [
+    'name',
+    'phone',
+    'taxNumber',
+    'address',
+    'notes',
+    'creditLimitMinor',
+    'priceTier',
+    'kind',
+    'contactName',
+    'contactPhone',
+    'archived',
+  ] as const) {
+    if (before[key] !== after[key]) changes[key] = [before[key], after[key]];
+  }
+  await audit(
+    tx,
+    {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      action: 'customer.update',
+      entity: 'customer',
+      entityId: id,
+      changes,
+    },
+    meta,
+  );
+  return after;
 }
 
 // ─── What a customer bought (03 › الألبسة: سجل الزبون ومقاسه) ─────────────────
@@ -284,6 +322,10 @@ async function purchasesOf(tx: Transaction, id: string): Promise<CustomerPurchas
             - coalesce((select sum(r.total_minor) from sale_returns r
                         join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
                         where i.customer_id = ${id}), 0))::text as spent`);
+  // What the customer owes now (account 1200), for the till's credit limit and the receipt
+  const [owed] = await tx.execute<{ balance: string }>(sql`
+    select coalesce(b.balance, 0)::text as balance
+    from (select 1) one left join (${balances}) b on b.customer_id = ${id}::uuid`);
   const byName = new Map<string, { value: string; qty: number }[]>();
   for (const s of sizes) {
     const list = byName.get(s.name) ?? [];
@@ -310,6 +352,7 @@ async function purchasesOf(tx: Transaction, id: string): Promise<CustomerPurchas
     })),
     pieces: Number(totals?.pieces ?? 0),
     spentMinor: Number(totals?.spent ?? 0),
+    balanceMinor: Number(owed?.balance ?? 0),
   };
 }
 
@@ -327,4 +370,71 @@ export function customerPurchasesForDevice(
   id: string,
 ): Promise<CustomerPurchases> {
   return withTenant(db, device.tenantId, (tx) => purchasesOf(tx, id));
+}
+
+// ─── The duplicate customer (no merge: posted rows are never moved) ─────────────
+
+/**
+ * «أرشف هذا الزبون المكرر»: archives a customer entered twice. Two customers are never merged (their
+ * invoices and ledger lines are posted and stay as they are), so a duplicate that still owes or is
+ * owed, holds a cheque not yet cashed or keeps loyalty points is refused, with the reason: it has
+ * to be settled first, on the customer the owner keeps.
+ */
+export async function archiveDuplicateCustomer(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  meta: RequestMeta,
+  now: Date,
+): Promise<CustomerDetail> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'customers.manage');
+    const [row] = await tx.execute<{
+      archived_at: string | null;
+      loyalty_points: number;
+      balance: string;
+    }>(sql`
+      select c.archived_at, c.loyalty_points, coalesce(b.balance, 0)::text as balance
+      from customers c left join (${balances}) b on b.customer_id = c.id
+      where c.id = ${id}`);
+    if (!row) throw notFound();
+    const refuse = (reason: string) => new AppError(409, 'conflict', reason);
+    if (row.archived_at !== null) throw refuse('هذا الزبون مؤرشف من قبل.');
+    if (Number(row.balance) !== 0) {
+      throw refuse(
+        Number(row.balance) > 0
+          ? 'عليه دين غير مسدّد. سدّد حسابه أو حوّله قبل الأرشفة.'
+          : 'له رصيد عندنا. اصرفه له قبل الأرشفة.',
+      );
+    }
+    const [open] = await tx.execute<{ n: string }>(sql`
+      select count(*)::text as n from (
+        select i.id from invoice_payments p
+          join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
+          where p.method = 'cheque' and i.customer_id = ${id}
+            and not exists (select 1 from cheque_actions a where a.source_type = 'sale'
+              and a.source_id = i.id and a.payment_no = p.payment_no)
+        union all
+        select r.id from receipts r
+          where r.method = 'cheque' and r.customer_id = ${id}
+            and not exists (select 1 from cheque_actions a where a.source_type = 'receipt'
+              and a.source_id = r.id and a.payment_no = 1)
+      ) x`);
+    if (Number(open?.n ?? 0) > 0) throw refuse('عنده شيك لم يُصرف بعد. أنهِ أمره قبل الأرشفة.');
+    if (row.loyalty_points > 0) throw refuse('عنده نقاط ولاء. استعملها أو انقلها قبل الأرشفة.');
+    await tx.update(customers).set({ archivedAt: now, updatedAt: now }).where(eq(customers.id, id));
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'customer.archive_duplicate',
+        entity: 'customer',
+        entityId: id,
+        changes: { archived: [false, true] },
+      },
+      meta,
+    );
+    return detail(tx, id);
+  });
 }

@@ -15,6 +15,14 @@ const shutdown = async (signal: string) => {
   await app.close();
   process.exit(0);
 };
+// A crash outside any request: report it, give the report a moment to leave, then exit as Node would.
+for (const event of ['uncaughtException', 'unhandledRejection'] as const) {
+  process.on(event, (error: unknown) => {
+    app.log.fatal({ err: error }, event);
+    app.reporter.captureException(error, { status: 500 });
+    void app.reporter.flush(2_000).finally(() => process.exit(1));
+  });
+}
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 

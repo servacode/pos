@@ -1,5 +1,15 @@
 import { useState } from 'react';
-import { cn, EmptyState, initialsOf, UserIcon } from '@serva/ui';
+import {
+  Badge,
+  CheckIcon,
+  cn,
+  EmptyState,
+  initialsOf,
+  LockIcon,
+  MoonIcon,
+  SunIcon,
+  UserIcon,
+} from '@serva/ui';
 import { usePos } from '../services';
 import { PinScreen, type PinStatus } from '../PinScreen';
 import { checkCode, type CodeCheck, type StaffMember, type StaffSession } from './staff';
@@ -24,9 +34,26 @@ export function statusOf(result: Exclude<CodeCheck, { ok: true }>): PinStatus {
   }
 }
 
+const MORNING = 'صباح الخير';
+
 function greeting(now: number): string {
   const hour = new Date(now).getHours();
-  return hour >= 4 && hour < 12 ? 'صباح الخير' : 'مساء الخير';
+  return hour >= 4 && hour < 12 ? MORNING : 'مساء الخير';
+}
+
+/** A person's initials in a 64 circle: soft, then the brand once picked (هوية 4 › Avatar). */
+function StaffAvatar({ name, picked }: { name: string; picked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'grid size-16 shrink-0 place-items-center rounded-full text-2xl font-bold transition-colors duration-120 ease-standard',
+        picked ? 'bg-brand text-on-brand' : 'bg-brand-soft text-brand-ink',
+      )}
+    >
+      {initialsOf(name)}
+    </span>
+  );
 }
 
 /**
@@ -51,6 +78,7 @@ export function StaffSignIn({
         icon={UserIcon}
         title="لا أسماء موظفين على هذا الجهاز بعد"
         description="تصل أسماء الموظفين ورموز دخولهم مع أول اتصال بالإنترنت. إن طال الانتظار، اطلب من المالك أن يضع رمز دخول لكل موظف."
+        className="w-full max-w-xl"
       />
     );
   }
@@ -77,15 +105,22 @@ export function StaffSignIn({
     }
   }
 
+  const hello = greeting(pos.now());
+
   return (
-    <div className="grid w-full max-w-6xl grid-cols-[minmax(0,1fr)_minmax(0,27.5rem)] items-center gap-8 xl:gap-14">
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-brand-ink">{greeting(pos.now())}</span>
-          <h1 className="text-3xl/[44px] font-bold text-ink">من يعمل الآن؟</h1>
-          <p className="text-ink-muted">اختر اسمك ثم اكتب رمز الدخول.</p>
+    <div className="grid w-full max-w-6xl grid-cols-1 items-center gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,27.5rem)] xl:gap-14">
+      <div className="flex flex-col gap-7">
+        <div className="flex flex-col items-start gap-3">
+          <Badge tone="brand">
+            {hello === MORNING ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+            {hello}
+          </Badge>
+          <div className="flex flex-col gap-1.5">
+            <h1 className="text-3xl/tight font-bold text-ink">من يعمل الآن؟</h1>
+            <p className="text-lg text-ink-muted">اختر اسمك ثم اكتب رمز الدخول.</p>
+          </div>
         </div>
-        <ul aria-label="الموظفون" className="grid grid-cols-3 gap-3.5">
+        <ul aria-label="الموظفون" className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
           {staff.map((member) => {
             const selected = picked?.id === member.id;
             return (
@@ -98,21 +133,25 @@ export function StaffSignIn({
                     setStatus({ kind: 'idle' });
                   }}
                   className={cn(
-                    'flex w-full flex-col items-center gap-2 rounded-card border bg-surface px-3 py-4 text-center shadow-e1 transition-colors duration-120',
+                    'relative flex w-full flex-col items-center gap-3 rounded-card border bg-surface px-4 pt-6 pb-5 text-center shadow-e1 select-none touch-manipulation',
+                    'transition-[border-color,background-color,box-shadow,scale] duration-120 ease-standard motion-safe:active:scale-[0.98]',
                     selected
-                      ? 'border-2 border-brand bg-brand-soft'
-                      : 'border-line hover:border-line-control',
+                      ? 'border-brand bg-brand-soft/40 ring-4 ring-brand/10'
+                      : 'border-line hover:border-line-control hover:shadow-e2',
                   )}
                 >
-                  <span
-                    aria-hidden="true"
-                    className="grid size-16 place-items-center rounded-full bg-brand text-2xl font-bold text-on-brand"
-                  >
-                    {initialsOf(member.fullName)}
-                  </span>
-                  <span className="flex flex-col">
-                    <span className="text-lg font-semibold text-ink">{member.fullName}</span>
-                    <span className="text-xs text-ink-muted">{member.roleNames.join('، ')}</span>
+                  {selected ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute end-3 top-3 grid size-6 place-items-center rounded-full bg-brand text-on-brand"
+                    >
+                      <CheckIcon size={16} strokeWidth={3} />
+                    </span>
+                  ) : null}
+                  <StaffAvatar name={member.fullName} picked={selected} />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate text-lg font-semibold text-ink">{member.fullName}</span>
+                    <span className="truncate text-sm text-ink-muted">{member.roleNames.join('، ')}</span>
                   </span>
                 </button>
               </li>
@@ -124,14 +163,7 @@ export function StaffSignIn({
       {picked ? (
         <PinScreen
           key={picked.id}
-          avatar={
-            <span
-              aria-hidden="true"
-              className="grid size-16 place-items-center rounded-full bg-brand text-2xl font-bold text-on-brand"
-            >
-              {initialsOf(picked.fullName)}
-            </span>
-          }
+          avatar={<StaffAvatar name={picked.fullName} picked />}
           heading={`أهلاً ${picked.fullName}`}
           subheading={`اكتب رمز الدخول من ${picked.pinLength} أرقام`}
           length={picked.pinLength}
@@ -139,9 +171,12 @@ export function StaffSignIn({
           status={status}
         />
       ) : (
-        <div className="grid min-h-80 place-items-center rounded-[1.75rem] border border-dashed border-line-control p-8 text-center text-ink-muted">
-          اختر اسمك من القائمة لتكتب رمز الدخول.
-        </div>
+        <EmptyState
+          icon={LockIcon}
+          title="اختر اسمك من القائمة لتكتب رمز الدخول."
+          description="يفتح من هذا الجهاز نفسه، حتى دون إنترنت."
+          className="min-h-96 justify-center lg:min-h-150"
+        />
       )}
     </div>
   );

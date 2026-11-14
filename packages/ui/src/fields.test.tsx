@@ -2,12 +2,16 @@ import { fireEvent, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { Checkbox, Radio, RadioGroup } from './Checkbox';
-import { canonicalNumber, displayNumber, MoneyField } from './NumberField';
+import { ChoiceCard } from './ChoiceCard';
+import { FieldGroup } from './FieldGroup';
+import { canonicalNumber, displayNumber, MoneyField, NumberField } from './NumberField';
+import { PasswordField } from './PasswordField';
 import { SearchField } from './SearchField';
 import { Select } from './Select';
 import { Switch } from './Switch';
 import { renderUi } from './test/render';
 import { TextField } from './TextField';
+import { ToggleChip } from './ToggleChip';
 
 describe('TextField', () => {
   it('links its label, hint and error to the input', () => {
@@ -22,7 +26,114 @@ describe('TextField', () => {
 
   it('is 56 high with 18 px text on the touch density', () => {
     renderUi(<TextField label="الاسم" />, { density: 'touch' });
-    expect(screen.getByLabelText('الاسم')).toHaveClass('min-h-14', 'text-lg');
+    const input = screen.getByLabelText('الاسم');
+    // The bordered box carries the height, so the field is exactly as tall as a button beside it.
+    expect(input.parentElement).toHaveClass('min-h-14');
+    expect(input).toHaveClass('text-lg');
+  });
+
+  it('is 40 high with a mouse and 48 on a finger on the admin (comfortable)', () => {
+    renderUi(<TextField label="الاسم" />);
+    expect(screen.getByLabelText('الاسم').parentElement).toHaveClass('min-h-10', 'pointer-coarse:min-h-12');
+  });
+
+  it('draws the identity box: a surface, the 3:1 border and the brand halo on focus, no shadow', () => {
+    renderUi(<TextField label="الاسم" hint="كما يظهر على الإيصال" />);
+
+    const input = screen.getByLabelText('الاسم');
+    expect(input.parentElement).toHaveClass(
+      'border-line-control',
+      'bg-surface',
+      'focus-within:ring-brand/15',
+    );
+    expect(input.parentElement).not.toHaveClass('shadow-e1');
+    expect(input).toHaveAccessibleDescription('كما يظهر على الإيصال');
+    // A browser fill paints the input itself: rounded like the box, it never squares its corners.
+    expect(input).toHaveClass('rounded-[inherit]');
+  });
+
+  it('insets an LTR number like Arabic text: the input pads both sides alike, the box adds the rest', () => {
+    renderUi(<TextField label="السعر" dir="ltr" endAdornment={<span>ل.س</span>} />);
+
+    const input = screen.getByLabelText('السعر');
+    // An LTR input inside an Arabic box would swap its own start and end, so it has neither.
+    expect(input).toHaveClass('px-2');
+    expect(input.className).not.toMatch(/(^|\s)p[se]-/);
+    // The box runs in the page's direction: the edge inset goes where no unit sits.
+    expect(input.parentElement).toHaveClass('ps-1');
+    expect(input.parentElement).not.toHaveClass('pe-1');
+  });
+
+  it("lets a font size of the screen's own replace the field's, at every pointer", () => {
+    renderUi(
+      <>
+        <TextField label="رمز المتجر" dir="ltr" inputClassName="num text-2xl font-bold" />
+        <TextField label="الاسم" inputClassName="num" />
+      </>,
+    );
+
+    const code = screen.getByLabelText('رمز المتجر');
+    expect(code).toHaveClass('text-2xl');
+    expect(code).not.toHaveClass('text-[0.9375rem]');
+    expect(code).not.toHaveClass('pointer-coarse:text-base');
+    expect(screen.getByLabelText('الاسم')).toHaveClass('text-[0.9375rem]', 'pointer-coarse:text-base');
+  });
+
+  it('keeps a read-only value on the muted fill, still focusable', async () => {
+    const { user } = renderUi(<TextField label="رمز المتجر" defaultValue="RAQ-001" readOnly dir="ltr" />);
+    const input = screen.getByLabelText('رمز المتجر');
+    expect(input.parentElement).toHaveClass('bg-surface-muted');
+    await user.tab();
+    expect(input).toHaveFocus();
+  });
+
+  it('marks an error on the box, and rings the box while you type in it', () => {
+    renderUi(<TextField label="رقم الجوال" error="رقم الجوال ناقص." />);
+    const input = screen.getByLabelText('رقم الجوال');
+    expect(input.parentElement).toHaveClass('border-danger', 'ring-danger/15');
+    // The border stays red when focused, so the global focus ring shows where the typing goes.
+    expect(input.parentElement).toHaveClass(
+      'has-[input:focus-visible]:outline-2',
+      'has-[input:focus-visible]:outline-ring',
+    );
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('greys a disabled field instead of fading it', () => {
+    renderUi(<TextField label="الفرع" defaultValue="الرقة" disabled />);
+    const input = screen.getByLabelText('الفرع');
+    expect(input).toBeDisabled();
+    expect(input.parentElement).toHaveClass('bg-surface-muted');
+    expect(input.parentElement).not.toHaveClass('opacity-50');
+  });
+});
+
+describe('PasswordField', () => {
+  it('shows and hides the password with a pressed toggle', async () => {
+    const { user } = renderUi(<PasswordField label="كلمة السر" defaultValue="raqqa2026" />);
+
+    const input = screen.getByLabelText('كلمة السر');
+    const toggle = screen.getByRole('button', { name: 'أظهر كلمة السر' });
+    expect(input).toHaveAttribute('type', 'password');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(toggle);
+    expect(input).toHaveAttribute('type', 'text');
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('NumberField', () => {
+  it('shows its unit at the end of the box and keeps the number LTR', () => {
+    function Weight() {
+      const [value, setValue] = useState('1.25');
+      return <NumberField label="الوزن" value={value} onValueChange={setValue} decimals={3} unit="كغ" />;
+    }
+    renderUi(<Weight />);
+
+    const input = screen.getByLabelText('الوزن');
+    expect(input).toHaveAttribute('dir', 'ltr');
+    expect(input.nextElementSibling).toHaveTextContent('كغ');
   });
 });
 
@@ -116,6 +227,22 @@ describe('Select', () => {
     const select = screen.getByRole('combobox', { name: 'المدينة' });
     expect(select).toHaveAttribute('aria-invalid', 'true');
     expect(select).toHaveAccessibleDescription('اختر مدينة.');
+    // It has no caret: with the border kept red, the global focus ring shows the keyboard's place.
+    expect(select).toHaveClass('focus-visible:outline-2', 'focus-visible:outline-ring');
+    expect(select).not.toHaveClass('focus:outline-hidden');
+  });
+
+  it('is the field box itself, at the density height', () => {
+    renderUi(
+      <Select label="الفرع" hint="فرع البيع">
+        <option>الرقة</option>
+      </Select>,
+      { density: 'touch' },
+    );
+
+    const select = screen.getByRole('combobox', { name: 'الفرع' });
+    expect(select).toHaveClass('min-h-14', 'rounded-control', 'border-line-control');
+    expect(select).toHaveAccessibleDescription('فرع البيع');
   });
 });
 
@@ -168,9 +295,16 @@ describe('Checkbox and Radio', () => {
     expect(box).toHaveAttribute('aria-checked', 'mixed');
   });
 
-  it('makes the whole row a 48 px target on touch', () => {
-    renderUi(<Checkbox label="اطبع الإيصال" />, { density: 'touch' });
-    expect(screen.getByText('اطبع الإيصال').closest('label')).toHaveClass('min-h-12');
+  it('makes the whole row a 56 px target on touch, like the chips and buttons beside it', () => {
+    renderUi(
+      <>
+        <Checkbox label="اطبع الإيصال" />
+        <Radio name="pay" label="نقداً" />
+      </>,
+      { density: 'touch' },
+    );
+    expect(screen.getByText('اطبع الإيصال').closest('label')).toHaveClass('min-h-14');
+    expect(screen.getByText('نقداً').closest('label')).toHaveClass('min-h-14');
   });
 
   it('groups radios under a legend', async () => {
@@ -202,6 +336,8 @@ describe('Switch', () => {
 
     const toggle = screen.getByRole('switch', { name: 'أرسل الفاتورة على واتساب' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
+    // The name is wired to the label itself, so a screen reader and an audit both read it on the button
+    expect(toggle).toHaveAttribute('aria-labelledby');
     expect(toggle).toHaveAccessibleDescription('للزبائن المسجّلين');
     await user.click(screen.getByText('أرسل الفاتورة على واتساب'));
     expect(onChange).toHaveBeenCalledWith(true);
@@ -212,5 +348,75 @@ describe('Switch', () => {
     renderUi(<Switch label="الوضع الكثيف" checked onCheckedChange={onChange} disabled />);
     fireEvent.click(screen.getByRole('switch'));
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('is toggled from the keyboard', async () => {
+    const onChange = vi.fn();
+    const { user } = renderUi(<Switch label="البيع دون مخزون" checked onCheckedChange={onChange} />);
+
+    await user.tab();
+    expect(screen.getByRole('switch', { name: 'البيع دون مخزون' })).toHaveFocus();
+    await user.keyboard(' ');
+    expect(onChange).toHaveBeenCalledWith(false);
+  });
+
+  it('is as tall as the density controls, its button included: 56 on touch', () => {
+    renderUi(<Switch label="البيع دون مخزون" checked onCheckedChange={vi.fn()} />, { density: 'touch' });
+
+    const toggle = screen.getByRole('switch', { name: 'البيع دون مخزون' });
+    expect(toggle).toHaveClass('min-h-14');
+    expect(toggle.parentElement).toHaveClass('min-h-14');
+  });
+});
+
+describe('FieldGroup', () => {
+  it('names its controls with the legend and describes them with the hint and error', () => {
+    renderUi(
+      <FieldGroup legend="الإيصال" hint="بعد كل بيع" error="اختر طريقة واحدة على الأقل.">
+        <Checkbox label="اطبع الإيصال" />
+      </FieldGroup>,
+    );
+
+    const group = screen.getByRole('group', { name: 'الإيصال' });
+    expect(group).toHaveAccessibleDescription('اختر طريقة واحدة على الأقل. بعد كل بيع');
+    expect(screen.getByRole('checkbox', { name: 'اطبع الإيصال' })).toBeInTheDocument();
+  });
+});
+
+describe('ChoiceCard', () => {
+  it('is a radio named by its title, picked by a click anywhere on the card', async () => {
+    const { user } = renderUi(
+      <>
+        <ChoiceCard name="sector" title="بقالية" description="باركود ووزن" />
+        <ChoiceCard name="sector" title="مقهى" description="طاولات وطلبات" defaultChecked />
+      </>,
+    );
+
+    const grocery = screen.getByRole('radio', { name: /بقالية/ });
+    expect(grocery).not.toBeChecked();
+    await user.click(screen.getByText('باركود ووزن'));
+    expect(grocery).toBeChecked();
+    expect(screen.getByRole('radio', { name: /مقهى/ })).not.toBeChecked();
+  });
+});
+
+describe('ToggleChip', () => {
+  it('is a checkbox by default and a radio when asked, named by its label', async () => {
+    const { user } = renderUi(
+      <>
+        <ToggleChip label="حلويات" />
+        <ToggleChip type="radio" name="size" label="وسط" />
+      </>,
+    );
+
+    const chip = screen.getByRole('checkbox', { name: 'حلويات' });
+    await user.click(screen.getByText('حلويات'));
+    expect(chip).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'وسط' })).toBeInTheDocument();
+  });
+
+  it('is at least the density control height', () => {
+    renderUi(<ToggleChip label="سفري" />, { density: 'touch' });
+    expect(screen.getByText('سفري').closest('label')).toHaveClass('min-h-14');
   });
 });

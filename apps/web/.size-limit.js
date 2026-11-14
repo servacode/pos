@@ -1,7 +1,8 @@
 // Performance budget (tab 00 › الجودة, tab 23): checked on every merge after `pnpm build`.
 // - The sale screen (/pos) loads under 300 KB of JS + CSS after gzip.
 // - Each lazily loaded chunk stays under 60 KB gzip.
-// - The stylesheet (the @serva/ui theme and every class its components use) stays under 15 KB gzip.
+// - The stylesheet (the @serva/ui theme and every class its components use) stays under 22 KB gzip:
+//   SERFA carries a full dark set of every token, the charts and the menus (was 15 KB before it).
 // - Fonts have their own budget: the woff2 files the cashier keeps (Arabic + Latin, 3 weights).
 // File lists come from Vite's manifest, so they follow the real chunk graph whatever Rollup names
 // or shares.
@@ -66,7 +67,7 @@ export default [
     name: 'Stylesheet: @serva/ui theme and component classes (gzip)',
     path: manifest['index.html'].css.map((file) => `dist/${file}`),
     gzip: true,
-    limit: '15 kB',
+    limit: '22 kB',
   },
   {
     name: 'Cashier fonts (woff2: Arabic + Latin, 400/600/700)',

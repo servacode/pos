@@ -3,12 +3,13 @@ import type { CurrencyCode } from '@serva/core';
 import type { GiftVoucherPayload } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
-import { Alert, Button, CloseIcon, Money, TextField } from '@serva/ui';
+import { Alert, Button, CalendarIcon, CloseIcon, Money, TextField } from '@serva/ui';
 import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import type { Cart } from './cart';
 import { postHold, type HoldAnswer } from './onlineOrders';
+import { SalePanel } from './SalePanel';
 
 /**
  * «احجز» (03 › الألبسة: الحجز بعربون): the cart held for a customer who pays a deposit now and the
@@ -125,16 +126,33 @@ export function HoldPanel({
   }
 
   return (
-    <section
-      aria-label="احجز للزبون"
-      className="flex flex-col gap-4 rounded-card border border-line bg-surface p-6"
-    >
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-ink">احجز للزبون</h2>
-        <Button variant="secondary" icon={<CloseIcon />} onClick={onClose} disabled={saving}>
+    <SalePanel
+      label="احجز للزبون"
+      title="احجز للزبون"
+      icon={<CalendarIcon size={20} />}
+      actions={
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<CloseIcon size={20} />}
+          onClick={onClose}
+          disabled={saving}
+        >
           أغلق
         </Button>
-      </div>
+      }
+      footer={
+        <Button
+          size="lg"
+          icon={<CalendarIcon size={20} />}
+          loading={saving}
+          disabled={!ready}
+          onClick={() => void hold()}
+        >
+          {paid ? 'أعد إرسال الحجز' : 'احجز'}
+        </Button>
+      }
+    >
       <p className="text-ink-muted">
         تُحجز قطع الفاتورة (<Money minor={totalMinor} currency={currency} />) باسم الزبون، ويدفع العربون الآن
         نقداً والباقي عند الاستلام. يظهر الحجز في «طلبات المتجر» على كل كاشير.
@@ -174,11 +192,6 @@ export function HoldPanel({
         />
       </div>
       {error ? <Alert tone="error">{error}</Alert> : null}
-      <div>
-        <Button size="lg" loading={saving} disabled={!ready} onClick={() => void hold()}>
-          {paid ? 'أعد إرسال الحجز' : 'احجز'}
-        </Button>
-      </div>
-    </section>
+    </SalePanel>
   );
 }

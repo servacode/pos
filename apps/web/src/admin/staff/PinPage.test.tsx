@@ -44,6 +44,7 @@ async function fill(
 describe('«رمز الدخول للكاشير»', () => {
   it('is reached from the top bar, explains 4 versus 6 digits, and tells an owner 6', async () => {
     const { user } = openPin(undefined, makeMe(), '/');
+    await user.click(await screen.findByRole('button', { name: /^حسابي/ }));
     await user.click(await screen.findByRole('link', { name: 'رمز الدخول للكاشير' }));
 
     expect(await screen.findByRole('heading', { name: 'رمز الدخول للكاشير', level: 1 })).toBeInTheDocument();

@@ -116,8 +116,16 @@ export function returnAmounts(
   };
 }
 
-/** The method the money goes back by: the sale's own, when it was paid one way other than cash */
+/**
+ * The method the money goes back by: the sale's own, when it was paid one way other than cash. A
+ * sale of a named customer that was (partly) on account goes back to their account, so the debt
+ * they still owe comes down (08 › مرتجع مبيعات). A sale paid by cheque does the same.
+ */
 export function defaultRefundMethod(sale: SalePayload): RefundMethod {
+  if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) return 'account';
+  // A cheque stays as it is in the books: the refund never comes out of the drawer. It goes to the
+  // customer's account, or on a voucher when the sale names nobody
+  if (sale.payments.some((p) => p.method === 'cheque')) return sale.customerId ? 'account' : 'voucher';
   const methods = new Set(sale.payments.map((p) => p.method));
   if (methods.size === 1) {
     const [only] = [...methods];
@@ -174,12 +182,15 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
     ZERO,
   );
   const method = request.refundMethod ?? defaultRefundMethod(sale);
+  if (method === 'account' && !sale.customerId)
+    throw new Error('only a sale of a named customer can be refunded to an account');
   const refund: Refund = {
     method,
     currency: sale.currency,
     amountMinor: totals.totalMinor,
     // A voucher's code is the return's own number, given when it is saved
-    reference: method === 'cash' || method === 'voucher' ? null : (request.reference ?? null),
+    reference:
+      method === 'cash' || method === 'voucher' || method === 'account' ? null : (request.reference ?? null),
   };
   return {
     saleId: request.saleId,
@@ -193,5 +204,7 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
     // Goods that cost nothing on the sale come back with nothing paid out
     refunds: totals.totalMinor > 0 ? [refund] : [],
     approval: request.approval ?? null,
+    // Only an account refund names the customer: every other return stays as it always was
+    ...(method === 'account' && totals.totalMinor > 0 ? { customerId: sale.customerId } : {}),
   };
 }

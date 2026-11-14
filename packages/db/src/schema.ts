@@ -78,7 +78,7 @@ export const userStatus = pgEnum('user_status', ['active', 'disabled']);
 /** Administrative state of a store, set by the platform team (e.g. suspended for abuse). */
 export const tenantStatus = pgEnum('tenant_status', ['active', 'suspended']);
 export const agentStatus = pgEnum('agent_status', ['active', 'suspended']);
-export const otpPurpose = pgEnum('otp_purpose', ['registration']);
+export const otpPurpose = pgEnum('otp_purpose', ['registration', 'password_reset']);
 
 // ─── Platform (no tenant_id) ──────────────────────────────────────────────────
 
@@ -124,6 +124,19 @@ export const platformUsers = pgTable('platform_users', {
   role: platformRole('role').notNull(),
   status: userStatus('status').notNull().default('active'),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  /** AES-256-GCM sealed TOTP secret (services/platform-2fa.ts); null until two-factor is on */
+  totpSecretEnc: text('totp_secret_enc'),
+  /** A secret shown for enrolment and not yet confirmed with a code */
+  totpPendingEnc: text('totp_pending_enc'),
+  totpEnabledAt: timestamp('totp_enabled_at', { withTimezone: true }),
+  /** The last 30-second step accepted, so one code works once */
+  totpLastStep: bigint('totp_last_step', { mode: 'number' }),
+  /** SHA-256 hashes of the unused recovery codes */
+  recoveryCodeHashes: jsonb('recovery_code_hashes')
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  /** Set by the seed while the password still equals the bootstrap one; cleared on change */
+  mustChangePassword: boolean('must_change_password').notNull().default(false),
   version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -235,6 +248,12 @@ export const platformSettings = pgTable('platform_settings', {
   paymentMethods: jsonb('payment_methods').notNull().default([]),
   /** Pounds per dollar for subscription invoices, set weekly */
   sypPerUsd: numeric('syp_per_usd').notNull().default('13000'),
+  /**
+   * The company and contact details the public terms and privacy pages read (companyName,
+   * ownerName, address, email, providers…). Written through platform_legal_save(); the public
+   * GET /v1/legal returns it. A key that is missing or empty is a blank the page marks.
+   */
+  legal: jsonb('legal').notNull().default({}),
   version: version(),
   updatedAt: updatedAt(),
 });
@@ -355,6 +374,30 @@ export const tenantSettings = pgTable(
     service: jsonb('service').$type<{ tables: string[]; orderNumbers: boolean; kitchenTickets: boolean }>(),
     /** «نقاط الولاء»: null, no points */
     loyalty: jsonb('loyalty').$type<{ earnEveryMinor: number; pointValueMinor: number }>(),
+    /** «الصيدلية» (packages/core › contracts/pharmacy.ts); null: not set, a pharmacy gets the defaults */
+    pharmacy: jsonb('pharmacy').$type<{
+      prescription: 'required' | 'optional';
+      returns?: 'none' | 'sealed' | 'allowed';
+      controlledReturns?: boolean;
+      autoBatch?: boolean;
+      blockNoBatch?: boolean;
+    }>(),
+    /** «الصندوق» (packages/core › contracts/till.ts): return window and card approval number; null: defaults */
+    till: jsonb('till').$type<{
+      returnWindowDays: number | null;
+      cardApprovalRequired: boolean;
+      blockNegativeStock?: boolean;
+      warrantyAskCustomer?: boolean | null;
+      warrantyTerms?: string | null;
+    }>(),
+    /**
+     * «الأصناف» (packages/core › contracts/catalog-options.ts): barcodes made for new variants, and the
+     * size runs of the purchase grid; null: the defaults
+     */
+    catalogOptions: jsonb('catalog_options').$type<{
+      autoBarcode: boolean;
+      sizeRuns: { name: string; counts: number[] }[];
+    }>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -501,6 +544,8 @@ export const users = pgTable(
     pinLength: integer('pin_length'),
     /** Moves up with every PIN change, so a device forgets what it learnt of the old one */
     pinVersion: integer('pin_version').notNull().default(0),
+    /** «نسبة العمولة» of a seller in basis points of the net sales; null: none set (reports only) */
+    commissionBp: integer('commission_bp'),
     status: userStatus('status').notNull().default('active'),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     version: version(),
@@ -733,6 +778,10 @@ export const syncInbox = pgTable(
     foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
     index('sync_inbox_number_idx').on(t.tenantId, t.docType, t.number),
     index('sync_inbox_device_seq_idx').on(t.tenantId, t.deviceId, t.deviceSeq),
+    // What a sync push checks first: is anything held back for this store? (read-only release)
+    index('sync_inbox_quarantined_idx')
+      .on(t.tenantId, t.deviceId, t.deviceSeq)
+      .where(sql`${t.status} = 'quarantined'`),
     tenantIsolation(),
   ],
 );
@@ -939,12 +988,22 @@ export const products = pgTable(
     searchName: text('search_name').notNull(),
     categoryId: uuid('category_id'),
     brand: text('brand'),
+    /** «الموسم/التشكيلة» (صيف 2026): a label to filter and report by; null: none */
+    season: text('season'),
     /** «الاسم العلمي» of a medicine (03 › الصيدليات): the till finds the product by it too */
     genericName: text('generic_name'),
+    /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
+    requiresPrescription: boolean('requires_prescription').notNull().default(false),
+    /** «مراقَب»: only the pharmacist sells it; every movement enters the controlled-drug register */
+    controlled: boolean('controlled').notNull().default(false),
     /** «له رقم تسلسلي أو IMEI» (03 › الإلكترونيات): every piece is received and sold by its number */
     tracksSerial: boolean('tracks_serial').notNull().default(false),
+    /** «يتطلب صلاحية»: a purchase line of it must carry an expiry date */
+    requiresExpiry: boolean('requires_expiry').notNull().default(false),
     /** «الكفالة» in months from the day of sale; null: none */
     warrantyMonths: integer('warranty_months'),
+    /** «قابل للتأجير» (03 › الأدوات الطبية): its serial-tracked pieces can be rented out */
+    rentable: boolean('rentable').notNull().default(false),
     /** stock, service */
     type: text('type').notNull().default('stock'),
     /** active, temporary */
@@ -1006,6 +1065,11 @@ export const variants = pgTable(
      * newest receipts first); null when no receipt gave one. The till warns on it.
      */
     nearestExpiry: date('nearest_expiry'),
+    /**
+     * The batches on the shelf with something left, nearest expiry first, as the same estimate
+     * gives them: [{ batchNo, expiry }]. The till picks the batch of a sale from it.
+     */
+    shelfBatches: jsonb('shelf_batches').$type<{ batchNo: string | null; expiry: string }[]>(),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
@@ -1068,6 +1132,8 @@ export const barcodes = pgTable(
     packQty: integer('pack_qty').notNull().default(1000),
     packName: text('pack_name'),
     packPriceMinor: bigint('pack_price_minor', { mode: 'number' }),
+    /** The pack's own wholesale price; null: the piece wholesale price times the pack quantity */
+    packWholesaleMinor: bigint('pack_wholesale_minor', { mode: 'number' }),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1095,6 +1161,14 @@ export const stockLevels = pgTable(
     variantId: uuid('variant_id').notNull(),
     qty: bigint('qty', { mode: 'number' }).notNull().default(0),
     reservedQty: bigint('reserved_qty', { mode: 'number' }).notNull().default(0),
+    /**
+     * What is left of each batch here, as the batch ledger gives it (refresh_batch_cache): the till
+     * allocates a sale from it. [{ batchNo, expiry, qty, blocked }]; null when no batch has a balance.
+     */
+    batches:
+      jsonb('batches').$type<
+        { batchNo: string | null; expiry: string | null; qty: number; blocked: boolean }[]
+      >(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1138,6 +1212,75 @@ export const stockMovements = pgTable(
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     unique('stock_movements_doc_line_unique').on(t.tenantId, t.docId, t.lineNo),
     index('stock_movements_variant_idx').on(t.tenantId, t.variantId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * The batch ledger (03 › الصيدليات: الدفعة والصلاحية), append-only and parallel to stock_movements:
+ * a batch's balance in a branch is the sum of its rows. Receipt +, a sale line's allocation −, a
+ * return to the batch +, a supplier return, a write-off or a transfer out −, a transfer in +. It
+ * never changes stock, costing or postings; it answers "which batch is left, which sold to whom".
+ * A batch is its item, number ('' when it has none) and expiry (null when it has none). One row
+ * per document line and allocation, so a document processed twice cannot count twice.
+ */
+export const batchMovements = pgTable(
+  'batch_movements',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    batchNo: text('batch_no').notNull().default(''),
+    expiryDate: date('expiry_date'),
+    /** Signed, thousandths of the base unit */
+    qty: bigint('qty', { mode: 'number' }).notNull(),
+    /** receipt, sale, return, supplier_return, count, transfer_out, transfer_in, backfill */
+    kind: text('kind').notNull(),
+    docId: uuid('doc_id').notNull(),
+    lineNo: integer('line_no').notNull(),
+    /** Which of a line's allocations (a sale line split over batches has several) */
+    allocNo: integer('alloc_no').notNull().default(0),
+    businessDate: date('business_date').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'batch_movements_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    unique('batch_movements_line_unique').on(t.tenantId, t.kind, t.docId, t.lineNo, t.allocNo),
+    index('batch_movements_balance_idx').on(t.tenantId, t.variantId, t.branchId),
+    index('batch_movements_batch_idx').on(t.tenantId, t.batchNo),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A batch stopped by hand (a recall): no till sells it while `releasedAt` is null. One row per
+ * item and batch number, kept after release as the history.
+ */
+export const batchBlocks = pgTable(
+  'batch_blocks',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    variantId: uuid('variant_id').notNull(),
+    batchNo: text('batch_no').notNull(),
+    reason: text('reason'),
+    blockedBy: uuid('blocked_by'),
+    blockedAt: timestamp('blocked_at', { withTimezone: true }).notNull().defaultNow(),
+    releasedAt: timestamp('released_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'batch_blocks_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.variantId], foreignColumns: [variants.tenantId, variants.id] }),
+    unique('batch_blocks_batch_unique').on(t.tenantId, t.variantId, t.batchNo),
     tenantIsolation(),
   ],
 );
@@ -1499,6 +1642,11 @@ export const customers = pgTable(
     loyaltyPoints: integer('loyalty_points').notNull().default(0),
     /** «لا يريد رسائل»: no message to customers ever reaches this one */
     noMessages: boolean('no_messages').notNull().default(false),
+    /** clinic, hospital, pharmacy, individual, government; null: not set */
+    kind: text('kind'),
+    /** The person to ask for and their phone, at a clinic, hospital or office */
+    contactName: text('contact_name'),
+    contactPhone: text('contact_phone'),
     /** The till document that created it, when a till did */
     createdByDoc: uuid('created_by_doc'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1664,6 +1812,8 @@ export const supplierPayments = pgTable(
     amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
     /** cash (from the safe), bank */
     method: text('method').notNull(),
+    /** A payment by cheque: its bank, number and due date (paid from the bank account) */
+    cheque: jsonb('cheque').$type<{ bank: string; number: string; dueDate: string } | null>(),
     note: text('note'),
     createdBy: uuid('created_by').notNull(),
     createdAt: createdAt(),
@@ -1841,6 +1991,9 @@ export const alterationTickets = pgTable(
     priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
     dueDate: date('due_date').notNull(),
     note: text('note'),
+    /** A deposit paid when the ticket was made: taken as a gift voucher (its code below), spent at delivery */
+    depositMinor: bigint('deposit_minor', { mode: 'number' }).notNull().default(0),
+    depositVoucher: text('deposit_voucher'),
     readyAt: timestamp('ready_at', { withTimezone: true }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     version: version(),
@@ -1852,6 +2005,241 @@ export const alterationTickets = pgTable(
     unique('alteration_tickets_seq_unique').on(t.tenantId, t.seq),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     index('alteration_tickets_status_idx').on(t.tenantId, t.status, t.dueDate),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Warranty and maintenance claims (03 › الإلكترونيات والأدوات الطبية): a piece handed back for a fault,
+ * found by its serial number, with the sale, the customer and the warranty end as they were when it
+ * was opened. received → sent (to the supplier or a workshop) → ready → delivered. Numbered per store
+ * (WC-000001); each step is written in `events` with its day and note. Stock and accounts are
+ * untouched: a claim posts nothing.
+ */
+export const warrantyClaims = pgTable(
+  'warranty_claims',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    seq: integer('seq').notNull(),
+    number: text('number').notNull(),
+    /** received | sent | ready | delivered */
+    status: text('status').notNull().default('received'),
+    serial: text('serial').notNull(),
+    variantId: uuid('variant_id'),
+    /** The item's name as it was when the claim opened */
+    item: text('item').notNull(),
+    saleId: uuid('sale_id'),
+    saleNumber: text('sale_number'),
+    soldOn: date('sold_on'),
+    warrantyUntil: date('warranty_until'),
+    /** Whether the warranty still ran on the day the piece came back */
+    underWarranty: boolean('under_warranty').notNull().default(false),
+    customerName: text('customer_name'),
+    customerPhone: text('customer_phone'),
+    issue: text('issue').notNull(),
+    /** Where it was sent: the supplier or the workshop */
+    sentTo: text('sent_to'),
+    /** What the repair cost the store, the technician, the unit lent meanwhile, and a paid repair's sale */
+    costMinor: bigint('cost_minor', { mode: 'number' }),
+    technician: text('technician'),
+    loanItem: text('loan_item'),
+    paidRepair: boolean('paid_repair').notNull().default(false),
+    repairSaleNumber: text('repair_sale_number'),
+    /** [{ status, on: 'YYYY-MM-DD', note }] in order, the first being the receipt */
+    events: jsonb('events')
+      .$type<{ status: string; on: string; note: string | null }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdBy: uuid('created_by'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'warranty_claims_pkey', columns: [t.tenantId, t.id] }),
+    unique('warranty_claims_seq_unique').on(t.tenantId, t.seq),
+    index('warranty_claims_status_idx').on(t.tenantId, t.status, t.createdAt),
+    index('warranty_claims_serial_idx').on(t.tenantId, t.serial),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A menu item's recipe (03 › المطاعم): what goes into one portion of a dish, to SHOW its food cost
+ * and margin in «كلفة الوجبات». Nothing is deducted from stock and nothing is posted: the cost of
+ * each ingredient is read from its own stock value when the report runs.
+ */
+export const recipeItems = pgTable(
+  'recipe_items',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** The dish */
+    productId: uuid('product_id').notNull(),
+    /** The ingredient (a stocked variant) */
+    ingredientVariantId: uuid('ingredient_variant_id').notNull(),
+    /** Thousandths of the ingredient's base unit in one portion */
+    qty: bigint('qty', { mode: 'number' }).notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'recipe_items_pkey', columns: [t.tenantId, t.id] }),
+    unique('recipe_items_ingredient_unique').on(t.tenantId, t.productId, t.ingredientVariantId),
+    index('recipe_items_product_idx').on(t.tenantId, t.productId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * A table's open order (03 › المطاعم › الصالة): an operational document shared by the waiter
+ * screens and the tills of a branch, never a financial one. One open order per table; every
+ * command on it runs under its row lock and moves `version`. Closed when the till charges the
+ * table (the sale itself goes through the sync path) or when an empty order is dropped.
+ */
+export const openOrders = pgTable(
+  'open_orders',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    tableName: text('table_name').notNull(),
+    guests: integer('guests'),
+    /** open | bill_requested | closed */
+    status: text('status').notNull().default('open'),
+    openedBy: uuid('opened_by'),
+    deviceId: uuid('device_id'),
+    billRequestedAt: timestamp('bill_requested_at', { withTimezone: true }),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    /** paid | empty */
+    closedReason: text('closed_reason'),
+    /** The sale's document number when it was paid */
+    closedRef: text('closed_ref'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'open_orders_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    // One live order per table of a branch
+    uniqueIndex('open_orders_table_live_idx')
+      .on(t.tenantId, t.branchId, t.tableName)
+      .where(sql`status <> 'closed'`),
+    index('open_orders_branch_idx').on(t.tenantId, t.branchId, t.status),
+    tenantIsolation(),
+  ],
+);
+
+/** A line of an open order: what was ordered, with its choices, and where the kitchen has it. */
+export const openOrderLines = pgTable(
+  'open_order_lines',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    orderId: uuid('order_id').notNull(),
+    productId: uuid('product_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    name: text('name').notNull(),
+    qty: integer('qty').notNull(),
+    choices: jsonb('choices')
+      .$type<{ group: string; name: string; priceMinor: number }[]>()
+      .notNull()
+      .default([]),
+    note: text('note'),
+    seat: integer('seat'),
+    /** The kitchen section: the product's top-level category */
+    section: text('section').notNull(),
+    /** new | sent | preparing | ready | served | cancelled */
+    status: text('status').notNull().default('new'),
+    ticketId: uuid('ticket_id'),
+    addedBy: uuid('added_by'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    preparingAt: timestamp('preparing_at', { withTimezone: true }),
+    readyAt: timestamp('ready_at', { withTimezone: true }),
+    servedAt: timestamp('served_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancelReason: text('cancel_reason'),
+    cancelledBy: uuid('cancelled_by'),
+    approvedBy: uuid('approved_by'),
+    /** Cancelled after it reached the kitchen: needs a reason and a manager, and shows in the report */
+    cancelledAfterSend: boolean('cancelled_after_send').notNull().default(false),
+    /** before_prep | after_prep, for a line cancelled after the send */
+    cancelStage: text('cancel_stage'),
+    /** The section has seen the cancellation */
+    kitchenAckAt: timestamp('kitchen_ack_at', { withTimezone: true }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'open_order_lines_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [openOrders.tenantId, openOrders.id] }),
+    index('open_order_lines_order_idx').on(t.tenantId, t.orderId),
+    index('open_order_lines_ticket_idx').on(t.tenantId, t.ticketId),
+    index('open_order_lines_cancel_idx')
+      .on(t.tenantId, t.cancelledAt)
+      .where(sql`cancelled_after_send`),
+    tenantIsolation(),
+  ],
+);
+
+/** What one «أرسل للمطبخ» sends to one section: the slip on its screen or printer. */
+export const kitchenTickets = pgTable(
+  'kitchen_tickets',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    orderId: uuid('order_id').notNull(),
+    seq: integer('seq').notNull(),
+    section: text('section').notNull(),
+    tableName: text('table_name').notNull(),
+    /** new | add (the second and later sends of one order) */
+    kind: text('kind').notNull().default('new'),
+    sentBy: uuid('sent_by'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'kitchen_tickets_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [openOrders.tenantId, openOrders.id] }),
+    unique('kitchen_tickets_seq_unique').on(t.tenantId, t.seq),
+    index('kitchen_tickets_branch_idx').on(t.tenantId, t.branchId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/** Everything that happened to an order, append-only (who, from which device, when). */
+export const openOrderEvents = pgTable(
+  'open_order_events',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    orderId: uuid('order_id').notNull(),
+    type: text('type').notNull(),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    userId: uuid('user_id'),
+    deviceId: uuid('device_id'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'open_order_events_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.orderId], foreignColumns: [openOrders.tenantId, openOrders.id] }),
+    index('open_order_events_order_idx').on(t.tenantId, t.orderId, t.at),
     tenantIsolation(),
   ],
 );
@@ -2074,6 +2462,43 @@ export const journalLines = pgTable(
 );
 
 /**
+ * An expense recorded on the dashboard (29 › المصاريف): the document that owns one automatic
+ * journal entry (Dr the expense account, Cr where it was paid from). Never changed; cancelling it
+ * is a reversing entry of its journal entry, which the list shows as «ملغى».
+ */
+export const expenses = pgTable(
+  'expenses',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** The expense account's number in the chart (6101, 6102, …) */
+    accountCode: text('account_code').notNull(),
+    currency: text('currency').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    /** In the store's base currency, at the rate frozen when it was recorded */
+    baseAmountMinor: bigint('base_amount_minor', { mode: 'number' }).notNull(),
+    rate: jsonb('rate'),
+    /** safe, bank, wallet, card */
+    payFrom: text('pay_from').notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'expenses_pkey', columns: [t.tenantId, t.id] }),
+    unique('expenses_number_unique').on(t.tenantId, t.number),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    index('expenses_date_idx').on(t.tenantId, t.businessDate),
+    tenantIsolation(),
+  ],
+);
+
+/**
  * Automatic promotions (packages/core › promotions.ts): set on the dashboard, pulled by every till,
  * applied there to each line. Stopping one archives it.
  */
@@ -2106,6 +2531,8 @@ export const promotions = pgTable(
       .default(sql`'{}'::integer[]`),
     fromTime: text('from_time'),
     toTime: text('to_time'),
+    /** «كود الخصم»: when set, the promotion applies only to a shop order that carries this code */
+    couponCode: text('coupon_code'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
@@ -2114,6 +2541,9 @@ export const promotions = pgTable(
   },
   (t) => [
     primaryKey({ name: 'promotions_pkey', columns: [t.tenantId, t.id] }),
+    uniqueIndex('promotions_coupon_unique')
+      .on(t.tenantId, sql`lower(${t.couponCode})`)
+      .where(sql`${t.couponCode} is not null`),
     index('promotions_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
   ],
@@ -2169,14 +2599,46 @@ export const serials = pgTable(
     saleId: uuid('sale_id'),
     soldOn: date('sold_on'),
     warrantyUntil: date('warranty_until'),
+    /** The branch that holds the piece (its purchase's, or the selling till's for one never received) */
+    branchId: uuid('branch_id'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
+    changeXid: changeXid(),
   },
   (t) => [
     primaryKey({ name: 'serials_pkey', columns: [t.tenantId, t.id] }),
     unique('serials_serial_unique').on(t.tenantId, t.serial),
     index('serials_variant_idx').on(t.tenantId, t.variantId),
+    index('serials_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Every sale of a serial number, however many: `serials` keeps the latest, this keeps them all, so
+ * a number sold twice never loses a sale. `flag`: unknown (never received), duplicate (already
+ * sold by another sale), other_product (in stock under another product), override (a manager
+ * accepted it at the till).
+ */
+export const serialSales = pgTable(
+  'serial_sales',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    serial: text('serial').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    saleId: uuid('sale_id').notNull(),
+    soldOn: date('sold_on').notNull(),
+    flag: text('flag'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'serial_sales_pkey', columns: [t.tenantId, t.id] }),
+    unique('serial_sales_unique').on(t.tenantId, t.serial, t.saleId),
+    index('serial_sales_flag_idx').on(t.tenantId, t.flag),
     tenantIsolation(),
   ],
 );
@@ -2298,12 +2760,20 @@ export const onlineStores = pgTable(
     showOutOfStock: boolean('show_out_of_stock').notNull().default(false),
     /** whatsapp: «اطلب عبر واتساب»; shop: the order is placed in the shop, the phone confirmed by a code */
     orderMode: text('order_mode').notNull().default('whatsapp'),
+    /** «اعرض الأسعار في المتجر الإلكتروني»: off, the public shop shows no price and the order is an inquiry */
+    showPrices: boolean('show_prices').notNull().default(true),
     /** «أجرة التوصيل»: flat, or per area when areas are set; for the courier, not a sale */
     deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
     deliveryAreas: jsonb('delivery_areas')
       .$type<{ name: string; feeMinor: number }[]>()
       .notNull()
       .default([]),
+    /** «شعار المتجر وصورة الغلاف وعبارة قصيرة» (26 › الشكل): the pictures are rows of `uploads` */
+    tagline: text('tagline'),
+    logoUploadId: uuid('logo_upload_id'),
+    coverUploadId: uuid('cover_upload_id'),
+    /** One of the identity's own colour families: emerald (the brand), teal or blue; never a free colour */
+    accent: text('accent').notNull().default('emerald'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2351,6 +2821,15 @@ export const onlineOrders = pgTable(
     /** For the courier, on top of the pieces; 0 for a pickup */
     deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
     deliveryArea: text('delivery_area'),
+    /** out, delivered (null: not yet): «خرج للتوصيل» and «سُلّم», apart from the sale at the till */
+    deliveryStage: text('delivery_stage'),
+    courierName: text('courier_name'),
+    outAt: timestamp('out_at', { withTimezone: true }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    /** The coupon typed in the cart; the till applies its promotion when it sells the order */
+    couponCode: text('coupon_code'),
+    /** The offer the code opened, as it was when the order was placed: the till applies it when it sells the order */
+    couponRule: jsonb('coupon_rule').$type<OnlineOrderCouponRule>(),
     decidedBy: uuid('decided_by'),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     version: version(),
@@ -2368,6 +2847,71 @@ export const onlineOrders = pgTable(
   ],
 );
 
+/**
+ * What the shop's page says of a product (26 › المتجر الإلكتروني): a description and a size guide,
+ * plain text. Apart from `products` so editing it never moves the product's version or its sync.
+ */
+export const productTexts = pgTable(
+  'product_texts',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    productId: uuid('product_id').notNull(),
+    description: text('description'),
+    sizeGuide: text('size_guide'),
+    updatedBy: uuid('updated_by'),
+    version: version(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'product_texts_pkey', columns: [t.tenantId, t.productId] }),
+    foreignKey({ columns: [t.tenantId, t.productId], foreignColumns: [products.tenantId, products.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * «أبلغني عند التوفر»: a customer left a phone on an out-of-stock piece. The owner sees the list and
+ * writes to them on WhatsApp when the piece is back; `notifiedAt` marks the ones already told.
+ */
+export const stockAlerts = pgTable(
+  'stock_alerts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    productId: uuid('product_id').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    phone: text('phone').notNull(),
+    notifiedAt: timestamp('notified_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'stock_alerts_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.productId], foreignColumns: [products.tenantId, products.id] }),
+    foreignKey({ columns: [t.tenantId, t.variantId], foreignColumns: [variants.tenantId, variants.id] }),
+    unique('stock_alerts_variant_phone_unique').on(t.tenantId, t.variantId, t.phone),
+    index('stock_alerts_product_idx').on(t.tenantId, t.productId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/** What the till needs of the offer a coupon opened (the shape of core's PromotionRule, without its clock) */
+export interface OnlineOrderCouponRule {
+  id: string;
+  name: string;
+  kind: 'percent' | 'buy_get';
+  percentBp: number | null;
+  buyQty: number | null;
+  getQty: number | null;
+  scope: 'all' | 'categories' | 'products';
+  categoryIds: string[];
+  productIds: string[];
+  couponCode: string;
+}
+
 export interface OnlineOrderLine {
   variantId: string;
   productId: string;
@@ -2377,3 +2921,189 @@ export interface OnlineOrderLine {
   priceMinor: number;
   totalMinor: number;
 }
+
+/**
+ * Device rentals (03 › الأدوات الطبية: التأجير): a serial-tracked piece of a rentable product lent to a
+ * customer for a rate per day, week or month, numbered per store (RNT-000001). While it is out the
+ * serial's status is «rented» and it cannot be sold. The return closes it and computes the charge,
+ * which the till sells as a «إيجار» service line less the deposit (taken as a gift voucher). It posts
+ * nothing itself.
+ */
+export const rentals = pgTable(
+  'rentals',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    seq: integer('seq').notNull(),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    deviceId: uuid('device_id'),
+    /** out | returned (a late one is «overdue» by its date, never stored) */
+    status: text('status').notNull().default('out'),
+    serial: text('serial').notNull(),
+    variantId: uuid('variant_id').notNull(),
+    /** The piece's name as it was when it went out */
+    item: text('item').notNull(),
+    customerId: uuid('customer_id'),
+    customerName: text('customer_name').notNull(),
+    customerPhone: text('customer_phone').notNull(),
+    startDate: date('start_date').notNull(),
+    expectedReturn: date('expected_return').notNull(),
+    /** day | week | month */
+    rateUnit: text('rate_unit').notNull(),
+    rateMinor: bigint('rate_minor', { mode: 'number' }).notNull(),
+    currency: text('currency').notNull(),
+    depositMinor: bigint('deposit_minor', { mode: 'number' }).notNull().default(0),
+    depositVoucher: text('deposit_voucher'),
+    note: text('note'),
+    returnedOn: date('returned_on'),
+    chargeMinor: bigint('charge_minor', { mode: 'number' }),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'rentals_pkey', columns: [t.tenantId, t.id] }),
+    unique('rentals_seq_unique').on(t.tenantId, t.seq),
+    index('rentals_status_idx').on(t.tenantId, t.status, t.expectedReturn),
+    index('rentals_serial_idx').on(t.tenantId, t.serial),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Maintenance contracts (03 › الأدوات الطبية: عقود الصيانة): a customer's devices serviced every N
+ * months for a period at a price, numbered per store (MC-000001). Each visit is written in `visits`;
+ * the price is sold at the till as a «عقد صيانة» service line, and `billedOn` marks the last time.
+ */
+export const maintenanceContracts = pgTable(
+  'maintenance_contracts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    seq: integer('seq').notNull(),
+    number: text('number').notNull(),
+    customerId: uuid('customer_id'),
+    customerName: text('customer_name').notNull(),
+    customerPhone: text('customer_phone'),
+    /** [{ serial, item }] */
+    devices: jsonb('devices')
+      .$type<{ serial: string; item: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    visitEveryMonths: integer('visit_every_months').notNull(),
+    currency: text('currency').notNull(),
+    priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
+    /** [{ on: 'YYYY-MM-DD', technician, note }] in the order they were written */
+    visits: jsonb('visits')
+      .$type<{ on: string; technician: string; note: string | null }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** The day the contract's price was last sold at the till; null: not yet */
+    billedOn: date('billed_on'),
+    /** When true, the contract is closed early and no visit is due */
+    cancelled: boolean('cancelled').notNull().default(false),
+    note: text('note'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'maintenance_contracts_pkey', columns: [t.tenantId, t.id] }),
+    unique('maintenance_contracts_seq_unique').on(t.tenantId, t.seq),
+    index('maintenance_contracts_end_idx').on(t.tenantId, t.endDate),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * Contract prices (03 › الأدوات الطبية: أسعار العقود): the price a customer (or every customer of one
+ * type, «مشفى») pays for a product, between two days. The till takes it for that customer in place
+ * of the shelf price; nothing posts here.
+ */
+export const contractPrices = pgTable(
+  'contract_prices',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** One of the two is set: a customer, or a customer type */
+    customerId: uuid('customer_id'),
+    customerKind: text('customer_kind'),
+    variantId: uuid('variant_id').notNull(),
+    currency: text('currency').notNull(),
+    /** One base unit (the till multiplies a pack) */
+    priceMinor: bigint('price_minor', { mode: 'number' }).notNull(),
+    validFrom: date('valid_from').notNull(),
+    validTo: date('valid_to'),
+    note: text('note'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'contract_prices_pkey', columns: [t.tenantId, t.id] }),
+    index('contract_prices_customer_idx').on(t.tenantId, t.customerId),
+    index('contract_prices_kind_idx').on(t.tenantId, t.customerKind),
+    index('contract_prices_variant_idx').on(t.tenantId, t.variantId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * «عروض الأسعار» (03 › الجملة: عرض السعر): a price offer to a customer, numbered per store and year
+ * (QUO-2026-000001). Not a financial document: nothing posts and no stock moves. The lines and their
+ * priced totals are kept as they were offered (jsonb), so a catalog price change never moves an offer.
+ */
+export const quotations = pgTable(
+  'quotations',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** The number's year and its place in that year, per store */
+    year: integer('year').notNull(),
+    seq: integer('seq').notNull(),
+    number: text('number').notNull(),
+    /** draft | sent | accepted | expired | converted (a waiting one past its date reads expired when read) */
+    status: text('status').notNull().default('draft'),
+    branchId: uuid('branch_id'),
+    customerId: uuid('customer_id'),
+    customerName: text('customer_name'),
+    customerPhone: text('customer_phone'),
+    customerTaxNumber: text('customer_tax_number'),
+    customerAddress: text('customer_address'),
+    currency: text('currency').notNull(),
+    taxInclusive: boolean('tax_inclusive').notNull(),
+    issueDate: date('issue_date').notNull(),
+    validUntil: date('valid_until').notNull(),
+    notes: text('notes'),
+    terms: text('terms'),
+    lines: jsonb('lines').notNull(),
+    invoiceDiscount: jsonb('invoice_discount'),
+    totals: jsonb('totals').notNull(),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    convertedAt: timestamp('converted_at', { withTimezone: true }),
+    createdBy: uuid('created_by'),
+    createdByName: text('created_by_name'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'quotations_pkey', columns: [t.tenantId, t.id] }),
+    unique('quotations_seq_unique').on(t.tenantId, t.year, t.seq),
+    unique('quotations_number_unique').on(t.tenantId, t.number),
+    index('quotations_status_idx').on(t.tenantId, t.status, t.createdAt),
+    index('quotations_customer_idx').on(t.tenantId, t.customerId),
+    tenantIsolation(),
+  ],
+);

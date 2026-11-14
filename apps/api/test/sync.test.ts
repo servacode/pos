@@ -491,6 +491,7 @@ describe('GET /v1/sync/pull', () => {
       'products',
       'promotions',
       'roles',
+      'serials',
       'settings',
       'stock_levels',
       'tax_rates',
@@ -657,7 +658,8 @@ describe('POST /v1/sync/resync and the server epoch', () => {
     });
     const snapshot = parseSnapshot(gunzipSync(file.rawPayload).toString('utf8'));
     expect(Object.keys(snapshot.sets).sort()).toEqual(['roles', 'users']);
-    expect(snapshot.sets.roles).toHaveLength(3);
+    // owner, manager, cashier, waiter, pharmacist, accountant and storekeeper: every new store starts with them
+    expect(snapshot.sets.roles).toHaveLength(7);
   });
 
   it('carries the epoch on every answer; server_epoch_bump() after a restore moves it on', async () => {

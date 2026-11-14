@@ -252,6 +252,15 @@ describe('a return', () => {
     } as unknown as SalePayload;
     expect(defaultRefundMethod(mixed)).toBe('cash');
     expect(defaultRefundMethod(aSale([line(1, 1_000)]))).toBe('cash');
+    // A cheque stays as it is: the refund goes to the customer's account, or a voucher without one
+    const byCheque = (customerId: string | null) =>
+      ({
+        ...aSale([line(1, 1_000)]),
+        customerId,
+        payments: [{ method: 'cheque' }],
+      }) as unknown as SalePayload;
+    expect(defaultRefundMethod(byCheque(CASHIER))).toBe('account');
+    expect(defaultRefundMethod(byCheque(null))).toBe('voucher');
     // Cash carries no reference even when one is typed; a card without one keeps null
     const sale = aSale([line(1, 1_000)], 'card');
     const cash = buildReturnPayload({
@@ -281,5 +290,50 @@ describe('a return', () => {
     expect(r.totals.totalMinor).toBe(0);
     expect(r.refunds).toEqual([]);
     expect(returnPayloadSchema.safeParse(r).success).toBe(true);
+  });
+});
+
+describe('a return on account (08 › مرتجع مبيعات: تخفيض دين الزبون)', () => {
+  const CUSTOMER = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a77';
+  const onCredit = (methods: ('cash' | 'credit')[], customerId: string | null = CUSTOMER) =>
+    ({
+      ...aSale([line(1, 1_000)]),
+      customerId,
+      payments: methods.map((method) => ({ method })),
+    }) as unknown as SalePayload;
+
+  it('is the default for a named customer’s sale that was on credit, wholly or in part', () => {
+    expect(defaultRefundMethod(onCredit(['credit']))).toBe('account');
+    expect(defaultRefundMethod(onCredit(['cash', 'credit']))).toBe('account');
+    // No customer, or no credit in the sale: as before
+    expect(defaultRefundMethod(onCredit(['credit'], null))).toBe('cash');
+    expect(defaultRefundMethod(onCredit(['cash']))).toBe('cash');
+  });
+
+  it('names the customer, carries no reference and passes the contract', () => {
+    const sale = aSale([line(1, 1_000)]);
+    const withCustomer = { ...sale, customerId: CUSTOMER } as SalePayload;
+    const r = buildReturnPayload({
+      ...request(withCustomer, [{ saleLineNo: 1, qty: 1000 }]),
+      refundMethod: 'account',
+      reference: 'X',
+    });
+    expect(r.refunds).toEqual([{ method: 'account', currency: 'SYP', amountMinor: 1_000, reference: null }]);
+    expect(r.customerId).toBe(CUSTOMER);
+    expect(returnPayloadSchema.safeParse(r).success).toBe(true);
+    // Other returns have no customerId at all, exactly as tills that predate it send them
+    expect('customerId' in buildReturnPayload(request(sale, [{ saleLineNo: 1, qty: 1000 }]))).toBe(false);
+  });
+
+  it('cannot be built or accepted without a customer', () => {
+    const sale = aSale([line(1, 1_000)]);
+    expect(() =>
+      buildReturnPayload({ ...request(sale, [{ saleLineNo: 1, qty: 1000 }]), refundMethod: 'account' }),
+    ).toThrow(/named customer/);
+    const forged = {
+      ...buildReturnPayload(request(sale, [{ saleLineNo: 1, qty: 1000 }])),
+      refunds: [{ method: 'account', currency: 'SYP', amountMinor: 1_000, reference: null }],
+    };
+    expect(returnPayloadSchema.safeParse(forged).success).toBe(false);
   });
 });

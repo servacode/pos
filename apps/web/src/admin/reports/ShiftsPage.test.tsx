@@ -118,7 +118,7 @@ describe('the shift close report', () => {
       'المبيعات نقداً268,400 ل.س410.00 $',
       'الباقي المعطى−1,200 ل.س0.00 $',
       'المرتجعات نقداً0 ل.س0.00 $',
-      'دفعات الزبائن نقداً0 ل.س0.00 $',
+      'دفعات الزبائن نقداً (وعربون التأجير)0 ل.س0.00 $',
       'الإيداع في الدرج12,000 ل.س0.00 $',
       'السحب من الدرج−1,500 ل.س0.00 $',
       'إلى الخزنة−150,000 ل.س0.00 $',
@@ -127,6 +127,8 @@ describe('the shift close report', () => {
       'الفرقعجز 1,500 ل.سلا فرق',
     ]);
     expect(screen.getByText('عجز')).toHaveClass('text-danger-ink');
+    expect(screen.getByText(/عربون التأجير المقبوض نقداً يُحسب هنا/)).toBeInTheDocument();
+    expect(screen.getByText(/رُدّ العربون في وردية غير التي قُبض فيها/)).toBeInTheDocument();
 
     const methods = within(screen.getByRole('region', { name: 'المبيعات حسب الطريقة والعملة' }));
     expect(methods.getAllByRole('row').map(text)).toEqual([

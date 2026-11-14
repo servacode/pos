@@ -164,6 +164,27 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
   return parse<T>(retry);
 }
 
+/**
+ * A binary download behind the sign-in (the store export): the same token and refresh handling as
+ * apiFetch, the answer as a Blob with the file name the server suggested.
+ */
+export async function apiDownload(path: string): Promise<{ blob: Blob; fileName: string | null }> {
+  const usedToken = accessToken;
+  let res = await send(path, 'GET', undefined, usedToken);
+  if (res.status === 401) {
+    const freshToken = accessToken && accessToken !== usedToken ? accessToken : await refreshAccessToken();
+    if (!freshToken) {
+      expireSession();
+      throw await toApiError(res);
+    }
+    res = await send(path, 'GET', undefined, freshToken);
+    if (res.status === 401) expireSession();
+  }
+  if (!res.ok) throw await toApiError(res);
+  const disposition = res.headers.get('content-disposition') ?? '';
+  return { blob: await res.blob(), fileName: /filename="([^"]+)"/.exec(disposition)?.[1] ?? null };
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : UNEXPECTED_ERROR_MESSAGE;
 }

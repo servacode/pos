@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CURRENCIES } from '@serva/core/currencies';
-import { convert } from '@serva/core/money';
+import { convert, lineGross } from '@serva/core/money';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import {
   buildSalePayload,
@@ -10,28 +10,49 @@ import {
   type SaleSettlement,
   type SaleTender,
 } from '@serva/core/sale';
+import type { Approval, PaymentMethod } from '@serva/core/contracts/documents';
+import { chequeReference } from '@serva/core/contracts/cheques';
 import type { OutboxEntry } from '@serva/sync';
 import {
+  AddIcon,
+  Alert,
+  AlertCircleIcon,
+  Avatar,
   BackIcon,
+  BookIcon,
   Button,
+  CardIcon,
   CashIcon,
   CheckIcon,
+  ChequeIcon,
   cn,
   DeleteIcon,
   displayNumber,
+  GiftIcon,
+  IconButton,
   Keypad,
   Money,
+  PhoneIcon,
+  SparklesIcon,
   TextField,
+  TransferIcon,
+  UserIcon,
   useDigits,
+  type Icon,
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
-import { CustomerHistory } from '../customers/CustomerHistory';
+import { warrantyAsksCustomer } from '@serva/core/contracts/till';
+import { CustomerHistory, fetchPurchases } from '../customers/CustomerHistory';
+import { DateField } from '../../lib/DateField';
 import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
+import { Kbd } from '../sale/Kbd';
 import { nextOrderNo } from '../sale/orders';
 import { digitOf } from '../PinScreen';
 import { usePos } from '../services';
+import { ManagerCode } from '../staff/ManagerCode';
+import type { StaffMember } from '../staff/staff';
 import { deviceDocuments } from '../shift/shift';
-import { pricingInput, type Cart, type PricingContext } from '../sale/cart';
+import { hasWarrantyDevice, pricingInput, type Cart, type PricingContext } from '../sale/cart';
 import {
   amountText,
   dueIn,
@@ -53,10 +74,16 @@ export interface PaymentPanelProps {
   cashierId: string;
   /** «البيع بالآجل» (sale.credit): the credit method shows once a customer is picked */
   canCredit?: boolean;
+  /** The branch's staff: a cashier without «البيع بالآجل» sells on account with a manager's code */
+  staff?: readonly StaffMember[];
   /** «البائع» when it is not the cashier (03 › عمولة البائع) */
   salespersonId?: string | null;
   /** A customer the owner marked «زبون جملة» was picked: the cart moves to the wholesale price */
   onWholesaleCustomer?: () => void;
+  /** A customer was picked: the till asks for their contract prices and prices the cart; true when some applied */
+  onContractPrices?: (customerId: string) => Promise<boolean>;
+  /** The customer was picked or removed: the cart keeps them, so a quotation, a reload or a held cart brings them back */
+  onCustomer?: (customer: { id: string; name: string } | null) => void;
   onBack: () => void;
   onCompleted: (entry: OutboxEntry) => void;
 }
@@ -74,6 +101,18 @@ interface Part {
   tender: SaleTender;
 }
 
+/** Each method's picture on its card and in the parts paid (هوية 4 › ChoiceCard). */
+const METHOD_ICON: Record<PaymentMethod, Icon> = {
+  cash: CashIcon,
+  card: CardIcon,
+  wallet: PhoneIcon,
+  transfer: TransferIcon,
+  credit: BookIcon,
+  cheque: ChequeIcon,
+  voucher: GiftIcon,
+  points: SparklesIcon,
+};
+
 /**
  * The payment panel (kit cashier/Payment), beside the cart: what is due in both currencies, the
  * method, the amount received with quick notes and the keypad, the change live, and a split over
@@ -88,7 +127,10 @@ export function PaymentPanel({
   shiftId,
   cashierId,
   canCredit = false,
+  staff,
   onWholesaleCustomer,
+  onContractPrices,
+  onCustomer,
   salespersonId = null,
   onBack,
   onCompleted,
@@ -97,9 +139,22 @@ export function PaymentPanel({
   const digits = useDigits();
   const settings = catalog.settings!;
   const base = ctx.currency;
-  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  // A customer already on the cart (a quotation's, a rental's, a reloaded sale) is the one paying
+  const [customer, setCustomer] = useState<PickedCustomer | null>(() => {
+    const on = cart.customer;
+    if (!on) return null;
+    const known = catalog.customers.find((c) => c.id === on.id);
+    return {
+      id: on.id,
+      name: known?.name ?? on.name,
+      creditLimitMinor: known?.creditLimitMinor ?? null,
+      priceTier: known?.priceTier,
+    };
+  });
   const [history, setHistory] = useState(false);
-  const [picking, setPicking] = useState(false);
+  // A device with a warranty is sold to a known customer (the store's setting): the picker opens first
+  const needsCustomer = warrantyAsksCustomer(settings.till, settings.sectors) && hasWarrantyDevice(cart);
+  const [picking, setPicking] = useState(needsCustomer);
   // This till's own documents, for the vouchers it issued or spent that the server has not sent back
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
   useEffect(() => {
@@ -109,6 +164,21 @@ export function PaymentPanel({
       alive = false;
     };
   }, [pos.store]);
+  // What the picked customer owes now, as the server says (online only); null while unknown
+  const [owed, setOwed] = useState<number | null>(null);
+  const customerId = customer?.id ?? null;
+  useEffect(() => {
+    setOwed(null);
+    const token = pos.device.token;
+    if (!customerId || !token || !pos.online()) return;
+    let alive = true;
+    void fetchPurchases(customerId, token, pos.fetch).then(
+      (got) => alive && setOwed(got?.balanceMinor ?? null),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [customerId, pos]);
   const vouchers = useMemo(() => tillVouchers(catalog.vouchers, entries ?? []), [catalog.vouchers, entries]);
   const hasVouchers = Boolean(cart.voucher) || [...vouchers.values()].some((v) => v.balanceMinor > 0);
   // «نقاط الولاء» (03 › الألبسة): what the picked customer's points are worth, as last pulled
@@ -124,6 +194,25 @@ export function PaymentPanel({
     if (customer && canCredit) {
       list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
       list.push({ key: 'cheque', method: 'cheque', currency: base, label: 'شيك', rate: null });
+    } else if (customer && staff) {
+      // Without the permission the sale on account goes within the customer's limit, or once a manager
+      // allows it; a cheque goes once a manager allows it
+      const limit = customer.creditLimitMinor;
+      const within = limit !== null && owed !== null && owed < limit;
+      list.push({
+        key: 'credit',
+        method: 'credit',
+        currency: base,
+        label: within ? 'آجل على الحساب' : 'على الحساب (بموافقة المدير)',
+        rate: null,
+      });
+      list.push({
+        key: 'cheque',
+        method: 'cheque',
+        currency: base,
+        label: 'شيك (بموافقة المدير)',
+        rate: null,
+      });
     }
     return list;
   }, [
@@ -133,16 +222,27 @@ export function PaymentPanel({
     catalog.collectRates,
     customer,
     canCredit,
+    staff,
     hasVouchers,
     loyalty,
     points,
+    owed,
   ]);
   // An exchange opens on the voucher of the return just saved
   const [option, setOption] = useState<PayOption>(cart.voucher ? VOUCHER_OPTION(base) : options[0]!);
+  // Who is asked for a manager's code now: a sale on account or by cheque, or one under cost
+  const [approving, setApproving] = useState<'credit' | 'cost' | null>(null);
+  const [creditGrant, setCreditGrant] = useState<Approval | null>(null);
+  const [costGrant, setCostGrant] = useState<Approval | null>(null);
   const [split, setSplit] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
   const [text, setText] = useState('');
   const [reference, setReference] = useState(cart.voucher ?? '');
+  // A cheque's details: bank, number, due day, and whose it is when not the customer's
+  const [chequeBank, setChequeBank] = useState('');
+  const [chequeNo, setChequeNo] = useState('');
+  const [chequeDue, setChequeDue] = useState('');
+  const [chequeDrawer, setChequeDrawer] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const referenceRef = useRef<HTMLInputElement>(null);
@@ -189,7 +289,30 @@ export function PaymentPanel({
         : nonCash
           ? remainingBase
           : null);
-  const current = amount && amount > 0 ? tenderOf(option, amount, voucher ? voucher.code : reference) : null;
+  const chequeDetails =
+    option.method === 'cheque' && chequeBank.trim() && chequeNo.trim() && chequeDue
+      ? {
+          bank: chequeBank.trim(),
+          number: chequeNo.trim(),
+          dueDate: chequeDue,
+          drawer: chequeDrawer.trim() || null,
+        }
+      : null;
+  const current =
+    amount && amount > 0
+      ? tenderOf(
+          option,
+          amount,
+          option.method === 'cheque'
+            ? chequeDetails
+              ? chequeReference(chequeDetails)
+              : ''
+            : voucher
+              ? voucher.code
+              : reference,
+          chequeDetails,
+        )
+      : null;
   const pointsProblem =
     option.method === 'points' && (amount ?? 0) > pointsLeft ? 'المبلغ أكبر مما تساويه نقاط الزبون.' : null;
   const voucherProblem =
@@ -205,10 +328,29 @@ export function PaymentPanel({
             : null);
   const tenders = [...parts.map((p) => p.tender), ...(current ? [current] : [])];
   const settlement = settleWith(tenders);
+  // A sale on account against the customer's limit: what it takes them over by, before any code is asked
+  const creditAmount = tenders
+    .filter((t) => t.method === 'credit')
+    .reduce((sum, t) => sum + t.amountMinor, 0);
+  const creditLimit = customer?.creditLimitMinor ?? null;
+  const overBy =
+    creditLimit !== null && owed !== null && creditAmount > 0
+      ? Math.max(0, owed + creditAmount - creditLimit)
+      : 0;
+  const withinLimit = creditLimit !== null && owed !== null && overBy === 0;
+  const overPolicy = settings.till?.creditOverLimit ?? 'approve';
+  const blockedOver = overBy > 0 && overPolicy === 'block';
+  // Under cost: the lines the till knows the average cost of and prices under it
+  const belowCost = cart.lines.filter(
+    (l) => typeof l.costMinor === 'number' && l.priceMinor < lineGross(l.costMinor, l.packQty),
+  );
+  // A card's approval number is asked for only when the store's settings say so
+  const cardApproval = settings.till?.cardApprovalRequired ?? false;
   const needsReference =
     nonCash &&
     option.method !== 'credit' &&
     option.method !== 'points' &&
+    (option.method !== 'card' || cardApproval) &&
     current !== null &&
     current.reference === null;
   const onAccount = (method: string) => method === 'credit' || method === 'cheque' || method === 'points';
@@ -218,6 +360,8 @@ export function PaymentPanel({
     settlement.covered &&
     !needsReference &&
     !voucherProblem &&
+    !blockedOver &&
+    !(needsCustomer && !customer) &&
     tenders.length > 0;
 
   const dueHere = dueIn(option.currency, base, remainingBase, ctx.rates);
@@ -238,10 +382,18 @@ export function PaymentPanel({
     setReference('');
   }, [cart.voucher, entries, vouchers, totalMinor, base, options]);
 
+  function clearCheque() {
+    setChequeBank('');
+    setChequeNo('');
+    setChequeDue('');
+    setChequeDrawer('');
+  }
+
   function pick(next: PayOption) {
     setOption(next);
     setText('');
     setReference('');
+    clearCheque();
     setError(null);
     if (next.method !== 'cash') setTimeout(() => referenceRef.current?.focus(), 0);
   }
@@ -251,13 +403,37 @@ export function PaymentPanel({
     setParts((list) => [...list, { option, tender: current }]);
     setText('');
     setReference('');
+    clearCheque();
   }
 
-  async function complete() {
+  async function complete(grant: { credit?: Approval; cost?: Approval } = {}) {
     if (!canComplete) {
       if ('error' in settlement) setError(settlement.error);
+      else if (blockedOver) setError('هذا الزبون يتجاوز حد الدين، ولا يُباع له بالآجل فوق الحد.');
       else if (voucherProblem) setError(voucherProblem);
-      else if (needsReference) setError(`اكتب ${REFERENCE_LABEL[option.method]}.`);
+      else if (needsReference) {
+        setError(
+          option.method === 'cheque'
+            ? 'اكتب البنك ورقم الشيك وتاريخ استحقاقه.'
+            : `اكتب ${REFERENCE_LABEL[option.method]}.`,
+        );
+      }
+      return;
+    }
+    // A cashier without «البيع بالآجل» needs a manager's code for a cheque, and for a sale on account
+    // unless it stays within the customer's limit; over the limit a code is asked of everyone who
+    // cannot sell on account themselves
+    const approved = grant.credit ?? creditGrant;
+    const onCredit = tenders.some((t) => t.method === 'credit');
+    const onCheque = tenders.some((t) => t.method === 'cheque');
+    if (!canCredit && !approved && ((onCredit && !withinLimit) || onCheque)) {
+      setApproving('credit');
+      return;
+    }
+    // A line under its cost: a manager's code when the store's settings ask for it
+    const costApproved = grant.cost ?? costGrant;
+    if (belowCost.length > 0 && settings.till?.belowCostApproval && !costApproved) {
+      setApproving('cost');
       return;
     }
     setSaving(true);
@@ -273,7 +449,7 @@ export function PaymentPanel({
             orderNo: settings.service.orderNumbers ? await nextOrderNo(pos.local, businessDate) : null,
           }
         : null;
-      const payload = buildSalePayload({
+      const built = buildSalePayload({
         ...pricingInput(cart, ctx),
         shiftId,
         cashierId,
@@ -284,7 +460,15 @@ export function PaymentPanel({
         salespersonId,
         service,
         onlineOrderId: cart.onlineOrder?.id ?? null,
+        prescription:
+          cart.prescription && Object.values(cart.prescription).some(Boolean) ? cart.prescription : null,
       });
+      const extra = {
+        ...(approved && (onCredit || onCheque) ? { creditApproval: approved } : {}),
+        // The balance the receipt prints under a sale on account
+        ...(onCredit && owed !== null ? { customerBalanceAfterMinor: owed + creditAmount } : {}),
+      };
+      const payload = { ...built, ...extra };
       const entry = await pos.save({
         type: 'sale',
         payload: payload as unknown as Record<string, unknown>,
@@ -303,9 +487,13 @@ export function PaymentPanel({
   // While the customer picker is open, its own fields take the keys
   const pickingRef = useRef(picking);
   pickingRef.current = picking;
+  // While the manager types their code, the keys are theirs
+  const approvingRef = useRef(approving !== null);
+  approvingRef.current = approving !== null;
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.altKey || event.ctrlKey || event.metaKey || pickingRef.current) return;
+      if (event.altKey || event.ctrlKey || event.metaKey || pickingRef.current || approvingRef.current)
+        return;
       if (event.key === 'Escape') {
         onBack();
         return;
@@ -338,253 +526,397 @@ export function PaymentPanel({
   return (
     <section
       aria-label="الدفع"
-      className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e3 motion-safe:animate-sheet-in"
+      className="@container/pay relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e2 motion-safe:animate-sheet-in"
     >
-      <header className="flex items-center gap-4 border-b border-line px-6 py-3">
-        <Button variant="secondary" icon={<BackIcon />} onClick={onBack}>
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-5 py-2">
+        <Button
+          variant="secondary"
+          size="md"
+          icon={<BackIcon size={20} />}
+          aria-keyshortcuts="Escape"
+          onClick={onBack}
+        >
           ارجع للسلة
         </Button>
-        <h2 className="text-2xl font-bold text-ink">{split ? 'الدفع · مقسّم' : 'الدفع'}</h2>
+        {/* Where the panel is narrow (a 1024 px screen), the methods and the keys say it is the payment */}
+        <h2 className="sr-only text-lg font-semibold text-ink @3xl/pay:not-sr-only">
+          {split ? 'الدفع · مقسّم' : 'الدفع'}
+        </h2>
         <span className="flex-1" />
-        <div className="flex flex-col items-end">
-          <span className="text-xs text-ink-muted">المطلوب</span>
-          <span className="flex items-baseline gap-3">
-            <Money minor={totalMinor} currency={base} className="text-3xl font-bold text-ink" />
-            {foreign ? (
-              <Money
-                minor={convert(totalMinor, base, foreign, rateFor(ctx.rates, foreign, base))}
-                currency={foreign}
-                className="text-lg text-ink-muted"
-              />
-            ) : null}
-          </span>
+        <div className="flex items-baseline gap-3">
+          <span className="text-sm font-semibold text-ink-muted">المطلوب</span>
+          <Money
+            minor={totalMinor}
+            currency={base}
+            className="text-kpi font-bold tracking-tight text-ink"
+            unitClassName="text-base font-semibold text-ink-muted"
+          />
+          {foreign ? (
+            <Money
+              minor={convert(totalMinor, base, foreign, rateFor(ctx.rates, foreign, base))}
+              currency={foreign}
+              className="text-base font-semibold text-ink-muted"
+            />
+          ) : null}
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,17rem)_minmax(0,1fr)] gap-5 overflow-y-auto px-6 py-4 xl:grid-cols-[minmax(0,21.25rem)_minmax(0,1fr)]">
-        <div className="flex flex-col gap-3">
-          <span className="text-sm font-semibold text-ink-muted">
-            {split ? 'طريقة الجزء التالي' : 'طريقة الدفع'}
-          </span>
-          <div role="group" aria-label="طريقة الدفع" className="grid grid-cols-2 gap-2">
-            {options.map((o) => (
-              <button
-                key={o.key}
-                type="button"
-                aria-pressed={option.key === o.key}
-                onClick={() => pick(o)}
-                className={cn(
-                  'flex min-h-16 flex-col items-start justify-center rounded-2xl border px-3 text-start',
-                  option.key === o.key
-                    ? 'border-2 border-brand bg-brand-soft text-brand-ink'
-                    : 'border-line bg-surface text-ink',
-                )}
-              >
-                <span className="font-bold">{o.label}</span>
-                {o.rate ? (
-                  <span className="text-xs font-semibold text-ink-muted">
-                    سعر <bdi className="num">{displayNumber(o.rate.rate, digits)}</bdi>
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-          {picking ? (
-            <CustomerPicker
-              catalog={catalog}
-              createdBy={cashierId}
-              onPicked={(picked) => {
-                setCustomer(picked);
-                setPicking(false);
-                if (picked.priceTier === 'wholesale' && cart.priceTier !== 'wholesale') {
-                  setParts([]);
-                  onWholesaleCustomer?.();
-                }
-              }}
-              onCancel={() => setPicking(false)}
-            />
-          ) : customer ? (
-            <div className="flex flex-col gap-2 rounded-control border border-line px-3 py-2">
-              <div className="flex items-center gap-2">
-                <span className="flex flex-1 flex-col">
-                  <span className="text-xs text-ink-muted">الزبون</span>
-                  <span className="font-semibold text-ink">{customer.name}</span>
-                </span>
-                <Button variant="ghost" aria-pressed={history} onClick={() => setHistory((h) => !h)}>
-                  مشترياته
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setCustomer(null);
-                    setParts((list) => list.filter((p) => !onAccount(p.option.method)));
-                    if (onAccount(option.method)) pick(options[0]!);
-                  }}
-                >
-                  أزله
-                </Button>
-              </div>
-              {history ? <CustomerHistory customerId={customer.id} /> : null}
-            </div>
-          ) : (
-            <Button variant="secondary" onClick={() => setPicking(true)}>
-              {canCredit ? 'اختر الزبون (للبيع بالآجل)' : 'اختر الزبون'}
-            </Button>
-          )}
-          <div
-            role="group"
-            aria-label="طريقة التقسيم"
-            className="grid grid-cols-2 gap-1 rounded-control bg-surface-muted p-1"
-          >
-            {[false, true].map((on) => (
-              <button
-                key={String(on)}
-                type="button"
-                aria-pressed={split === on}
-                onClick={() => {
-                  setSplit(on);
-                  if (!on) setParts([]);
-                }}
-                className={cn(
-                  'min-h-12 rounded-xl font-semibold',
-                  split === on ? 'bg-surface text-ink shadow-e1' : 'text-ink-muted',
-                )}
-              >
-                {on ? 'قسّم الدفع' : 'دفعة واحدة'}
-              </button>
-            ))}
-          </div>
-          {parts.length > 0 ? (
-            <ul aria-label="الأجزاء المدفوعة" className="flex flex-col gap-2">
-              {parts.map((part, index) => (
-                <li
-                  key={index}
-                  className="flex items-center gap-2 rounded-control border border-line px-3 py-2"
-                >
-                  <span className="flex-1 font-semibold">{part.option.label}</span>
-                  <Money
-                    minor={part.tender.amountMinor}
-                    currency={part.tender.currency}
-                    className="font-bold"
-                  />
-                  <button
-                    type="button"
-                    aria-label="احذف هذا الجزء"
-                    onClick={() => setParts((list) => list.filter((_, i) => i !== index))}
-                    className="grid size-12 place-items-center rounded-xl text-ink-muted hover:bg-surface-muted"
-                  >
-                    <DeleteIcon size={20} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-2 @3xl/pay:py-3">
+        <div className="grid gap-4 @lg/pay:grid-cols-2 @3xl/pay:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] @3xl/pay:gap-5">
+          {/* How the customer pays, who the customer is, and the parts paid so far */}
+          <div className="@container flex min-w-0 flex-col gap-3">
             <span className="text-sm font-semibold text-ink-muted">
-              {option.method === 'cash' ? 'المبلغ المستلم' : 'المبلغ'} · {option.label}
+              {split ? 'طريقة الجزء التالي' : 'طريقة الدفع'}
             </span>
-            <span className="flex h-16 items-center justify-between rounded-control border-2 border-brand bg-surface px-4">
-              <span className="num text-3xl font-bold text-ink" dir="ltr">
-                {text
-                  ? displayNumber(text, digits)
-                  : amount
-                    ? displayNumber(amountText(amount, option.currency), digits)
-                    : displayNumber('0', digits)}
-              </span>
-              <span className="text-lg text-ink-muted">{CURRENCIES[option.currency].symbolAr}</span>
-            </span>
-          </div>
-          {option.method === 'credit' ? (
-            <p className="rounded-control bg-warning-soft/60 p-3 text-sm text-ink">
-              يُسجَّل المبلغ ديناً على {customer?.name}
-              {customer?.creditLimitMinor !== null && customer?.creditLimitMinor !== undefined ? (
-                <>
-                  {' '}
-                  · حد الدين <Money minor={customer.creditLimitMinor} currency={base} />
-                </>
-              ) : null}
-              . يظهر في كشف حسابه.
-            </p>
-          ) : option.method === 'points' ? (
-            <p
-              role="status"
-              aria-label="نقاط الزبون"
-              className="rounded-control bg-brand-soft p-3 text-sm text-ink"
-            >
-              لدى {customer?.name} <bdi className="num font-bold">{points}</bdi> نقطة تساوي{' '}
-              <Money minor={pointsWorth} currency={base} className="font-bold" />.
-              {pointsProblem ? (
-                <span className="block font-semibold text-danger-ink">{pointsProblem}</span>
-              ) : null}
-            </p>
-          ) : option.method !== 'cash' ? (
-            <>
-              <TextField
-                ref={referenceRef}
-                label={REFERENCE_LABEL[option.method] ?? 'المرجع'}
-                hint={option.method === 'voucher' ? 'امسح باركود القسيمة أو اكتب آخر أرقامها' : undefined}
-                value={reference}
-                onChange={(event) => setReference(event.target.value.slice(0, 64))}
-                dir="ltr"
-                inputMode={option.method === 'voucher' ? 'text' : 'numeric'}
-                autoComplete="off"
+            <div role="group" aria-label="طريقة الدفع" className="grid grid-cols-2 gap-2">
+              {options.map((o) => {
+                const on = option.key === o.key;
+                const MethodIcon = METHOD_ICON[o.method];
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => pick(o)}
+                    className={cn(
+                      'flex min-h-16 flex-col items-start gap-1.5 rounded-card border p-2.5 text-start transition-[background-color,border-color,box-shadow] duration-120 ease-standard select-none @xs:flex-row @xs:items-center @xs:gap-3 @xs:p-3',
+                      on
+                        ? 'border-brand bg-brand-soft/40 ring-4 ring-brand/10'
+                        : 'border-line bg-surface shadow-e1 hover:border-line-control',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'grid size-8 shrink-0 place-items-center rounded-small transition-colors duration-120 ease-standard @xs:size-9',
+                        on ? 'bg-brand text-on-brand' : 'bg-surface-muted text-ink-muted',
+                      )}
+                    >
+                      <MethodIcon size={20} />
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="font-semibold text-ink">{o.label}</span>
+                      {o.rate ? (
+                        <span className="text-xs font-semibold text-ink-muted">
+                          سعر <bdi className="num">{displayNumber(o.rate.rate, digits)}</bdi>
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {needsCustomer && !customer ? (
+              <Alert tone="warning">جهاز بكفالة: اطلب اسم الزبون وجواله، فالكفالة تُسجَّل باسمه.</Alert>
+            ) : null}
+            {picking ? (
+              <CustomerPicker
+                catalog={catalog}
+                createdBy={cashierId}
+                onPicked={(picked) => {
+                  setCustomer(picked);
+                  onCustomer?.({ id: picked.id, name: picked.name });
+                  setPicking(false);
+                  if (picked.priceTier === 'wholesale' && cart.priceTier !== 'wholesale') {
+                    setParts([]);
+                    onWholesaleCustomer?.();
+                  }
+                  void onContractPrices?.(picked.id).then((applied) => applied && setParts([]));
+                }}
+                onCancel={() => setPicking(false)}
               />
-              {option.method === 'voucher' && voucher ? (
-                <p role="status" aria-label="رصيد القسيمة" className="text-sm text-ink">
-                  القسيمة{' '}
-                  <bdi dir="ltr" className="num font-semibold">
-                    {voucher.code}
-                  </bdi>{' '}
-                  · بقي عليها{' '}
-                  <Money minor={Math.max(0, voucherLeft)} currency={voucher.currency} className="font-bold" />
-                </p>
-              ) : null}
-              {voucherProblem ? (
-                <p className="text-sm font-semibold text-danger-ink">{voucherProblem}</p>
-              ) : null}
-            </>
-          ) : (
-            <div className="grid grid-cols-3 gap-2">
-              {quick.map((value, index) => (
-                <Button
-                  key={value}
-                  variant="secondary"
-                  size="lg"
-                  onClick={() => setText(amountText(value, option.currency))}
-                  className="flex-col gap-0"
+            ) : customer ? (
+              <div className="flex flex-col gap-2 rounded-card border border-line bg-surface p-3 shadow-e1">
+                {/* On a phone the whole name shows: the buttons drop to the next line instead of cutting it */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Avatar name={customer.name} />
+                  <span className="flex min-w-40 flex-1 flex-col">
+                    <span className="text-xs text-ink-muted">الزبون</span>
+                    <span className="font-semibold break-words text-ink">{customer.name}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    aria-pressed={history}
+                    onClick={() => setHistory((h) => !h)}
+                  >
+                    مشترياته
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    onClick={() => {
+                      setCustomer(null);
+                      onCustomer?.(null);
+                      setParts((list) => list.filter((p) => !onAccount(p.option.method)));
+                      if (onAccount(option.method)) pick(options[0]!);
+                    }}
+                  >
+                    أزله
+                  </Button>
+                </div>
+                {history ? <CustomerHistory customerId={customer.id} /> : null}
+              </div>
+            ) : (
+              <Button
+                variant="secondary"
+                size="md"
+                icon={<UserIcon size={20} />}
+                onClick={() => setPicking(true)}
+              >
+                {canCredit ? 'اختر الزبون (للبيع بالآجل)' : 'اختر الزبون'}
+              </Button>
+            )}
+            {/* One payment or several (هوية 4 › Segmented control), drawn as its track */}
+            <div
+              role="group"
+              aria-label="طريقة التقسيم"
+              className="grid grid-cols-2 gap-1 rounded-control bg-surface-muted p-1"
+            >
+              {[false, true].map((on) => (
+                <button
+                  key={String(on)}
+                  type="button"
+                  aria-pressed={split === on}
+                  onClick={() => {
+                    setSplit(on);
+                    if (!on) setParts([]);
+                  }}
+                  className={cn(
+                    'min-h-12 rounded-small px-3 text-base font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard',
+                    split === on
+                      ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
+                      : 'text-ink-muted hover:text-ink',
+                  )}
                 >
-                  {index === 0 ? <span className="text-xs">المبلغ تماماً</span> : null}
-                  <Money minor={value} currency={option.currency} symbol={false} className="text-lg" />
-                </Button>
+                  {on ? 'قسّم الدفع' : 'دفعة واحدة'}
+                </button>
               ))}
             </div>
-          )}
-          <Keypad
-            onDigit={(d) => setText((t) => (t === '0' ? d : (t + d).slice(0, 12)))}
-            onBackspace={() => setText((t) => t.slice(0, -1))}
-            extraKey={CURRENCIES[option.currency].displayDecimals > 0 ? '.' : '00'}
-            onExtraKey={() =>
-              setText((t) =>
-                CURRENCIES[option.currency].displayDecimals > 0
-                  ? t.includes('.')
-                    ? t
-                    : `${t || '0'}.`
-                  : t
-                    ? `${t}00`
-                    : t,
-              )
-            }
-          />
+            {parts.length > 0 ? (
+              <ul
+                aria-label="الأجزاء المدفوعة"
+                className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line"
+              >
+                {parts.map((part, index) => {
+                  const PartIcon = METHOD_ICON[part.option.method];
+                  return (
+                    <li key={index} className="flex items-center gap-3 bg-surface py-1 ps-3 pe-1">
+                      <PartIcon size={20} className="text-ink-subtle" />
+                      <span className="min-w-0 flex-1 truncate font-semibold text-ink">
+                        {part.option.label}
+                      </span>
+                      <Money
+                        minor={part.tender.amountMinor}
+                        currency={part.tender.currency}
+                        className="font-bold text-ink"
+                      />
+                      <IconButton
+                        label="احذف هذا الجزء"
+                        size="md"
+                        icon={<DeleteIcon size={20} />}
+                        onClick={() => setParts((list) => list.filter((_, i) => i !== index))}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+
+          {/* What the customer hands over: the amount, the quick notes or the reference, the keys */}
+          <div className="@container flex min-w-0 flex-col gap-2 @3xl/pay:gap-3">
+            <div className="flex flex-col gap-0.5 rounded-control border border-brand bg-surface px-4 py-2 ring-4 ring-brand/15 @3xl/pay:py-2.5">
+              {/* On a narrow panel the chosen method card says it; the words stay for screen readers */}
+              <span className="sr-only text-xs font-semibold text-ink-muted @3xl/pay:not-sr-only">
+                {option.method === 'cash' ? 'المبلغ المستلم' : 'المبلغ'} · {option.label}
+              </span>
+              <span className="flex items-baseline justify-between gap-3">
+                <span className="num truncate text-2xl font-bold text-ink @3xl/pay:text-3xl" dir="ltr">
+                  {text
+                    ? displayNumber(text, digits)
+                    : amount
+                      ? displayNumber(amountText(amount, option.currency), digits)
+                      : displayNumber('0', digits)}
+                </span>
+                <span className="shrink-0 text-lg font-semibold text-ink-subtle">
+                  {CURRENCIES[option.currency].symbolAr}
+                </span>
+              </span>
+            </div>
+            {option.method === 'credit' ? (
+              <p className="flex items-start gap-2 rounded-card border border-warning/20 bg-warning-soft px-3 py-2.5 text-sm text-warning-ink">
+                <BookIcon size={20} className="shrink-0" />
+                <span>
+                  يُسجَّل المبلغ ديناً على {customer?.name}
+                  {customer?.creditLimitMinor !== null && customer?.creditLimitMinor !== undefined ? (
+                    <>
+                      {' '}
+                      · حد الدين <Money minor={customer.creditLimitMinor} currency={base} />
+                    </>
+                  ) : null}
+                  . يظهر في كشف حسابه.
+                  {overBy > 0 ? (
+                    <strong className="block font-semibold text-danger-ink">
+                      يتجاوز حد الزبون بـ <Money minor={overBy} currency={base} />
+                      {blockedOver ? '. لا يُباع له بالآجل فوق الحد.' : canCredit ? '.' : '. يلزم رمز مدير.'}
+                    </strong>
+                  ) : null}
+                </span>
+              </p>
+            ) : option.method === 'points' ? (
+              <p
+                role="status"
+                aria-label="نقاط الزبون"
+                className="rounded-card border border-brand/20 bg-brand-soft px-3 py-2.5 text-sm text-brand-ink"
+              >
+                لدى {customer?.name} <bdi className="num font-bold">{points}</bdi> نقطة تساوي{' '}
+                <Money minor={pointsWorth} currency={base} className="font-bold" />.
+                {pointsProblem ? (
+                  <span className="block font-semibold text-danger-ink">{pointsProblem}</span>
+                ) : null}
+              </p>
+            ) : option.method === 'cheque' ? (
+              <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <TextField
+                    ref={referenceRef}
+                    label="البنك"
+                    value={chequeBank}
+                    onChange={(event) => setChequeBank(event.target.value.slice(0, 60))}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="رقم الشيك"
+                    value={chequeNo}
+                    onChange={(event) => setChequeNo(event.target.value.slice(0, 40))}
+                    dir="ltr"
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <DateField label="تاريخ الاستحقاق" value={chequeDue} onChange={setChequeDue} />
+                  <TextField
+                    label="اسم الساحب (اختياري)"
+                    value={chequeDrawer}
+                    onChange={(event) => setChequeDrawer(event.target.value.slice(0, 80))}
+                    autoComplete="off"
+                  />
+                </div>
+                {!canCredit ? (
+                  <p className="text-sm text-ink-muted">قبول الشيك يحتاج رمز مدير عند الإتمام.</p>
+                ) : null}
+              </div>
+            ) : option.method !== 'cash' ? (
+              <>
+                <TextField
+                  ref={referenceRef}
+                  label={`${REFERENCE_LABEL[option.method] ?? 'المرجع'}${
+                    option.method === 'card' && !cardApproval ? ' (اختياري)' : ''
+                  }`}
+                  hint={option.method === 'voucher' ? 'امسح باركود القسيمة أو اكتب آخر أرقامها' : undefined}
+                  value={reference}
+                  onChange={(event) => setReference(event.target.value.slice(0, 64))}
+                  dir="ltr"
+                  inputMode={option.method === 'voucher' ? 'text' : 'numeric'}
+                  autoComplete="off"
+                />
+                {option.method === 'voucher' && voucher ? (
+                  <p role="status" aria-label="رصيد القسيمة" className="text-sm text-ink">
+                    القسيمة{' '}
+                    <bdi dir="ltr" className="num font-semibold">
+                      {voucher.code}
+                    </bdi>{' '}
+                    · بقي عليها{' '}
+                    <Money
+                      minor={Math.max(0, voucherLeft)}
+                      currency={voucher.currency}
+                      className="font-bold"
+                    />
+                  </p>
+                ) : null}
+                {voucherProblem ? (
+                  <p className="flex items-start gap-2 text-sm font-semibold text-danger-ink">
+                    <AlertCircleIcon size={20} className="shrink-0" />
+                    {voucherProblem}
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              // An even grid whatever the count: 3 and 6 in threes, 2 and 4 in twos, 5 as 3 over 2
+              // (six columns, the second row's two wider), never a hole or a lone button on a row
+              <div
+                className={cn(
+                  'grid gap-2',
+                  quick.length === 1
+                    ? 'grid-cols-1'
+                    : quick.length === 2 || quick.length === 4
+                      ? 'grid-cols-2'
+                      : quick.length === 5
+                        ? 'grid-cols-6'
+                        : 'grid-cols-3',
+                )}
+              >
+                {quick.map((value, index) => (
+                  <Button
+                    key={value}
+                    variant="secondary"
+                    size="md"
+                    className={quick.length === 5 ? (index < 3 ? 'col-span-2' : 'col-span-3') : undefined}
+                    onClick={() => setText(amountText(value, option.currency))}
+                  >
+                    <span className="flex flex-col items-center">
+                      {index === 0 ? <span className="text-xs text-ink-muted">المبلغ تماماً</span> : null}
+                      <Money minor={value} currency={option.currency} symbol={false} className="text-lg" />
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            )}
+            {belowCost.length > 0 ? (
+              <p
+                role="status"
+                aria-label="بيع بأقل من التكلفة"
+                className="flex items-start gap-2 rounded-card border border-warning/20 bg-warning-soft px-3 py-2.5 text-sm text-warning-ink"
+              >
+                <AlertCircleIcon size={20} className="shrink-0" />
+                <span>
+                  تنبيه: {belowCost.map((l) => l.name).join('، ')} بأقل من متوسط تكلفته.
+                  {settings.till?.belowCostApproval ? ' يلزم رمز مدير عند الإتمام.' : ''}
+                </span>
+              </p>
+            ) : null}
+            <Keypad
+              onDigit={(d) => setText((t) => (t === '0' ? d : (t + d).slice(0, 12)))}
+              onBackspace={() => setText((t) => t.slice(0, -1))}
+              extraKey={CURRENCIES[option.currency].displayDecimals > 0 ? '.' : '00'}
+              onExtraKey={() =>
+                setText((t) =>
+                  CURRENCIES[option.currency].displayDecimals > 0
+                    ? t.includes('.')
+                      ? t
+                      : `${t || '0'}.`
+                    : t
+                      ? `${t}00`
+                      : t,
+                )
+              }
+            />
+          </div>
         </div>
       </div>
 
-      <footer className="flex items-center gap-5 border-t border-line bg-surface-total px-6 py-3">
-        <div role="status" className="flex flex-col">
-          <span className="text-sm font-semibold text-ink-muted">{short ? 'ناقص من الزبون' : 'الباقي'}</span>
-          <span className={cn('text-4xl/[52px] font-bold', short ? 'text-warning-ink' : 'text-ink')}>
+      <footer className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-line bg-surface-total px-5 py-2 @3xl/pay:py-3">
+        <div role="status" className="flex items-baseline gap-3">
+          <span className="text-base font-semibold text-ink-muted">
+            {short ? 'ناقص من الزبون' : 'الباقي'}
+          </span>
+          <span
+            className={cn(
+              'text-kpi font-bold tracking-tight @3xl/pay:text-total',
+              short ? 'text-warning-ink' : 'text-ink',
+            )}
+          >
             <Money
               minor={short ? shortCash : changeMinor}
               currency={
@@ -594,28 +926,58 @@ export function PaymentPanel({
                     : settlement.settlementCurrency
                   : (settlement.change?.currency ?? base)
               }
+              unitClassName="text-xl font-semibold"
             />
           </span>
         </div>
         <span className="flex-1" />
         {error ? (
-          <p role="alert" className="max-w-xs text-sm font-semibold text-danger-ink">
+          <p role="alert" className="flex max-w-xs items-start gap-2 text-sm font-semibold text-danger-ink">
+            <AlertCircleIcon size={20} className="shrink-0" />
             {error}
           </p>
         ) : null}
         {split && !canComplete && current ? (
-          <Button size="lg" variant="secondary" onClick={addPart}>
+          <Button size="lg" variant="secondary" icon={<AddIcon size={20} />} onClick={addPart}>
             أضف الجزء
           </Button>
         ) : null}
+        {approving && staff ? (
+          // A layer over the panel, scrolling by itself: in the footer the keypad overran a short screen
+          <div className="absolute inset-0 z-20 flex items-start justify-center overflow-y-auto bg-surface/95 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md">
+              <ManagerCode
+                staff={staff}
+                permission={approving === 'cost' ? 'sale.discount_over_limit' : 'sale.credit'}
+                reason={
+                  approving === 'cost'
+                    ? 'البيع بأقل من التكلفة يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                    : tenders.some((t) => t.method === 'cheque')
+                      ? 'قبول الشيك يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                      : 'البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                }
+                onApproved={(approval) => {
+                  const kind = approving;
+                  setApproving(null);
+                  if (kind === 'cost') setCostGrant(approval);
+                  else setCreditGrant(approval);
+                  void complete(kind === 'cost' ? { cost: approval } : { credit: approval });
+                }}
+                onCancel={() => setApproving(null)}
+              />
+            </div>
+          </div>
+        ) : null}
         <Button
           size="lg"
-          icon={option.method === 'cash' ? <CashIcon /> : <CheckIcon />}
-          onClick={complete}
+          icon={option.method === 'cash' ? <CashIcon size={20} /> : <CheckIcon size={20} />}
+          aria-keyshortcuts="Enter"
+          onClick={() => void complete()}
           disabled={!canComplete}
           loading={saving}
         >
           أتمّ الدفع
+          <Kbd tone="brand">Enter</Kbd>
         </Button>
       </footer>
     </section>

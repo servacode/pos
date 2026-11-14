@@ -32,7 +32,7 @@ export function LoginPage() {
         </>
       }
     >
-      <title>تسجيل الدخول · Serva POS</title>
+      <title>تسجيل الدخول · SERFA</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         {sessionExpired && !formError ? <Alert tone="info">انتهى دخولك. سجّل الدخول مرة أخرى.</Alert> : null}
@@ -56,9 +56,23 @@ export function LoginPage() {
           onChange={(e) => setValue('password', e.target.value)}
           error={errors.password}
         />
+        <p className="-mt-2 text-sm">
+          <TextLink as={Link} to="/forgot-password">
+            نسيت كلمة السر؟
+          </TextLink>
+        </p>
         <Button type="submit" size="lg" fullWidth loading={submitting} className="mt-1">
           دخول
         </Button>
+        <p className="text-center text-sm text-ink-subtle">
+          <TextLink href="/terms" target="_blank" rel="noopener">
+            الشروط
+          </TextLink>{' '}
+          ·{' '}
+          <TextLink href="/privacy" target="_blank" rel="noopener">
+            سياسة الخصوصية
+          </TextLink>
+        </p>
       </form>
     </AuthLayout>
   );

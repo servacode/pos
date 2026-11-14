@@ -1,5 +1,14 @@
 import { cn } from './cn';
 
+type ProgressTone = 'brand' | 'success' | 'warning' | 'danger';
+
+const FILLS: Record<ProgressTone, string> = {
+  brand: 'bg-brand',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  danger: 'bg-danger',
+};
+
 export interface ProgressBarProps {
   /** What is progressing, read by screen readers (e.g. «تنزيل بيانات المحل»). */
   label: string;
@@ -8,14 +17,17 @@ export interface ProgressBarProps {
   max?: number;
   /** The words a screen reader says instead of the bare percentage, e.g. «8:41 دقيقة باقية». */
   valueText?: string;
-  /** Warning: time running out (a code about to expire). */
-  tone?: 'brand' | 'warning';
+  /**
+   * Brand by default. Warning: time running out (a code about to expire); success: a goal reached;
+   * danger: over a limit.
+   */
+  tone?: ProgressTone;
   className?: string;
 }
 
 /**
- * A thin bar of progress (kit: the download bar and the code countdown): 8 px, rounded, the
- * filled part in the brand or warning colour. Without a value it shows a calm pulse.
+ * A thin bar of progress (kit: the download bar and the code countdown): 8 px, rounded, a
+ * surface-muted track and the filled part in the tone's colour. Without a value it shows a calm pulse.
  */
 export function ProgressBar({
   label,
@@ -39,8 +51,8 @@ export function ProgressBar({
     >
       <div
         className={cn(
-          'h-full rounded-full transition-[width] duration-200 ease-standard',
-          tone === 'warning' ? 'bg-warning' : 'bg-brand',
+          'h-full rounded-full motion-safe:transition-[width] motion-safe:duration-200 motion-safe:ease-standard',
+          FILLS[tone],
           !known && 'w-1/3 motion-safe:animate-skeleton',
         )}
         style={known ? { width: `${ratio * 100}%` } : undefined}

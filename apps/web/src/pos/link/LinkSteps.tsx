@@ -15,36 +15,38 @@ export function LinkSteps({ current, ownerSignedIn }: { current: LinkStep; owner
   const steps = ownerSignedIn ? STEPS.filter((s) => s.key !== 'waiting') : STEPS;
   const currentIndex = steps.findIndex((s) => s.key === current);
   return (
-    <ol aria-label="خطوات الإعداد" className="flex flex-wrap items-center gap-2.5">
+    <ol aria-label="خطوات الإعداد" className="flex flex-wrap items-center gap-x-3 gap-y-2">
       {steps.map((step, index) => {
         const done = index < currentIndex;
         const now = index === currentIndex;
         return (
-          <li key={step.key} className="flex items-center gap-2.5" aria-current={now ? 'step' : undefined}>
+          <li key={step.key} className="flex items-center gap-3" aria-current={now ? 'step' : undefined}>
             {index > 0 ? (
               <span
                 aria-hidden="true"
-                className={cn('h-0.5 w-7 rounded-full', done || now ? 'bg-brand' : 'bg-line')}
+                className={cn('h-0.5 w-8 rounded-full', done || now ? 'bg-brand' : 'bg-line')}
               />
             ) : null}
-            <span
-              className={cn(
-                'num grid size-7 place-items-center rounded-full text-sm font-bold',
-                done && 'bg-brand text-on-brand',
-                now && 'border-2 border-brand bg-brand-soft text-brand-ink',
-                !done && !now && 'border-[1.5px] border-line-control text-ink-muted',
-              )}
-            >
-              {done ? <CheckIcon size={16} /> : index + 1}
-            </span>
-            <span
-              className={cn(
-                'text-sm font-semibold',
-                now ? 'font-bold text-ink' : done ? 'text-brand-ink' : 'text-ink-muted',
-              )}
-            >
-              {step.label}
-              {done ? <span className="sr-only"> (تمّت)</span> : null}
+            <span className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'num grid size-8 shrink-0 place-items-center rounded-full border-2 text-sm font-bold transition-colors duration-120 ease-standard',
+                  done && 'border-brand bg-brand text-on-brand',
+                  now && 'border-brand bg-brand-soft text-brand-ink ring-4 ring-brand/10',
+                  !done && !now && 'border-line-control/50 bg-surface text-ink-muted',
+                )}
+              >
+                {done ? <CheckIcon size={16} strokeWidth={3} /> : index + 1}
+              </span>
+              <span
+                className={cn(
+                  'text-sm',
+                  now ? 'font-bold text-ink' : done ? 'font-semibold text-brand-ink' : 'text-ink-muted',
+                )}
+              >
+                {step.label}
+                {done ? <span className="sr-only"> (تمّت)</span> : null}
+              </span>
             </span>
           </li>
         );

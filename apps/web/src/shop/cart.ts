@@ -88,6 +88,23 @@ export function variantFor(product: ShopProduct, chosen: Record<string, string>)
 }
 
 /**
+ * Whether a value can be chosen at all: some piece, on the shelf or run out, has it together with the
+ * values already chosen. A piece that ran out can be chosen to leave a phone (أبلغني عند التوفر).
+ */
+export function canChoose(
+  product: ShopProduct,
+  chosen: Record<string, string>,
+  option: string,
+  value: string,
+): boolean {
+  return product.variants.some(
+    (v) =>
+      v.attributes.some((a) => a.name === option && a.value === value) &&
+      v.attributes.every((a) => a.name === option || !chosen[a.name] || chosen[a.name] === a.value),
+  );
+}
+
+/**
  * Whether a value can still be picked: some piece on the shelf has it together with the values
  * already chosen for the other options.
  */

@@ -6,40 +6,35 @@ import {
   Card,
   EmptyState,
   LockIcon,
+  PageHeader,
   RetryIcon,
   Select,
   SkeletonText,
-  TextField,
 } from '@serva/ui';
+import { DateField } from '../../lib/DateField';
 import { AppShell } from '../../layout/AppShell';
 import { holdsAny, type AccessRule } from './access';
 
-/** The page title row (kit .page-head): the path, the title and its line, the page's actions. */
+/** The page title row: the one h1 with its line, an icon tile and the page's actions (PageHeader). */
 export function PageHead({
-  crumbs,
   title,
   subtitle,
+  icon,
   actions,
 }: {
-  crumbs?: readonly string[];
   title: string;
   subtitle?: ReactNode;
+  icon?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 print:hidden">
-      <div className="flex min-w-0 flex-col gap-1">
-        {crumbs && crumbs.length > 0 ? (
-          <nav aria-label="المسار" className="text-sm text-ink-muted">
-            {crumbs.join(' / ')}
-          </nav>
-        ) : null}
-        <h1 className="text-2xl font-bold text-ink">{title}</h1>
-        {subtitle ? <p className="text-ink-muted">{subtitle}</p> : null}
-      </div>
-      {actions ? <div className="flex flex-wrap items-center gap-3">{actions}</div> : null}
-    </div>
+    <PageHeader className="print:hidden" title={title} description={subtitle} icon={icon} actions={actions} />
   );
+}
+
+/** The date, branch and device controls of a report, in one calm card above the numbers. */
+export function ReportFilters({ children }: { children: ReactNode }) {
+  return <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">{children}</Card>;
 }
 
 /** A report screen inside the admin shell, or «ليست لك» for whoever lacks its key. */
@@ -57,7 +52,7 @@ export function ReportScreen({
   const allowed = typeof access === 'function' ? access(me) : holdsAny(me, access);
   return (
     <AppShell>
-      <title>{`${title} · Serva POS`}</title>
+      <title>{`${title} · SERFA`}</title>
       {allowed ? (
         <div className="flex flex-col gap-6">{children}</div>
       ) : (
@@ -147,16 +142,13 @@ export function DayField({
   max?: string;
 }) {
   return (
-    <TextField
+    <DateField
       label={label}
-      type="date"
       value={value}
       max={max}
-      dir="ltr"
-      onChange={(event) => {
-        if (event.target.value) onChange(event.target.value);
-      }}
-      className="min-w-44"
+      required
+      onChange={onChange}
+      className="min-w-40 max-w-full"
     />
   );
 }

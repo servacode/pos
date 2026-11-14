@@ -10,7 +10,7 @@ import { parseBody } from './validation';
 export async function meRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/me', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
-    return loadMe(app.db, request.auth, app.clock.now());
+    return loadMe(app.db, request.auth, app.clock.now(), app.env.SUBSCRIPTION_ENFORCEMENT);
   });
 
   // «رمز الدخول للكاشير» (packages/core › contracts/staff.ts): 204, no body.

@@ -8,6 +8,7 @@ import {
   type SerialRow,
   type SupplierRow,
 } from '@serva/core';
+import { sql } from 'drizzle-orm';
 import { createDb } from '@serva/db';
 import { DOCUMENT_PROCESSORS } from '../src/services/processors';
 import { checkRebuild } from '../src/services/rebuild';
@@ -35,13 +36,13 @@ beforeEach(resetDatabase);
 
 const as = (store: Pick<Store, 'accessToken'>) => ({ authorization: `Bearer ${store.accessToken}` });
 
-async function phone(store: Store) {
+async function phone(store: Store, nameAr = 'سامسونج A15') {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/products',
     headers: as(store),
     payload: {
-      nameAr: 'سامسونج A15',
+      nameAr,
       tracksSerial: true,
       warrantyMonths: 12,
       variants: [{ price: { currency: 'SYP', priceMinor: 2_000_000 } }],
@@ -178,5 +179,201 @@ describe('serial numbers', () => {
       now: new Date('2026-10-31T00:00:00Z'),
     });
     expect(rebuilt.same).toBe(true);
+  });
+});
+
+describe('serial tracking at the till and on the server', () => {
+  const salePayments = [{ method: 'cash' as const, currency: 'SYP' as const, amountMinor: 2_000_000 }];
+  const history = async (store: Store, serial: string) =>
+    (await lookup(store, serial)).find((r) => r.serial === serial)!;
+
+  async function received(store: Store, a15: Awaited<ReturnType<typeof phone>>, list: string[]) {
+    const s = await supplier(store);
+    const ok = await purchase(store, {
+      supplierId: s.id,
+      date: '2026-10-29',
+      payment: 'cash',
+      lines: [
+        {
+          variantId: a15.variantId,
+          qty: list.length * 1000,
+          costMinor: 1_000_000 * list.length,
+          serials: list,
+        },
+      ],
+    });
+    expect(ok.statusCode, ok.body).toBe(201);
+  }
+
+  it('keeps every sale of a number, flags the repeat, and shows both buyers', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    await received(store, a15, ['BP-1001']);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const mk = () =>
+      doc(
+        'sale',
+        sale(store, open.id, {
+          lines: [cartLine(1, 2_000_000, { ...a15, serials: ['BP-1001'] })],
+          payments: salePayments,
+        }),
+      );
+    const first = mk();
+    const second = mk();
+    const res = await push(app, store.device, [open, first, second]);
+    expect(res.results.map((r) => r.flags)).toEqual([[], [], expect.arrayContaining(['serial_sold_twice'])]);
+    const row = await history(store, 'BP-1001');
+    expect(row.saleNumber).toBe(first.number);
+    expect(row.flags).toEqual(['duplicate']);
+    expect(row.sales.map((x) => x.saleNumber).sort()).toEqual([first.number, second.number].sort());
+    // The owner's list holds it, and a clean number does not
+    const flagged = await app.inject({ method: 'GET', url: '/v1/serials?flagged=1', headers: as(store) });
+    expect(flagged.json<{ items: SerialRow[] }>().items.map((r) => r.serial)).toEqual(['BP-1001']);
+    // Both invoices are found by the serial
+    const found = await app.inject({ method: 'GET', url: '/v1/sales?q=bp-1001', headers: as(store) });
+    expect(
+      found
+        .json<{ items: { number: string }[] }>()
+        .items.map((i) => i.number)
+        .sort(),
+    ).toEqual([first.number, second.number].sort());
+  });
+
+  it('flags an unknown number and a manager override, and a purchase entered later adopts it', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const sold = doc(
+      'sale',
+      sale(store, open.id, {
+        lines: [
+          cartLine(1, 2_000_000, {
+            ...a15,
+            serials: ['LATE-1'],
+            serialOverrides: ['LATE-1'],
+            serialApprovedBy: store.userId,
+          }),
+        ],
+        payments: salePayments,
+      }),
+    );
+    const res = await push(app, store.device, [open, sold]);
+    expect(res.results[1]!.flags).toEqual(expect.arrayContaining(['unknown_serial']));
+    const row = await history(store, 'LATE-1');
+    expect(row).toMatchObject({ status: 'sold', flags: ['override'] });
+    // Entered on a purchase afterwards: the row is adopted, not refused
+    await received(store, a15, ['LATE-1', 'LATE-2']);
+    expect(await history(store, 'LATE-1')).toMatchObject({
+      status: 'sold',
+      purchaseNumber: expect.stringMatching(/^PUR-/),
+    });
+    expect(await history(store, 'LATE-2')).toMatchObject({ status: 'in_stock' });
+  });
+
+  it('flags a number in stock as another product and leaves that piece in stock', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    const glass = await phone(store, 'سماعة GL');
+    await received(store, glass, ['GL-2003']);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const sold = doc(
+      'sale',
+      sale(store, open.id, {
+        lines: [cartLine(1, 2_000_000, { ...a15, serials: ['GL-2003'] })],
+        payments: salePayments,
+      }),
+    );
+    const res = await push(app, store.device, [open, sold]);
+    expect(res.results[1]!.flags).toEqual(expect.arrayContaining(['serial_other_product']));
+    expect(await history(store, 'GL-2003')).toMatchObject({ status: 'in_stock', flags: ['other_product'] });
+  });
+
+  it('puts a drifted row right with «تصحيح»', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    await received(store, a15, ['DRIFT-1']);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const sold = doc(
+      'sale',
+      sale(store, open.id, {
+        lines: [cartLine(1, 2_000_000, { ...a15, serials: ['DRIFT-1'] })],
+        payments: salePayments,
+      }),
+    );
+    await push(app, store.device, [open, sold]);
+    const fix = (status: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/serials/fix',
+        headers: as(store),
+        payload: { serial: 'drift-1', status },
+      });
+    expect((await fix('sold')).statusCode).toBe(400);
+    expect((await fix('in_stock')).statusCode).toBe(200);
+    expect(await history(store, 'DRIFT-1')).toMatchObject({ status: 'in_stock', saleNumber: null });
+    expect((await fix('sold')).statusCode).toBe(200);
+    expect(await history(store, 'DRIFT-1')).toMatchObject({ status: 'sold', saleNumber: sold.number });
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/serials/fix',
+          headers: as(store),
+          payload: { serial: 'NOPE-1', status: 'in_stock' },
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+
+  it('sends a device to the supplier or another branch with its number, and refuses a number that is not there', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    await received(store, a15, ['OUT-1', 'OUT-2', 'OUT-3']);
+    const [main] = await owner.db.execute<{ id: string }>(
+      sql`select id from branches where tenant_id = ${store.tenantId}`,
+    );
+    const [mall] = await owner.db.execute<{ id: string }>(
+      sql`insert into branches (tenant_id, code, name) values (${store.tenantId}, '002', 'فرع المول') returning id`,
+    );
+    const send = (url: string, extra: Record<string, unknown>, serials?: string[]) =>
+      app.inject({
+        method: 'POST',
+        url,
+        headers: as(store),
+        payload: {
+          date: '2026-10-30',
+          ...extra,
+          lines: [
+            { variantId: a15.variantId, qty: (serials?.length ?? 1) * 1000, ...(serials ? { serials } : {}) },
+          ],
+        },
+      });
+    const supplierId = (await supplier(store)).id;
+    // A tracked line needs its numbers, in stock for that product
+    const bare = await send('/v1/supplier-returns', { supplierId, refund: 'credit' });
+    expect(bare.statusCode).toBe(400);
+    expect(bare.json().error.fields['lines.0.serials']).toContain('1');
+    const ghost = await send('/v1/supplier-returns', { supplierId, refund: 'credit' }, ['NOPE-1']);
+    expect(ghost.json().error.fields['lines.0.serials']).toContain('NOPE-1');
+    const back = await send('/v1/supplier-returns', { supplierId, refund: 'credit' }, ['out-1']);
+    expect(back.statusCode, back.body).toBe(201);
+    expect(await history(store, 'OUT-1')).toMatchObject({ status: 'returned' });
+    // Gone: it cannot go back to the supplier again, nor be transferred
+    const again = await send('/v1/supplier-returns', { supplierId, refund: 'credit' }, ['OUT-1']);
+    expect(again.statusCode).toBe(400);
+
+    const moved = await send('/v1/transfers', { fromBranchId: main!.id, toBranchId: mall!.id }, ['OUT-2']);
+    expect(moved.statusCode, moved.body).toBe(201);
+    const [branch] = await owner.db.execute<{ branch_id: string }>(
+      sql`select branch_id from serials where serial = 'OUT-2'`,
+    );
+    expect(branch!.branch_id).toBe(mall!.id);
+    // It is no longer in the sender's stock
+    const lost = await send('/v1/transfers', { fromBranchId: main!.id, toBranchId: mall!.id }, ['OUT-2']);
+    expect(lost.statusCode).toBe(400);
   });
 });

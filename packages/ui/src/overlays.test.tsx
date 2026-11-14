@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CONTROL_HEIGHT, DensityProvider } from './context';
 import { Dialog, Sheet } from './Dialog';
 import { renderUi } from './test/render';
 import { TOAST_DURATION_MS, ToastProvider, useToast } from './Toast';
@@ -78,6 +79,17 @@ describe('Dialog', () => {
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     expect(error).toHaveBeenCalledWith(expect.stringContaining('no dialog over a dialog'));
   });
+
+  it('writes its description at 16 on the cashier and 14 on the admin (tab 14 › الخط)', async () => {
+    const description = 'سيُلغى البيع كله.';
+    const dialog = <Dialog open onOpenChange={() => {}} title="ألغِ البيع؟" description={description} />;
+    const cashier = renderUi(dialog, { density: 'touch' });
+    expect(await screen.findByText(description)).toHaveClass('text-base');
+    cashier.unmount();
+
+    renderUi(dialog);
+    expect(await screen.findByText(description)).toHaveClass('text-sm');
+  });
 });
 
 describe('Sheet', () => {
@@ -106,7 +118,7 @@ describe('Sheet', () => {
 
   it('becomes a bottom sheet on the phone', async () => {
     renderUi(<Payment side="bottom" />);
-    expect(await screen.findByRole('dialog', { name: 'الدفع' })).toHaveClass('bottom-0', 'rounded-t-card');
+    expect(await screen.findByRole('dialog', { name: 'الدفع' })).toHaveClass('bottom-0', 'rounded-t-panel');
   });
 
   it('stays open on a click outside, so the payment is never lost by a slip', async () => {
@@ -114,6 +126,24 @@ describe('Sheet', () => {
     await screen.findByRole('dialog');
     fireEvent.pointerDown(document.body);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('rounds its inner corners only once the window is wider than the panel', async () => {
+    renderUi(<Payment />);
+    const sheet = await screen.findByRole('dialog', { name: 'الدفع' });
+    // max-w-120 is 30rem: up to that width the sheet fills the window, square; not up to 640 (sm).
+    expect(sheet).toHaveClass('max-w-120', '[@media(width>30rem)]:rounded-s-panel');
+    expect(sheet).not.toHaveClass('sm:rounded-s-panel');
+  });
+
+  it('writes its description at 16 on the cashier', async () => {
+    renderUi(
+      <Sheet open onOpenChange={() => {}} title="الدفع" description="نقداً أو بالبطاقة">
+        <p>الباقي 90 ل.س</p>
+      </Sheet>,
+      { density: 'touch' },
+    );
+    expect(await screen.findByText('نقداً أو بالبطاقة')).toHaveClass('text-base');
   });
 });
 
@@ -169,6 +199,30 @@ describe('Toast', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('announces an error at once, with its tone mark, and closes from «أغلق الإشعار»', () => {
+    function PrintButton() {
+      const toast = useToast();
+      return (
+        <button type="button" onClick={() => toast({ tone: 'error', message: 'لم تُطبع الفاتورة.' })}>
+          اطبع
+        </button>
+      );
+    }
+    renderUi(
+      <ToastProvider>
+        <PrintButton />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'اطبع' }));
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('لم تُطبع الفاتورة.');
+    expect(alert.querySelector('svg')).toHaveClass('lucide-circle-alert', 'fill-danger');
+
+    fireEvent.click(screen.getByRole('button', { name: 'أغلق الإشعار' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('offers «تراجع» when the action can be undone', () => {
     renderUi(
       <ToastProvider>
@@ -180,5 +234,41 @@ describe('Toast', () => {
 
     expect(undo).toHaveBeenCalledOnce();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('sizes its buttons by the density, 48 under a finger on the admin', () => {
+    renderUi(
+      <ToastProvider>
+        <SaveButton />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'احفظ' }));
+
+    expect(screen.getByRole('status')).toHaveClass('text-sm');
+    expect(screen.getByRole('button', { name: 'تراجع' })).toHaveClass(
+      ...CONTROL_HEIGHT.comfortable.split(' '),
+      'rounded-control',
+    );
+    expect(screen.getByRole('button', { name: 'أغلق الإشعار' })).toHaveClass(
+      'size-10',
+      'pointer-coarse:size-12',
+      'rounded-control',
+    );
+  });
+
+  it('takes the density of the screen that raised it: 56 and text at 16 on the cashier', () => {
+    // The provider sits at the app's root, outside the cashier's touch density.
+    renderUi(
+      <ToastProvider>
+        <DensityProvider density="touch">
+          <SaveButton />
+        </DensityProvider>
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'احفظ' }));
+
+    expect(screen.getByRole('status')).toHaveClass('text-base');
+    expect(screen.getByRole('button', { name: 'تراجع' })).toHaveClass(CONTROL_HEIGHT.touch);
+    expect(screen.getByRole('button', { name: 'أغلق الإشعار' })).toHaveClass('size-14');
   });
 });

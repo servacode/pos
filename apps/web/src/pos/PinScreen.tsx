@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { cn, Keypad, LockIcon } from '@serva/ui';
+import { AlertCircleIcon, cn, Keypad, LockIcon, WarningIcon } from '@serva/ui';
 import { useNow } from '../lib/useNow';
 import { FREE_ATTEMPTS } from './staff/verifier';
 
@@ -102,23 +102,23 @@ export function PinPad({
 
   const wrong = status.kind === 'wrong';
   return (
-    <div className={cn('flex w-full flex-col items-center gap-4', className)}>
+    <div className={cn('flex w-full flex-col items-center gap-5', className)}>
       <div
         role={wrong || lockedNow ? 'alert' : 'status'}
         dir="ltr"
-        className={cn('flex justify-center gap-5 py-1.5', wrong && 'pin-shake')}
+        className={cn('flex justify-center gap-4 py-2', wrong && 'pin-shake')}
       >
         {Array.from({ length }, (_, index) => (
           <span
             key={index}
             aria-hidden="true"
             className={cn(
-              'size-5 rounded-full',
+              'size-4 rounded-full border-2 transition-[background-color,border-color,scale] duration-120 ease-standard',
               wrong || lockedNow
-                ? 'border-2 border-danger'
+                ? 'border-danger'
                 : index < pin.length
-                  ? 'bg-ink'
-                  : 'border-2 border-line-control',
+                  ? 'scale-110 border-brand bg-brand'
+                  : 'border-line-control',
             )}
           />
         ))}
@@ -128,24 +128,29 @@ export function PinPad({
       </div>
 
       {lockedNow ? (
-        <div className="flex w-full items-center gap-3 rounded-control bg-danger-soft p-3 text-danger-ink">
+        <div className="flex w-full items-center gap-4 rounded-card border border-danger/20 bg-danger-soft px-4 py-3 text-danger-ink">
           <span className="num text-2xl font-bold" dir="ltr">
             {countdown(status.until - now)}
           </span>
-          <span className="flex flex-col text-sm">
+          <span className="flex min-w-0 flex-col text-sm">
             <span className="font-semibold">رمز غير صحيح. توقف الدخول مؤقتاً.</span>
             <span>محاولات خاطئة كثيرة. حاول بعد انتهاء العدّ، وتتضاعف المدة إن تكرر الخطأ.</span>
           </span>
         </div>
       ) : wrong ? (
-        <p className="text-sm font-semibold text-danger-ink">
+        <p className="flex items-center gap-1.5 text-center text-sm font-semibold text-danger-ink">
+          <AlertCircleIcon size={16} />
           رمز غير صحيح.{' '}
           {status.failures < FREE_ATTEMPTS
             ? `بقيت ${FREE_ATTEMPTS - status.failures} من ${FREE_ATTEMPTS} محاولات قبل توقف الدخول.`
             : ''}
         </p>
       ) : status.kind === 'message' ? (
-        <p role="alert" className="text-center text-sm font-semibold text-warning-ink">
+        <p
+          role="alert"
+          className="flex w-full items-start gap-2.5 rounded-card border border-warning/20 bg-warning-soft px-4 py-3 text-sm font-semibold text-warning-ink"
+        >
+          <WarningIcon size={20} className="shrink-0" />
           {status.text}
         </p>
       ) : null}
@@ -165,7 +170,7 @@ interface PinScreenProps {
   footer?: ReactNode;
 }
 
-/** The sign-in card around the pad (kit cashier/Login, frame 1). */
+/** The sign-in card around the pad (kit cashier/Login, frame 1): who, the dots, the keypad. */
 export function PinScreen({
   heading,
   subheading,
@@ -178,22 +183,22 @@ export function PinScreen({
   return (
     <section
       aria-labelledby="pin-title"
-      className="flex w-full max-w-110 flex-col items-center gap-4 rounded-[1.75rem] border border-line bg-surface px-8 py-7 shadow-e2"
+      className="flex w-full max-w-110 flex-col items-center gap-5 rounded-card border border-line bg-surface px-7 py-7 shadow-e2 motion-safe:animate-rise sm:px-8"
     >
       {avatar ?? (
         <span className="grid size-16 place-items-center rounded-full bg-brand-soft text-brand-ink">
           <LockIcon size={32} />
         </span>
       )}
-      <div className="flex flex-col items-center text-center">
+      <div className="flex flex-col items-center gap-1 text-center">
         <h2 id="pin-title" className="text-2xl font-bold text-ink">
           {heading}
         </h2>
-        {subheading ? <p className="text-sm text-ink-muted">{subheading}</p> : null}
+        {subheading ? <p className="text-ink-muted">{subheading}</p> : null}
       </div>
       <PinPad length={length} onComplete={onComplete} status={status} />
       {footer ?? (
-        <p className="flex items-center gap-2 text-xs text-ink-muted">
+        <p className="flex items-center gap-2 text-sm text-ink-subtle">
           <LockIcon size={16} />
           يفتح من هذا الجهاز نفسه، حتى دون إنترنت.
         </p>
