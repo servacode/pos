@@ -262,6 +262,10 @@ export function ChequesPage() {
               مرتجع
             </Button>
           </span>
+        ) : c.direction === 'out' ? (
+          <span className="block py-2 text-xs whitespace-nowrap text-ink-muted sm:py-0">
+            خُصم من البنك يوم الدفع
+          </span>
         ) : null,
     },
   ];
