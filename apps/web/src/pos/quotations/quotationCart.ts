@@ -10,7 +10,7 @@ import { addItem, EMPTY_CART, updateLine, type Cart } from '../sale/cart';
  */
 export function quotationCart(
   q: Quotation,
-  catalog: Pick<Catalog, 'byVariant' | 'customers'>,
+  catalog: Pick<Catalog, 'byVariant' | 'customers'> & Partial<Pick<Catalog, 'byBarcode'>>,
 ): { cart: Cart; missing: string[] } {
   const customer = q.customerId ? catalog.customers.find((c) => c.id === q.customerId) : undefined;
   let cart: Cart = {
@@ -34,11 +34,12 @@ export function quotationCart(
     // The same item twice becomes one line (the first line's price and pack stand)
     if (cart.nextLineNo === before) continue;
     const added = cart.lines[cart.lines.length - 1]!;
+    const packName = tillPackName(line, item.variantId, catalog.byBarcode);
     cart = updateLine(cart, added.lineNo, {
       // A pack reads as the till names it: «name · pack», not the quotation's own wording
-      name: line.packName ? `${item.name} · ${line.packName}` : line.name,
+      name: packName ? `${item.name} · ${packName}` : line.name,
       packQty: line.packQty,
-      packName: line.packName ?? null,
+      packName,
       priceCurrency: q.currency,
       priceMinor: line.unitPriceMinor,
       retailPriceMinor: line.unitPriceMinor,
@@ -57,4 +58,24 @@ export function quotationCart(
     });
   }
   return { cart, missing };
+}
+
+/**
+ * The pack is named as the till names it: «علبة» with «(100 قطعة)» beside it, never «علبة 100».
+ * The till's own barcode for that pack gives the name; without one, the pieces count is cut off the end.
+ */
+function tillPackName(
+  line: Quotation['lines'][number],
+  variantId: string,
+  byBarcode: Catalog['byBarcode'] | undefined,
+): string | null {
+  if (!line.packName) return null;
+  if (byBarcode) {
+    for (const { barcode } of byBarcode.values()) {
+      if (barcode.variantId === variantId && barcode.packQty === line.packQty && barcode.packName) {
+        return barcode.packName;
+      }
+    }
+  }
+  return line.packName.replace(/s*[0-9٠-٩۰-۹]+$/u, '').trim() || line.packName;
 }

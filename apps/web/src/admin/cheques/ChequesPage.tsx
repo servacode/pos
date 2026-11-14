@@ -179,9 +179,9 @@ export function ChequesPage() {
       className: 'hidden sm:table-cell',
       cell: (c) =>
         c.direction === 'out' ? (
-          <span className="font-semibold">{c.supplierName ?? '—'}</span>
+          <span className="block min-w-44 font-semibold">{c.supplierName ?? '—'}</span>
         ) : c.customerName ? (
-          <span className="flex items-center gap-2.5">
+          <span className="flex min-w-44 items-center gap-2.5">
             <Avatar name={c.customerName} size="sm" />
             <span className="font-semibold">{c.customerName}</span>
           </span>
@@ -194,7 +194,7 @@ export function ChequesPage() {
       header: 'البنك',
       className: 'hidden md:table-cell',
       cell: (c) => (
-        <span className="flex min-w-36 flex-col items-start">
+        <span className="flex min-w-24 flex-col items-start">
           <span>{c.bank ?? <span className="text-ink-subtle">—</span>}</span>
           {c.drawer ? <span className="text-xs text-ink-muted">الساحب: {c.drawer}</span> : null}
         </span>
@@ -273,7 +273,7 @@ export function ChequesPage() {
   return (
     <AppShell>
       <title>الشيكات · SERFA</title>
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
         <PageHeader
           title="الشيكات"
           description="كل شيك قبضه الكاشير من بيع أو من دفعة زبون، حتى يُحصَّل في البنك أو يرتجع."

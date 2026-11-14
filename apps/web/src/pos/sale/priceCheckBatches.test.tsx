@@ -51,3 +51,15 @@ describe('the price checker with boxes and expired batches', () => {
     expect(row).toHaveTextContent(/غير صالح للبيع 500 \(منتهية\)/);
   });
 });
+
+describe('the price checker row layout', () => {
+  it('keeps what is left of the stock beside the price, not at the far end of the row', () => {
+    render(<PriceCheckCard today="2026-11-14" check={{ name: 'قفازات', pieces: [piece], focus: 'v1' }} />);
+    const row = within(screen.getByRole('list', { name: 'أسعار الصنف' })).getByRole('listitem');
+    const stock = within(row).getByText(/المتوفر/);
+    // The price and the stock share one group: the same parent
+    const group = stock.parentElement!;
+    expect(group.textContent).toMatch(/10/);
+    expect(group.className).toContain('shrink-0');
+  });
+});

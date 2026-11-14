@@ -452,32 +452,35 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
                   </span>
                 ))}
               </span>
-              <Money minor={piece.price.priceMinor} currency={piece.price.currency} className="font-bold" />
-              <span
-                className={cn(
-                  'num max-w-[14rem] min-w-28 shrink-0 text-end text-sm',
-                  left === null
-                    ? 'text-ink-subtle'
+              {/* The price and what is left of it sit together, not at opposite ends of the row */}
+              <div className="flex max-w-[22rem] shrink-0 items-baseline gap-3">
+                <Money minor={piece.price.priceMinor} currency={piece.price.currency} className="font-bold" />
+                <span
+                  className={cn(
+                    'num max-w-[14rem] shrink-0 text-start text-sm',
+                    left === null
+                      ? 'text-ink-subtle'
+                      : left <= 0
+                        ? 'font-semibold text-danger-ink'
+                        : 'text-ink-muted',
+                  )}
+                >
+                  {left === null
+                    ? 'المتوفر غير معروف'
                     : left <= 0
-                      ? 'font-semibold text-danger-ink'
-                      : 'text-ink-muted',
-                )}
-              >
-                {left === null
-                  ? 'المتوفر غير معروف'
-                  : left <= 0
-                    ? 'نفد'
-                    : `المتوفر ${
-                        piece.variantId === check.focus && check.pack
-                          ? stockInPacks(left, check.pack, digits, (q) => formatQuantity(q, digits))
-                          : formatQuantity(left, digits)
-                      }`}
-                {unsellable > 0 ? (
-                  <span className="block text-xs font-semibold text-danger-ink">
-                    غير صالح للبيع {formatQuantity(unsellable, digits)} ({why})
-                  </span>
-                ) : null}
-              </span>
+                      ? 'نفد'
+                      : `المتوفر ${
+                          piece.variantId === check.focus && check.pack
+                            ? stockInPacks(left, check.pack, digits, (q) => formatQuantity(q, digits))
+                            : formatQuantity(left, digits)
+                        }`}
+                  {unsellable > 0 ? (
+                    <span className="block text-xs font-semibold text-danger-ink">
+                      غير صالح للبيع {formatQuantity(unsellable, digits)} ({why})
+                    </span>
+                  ) : null}
+                </span>
+              </div>
             </li>
           );
         })}

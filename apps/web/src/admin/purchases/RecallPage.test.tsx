@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MeResponse, RecallResponse } from '@serva/core';
 import { mockFetch } from '../../test/fetchMock';
@@ -114,7 +114,7 @@ describe('«سحب دفعة»', () => {
               receivedOn: null,
               qty: 17_000,
               daysLeft: 107,
-              blocked: true,
+              blocked,
               blockReason: null,
             },
           ],
@@ -128,6 +128,7 @@ describe('«سحب دفعة»', () => {
     });
     const { user } = renderApp('/recall');
     const list = await screen.findByRole('list', { name: 'دفعات مقترحة' });
+    expect(within(list).getByRole('button', { name: /C-09/ })).toHaveTextContent('موقوفة');
     await user.click(within(list).getByRole('button', { name: /C-09/ }));
     await screen.findByRole('table', { name: 'الدفعة وأصلها' });
     expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
@@ -141,6 +142,12 @@ describe('«سحب دفعة»', () => {
     // The page stays: the batch and its tables are still there
     expect(screen.getByRole('table', { name: 'الدفعة وأصلها' })).toBeInTheDocument();
     expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
+    // the suggestion chip no longer says «موقوفة» once the stop is lifted
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('list', { name: 'دفعات مقترحة' })).getByRole('button', { name: /C-09/ }),
+      ).not.toHaveTextContent('موقوفة'),
+    );
   });
 
   it('prints and downloads the list of invoices', async () => {

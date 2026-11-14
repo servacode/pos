@@ -893,16 +893,32 @@ export function SaleScreen(props: SaleScreenProps) {
             <h2 className="truncate text-lg/6 font-semibold text-ink">
               {lineCount === 0 ? 'فاتورة جديدة' : 'الفاتورة الحالية'}
             </h2>
-            <p className="truncate text-sm text-ink-muted">
-              {lineCount === 0
-                ? 'لا أسطر بعد'
-                : `${counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)} · ${counted(pieceCount(cart), ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)}`}
+            {/* Who the sale is for: a quotation's or a picked customer's name, never cut short on a phone */}
+            {cart.customer?.name ? (
+              <p className="text-sm/5 font-semibold text-ink">
+                <bdi>{cart.customer.name}</bdi>
+              </p>
+            ) : null}
+            {/* Wraps between its two parts rather than cut: on a phone the seller box shares this row */}
+            <p className="flex flex-wrap gap-x-1 text-sm/5 text-ink-muted">
+              {lineCount === 0 ? (
+                'لا أسطر بعد'
+              ) : (
+                <>
+                  <span className="whitespace-nowrap">
+                    {counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)} ·
+                  </span>
+                  <span className="whitespace-nowrap">
+                    {counted(pieceCount(cart), ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)}
+                  </span>
+                </>
+              )}
             </p>
           </div>
           {staff.length > 1 ? (
             <div className="flex shrink-0 items-center gap-2">
               {/* Seen beside the box; the select is named by its own label for screen readers */}
-              <span aria-hidden="true" className="text-sm text-ink-subtle">
+              <span aria-hidden="true" className="hidden text-sm text-ink-subtle sm:inline">
                 البائع
               </span>
               <Select

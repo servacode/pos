@@ -172,7 +172,7 @@ export function SerialPanel({
                     className={
                       serialKey(value) === serial
                         ? 'num min-h-11 rounded-control border border-brand bg-brand-soft px-3 text-sm font-semibold text-ink'
-                        : 'num min-h-11 rounded-control border border-line bg-surface px-3 text-sm text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted'
+                        : 'num min-h-11 rounded-control border border-line-control bg-surface px-3 text-sm font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:border-brand hover:bg-brand-soft'
                     }
                   >
                     <bdi dir="ltr">{serial}</bdi>

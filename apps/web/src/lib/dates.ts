@@ -96,7 +96,7 @@ export function slashDay(iso: string): string {
 
 /**
  * The ISO day of what was typed: «31/10/2026», «31-10-2026», «٣١/١٠/٢٠٢٦», «1 5 2026» (day, month,
- * year) or already «2026-10-31». Null when it is not a real calendar day.
+ * year), eight digits «31102026» or already «2026-10-31». Null when it is not a real calendar day.
  */
 export function parseDayInput(text: string): string | null {
   const latin = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).trim();
@@ -105,10 +105,12 @@ export function parseDayInput(text: string): string | null {
   let day: number;
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(latin);
   const local = /^(\d{1,2})[\s/.-](\d{1,2})[\s/.-](\d{4})$/.exec(latin);
+  const digitsOnly = /^(\d{2})(\d{2})(\d{4})$/.exec(latin);
   if (iso) [year, month, day] = [Number(iso[1]), Number(iso[2]), Number(iso[3])] as [number, number, number];
-  else if (local)
-    [day, month, year] = [Number(local[1]), Number(local[2]), Number(local[3])] as [number, number, number];
-  else return null;
+  else if (local || digitsOnly) {
+    const m = (local ?? digitsOnly)!;
+    [day, month, year] = [Number(m[1]), Number(m[2]), Number(m[3])] as [number, number, number];
+  } else return null;
   const check = new Date(Date.UTC(year, month - 1, day));
   if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) {
     return null;

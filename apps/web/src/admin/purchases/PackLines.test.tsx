@@ -98,7 +98,8 @@ describe('lines typed in packs', () => {
     await user.type(screen.getByLabelText('كمية أموكسيل'), '50');
     await user.type(screen.getByLabelText('كلفة وحدة أموكسيل'), '2500');
     // 50 boxes at 2,500 each: the total follows, and the line says what it comes to in pieces
-    expect(screen.getByLabelText('كلفة أموكسيل')).toHaveValue('125000');
+    expect(screen.getByLabelText('كلفة وحدة أموكسيل')).toHaveValue('2,500');
+    expect(screen.getByLabelText('كلفة أموكسيل')).toHaveValue('125,000');
     expect(screen.getByText('50 علبة (5,000 قطعة)')).toBeInTheDocument();
     expect(screen.getByText(/كلفة القطعة/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
@@ -117,6 +118,7 @@ describe('lines typed in packs', () => {
     await user.type(await screen.findByLabelText('كمية أموكسيل'), '30');
     await user.type(screen.getByLabelText('كلفة وحدة أموكسيل'), '10');
     expect(screen.getByLabelText('كلفة أموكسيل')).toHaveValue('300');
+    expect(screen.getByLabelText('كلفة وحدة أموكسيل')).toHaveValue('10');
     await user.clear(screen.getByLabelText('كلفة أموكسيل'));
     await user.type(screen.getByLabelText('كلفة أموكسيل'), '250');
     expect(screen.getByLabelText('كلفة وحدة أموكسيل')).toHaveValue('');

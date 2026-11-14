@@ -165,7 +165,7 @@ export function StatusBar({
           {/* The long sentence gives way (shortened with its full text on hover) so the store and the person keep their names */}
           <span
             title={connectionText(online, outbox?.pending ?? 0)}
-            className="sr-only sm:not-sr-only sm:block sm:max-w-40 sm:truncate min-[1700px]:max-w-none"
+            className="sr-only sm:not-sr-only sm:block sm:max-w-40 sm:truncate min-[1280px]:max-w-72 min-[1536px]:max-w-none"
           >
             {connectionText(online, outbox?.pending ?? 0)}
           </span>

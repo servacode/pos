@@ -344,3 +344,59 @@ describe('a quotation from the address while a sale is in progress', () => {
     window.history.replaceState(null, '', '/');
   });
 });
+
+describe('a quotation opened from the menu while a sale is in progress', () => {
+  it('puts the sale aside under «المعلّقة», says so, and shows the customer on the cart', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const { fetch } = server([{ ...OFFER, customerId: 'c-1', lines: [OFFER.lines[0]!] }]);
+    const { user } = renderPos({ local, fetch });
+    await signIn(user);
+    await scan(user, PRODUCTS.milk.barcode!.code);
+    await waitFor(async () => expect(await local.get('currentCart')).not.toBeNull());
+    await user.click(screen.getByRole('button', { name: 'المزيد' }));
+    await user.click(screen.getByRole('menuitem', { name: 'عروض الأسعار' }));
+    const card = await screen.findByRole('listitem');
+    await user.click(within(card).getByRole('button', { name: 'افتحه في السلة' }));
+    expect(await screen.findByText(/فعلّقناها وفتحنا عرض السعر/)).toBeInTheDocument();
+    expect(await local.get<unknown[]>('heldCarts')).toHaveLength(1);
+    expect(plain(screen.getByRole('status', { name: 'المطلوب' }))).toContain('1,400 ل.س');
+    // The cart's head names who the offer was made to
+    expect(await screen.findByRole('button', { name: 'افتح الفواتير المعلّقة' })).toBeInTheDocument();
+    expect(screen.getAllByText('مشفى الأمل').length).toBeGreaterThan(0);
+  });
+});
+
+describe('a pack on a quotation line', () => {
+  const item = {
+    variantId: 'v-1',
+    productId: 'p-1',
+    name: 'قفازات فحص M',
+    price: { priceMinor: 1_000, currency: 'SYP' },
+  };
+  const line = {
+    ...OFFER.lines[0]!,
+    variantId: 'v-1',
+    name: 'قفازات فحص M · علبة 100',
+    packName: 'علبة 100',
+    packQty: 100_000,
+    qty: 300_000,
+  };
+
+  it('takes the till’s own name for that pack, so it reads «علبة» with «(100 قطعة)» beside it', () => {
+    const byBarcode = new Map([
+      ['b-1', { item, barcode: { variantId: 'v-1', code: 'b-1', packName: 'علبة', packQty: 100_000 } }],
+    ]);
+    const catalog = { byVariant: new Map([['v-1', item]]), byBarcode, customers: [] } as never;
+    const { cart } = quotationCart({ ...OFFER, lines: [line] }, catalog);
+    expect(cart.lines[0]!.name).toBe('قفازات فحص M · علبة');
+    expect(cart.lines[0]!.packName).toBe('علبة');
+  });
+
+  it('cuts the pieces count off the pack name when the till has no such pack', () => {
+    const catalog = { byVariant: new Map([['v-1', item]]), customers: [] } as never;
+    const { cart } = quotationCart({ ...OFFER, lines: [line] }, catalog);
+    expect(cart.lines[0]!.name).toBe('قفازات فحص M · علبة');
+    expect(cart.lines[0]!.packName).toBe('علبة');
+  });
+});

@@ -10,7 +10,7 @@ import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
 import { ids, PINS, PRODUCTS } from '../../test/pos';
 import { openShift, renderPos, scan, SHIFT_ID } from '../../test/renderPos';
-import { closeDrawer, shiftActivity } from './shift';
+import { closeDrawer, netMethodRows, shiftActivity } from './shift';
 
 beforeEach(() => {
   vi.spyOn(window, 'print').mockImplementation(() => undefined);
@@ -244,5 +244,44 @@ describe('the drawer formula (10 › مطابقة الصندوق)', () => {
       totalMinor: 300,
     });
     expect(usd).toMatchObject({ expectedMinor: 400, differenceMinor: -100, differenceBaseMinor: -13_000 });
+  });
+});
+
+describe('the close summary rows', () => {
+  it('takes the cash paid back for returns off the cash row and leaves the saved summary alone', () => {
+    const doc = (type: string, payload: Record<string, unknown>, seq: number) =>
+      ({ seq, type, doc: { type, payload } }) as never;
+    const activity = shiftActivity(SHIFT_ID, [
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 174_100 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 27_000 }] },
+        2,
+      ),
+    ]);
+    expect(netMethodRows(activity)).toEqual([
+      { method: 'cash', currency: 'SYP', count: 1, amountMinor: 147_100 },
+    ]);
+    // The saved summary and the drawer's expected cash are what they were
+    expect(activity.byMethod[0]!.amountMinor).toBe(174_100);
+    expect(activity.terms.get('SYP')!.refundsMinor).toBe(27_000);
+    // Cash paid back with no cash sale in the shift still shows, as a minus
+    const only = shiftActivity(SHIFT_ID, [
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 5_000 }] },
+        1,
+      ),
+    ]);
+    expect(netMethodRows(only)).toEqual([{ method: 'cash', currency: 'SYP', count: 0, amountMinor: -5_000 }]);
+    expect(netMethodRows(null)).toEqual([]);
   });
 });

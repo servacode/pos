@@ -26,6 +26,25 @@ describe('day helpers', () => {
     expect(parseDayInput('31/02/2026')).toBeNull();
     expect(parseDayInput('11/13/26')).toBeNull();
     expect(parseDayInput('')).toBeNull();
+    expect(parseDayInput('01102026')).toBe('2026-10-01');
+    expect(parseDayInput('٠١١٠٢٠٢٦')).toBe('2026-10-01');
+    expect(parseDayInput('31022026')).toBeNull();
+    expect(parseDayInput('0110202')).toBeNull();
+  });
+
+  it('reads DDMMYYYY digits typed without slashes and says when text cannot be read', async () => {
+    const user = userEvent.setup();
+    render(<Harness required />);
+    const field = screen.getByLabelText('من');
+    await user.clear(field);
+    await user.type(field, '01102026');
+    expect(screen.getByLabelText('iso')).toHaveTextContent('2026-10-01');
+    await user.tab();
+    expect(field).toHaveValue('01/10/2026');
+    await user.clear(field);
+    await user.type(field, '9999');
+    await user.tab();
+    expect(screen.getByText(/اكتب تاريخاً صحيحاً/)).toBeInTheDocument();
   });
 });
 

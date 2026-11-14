@@ -126,6 +126,9 @@ describe('cheques by due date', () => {
     expect(refs()[0]).toBe('NEAR-1');
     const outRow = within(table).getByText('OUT-1').closest('tr') as HTMLElement;
     expect(within(outRow).getByText('مورد المواد')).toBeInTheDocument();
+    // the name columns keep room so a name does not wrap into 2-3 lines; the bank column may shrink
+    expect(within(outRow).getByText('مورد المواد')).toHaveClass('min-w-44');
+    expect(within(outRow).getByText('بنك الشرق').parentElement).toHaveClass('min-w-24');
     expect(within(outRow).queryByRole('button', { name: 'حُصّل' })).not.toBeInTheDocument();
   });
 });

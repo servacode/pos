@@ -626,11 +626,12 @@ export function PaymentPanel({
               />
             ) : customer ? (
               <div className="flex flex-col gap-2 rounded-card border border-line bg-surface p-3 shadow-e1">
-                <div className="flex items-center gap-3">
+                {/* On a phone the whole name shows: the buttons drop to the next line instead of cutting it */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <Avatar name={customer.name} />
-                  <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="flex min-w-40 flex-1 flex-col">
                     <span className="text-xs text-ink-muted">الزبون</span>
-                    <span className="truncate font-semibold text-ink">{customer.name}</span>
+                    <span className="font-semibold break-words text-ink">{customer.name}</span>
                   </span>
                   <Button
                     variant="ghost"

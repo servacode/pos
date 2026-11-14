@@ -95,6 +95,11 @@ export function RecallPage() {
           : `رُفع الإيقاف عن الدفعة ${found.batchNo}.`,
       );
       await search(found.batchNo, true);
+      // the chips under the search box read the same flag: read them again too
+      await listExpiry(730).then(
+        (r) => setOnShelf(r.items),
+        () => undefined,
+      );
     } catch (e) {
       setError(errorMessage(e));
     }

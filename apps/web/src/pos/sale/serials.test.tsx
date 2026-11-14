@@ -56,6 +56,11 @@ describe('serial numbers at the till', () => {
       .getAllByRole('listitem')
       .map((li) => plain(li));
     expect(shown).toEqual(['IMEI351', 'IMEI352']);
+    // The numbers read as buttons to tap: full-strength text and a visible border, not a muted look
+    const chip = within(list).getByRole('button', { name: 'IMEI351' });
+    expect(chip.className).toContain('text-ink');
+    expect(chip.className).not.toContain('text-ink-muted');
+    expect(chip.className).toContain('border-line-control');
     await user.click(within(list).getByRole('button', { name: 'IMEI352' }));
     // One tap saves it: no second «احفظ الرقم»
     expect(plain(cartLines())).toContain('IMEI352');

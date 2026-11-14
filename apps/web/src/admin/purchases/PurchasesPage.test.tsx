@@ -136,7 +136,7 @@ describe('typed amounts', () => {
     await user.type(within(grid).getByLabelText('كلفة القطعة الواحدة'), '12500');
     await user.click(within(grid).getByRole('button', { name: 'أضف 10 قطعة' }));
     expect(screen.getByLabelText('كمية قميص كتان M · أبيض')).toHaveValue('6');
-    expect(screen.getByLabelText('كلفة قميص كتان L · أبيض')).toHaveValue('50000');
+    expect(screen.getByLabelText('كلفة قميص كتان L · أبيض')).toHaveValue('50,000');
     await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
     await screen.findByText(/سُجّلت الفاتورة/);
     expect(requestsTo('POST', '/v1/purchases')[0]?.body).toMatchObject({

@@ -18,6 +18,7 @@ import {
   EmptyState,
   formatQuantity,
   Money,
+  NumberField,
   PackageOpenIcon,
   PageHeader,
   PrintIcon,
@@ -773,35 +774,28 @@ function PurchaseForm({
                         </div>
                         <div className="col-start-1 row-start-3 md:col-start-auto md:row-start-auto">
                           <Caption>{pack ? `كلفة ${pack.name}` : 'كلفة الوحدة'}</Caption>
-                          <TextField
+                          <NumberField
                             label={`كلفة وحدة ${l.name}`}
                             hideLabel
-                            inputMode="decimal"
-                            dir="ltr"
+                            decimals={2}
                             value={l.unitCost ?? ''}
-                            onChange={(e) =>
+                            onValueChange={(unitCost) =>
                               setLines((all) =>
-                                all.map((x, j) =>
-                                  j === i ? withPackChange(x, { unitCost: e.target.value }) : x,
-                                ),
+                                all.map((x, j) => (j === i ? withPackChange(x, { unitCost }) : x)),
                               )
                             }
-                            inputClassName="num"
                           />
                         </div>
                         <div className="col-span-2 col-start-2 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
                           <Caption>مجموع الكلفة</Caption>
-                          <TextField
+                          <NumberField
                             label={`كلفة ${l.name}`}
                             hideLabel
-                            inputMode="decimal"
-                            dir="ltr"
+                            decimals={2}
                             value={l.cost}
-                            onChange={(e) =>
+                            onValueChange={(cost) =>
                               setLines((all) =>
-                                all.map((x, j) =>
-                                  j === i ? withPackChange(x, { cost: e.target.value }) : x,
-                                ),
+                                all.map((x, j) => (j === i ? withPackChange(x, { cost }) : x)),
                               )
                             }
                             error={s.fields[`lines.${i}.costMinor`]}

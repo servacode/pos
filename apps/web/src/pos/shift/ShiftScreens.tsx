@@ -43,6 +43,7 @@ import {
   countTotal,
   deviceDocuments,
   LAST_CLOSED_KEY,
+  netMethodRows,
   shiftActivity,
   shiftClosePayload,
   shiftKey,
@@ -367,6 +368,16 @@ export function ShiftCloseScreen({
     showDifference: canSeeDifference,
   });
 
+  // Display only: «الصافي» is what stayed in the drawer from payments, the cash paid back for returns taken off
+  const methodRows = netMethodRows(activity);
+  // What the returns paid back, per currency, for the line under the table
+  const returnedByCurrency = new Map<string, number>();
+  for (const refund of activity?.returns.byMethod ?? [])
+    returnedByCurrency.set(
+      refund.currency,
+      (returnedByCurrency.get(refund.currency) ?? 0) + refund.amountMinor,
+    );
+
   const columns: DataColumn<MethodRow>[] = [
     {
       key: 'method',
@@ -450,7 +461,7 @@ export function ShiftCloseScreen({
             <DataTable
               caption="الملخّص حسب طريقة الدفع"
               columns={columns}
-              rows={activity?.byMethod ?? []}
+              rows={methodRows}
               rowKey={(row) => `${row.method}:${row.currency}`}
               loading={!activity}
               empty={
@@ -463,6 +474,12 @@ export function ShiftCloseScreen({
                   <li>
                     المرتجعات:{' '}
                     {counted(activity.returns.count, ['مرتجع واحد', 'مرتجعان', 'مرتجعات', 'مرتجعاً'], digits)}
+                    {[...returnedByCurrency].map(([currency, amountMinor]) => (
+                      <span key={currency}>
+                        {' · '}
+                        <Money minor={amountMinor} currency={currency as CurrencyCode} />
+                      </span>
+                    ))}
                   </li>
                 ) : null}
                 {activity.vouchers.count > 0 ? (

@@ -262,6 +262,22 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   };
 }
 
+/**
+ * The summary's payment rows as the cashier reads them: cash rows less the cash paid back for returns
+ * (a row is added when cash was only paid out). Display only: the saved summary and the drawer formula
+ * never read it.
+ */
+export function netMethodRows(activity: ShiftActivity | null | undefined): ShiftActivity['byMethod'] {
+  const rows = (activity?.byMethod ?? []).map((row) => ({ ...row }));
+  for (const refund of activity?.returns.byMethod ?? []) {
+    if (refund.method !== 'cash') continue;
+    const row = rows.find((r) => r.method === 'cash' && r.currency === refund.currency);
+    if (row) row.amountMinor -= refund.amountMinor;
+    else rows.push({ method: 'cash', currency: refund.currency, count: 0, amountMinor: -refund.amountMinor });
+  }
+  return rows;
+}
+
 /** One drawer at close, with every term of the formula, the expected amount and the difference. */
 export function closeDrawer(
   currency: Code,
