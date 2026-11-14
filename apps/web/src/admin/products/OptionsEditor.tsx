@@ -23,6 +23,8 @@ interface OptionsEditorProps {
   /** How many live variants the axes make, for the summary line */
   variantCount: number;
   onChange: (axes: Axis[]) => void;
+  /** Clothes and shoes talk about sizes and colours; every other store about types and options */
+  fashion?: boolean;
 }
 
 const defaultAxes = (): Axis[] => DEFAULT_AXIS_NAMES.map((name) => ({ key: newKey('a'), name, values: [] }));
@@ -107,13 +109,14 @@ export const OptionsEditor = memo(function OptionsEditor({
   axes,
   variantCount,
   onChange,
+  fashion = true,
 }: OptionsEditorProps) {
   const on = axes.length > 0;
   const storeValues = useStoreValues(on);
   return (
     <div className="flex flex-col gap-4">
       <Switch
-        label="له مقاسات أو ألوان"
+        label={fashion ? 'له مقاسات أو ألوان' : 'له أنواع أو خيارات'}
         description="كل تركيبة متغيّر له سعره وباركوده ومخزونه."
         checked={on}
         onCheckedChange={(checked) => onChange(checked ? defaultAxes() : [])}

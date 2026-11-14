@@ -60,7 +60,7 @@ describe('«مرتجع إلى المورد»', () => {
         body: {
           id: 'p-1',
           nameAr: 'فستان',
-          variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [] }],
+          variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [], barcodes: [] }],
         },
       },
       'POST /v1/supplier-returns': (r: MockRequest) => {
@@ -101,5 +101,71 @@ describe('«مرتجع إلى المورد»', () => {
     expect(requestsTo('POST', '/v1/supplier-returns')).toHaveLength(1);
     const table = await screen.findByRole('table', { name: 'المرتجعات إلى الموردين' });
     expect(within(table).getByText('من رصيده')).toBeInTheDocument();
+  });
+
+  it('lets the line name the batch it sends back, and sends it with the number and expiry', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/suppliers': {
+        status: 200,
+        body: {
+          items: [
+            { id: 's-1', name: 'معمل الأمل', phone: null, notes: null, balanceMinor: 0, archived: false },
+          ],
+          baseCurrency: 'SYP',
+        },
+      },
+      'GET /v1/supplier-returns': { status: 200, body: { items: [] } },
+      [`GET ${productsPath({ q: 'مصل' })}`]: {
+        status: 200,
+        body: { items: [{ id: 'p-1', nameAr: 'مصل', type: 'stock' }], nextCursor: null },
+      },
+      'GET /v1/products/p-1': {
+        status: 200,
+        body: {
+          id: 'p-1',
+          nameAr: 'مصل',
+          variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [], barcodes: [] }],
+        },
+      },
+      'GET /v1/inventory/expiry?days=730&variantId=v-1&branchId=branch-1': {
+        status: 200,
+        body: {
+          today: '2026-10-30',
+          items: ['SY-117', 'SY-118'].map((batchNo, i) => ({
+            variantId: 'v-1',
+            name: 'مصل',
+            branchId: 'branch-1',
+            branchName: 'الفرع الرئيسي',
+            batchNo,
+            expiryDate: `2027-0${i + 1}-01`,
+            purchaseNumber: 'PUR-1',
+            supplierId: 's-1',
+            supplierName: 'معمل الأمل',
+            receivedOn: '2026-10-01',
+            qty: 5000,
+            daysLeft: 100,
+            blocked: false,
+            blockReason: null,
+          })),
+        },
+      },
+      'POST /v1/supplier-returns': {
+        status: 201,
+        body: { id: 'r-1', number: 'PRT-1', amountMinor: 0, refund: 'credit' },
+      },
+    });
+    const { user } = renderApp('/supplier-returns');
+    await screen.findByRole('option', { name: 'معمل الأمل' });
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'مصل');
+    await user.click(await screen.findByRole('button', { name: 'مصل' }));
+    await user.type(await screen.findByLabelText('كمية مصل'), '5');
+    await user.selectOptions(await screen.findByLabelText('الدفعة'), 'SY-118|2027-02-01');
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByText(/سُجّل المرتجع PRT-1/);
+    expect(requestsTo('POST', '/v1/supplier-returns')[0]?.body).toMatchObject({
+      lines: [{ variantId: 'v-1', qty: 5000, batchNo: 'SY-118', expiryDate: '2027-02-01' }],
+    });
   });
 });

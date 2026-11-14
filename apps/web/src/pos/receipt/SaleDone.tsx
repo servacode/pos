@@ -15,6 +15,8 @@ export function SaleDone({
   width,
   onWidth,
   onPrint,
+  onPrintWarranty,
+  onPrintA4,
   onNewSale,
 }: {
   data: ReceiptData;
@@ -22,11 +24,22 @@ export function SaleDone({
   width: PaperWidth;
   onWidth: (width: PaperWidth) => void;
   onPrint: () => void;
+  /** «اطبع شهادة الكفالة» (A4), when the sale has devices with a warranty */
+  onPrintWarranty?: () => void;
+  /** «اطبع A4» and «إشعار تسليم»: the invoice (a tax invoice when the store has a tax number) or its delivery note on A4 */
+  onPrintA4?: (kind: 'invoice' | 'delivery') => void;
   onNewSale: () => void;
 }) {
   const sale = data.doc.payload as unknown as SalePayload;
   const change = sale.change;
   const notes = change ? changeNotes(change.amountMinor, DENOMINATIONS[change.currency] ?? []) : [];
+  // A sale on account or by cheque has no change: it says what stays with the customer instead
+  const onAccount = (['credit', 'cheque'] as const).flatMap((method) => {
+    const parts = sale.payments.filter((p) => p.method === method);
+    return parts.length > 0
+      ? [{ method, currency: parts[0]!.currency, amountMinor: parts.reduce((s, p) => s + p.amountMinor, 0) }]
+      : [];
+  });
   const methods = [...new Set(sale.payments.map((p) => methodLabel(p.method, p.currency, sale.currency)))];
 
   return (
@@ -90,7 +103,18 @@ export function SaleDone({
             <span className="grid size-9 shrink-0 place-items-center rounded-full bg-success-soft text-success-ink">
               <CheckIcon size={20} />
             </span>
-            لا باقي · المبلغ مدفوع تماماً
+            {onAccount.length > 0 ? (
+              <span className="flex flex-col gap-1">
+                {onAccount.map((p) => (
+                  <span key={p.method}>
+                    {p.method === 'credit' ? 'على حساب الزبون: ' : 'بشيك: '}
+                    <Money minor={p.amountMinor} currency={p.currency} />
+                  </span>
+                ))}
+              </span>
+            ) : (
+              'لا باقي · المبلغ مدفوع تماماً'
+            )}
           </div>
         )}
         {!online ? (
@@ -113,6 +137,21 @@ export function SaleDone({
           >
             اطبع
           </Button>
+          {onPrintA4 ? (
+            <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={() => onPrintA4('invoice')}>
+              اطبع A4
+            </Button>
+          ) : null}
+          {onPrintA4 ? (
+            <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={() => onPrintA4('delivery')}>
+              إشعار تسليم
+            </Button>
+          ) : null}
+          {onPrintWarranty ? (
+            <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={onPrintWarranty}>
+              اطبع شهادة الكفالة
+            </Button>
+          ) : null}
           <Button size="pay" onClick={onNewSale} className="flex-1">
             بيعة جديدة
             <CartIcon size={24} />

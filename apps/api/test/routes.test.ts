@@ -45,7 +45,11 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/supplier-payments': 'signed-in',
   'GET /v1/inventory': 'signed-in',
   'GET /v1/inventory/expiry': 'signed-in',
+  'GET /v1/batches/recall': 'signed-in',
+  'POST /v1/batches/block': 'signed-in',
+  'POST /v1/batches/unblock': 'signed-in',
   'GET /v1/serials': 'signed-in',
+  'POST /v1/serials/fix': 'signed-in',
   'GET /v1/recipes/:productId': 'signed-in',
   'PUT /v1/recipes/:productId': 'signed-in',
   'GET /v1/reports/food-cost': 'signed-in',
@@ -53,6 +57,25 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/warranty/claims': 'signed-in',
   'POST /v1/warranty/claims': 'signed-in',
   'POST /v1/warranty/claims/:id/status': 'signed-in',
+  'GET /v1/rentals': 'signed-in',
+  'GET /v1/maintenance': 'signed-in',
+  'POST /v1/maintenance': 'signed-in',
+  'POST /v1/maintenance/:id/visits': 'signed-in',
+  'POST /v1/maintenance/:id/renew': 'signed-in',
+  'GET /v1/contract-prices': 'signed-in',
+  'POST /v1/contract-prices': 'signed-in',
+  'PUT /v1/contract-prices/:id': 'signed-in',
+  'DELETE /v1/contract-prices/:id': 'signed-in',
+  'GET /v1/reports/debt-ageing': 'signed-in',
+  'GET /v1/quotations': 'signed-in',
+  'GET /v1/quotations/:id': 'signed-in',
+  'POST /v1/quotations': 'signed-in',
+  'PUT /v1/quotations/:id': 'signed-in',
+  'POST /v1/quotations/:id/status': 'signed-in',
+  'GET /v1/device/quotations': 'device',
+  'GET /v1/device/quotations/:id': 'device',
+  'POST /v1/device/quotations': 'device',
+  'POST /v1/device/quotations/:id/convert': 'device',
   'POST /v1/stocktakes': 'signed-in',
   'POST /v1/import': 'signed-in',
   'GET /v1/export': 'signed-in',
@@ -109,6 +132,13 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/device/alterations': 'device',
   'POST /v1/device/alterations': 'device',
   'POST /v1/device/alterations/:id/status': 'device',
+  'GET /v1/device/rentals': 'device',
+  'GET /v1/device/rentals/units': 'device',
+  'POST /v1/device/rentals': 'device',
+  'POST /v1/device/rentals/:id/return': 'device',
+  'GET /v1/device/maintenance': 'device',
+  'POST /v1/device/maintenance/:id/billed': 'device',
+  'GET /v1/device/contract-prices': 'device',
   'GET /v1/device/hall': 'device',
   'POST /v1/device/hall': 'device',
   'GET /v1/device/kitchen': 'device',
@@ -188,6 +218,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/tax-rates': 'signed-in',
   'POST /v1/tax-rates': 'signed-in',
   'PATCH /v1/tax-rates/:id': 'signed-in',
+  'PUT /v1/tax-rates/default': 'signed-in',
   'GET /v1/accounts': 'signed-in',
   'GET /v1/reports/day': 'signed-in',
   'GET /v1/reports/merchandise': 'signed-in',
@@ -452,6 +483,63 @@ async function twoShops(app: FastifyInstance, { a, b }: Stores) {
     expect(res.statusCode, res.body).toBe(200);
   }
   return productOf(app, a);
+}
+
+const QUOTATION = { lines: [{ name: 'قفازات', qty: 2000, unitPriceMinor: 10_000 }] };
+
+/** Rows of store A's rentals, maintenance contracts and contract prices, written once per store straight into the tables */
+const contractRows = new Map<string, ReturnType<typeof makeContractRows>>();
+const contractRowsOf = (app: FastifyInstance, a: Stores['a']) => {
+  if (!contractRows.has(a.tenantId)) contractRows.set(a.tenantId, makeContractRows(app, a));
+  return contractRows.get(a.tenantId)!;
+};
+async function makeContractRows(app: FastifyInstance, a: Stores['a']) {
+  const [branch] = await ownerDb()<{ id: string }[]>`
+    select id from branches where tenant_id = ${a.tenantId} order by created_at limit 1`;
+  const product = await productOf(app, a);
+  const variantId = product.variants[0]!.id;
+  const [rental] = await ownerDb()<{ id: string; version: number }[]>`
+    insert into rentals (tenant_id, seq, number, branch_id, serial, variant_id, item, customer_name, customer_phone,
+                         start_date, expected_return, rate_unit, rate_minor, currency)
+    values (${a.tenantId}, (select coalesce(max(seq), 0) + 1 from rentals), 'RNT-000001', ${branch!.id}, ${`WC${Math.random()}`}, ${variantId}, 'كرسي', 'زبون', '0944555666',
+            '2026-11-01', '2026-11-05', 'day', 1000, 'SYP')
+    returning id, version`;
+  const [contract] = await ownerDb()<{ id: string; version: number }[]>`
+    insert into maintenance_contracts (tenant_id, seq, number, customer_name, start_date, end_date,
+                                       visit_every_months, currency, price_minor)
+    values (${a.tenantId}, (select coalesce(max(seq), 0) + 1 from maintenance_contracts), 'MC-000001', 'عيادة',
+            '2026-01-01', '2026-12-31', 3, 'SYP', 1000)
+    returning id, version`;
+  const customer = await app.inject({
+    method: 'POST',
+    url: '/v1/customers',
+    headers: owner(a),
+    payload: { name: 'مشفى', kind: 'hospital' },
+  });
+  const customerId = customer.json<{ id: string }>().id;
+  const [price] = await ownerDb()<{ id: string; version: number }[]>`
+    insert into contract_prices (tenant_id, customer_id, variant_id, currency, price_minor, valid_from)
+    values (${a.tenantId}, ${customerId}, ${variantId}, 'SYP', 900, '2026-01-01')
+    returning id, version`;
+  return {
+    rental: rental!,
+    contract: contract!,
+    price: price!,
+    customerId,
+    variantId,
+    productId: product.id,
+  };
+}
+
+/** A rentable piece of store A in stock, for the probes that try to rent it from store B */
+async function rentablePieceOf(app: FastifyInstance, a: Stores['a']) {
+  const product = await productOf(app, a);
+  const serial = `WC${Math.random()}`;
+  await ownerDb()`update products set rentable = true where id = ${product.id}`;
+  await ownerDb()`
+    insert into serials (tenant_id, variant_id, serial, status)
+    values (${a.tenantId}, ${product.variants[0]!.id}, ${serial}, 'in_stock')`;
+  return serial;
 }
 
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
@@ -956,6 +1044,93 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     >`select status from warranty_claims where id = ${claim!.id}`;
     expect(row!.status).toBe('received');
   },
+  // Another store's quotation answers 404 for reading, editing and moving on, and stays as it was
+  'GET /v1/quotations/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/quotations/${made.json<{ id: string }>().id}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'PUT /v1/quotations/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const q = made.json<{ id: string; version: number }>();
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/quotations/${q.id}`,
+      headers: owner(b),
+      payload: { ...QUOTATION, version: q.version, notes: 'تغيير' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { notes: string | null }[]
+    >`select notes from quotations where id = ${q.id}`;
+    expect(row!.notes).toBeNull();
+  },
+  'POST /v1/quotations/:id/status': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const q = made.json<{ id: string; version: number }>();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/quotations/${q.id}/status`,
+      headers: owner(b),
+      payload: { status: 'sent', version: q.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from quotations where id = ${q.id}`;
+    expect(row!.status).toBe('draft');
+  },
+  'GET /v1/device/quotations/:id': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/quotations/${made.json<{ id: string }>().id}`,
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'POST /v1/device/quotations/:id/convert': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: QUOTATION,
+    });
+    const q = made.json<{ id: string; version: number }>();
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/quotations/${q.id}/convert`,
+      headers: { authorization: deviceB.authorization },
+      payload: { version: q.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from quotations where id = ${q.id}`;
+    expect(row!.status).toBe('draft');
+  },
   'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
     const made = await app.inject({
@@ -985,6 +1160,88 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       { status: string }[]
     >`select status from alteration_tickets where id = ${t.id}`;
     expect(row!.status).toBe('received');
+  },
+  'POST /v1/device/rentals/:id/return': async (app, { a, b }) => {
+    const { rental } = await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/rentals/${rental.id}/return`,
+      headers: { authorization: deviceB.authorization },
+      payload: { version: rental.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from rentals where id = ${rental.id}`;
+    expect(row!.status).toBe('out');
+  },
+  'POST /v1/device/maintenance/:id/billed': async (app, { a, b }) => {
+    const { contract } = await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/device/maintenance/${contract.id}/billed`,
+      headers: { authorization: deviceB.authorization },
+      payload: { version: contract.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { billed_on: string | null }[]
+    >`select billed_on from maintenance_contracts where id = ${contract.id}`;
+    expect(row!.billed_on).toBeNull();
+  },
+  'POST /v1/maintenance/:id/visits': async (app, { a, b }) => {
+    const { contract } = await contractRowsOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/maintenance/${contract.id}/visits`,
+      headers: owner(b),
+      payload: { technician: 'فني', version: contract.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { visits: unknown[] }[]
+    >`select visits from maintenance_contracts where id = ${contract.id}`;
+    expect(row!.visits).toEqual([]);
+  },
+  'POST /v1/maintenance/:id/renew': async (app, { a, b }) => {
+    const { contract } = await contractRowsOf(app, a);
+    const [before] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from maintenance_contracts`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/maintenance/${contract.id}/renew`,
+      headers: owner(b),
+      payload: { version: contract.version },
+    });
+    expect(res.statusCode).toBe(404);
+    const [count] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from maintenance_contracts`;
+    expect(count!.n).toBe(before!.n);
+  },
+  'PUT /v1/contract-prices/:id': async (app, { a, b }) => {
+    const { price, customerId, variantId } = await contractRowsOf(app, a);
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/contract-prices/${price.id}`,
+      headers: owner(b),
+      payload: { version: price.version, customerId, variantId, priceMinor: 1, validFrom: '2026-01-01' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { price_minor: string }[]
+    >`select price_minor::text from contract_prices where id = ${price.id}`;
+    expect(row!.price_minor).toBe('900');
+  },
+  'DELETE /v1/contract-prices/:id': async (app, { a, b }) => {
+    const { price } = await contractRowsOf(app, a);
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/contract-prices/${price.id}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+    const [count] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from contract_prices`;
+    expect(count!.n).toBeGreaterThan(0);
+    const [still] = await ownerDb()<{ id: string }[]>`select id from contract_prices where id = ${price.id}`;
+    expect(still!.id).toBe(price.id);
   },
   'GET /v1/customers/:id/purchases': async (app, { a, b }) => {
     const made = await app.inject({
@@ -1318,8 +1575,81 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
   'GET /v1/device/customers/:id/purchases': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/device/customers/:id/purchases']!(app, { a, b });
   },
+  'GET /v1/device/quotations/:id': async (app, { a, b }) => {
+    await IDOR_PROBES['GET /v1/device/quotations/:id']!(app, { a, b });
+  },
+  'POST /v1/device/quotations/:id/convert': async (app, { a, b }) => {
+    await IDOR_PROBES['POST /v1/device/quotations/:id/convert']!(app, { a, b });
+  },
   'POST /v1/device/alterations/:id/status': async (app, { a, b }) => {
     await IDOR_PROBES['POST /v1/device/alterations/:id/status']!(app, { a, b });
+  },
+  'POST /v1/device/rentals/:id/return': async (app, { a, b }) => {
+    await IDOR_PROBES['POST /v1/device/rentals/:id/return']!(app, { a, b });
+  },
+  'POST /v1/device/maintenance/:id/billed': async (app, { a, b }) => {
+    await IDOR_PROBES['POST /v1/device/maintenance/:id/billed']!(app, { a, b });
+  },
+  // Another store's rentals, contracts, prices and pieces never reach this store's till
+  'GET /v1/device/rentals': async (app, { a, b }) => {
+    await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/rentals?status=all',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'GET /v1/device/maintenance': async (app, { a, b }) => {
+    await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/maintenance',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'GET /v1/device/contract-prices': async (app, { a, b }) => {
+    const { customerId } = await contractRowsOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/contract-prices?customerId=${customerId}`,
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'GET /v1/device/rentals/units': async (app, { a, b }) => {
+    await rentablePieceOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/rentals/units',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'POST /v1/device/rentals': async (app, { a, b }) => {
+    const serial = await rentablePieceOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/rentals',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        serial,
+        customerName: 'زبون',
+        phone: '0944555666',
+        expectedReturn: '2099-01-01',
+        rateUnit: 'day',
+        rateMinor: 1000,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from serials where serial = ${serial}`;
+    expect(row!.status).toBe('in_stock');
   },
   // An invoice is found by its number only inside its own store: another store's till gets 404
   'GET /v1/device/invoices/lookup': async (app) => {
@@ -1437,6 +1767,36 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     expect(menu.staff.every((p) => !idsA.has(p.id))).toBe(true);
   },
   // Store B's till lists none of store A's tickets, and its new one is its own
+  // Store B's till lists none of store A's quotations, and its new one is its own
+  'GET /v1/device/quotations': async (app, { a, b }) => {
+    await app.inject({
+      method: 'POST',
+      url: '/v1/quotations',
+      headers: owner(a),
+      payload: { ...QUOTATION, status: 'sent' },
+    });
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/device/quotations',
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.json<{ items: unknown[] }>().items).toEqual([]);
+  },
+  'POST /v1/device/quotations': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/device/quotations',
+      headers: { authorization: deviceB.authorization },
+      payload: QUOTATION,
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const [row] = await ownerDb()<{ tenant_id: string }[]>`
+      select tenant_id from quotations where id = ${made.json<{ id: string }>().id}`;
+    expect(row!.tenant_id).toBe(b.tenantId);
+    expect(row!.tenant_id).not.toBe(a.tenantId);
+  },
   'GET /v1/device/alterations': async (app, { a, b }) => {
     const deviceA = await createDevice(a.tenantId);
     await app.inject({
@@ -1568,7 +1928,7 @@ describe('route registry', () => {
   it('IDOR probes: another store’s ids answer 404', async () => {
     const stores = await twoStores();
     for (const probe of Object.values(IDOR_PROBES)) await probe(app, stores);
-  });
+  }, 90_000);
 
   it('the activation poll refuses a missing, malformed or unknown secret', async () => {
     for (const authorization of [

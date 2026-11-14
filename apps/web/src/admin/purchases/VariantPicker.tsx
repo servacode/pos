@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ProductDetail, ProductListItem } from '@serva/core';
+import { packOptionsOf, type PackOption, type ProductDetail, type ProductListItem } from '@serva/core';
 import {
   AddIcon,
   Button,
@@ -16,6 +16,10 @@ import { gridOf, SizeGrid, type GridLine } from './SizeGrid';
 export interface PickedVariant {
   variantId: string;
   name: string;
+  /** The named packs of the item («علبة 100»), for typing a quantity in them */
+  packs?: PackOption[];
+  /** «يتطلب صلاحية»: a receipt of it needs an expiry date (03 › الصيدليات) */
+  requiresExpiry?: boolean;
 }
 
 /**
@@ -56,7 +60,12 @@ export function VariantPicker({
     const detail = await getProduct(p.id);
     const variants = detail.variants
       .filter((v) => !v.archivedAt)
-      .map((v) => ({ variantId: v.id, name: v.label ? `${detail.nameAr} ${v.label}` : detail.nameAr }));
+      .map((v) => ({
+        variantId: v.id,
+        name: v.label ? `${detail.nameAr} ${v.label}` : detail.nameAr,
+        packs: packOptionsOf(v.barcodes),
+        ...(detail.requiresExpiry ? { requiresExpiry: true } : {}),
+      }));
     if (variants.length === 1) {
       onPick(variants[0]!);
       setQ('');

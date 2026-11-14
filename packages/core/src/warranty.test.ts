@@ -40,3 +40,30 @@ describe('the warranty contracts', () => {
     }
   });
 });
+
+describe('warranty dates and labels', () => {
+  it('adds months like the database: same day, or the last day of a shorter month', async () => {
+    const { addMonthsIso, dmy, warrantyUntilText, serialLabel } = await import('./contracts/warranty');
+    expect(addMonthsIso('2026-10-30', 12)).toBe('2027-10-30');
+    expect(addMonthsIso('2026-01-31', 1)).toBe('2026-02-28');
+    expect(addMonthsIso('2024-01-31', 1)).toBe('2024-02-29');
+    expect(addMonthsIso('2026-11-15', 3)).toBe('2027-02-15');
+    expect(addMonthsIso('2026-03-10', 0)).toBe('2026-03-10');
+    expect(dmy('2027-10-30')).toBe('30/10/2027');
+    expect(warrantyUntilText('2027-10-30')).toBe('الكفالة حتى 30/10/2027');
+    expect(serialLabel(['electronics'])).toBe('IMEI');
+    expect(serialLabel(['medical_supplies'])).toBe('الرقم التسلسلي');
+    expect(serialLabel(undefined)).toBe('الرقم التسلسلي');
+  });
+
+  it('asks for the customer by sector unless the store decided', async () => {
+    const { warrantyAsksCustomer } = await import('./contracts/till');
+    expect(warrantyAsksCustomer(null, ['electronics'])).toBe(true);
+    expect(warrantyAsksCustomer(undefined, ['medical_supplies'])).toBe(true);
+    expect(warrantyAsksCustomer({}, ['clothing'])).toBe(false);
+    expect(warrantyAsksCustomer({}, undefined)).toBe(false);
+    expect(warrantyAsksCustomer({ warrantyAskCustomer: false }, ['electronics'])).toBe(false);
+    expect(warrantyAsksCustomer({ warrantyAskCustomer: null }, ['electronics'])).toBe(true);
+    expect(warrantyAsksCustomer({ warrantyAskCustomer: true }, ['clothing'])).toBe(true);
+  });
+});

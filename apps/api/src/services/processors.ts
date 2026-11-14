@@ -45,6 +45,7 @@ import {
 import type { DocumentContext, SyncProcessors } from './sync-push';
 import { returnSerials, sellSerials } from './serials';
 import { refreshExpiry } from './expiry';
+import { recordReturnBatches, recordSaleBatches } from './batches';
 import { inScope, permissionScope } from '../auth/permissions';
 
 /**
@@ -180,7 +181,15 @@ async function processSale({ tx, device, doc }: DocumentContext) {
   const { tenantId } = device;
   if (await moveStock(tx, device, doc, 'sale', sale.lines, -1)) flags.push('negative_stock');
   flags.push(...(await controlledFlags(tx, device, sale)));
-  flags.push(...(await sellSerials(tx, tenantId, doc.id, doc.businessDate, sale.lines)));
+  // The batch ledger follows the sale: what each line took from which batch (a parallel record)
+  flags.push(
+    ...(await recordSaleBatches(
+      tx,
+      { tenantId, branchId: device.branchId, docId: doc.id, date: doc.businessDate },
+      sale.lines,
+    )),
+  );
+  flags.push(...(await sellSerials(tx, tenantId, device.branchId, doc.id, doc.businessDate, sale.lines)));
 
   const [inserted] = await tx
     .insert(invoices)
@@ -396,6 +405,11 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     })),
   );
   await moveStock(tx, device, doc, 'return', ret.lines, 1);
+  await recordReturnBatches(
+    tx,
+    { tenantId, branchId: device.branchId, docId: doc.id, date: doc.businessDate, saleId: ret.saleId },
+    ret.lines,
+  );
   await returnSerials(
     tx,
     ret.saleId,

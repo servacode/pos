@@ -43,6 +43,23 @@ export const SERIAL_SECTORS: readonly SectorKey[] = [
 /** Warranty and maintenance claims on serial-tracked pieces. */
 export const WARRANTY_SECTORS: readonly SectorKey[] = ['electronics', 'medical_supplies'];
 
+/** Device rentals and maintenance contracts: lent and serviced devices, by serial number. */
+export const RENTAL_SECTORS: readonly SectorKey[] = [
+  'medical_supplies',
+  'electronics',
+  'building_materials',
+  'general',
+];
+
+/** Contract prices: what a hospital, a clinic or a regular customer is quoted on a tender or contract. */
+export const CONTRACT_PRICE_SECTORS: readonly SectorKey[] = [
+  'medical_supplies',
+  'pharmacy',
+  'wholesale',
+  'building_materials',
+  'general',
+];
+
 /** Customers who pay with cheques. */
 export const CHEQUE_SECTORS: readonly SectorKey[] = [
   'wholesale',
@@ -92,3 +109,15 @@ export function categoryExamples(storeSectors: readonly SectorKey[] | undefined)
   const per = keys.length === 1 ? 5 : 3;
   return [...new Set(keys.flatMap((k) => CATEGORY_EXAMPLES[k].slice(0, per)))];
 }
+
+/** Shortening and altering a piece left with the shop. */
+export const ALTERATION_SECTORS: readonly SectorKey[] = ['clothing'];
+
+/** Gift vouchers sold at the till: shops people buy presents in (no gift voucher at a pharmacy or a clinic supplier). */
+export const GIFT_SECTORS: readonly SectorKey[] = [
+  'clothing',
+  'cosmetics',
+  'electronics',
+  'supermarket',
+  'general',
+];

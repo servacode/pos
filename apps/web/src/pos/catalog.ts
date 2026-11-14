@@ -13,8 +13,9 @@ import type {
   VariantRow,
   VoucherRow,
 } from '@serva/core/contracts/catalog';
-import type { ShelfBatch } from '@serva/core/contracts/pharmacy';
+import type { ShelfBatch, StockBatch } from '@serva/core/contracts/pharmacy';
 import type { OnlineOrderRow } from '@serva/core/contracts/shop';
+import type { SerialStockRow } from '@serva/core/contracts/purchases';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { CustomerRow } from '@serva/core/contracts/customers';
 import type { PromotionRow } from '@serva/core/contracts/promotions';
@@ -48,6 +49,8 @@ export interface CatalogItem {
   nearestExpiry?: string | null;
   /** The batches on the shelf, nearest expiry first; null or empty when none was received (03 › الصيدليات) */
   shelfBatches?: readonly ShelfBatch[] | null;
+  /** What is left of each batch in this branch, expired ones included, as last pulled (03 › الصيدليات); null: none */
+  stockBatches?: readonly StockBatch[] | null;
   /** «يحتاج وصفة» and «مراقَب» (03 › الصيدليات) */
   requiresPrescription?: boolean;
   controlled?: boolean;
@@ -69,6 +72,8 @@ export interface CatalogItem {
     minPriceMinor: number | null;
     /** «سعر الجملة» of one unit; null: sold wholesale at the shelf price */
     wholesalePriceMinor?: number | null;
+    /** The average cost of one unit, when the till knows it (a user who may see cost) */
+    costMinor?: number | null;
   };
 }
 
@@ -99,6 +104,8 @@ export interface Catalog {
   vouchers: VoucherRow[];
   /** Online shop orders the store accepted, waiting to be sold here (26 › حياة الطلب) */
   onlineOrders: OnlineOrderRow[];
+  /** This branch's pieces of serial-tracked products, in stock or sold lately (03 › الإلكترونيات) */
+  serials: SerialStockRow[];
 }
 
 export type CatalogSets = { [K in keyof PullSetRows]: PullSetRows[K][] };
@@ -122,6 +129,7 @@ export const CATALOG_SETS = [
   'promotions',
   'vouchers',
   'online_orders',
+  'serials',
 ] as const satisfies readonly (keyof PullSetRows)[];
 
 export async function readCatalogSets(store: SyncStore): Promise<CatalogSets> {
@@ -177,8 +185,13 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
   };
 
   const stock = new Map<string, number>();
+  const stockBatches = new Map<string, StockBatch[]>();
   for (const level of sets.stock_levels ?? []) {
     stock.set(level.variantId, (stock.get(level.variantId) ?? 0) + level.qty);
+    // An empty list means the item keeps batches here and none is left; no list, it keeps none
+    if (Array.isArray(level.batches)) {
+      stockBatches.set(level.variantId, [...(stockBatches.get(level.variantId) ?? []), ...level.batches]);
+    }
   }
 
   const items: CatalogItem[] = [];
@@ -203,6 +216,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       modifiers: product.modifiers ?? [],
       nearestExpiry: variant.nearestExpiry ?? null,
       shelfBatches: variant.shelfBatches ?? null,
+      stockBatches: stockBatches.get(variant.id) ?? null,
       requiresPrescription: product.requiresPrescription ?? false,
       controlled: product.controlled ?? false,
       imageUrl: variant.imageUrl ?? null,
@@ -265,6 +279,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     onlineOrders: (sets.online_orders ?? [])
       .filter((o) => o.status === 'accepted')
       .sort((a, b) => a.number.localeCompare(b.number)),
+    serials: sets.serials ?? [],
   };
 }
 

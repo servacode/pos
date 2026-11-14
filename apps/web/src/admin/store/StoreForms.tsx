@@ -364,7 +364,8 @@ export function CurrencyForm({
   const [saved, setSaved] = useState(false);
   const form = useForm<CurrencyValues, StoreCurrencyInput>({
     initialValues: () => ({
-      usdEnabled: store.enabledCurrencies.includes('USD'),
+      // On only once there is a rate: an empty rate under an on switch would block «احفظ وتابع» for nothing
+      usdEnabled: store.enabledCurrencies.includes('USD') && Boolean(store.usdRate),
       usdRate: store.usdRate ?? '',
       taxInclusive: store.taxInclusive,
     }),

@@ -5,12 +5,17 @@ import { cn } from './cn';
  * «أبو أحمد الخلف» → «أأ», «سامر» → «س».
  */
 export function initialsOf(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((word) => Array.from(word.length > 3 ? word.replace(/^ال/, '') : word)[0] ?? '')
-    .join('');
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      // A dash or a dot between words is not a word: «مريض - أحمد» → «مأ», never «م-»
+      .filter((word) => /[\p{L}\p{N}]/u.test(word))
+      .map((word) => word.replace(/^[^\p{L}\p{N}]+/u, ''))
+      .slice(0, 2)
+      .map((word) => Array.from(word.length > 3 ? word.replace(/^ال/, '') : word)[0] ?? '')
+      .join('')
+  );
 }
 
 export interface AvatarProps {

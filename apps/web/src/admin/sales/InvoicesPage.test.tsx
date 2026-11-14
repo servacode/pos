@@ -237,9 +237,27 @@ describe('«الفواتير»', () => {
     const a4 = document.querySelector('[data-print-sheet="A4"]');
     expect(a4).not.toBeNull();
     expect(document.querySelector('[data-print-sheet="80mm"]')).toBeNull();
-    expect(text(a4!)).toContain('فاتورة مبيعات');
+    // The store has a tax number: a tax invoice, with the customer's block, payment terms and signature lines
+    expect(text(a4!)).toContain('فاتورة ضريبية');
     expect(text(a4!)).toContain('نسخة');
     expect(text(a4!)).toContain('قميص أبيض');
+    expect(text(a4!)).toContain('الرقم الضريبي');
+    expect(text(a4!)).toContain('شروط الدفع');
+    expect(text(a4!)).toContain('سلّمها');
+    expect(text(a4!)).toContain('استلمها');
+    expect(text(a4!)).toContain('مكان الختم');
+
+    // The delivery note: the same lines without prices, then with them
+    fireEvent.click(within(sheet).getByRole('button', { name: 'إشعار تسليم' }));
+    await vi.waitFor(() => expect(print).toHaveBeenCalledTimes(3));
+    const note = document.querySelector('[data-print-sheet="A4"]');
+    expect(text(note!)).toContain('إشعار تسليم');
+    expect(text(note!)).toContain('قميص أبيض');
+    expect(text(note!)).toContain('الأرقام التسلسلية');
+    expect(text(note!)).not.toContain('المجموع');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'إشعار تسليم بالأسعار' }));
+    await vi.waitFor(() => expect(print).toHaveBeenCalledTimes(4));
+    expect(text(document.querySelector('[data-print-sheet="A4"]')!)).toContain('المجموع');
   });
 
   it('filters one customer’s invoices when opened from the customer page', async () => {

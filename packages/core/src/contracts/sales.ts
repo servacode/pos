@@ -83,6 +83,8 @@ export interface SaleReturnRef {
 export interface SaleDetail extends SaleListItem {
   /** The saved sale document: lines, discounts, tax, payments, change, rates */
   payload: SalePayload;
+  /** The customer's phone, tax number and address as the customer card has them now; null for a sale with no customer card */
+  customerDetails?: { phone: string | null; taxNumber: string | null; address: string | null } | null;
   salesperson: { id: string; fullName: string | null } | null;
   device: { id: string; name: string; code: string | null };
   flags: string[];

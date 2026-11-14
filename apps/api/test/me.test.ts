@@ -36,6 +36,8 @@ describe('GET /v1/me', () => {
       numberFormat: 'latn',
       // the size runs and barcode choice the store starts with
       catalogOptions: { autoBarcode: false, sizeRuns: expect.any(Array) },
+      // the warranty certificate's terms: none until the owner writes them
+      warrantyTerms: null,
     });
     expect(me.subscription).toMatchObject({ status: 'trialing', planName: 'الباقة المجانية', daysLeft: 30 });
     expect(me.branches).toEqual([{ id: expect.any(String), code: '001', name: 'الفرع الرئيسي' }]);

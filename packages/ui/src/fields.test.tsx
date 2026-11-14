@@ -336,6 +336,8 @@ describe('Switch', () => {
 
     const toggle = screen.getByRole('switch', { name: 'أرسل الفاتورة على واتساب' });
     expect(toggle).toHaveAttribute('aria-checked', 'false');
+    // The name is wired to the label itself, so a screen reader and an audit both read it on the button
+    expect(toggle).toHaveAttribute('aria-labelledby');
     expect(toggle).toHaveAccessibleDescription('للزبائن المسجّلين');
     await user.click(screen.getByText('أرسل الفاتورة على واتساب'));
     expect(onChange).toHaveBeenCalledWith(true);

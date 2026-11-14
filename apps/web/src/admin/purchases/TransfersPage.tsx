@@ -19,23 +19,27 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
-import { apiFetch, errorMessage } from '../../lib/api';
+import { apiFetch, ApiError, errorMessage } from '../../lib/api';
 import { qtyOf, today } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } from './parts';
-import { VariantPicker } from './VariantPicker';
+import { PackQty } from './PackQty';
+import { baseQtyOf, packSummary, withPackChange } from './packLines';
+import { VariantPicker, type PickedVariant } from './VariantPicker';
 
 const listTransfers = () => apiFetch<{ items: TransferRow[] }>('/v1/transfers', { auth: true });
 const createTransfer = (input: TransferInput) =>
   apiFetch<TransferDetail>('/v1/transfers', { method: 'POST', body: input, auth: true });
 
-interface Line {
-  variantId: string;
-  name: string;
+interface Line extends PickedVariant {
+  /** Pieces, or packs of `packQty` pieces (thousandths) when the item has packs */
   qty: string;
+  packQty: number;
+  /** Serial numbers of a device sent, one per piece (shown when the product tracks them) */
+  serials?: string;
 }
 
 /** The grid of a transfer line: the item, its quantity and the bin. */
-const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_9rem_2.5rem]';
+const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_14rem_2.5rem]';
 
 /**
  * «التحويل بين الفروع» (09 › transfers): goods sent from one branch to another in one step, out of
@@ -54,6 +58,7 @@ export function TransfersPage() {
   const [lines, setLines] = useState<Line[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fields, setFields] = useState<Record<string, string>>({});
   const [done, setDone] = useState<TransferDetail | null>(null);
 
   const load = useCallback(() => {
@@ -63,7 +68,7 @@ export function TransfersPage() {
   }, []);
   useEffect(load, [load]);
 
-  const parsed = lines.map((l) => qtyOf(l.qty));
+  const parsed = lines.map((l) => baseQtyOf(l));
   const ready = from && to && from !== to && lines.length > 0 && parsed.every((q) => q !== null && q > 0);
   const pieces = parsed.reduce<number>((sum, q) => sum + (q ?? 0), 0);
 
@@ -71,6 +76,7 @@ export function TransfersPage() {
     if (!ready) return;
     setSaving(true);
     setError(null);
+    setFields({});
     try {
       setDone(
         await createTransfer({
@@ -78,7 +84,18 @@ export function TransfersPage() {
           toBranchId: to,
           date: today(),
           note: note.trim() || null,
-          lines: lines.map((l, i) => ({ variantId: l.variantId, qty: parsed[i]! })),
+          lines: lines.map((l, i) => ({
+            variantId: l.variantId,
+            qty: parsed[i]!,
+            ...(l.serials?.trim()
+              ? {
+                  serials: l.serials
+                    .split(/[\n,،]+/)
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+                }
+              : {}),
+          })),
         }),
       );
       setLines([]);
@@ -86,6 +103,7 @@ export function TransfersPage() {
       load();
     } catch (e) {
       setError(errorMessage(e));
+      setFields(e instanceof ApiError ? (e.fields ?? {}) : {});
     } finally {
       setSaving(false);
     }
@@ -183,13 +201,20 @@ export function TransfersPage() {
                 <VariantPicker
                   onPick={(v) =>
                     setLines((list) =>
-                      list.some((l) => l.variantId === v.variantId) ? list : [...list, { ...v, qty: '' }],
+                      list.some((l) => l.variantId === v.variantId)
+                        ? list
+                        : [...list, { ...v, qty: '', packQty: 1000 }],
                     )
                   }
                   onPickGrid={(picked) =>
                     setLines((list) => [
                       ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
-                      ...picked.map((p) => ({ variantId: p.variantId, name: p.name, qty: p.qty })),
+                      ...picked.map((p) => ({
+                        variantId: p.variantId,
+                        name: p.name,
+                        qty: p.qty,
+                        packQty: 1000,
+                      })),
                     ])
                   }
                 />
@@ -209,23 +234,28 @@ export function TransfersPage() {
                         key={l.variantId}
                         className={`grid grid-cols-[minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 px-4 py-3 md:items-center ${LINE_COLUMNS}`}
                       >
-                        <span className="min-w-0 truncate font-semibold text-ink md:self-center">
-                          {l.name}
+                        <span className="flex min-w-0 flex-col md:self-center">
+                          <span className="truncate font-semibold text-ink">{l.name}</span>
+                          {l.packQty > 1000 && parsed[i] ? (
+                            <span className="text-xs font-normal text-ink-subtle">
+                              {packSummary(
+                                qtyOf(l.qty) ?? 0,
+                                l.packs?.find((x) => x.qty === l.packQty) ?? null,
+                                (q) => formatQuantity(q, digits),
+                              )}
+                            </span>
+                          ) : null}
                         </span>
                         <div className="col-span-2 row-start-2 md:col-span-1 md:row-start-auto">
                           <Caption>الكمية</Caption>
-                          <TextField
-                            label={`كمية ${l.name}`}
-                            hideLabel
-                            dir="ltr"
-                            inputMode="decimal"
-                            value={l.qty}
-                            onChange={(e) =>
-                              setLines((all) =>
-                                all.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)),
-                              )
+                          <PackQty
+                            name={l.name}
+                            packs={l.packs}
+                            qty={l.qty}
+                            packQty={l.packQty}
+                            onChange={(patch) =>
+                              setLines((all) => all.map((x, j) => (j === i ? withPackChange(x, patch) : x)))
                             }
-                            inputClassName="num"
                           />
                         </div>
                         <div className="col-start-2 row-start-1 md:col-start-auto md:row-start-auto">
@@ -234,6 +264,33 @@ export function TransfersPage() {
                             onRemove={() => setLines((all) => all.filter((_, j) => j !== i))}
                           />
                         </div>
+
+                        {fields[`lines.${i}.serials`] || l.serials ? (
+                          <div className="col-span-2 md:col-span-3">
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs font-semibold text-ink-subtle">
+                                الأرقام التسلسلية (رقم لكل قطعة، واحد في كل سطر)
+                              </span>
+                              <textarea
+                                aria-label={`أرقام ${l.name}`}
+                                dir="ltr"
+                                rows={2}
+                                value={l.serials ?? ''}
+                                onChange={(e) =>
+                                  setLines((all) =>
+                                    all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)),
+                                  )
+                                }
+                                className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden"
+                              />
+                              {fields[`lines.${i}.serials`] ? (
+                                <span className="text-sm text-danger-ink">
+                                  {fields[`lines.${i}.serials`]}
+                                </span>
+                              ) : null}
+                            </label>
+                          </div>
+                        ) : null}
                       </li>
                     ))}
                   </LinesTable>

@@ -16,6 +16,7 @@ describe('returnWindowDays', () => {
     expect(returnWindowDays({ returnWindowDays: null }, ['clothing', 'cosmetics'])).toBe(30);
     expect(returnWindowDays(undefined, ['supermarket'])).toBe(DEFAULT_RETURN_DAYS);
     expect(returnWindowDays(null, undefined)).toBe(7);
+    expect(returnWindowDays(null, ['medical_supplies'])).toBe(30);
   });
 });
 

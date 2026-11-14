@@ -68,6 +68,11 @@ export function StaffForm({
   const [saving, setSaving] = useState(false);
 
   const role = options.roles.find((r) => r.key === roleKey);
+  // The till code opens the cashier screen: a role that does not sell has no use for it unless it covers a shift
+  const sellsAtTill = roleKey !== 'accountant' && roleKey !== 'storekeeper';
+  const sameName = options.staff.filter(
+    (m) => m.id !== member?.id && m.fullName.trim() !== '' && m.fullName.trim() === fullName.trim(),
+  );
   const digits = role?.pinLength ?? 4;
 
   // Two people on one till code is allowed, but the owner is told who else has it
@@ -158,6 +163,11 @@ export function StaffForm({
         onChange={(e) => setFullName(e.target.value)}
         error={fields.fullName}
       />
+      {sameName.length > 0 ? (
+        <Alert tone="warning">
+          يوجد موظف بهذا الاسم أصلاً. أضف حرفاً يميّزهما (اسم الأب أو الفرع) ليُعرف من باع.
+        </Alert>
+      ) : null}
       <Select
         label="الدور"
         value={roleKey}
@@ -208,9 +218,11 @@ export function StaffForm({
       <TextField
         label={member ? 'رمز دخول جديد' : 'رمز الدخول للكاشير'}
         hint={
-          member
-            ? `اتركه فارغاً ليبقى رمزه كما هو. ${digits} أرقام.`
-            : `${digits} أرقام يكتبها على شاشة الكاشير. تجنّب 1234 و0000.`
+          !sellsAtTill
+            ? `اختياري: هذا الدور لا يبيع على الكاشير، والرمز ${digits} أرقام لا يُستعمل إلا إن فتح شاشة الكاشير.`
+            : member
+              ? `اتركه فارغاً ليبقى رمزه كما هو. ${digits} أرقام.`
+              : `${digits} أرقام يكتبها على شاشة الكاشير. تجنّب 1234 و0000.`
         }
         inputMode="numeric"
         dir="ltr"

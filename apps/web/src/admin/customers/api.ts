@@ -1,6 +1,7 @@
 import type {
   CustomerDetail,
   CustomerInput,
+  CustomerKind,
   CustomerListResponse,
   CustomerMoneyResult,
   CustomerOpeningDebtInput,
@@ -10,10 +11,11 @@ import type {
 import { apiFetch } from '../../lib/api';
 
 /** `GET /v1/customers`: every customer with what they owe (customers.view) */
-export const listCustomers = (q = '', owing = false) => {
+export const listCustomers = (q = '', owing = false, kind?: CustomerKind) => {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (owing) params.set('owing', 'true');
+  if (kind) params.set('kind', kind);
   const query = params.toString();
   return apiFetch<CustomerListResponse>(`/v1/customers${query ? `?${query}` : ''}`, { auth: true });
 };

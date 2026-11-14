@@ -236,6 +236,8 @@ export function WelcomePage() {
             secondaryAction={skip(2)}
             onSaved={(s) => {
               setStore(s);
+              // The top bar names the store from the signed-in profile: read it again now, not at the end
+              void refreshMe();
               void go(2);
             }}
           />

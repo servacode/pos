@@ -278,7 +278,7 @@ export function ReturnScreen({
         'cash',
         // What was on account (آجل) can go back to the customer's account, when the sale names them
         ...current.sale.payments.map((p) =>
-          p.method === 'credit' && current.sale.customerId ? 'account' : p.method,
+          (p.method === 'credit' || p.method === 'cheque') && current.sale.customerId ? 'account' : p.method,
         ),
         'voucher',
       ].filter(
@@ -365,7 +365,7 @@ export function ReturnScreen({
                     )}
                   >
                     <span className="flex min-w-0 flex-col gap-0.5">
-                      <bdi dir="ltr" className="num font-semibold break-all text-ink">
+                      <bdi dir="ltr" className="num font-semibold whitespace-nowrap text-ink">
                         {s.number}
                       </bdi>
                       <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
@@ -615,6 +615,12 @@ export function ReturnScreen({
                   ))}
                 </ChoiceGroup>
               )}
+              {current?.sale.payments.some((p) => p.method === 'cheque') ? (
+                <Alert tone="info">
+                  دُفعت هذه الفاتورة بشيك. الشيك نفسه يبقى كما هو عند البنك، والمرتجع لا يخرج من الدرج إلا إن
+                  اخترت النقد بنفسك.
+                </Alert>
+              ) : null}
               {needsReference ? (
                 <TextField
                   label="رقم العملية"

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import type { CurrencyCode, CustomerDetail, CustomerPurchases, StatementLine } from '@serva/core';
+import {
+  CUSTOMER_KIND_LABELS,
+  type CurrencyCode,
+  type CustomerDetail,
+  type CustomerPurchases,
+  type StatementLine,
+} from '@serva/core';
 import {
   AddIcon,
   Alert,
@@ -30,9 +36,11 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { dayText, isoDay } from '../../lib/dates';
-import { archiveDuplicate, getCustomer, getPurchases, updateCustomer } from './api';
+import { storeSells } from '../../lib/sectors';
+import { archiveDuplicate, getCustomer, getPurchases, listCustomers, updateCustomer } from './api';
 import { CustomerForm } from './CustomerForm';
 import { CustomerMoneyDialog } from './CustomerMoneyDialog';
+import { WarrantyDevices } from '../warranty/WarrantyDevices';
 
 const SOURCE_TEXT: Record<string, string> = {
   sale: 'فاتورة آجل',
@@ -167,6 +175,7 @@ function BalanceCard({ customer, currency }: { customer: CustomerDetail; currenc
  */
 function SizesCard({ purchases, currency }: { purchases: CustomerPurchases; currency: CurrencyCode }) {
   const digits = useDigits();
+  const me = useMe();
   const latest = purchases.invoices[0];
   return (
     <section aria-label="مشترياته">
@@ -182,7 +191,9 @@ function SizesCard({ purchases, currency }: { purchases: CustomerPurchases; curr
           }
         />
         {purchases.sizes.length === 0 ? (
-          <p className="text-sm text-ink-muted">لا مقاسات في مشترياته بعد.</p>
+          storeSells(me.tenant.sectors, ['clothing']) ? (
+            <p className="text-sm text-ink-muted">لا مقاسات في مشترياته بعد.</p>
+          ) : null
         ) : (
           <div className="flex flex-col gap-4">
             {purchases.sizes.map((s) => (
@@ -276,6 +287,33 @@ export function CustomerPage() {
       setError(errorMessage(e));
     }
   }
+
+  // «أرشف هذا الزبون المكرر» is offered only when another customer has the same name or phone
+  const [hasTwin, setHasTwin] = useState(false);
+  const twinKey = customer ? `${customer.id}|${customer.name}|${customer.phone ?? ''}` : '';
+  useEffect(() => {
+    if (!customer) return;
+    let alive = true;
+    const name = customer.name.trim();
+    const phone = customer.phone;
+    void listCustomers(name)
+      .then((res) => {
+        if (!alive) return;
+        setHasTwin(
+          res.items.some(
+            (c) =>
+              c.id !== customer.id &&
+              !c.archived &&
+              (c.name.trim() === name || (phone !== null && c.phone === phone)),
+          ),
+        );
+      })
+      .catch(() => alive && setHasTwin(false));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- twinKey stands for the three fields it joins
+  }, [twinKey]);
 
   /** «أرشف هذا الزبون المكرر»: refused with its reason when money or a cheque is still open on them */
   async function archiveAsDuplicate() {
@@ -373,7 +411,21 @@ export function CustomerPage() {
                     {customer.priceTier === 'wholesale' ? <Badge tone="brand">زبون جملة</Badge> : null}
                     {customer.archived ? <Badge>مؤرشف</Badge> : null}
                     {customer.noMessages ? <Badge>لا يريد رسائل</Badge> : null}
+                    {customer.kind ? <Badge tone="info">{CUSTOMER_KIND_LABELS[customer.kind]}</Badge> : null}
                   </div>
+                  {customer.contactName || customer.contactPhone ? (
+                    <p className="text-sm text-ink-muted">
+                      المسؤول: {customer.contactName ?? '—'}
+                      {customer.contactPhone ? (
+                        <>
+                          {' · '}
+                          <bdi dir="ltr" className="num">
+                            {customer.contactPhone}
+                          </bdi>
+                        </>
+                      ) : null}
+                    </p>
+                  ) : null}
                   <p className="text-sm text-ink-muted">
                     زبون منذ{' '}
                     <bdi className="num">
@@ -401,7 +453,7 @@ export function CustomerPage() {
                     >
                       {customer.archived ? 'أرجعه' : 'أرشفه'}
                     </Button>
-                    {customer.archived ? null : (
+                    {customer.archived || !hasTwin ? null : (
                       <Button
                         variant="ghost"
                         icon={<ArchiveIcon />}
@@ -530,6 +582,9 @@ export function CustomerPage() {
                       </Link>
                     </div>
                   </div>
+                  <p className="text-xs text-ink-muted sm:hidden">
+                    إن لم يظهر عمود الرصيد كاملاً فمرّر الجدول جانباً.
+                  </p>
                   <DataTable
                     caption="كشف الحساب"
                     columns={columns}
@@ -544,6 +599,15 @@ export function CustomerPage() {
                     }
                   />
                 </section>
+                {storeSells(me.tenant.sectors, ['electronics', 'medical_supplies']) ? (
+                  <WarrantyDevices
+                    by={{ customerId: customer.id }}
+                    storeName={me.tenant.name}
+                    customerName={customer.name}
+                    customerPhone={customer.phone}
+                    heading="أجهزته وكفالتها"
+                  />
+                ) : null}
               </div>
             </div>
             {money ? (

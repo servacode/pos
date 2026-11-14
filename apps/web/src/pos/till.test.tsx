@@ -68,6 +68,9 @@ describe('return rules by store', () => {
   it('words the reasons by business type and keeps expiry as the default only where it applies', () => {
     expect(returnReasons(undefined)[0]).toBe('تالف أو منتهي الصلاحية');
     expect(returnReasons(['pharmacy'])[0]).toBe('تالف أو منتهي الصلاحية');
+    // Medical supplies: a sealed box is the first (default) reason, damage is chosen on purpose
+    expect(returnReasons(['medical_supplies'])[0]).toBe('لم يُستعمل / علبة مغلقة');
+    expect(returnReasons(['medical_supplies'])).toContain('تالف أو منتهي الصلاحية');
     expect(returnReasons(['clothing'])).toEqual([
       'المقاس غير مناسب',
       'عيب في القطعة',

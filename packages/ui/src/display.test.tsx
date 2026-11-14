@@ -633,6 +633,7 @@ describe('EmptyState, Skeleton and Avatar', () => {
   it('draws initials, decorative unless it stands alone', () => {
     expect(initialsOf('أبو أحمد الخلف')).toBe('أأ');
     expect(initialsOf(' سامر ')).toBe('س');
+    expect(initialsOf('مريض - أحمد')).toBe('مأ');
     renderUi(
       <>
         <Avatar name="خالد العلي" />

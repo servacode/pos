@@ -65,6 +65,21 @@ describe('shift', () => {
     expect(screen.getByText(/وردية منذ/)).toBeInTheDocument();
   });
 
+  it('asks again before saving an opening count far above the usual one', async () => {
+    const { user, outbox, local } = renderPos();
+    // Last time the drawer opened with 1,100 ل.س; now a slipped key makes it 100 times that
+    await local.set('lastOpeningCount', { SYP: 110_000, USD: 0 });
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await user.type(screen.getByLabelText('عدد أوراق 500 ل.س'), '300');
+    await user.click(screen.getByRole('button', { name: 'افتح الوردية' }));
+    expect(await screen.findByText(/أكبر بكثير من المعتاد/)).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: /نعم، المبلغ صحيح/ }));
+    expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(1);
+  });
+
   it('closes blind for a cashier: no expected amount, and shift_close carries every term', async () => {
     const local = memoryLocal();
     await openShift(local);

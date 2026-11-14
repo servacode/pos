@@ -92,6 +92,16 @@ const FASHION_REASONS = ['المقاس غير مناسب', 'عيب في القط
 export function returnReasons(sectors: SettingsRow['sectors']): string[] {
   const fashion = sectors !== undefined && sectors.includes('clothing');
   const expiry = storeSells(sectors, EXPIRY_SECTORS);
+  // Medicines and medical supplies: the first (default) reason is a sealed box, never «تالف»: the cashier chooses damage
+  if (!fashion && sectors?.includes('medical_supplies') && !sectors.includes('pharmacy')) {
+    return [
+      'لم يُستعمل / علبة مغلقة',
+      'تالف أو منتهي الصلاحية',
+      'الزبون غيّر رأيه',
+      'تبديل',
+      'خطأ في الفاتورة',
+    ];
+  }
   if (!fashion) return ['تالف أو منتهي الصلاحية', 'الزبون غيّر رأيه', 'تبديل', 'خطأ في الفاتورة'];
   return [...FASHION_REASONS, ...(expiry ? ['تالف أو منتهي الصلاحية'] : []), 'خطأ في الفاتورة'];
 }

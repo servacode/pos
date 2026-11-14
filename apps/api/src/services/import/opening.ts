@@ -1,10 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { roundDiv, stockIn, type CurrencyCode, type StockValue, type StocktakeLineRow } from '@serva/core';
-import { stocktakes, type Transaction } from '@serva/db';
+import { serials, stocktakes, type Transaction } from '@serva/db';
 import { createUuidV7 } from '@serva/sync';
 import type { AccessClaims } from '../../auth/tokens';
 import type { RequestMeta } from '../../types';
 import { audit } from '../audit';
+import { recordBatchMovements, refreshBatches } from '../batches';
 import { costPending, loadValues, saveValues, stockKey } from '../costing';
 import { postEntry, type DraftLine } from '../posting';
 import { baseCurrency, moveStock, nextNumber } from '../purchases';
@@ -20,6 +21,22 @@ export interface OpeningLine {
   qty: number;
   /** What one whole unit cost, base currency minor units; 0 when the file had no cost */
   unitCostMinor: number;
+  /**
+   * What of `qty` came in which batch, with its expiry and (for a serial-tracked item) its numbers.
+   * The part of `qty` they do not cover is stock with no batch.
+   */
+  lots?: OpeningLot[];
+}
+
+/** One batch of an opening quantity. */
+export interface OpeningLot {
+  /** Thousandths of the base unit */
+  qty: number;
+  batchNo: string | null;
+  /** YYYY-MM-DD */
+  expiryDate: string | null;
+  /** One number per piece, already checked against the item */
+  serials: string[];
 }
 
 /** The value of `qty` thousandths at `unitCostMinor` per unit, rounded half away from zero. */
@@ -88,6 +105,7 @@ export async function postOpeningStock(
       date,
       branchLines.map((l, i) => ({ lineNo: i + 1, variantId: l.variantId, qty: l.qty })),
     );
+    await postOpeningLots(tx, auth.tenantId, branchId, id, date, branchLines);
     const debit: DraftLine = {
       account: { code: '1300' },
       baseMinor: total,
@@ -212,4 +230,51 @@ export async function postOpeningBalance(
     },
     meta,
   );
+}
+
+/**
+ * The batches and serial numbers of an opening document: the same ledgers a purchase receipt feeds
+ * (the batch ledger as a «count» of the stocktake, and one `serials` row per piece), so the expiry
+ * report, the recall and the warranty find opening stock exactly as they find bought stock. Only the
+ * rows of the stocktake document are written; stock, cost and the entry are the opening path's own.
+ */
+async function postOpeningLots(
+  tx: Transaction,
+  tenantId: string,
+  branchId: string,
+  docId: string,
+  date: string,
+  lines: readonly OpeningLine[],
+): Promise<void> {
+  const batchRows = lines.flatMap((l, i) =>
+    (l.lots ?? [])
+      .filter((lot) => lot.batchNo !== null || lot.expiryDate !== null)
+      .map((lot, n) => ({
+        variantId: l.variantId,
+        batchNo: lot.batchNo,
+        expiry: lot.expiryDate,
+        qty: lot.qty,
+        lineNo: i + 1,
+        allocNo: n,
+      })),
+  );
+  await recordBatchMovements(tx, { tenantId, branchId, kind: 'count', docId, date }, batchRows);
+  await refreshBatches(
+    tx,
+    [branchId],
+    batchRows.map((r) => r.variantId),
+  );
+  const pieces = lines.flatMap((l) =>
+    (l.lots ?? []).flatMap((lot) =>
+      lot.serials.map((serial) => ({
+        tenantId,
+        variantId: l.variantId,
+        serial,
+        status: 'in_stock',
+        purchaseId: null,
+        branchId,
+      })),
+    ),
+  );
+  if (pieces.length > 0) await tx.insert(serials).values(pieces);
 }

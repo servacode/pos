@@ -9,7 +9,16 @@ import { formatMoney } from '@serva/core/money';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { clockText, dateText } from '../format';
+import { dayText } from '../../lib/dates';
 import { methodLabel, needsThanks, type ReceiptData } from '../receipt/Receipt';
+import { serialText, warrantyText } from '../receipt/warranty';
+import { packPiecesNote } from '../sale/packText';
+
+/** « (200 قطعة)» after the packs of a line sold by the box, nothing for single units. */
+const packNote = (l: { qty: number; packQty?: number }) => {
+  const note = packPiecesNote(l, (q) => formatQuantity(q));
+  return note === null ? '' : ` ${note}`;
+};
 
 /**
  * What a thermal printer prints, line by line (21 › إيصال 80 مم): the same receipt as the screen's,
@@ -132,7 +141,7 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     lines.push({ kind: 'text', text: l.name, bold: true });
     lines.push({
       kind: 'pair',
-      start: `${formatQuantity(l.qty)}${l.unitName ? ` ${l.unitName}` : ''} × ${money(l.unitPriceMinor, base)}`,
+      start: `${formatQuantity(l.qty)}${l.unitName ? ` ${l.unitName}` : ''}${packNote(l)} × ${money(l.unitPriceMinor, base)}`,
       end: money(l.priced.grossMinor, base),
     });
     if (l.priced.lineDiscountMinor > 0) {
@@ -142,11 +151,21 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
         end: `−${money(l.priced.lineDiscountMinor, base)}`,
       });
     }
-    if (l.serials?.length) lines.push({ kind: 'text', text: `IMEI ${l.serials.join('، ')}` });
-    if (l.batchNo) {
+    if (l.serials?.length) lines.push({ kind: 'text', text: serialText(l, data.settings) ?? '' });
+    const until = warrantyText(l, data.doc.deviceTime, data.settings);
+    if (until) lines.push({ kind: 'text', text: until });
+    if (l.batches && l.batches.length > 0) {
+      // A line split over batches prints each with what it took (03 › الصيدليات)
+      for (const b of l.batches) {
+        lines.push({
+          kind: 'text',
+          text: `دفعة ${b.batchNo ?? '—'}${b.expiry ? ` · تنتهي ${dayText(b.expiry)}` : ''} × ${formatQuantity(b.qty)}`,
+        });
+      }
+    } else if (l.batchNo) {
       lines.push({
         kind: 'text',
-        text: `دفعة ${l.batchNo}${l.batchExpiry ? ` · تنتهي ${l.batchExpiry}` : ''}`,
+        text: `دفعة ${l.batchNo}${l.batchExpiry ? ` · تنتهي ${dayText(l.batchExpiry)}` : ''}`,
       });
     }
   }

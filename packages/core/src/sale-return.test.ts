@@ -252,6 +252,15 @@ describe('a return', () => {
     } as unknown as SalePayload;
     expect(defaultRefundMethod(mixed)).toBe('cash');
     expect(defaultRefundMethod(aSale([line(1, 1_000)]))).toBe('cash');
+    // A cheque stays as it is: the refund goes to the customer's account, or a voucher without one
+    const byCheque = (customerId: string | null) =>
+      ({
+        ...aSale([line(1, 1_000)]),
+        customerId,
+        payments: [{ method: 'cheque' }],
+      }) as unknown as SalePayload;
+    expect(defaultRefundMethod(byCheque(CASHIER))).toBe('account');
+    expect(defaultRefundMethod(byCheque(null))).toBe('voucher');
     // Cash carries no reference even when one is typed; a card without one keeps null
     const sale = aSale([line(1, 1_000)], 'card');
     const cash = buildReturnPayload({

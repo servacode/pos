@@ -179,7 +179,10 @@ export function listSales(
         and p.invoice_id = i.id and p.method = ${query.method})`);
     if (query.q) {
       const pattern = likeOf(query.q);
-      where.push(sql`(i.number ilike ${pattern} or i.customer_name ilike ${pattern})`);
+      // An invoice is also found by the serial number of a piece it sold (03 › الإلكترونيات)
+      where.push(
+        sql`(i.number ilike ${pattern} or i.customer_name ilike ${pattern} or exists (select 1 from serial_sales ss where ss.tenant_id = i.tenant_id and ss.sale_id = i.id and ss.serial = ${query.q.replace(/\s+/g, '').toUpperCase()}) or exists (select 1 from batch_movements bm where bm.tenant_id = i.tenant_id and bm.kind = 'sale' and bm.doc_id = i.id and bm.batch_no = ${query.q.trim()}))`,
+      );
     }
     if (after)
       where.push(
@@ -226,14 +229,19 @@ export function getSale(db: Database, auth: AccessClaims, id: string): Promise<S
         footer: string | null;
         tax_number: string | null;
         store_name: string;
+        customer_phone: string | null;
+        customer_tax_number: string | null;
+        customer_address: string | null;
       }
     >(sql`
       select s.*, i.payload, i.salesperson_id, sp.full_name as salesperson_name,
              d.name as device_name, i.flags, b.address as branch_address, b.phone as branch_phone,
              (select receipt_footer from tenant_settings limit 1) as footer,
-             t.tax_number, t.name as store_name
+             t.tax_number, t.name as store_name,
+             c.phone as customer_phone, c.tax_number as customer_tax_number, c.address as customer_address
       from (${SELECT} where i.id = ${id} and ${inScopeSql(sql`i.branch_id`, scope)}) s
       join invoices i on i.id = s.id
+      left join customers c on c.tenant_id = i.tenant_id and c.id = i.customer_id
       join branches b on b.id = s.branch_id
       join tenants t on t.id = i.tenant_id
       left join devices d on d.id = i.device_id
@@ -255,6 +263,13 @@ export function getSale(db: Database, auth: AccessClaims, id: string): Promise<S
     return {
       ...itemOf(row),
       payload: row.payload,
+      customerDetails: row.customer_id
+        ? {
+            phone: row.customer_phone,
+            taxNumber: row.customer_tax_number,
+            address: row.customer_address,
+          }
+        : null,
       salesperson: row.salesperson_id ? { id: row.salesperson_id, fullName: row.salesperson_name } : null,
       device: { id: row.device_id, name: row.device_name ?? '', code: row.device_code },
       flags: row.flags,

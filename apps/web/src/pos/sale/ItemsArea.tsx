@@ -1,5 +1,7 @@
 import { memo, useMemo, useState, type RefObject } from 'react';
+import type { CurrencyCode } from '@serva/core/currencies';
 import { toLatinDigits } from '@serva/core/text';
+import { dayText } from '../../lib/dates';
 import {
   BarcodeIcon,
   Button,
@@ -31,6 +33,8 @@ export interface PriceCheck {
   pieces: readonly CatalogItem[];
   /** The piece that was scanned, if one was */
   focus: string | null;
+  /** The pack that was scanned (a box of 12): its name, size and price */
+  pack?: { name: string | null; qty: number; priceMinor: number; currency: CurrencyCode } | null;
 }
 
 export interface ItemsAreaProps {
@@ -368,13 +372,29 @@ const ModelTile = memo(function ModelTile({
 /** «سعر صنف»: the product's name, then a row for each size and colour with its price and what is left. */
 export function PriceCheckCard({ check }: { check: PriceCheck }) {
   const digits = useDigits();
+  // The product's name is the heading: a piece shows only what sets it apart (size, colour), never the name again
   const label = (piece: CatalogItem) =>
-    (piece.attributes ?? []).length > 0 ? piece.attributes!.map((a) => a.value).join(' · ') : piece.name;
+    (piece.attributes ?? []).length > 0
+      ? piece.attributes!.map((a) => a.value).join(' · ')
+      : piece.name === check.name
+        ? check.pieces.length > 1
+          ? 'الأساسي'
+          : ''
+        : piece.name;
   return (
     <div className="flex flex-col gap-2 rounded-card bg-surface p-3 text-ink">
       <h3 className="text-lg font-semibold">
         <bdi>{check.name}</bdi>
       </h3>
+      {check.pack ? (
+        <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+          <span>
+            {check.pack.name ? <bdi>{check.pack.name}</bdi> : 'العبوة'} (
+            {formatQuantity(check.pack.qty, digits)} قطعة)
+          </span>
+          <Money minor={check.pack.priceMinor} currency={check.pack.currency} className="font-bold" />
+        </p>
+      ) : null}
       <ul aria-label="أسعار الصنف" className="flex flex-col divide-y divide-line">
         {check.pieces.map((piece) => {
           const left = piece.stockQty ?? null;
@@ -387,7 +407,7 @@ export function PriceCheckCard({ check }: { check: PriceCheck }) {
               )}
             >
               <span className="min-w-0 flex-1 truncate">
-                <bdi>{label(piece)}</bdi>
+                <bdi>{label(piece) || 'سعر القطعة'}</bdi>
                 {piece.unit?.allowsFraction ? (
                   <span className="text-sm text-ink-muted"> · للكيلو</span>
                 ) : null}
@@ -413,6 +433,26 @@ export function PriceCheckCard({ check }: { check: PriceCheck }) {
           );
         })}
       </ul>
+      {check.pieces
+        .filter((p) => p.variantId === check.focus || check.pieces.length === 1)
+        .map((p) =>
+          p.shelfBatches && p.shelfBatches.length > 0 ? (
+            <ul
+              key={p.variantId}
+              aria-label="الدفعات وتواريخ الصلاحية"
+              className="flex flex-col gap-1 text-sm"
+            >
+              {p.shelfBatches.map((b, i) => (
+                <li key={`${b.batchNo ?? ''}-${i}`} className="flex gap-2 text-ink-muted">
+                  <span>دفعة {b.batchNo ? <bdi dir="ltr">{b.batchNo}</bdi> : '—'}</span>
+                  <span>
+                    · تنتهي <bdi>{dayText(b.expiry, digits)}</bdi>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null,
+        )}
     </div>
   );
 }

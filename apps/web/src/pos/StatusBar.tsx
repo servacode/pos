@@ -105,7 +105,7 @@ export function StatusBar({
       {device ? (
         <>
           <Divider />
-          <p className="flex min-w-0 flex-col">
+          <p className="flex min-w-24 shrink-[2] flex-col">
             <span className="truncate text-sm/tight font-semibold text-ink">{device.storeName}</span>
             <span className="truncate text-xs/tight text-ink-muted">
               {device.branchName} · {device.deviceName}
@@ -116,7 +116,7 @@ export function StatusBar({
       {user ? (
         <>
           <Divider />
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-28 shrink-[2] items-center gap-2.5">
             <Avatar name={user.name} size="sm" />
             <p className="flex min-w-0 flex-col">
               <span className="truncate text-sm/tight font-semibold text-ink">{user.name}</span>
@@ -159,7 +159,15 @@ export function StatusBar({
       {notice}
       {lastInvoice}
       <span className="flex shrink-0 items-center gap-2.5">
-        <ConnectionPill online={online}>{connectionText(online, outbox?.pending ?? 0)}</ConnectionPill>
+        <ConnectionPill online={online}>
+          {/* The long sentence gives way (shortened with its full text on hover) so the store and the person keep their names */}
+          <span
+            title={connectionText(online, outbox?.pending ?? 0)}
+            className="block max-w-40 truncate min-[1700px]:max-w-none"
+          >
+            {connectionText(online, outbox?.pending ?? 0)}
+          </span>
+        </ConnectionPill>
         {outbox?.lastSentAt ? (
           <span className="hidden shrink-0 text-xs whitespace-nowrap text-ink-muted xl:inline">
             آخر إرسال {clockText(outbox.lastSentAt, digits)}

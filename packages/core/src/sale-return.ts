@@ -119,10 +119,13 @@ export function returnAmounts(
 /**
  * The method the money goes back by: the sale's own, when it was paid one way other than cash. A
  * sale of a named customer that was (partly) on account goes back to their account, so the debt
- * they still owe comes down (08 › مرتجع مبيعات).
+ * they still owe comes down (08 › مرتجع مبيعات). A sale paid by cheque does the same.
  */
 export function defaultRefundMethod(sale: SalePayload): RefundMethod {
   if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) return 'account';
+  // A cheque stays as it is in the books: the refund never comes out of the drawer. It goes to the
+  // customer's account, or on a voucher when the sale names nobody
+  if (sale.payments.some((p) => p.method === 'cheque')) return sale.customerId ? 'account' : 'voucher';
   const methods = new Set(sale.payments.map((p) => p.method));
   if (methods.size === 1) {
     const [only] = [...methods];

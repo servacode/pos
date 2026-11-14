@@ -126,7 +126,8 @@ describe('batches and expiry', () => {
       ['B-07', '2026-11-15', 5 * BOX, 16],
     ]);
 
-    // Twelve boxes sold: the oldest go first, three of the new batch are left
+    // Twelve boxes sold with no batch on the line (an older till): the expired batch is never taken,
+    // so all five good boxes go and the expired ten stay on the report until they are written off
     const doc = documents(store.device);
     const open = doc('shift_open', shiftOpen(store.userId));
     const sold = doc(
@@ -145,11 +146,11 @@ describe('batches and expiry', () => {
     );
     await push(app, store.device, [open, sold]);
     report = await expiry(store);
-    expect(report.items.map((r) => [r.batchNo, r.qty])).toEqual([['B-07', 3 * BOX]]);
+    expect(report.items.map((r) => [r.batchNo, r.qty])).toEqual([['A-01', 10 * BOX]]);
     sets = await pull(store);
-    expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.nearestExpiry).toBe('2026-11-15');
-    // Within 10 days, nothing
-    expect((await expiry(store, 10)).items).toEqual([]);
+    expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.nearestExpiry).toBe('2026-10-25');
+    // The expired batch is still listed within 10 days; a batch ending later is not
+    expect((await expiry(store, 10)).items.map((r) => r.batchNo)).toEqual(['A-01']);
   });
 
   it('a purchase line without an expiry changes nothing, and a cashier cannot read the report', async () => {
@@ -219,7 +220,7 @@ describe('batches the till picks from, and the prescription flags', () => {
       { batchNo: 'B-07', expiry: '2026-11-15' },
     ]);
 
-    // Eleven boxes sold: the old batch is gone from the shelf, and the till is told without the report
+    // Eleven boxes sold: the old batch is expired so five good boxes go, and the expired one stays
     const doc = documents(store.device);
     const open = doc('shift_open', shiftOpen(store.userId));
     const sold = doc(
@@ -240,7 +241,7 @@ describe('batches the till picks from, and the prescription flags', () => {
     await push(app, store.device, [open, sold]);
     sets = await pull(store);
     expect(sets.variants.upserts.find((v) => v.id === med.variantId)!.shelfBatches).toEqual([
-      { batchNo: 'B-07', expiry: '2026-11-15' },
+      { batchNo: 'A-01', expiry: '2026-10-25' },
     ]);
 
     const patched = await app.inject({

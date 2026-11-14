@@ -12,6 +12,7 @@ import {
   uuidSchema,
 } from './common';
 import { customerPayloadSchema, type CustomerPayload } from './customers';
+import { chequeDetailsSchema } from './cheques';
 
 /**
  * Payloads of the documents a cashier device sends in phase 1 (17 › الإرسال; 15 › عقد المزامنة v1;
@@ -150,6 +151,14 @@ export const saleTotalsSchema = z.object({
   totalMinor: nonNegativeMinorSchema,
 });
 
+/** What a sale line took from one batch: the batch and its expiry as received, base units (thousandths) */
+export const batchAllocationSchema = z.object({
+  batchNo: z.string().trim().min(1).max(60).nullable(),
+  expiry: z.iso.date().nullable(),
+  qty: z.int().positive(),
+});
+export type BatchAllocation = z.output<typeof batchAllocationSchema>;
+
 /**
  * One sale line: the snapshot of the moment (08 › قواعد ثابتة 2) and what the engine made of it.
  *
@@ -186,12 +195,22 @@ export const saleLineSchema = z.object({
    * as optional, so a line without them leaves it out.
    */
   serials: z.array(z.string().trim().min(3).max(40)).max(1000).optional(),
+  /** Numbers a manager let through though the store never received them, and who allowed it */
+  serialOverrides: z.array(z.string().trim().min(3).max(40)).max(1000).optional(),
+  serialApprovedBy: uuidSchema.nullable().optional(),
+  /** The warranty in months the receipt printed an end date for (with serials) */
+  warrantyMonths: z.int().min(1).max(240).optional(),
   /**
    * The batch the till chose for this line (03 › الصيدليات: الدفعة, nearest expiry first) and its
    * expiry date. Metadata only: stock and costing stay per item. Optional, left out elsewhere.
    */
   batchNo: z.string().trim().min(1).max(60).nullable().optional(),
   batchExpiry: z.iso.date().nullable().optional(),
+  /**
+   * The batches the line's pieces came from, base units each (FEFO, split across batches when one
+   * is not enough). Optional: a line from an older till has only batchNo and batchExpiry above.
+   */
+  batches: z.array(batchAllocationSchema).max(50).optional(),
   /** Price of one pack in the invoice currency: what the engine prices */
   unitPriceMinor: nonNegativeMinorSchema,
   /** The tax rate row (posting picks its account); null with taxRateBp 0 when untaxed */
@@ -240,6 +259,8 @@ export const salePaymentSchema = z
     cardBrand: z.string().trim().min(1).max(20).nullable(),
     /** The provider account (card acquirer, wallet such as Sham Cash): its subaccount under 1140/1150 */
     providerAccountId: uuidSchema.nullable(),
+    /** A cheque's bank, number, due date and drawer (the reference keeps them as one line too) */
+    cheque: chequeDetailsSchema.nullable().optional(),
   })
   .superRefine((p, ctx) => {
     if (REFERENCE_METHODS.includes(p.method) && p.reference === null) {
@@ -316,6 +337,8 @@ export const salePayloadSchema = z
     customerId: uuidSchema.nullable(),
     /** The manager who allowed a sale on account by a cashier without «البيع بالآجل»; absent otherwise */
     creditApproval: approvalSchema.nullable().optional(),
+    /** What the customer owed after this sale, as the till last knew it: printed on a credit receipt */
+    customerBalanceAfterMinor: minorSchema.nullable().optional(),
     /** The customer's name as printed, a snapshot */
     customerName: z.string().trim().min(1).max(120).nullable(),
     /** Invoice currency: the store's base currency when the sale was made */

@@ -3,6 +3,7 @@ import type {
   Category,
   CreateCategoryInput,
   CreateProductInput,
+  CreateUnitInput,
   ListResponse,
   ProductDetail,
   ProductImage,
@@ -10,10 +11,11 @@ import type {
   ProductImagesResponse,
   ProductListItem,
   ProductListQuery,
-  TaxRate,
+  TaxRateList,
   Unit,
   UpdateCategoryInput,
   UpdateProductInput,
+  UpdateUnitInput,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
@@ -68,6 +70,17 @@ export function lookupBarcode(code: string) {
   return apiFetch<BarcodeLookupResponse>(`/v1/barcodes/${id(code)}`, { auth: true });
 }
 
+/** The same lookup for a code that may be free: null (a 200 answer, no 404 in the console) when no product has it. */
+export async function probeBarcode(code: string): Promise<BarcodeLookupResponse | null> {
+  const answer = await apiFetch<BarcodeLookupResponse | { exists: false }>(
+    `/v1/barcodes/${id(code)}?free=1`,
+    {
+      auth: true,
+    },
+  );
+  return 'exists' in answer ? null : answer;
+}
+
 export function listCategories() {
   return apiFetch<{ items: Category[] }>('/v1/categories', { auth: true });
 }
@@ -88,8 +101,16 @@ export function listUnits() {
   return apiFetch<{ items: Unit[] }>('/v1/units', { auth: true });
 }
 
+export function createUnit(input: CreateUnitInput) {
+  return apiFetch<Unit>('/v1/units', { method: 'POST', body: input, auth: true });
+}
+
+export function updateUnit(unitId: string, input: UpdateUnitInput) {
+  return apiFetch<Unit>(`/v1/units/${id(unitId)}`, { method: 'PATCH', body: input, auth: true });
+}
+
 export function listTaxRates() {
-  return apiFetch<{ items: TaxRate[] }>('/v1/tax-rates', { auth: true });
+  return apiFetch<TaxRateList>('/v1/tax-rates', { auth: true });
 }
 
 // ─── Product pictures ─────────────────────────────────────────────────────────

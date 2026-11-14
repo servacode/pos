@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CURRENCIES } from '@serva/core/currencies';
-import { convert } from '@serva/core/money';
+import { convert, lineGross } from '@serva/core/money';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import {
   buildSalePayload,
@@ -11,9 +11,11 @@ import {
   type SaleTender,
 } from '@serva/core/sale';
 import type { Approval, PaymentMethod } from '@serva/core/contracts/documents';
+import { chequeReference } from '@serva/core/contracts/cheques';
 import type { OutboxEntry } from '@serva/sync';
 import {
   AddIcon,
+  Alert,
   AlertCircleIcon,
   Avatar,
   BackIcon,
@@ -39,7 +41,9 @@ import {
   type Icon,
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
-import { CustomerHistory } from '../customers/CustomerHistory';
+import { warrantyAsksCustomer } from '@serva/core/contracts/till';
+import { CustomerHistory, fetchPurchases } from '../customers/CustomerHistory';
+import { DateField } from '../../lib/DateField';
 import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
 import { Kbd } from '../sale/Kbd';
 import { nextOrderNo } from '../sale/orders';
@@ -48,7 +52,7 @@ import { usePos } from '../services';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember } from '../staff/staff';
 import { deviceDocuments } from '../shift/shift';
-import { pricingInput, type Cart, type PricingContext } from '../sale/cart';
+import { hasWarrantyDevice, pricingInput, type Cart, type PricingContext } from '../sale/cart';
 import {
   amountText,
   dueIn,
@@ -76,6 +80,8 @@ export interface PaymentPanelProps {
   salespersonId?: string | null;
   /** A customer the owner marked «زبون جملة» was picked: the cart moves to the wholesale price */
   onWholesaleCustomer?: () => void;
+  /** A customer was picked: the till asks for their contract prices and prices the cart; true when some applied */
+  onContractPrices?: (customerId: string) => Promise<boolean>;
   onBack: () => void;
   onCompleted: (entry: OutboxEntry) => void;
 }
@@ -121,6 +127,7 @@ export function PaymentPanel({
   canCredit = false,
   staff,
   onWholesaleCustomer,
+  onContractPrices,
   salespersonId = null,
   onBack,
   onCompleted,
@@ -131,7 +138,9 @@ export function PaymentPanel({
   const base = ctx.currency;
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
   const [history, setHistory] = useState(false);
-  const [picking, setPicking] = useState(false);
+  // A device with a warranty is sold to a known customer (the store's setting): the picker opens first
+  const needsCustomer = warrantyAsksCustomer(settings.till, settings.sectors) && hasWarrantyDevice(cart);
+  const [picking, setPicking] = useState(needsCustomer);
   // This till's own documents, for the vouchers it issued or spent that the server has not sent back
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
   useEffect(() => {
@@ -141,6 +150,21 @@ export function PaymentPanel({
       alive = false;
     };
   }, [pos.store]);
+  // What the picked customer owes now, as the server says (online only); null while unknown
+  const [owed, setOwed] = useState<number | null>(null);
+  const customerId = customer?.id ?? null;
+  useEffect(() => {
+    setOwed(null);
+    const token = pos.device.token;
+    if (!customerId || !token || !pos.online()) return;
+    let alive = true;
+    void fetchPurchases(customerId, token, pos.fetch).then(
+      (got) => alive && setOwed(got?.balanceMinor ?? null),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [customerId, pos]);
   const vouchers = useMemo(() => tillVouchers(catalog.vouchers, entries ?? []), [catalog.vouchers, entries]);
   const hasVouchers = Boolean(cart.voucher) || [...vouchers.values()].some((v) => v.balanceMinor > 0);
   // «نقاط الولاء» (03 › الألبسة): what the picked customer's points are worth, as last pulled
@@ -157,12 +181,22 @@ export function PaymentPanel({
       list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
       list.push({ key: 'cheque', method: 'cheque', currency: base, label: 'شيك', rate: null });
     } else if (customer && staff) {
-      // Without the permission the sale on account still goes, once a manager allows it
+      // Without the permission the sale on account goes within the customer's limit, or once a manager
+      // allows it; a cheque goes once a manager allows it
+      const limit = customer.creditLimitMinor;
+      const within = limit !== null && owed !== null && owed < limit;
       list.push({
         key: 'credit',
         method: 'credit',
         currency: base,
-        label: 'على الحساب (بموافقة المدير)',
+        label: within ? 'آجل على الحساب' : 'على الحساب (بموافقة المدير)',
+        rate: null,
+      });
+      list.push({
+        key: 'cheque',
+        method: 'cheque',
+        currency: base,
+        label: 'شيك (بموافقة المدير)',
         rate: null,
       });
     }
@@ -178,14 +212,23 @@ export function PaymentPanel({
     hasVouchers,
     loyalty,
     points,
+    owed,
   ]);
   // An exchange opens on the voucher of the return just saved
   const [option, setOption] = useState<PayOption>(cart.voucher ? VOUCHER_OPTION(base) : options[0]!);
-  const [approving, setApproving] = useState(false);
+  // Who is asked for a manager's code now: a sale on account or by cheque, or one under cost
+  const [approving, setApproving] = useState<'credit' | 'cost' | null>(null);
+  const [creditGrant, setCreditGrant] = useState<Approval | null>(null);
+  const [costGrant, setCostGrant] = useState<Approval | null>(null);
   const [split, setSplit] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
   const [text, setText] = useState('');
   const [reference, setReference] = useState(cart.voucher ?? '');
+  // A cheque's details: bank, number, due day, and whose it is when not the customer's
+  const [chequeBank, setChequeBank] = useState('');
+  const [chequeNo, setChequeNo] = useState('');
+  const [chequeDue, setChequeDue] = useState('');
+  const [chequeDrawer, setChequeDrawer] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const referenceRef = useRef<HTMLInputElement>(null);
@@ -232,7 +275,30 @@ export function PaymentPanel({
         : nonCash
           ? remainingBase
           : null);
-  const current = amount && amount > 0 ? tenderOf(option, amount, voucher ? voucher.code : reference) : null;
+  const chequeDetails =
+    option.method === 'cheque' && chequeBank.trim() && chequeNo.trim() && chequeDue
+      ? {
+          bank: chequeBank.trim(),
+          number: chequeNo.trim(),
+          dueDate: chequeDue,
+          drawer: chequeDrawer.trim() || null,
+        }
+      : null;
+  const current =
+    amount && amount > 0
+      ? tenderOf(
+          option,
+          amount,
+          option.method === 'cheque'
+            ? chequeDetails
+              ? chequeReference(chequeDetails)
+              : ''
+            : voucher
+              ? voucher.code
+              : reference,
+          chequeDetails,
+        )
+      : null;
   const pointsProblem =
     option.method === 'points' && (amount ?? 0) > pointsLeft ? 'المبلغ أكبر مما تساويه نقاط الزبون.' : null;
   const voucherProblem =
@@ -248,6 +314,22 @@ export function PaymentPanel({
             : null);
   const tenders = [...parts.map((p) => p.tender), ...(current ? [current] : [])];
   const settlement = settleWith(tenders);
+  // A sale on account against the customer's limit: what it takes them over by, before any code is asked
+  const creditAmount = tenders
+    .filter((t) => t.method === 'credit')
+    .reduce((sum, t) => sum + t.amountMinor, 0);
+  const creditLimit = customer?.creditLimitMinor ?? null;
+  const overBy =
+    creditLimit !== null && owed !== null && creditAmount > 0
+      ? Math.max(0, owed + creditAmount - creditLimit)
+      : 0;
+  const withinLimit = creditLimit !== null && owed !== null && overBy === 0;
+  const overPolicy = settings.till?.creditOverLimit ?? 'approve';
+  const blockedOver = overBy > 0 && overPolicy === 'block';
+  // Under cost: the lines the till knows the average cost of and prices under it
+  const belowCost = cart.lines.filter(
+    (l) => typeof l.costMinor === 'number' && l.priceMinor < lineGross(l.costMinor, l.packQty),
+  );
   // A card's approval number is asked for only when the store's settings say so
   const cardApproval = settings.till?.cardApprovalRequired ?? false;
   const needsReference =
@@ -264,6 +346,8 @@ export function PaymentPanel({
     settlement.covered &&
     !needsReference &&
     !voucherProblem &&
+    !blockedOver &&
+    !(needsCustomer && !customer) &&
     tenders.length > 0;
 
   const dueHere = dueIn(option.currency, base, remainingBase, ctx.rates);
@@ -284,10 +368,18 @@ export function PaymentPanel({
     setReference('');
   }, [cart.voucher, entries, vouchers, totalMinor, base, options]);
 
+  function clearCheque() {
+    setChequeBank('');
+    setChequeNo('');
+    setChequeDue('');
+    setChequeDrawer('');
+  }
+
   function pick(next: PayOption) {
     setOption(next);
     setText('');
     setReference('');
+    clearCheque();
     setError(null);
     if (next.method !== 'cash') setTimeout(() => referenceRef.current?.focus(), 0);
   }
@@ -297,18 +389,37 @@ export function PaymentPanel({
     setParts((list) => [...list, { option, tender: current }]);
     setText('');
     setReference('');
+    clearCheque();
   }
 
-  async function complete(approved: Approval | null = null) {
+  async function complete(grant: { credit?: Approval; cost?: Approval } = {}) {
     if (!canComplete) {
       if ('error' in settlement) setError(settlement.error);
+      else if (blockedOver) setError('هذا الزبون يتجاوز حد الدين، ولا يُباع له بالآجل فوق الحد.');
       else if (voucherProblem) setError(voucherProblem);
-      else if (needsReference) setError(`اكتب ${REFERENCE_LABEL[option.method]}.`);
+      else if (needsReference) {
+        setError(
+          option.method === 'cheque'
+            ? 'اكتب البنك ورقم الشيك وتاريخ استحقاقه.'
+            : `اكتب ${REFERENCE_LABEL[option.method]}.`,
+        );
+      }
       return;
     }
-    // A cashier without «البيع بالآجل» needs a manager's code before a sale goes on account
-    if (!canCredit && !approved && tenders.some((t) => t.method === 'credit')) {
-      setApproving(true);
+    // A cashier without «البيع بالآجل» needs a manager's code for a cheque, and for a sale on account
+    // unless it stays within the customer's limit; over the limit a code is asked of everyone who
+    // cannot sell on account themselves
+    const approved = grant.credit ?? creditGrant;
+    const onCredit = tenders.some((t) => t.method === 'credit');
+    const onCheque = tenders.some((t) => t.method === 'cheque');
+    if (!canCredit && !approved && ((onCredit && !withinLimit) || onCheque)) {
+      setApproving('credit');
+      return;
+    }
+    // A line under its cost: a manager's code when the store's settings ask for it
+    const costApproved = grant.cost ?? costGrant;
+    if (belowCost.length > 0 && settings.till?.belowCostApproval && !costApproved) {
+      setApproving('cost');
       return;
     }
     setSaving(true);
@@ -338,7 +449,12 @@ export function PaymentPanel({
         prescription:
           cart.prescription && Object.values(cart.prescription).some(Boolean) ? cart.prescription : null,
       });
-      const payload = approved ? { ...built, creditApproval: approved } : built;
+      const extra = {
+        ...(approved && (onCredit || onCheque) ? { creditApproval: approved } : {}),
+        // The balance the receipt prints under a sale on account
+        ...(onCredit && owed !== null ? { customerBalanceAfterMinor: owed + creditAmount } : {}),
+      };
+      const payload = { ...built, ...extra };
       const entry = await pos.save({
         type: 'sale',
         payload: payload as unknown as Record<string, unknown>,
@@ -358,8 +474,8 @@ export function PaymentPanel({
   const pickingRef = useRef(picking);
   pickingRef.current = picking;
   // While the manager types their code, the keys are theirs
-  const approvingRef = useRef(approving);
-  approvingRef.current = approving;
+  const approvingRef = useRef(approving !== null);
+  approvingRef.current = approving !== null;
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.altKey || event.ctrlKey || event.metaKey || pickingRef.current || approvingRef.current)
@@ -396,7 +512,7 @@ export function PaymentPanel({
   return (
     <section
       aria-label="الدفع"
-      className="@container/pay flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e2 motion-safe:animate-sheet-in"
+      className="@container/pay relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e2 motion-safe:animate-sheet-in"
     >
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-5 py-2">
         <Button
@@ -475,6 +591,9 @@ export function PaymentPanel({
                 );
               })}
             </div>
+            {needsCustomer && !customer ? (
+              <Alert tone="warning">جهاز بكفالة: اطلب اسم الزبون وجواله، فالكفالة تُسجَّل باسمه.</Alert>
+            ) : null}
             {picking ? (
               <CustomerPicker
                 catalog={catalog}
@@ -486,6 +605,7 @@ export function PaymentPanel({
                     setParts([]);
                     onWholesaleCustomer?.();
                   }
+                  void onContractPrices?.(picked.id).then((applied) => applied && setParts([]));
                 }}
                 onCancel={() => setPicking(false)}
               />
@@ -618,6 +738,12 @@ export function PaymentPanel({
                     </>
                   ) : null}
                   . يظهر في كشف حسابه.
+                  {overBy > 0 ? (
+                    <strong className="block font-semibold text-danger-ink">
+                      يتجاوز حد الزبون بـ <Money minor={overBy} currency={base} />
+                      {blockedOver ? '. لا يُباع له بالآجل فوق الحد.' : canCredit ? '.' : '. يلزم رمز مدير.'}
+                    </strong>
+                  ) : null}
                 </span>
               </p>
             ) : option.method === 'points' ? (
@@ -632,6 +758,38 @@ export function PaymentPanel({
                   <span className="block font-semibold text-danger-ink">{pointsProblem}</span>
                 ) : null}
               </p>
+            ) : option.method === 'cheque' ? (
+              <div className="flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <TextField
+                    ref={referenceRef}
+                    label="البنك"
+                    value={chequeBank}
+                    onChange={(event) => setChequeBank(event.target.value.slice(0, 60))}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="رقم الشيك"
+                    value={chequeNo}
+                    onChange={(event) => setChequeNo(event.target.value.slice(0, 40))}
+                    dir="ltr"
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <DateField label="تاريخ الاستحقاق" value={chequeDue} onChange={setChequeDue} />
+                  <TextField
+                    label="اسم الساحب (اختياري)"
+                    value={chequeDrawer}
+                    onChange={(event) => setChequeDrawer(event.target.value.slice(0, 80))}
+                    autoComplete="off"
+                  />
+                </div>
+                {!canCredit ? (
+                  <p className="text-sm text-ink-muted">قبول الشيك يحتاج رمز مدير عند الإتمام.</p>
+                ) : null}
+              </div>
             ) : option.method !== 'cash' ? (
               <>
                 <TextField
@@ -698,6 +856,19 @@ export function PaymentPanel({
                 ))}
               </div>
             )}
+            {belowCost.length > 0 ? (
+              <p
+                role="status"
+                aria-label="بيع بأقل من التكلفة"
+                className="flex items-start gap-2 rounded-card border border-warning/20 bg-warning-soft px-3 py-2.5 text-sm text-warning-ink"
+              >
+                <AlertCircleIcon size={20} className="shrink-0" />
+                <span>
+                  تنبيه: {belowCost.map((l) => l.name).join('، ')} بأقل من متوسط تكلفته.
+                  {settings.till?.belowCostApproval ? ' يلزم رمز مدير عند الإتمام.' : ''}
+                </span>
+              </p>
+            ) : null}
             <Keypad
               onDigit={(d) => setText((t) => (t === '0' ? d : (t + d).slice(0, 12)))}
               onBackspace={() => setText((t) => t.slice(0, -1))}
@@ -755,29 +926,42 @@ export function PaymentPanel({
           </Button>
         ) : null}
         {approving && staff ? (
-          <ManagerCode
-            staff={staff}
-            permission="sale.credit"
-            reason="البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه."
-            onApproved={(approval) => {
-              setApproving(false);
-              void complete(approval);
-            }}
-            onCancel={() => setApproving(false)}
-          />
-        ) : (
-          <Button
-            size="lg"
-            icon={option.method === 'cash' ? <CashIcon size={20} /> : <CheckIcon size={20} />}
-            aria-keyshortcuts="Enter"
-            onClick={() => void complete()}
-            disabled={!canComplete}
-            loading={saving}
-          >
-            أتمّ الدفع
-            <Kbd tone="brand">Enter</Kbd>
-          </Button>
-        )}
+          // A layer over the panel, scrolling by itself: in the footer the keypad overran a short screen
+          <div className="absolute inset-0 z-20 flex items-start justify-center overflow-y-auto bg-surface/95 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md">
+              <ManagerCode
+                staff={staff}
+                permission={approving === 'cost' ? 'sale.discount_over_limit' : 'sale.credit'}
+                reason={
+                  approving === 'cost'
+                    ? 'البيع بأقل من التكلفة يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                    : tenders.some((t) => t.method === 'cheque')
+                      ? 'قبول الشيك يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                      : 'البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                }
+                onApproved={(approval) => {
+                  const kind = approving;
+                  setApproving(null);
+                  if (kind === 'cost') setCostGrant(approval);
+                  else setCreditGrant(approval);
+                  void complete(kind === 'cost' ? { cost: approval } : { credit: approval });
+                }}
+                onCancel={() => setApproving(null)}
+              />
+            </div>
+          </div>
+        ) : null}
+        <Button
+          size="lg"
+          icon={option.method === 'cash' ? <CashIcon size={20} /> : <CheckIcon size={20} />}
+          aria-keyshortcuts="Enter"
+          onClick={() => void complete()}
+          disabled={!canComplete}
+          loading={saving}
+        >
+          أتمّ الدفع
+          <Kbd tone="brand">Enter</Kbd>
+        </Button>
       </footer>
     </section>
   );

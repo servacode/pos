@@ -54,6 +54,8 @@ import {
   today,
 } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead } from './parts';
+import { PackQty } from './PackQty';
+import { baseQtyOf, packSummary, withPackChange } from './packLines';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRules';
 import { downloadCsv } from '../exportCsv';
@@ -75,7 +77,11 @@ const PAYMENT_LOOK: Record<PurchasePayment, { hint: string; icon: Icon; tone: Ba
 };
 
 interface Line extends PickedVariant {
+  /** Pieces, or packs of `packQty` pieces (thousandths) when the item has packs */
   qty: string;
+  packQty: number;
+  /** What one pack (or piece) cost, as typed; the total follows it */
+  unitCost?: string;
   cost: string;
   /** «رقم الدفعة» and «تاريخ الانتهاء» (03 › الصيدليات), both optional */
   batch?: string;
@@ -550,7 +556,7 @@ function SupplierForm({
 }
 
 /** The grid of a purchase line: the item, its quantity, its cost and the bin. */
-const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_7rem_11rem_2.5rem]';
+const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_14rem_8rem_9rem_2.5rem]';
 
 function PurchaseForm({
   suppliers,
@@ -572,8 +578,11 @@ function PurchaseForm({
   // a clothing shop sees no expiry dates or IMEI).
   const [allFields, setAllFields] = useState(false);
   const s = useSaving();
-  const parsed = lines.map((l) => ({ qty: qtyOf(l.qty), cost: moneyOf(l.cost) }));
-  const ready = lines.length > 0 && parsed.every((p) => p.qty && p.qty > 0 && p.cost !== null);
+  const parsed = lines.map((l) => ({ qty: baseQtyOf(l), cost: moneyOf(l.cost) }));
+  const ready =
+    lines.length > 0 &&
+    parsed.every((p) => p.qty && p.qty > 0 && p.cost !== null) &&
+    lines.every((l) => !l.requiresExpiry || Boolean(l.expiry));
   const total = parsed.reduce((sum, p) => sum + (p.cost ?? 0), 0);
 
   const withDates = storeSells(me.tenant.sectors, EXPIRY_SECTORS);
@@ -680,15 +689,17 @@ function PurchaseForm({
             <VariantPicker
               onPick={(v) =>
                 setLines((list) =>
-                  list.some((l) => l.variantId === v.variantId)
+                  // The same item twice is allowed where batches are kept: each on its own line, with its batch
+                  list.some((l) => l.variantId === v.variantId) &&
+                  !(withDates || allFields || v.requiresExpiry)
                     ? list
-                    : [...list, { ...v, qty: '', cost: '', batch: '', expiry: '' }],
+                    : [...list, { ...v, qty: '', packQty: 1000, cost: '', batch: '', expiry: '' }],
                 )
               }
               onPickGrid={(picked) =>
                 setLines((list) => [
                   ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
-                  ...picked.map((p) => ({ ...p, batch: '', expiry: '' })),
+                  ...picked.map((p) => ({ ...p, packQty: 1000, batch: '', expiry: '' })),
                 ])
               }
             />
@@ -707,6 +718,7 @@ function PurchaseForm({
                   <LinesHead className={LINE_COLUMNS}>
                     <span>الصنف</span>
                     <span>الكمية</span>
+                    <span>كلفة الوحدة</span>
                     <span>مجموع الكلفة</span>
                     <span />
                   </LinesHead>
@@ -714,44 +726,66 @@ function PurchaseForm({
               >
                 {lines.map((l, i) => {
                   const p = parsed[i]!;
+                  const pack = l.packs?.find((x) => x.qty === l.packQty) ?? null;
                   const unit =
                     p.qty && p.qty > 0 && p.cost !== null ? Math.round(p.cost / (p.qty / 1000)) : null;
                   const showDates =
                     withDates ||
                     allFields ||
+                    l.requiresExpiry === true ||
                     Boolean(l.batch || l.expiry || s.fields[`lines.${i}.expiryDate`]);
                   const showSerials =
                     withSerials || allFields || Boolean(l.serials || s.fields[`lines.${i}.serials`]);
                   return (
-                    <li key={l.variantId} className="flex flex-col gap-3 px-4 py-3">
+                    <li key={`${l.variantId}-${i}`} className="flex flex-col gap-3 px-4 py-3">
                       <div
                         className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 md:items-center ${LINE_COLUMNS}`}
                       >
                         <div className="col-span-2 flex min-w-0 flex-col md:col-span-1">
                           <span className="truncate font-semibold text-ink">{l.name}</span>
+                          {pack && p.qty ? (
+                            <span className="text-xs text-ink-subtle">
+                              {packSummary(qtyOf(l.qty) ?? 0, pack, (q) => formatQuantity(q, digits))}
+                            </span>
+                          ) : null}
                           {unit !== null ? (
                             <span className="text-xs text-ink-subtle">
-                              كلفة الوحدة <Money minor={unit} currency="SYP" />
+                              كلفة القطعة <Money minor={unit} currency="SYP" />
                             </span>
                           ) : null}
                         </div>
-                        <div className="col-start-1 row-start-2 md:col-start-auto md:row-start-auto">
+                        <div className="col-span-3 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
                           <Caption>الكمية</Caption>
-                          <TextField
-                            label={`كمية ${l.name}`}
-                            hideLabel
-                            inputMode="decimal"
-                            dir="ltr"
-                            value={l.qty}
-                            onChange={(e) =>
-                              setLines((all) =>
-                                all.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)),
-                              )
+                          <PackQty
+                            name={l.name}
+                            packs={l.packs}
+                            qty={l.qty}
+                            packQty={l.packQty}
+                            onChange={(patch) =>
+                              setLines((all) => all.map((x, j) => (j === i ? withPackChange(x, patch) : x)))
                             }
                             error={s.fields[`lines.${i}.qty`]}
                           />
                         </div>
-                        <div className="col-span-2 col-start-2 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
+                        <div className="col-start-1 row-start-3 md:col-start-auto md:row-start-auto">
+                          <Caption>{pack ? `كلفة ${pack.name}` : 'كلفة الوحدة'}</Caption>
+                          <TextField
+                            label={`كلفة وحدة ${l.name}`}
+                            hideLabel
+                            inputMode="decimal"
+                            dir="ltr"
+                            value={l.unitCost ?? ''}
+                            onChange={(e) =>
+                              setLines((all) =>
+                                all.map((x, j) =>
+                                  j === i ? withPackChange(x, { unitCost: e.target.value }) : x,
+                                ),
+                              )
+                            }
+                            inputClassName="num"
+                          />
+                        </div>
+                        <div className="col-span-2 col-start-2 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
                           <Caption>مجموع الكلفة</Caption>
                           <TextField
                             label={`كلفة ${l.name}`}
@@ -761,7 +795,9 @@ function PurchaseForm({
                             value={l.cost}
                             onChange={(e) =>
                               setLines((all) =>
-                                all.map((x, j) => (j === i ? { ...x, cost: e.target.value } : x)),
+                                all.map((x, j) =>
+                                  j === i ? withPackChange(x, { cost: e.target.value }) : x,
+                                ),
                               )
                             }
                             error={s.fields[`lines.${i}.costMinor`]}
@@ -794,7 +830,9 @@ function PurchaseForm({
                               </div>
                               <div>
                                 <DateField
-                                  label="تاريخ الانتهاء (اختياري)"
+                                  label={
+                                    l.requiresExpiry ? 'تاريخ الانتهاء (مطلوب)' : 'تاريخ الانتهاء (اختياري)'
+                                  }
                                   value={l.expiry ?? ''}
                                   onChange={(iso) =>
                                     setLines((all) =>
@@ -803,6 +841,11 @@ function PurchaseForm({
                                   }
                                   error={s.fields[`lines.${i}.expiryDate`]}
                                 />
+                                {l.expiry && l.expiry < today() ? (
+                                  <p role="status" className="mt-1 text-xs font-semibold text-warning-ink">
+                                    هذا التاريخ مضى: الدفعة منتهية الصلاحية. تأكد منه قبل الحفظ.
+                                  </p>
+                                ) : null}
                               </div>
                             </>
                           ) : null}
@@ -911,8 +954,12 @@ function PaymentForm({
   const owing = suppliers.filter((x) => x.balanceMinor > 0);
   const [supplierId, setSupplierId] = useState((owing[0] ?? suppliers[0])?.id ?? '');
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<'cash' | 'bank'>('cash');
+  const [method, setMethod] = useState<'cash' | 'bank' | 'cheque'>('cash');
   const [date, setDate] = useState(today());
+  const [bank, setBank] = useState('');
+  const [chequeNo, setChequeNo] = useState('');
+  const [dueDate, setDueDate] = useState(today());
+  const chequeReady = method !== 'cheque' || (bank.trim() !== '' && chequeNo.trim() !== '' && dueDate !== '');
   const [advance, setAdvance] = useState(false);
   const s = useSaving();
   const minor = moneyOf(amount);
@@ -933,14 +980,17 @@ function PaymentForm({
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!minor || (over && !advance)) return;
+          if (!minor || (over && !advance) || !chequeReady) return;
           void s
             .run(() =>
               paySupplier({
                 supplierId,
                 date,
                 amountMinor: minor,
-                method,
+                method: method === 'cheque' ? 'bank' : method,
+                ...(method === 'cheque'
+                  ? { cheque: { bank: bank.trim(), number: chequeNo.trim(), dueDate } }
+                  : {}),
                 note: null,
                 ...(over ? { advance: true } : {}),
               }),
@@ -990,25 +1040,40 @@ function PaymentForm({
           </Alert>
         ) : null}
         <RadioGroup legend="من أين">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {(['cash', 'bank'] as const).map((m) => (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {(['cash', 'bank', 'cheque'] as const).map((m) => (
               <ChoiceCard
                 key={m}
                 name="supplier-payment-method"
                 value={m}
                 checked={method === m}
                 onChange={() => setMethod(m)}
-                title={m === 'cash' ? 'من الخزنة' : 'من البنك'}
+                title={m === 'cash' ? 'من الخزنة' : m === 'bank' ? 'من البنك' : 'بشيك'}
                 leading={m === 'cash' ? <CashIcon /> : <ChequeIcon />}
               />
             ))}
           </div>
         </RadioGroup>
+        {method === 'cheque' ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <TextField label="البنك" value={bank} onChange={(e) => setBank(e.target.value)} required />
+            <TextField
+              label="رقم الشيك"
+              dir="ltr"
+              inputMode="numeric"
+              value={chequeNo}
+              onChange={(e) => setChequeNo(e.target.value)}
+              inputClassName="num"
+              required
+            />
+            <DateField label="تاريخ الاستحقاق" value={dueDate} onChange={setDueDate} required />
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onCancel}>
             إلغاء
           </Button>
-          <Button type="submit" loading={s.saving} disabled={!minor || (over && !advance)}>
+          <Button type="submit" loading={s.saving} disabled={!minor || (over && !advance) || !chequeReady}>
             سجّل الدفعة
           </Button>
         </div>

@@ -34,6 +34,8 @@ export interface BarcodeDraft {
   packName: string;
   /** The pack's own price; null = pieces × the unit price. */
   packPriceMinor: number | null;
+  /** The pack's own wholesale price; null = the piece wholesale price × pieces. */
+  packWholesaleMinor: number | null;
 }
 
 export interface VariantDraft {
@@ -72,8 +74,12 @@ export interface ProductDraft {
   /** «يحتاج وصفة» and «مراقَب» (pharmacies) */
   requiresPrescription?: boolean;
   controlled?: boolean;
+  /** «يتطلب صلاحية»: a purchase line of it must carry an expiry date */
+  requiresExpiry?: boolean;
   /** «له رقم تسلسلي أو IMEI» and «الكفالة» in months as typed ("" = none) */
   tracksSerial?: boolean;
+  /** «قابل للتأجير»: its serial-tracked pieces can be rented out */
+  rentable?: boolean;
   warranty?: string;
   /** "" = بلا تصنيف */
   categoryId: string;
@@ -117,7 +123,15 @@ export function qtyFromText(text: string): number | null {
 }
 
 export function newBarcode(kind: BarcodeKind, code = ''): BarcodeDraft {
-  return { key: newKey('b'), kind, code, packCount: '1', packName: '', packPriceMinor: null };
+  return {
+    key: newKey('b'),
+    kind,
+    code,
+    packCount: '1',
+    packName: '',
+    packPriceMinor: null,
+    packWholesaleMinor: null,
+  };
 }
 
 export function emptyDraft(options: {
@@ -173,6 +187,7 @@ function variantDraft(variant: VariantDetail): VariantDraft {
       packCount: qtyText(b.packQty),
       packName: b.packName ?? '',
       packPriceMinor: b.packPriceMinor,
+      packWholesaleMinor: b.packWholesaleMinor ?? null,
     })),
     archived: variant.archivedAt !== null,
   };
@@ -200,7 +215,9 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     genericName: detail.genericName ?? '',
     requiresPrescription: detail.requiresPrescription ?? false,
     controlled: detail.controlled ?? false,
+    requiresExpiry: detail.requiresExpiry ?? false,
     tracksSerial: detail.tracksSerial ?? false,
+    rentable: detail.rentable ?? false,
     warranty: detail.warrantyMonths ? String(detail.warrantyMonths) : '',
     categoryId: detail.categoryId ?? '',
     type: detail.type,
@@ -313,6 +330,7 @@ function barcodeInput(barcode: BarcodeDraft): BarcodeInput {
     packQty: qtyFromText(barcode.packCount) ?? 1000,
     packName: textOrNull(barcode.packName),
     packPriceMinor: barcode.packPriceMinor,
+    packWholesaleMinor: barcode.packWholesaleMinor,
   };
   const id = barcode.id ? { id: barcode.id } : {};
   if (barcode.kind === 'internal') {
@@ -362,7 +380,9 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       ...(textOrNull(draft.genericName ?? '') ? { genericName: textOrNull(draft.genericName ?? '') } : {}),
       ...(draft.requiresPrescription ? { requiresPrescription: true } : {}),
       ...(draft.controlled ? { controlled: true } : {}),
+      ...(draft.requiresExpiry ? { requiresExpiry: true } : {}),
       ...(draft.tracksSerial ? { tracksSerial: true } : {}),
+      ...(draft.rentable ? { rentable: true } : {}),
       ...(warrantyOf(draft.warranty) !== null ? { warrantyMonths: warrantyOf(draft.warranty) } : {}),
       categoryId: draft.categoryId || null,
       type: draft.type,
@@ -389,6 +409,7 @@ function barcodesOfDetail(variant: VariantDetail) {
       packCount: qtyText(b.packQty),
       packName: b.packName ?? '',
       packPriceMinor: b.packPriceMinor,
+      packWholesaleMinor: b.packWholesaleMinor ?? null,
     }),
   );
 }
@@ -436,8 +457,14 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   if ((draft.controlled ?? false) !== (original.controlled ?? false)) {
     body.controlled = draft.controlled ?? false;
   }
+  if ((draft.requiresExpiry ?? false) !== (original.requiresExpiry ?? false)) {
+    body.requiresExpiry = draft.requiresExpiry ?? false;
+  }
   if ((draft.tracksSerial ?? false) !== (original.tracksSerial ?? false)) {
     body.tracksSerial = draft.tracksSerial ?? false;
+  }
+  if ((draft.rentable ?? false) !== (original.rentable ?? false)) {
+    body.rentable = draft.rentable ?? false;
   }
   if (warrantyOf(draft.warranty) !== (original.warrantyMonths ?? null)) {
     body.warrantyMonths = warrantyOf(draft.warranty);

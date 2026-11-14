@@ -37,6 +37,7 @@ export function PharmacyForm({
   const [controlled, setControlled] = useState(current?.controlledReturns === true);
   // On for a pharmacy until it is turned off; off for any other store until it is turned on
   const [autoBatch, setAutoBatch] = useState(current?.autoBatch ?? store.sectors.includes('pharmacy'));
+  const [blockNoBatch, setBlockNoBatch] = useState(current?.blockNoBatch === true);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -52,6 +53,7 @@ export function PharmacyForm({
           returns,
           controlledReturns: controlled,
           autoBatch,
+          ...(blockNoBatch || current?.blockNoBatch !== undefined ? { blockNoBatch } : {}),
         }),
       );
       setSaved(true);
@@ -64,7 +66,7 @@ export function PharmacyForm({
 
   return (
     <SettingsCard
-      section={medicinal ? SETTINGS_SECTIONS.pharmacy : SETTINGS_SECTIONS.batches}
+      section={pharmacy ? SETTINGS_SECTIONS.pharmacy : SETTINGS_SECTIONS.batches}
       onSubmit={(e) => {
         e.preventDefault();
         void save();
@@ -116,6 +118,12 @@ export function PharmacyForm({
           description="يبيع الكاشير من الدفعة الأقرب انتهاءً ويسجّل رقمها على الفاتورة، ويرفض صنفاً انتهت كل دفعاته."
           checked={autoBatch}
           onCheckedChange={setAutoBatch}
+        />
+        <Switch
+          label="امنع البيع بلا دفعة صالحة"
+          description="مطفأ: إن لم تكفِ الدفعات الصالحة (منتهية أو موقوفة أو نفدت) طلب الكاشير رمز المدير. مشعل: لا يُباع."
+          checked={blockNoBatch}
+          onCheckedChange={setBlockNoBatch}
         />
       </div>
     </SettingsCard>

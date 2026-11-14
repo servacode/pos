@@ -39,6 +39,8 @@ import { promotionRoutes } from './routes/promotions';
 import { chequeRoutes } from './routes/cheques';
 import { serialRoutes } from './routes/serials';
 import { warrantyRoutes } from './routes/warranty';
+import { contractRoutes } from './routes/contracts';
+import { quotationRoutes } from './routes/quotations';
 import { recipeRoutes } from './routes/recipes';
 import { staffRoutes } from './routes/staff';
 import { staffAdminRoutes } from './routes/staff-admin';
@@ -164,6 +166,8 @@ export async function buildApp({
   await app.register(chequeRoutes);
   await app.register(serialRoutes);
   await app.register(warrantyRoutes);
+  await app.register(contractRoutes);
+  await app.register(quotationRoutes);
   await app.register(recipeRoutes);
   return app;
 }

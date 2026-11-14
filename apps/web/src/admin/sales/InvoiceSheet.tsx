@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { SaleDetail, SaleStatus } from '@serva/core';
 import type { BranchRow, SettingsRow } from '@serva/core/contracts/catalog';
@@ -12,17 +12,25 @@ import {
   RetryIcon,
   Sheet,
   SkeletonText,
-  formatQuantity,
   useDigits,
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
-import { dayText, zonedClock } from '../../lib/dates';
+import { dayText } from '../../lib/dates';
+import { DeliveryNoteA4, InvoiceA4, type A4SaleData } from '../../lib/a4/documents';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { Receipt, type ReceiptData } from '../../pos/receipt/Receipt';
 import { useReport } from '../reports/useReport';
+import { WarrantyDevices } from '../warranty/WarrantyDevices';
 import { getSale } from './api';
 import { METHOD_TEXT, SALE_STATUS_TEXT } from './labels';
+
+/** What the serial flags of a sale mean to the owner (03 › الإلكترونيات) */
+const SERIAL_FLAG_TEXT: Record<string, string> = {
+  unknown_serial: 'رقم تسلسلي لم يُستلم',
+  serial_sold_twice: 'رقم تسلسلي مباع من قبل',
+  serial_other_product: 'رقم تسلسلي لصنف آخر',
+};
 
 export function StatusBadge({ status }: { status: SaleStatus }) {
   return (
@@ -33,7 +41,11 @@ export function StatusBadge({ status }: { status: SaleStatus }) {
 }
 
 /** What the till's receipt component reads, from what the server kept of this sale. */
-export function receiptDataOf(sale: SaleDetail, timezone: string): ReceiptData {
+export function receiptDataOf(
+  sale: SaleDetail,
+  timezone: string,
+  sectors?: SettingsRow['sectors'],
+): ReceiptData {
   const r = sale.receipt;
   return {
     kind: 'sale',
@@ -44,6 +56,7 @@ export function receiptDataOf(sale: SaleDetail, timezone: string): ReceiptData {
       taxNumber: r.taxNumber,
       receiptFooter: r.receiptFooter,
       timezone,
+      sectors,
     } as SettingsRow,
     branch: { name: r.branchName, address: r.branchAddress, phone: r.branchPhone } as BranchRow,
     storeName: r.storeName,
@@ -62,127 +75,34 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** The A4 print: the same invoice as a full page, marked «نسخة». */
-function InvoiceA4({ sale, data }: { sale: SaleDetail; data: ReceiptData }) {
-  const me = useMe();
-  const digits = useDigits();
-  const p = sale.payload;
-  const base = p.currency;
-  const at = zonedClock(sale.deviceTime, me.tenant.timezone, digits);
-  return (
-    <div dir="rtl" lang="ar" aria-label="فاتورة A4" className="flex flex-col gap-4 p-2 text-sm text-ink">
-      <div className="flex items-start justify-between border-b border-ink pb-2">
-        <div>
-          <p className="text-lg font-bold">{data.settings.storeName || data.storeName}</p>
-          <p>
-            {data.branchName}
-            {data.branch?.address ? ` · ${data.branch.address}` : ''}
-          </p>
-          {data.branch?.phone ? (
-            <p>
-              هاتف <bdi className="num">{data.branch.phone}</bdi>
-            </p>
-          ) : null}
-          {data.settings.taxNumber ? (
-            <p>
-              الرقم الضريبي <bdi className="num">{data.settings.taxNumber}</bdi>
-            </p>
-          ) : null}
-        </div>
-        <div className="text-end">
-          <p className="text-xl font-bold">فاتورة مبيعات</p>
-          <p className="inline-block border-2 border-ink px-3 font-bold">نسخة</p>
-          <p>
-            <bdi dir="ltr" className="num font-bold">
-              {sale.number}
-            </bdi>
-          </p>
-          <p>
-            {dayText(sale.businessDate, digits)} ، {at}
-          </p>
-        </div>
-      </div>
-      <p>
-        الكاشير: {sale.cashier.fullName ?? '—'} · {sale.device.name}
-        {sale.customer ? ` · الزبون: ${sale.customer.name}` : ''}
-      </p>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="border-b border-ink">
-            <th className="py-1 text-start">الصنف</th>
-            <th className="py-1 text-end">الكمية</th>
-            <th className="py-1 text-end">السعر</th>
-            <th className="py-1 text-end">الخصم</th>
-            <th className="py-1 text-end">المجموع</th>
-          </tr>
-        </thead>
-        <tbody>
-          {p.lines.map((line) => (
-            <tr key={line.lineNo} className="border-b border-line">
-              <td className="py-1">{line.name}</td>
-              <td className="num py-1 text-end">
-                {formatQuantity(line.qty, digits)}
-                {line.unitName ? ` ${line.unitName}` : ''}
-              </td>
-              <td className="py-1 text-end">
-                <Money minor={line.unitPriceMinor} currency={base} symbol={false} />
-              </td>
-              <td className="py-1 text-end">
-                <Money minor={line.priced.lineDiscountMinor} currency={base} symbol={false} />
-              </td>
-              <td className="py-1 text-end">
-                <Money minor={line.priced.totalMinor} currency={base} symbol={false} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <dl className="ms-auto flex w-72 flex-col gap-1">
-        {p.totals.invoiceDiscountMinor > 0 ? (
-          <div className="flex justify-between">
-            <dt>خصم الفاتورة</dt>
-            <dd>
-              <Money minor={p.totals.invoiceDiscountMinor} currency={base} />
-            </dd>
-          </div>
-        ) : null}
-        {p.totals.taxMinor > 0 ? (
-          <div className="flex justify-between">
-            <dt>{p.taxInclusive ? 'منها ضريبة' : 'الضريبة'}</dt>
-            <dd>
-              <Money minor={p.totals.taxMinor} currency={base} />
-            </dd>
-          </div>
-        ) : null}
-        <div className="flex justify-between border-t border-ink pt-1 text-base font-bold">
-          <dt>الإجمالي</dt>
-          <dd>
-            <Money minor={p.totals.totalMinor} currency={base} />
-          </dd>
-        </div>
-        {p.payments.map((pay) => (
-          <div key={pay.paymentNo} className="flex justify-between">
-            <dt>{METHOD_TEXT[pay.method]}</dt>
-            <dd>
-              <Money minor={pay.amountMinor} currency={pay.currency} />
-            </dd>
-          </div>
-        ))}
-        {p.change ? (
-          <div className="flex justify-between">
-            <dt>الباقي للزبون</dt>
-            <dd>
-              <Money minor={p.change.amountMinor} currency={p.change.currency} />
-            </dd>
-          </div>
-        ) : null}
-      </dl>
-      {data.settings.receiptFooter ? (
-        <p className="text-center whitespace-pre-line">{data.settings.receiptFooter}</p>
-      ) : null}
-      <p className="text-center text-xs">سيرفا · Serva</p>
-    </div>
-  );
+/** What the A4 documents read, from what the server kept of this sale and its customer. */
+export function a4DataOf(sale: SaleDetail, timezone: string): A4SaleData {
+  const r = sale.receipt;
+  const c = sale.customerDetails;
+  return {
+    store: {
+      name: r.storeName,
+      taxNumber: r.taxNumber,
+      branchName: r.branchName,
+      address: r.branchAddress,
+      phone: r.branchPhone,
+      footer: r.receiptFooter,
+    },
+    number: sale.number,
+    deviceTime: sale.deviceTime,
+    timezone,
+    customer: sale.customer
+      ? {
+          name: sale.customer.name,
+          phone: c?.phone ?? null,
+          taxNumber: c?.taxNumber ?? null,
+          address: c?.address ?? null,
+        }
+      : null,
+    payload: sale.payload,
+    cashierName: sale.cashier.fullName,
+    copy: true,
+  };
 }
 
 type ReturnRow = SaleDetail['returns'][number];
@@ -196,7 +116,13 @@ export function InvoiceSheet({ id, onClose }: { id: string | null; onClose: () =
   const digits = useDigits();
   const { data, error, loading, retry } = useReport(id, () => getSale(id!));
   const { paper, print } = usePrint();
-  const receipt = data ? receiptDataOf(data, me.tenant.timezone) : null;
+  // What the A4 sheet holds: the invoice, or its delivery note with or without prices
+  const [a4, setA4] = useState<'invoice' | 'delivery' | 'delivery-prices'>('invoice');
+  const printA4 = (kind: typeof a4) => {
+    setA4(kind);
+    print('A4');
+  };
+  const receipt = data ? receiptDataOf(data, me.tenant.timezone, me.tenant.sectors) : null;
 
   const returnColumns: DataColumn<ReturnRow>[] = [
     {
@@ -231,8 +157,14 @@ export function InvoiceSheet({ id, onClose }: { id: string | null; onClose: () =
             <Button icon={<PrintIcon />} onClick={() => print('80mm')}>
               اطبع الفاتورة
             </Button>
-            <Button variant="secondary" icon={<PrintIcon />} onClick={() => print('A4')}>
+            <Button variant="secondary" icon={<PrintIcon />} onClick={() => printA4('invoice')}>
               اطبعها على A4
+            </Button>
+            <Button variant="secondary" icon={<PrintIcon />} onClick={() => printA4('delivery')}>
+              إشعار تسليم
+            </Button>
+            <Button variant="ghost" icon={<PrintIcon />} onClick={() => printA4('delivery-prices')}>
+              إشعار تسليم بالأسعار
             </Button>
           </div>
         ) : undefined
@@ -257,6 +189,15 @@ export function InvoiceSheet({ id, onClose }: { id: string | null; onClose: () =
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={data.status} />
             {data.flags.length > 0 ? <Badge tone="warning">للمراجعة</Badge> : null}
+            {data.flags.flatMap((f) =>
+              SERIAL_FLAG_TEXT[f]
+                ? [
+                    <Badge key={f} tone="warning">
+                      {SERIAL_FLAG_TEXT[f]}
+                    </Badge>,
+                  ]
+                : [],
+            )}
           </div>
           <dl className="grid gap-4 rounded-card border border-line bg-surface-muted/50 p-4 sm:grid-cols-2">
             <Fact label="الفرع والجهاز">
@@ -281,6 +222,12 @@ export function InvoiceSheet({ id, onClose }: { id: string | null; onClose: () =
             </Fact>
             <Fact label="طريقة الدفع">{data.methods.map((m) => METHOD_TEXT[m]).join(' + ') || '—'}</Fact>
           </dl>
+          <WarrantyDevices
+            by={{ saleId: data.id }}
+            storeName={receipt.storeName}
+            branchName={receipt.branchName}
+            customerName={data.customer?.name ?? null}
+          />
           <div className="flex justify-center overflow-x-auto rounded-card border border-line bg-surface p-3 shadow-e1">
             <Receipt data={receipt} width={80} copy />
           </div>
@@ -296,8 +243,13 @@ export function InvoiceSheet({ id, onClose }: { id: string | null; onClose: () =
             <PrintSheet paper={paper}>
               {paper === '80mm' ? (
                 <Receipt data={receipt} width={80} copy />
+              ) : a4 === 'invoice' ? (
+                <InvoiceA4 data={a4DataOf(data, me.tenant.timezone)} />
               ) : (
-                <InvoiceA4 sale={data} data={receipt} />
+                <DeliveryNoteA4
+                  data={a4DataOf(data, me.tenant.timezone)}
+                  withPrices={a4 === 'delivery-prices'}
+                />
               )}
             </PrintSheet>
           ) : null}

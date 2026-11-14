@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HallOrder } from '@serva/core';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
@@ -9,6 +9,7 @@ import {
   EmptyState,
   GiftIcon,
   IconButton,
+  ListIcon,
   LockIcon,
   LogoutIcon,
   Menu,
@@ -17,6 +18,7 @@ import {
   MoreIcon,
   PrintIcon,
   ScissorsIcon,
+  SerialIcon,
   SettingsIcon,
   TransferIcon,
   UndoIcon,
@@ -27,12 +29,20 @@ import type { Catalog } from './catalog';
 import { clockText } from './format';
 import { PrintableReceipt, type PaperWidth, type ReceiptData } from './receipt/Receipt';
 import { printJob as escposJob } from './print/escpos';
+import { WarrantyCertificate } from '../lib/WarrantyCertificate';
+import { certificateOf, customerPhoneOf } from './receipt/warranty';
 import { receiptLines } from './print/lines';
 import { DEFAULT_PRINTER, PRINTER_KEY, PrinterScreen, type PrinterSetting } from './print/PrinterScreen';
 import { renderLines } from './print/render';
 import { sendToPrinter } from './print/usb';
 import { SaleDone } from './receipt/SaleDone';
+import { A4Print, type A4Kind } from './receipt/A4Print';
 import { deliverTicket } from './alterations/api';
+import { markContractBilled, returnRental } from './rentals/api';
+import type { Quotation } from '@serva/core/contracts/quotations';
+import { convertQuotation } from './quotations/api';
+import { quotationCart } from './quotations/quotationCart';
+import { useQuotationFromAddress } from './quotations/useQuotationFromAddress';
 import { addItem, EMPTY_CART, type Cart } from './sale/cart';
 import { cancelSentLines, flushPendingCancels } from './hall/cancelSent';
 import { cartFromOrder, lineIdsOf } from './hall/hallCart';
@@ -47,24 +57,35 @@ import { staffRoster, type StaffSession } from './staff/staff';
 import { SubscriptionChip, useTillSubscription } from '../layout/subscription-banner';
 import { StatusBar, type OutboxStatus } from './StatusBar';
 import { useIdle } from './useIdle';
+import { cartAlreadySold } from './soldCart';
+import { ALTERATION_SECTORS, GIFT_SECTORS, RENTAL_SECTORS, storeSells } from '../lib/sectors';
+import { lazyChunk, preloadTill, TillBoundary } from './chunks';
 
-const ShiftOpenScreen = lazy(() =>
+const ShiftOpenScreen = lazyChunk(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.ShiftOpenScreen })),
 );
-const ShiftCloseScreen = lazy(() =>
+const ShiftCloseScreen = lazyChunk(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.ShiftCloseScreen })),
 );
-const ReturnScreen = lazy(() => import('./return/ReturnScreen').then((m) => ({ default: m.ReturnScreen })));
-const ReceiptScreen = lazy(() =>
+const ReturnScreen = lazyChunk(() =>
+  import('./return/ReturnScreen').then((m) => ({ default: m.ReturnScreen })),
+);
+const ReceiptScreen = lazyChunk(() =>
   import('./customers/ReceiptScreen').then((m) => ({ default: m.ReceiptScreen })),
 );
-const GiftVoucherScreen = lazy(() =>
+const GiftVoucherScreen = lazyChunk(() =>
   import('./customers/GiftVoucherScreen').then((m) => ({ default: m.GiftVoucherScreen })),
 );
-const AlterationsScreen = lazy(() =>
+const RentalsScreen = lazyChunk(() =>
+  import('./rentals/RentalsScreen').then((m) => ({ default: m.RentalsScreen })),
+);
+const AlterationsScreen = lazyChunk(() =>
   import('./alterations/AlterationsScreen').then((m) => ({ default: m.AlterationsScreen })),
 );
-const CashMovementScreen = lazy(() =>
+const QuotationsScreen = lazyChunk(() =>
+  import('./quotations/QuotationsScreen').then((m) => ({ default: m.QuotationsScreen })),
+);
+const CashMovementScreen = lazyChunk(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.CashMovementScreen })),
 );
 
@@ -104,6 +125,8 @@ const CURRENT_CART_KEY = 'currentCart';
 interface SavedCurrentCart {
   userId: string;
   cart: Cart;
+  /** When it was kept: a sale saved after it with the same lines means it was already sold */
+  savedAt?: number;
 }
 
 interface LastSale {
@@ -111,7 +134,17 @@ interface LastSale {
   cashierName: string;
 }
 
-type View = 'sale' | 'close' | 'cash' | 'return' | 'receipt' | 'gift' | 'alterations' | 'printer';
+type View =
+  | 'sale'
+  | 'close'
+  | 'cash'
+  | 'return'
+  | 'receipt'
+  | 'gift'
+  | 'alterations'
+  | 'rentals'
+  | 'quotations'
+  | 'printer';
 
 export interface CashierAppProps {
   session: StaffSession;
@@ -143,6 +176,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const tillSubscription = useTillSubscription(pos.device.token);
   const notice = <SubscriptionChip subscription={tillSubscription} />;
   const settings = catalog.settings;
+  // The menu shows only what this business type does: alterations for clothes, gift vouchers where gifts are sold
+  const alters = storeSells(settings?.sectors, ALTERATION_SECTORS);
+  const rents = storeSells(settings?.sectors, RENTAL_SECTORS);
+  const sellsGifts = storeSells(settings?.sectors, GIFT_SECTORS);
   const staff = useMemo(
     () => staffRoster(catalog.staff, pos.device.branchCode),
     [catalog.staff, pos.device.branchCode],
@@ -164,10 +201,18 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const [lastSale, setLastSale] = useState<LastSale | null>(null);
   const [done, setDone] = useState<ReceiptData | null>(null);
   const [paper, setPaper] = useState<PaperWidth>(80);
-  const [printJob, setPrintJob] = useState<{ data: ReceiptData; copy: boolean } | null>(null);
+  const [printJob, setPrintJob] = useState<{
+    data: ReceiptData;
+    copy: boolean;
+    certificate?: boolean;
+  } | null>(null);
   const [printer, setPrinter] = useState<PrinterSetting>(DEFAULT_PRINTER);
+  // The sale just finished, printed on A4 (an invoice, or its delivery note)
+  const [a4Job, setA4Job] = useState<{ data: ReceiptData; kind: A4Kind } | null>(null);
 
   staffRef.current = staff;
+  // Every screen of the till is fetched once signed in, so a dropped connection never needs a new file
+  useEffect(() => preloadTill(), []);
   const shiftMode = settings?.shiftMode ?? null;
   useEffect(() => {
     if (!shiftMode) return;
@@ -186,7 +231,15 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       // A cart kept by the old lock (one per cashier) is read once and moved to the new place
       const legacy = await pos.local.get<Cart>(cartKey(session.userId));
       if (legacy) void pos.local.remove(cartKey(session.userId));
-      const mine = saved && saved.userId === session.userId ? saved.cart : null;
+      let mine = saved && saved.userId === session.userId ? saved.cart : null;
+      if (mine && mine.lines.length > 0) {
+        const pending = await pos.store.listPending().catch(() => []);
+        const sold = [...pending.map((e) => e.doc), ...(last ? [last.doc] : [])];
+        if (cartAlreadySold(mine, saved?.savedAt, sold)) {
+          mine = null;
+          void pos.local.remove(CURRENT_CART_KEY);
+        }
+      }
       if (!alive) return;
       if (mine && mine.lines.length > 0) {
         setCartState(mine);
@@ -211,15 +264,39 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     return () => {
       alive = false;
     };
-  }, [pos.local, shiftMode, session.userId]);
+  }, [pos.local, pos.store, shiftMode, session.userId]);
 
-  const setCart = useCallback((update: (cart: Cart) => Cart) => setCartState(update), []);
+  // «سعر الجملة» does not outlive its sale: when the last line goes, the cart goes back to the shelf price
+  const setCart = useCallback(
+    (update: (cart: Cart) => Cart) =>
+      setCartState((c) => {
+        const next = update(c);
+        return c.lines.length > 0 && next.lines.length === 0 && next.priceTier === 'wholesale'
+          ? { ...next, priceTier: 'retail' }
+          : next;
+      }),
+    [],
+  );
+
+  /** A quotation opened as the cart (03 › الجملة): the sale is the ordinary one; returns what could not be added */
+  const openQuotation = (q: Quotation): string[] | null => {
+    if (!session.permissions.has('sale.create')) return null;
+    const { cart: next, missing } = quotationCart(q, catalog);
+    setCart(() => next);
+    setDone(null);
+    // With lines left out the screen stays, to name them first
+    if (missing.length === 0) setView('sale');
+    return missing;
+  };
+  useQuotationFromAddress(cartRestored && Boolean(shift) && cartRef.current.lines.length === 0, pos, (q) => {
+    openQuotation(q);
+  });
 
   // The cart in progress is kept on the device on every change and dropped once it is empty (sold, held, cleared)
   useEffect(() => {
     if (!cartRestored) return;
     if (cart.lines.length > 0) {
-      writeCart(() => pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart }));
+      writeCart(() => pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart, savedAt: Date.now() }));
     } else {
       writeCart(() => pos.local.remove(CURRENT_CART_KEY));
     }
@@ -280,7 +357,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     const current = cartRef.current;
     writeCart(() =>
       current.lines.length > 0
-        ? pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart: current })
+        ? pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart: current, savedAt: Date.now() })
         : Promise.resolve(),
     );
     void cartWrites.current.finally(onSignOut);
@@ -302,7 +379,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       }
     };
     const timer = setTimeout(() => {
-      if (printer.mode !== 'usb') return dialog();
+      if (printer.mode !== 'usb' || printJob.certificate) return dialog();
       const image = renderLines(receiptLines(printJob.data, printJob.copy), paper);
       if (!image) return dialog();
       const tookCash = paidInCash(printJob.data);
@@ -375,6 +452,14 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     // A sale that delivers an alteration ticket: the ticket turns delivered now that its fee is sold
     const delivering = cartRef.current.alteration;
     if (delivering && pos.device.token) void deliverTicket(delivering, pos.device.token, pos.fetch);
+    // A sale that returns a rental, or bills a maintenance contract: the server closes or marks it now
+    const returning = cartRef.current.rental;
+    if (returning && pos.device.token) void returnRental(returning, pos.device.token, pos.fetch);
+    const billing = cartRef.current.maintenance;
+    if (billing && pos.device.token) void markContractBilled(billing, pos.device.token, pos.fetch);
+    // A sale made from a quotation: the quotation turns «حُوّل إلى فاتورة»
+    const converting = cartRef.current.quotation;
+    if (converting && pos.device.token) void convertQuotation(converting, pos.device.token, pos.fetch);
     // The sale is in the outbox: the kept cart goes now, so a refresh cannot bring it back as a second sale
     writeCart(() => pos.local.remove(CURRENT_CART_KEY));
     setCartState(EMPTY_CART);
@@ -716,14 +801,26 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               قبض من زبون
             </MenuItem>
           ) : null}
-          {shift && session.permissions.has('sale.create') ? (
+          {shift && session.permissions.has('sale.create') && sellsGifts ? (
             <MenuItem icon={<GiftIcon />} onSelect={() => setView('gift')}>
               قسيمة هدية
             </MenuItem>
           ) : null}
-          <MenuItem icon={<ScissorsIcon />} onSelect={() => setView('alterations')}>
-            التعديلات
-          </MenuItem>
+          {alters ? (
+            <MenuItem icon={<ScissorsIcon />} onSelect={() => setView('alterations')}>
+              التعديلات
+            </MenuItem>
+          ) : null}
+          {rents ? (
+            <MenuItem icon={<SerialIcon />} onSelect={() => setView('rentals')}>
+              التأجير
+            </MenuItem>
+          ) : null}
+          {shift && session.permissions.has('sale.create') ? (
+            <MenuItem icon={<ListIcon />} onSelect={() => setView('quotations')}>
+              عروض الأسعار
+            </MenuItem>
+          ) : null}
           <MenuSeparator />
           {shift ? (
             <MenuItem icon={<TransferIcon />} shortcut="Alt+7" onSelect={() => setView('cash')}>
@@ -752,8 +849,24 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     />
   );
 
+  const certificate = printJob?.certificate
+    ? certificateOf(printJob.data, customerPhoneOf(catalog, printJob.data))
+    : null;
   const printPortal = printJob ? (
-    <PrintableReceipt data={printJob.data} width={paper} copy={printJob.copy} />
+    certificate ? (
+      <WarrantyCertificate data={certificate} />
+    ) : (
+      <PrintableReceipt data={printJob.data} width={paper} copy={printJob.copy} />
+    )
+  ) : null;
+  // A4 prints on its own sheet: the receipt's portal is dropped while it is mounted
+  const a4Portal = a4Job ? (
+    <A4Print
+      data={a4Job.data}
+      kind={a4Job.kind}
+      customers={catalog.customers}
+      onDone={() => setA4Job(null)}
+    />
   ) : null;
 
   if (shift === undefined) return null;
@@ -779,6 +892,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           onBack={() => setView('sale')}
         />
         {printPortal}
+        {a4Portal}
       </CashierShell>
     );
   }
@@ -786,99 +900,159 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   if (shift === null || view !== 'sale') {
     return (
       <CashierShell statusBar={statusBar} mainClassName="flex justify-center p-6 lg:px-10">
-        <Suspense fallback={null}>
-          {shift === null ? (
-            <ShiftOpenScreen session={session} catalog={catalog} onOpened={setShift} />
-          ) : view === 'close' ? (
-            <ShiftCloseScreen
-              session={session}
-              catalog={catalog}
-              shift={shift}
-              onBack={() => setView('sale')}
-              onClosed={() => {
-                setShift(null);
-                setView('sale');
-                onSignOut();
-              }}
-            />
-          ) : view === 'receipt' ? (
-            <ReceiptScreen
-              session={session}
-              catalog={catalog}
-              shift={shift}
-              onBack={() => setView('sale')}
-              onPrint={(doc) =>
-                setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'receipt' }, copy: false })
-              }
-            />
-          ) : view === 'alterations' ? (
-            <AlterationsScreen
-              catalog={catalog}
-              session={session}
-              shift={shift}
-              onBack={() => setView('sale')}
-              onDeliver={(ticket) => {
-                // The fee is sold as the «تقصير» service: what is left after the deposit voucher
-                const service = catalog.items.find((i) => i.name.includes('تقصير'));
-                if (!service) return false;
-                const fee = ticket.priceMinor;
-                const line = addItem(EMPTY_CART, service);
-                setCart(() => ({
-                  ...line,
-                  lines: line.lines.map((l) => ({
-                    ...l,
-                    name: `${l.name} · ${ticket.number}`,
-                    priceMinor: fee,
-                    retailPriceMinor: fee,
-                    wholesalePriceMinor: null,
-                    priceCurrency: ticket.currency,
-                  })),
-                  ...(ticket.depositVoucher ? { voucher: ticket.depositVoucher } : {}),
-                  alteration: { id: ticket.id, number: ticket.number, version: ticket.version },
-                }));
-                setDone(null);
-                setView('sale');
-                return true;
-              }}
-            />
-          ) : view === 'gift' ? (
-            <GiftVoucherScreen
-              session={session}
-              catalog={catalog}
-              shift={shift}
-              onBack={() => setView('sale')}
-              onPrint={(doc) =>
-                setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'gift' }, copy: false })
-              }
-            />
-          ) : view === 'return' ? (
-            <ReturnScreen
-              session={session}
-              catalog={catalog}
-              staff={staff}
-              shift={shift}
-              onBack={() => setView('sale')}
-              onPrint={(doc) =>
-                setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'return' }, copy: false })
-              }
-              onExchange={(code) => {
-                // A cash exchange has no voucher: the return went out in cash, the other piece is paid in cash
-                if (code) setCart((c) => ({ ...c, voucher: code }));
-                setDone(null);
-                setView('sale');
-              }}
-            />
-          ) : (
-            <CashMovementScreen
-              session={session}
-              catalog={catalog}
-              staff={staff}
-              shift={shift}
-              onBack={() => setView('sale')}
-            />
-          )}
-        </Suspense>
+        <TillBoundary onBack={() => setView('sale')}>
+          <Suspense fallback={null}>
+            {shift === null ? (
+              <ShiftOpenScreen session={session} catalog={catalog} onOpened={setShift} />
+            ) : view === 'close' ? (
+              <ShiftCloseScreen
+                session={session}
+                catalog={catalog}
+                shift={shift}
+                onBack={() => setView('sale')}
+                onClosed={() => {
+                  setShift(null);
+                  setView('sale');
+                  onSignOut();
+                }}
+              />
+            ) : view === 'receipt' ? (
+              <ReceiptScreen
+                session={session}
+                catalog={catalog}
+                shift={shift}
+                onBack={() => setView('sale')}
+                onPrint={(doc) =>
+                  setPrintJob({
+                    data: { ...receiptData(doc, session.fullName), kind: 'receipt' },
+                    copy: false,
+                  })
+                }
+              />
+            ) : view === 'quotations' ? (
+              <QuotationsScreen onBack={() => setView('sale')} onOpen={openQuotation} />
+            ) : view === 'rentals' ? (
+              <RentalsScreen
+                catalog={catalog}
+                session={session}
+                shift={shift}
+                onBack={() => setView('sale')}
+                onReturn={(rental) => {
+                  // The rent is sold as the «إيجار» service; the deposit voucher pays part of it
+                  const service = catalog.items.find((i) => i.name.includes('إيجار'));
+                  if (!service) return false;
+                  const line = addItem(EMPTY_CART, service);
+                  setCart(() => ({
+                    ...line,
+                    lines: line.lines.map((l) => ({
+                      ...l,
+                      name: `${l.name} · ${rental.number}`,
+                      priceMinor: rental.chargeMinor,
+                      retailPriceMinor: rental.chargeMinor,
+                      wholesalePriceMinor: null,
+                      priceCurrency: rental.currency,
+                    })),
+                    ...(rental.depositVoucher ? { voucher: rental.depositVoucher } : {}),
+                    rental: { id: rental.id, number: rental.number, version: rental.version },
+                  }));
+                  setDone(null);
+                  setView('sale');
+                  return true;
+                }}
+                onBill={(contract) => {
+                  const service = catalog.items.find((i) => i.name.includes('عقد صيانة'));
+                  if (!service) return false;
+                  const line = addItem(EMPTY_CART, service);
+                  setCart(() => ({
+                    ...line,
+                    lines: line.lines.map((l) => ({
+                      ...l,
+                      name: `${l.name} · ${contract.number}`,
+                      priceMinor: contract.priceMinor,
+                      retailPriceMinor: contract.priceMinor,
+                      wholesalePriceMinor: null,
+                      priceCurrency: contract.currency,
+                    })),
+                    maintenance: { id: contract.id, number: contract.number, version: contract.version },
+                  }));
+                  setDone(null);
+                  setView('sale');
+                  return true;
+                }}
+              />
+            ) : view === 'alterations' ? (
+              <AlterationsScreen
+                catalog={catalog}
+                session={session}
+                shift={shift}
+                onBack={() => setView('sale')}
+                onDeliver={(ticket) => {
+                  // The fee is sold as the «تقصير» service: what is left after the deposit voucher
+                  const service = catalog.items.find((i) => i.name.includes('تقصير'));
+                  if (!service) return false;
+                  const fee = ticket.priceMinor;
+                  const line = addItem(EMPTY_CART, service);
+                  setCart(() => ({
+                    ...line,
+                    lines: line.lines.map((l) => ({
+                      ...l,
+                      name: `${l.name} · ${ticket.number}`,
+                      priceMinor: fee,
+                      retailPriceMinor: fee,
+                      wholesalePriceMinor: null,
+                      priceCurrency: ticket.currency,
+                    })),
+                    ...(ticket.depositVoucher ? { voucher: ticket.depositVoucher } : {}),
+                    alteration: { id: ticket.id, number: ticket.number, version: ticket.version },
+                  }));
+                  setDone(null);
+                  setView('sale');
+                  return true;
+                }}
+              />
+            ) : view === 'gift' ? (
+              <GiftVoucherScreen
+                session={session}
+                catalog={catalog}
+                shift={shift}
+                onBack={() => setView('sale')}
+                onPrint={(doc) =>
+                  setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'gift' }, copy: false })
+                }
+              />
+            ) : view === 'return' ? (
+              <ReturnScreen
+                session={session}
+                catalog={catalog}
+                staff={staff}
+                shift={shift}
+                onBack={() => setView('sale')}
+                onPrint={(doc) =>
+                  setPrintJob({
+                    data: { ...receiptData(doc, session.fullName), kind: 'return' },
+                    copy: false,
+                  })
+                }
+                onExchange={(code) => {
+                  // A cash exchange has no voucher: the return went out in cash, the other piece is paid in cash
+                  if (code) setCart((c) => ({ ...c, voucher: code }));
+                  setDone(null);
+                  setView('sale');
+                }}
+              />
+            ) : (
+              <CashMovementScreen
+                session={session}
+                catalog={catalog}
+                staff={staff}
+                shift={shift}
+                onBack={() => setView('sale')}
+              />
+            )}
+          </Suspense>
+        </TillBoundary>
         {printPortal}
+        {a4Portal}
       </CashierShell>
     );
   }
@@ -918,6 +1092,12 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 void pos.local.set(PAPER_KEY, w);
               }}
               onPrint={() => setPrintJob({ data: done, copy: false })}
+              onPrintA4={(kind) => setA4Job({ data: done, kind })}
+              onPrintWarranty={
+                certificateOf(done, null)
+                  ? () => setPrintJob({ data: done, copy: false, certificate: true })
+                  : undefined
+              }
               onNewSale={() => setDone(null)}
             />
           ) : null
@@ -929,6 +1109,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         }
       />
       {printPortal}
+      {a4Portal}
     </>
   );
 }

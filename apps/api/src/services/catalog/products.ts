@@ -125,8 +125,10 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
     season: product.season,
     genericName: product.genericName,
     requiresPrescription: product.requiresPrescription,
+    requiresExpiry: product.requiresExpiry,
     controlled: product.controlled,
     tracksSerial: product.tracksSerial,
+    rentable: product.rentable,
     warrantyMonths: product.warrantyMonths,
     type: product.type as ProductType,
     status: product.status as ProductStatus,
@@ -149,6 +151,7 @@ const barcodeView = (b: typeof barcodes.$inferSelect): BarcodeView => ({
   packQty: b.packQty,
   packName: b.packName,
   packPriceMinor: b.packPriceMinor,
+  packWholesaleMinor: b.packWholesaleMinor,
 });
 
 export async function getProduct(db: Database, id: string, ctx: CatalogContext): Promise<ProductDetail> {
@@ -163,7 +166,9 @@ export async function lookupBarcode(
   db: Database,
   code: string,
   ctx: CatalogContext,
-): Promise<BarcodeLookupResponse> {
+  /** A code nobody has is an answer, not an error (the product form asks for every new code) */
+  soft = false,
+): Promise<BarcodeLookupResponse | { exists: false }> {
   return withTenant(db, ctx.auth.tenantId, async (tx) => {
     await requireCatalogReader(tx, ctx.auth.userId);
     const [row] = await tx
@@ -171,6 +176,7 @@ export async function lookupBarcode(
       .from(barcodes)
       .innerJoin(variants, and(eq(variants.tenantId, barcodes.tenantId), eq(variants.id, barcodes.variantId)))
       .where(eq(barcodes.code, code));
+    if (!row && soft) return { exists: false as const };
     if (!row) throw notFound('لا يوجد منتج بهذا الباركود.');
     return { productId: row.productId, variantId: row.barcode.variantId, barcode: barcodeView(row.barcode) };
   });
@@ -411,6 +417,7 @@ async function writeBarcodes(
       packQty: b.packQty,
       packName: b.packName,
       packPriceMinor: b.packPriceMinor,
+      packWholesaleMinor: b.packWholesaleMinor,
     };
     const existing = b.id ? current.find((c) => c.id === b.id) : undefined;
     if (b.id && !existing) throw fieldError('variants', 'باركود غير موجود في هذا المتغير');
@@ -506,8 +513,10 @@ export async function createProductTx(
       season: input.season,
       genericName: input.genericName,
       requiresPrescription: input.requiresPrescription,
+      requiresExpiry: input.requiresExpiry,
       controlled: input.controlled,
       tracksSerial: input.tracksSerial,
+      rentable: input.rentable,
       warrantyMonths: input.warrantyMonths,
       type: input.type,
       unitId: input.unitId ?? (await pieceUnit(tx)),
@@ -627,8 +636,10 @@ export async function updateProductTx(
     season: input.season,
     genericName: input.genericName,
     requiresPrescription: input.requiresPrescription,
+    requiresExpiry: input.requiresExpiry,
     controlled: input.controlled,
     tracksSerial: input.tracksSerial,
+    rentable: input.rentable,
     warrantyMonths: input.warrantyMonths,
     type: input.type,
     unitId: input.unitId,

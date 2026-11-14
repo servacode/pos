@@ -205,7 +205,7 @@ describe('a purchase', () => {
       },
     });
     expect(bad.statusCode).toBe(400);
-    expect(bad.json().error.fields.lines).toBe('كل صنف مرة واحدة في الفاتورة');
+    expect(bad.json().error.fields.lines).toBe('كل صنف مرة واحدة في الفاتورة إلا إن اختلفت الدفعة');
     const s = await supplier(store);
     const ghost = await app.inject({
       method: 'POST',

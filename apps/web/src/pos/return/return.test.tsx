@@ -162,6 +162,41 @@ describe('a return of a credit sale (08 › مرتجع مبيعات: تخفيض 
   });
 });
 
+describe('a return of a sale paid by cheque', () => {
+  it('goes to the customer’s account by default, says the cheque stays, and cash only when chosen', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    await user.type(within(pay).getByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
+    await user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
+    await user.click(within(pay).getByRole('button', { name: 'شيك' }));
+    await user.type(within(pay).getByLabelText('البنك'), 'بنك سورية');
+    await user.type(within(pay).getByLabelText('رقم الشيك'), '5512');
+    await user.type(within(pay).getByLabelText('تاريخ الاستحقاق'), '30/11/2030');
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    expect(screen.getByRole('button', { name: 'نقداً من الدرج' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'إلى حساب الزبون' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/الشيك نفسه يبقى كما هو/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'الكل' }));
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(payload.refunds).toEqual([
+      { method: 'account', currency: 'SYP', amountMinor: 25_000, reference: null },
+    ]);
+  });
+});
+
 describe('«استبدال» on the till (03 › الملابس)', () => {
   it('returns a piece on a voucher, sells the other one with it, and takes the rest in cash', async () => {
     const local = memoryLocal();

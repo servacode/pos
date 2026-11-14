@@ -536,6 +536,32 @@ describe('a pharmacy sale carries its batch and prescription', () => {
     expect('prescription' in buildSalePayload(saleCart({ prescription: null }))).toBe(false);
   });
 
+  it('carries a line split over batches, and refuses an allocation with no quantity or a bad date', () => {
+    const batches = [
+      { batchNo: 'B-07', expiry: '2027-03-01', qty: 2000 },
+      { batchNo: null, expiry: null, qty: 1000 },
+    ];
+    const line = { ...saleCart().lines[1]!, priceMinor: 30000, qty: 3000, batches };
+    const sold = buildSalePayload(
+      saleCart({ lines: [line], payments: [{ method: 'cash', currency: 'SYP', amountMinor: 90000 }] }),
+    );
+    expect(sold.lines[0]!.batches).toEqual(batches);
+    expect(salePayloadSchema.safeParse(sold).error?.issues ?? []).toEqual([]);
+    expect('batches' in validSale().lines[0]!).toBe(false);
+    const empty = buildSalePayload(
+      saleCart({
+        lines: [{ ...line, batches: [] }],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 90000 }],
+      }),
+    );
+    expect('batches' in empty.lines[0]!).toBe(false);
+    const bad = structuredClone(sold);
+    bad.lines[0]!.batches = [{ batchNo: 'B', expiry: '2027-03-01', qty: 0 }];
+    expect(salePayloadSchema.safeParse(bad).success).toBe(false);
+    bad.lines[0]!.batches = [{ batchNo: 'B', expiry: 'soon', qty: 1000 }];
+    expect(salePayloadSchema.safeParse(bad).success).toBe(false);
+  });
+
   it('refuses a prescription with a blank field or a batch date that is not a date', () => {
     const base = validSale();
     expect(salePayloadSchema.safeParse({ ...base, prescription: { ...RX, ref: ' ' } }).success).toBe(false);

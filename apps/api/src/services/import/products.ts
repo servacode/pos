@@ -1,11 +1,13 @@
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import {
   BRANCH_QTY_PREFIX,
   barcodeCodeSchema,
   createProductInput,
   currencyCodeSchema,
   normalizeArabic,
+  serialSchema,
   updateProductInput,
+  type BarcodeView,
   type CurrencyCode,
   type ImportRow,
   type ProductDetail,
@@ -18,6 +20,7 @@ import {
   units,
   variants,
   products,
+  serials,
   type Transaction,
 } from '@serva/db';
 import { ZodError } from 'zod';
@@ -33,9 +36,9 @@ import {
 } from '../catalog/products';
 import { createCategoryTx } from '../catalog/reference';
 import { baseCurrency } from '../purchases';
-import { amountOf, Issues, quantityOf, shortText, textOf } from './cells';
+import { amountOf, dateOf, Issues, listOf, quantityOf, shortText, textOf, truthy } from './cells';
 import { fieldOfPath, issuesOf, variantIndexOf, type ImportContext, type Results } from './context';
-import { postOpeningStock, variantsWithMovements, type OpeningLine } from './opening';
+import { postOpeningStock, variantsWithMovements, type OpeningLine, type OpeningLot } from './opening';
 
 /** Everything about the store a product row refers to, read once per chunk. */
 interface Lookups {
@@ -107,6 +110,23 @@ interface Parsed {
   attributes: { name: string; value: string }[];
   /** Opening quantities by branch, thousandths */
   stock: Map<string, number>;
+  /** «العبوة»: a pack barcode of the variant (علبة 12) */
+  pack: ParsedPack | null;
+  /** «الكفالة بالأشهر»; null: the file said nothing */
+  warrantyMonths: number | null;
+  /** «له رقم تسلسلي»; null: the file said nothing */
+  tracksSerial: boolean | null;
+  /** What of the default branch's opening quantity came in which batch (the row's own, then merged rows) */
+  lots: OpeningLot[];
+}
+
+interface ParsedPack {
+  name: string | null;
+  /** Base units in the pack, thousandths */
+  qty: number;
+  /** null: the system makes an internal barcode */
+  code: string | null;
+  priceMinor: number | null;
 }
 
 const SIZE = 'المقاس';
@@ -190,6 +210,55 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
     if (qty !== null && qty > 0) stock.set(branchId, (stock.get(branchId) ?? 0) + qty);
   }
 
+  // The pack: 12 pieces in a «علبة», with its own barcode and price when the file has them
+  const packName = shortText(row, 'packName', 30, 'اسم العبوة', issues);
+  const packQty = quantityOf(row, 'packQty', 'كمية العبوة', issues, { allowsFraction: true });
+  const packPrice = amountOf(row, 'packPrice', currency, 'سعر العبوة', issues);
+  let packBarcode: string | null = null;
+  const packBarcodeText = textOf(row.values.packBarcode);
+  if (packBarcodeText !== null) {
+    const checked = barcodeCodeSchema.safeParse(packBarcodeText);
+    if (checked.success) packBarcode = checked.data;
+    else issues.add('packBarcode', checked.error.issues[0]?.message ?? 'باركود العبوة غير صالح');
+  }
+  let pack: ParsedPack | null = null;
+  if (packName !== null || packQty !== null || packBarcode !== null || packPrice !== null) {
+    if (packQty === null) issues.add('packQty', 'اكتب كمية العبوة: كم قطعة فيها');
+    else if (packQty <= 1000) issues.add('packQty', 'كمية العبوة أكبر من واحد');
+    else pack = { name: packName, qty: packQty, code: packBarcode, priceMinor: packPrice };
+  }
+  if (packBarcode !== null && packBarcode === barcode) {
+    issues.add('packBarcode', 'باركود العبوة هو باركود القطعة نفسه');
+  }
+
+  const warranty = quantityOf(row, 'warrantyMonths', 'الكفالة', issues, { allowsFraction: true });
+  let warrantyMonths: number | null = null;
+  if (warranty !== null) {
+    if (warranty % 1000 !== 0 || warranty < 1000 || warranty > 120_000) {
+      issues.add('warrantyMonths', 'الكفالة عدد أشهر صحيح من 1 إلى 120');
+    } else warrantyMonths = warranty / 1000;
+  }
+  const trackText = textOf(row.values.tracksSerial);
+  const tracksSerial = trackText === null ? null : truthy(trackText);
+
+  // The batch, its expiry and the pieces' numbers belong to the opening quantity of the default branch
+  const batchNo = shortText(row, 'batch', 40, 'رقم الدفعة', issues);
+  const expiry = dateOf(row, 'expiry', 'تاريخ الانتهاء', issues);
+  const numbers: string[] = [];
+  for (const raw of listOf(row.values.serials)) {
+    const checked = serialSchema.safeParse(raw);
+    if (!checked.success) {
+      issues.add('serials', `الرقم «${raw}» غير صالح: من 3 إلى 40 خانة`);
+    } else if (numbers.includes(checked.data)) {
+      issues.add('serials', `الرقم ${checked.data} مكرر في الصف`);
+    } else numbers.push(checked.data);
+  }
+  const lots: OpeningLot[] = [];
+  const ownQty = quantity !== null && quantity > 0 && lookups.defaultBranchId ? quantity : 0;
+  if ((batchNo !== null || expiry !== null || numbers.length > 0) && ownQty === 0) {
+    issues.add('quantity', 'اكتب الكمية الافتتاحية مع الدفعة أو الأرقام التسلسلية');
+  } else if (ownQty > 0) lots.push({ qty: ownQty, batchNo, expiryDate: expiry, serials: numbers });
+
   return {
     line: row.line,
     name: name ?? '',
@@ -209,6 +278,10 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
     minStock,
     attributes,
     stock,
+    pack,
+    warrantyMonths,
+    tracksSerial,
+    lots,
   };
 }
 
@@ -281,6 +354,7 @@ interface Opening {
   name: string;
   stock: Map<string, number>;
   costMinor: number | null;
+  lots: OpeningLot[];
 }
 
 interface RowFailure {
@@ -334,11 +408,28 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
   // A barcode belongs to one variant: a later row repeating it (maybe for another size or colour)
   // is refused and named, never merged into the first row and lost
   const seenCodes = new Map<string, Parsed>();
+  // A repeated barcode with a batch (or expiry, or numbers) of its own is one more batch of the same
+  // item: its quantity joins the first row's, and the row answers as that row does
+  const merged = new Map<number, number>();
   for (const p of [...parsed]) {
     if (p.barcode === null) continue;
     const first = seenCodes.get(p.barcode);
     if (!first) {
       seenCodes.set(p.barcode, p);
+      continue;
+    }
+    const lot = p.lots[0];
+    const branchId = lookups.defaultBranchId;
+    if (
+      lot &&
+      branchId !== null &&
+      first.lots.length > 0 &&
+      (lot.batchNo !== null || lot.expiryDate !== null || lot.serials.length > 0)
+    ) {
+      first.lots.push(lot);
+      first.stock.set(branchId, (first.stock.get(branchId) ?? 0) + lot.qty);
+      merged.set(p.line, first.line);
+      parsed.splice(parsed.indexOf(p), 1);
       continue;
     }
     const wanted = p.attributes.map((a) => a.value).join(' · ');
@@ -351,6 +442,20 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
       },
     ]);
     parsed.splice(parsed.indexOf(p), 1);
+  }
+
+  // A number is one piece: the same number in two rows of the file is refused on the later row
+  const seenSerials = new Map<string, number>();
+  for (const p of [...parsed]) {
+    const dup = p.lots.flatMap((l) => l.serials).find((n) => seenSerials.has(n));
+    if (dup !== undefined) {
+      results.fail(p.line, [
+        { field: 'serials', message: `الرقم ${dup} مكرر: سبق في السطر ${String(seenSerials.get(dup))}` },
+      ]);
+      parsed.splice(parsed.indexOf(p), 1);
+      continue;
+    }
+    for (const n of p.lots.flatMap((l) => l.serials)) seenSerials.set(n, p.line);
   }
 
   const openings: Opening[] = [];
@@ -388,6 +493,14 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
     }
   }
 
+  for (const [line, into] of merged) {
+    if (results.statusOf(into) === 'error') {
+      results.fail(line, [
+        { field: '_', message: `لم يُحفظ لأن السطر ${String(into)} (الصنف نفسه) فيه خطأ` },
+      ]);
+    } else results.set(line, results.statusOf(into), [`دفعة إضافية أُضيفت إلى صنف السطر ${String(into)}`]);
+  }
+
   const lines: OpeningLine[] = [];
   for (const o of openings) {
     for (const [branchId, qty] of o.stock) {
@@ -395,10 +508,53 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
         results.note(o.line, 'الصنف مكرر في الملف: الكمية الافتتاحية من أول صف له فقط');
         continue;
       }
-      lines.push({ variantId: o.variantId, name: o.name, branchId, qty, unitCostMinor: o.costMinor ?? 0 });
+      lines.push({
+        variantId: o.variantId,
+        name: o.name,
+        branchId,
+        qty,
+        unitCostMinor: o.costMinor ?? 0,
+        ...(branchId === lookups.defaultBranchId ? { lots: o.lots } : {}),
+      });
     }
   }
   await postOpeningStock(tx, ctx.auth, ctx.meta, input.date, lines);
+}
+
+/** A new pack barcode as the catalog takes it: the file's code, or an internal one the system numbers. */
+function packInput(pack: ParsedPack) {
+  const fields = { packQty: pack.qty, packName: pack.name, packPriceMinor: pack.priceMinor };
+  return pack.code === null
+    ? { kind: 'internal' as const, ...fields }
+    : { kind: 'standard' as const, code: pack.code, ...fields };
+}
+
+/**
+ * The variant's complete barcode list with the row's pack in it: a pack already there (the same code,
+ * or the same quantity when the file gave no code) takes the name and price the file has, otherwise
+ * the pack is added. `changed` is false when the variant already says what the file says.
+ */
+function withPack(
+  existing: readonly BarcodeView[],
+  pack: ParsedPack,
+): { list: Record<string, unknown>[]; changed: boolean } {
+  const list: Record<string, unknown>[] = existing.map((b) => ({ ...b }));
+  const at = existing.findIndex((b) => (pack.code !== null ? b.code === pack.code : b.packQty === pack.qty));
+  if (at < 0) {
+    list.push(packInput(pack));
+    return { list, changed: true };
+  }
+  const b = existing[at]!;
+  const next = {
+    ...b,
+    packQty: pack.qty,
+    packName: pack.name ?? b.packName,
+    packPriceMinor: pack.priceMinor ?? b.packPriceMinor,
+  };
+  list[at] = next;
+  const changed =
+    next.packQty !== b.packQty || next.packName !== b.packName || next.packPriceMinor !== b.packPriceMinor;
+  return { list, changed };
 }
 
 /** The variant patch an update sends for a row: only what the file said. */
@@ -426,7 +582,10 @@ function differs(detail: ProductDetail, variantId: string, p: Parsed, categoryId
     (p.season !== null && !same(detail.season, p.season)) ||
     (categoryId !== null && !same(detail.categoryId, categoryId)) ||
     (p.unitId !== null && !same(detail.unitId, p.unitId)) ||
-    (p.hasTax && !same(detail.taxRateId, p.taxRateId))
+    (p.hasTax && !same(detail.taxRateId, p.taxRateId)) ||
+    (p.warrantyMonths !== null && !same(detail.warrantyMonths, p.warrantyMonths)) ||
+    (p.tracksSerial !== null && detail.tracksSerial !== p.tracksSerial) ||
+    (p.pack !== null && withPack(v.barcodes, p.pack).changed)
   );
 }
 
@@ -447,6 +606,64 @@ async function categoryIdOf(
   created.push(key);
   results.note(line, `سيُنشأ تصنيف جديد «${name}»`);
   return made.id;
+}
+
+/**
+ * The numbers of the opening quantity before anything is written: an item that tracks them takes
+ * one per piece, each new to the store; an item that does not takes none. A row whose opening will not
+ * happen (the file asks to skip what exists, or the branch already moved the item) is not checked.
+ */
+async function checkLots(
+  ctx: ImportContext,
+  branchId: string | null,
+  group: Parsed[],
+  current: ProductDetail | null,
+  matched: Map<Parsed, ExistingVariant>,
+  fresh: Parsed[],
+  state: GroupState,
+): Promise<void> {
+  const tracks = group.map((p) => p.tracksSerial).find((t) => t !== null) ?? current?.tracksSerial ?? false;
+  const oldIds = [...matched.values()].map((m) => m.variantId);
+  const moved =
+    branchId !== null && oldIds.length > 0
+      ? await variantsWithMovements(ctx.tx, branchId, oldIds)
+      : new Set<string>();
+  const opening = (p: Parsed) => {
+    if (p.lots.length === 0) return false;
+    if (fresh.includes(p)) return true;
+    const found = matched.get(p);
+    return ctx.input.existing !== 'skip' && found !== undefined && !moved.has(found.variantId);
+  };
+  state.sent = group;
+  const wanted: { path: string; serial: string }[] = [];
+  for (const [index, p] of group.entries()) {
+    if (!opening(p)) continue;
+    const path = `variants.${String(index)}.serials`;
+    for (const lot of p.lots) {
+      if (tracks && lot.serials.length * 1000 !== lot.qty) {
+        throw fieldError(
+          path,
+          `اكتب ${String(lot.qty / 1000)} رقماً تسلسلياً، واحداً لكل قطعة (كُتب ${String(lot.serials.length)})`,
+        );
+      }
+      if (!tracks && lot.serials.length > 0) {
+        throw fieldError(path, 'هذا الصنف لا يتتبع الأرقام التسلسلية: اكتب «نعم» في «له رقم تسلسلي»');
+      }
+      for (const serial of lot.serials) wanted.push({ path, serial });
+    }
+  }
+  if (wanted.length === 0) return;
+  const known = await ctx.tx
+    .select({ serial: serials.serial })
+    .from(serials)
+    .where(
+      inArray(
+        serials.serial,
+        wanted.map((w) => w.serial),
+      ),
+    );
+  const hit = wanted.find((w) => known.some((k) => k.serial === w.serial));
+  if (hit) throw fieldError(hit.path, `الرقم ${hit.serial} موجود في المحل من قبل`);
 }
 
 async function processGroup(
@@ -508,6 +725,8 @@ async function processGroup(
   const old = group.filter((p) => matched.has(p));
   const pendingOpenings: { parsed: Parsed; variantId: string; name: string }[] = [];
 
+  await checkLots(ctx, lookups.defaultBranchId, group, current, matched, fresh, state);
+
   // Rows for variants that exist: left alone, or patched
   const patches: Record<string, unknown>[] = [];
   const touched: Parsed[] = [];
@@ -527,7 +746,11 @@ async function processGroup(
     }
     if (p.stock.size > 0) pendingOpenings.push({ parsed: p, variantId, name: label });
     if (differs(current!, variantId, p, categoryId)) {
-      patches.push({ id: variantId, ...variantPatch(p) });
+      patches.push({
+        id: variantId,
+        ...variantPatch(p),
+        ...(p.pack ? { barcodes: withPack(variant.barcodes, p.pack).list } : {}),
+      });
       touched.push(p);
     } else {
       results.set(p.line, 'skip', ['لا تغيير']);
@@ -543,6 +766,8 @@ async function processGroup(
           ...(categoryId !== null ? { categoryId } : {}),
           ...(first.unitId !== null ? { unitId: first.unitId } : {}),
           ...(first.hasTax ? { taxRateId: first.taxRateId } : {}),
+          ...(first.warrantyMonths !== null ? { warrantyMonths: first.warrantyMonths } : {}),
+          ...(first.tracksSerial !== null ? { tracksSerial: first.tracksSerial } : {}),
         }
       : {};
 
@@ -559,7 +784,10 @@ async function processGroup(
     price: p.price,
     wholesalePriceMinor: p.wholesaleMinor,
     minStockQty: p.minStock,
-    barcodes: p.barcode ? [{ kind: 'standard' as const, code: p.barcode }] : [],
+    barcodes: [
+      ...(p.barcode ? [{ kind: 'standard' as const, code: p.barcode }] : []),
+      ...(p.pack ? [packInput(p.pack)] : []),
+    ],
   }));
 
   if (current === null) {
@@ -571,6 +799,8 @@ async function processGroup(
       season: first.season,
       unitId: first.unitId ?? undefined,
       taxRateId: first.taxRateId,
+      tracksSerial: first.tracksSerial ?? false,
+      warrantyMonths: first.warrantyMonths,
       variants: newVariants,
     });
     const created = await createProductTx(tx, data, ctx.catalog);
@@ -637,6 +867,7 @@ async function processGroup(
       name: o.name,
       stock,
       costMinor: o.parsed.costMinor,
+      lots: o.parsed.lots,
     });
   }
 }

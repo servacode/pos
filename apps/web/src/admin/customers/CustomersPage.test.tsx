@@ -32,6 +32,9 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   priceTier: 'retail',
   noMessages: false,
   archived: false,
+  kind: null,
+  contactName: null,
+  contactPhone: null,
   taxNumber: null,
   address: null,
   notes: null,
@@ -62,10 +65,11 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   ...over,
 });
 
-function open(path: string, start: CustomerDetail = detail()) {
+function open(path: string, start: CustomerDetail = detail(), twin = false) {
   let current = start;
   const list = (): CustomerListResponse => ({
-    items: [current],
+    // The same person typed twice: «أرشف هذا الزبون المكرر» shows only then
+    items: twin ? [current, { ...current, id: 'c-2', balanceMinor: 0 }] : [current],
     totalOwedMinor: Math.max(0, current.balanceMinor),
     baseCurrency: 'SYP',
   });
@@ -73,6 +77,8 @@ function open(path: string, start: CustomerDetail = detail()) {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
     'GET /v1/customers': () => ({ status: 200, body: list() }),
+    // The customer page asks whether another customer has the same name
+    [`GET /v1/customers?${new URLSearchParams({ q: start.name })}`]: () => ({ status: 200, body: list() }),
     'GET /v1/customers/c-1': () => ({ status: 200, body: current }),
     'POST /v1/customers': (r: MockRequest) => {
       const body = r.body as { name: string };
@@ -201,14 +207,26 @@ describe('«الزبائن»', () => {
   });
 
   it('says why a duplicate that still owes is not archived', async () => {
-    const { user } = open('/customers/c-1');
+    const { user } = open('/customers/c-1', detail(), true);
     await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
     expect(await screen.findByText(/عليه دين غير مسدّد/)).toBeInTheDocument();
     expect(screen.queryByText('مؤرشف')).not.toBeInTheDocument();
   });
 
+  it('offers «أرشف هذا الزبون المكرر» only when a duplicate exists', async () => {
+    open('/customers/c-1');
+    await screen.findByRole('button', { name: 'أرشفه' });
+    expect(screen.queryByRole('button', { name: 'أرشف هذا الزبون المكرر' })).not.toBeInTheDocument();
+  });
+
+  it('offers «أرشف هذا الزبون المكرر» only when a duplicate exists', async () => {
+    open('/customers/c-1');
+    await screen.findByRole('button', { name: 'أرشفه' });
+    expect(screen.queryByRole('button', { name: 'أرشف هذا الزبون المكرر' })).not.toBeInTheDocument();
+  });
+
   it('archives a duplicate with nothing open on them', async () => {
-    const { user, requestsTo } = open('/customers/c-1', detail({ balanceMinor: 0, statement: [] }));
+    const { user, requestsTo } = open('/customers/c-1', detail({ balanceMinor: 0, statement: [] }), true);
     await user.click(await screen.findByRole('button', { name: 'أرشف هذا الزبون المكرر' }));
     expect(await screen.findByText('مؤرشف')).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/customers/c-1/archive-duplicate')).toHaveLength(1);

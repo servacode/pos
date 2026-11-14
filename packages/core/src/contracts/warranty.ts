@@ -35,7 +35,20 @@ export const warrantyLookupQuery = z.object({
   serial: z.string().trim().min(3, 'اكتب الرقم التسلسلي').max(40),
 });
 
+/** The repair's own details, set when the claim opens or at any step */
+const repairDetails = {
+  /** What the repair cost the store, base currency minor units */
+  costMinor: z.int().nonnegative().nullable().optional(),
+  technician: z.string().trim().max(80).nullable().optional(),
+  /** The unit lent to the customer meanwhile */
+  loanItem: z.string().trim().max(120).nullable().optional(),
+  /** A repair after the warranty, charged by a till sale of a «صيانة» line */
+  paidRepair: z.boolean().optional(),
+  repairSaleNumber: z.string().trim().max(40).nullable().optional(),
+};
+
 export const warrantyClaimInput = z.object({
+  ...repairDetails,
   serial: z.string().trim().min(3, 'اكتب الرقم التسلسلي').max(40),
   /** «الشاشة لا تعمل» */
   issue: z.string().trim().min(1, 'اكتب العطل').max(300),
@@ -54,6 +67,7 @@ export const warrantyStatusInput = z
     note: z.string().trim().max(300).nullable().optional(),
     /** The supplier or workshop it was sent to (with status `sent`) */
     sentTo: z.string().trim().max(120).nullable().optional(),
+    ...repairDetails,
   })
   .refine((s) => s.status !== 'sent' || Boolean(s.sentTo), {
     path: ['sentTo'],
@@ -86,6 +100,11 @@ export interface WarrantyClaim {
   customerPhone: string | null;
   issue: string;
   sentTo: string | null;
+  costMinor: number | null;
+  technician: string | null;
+  loanItem: string | null;
+  paidRepair: boolean;
+  repairSaleNumber: string | null;
   events: WarrantyEvent[];
   createdAt: string;
   version: number;
@@ -103,4 +122,33 @@ export interface WarrantyLookup {
   customerName: string | null;
   customerPhone: string | null;
   claims: WarrantyClaim[];
+}
+
+/**
+ * The day a warranty of `months` from `date` ends: the same day of the month `months` later, or the
+ * last day of that month when it has no such day (the database does the same): 2026-01-31 + 1 →
+ * 2026-02-28. The till shows it on the receipt, so it must match what the server stores.
+ */
+export function addMonthsIso(date: string, months: number): string {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  const index = y * 12 + (m - 1) + months;
+  const year = Math.floor(index / 12);
+  const month = index % 12;
+  const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${pad(year, 4)}-${pad(month + 1)}-${pad(Math.min(d, last))}`;
+}
+
+/** «2027-10-30» as «30/10/2027» */
+export function dmy(date: string): string {
+  const [y, m, d] = date.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+/** «الكفالة حتى 30/10/2027»: the line a receipt and a warranty slip carry */
+export const warrantyUntilText = (until: string): string => `الكفالة حتى ${dmy(until)}`;
+
+/** What a serial number is called: «IMEI» for phones (electronics), «الرقم التسلسلي» elsewhere */
+export function serialLabel(sectors: readonly string[] | undefined): string {
+  return sectors?.includes('electronics') ? 'IMEI' : 'الرقم التسلسلي';
 }

@@ -4,15 +4,25 @@ import type {
   Category,
   TaxKind,
   TaxRate,
+  TaxRateList,
   Unit,
   createCategoryInput,
   createTaxRateInput,
   createUnitInput,
+  defaultTaxRateInput,
   updateCategoryInput,
   updateTaxRateInput,
   updateUnitInput,
 } from '@serva/core';
-import { categories, taxRates, units, withTenant, type Database, type Transaction } from '@serva/db';
+import {
+  categories,
+  taxRates,
+  tenantSettings,
+  units,
+  withTenant,
+  type Database,
+  type Transaction,
+} from '@serva/db';
 import type { z } from 'zod';
 import { AppError } from '../../errors';
 import { audit } from '../audit';
@@ -303,11 +313,48 @@ const taxRateView = (r: typeof taxRates.$inferSelect): TaxRate => ({
   version: r.version,
 });
 
-export async function listTaxRates(db: Database, ctx: CatalogContext): Promise<{ items: TaxRate[] }> {
+export async function listTaxRates(db: Database, ctx: CatalogContext): Promise<TaxRateList> {
   return withTenant(db, ctx.auth.tenantId, async (tx) => {
     await requireCatalogReader(tx, ctx.auth.userId);
-    const rows = await tx.select().from(taxRates).orderBy(asc(taxRates.createdAt), asc(taxRates.id));
-    return { items: rows.map(taxRateView) };
+    return readTaxRates(tx);
+  });
+}
+
+async function readTaxRates(tx: Transaction): Promise<TaxRateList> {
+  const rows = await tx.select().from(taxRates).orderBy(asc(taxRates.createdAt), asc(taxRates.id));
+  const [settings] = await tx.select({ bp: tenantSettings.defaultTaxRateBp }).from(tenantSettings);
+  return { items: rows.map(taxRateView), defaultRateBp: settings?.bp ?? 0 };
+}
+
+/** «الضريبة الافتراضية»: stores the chosen rate's percentage as the store's default (null: no tax) */
+export async function setDefaultTaxRate(
+  db: Database,
+  input: z.output<typeof defaultTaxRateInput>,
+  ctx: CatalogContext,
+): Promise<TaxRateList> {
+  return withTenant(db, ctx.auth.tenantId, async (tx) => {
+    await requireOwner(tx, ctx.auth.userId);
+    let bp = 0;
+    if (input.taxRateId) {
+      const [rate] = await tx.select().from(taxRates).where(eq(taxRates.id, input.taxRateId));
+      if (!rate) throw notFound('هذه الضريبة غير موجودة.');
+      if (rate.archivedAt) throw fieldError('taxRateId', 'هذه الضريبة مؤرشفة');
+      bp = rate.rateBp;
+    }
+    await tx.update(tenantSettings).set({ defaultTaxRateBp: bp });
+    await audit(
+      tx,
+      {
+        tenantId: ctx.auth.tenantId,
+        userId: ctx.auth.userId,
+        action: 'tax_rate.default_set',
+        entity: 'tenant_settings',
+        entityId: ctx.auth.tenantId,
+        data: { taxRateId: input.taxRateId, rateBp: bp },
+      },
+      ctx.meta,
+    );
+    return readTaxRates(tx);
   });
 }
 

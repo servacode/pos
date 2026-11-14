@@ -77,7 +77,7 @@ async function aDay(store: Store): Promise<Day> {
       method: 'POST',
       url: '/v1/customers',
       headers: bearer(store.accessToken),
-      payload: { name: 'ريم' },
+      payload: { name: 'ريم', phone: '0933000111', taxNumber: '555123', address: 'حلب، الجميلية' },
     })
   ).json<{ id: string }>();
   const doc = documents(store.device);
@@ -313,6 +313,8 @@ describe('GET /v1/sales/{id}', () => {
       number: day.card.number,
       status: 'partly_returned',
       customer: { id: day.customerId, name: 'ريم' },
+      // The A4 invoice prints the customer card's tax number and address
+      customerDetails: { taxNumber: '555123', address: 'حلب، الجميلية', phone: expect.any(String) },
       device: { id: store.device.deviceId, code: store.device.code },
       receipt: {
         branchName: expect.any(String),

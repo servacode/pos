@@ -10,8 +10,10 @@ import { RegisterPage } from '../pages/RegisterPage';
 import { SectorGate } from './SectorGate';
 import {
   CHEQUE_SECTORS,
+  CONTRACT_PRICE_SECTORS,
   EXPIRY_SECTORS,
   HALL_SECTORS,
+  RENTAL_SECTORS,
   SERIAL_SECTORS,
   WARRANTY_SECTORS,
 } from '../lib/sectors';
@@ -23,7 +25,24 @@ const ProductsPage = lazy(() => import('./products/ProductsPage').then((m) => ({
 const ProductRoute = lazy(() => import('./products/ProductPage').then((m) => ({ default: m.ProductRoute })));
 const LabelsPage = lazy(() => import('./labels/LabelsPage').then((m) => ({ default: m.LabelsPage })));
 const SerialsPage = lazy(() => import('./purchases/SerialsPage').then((m) => ({ default: m.SerialsPage })));
+const RentalsPage = lazy(() => import('./contracts/RentalsPage').then((m) => ({ default: m.RentalsPage })));
+const MaintenancePage = lazy(() =>
+  import('./contracts/MaintenancePage').then((m) => ({ default: m.MaintenancePage })),
+);
+const ContractPricesPage = lazy(() =>
+  import('./contracts/ContractPricesPage').then((m) => ({ default: m.ContractPricesPage })),
+);
+const DebtAgeingPage = lazy(() =>
+  import('./contracts/DebtAgeingPage').then((m) => ({ default: m.DebtAgeingPage })),
+);
 const WarrantyPage = lazy(() => import('./warranty/WarrantyPage').then((m) => ({ default: m.WarrantyPage })));
+const TaxRatesPage = lazy(() => import('./tax/TaxRatesPage').then((m) => ({ default: m.TaxRatesPage })));
+const QuotationsPage = lazy(() =>
+  import('./quotations/QuotationsPage').then((m) => ({ default: m.QuotationsPage })),
+);
+const QuotationPage = lazy(() =>
+  import('./quotations/QuotationPage').then((m) => ({ default: m.QuotationPage })),
+);
 const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
 );
@@ -57,6 +76,7 @@ const ControlledRegisterPage = lazy(() =>
   import('./pharmacy/ControlledRegisterPage').then((m) => ({ default: m.ControlledRegisterPage })),
 );
 const ExpiryPage = lazy(() => import('./purchases/ExpiryPage').then((m) => ({ default: m.ExpiryPage })));
+const RecallPage = lazy(() => import('./purchases/RecallPage').then((m) => ({ default: m.RecallPage })));
 const ChequesPage = lazy(() => import('./cheques/ChequesPage').then((m) => ({ default: m.ChequesPage })));
 const PromotionsPage = lazy(() =>
   import('./promotions/PromotionsPage').then((m) => ({ default: m.PromotionsPage })),
@@ -161,6 +181,14 @@ export function AdminApp() {
             )}
           />
           <Route
+            path="/recall"
+            element={page(
+              <SectorGate sectors={EXPIRY_SECTORS}>
+                <RecallPage />
+              </SectorGate>,
+            )}
+          />
+          <Route
             path="/controlled-register"
             element={page(
               <SectorGate sectors={['pharmacy']}>
@@ -202,7 +230,35 @@ export function AdminApp() {
               </SectorGate>,
             )}
           />
+          <Route
+            path="/rentals"
+            element={page(
+              <SectorGate sectors={RENTAL_SECTORS}>
+                <RentalsPage />
+              </SectorGate>,
+            )}
+          />
+          <Route
+            path="/maintenance"
+            element={page(
+              <SectorGate sectors={RENTAL_SECTORS}>
+                <MaintenancePage />
+              </SectorGate>,
+            )}
+          />
+          <Route
+            path="/contract-prices"
+            element={page(
+              <SectorGate sectors={CONTRACT_PRICE_SECTORS}>
+                <ContractPricesPage />
+              </SectorGate>,
+            )}
+          />
+          <Route path="/reports/debt-ageing" element={page(<DebtAgeingPage />)} />
           <Route path="/labels" element={page(<LabelsPage />)} />
+          <Route path="/tax-rates" element={page(<TaxRatesPage />)} />
+          <Route path="/quotations" element={page(<QuotationsPage />)} />
+          <Route path="/quotations/:id" element={page(<QuotationPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />
           <Route path="/customers/:id/statement" element={page(<CustomerStatementPage />)} />
           <Route path="/suppliers/:id/statement" element={page(<SupplierStatementPage />)} />

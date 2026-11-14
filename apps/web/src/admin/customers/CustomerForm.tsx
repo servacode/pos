@@ -1,12 +1,15 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import {
+  CUSTOMER_KIND_LABELS,
+  CUSTOMER_KINDS,
   normalizeArabic,
   normalizeContactPhone,
   type CustomerDetail,
+  type CustomerKind,
   type CustomerListItem,
 } from '@serva/core';
-import { Alert, Button, Card, CardHeader, Switch, TextField, UserIcon } from '@serva/ui';
+import { Alert, Button, Card, CardHeader, Select, Switch, TextField, UserIcon } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { createCustomer, updateCustomer } from './api';
 
@@ -84,6 +87,9 @@ export function CustomerForm({
   );
   const [wholesale, setWholesale] = useState(customer?.priceTier === 'wholesale');
   const [noMessages, setNoMessages] = useState(customer?.noMessages ?? false);
+  const [kind, setKind] = useState<CustomerKind | ''>(customer?.kind ?? '');
+  const [contactName, setContactName] = useState(customer?.contactName ?? '');
+  const [contactPhone, setContactPhone] = useState(customer?.contactPhone ?? '');
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -108,6 +114,9 @@ export function CustomerForm({
       creditLimitMinor,
       priceTier: wholesale ? ('wholesale' as const) : ('retail' as const),
       noMessages,
+      kind: kind || null,
+      contactName,
+      contactPhone,
     };
     try {
       onSaved(customer ? await updateCustomer(customer.id, input) : await createCustomer(input));
@@ -185,6 +194,33 @@ export function CustomerForm({
                 value={taxNumber}
                 onChange={(e) => setTaxNumber(e.target.value)}
                 error={fields.taxNumber}
+              />
+              <Select
+                label="نوع الزبون"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as CustomerKind | '')}
+                error={fields.kind}
+              >
+                <option value="">غير محدد</option>
+                {CUSTOMER_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {CUSTOMER_KIND_LABELS[k]}
+                  </option>
+                ))}
+              </Select>
+              <TextField
+                label="المسؤول للتواصل"
+                value={contactName}
+                onChange={(e) => setContactName(e.target.value)}
+                error={fields.contactName}
+              />
+              <TextField
+                label="جوال المسؤول"
+                inputMode="tel"
+                dir="ltr"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                error={fields.contactPhone}
               />
               <TextField
                 label="ملاحظات"

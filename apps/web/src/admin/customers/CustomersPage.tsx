@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import type { CurrencyCode, CustomerListItem, CustomerListResponse } from '@serva/core';
+import {
+  CUSTOMER_KIND_LABELS,
+  CUSTOMER_KINDS,
+  type CurrencyCode,
+  type CustomerKind,
+  type CustomerListItem,
+  type CustomerListResponse,
+} from '@serva/core';
 import {
   AddIcon,
   Avatar,
@@ -21,6 +28,7 @@ import {
   PhoneIcon,
   SearchField,
   SearchIcon,
+  Select,
   SendIcon,
   Skeleton,
   StatTile,
@@ -129,6 +137,7 @@ export function CustomersPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [owing, setOwing] = useState(false);
+  const [kind, setKind] = useState<CustomerKind | ''>('');
   const [adding, setAdding] = useState(false);
   // Every customer, whatever the search says, for the duplicate warning of the new-customer form
   const [everyone, setEveryone] = useState<CustomerListItem[]>([]);
@@ -141,10 +150,10 @@ export function CustomersPage() {
 
   const load = useCallback(() => {
     setError(null);
-    listCustomers(search.trim(), owing)
+    listCustomers(search.trim(), owing, kind || undefined)
       .then(setList)
       .catch((e: unknown) => setError(errorMessage(e)));
-  }, [search, owing]);
+  }, [search, owing, kind]);
   useEffect(() => {
     const timer = setTimeout(load, 200);
     return () => clearTimeout(timer);
@@ -173,6 +182,7 @@ export function CustomersPage() {
                 {c.name}
               </Link>
               {c.priceTier === 'wholesale' ? <Badge tone="brand">جملة</Badge> : null}
+              {c.kind ? <Badge tone="info">{CUSTOMER_KIND_LABELS[c.kind]}</Badge> : null}
               {c.archived ? <Badge>مؤرشف</Badge> : null}
             </span>
             {c.phone ? (
@@ -304,6 +314,19 @@ export function CustomersPage() {
               onValueChange={setSearch}
               className="min-w-0 flex-1 basis-64 sm:max-w-md"
             />
+            <Select
+              label="نوع الزبون"
+              hideLabel
+              value={kind}
+              onChange={(e) => setKind(e.target.value as CustomerKind | '')}
+            >
+              <option value="">كل الأنواع</option>
+              {CUSTOMER_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {CUSTOMER_KIND_LABELS[k]}
+                </option>
+              ))}
+            </Select>
             <ToggleChip
               label="من عليه دين فقط"
               checked={owing}

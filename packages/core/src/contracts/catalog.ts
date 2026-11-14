@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import type { CustomerRow } from './customers';
 import type { OnlineOrderRow } from './shop';
+import type { SerialStockRow } from './purchases';
 import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
 import type { LoyaltySettings, ServiceSettings } from './store';
-import type { PharmacySettings, ShelfBatch } from './pharmacy';
+import type { PharmacySettings, ShelfBatch, StockBatch } from './pharmacy';
 import type { TillSettings } from './till';
 import type { SectorKey } from '../sectors';
 import type { CurrencyCode } from '../currencies';
@@ -52,6 +53,7 @@ import {
  *   GET    /v1/tax-rates                 owner, manager      → { items: TaxRate[] }
  *   POST   /v1/tax-rates                 owner               createTaxRateInput → TaxRate (201)
  *   PATCH  /v1/tax-rates/{id}            owner               updateTaxRateInput → TaxRate
+ *   PUT    /v1/tax-rates/default         owner               defaultTaxRateInput → { items, defaultRateBp }
  *
  * Concurrent edits (17 › التعديل المتزامن): every update sends the `version` it was read at, in
  * the body as PATCH /v1/devices/{id} does; a different current version answers 409 `stale_version`,
@@ -113,9 +115,15 @@ export const BARCODE_KINDS = ['standard', 'internal'] as const;
 export type BarcodeKind = (typeof BARCODE_KINDS)[number];
 
 /** A price as the owner enters it: an amount in pounds or in dollars (10 › التسعير بعملة والبيع بأخرى). */
+/** No shelf price is believable above this (in minor units): a slipped key is refused with a clear message. */
+export const MAX_PRICE_MINOR = 1_000_000_000_000;
+export const priceMinorSchema = nonNegativeMinorSchema.max(MAX_PRICE_MINOR, {
+  message: 'السعر كبير جداً. تحقق من الأرقام.',
+});
+
 export const priceInputSchema = z.object({
   currency: currencyCodeSchema,
-  priceMinor: nonNegativeMinorSchema,
+  priceMinor: priceMinorSchema,
 });
 export type PriceInput = z.input<typeof priceInputSchema>;
 
@@ -126,6 +134,8 @@ const packFields = {
   packName: optionalText(30, 'اسم العبوة طويل جداً'),
   /** The pack's own price in the variant's price currency; null = packQty × the unit price */
   packPriceMinor: nonNegativeMinorSchema.nullable().default(null),
+  /** The pack's own wholesale price; null = the piece wholesale price × packQty */
+  packWholesaleMinor: nonNegativeMinorSchema.nullable().default(null),
 };
 
 /**
@@ -266,8 +276,12 @@ const productFields = {
   requiresPrescription: z.boolean().default(false),
   /** «مراقَب»: only the pharmacist sells it, with the patient's details, and it enters the register */
   controlled: z.boolean().default(false),
+  /** «يتطلب صلاحية»: a purchase line of it must carry an expiry date (medical supplies, medicines) */
+  requiresExpiry: z.boolean().default(false),
   /** «له رقم تسلسلي أو IMEI» (03 › الإلكترونيات): each piece is received and sold by its number */
   tracksSerial: z.boolean().default(false),
+  /** «قابل للتأجير» (03 › الأدوات الطبية): its serial-tracked pieces can be rented out */
+  rentable: z.boolean().default(false),
   /** «الكفالة» in months from the sale; null: none */
   warrantyMonths: z.int().min(1).max(120).nullable().default(null),
   type: z.enum(PRODUCT_TYPES).default('stock'),
@@ -334,7 +348,9 @@ export const updateProductInput = z
     genericName: patchText(120, 'الاسم العلمي طويل جداً'),
     requiresPrescription: z.boolean().optional(),
     controlled: z.boolean().optional(),
+    requiresExpiry: z.boolean().optional(),
     tracksSerial: z.boolean().optional(),
+    rentable: z.boolean().optional(),
     warrantyMonths: z.int().min(1).max(120).nullable().optional(),
     type: z.enum(PRODUCT_TYPES).optional(),
     unitId: uuidSchema.optional(),
@@ -385,6 +401,7 @@ export interface BarcodeView {
   packQty: number;
   packName: string | null;
   packPriceMinor: number | null;
+  packWholesaleMinor?: number | null;
 }
 
 export interface VariantStock {
@@ -427,7 +444,9 @@ export interface ProductDetail {
   genericName: string | null;
   requiresPrescription: boolean;
   controlled: boolean;
+  requiresExpiry: boolean;
   tracksSerial: boolean;
+  rentable: boolean;
   warrantyMonths: number | null;
   type: ProductType;
   status: ProductStatus;
@@ -580,6 +599,20 @@ export const updateTaxRateInput = z.object({
 });
 export type UpdateTaxRateInput = z.input<typeof updateTaxRateInput>;
 
+/**
+ * «الضريبة الافتراضية»: the rate a new product starts with (null: none). The store keeps the rate's
+ * percentage (tenant_settings.default_tax_rate_bp, which the tills already pull); nothing about how
+ * tax is calculated or posted changes.
+ */
+export const defaultTaxRateInput = z.object({ taxRateId: uuidSchema.nullable() });
+export type DefaultTaxRateInput = z.input<typeof defaultTaxRateInput>;
+
+/** The list answer: the rates and the store's default percentage (the first live rate with it is «the default») */
+export interface TaxRateList {
+  items: TaxRate[];
+  defaultRateBp: number;
+}
+
 // ─── Pull sets: the rows a cashier device stores ──────────────────────────────
 
 /**
@@ -615,6 +648,7 @@ export interface ProductRow {
    *  pulled before these existed leave them out: read as false. */
   requiresPrescription?: boolean;
   controlled?: boolean;
+  requiresExpiry?: boolean;
   /** Each piece is sold by its serial number or IMEI, asked at the till */
   tracksSerial: boolean;
   /** «الكفالة» in months, printed with the numbers on the receipt */
@@ -684,6 +718,8 @@ export interface BarcodeRow {
   packName: string | null;
   /** In the variant's price currency */
   packPriceMinor: number | null;
+  /** The pack's wholesale price, in the variant's price currency; null: piece wholesale × packQty */
+  packWholesaleMinor?: number | null;
   version: number;
 }
 
@@ -730,6 +766,8 @@ export interface StockLevelRow {
   /** Thousandths of the base unit; may be negative */
   qty: number;
   reservedQty: number;
+  /** What is left of each batch in this branch (03 › الصيدليات); null: the item keeps no batches */
+  batches?: StockBatch[] | null;
   version: number;
 }
 
@@ -873,6 +911,7 @@ export interface PullSetRows {
   promotions: PromotionRow;
   vouchers: VoucherRow;
   online_orders: OnlineOrderRow;
+  serials: SerialStockRow;
 }
 
 // ─── Product pictures (03 › الألبسة: صور القطع) ───────────────────────────────

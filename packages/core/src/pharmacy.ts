@@ -1,5 +1,6 @@
 import type { Prescription } from './contracts/documents';
-import type { MedicineReturnPolicy, PharmacySettings, ShelfBatch } from './contracts/pharmacy';
+import type { MedicineReturnPolicy, PharmacySettings, ShelfBatch, StockBatch } from './contracts/pharmacy';
+import type { BatchAllocation } from './contracts/documents';
 
 /**
  * The pharmacy rules the till and the server share (03 › الصيدليات): which batch a sale takes,
@@ -106,4 +107,84 @@ export function medicineReturnRule(
   }
   if (policy === 'none') return { kind: 'blocked', reason: 'المحل لا يقبل مرتجع الأدوية.' };
   return policy === 'sealed' ? { kind: 'sealed' } : { kind: 'free' };
+}
+
+// ─── Per-batch stock (FEFO) ───────────────────────────────────────────────────
+
+export type BatchState = 'ok' | 'expired' | 'blocked' | 'empty';
+
+/** Whether a batch can be sold from on `today` (good through its own date): empty, blocked, expired or fine. */
+export function batchState(batch: StockBatch, today: string): BatchState {
+  if (batch.qty <= 0) return 'empty';
+  if (batch.blocked) return 'blocked';
+  if (batch.expiry && batch.expiry < today) return 'expired';
+  return 'ok';
+}
+
+/** First expiry first; a batch with no date last, then by number. */
+const byExpiry = (a: StockBatch, b: StockBatch): number =>
+  (a.expiry ?? '9999-12-31').localeCompare(b.expiry ?? '9999-12-31') ||
+  (a.batchNo ?? '').localeCompare(b.batchNo ?? '');
+
+export interface FefoResult {
+  /** What to take from each batch, in the order taken (one line may span several batches) */
+  allocations: BatchAllocation[];
+  /** What no valid batch covered, base units; 0 when everything is allocated */
+  uncovered: number;
+  /** What sat in expired or blocked batches, so the till can say why it was left */
+  expiredQty: number;
+  blockedQty: number;
+  /** The batches after the allocation: the next line of the cart takes from these */
+  remaining: StockBatch[];
+}
+
+/**
+ * First-expiry-first-out across the batches with something left that are neither expired (by
+ * `today`) nor blocked. When one batch is short the line is split onto the next. Pure: the batches
+ * given are not changed; `remaining` is what is left for the next line.
+ */
+export function allocateFefo(batches: readonly StockBatch[], qty: number, today: string): FefoResult {
+  const remaining = batches.map((b) => ({ ...b }));
+  let expiredQty = 0;
+  let blockedQty = 0;
+  for (const b of remaining) {
+    const state = batchState(b, today);
+    if (state === 'expired') expiredQty += b.qty;
+    if (state === 'blocked') blockedQty += b.qty;
+  }
+  const allocations: BatchAllocation[] = [];
+  let left = Math.max(0, qty);
+  for (const b of [...remaining].sort(byExpiry)) {
+    if (left === 0) break;
+    if (batchState(b, today) !== 'ok') continue;
+    const take = Math.min(left, b.qty);
+    allocations.push({ batchNo: b.batchNo, expiry: b.expiry, qty: take });
+    b.qty -= take;
+    left -= take;
+  }
+  return { allocations, uncovered: left, expiredQty, blockedQty, remaining };
+}
+
+/** The same batch: number and expiry as received */
+export const sameBatch = (
+  a: { batchNo: string | null; expiry: string | null },
+  b: { batchNo: string | null; expiry: string | null },
+): boolean => (a.batchNo ?? '') === (b.batchNo ?? '') && (a.expiry ?? null) === (b.expiry ?? null);
+
+/** Whether a sale of `wanted` base units goes past what is on hand (zero or negative on hand included) */
+export function overStock(onHand: number | null | undefined, wanted: number): boolean {
+  return onHand !== null && onHand !== undefined && wanted > Math.max(0, onHand);
+}
+
+/**
+ * What the till does when no valid batch covers a line: `block` refuses (the store's setting),
+ * `approve` asks a manager, `none` when the batches cover it or the item keeps no batches.
+ */
+export function uncoveredAction(
+  settings: PharmacySettings | null | undefined,
+  tracksBatches: boolean,
+  uncovered: number,
+): 'none' | 'block' | 'approve' {
+  if (!tracksBatches || uncovered <= 0) return 'none';
+  return settings?.blockNoBatch ? 'block' : 'approve';
 }

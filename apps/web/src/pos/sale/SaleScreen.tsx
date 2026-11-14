@@ -1,11 +1,19 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazyChunk, TillBoundary } from '../chunks';
+import { dayText } from '../../lib/dates';
 import { CURRENCIES } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import type { Approval } from '@serva/core/contracts/documents';
-import { businessDateOf, rateFor } from '@serva/core/sale';
+import { businessDateOf, packPrice, rateFor } from '@serva/core/sale';
 import { promotionActive } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
-import { missingPrescription, pickBatch, prescriptionNeed, usesAutoBatch } from '@serva/core/pharmacy';
+import {
+  allocateFefo,
+  missingPrescription,
+  pickBatch,
+  prescriptionNeed,
+  usesAutoBatch,
+} from '@serva/core/pharmacy';
 import type { OutboxEntry } from '@serva/sync';
 import {
   AddIcon,
@@ -45,6 +53,9 @@ import { barcodeKey, type BarcodeHit, type Catalog, type CatalogItem } from '../
 import { counted } from '../format';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
+import { BatchBanner } from './BatchBanner';
+import { batchGuard, planBatches } from './batches';
+import { deviceDocuments } from '../shift/shift';
 import { AdjustPanel, NEED_TEXT, type AdjustMode, type AdjustValue } from './AdjustPanel';
 import {
   addItem,
@@ -56,6 +67,7 @@ import {
   missingSerials,
   priceCart,
   setPriceTier,
+  applyContractPrices,
   type ItemChoice,
   EMPTY_CART,
   couponPromotion,
@@ -72,7 +84,9 @@ import {
 } from './cart';
 import { useScanner } from './useScanner';
 import { usePos } from '../services';
+import { fetchContractPrices } from '../rentals/api';
 import { PrintableQuote, type QuoteData } from '../receipt/Quote';
+import { quotationInputOf, saveQuotation } from '../quotations/api';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
 import { modelPieces, orderPieces } from './models';
@@ -89,17 +103,22 @@ import { ItemsArea, type PriceCheck } from './ItemsArea';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
+import { serialLabel } from '@serva/core/contracts/warranty';
 import { PrescriptionPanel } from './PrescriptionPanel';
 import { Kbd } from './Kbd';
 import { SalePanel } from './SalePanel';
+import { packLineText } from './packText';
 
-const PaymentPanel = lazy(() => import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })));
+const PaymentPanel = lazyChunk(() =>
+  import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })),
+);
 
 export type SaleMode =
   | { kind: 'items' }
   | { kind: 'line'; lineNo: number; adjust: AdjustMode }
   | { kind: 'invoice' }
   | { kind: 'approve'; lineNo: number | null; need: ApprovalNeed }
+  | { kind: 'batchApprove' }
   | { kind: 'pay' }
   | { kind: 'done' }
   | { kind: 'help' }
@@ -196,14 +215,43 @@ export function SaleScreen(props: SaleScreenProps) {
       : running;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the cart is the clock's tick
   }, [catalog.promotions, settings.timezone, cart]);
+  // 03 › الصيدليات: what the cart takes from which batch (first expiry first), and from the shelf.
+  // What this till sold and has not sent yet comes off what it last pulled, as it works offline.
+  const posServices = usePos();
+  const [unsent, setUnsent] = useState<OutboxEntry[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void deviceDocuments(posServices.store).then((list) => alive && setUnsent(list));
+    return () => {
+      alive = false;
+    };
+  }, [posServices.store, props.done]);
+  const batchPlan = useMemo(
+    () =>
+      planBatches({
+        cart,
+        catalog,
+        today: businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff),
+        pending: unsent,
+        pharmacy: settings.pharmacy,
+      }),
+    [cart, catalog, unsent, settings.timezone, settings.businessDayCutoff, settings.pharmacy],
+  );
+  const guard = useMemo(
+    () => batchGuard(batchPlan, settings.pharmacy, settings.till?.blockNegativeStock === true),
+    [batchPlan, settings.pharmacy, settings.till],
+  );
+  const batchApproved = cart.batchApproval?.sig === batchPlan.signature;
+  const batchWaits = guard.approvals.length > 0 && !batchApproved;
   const ctx = useMemo<PricingContext>(
     () => ({
       currency: settings.baseCurrency,
       taxInclusive: settings.taxInclusive,
       rates: catalog.rates,
       promotions: activePromotions,
+      batchPlan: batchPlan.allocations,
     }),
-    [settings.baseCurrency, settings.taxInclusive, catalog.rates, activePromotions],
+    [settings.baseCurrency, settings.taxInclusive, catalog.rates, activePromotions, batchPlan.allocations],
   );
   const rules = useMemo<ApprovalRules>(
     () => ({
@@ -219,6 +267,31 @@ export function SaleScreen(props: SaleScreenProps) {
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
   const [quote, setQuote] = useState<QuoteData | null>(null);
+  /** «عرض سعر»: saved as a numbered quotation when the server answers, then printed with its number */
+  async function printQuote(from: PricedCart) {
+    const slip: QuoteData = {
+      settings,
+      lines: from.lines,
+      totals: from.priced.totals,
+      at: Date.now(),
+      cashierName: session.fullName,
+      wholesale: cart.priceTier === 'wholesale',
+    };
+    const token = posServices.device.token;
+    if (token && posServices.online()) {
+      const saved = await saveQuotation(
+        quotationInputOf(from.lines, cart.invoiceDiscount, cart.customer ?? null, null),
+        token,
+        posServices.fetch,
+      );
+      if (saved.kind === 'ok') {
+        setQuote({ ...slip, number: saved.body.number, validUntil: saved.body.validUntil });
+        return;
+      }
+    }
+    // No server to number it: the slip still prints, marked as not saved
+    setQuote({ ...slip, unsaved: true });
+  }
   const [kitchen, setKitchen] = useState<KitchenData | null>(null);
   // «سعر صنف»: looks an item up (price per size and colour, stock) without adding it to the cart
   const [checking, setChecking] = useState(false);
@@ -278,7 +351,13 @@ export function SaleScreen(props: SaleScreenProps) {
   const invoiceNeeds = priced ? invoiceNeed(cart, priced.priced, rules) : null;
   const totalMinor = priced?.priced.totals.totalMinor ?? 0;
   const unnumbered = missingSerials(cart);
-  const blocked = needs.size > 0 || invoiceNeeds !== null || unnumbered.length > 0;
+  const blocked =
+    needs.size > 0 ||
+    invoiceNeeds !== null ||
+    unnumbered.length > 0 ||
+    guard.blocks.length > 0 ||
+    guard.stockBlocks.length > 0 ||
+    batchWaits;
   const canPay = cart.lines.length > 0 && priced !== null && !blocked;
 
   const showDone = props.done !== null && cart.lines.length === 0;
@@ -313,9 +392,14 @@ export function SaleScreen(props: SaleScreenProps) {
       }
       // …and no box of an expired batch goes out: the nearest batch that is still good is taken
       const today = businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff);
-      const pick = usesAutoBatch(settings.pharmacy)
-        ? pickBatch(item.shelfBatches, today)
-        : { kind: 'none' as const };
+      // A branch that has its batches' balances (stock_levels.batches) plans them for the whole cart
+      // at payment (batches.ts); one that has only the dates (an older pull) picks here as before.
+      const planned = usesAutoBatch(settings.pharmacy) && Array.isArray(item.stockBatches);
+      const pick = planned
+        ? { kind: 'ok' as const, batch: allocateFefo(item.stockBatches!, 1, today).allocations[0] }
+        : usesAutoBatch(settings.pharmacy)
+          ? pickBatch(item.shelfBatches, today)
+          : { kind: 'none' as const };
       if (pick.kind === 'expired') {
         setNotice({
           tone: 'warning',
@@ -323,7 +407,8 @@ export function SaleScreen(props: SaleScreenProps) {
         });
         return;
       }
-      const batch = pick.kind === 'ok' ? pick.batch : null;
+      const shown = pick.kind === 'ok' && pick.batch ? pick.batch : null;
+      const batch = planned ? null : (shown as { batchNo: string | null; expiry: string } | null);
       const qty = weighedQty ?? (multiplier ?? 1) * 1000;
       setMultiplier(null);
       setNotice(null);
@@ -336,7 +421,7 @@ export function SaleScreen(props: SaleScreenProps) {
       const added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
       setBump(added);
       // 03 › الصيدليات: what is on the shelf may have expired, or soon will
-      const expiry = batch ? batch.expiry : item.nearestExpiry;
+      const expiry = shown ? shown.expiry : planned ? null : item.nearestExpiry;
       if (expiry) {
         const soon = businessDateOf(
           Date.now() + 30 * 86_400_000,
@@ -346,14 +431,14 @@ export function SaleScreen(props: SaleScreenProps) {
         if (expiry < today) {
           setNotice({
             tone: 'warning',
-            text: `صلاحية «${item.name}» انتهت في ${expiry} حسب آخر استلام. تأكد من العلبة قبل البيع.`,
+            text: `صلاحية «${item.name}» انتهت في ${dayText(expiry, digits)} حسب آخر استلام. تأكد من العلبة قبل البيع.`,
           });
         } else if (expiry <= soon) {
           setNotice({
             tone: 'info',
-            text: batch?.batchNo
-              ? `صلاحية «${item.name}» (دفعة ${batch.batchNo}) تنتهي في ${expiry}.`
-              : `صلاحية «${item.name}» تنتهي في ${expiry}.`,
+            text: shown?.batchNo
+              ? `صلاحية «${item.name}» (دفعة ${shown.batchNo}) تنتهي في ${dayText(expiry, digits)}.`
+              : `صلاحية «${item.name}» تنتهي في ${dayText(expiry, digits)}.`,
           });
         }
       }
@@ -377,6 +462,7 @@ export function SaleScreen(props: SaleScreenProps) {
       settings.businessDayCutoff,
       settings.pharmacy,
       session.permissions,
+      digits,
     ],
   );
 
@@ -386,7 +472,7 @@ export function SaleScreen(props: SaleScreenProps) {
       const hit = catalog.byBarcode.get(code);
       // «سعر صنف»: a scan shows the item's price and stock, and adds nothing
       const take = (item: CatalogItem, h: BarcodeHit | null, qty?: number) => {
-        if (checkingRef.current) handlers.current.showPrice(item);
+        if (checkingRef.current) handlers.current.showPrice(item, h);
         else add(item, h, qty);
       };
       if (hit) {
@@ -432,6 +518,7 @@ export function SaleScreen(props: SaleScreenProps) {
     mode.kind === 'line' ||
     mode.kind === 'invoice' ||
     mode.kind === 'approve' ||
+    mode.kind === 'batchApprove' ||
     mode.kind === 'serial' ||
     mode.kind === 'rx' ||
     mode.kind === 'holdName' ||
@@ -487,12 +574,22 @@ export function SaleScreen(props: SaleScreenProps) {
 
   /** Shows an item's price and stock (all its sizes and colours) and adds nothing */
   const showPrice = useCallback(
-    (item: CatalogItem) => {
+    (item: CatalogItem, hit?: BarcodeHit | null) => {
       const model = pieces.get(item.productId);
+      const packQty = hit?.barcode.packQty ?? 1000;
       setCheck({
         name: model ? (model[0]!.productName ?? item.name) : item.name,
         pieces: model ? orderPieces(model) : [item],
         focus: item.variantId,
+        pack:
+          hit && packQty !== 1000
+            ? {
+                name: hit.barcode.packName,
+                qty: packQty,
+                priceMinor: packPrice(item.price.priceMinor, packQty, hit.barcode.packPriceMinor),
+                currency: item.price.currency,
+              }
+            : null,
       });
     },
     [pieces],
@@ -503,7 +600,7 @@ export function SaleScreen(props: SaleScreenProps) {
   const handlers = useRef({ add, scan, showPrice });
   handlers.current = { add, scan, showPrice };
   const pickItem = useCallback((item: CatalogItem, hit?: BarcodeHit | null) => {
-    if (checkingRef.current) handlers.current.showPrice(item);
+    if (checkingRef.current) handlers.current.showPrice(item, hit);
     else handlers.current.add(item, hit);
   }, []);
   const pickModel = useCallback(
@@ -800,16 +897,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   label="عرض سعر"
                   size="md"
                   icon={<PrintIcon />}
-                  onClick={() =>
-                    setQuote({
-                      settings,
-                      lines: priced.lines,
-                      totals: priced.priced.totals,
-                      at: Date.now(),
-                      cashierName: session.fullName,
-                      wholesale: cart.priceTier === 'wholesale',
-                    })
-                  }
+                  onClick={() => void printQuote(priced)}
                 />
               </Tooltip>
             ) : null}
@@ -966,7 +1054,8 @@ export function SaleScreen(props: SaleScreenProps) {
               const percent =
                 adj?.kind === 'discount' && adj.discount.type === 'percent' ? adj.discount.bp : null;
               const meta = [
-                line.packName ? line.packName : null,
+                packLineText(line, (q) => formatQuantity(q, digits)) ??
+                  (line.packName ? line.packName : null),
                 adj?.kind === 'price' ? 'سعر معدّل' : null,
                 // A discount on the line: the price before it struck through, then what was taken off
                 discounted && p ? (
@@ -1033,7 +1122,9 @@ export function SaleScreen(props: SaleScreenProps) {
                         )}
                         onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
                       >
-                        {line.serials?.length ? `IMEI ${line.serials.join('، ')}` : 'اكتب الرقم التسلسلي'}
+                        {line.serials?.length
+                          ? `${serialLabel(settings.sectors)} ${line.serials.join('، ')}`
+                          : 'اكتب الرقم التسلسلي'}
                       </button>
                     ) : undefined
                   }
@@ -1203,21 +1294,35 @@ export function SaleScreen(props: SaleScreenProps) {
           ) : undefined
         }
         notice={
-          invoiceNeeds ? (
-            <div
-              role="alert"
-              className="flex items-center gap-3 rounded-card border border-warning/20 bg-warning-soft py-2 ps-3 pe-2 text-sm font-semibold text-warning-ink"
-            >
-              <WarningIcon size={20} className="shrink-0" />
-              <span className="min-w-0 flex-1">{NEED_TEXT[invoiceNeeds]}</span>
-              <Button
-                variant="secondary"
-                size="md"
-                icon={<KeyIcon size={20} />}
-                onClick={() => setMode({ kind: 'approve', lineNo: null, need: invoiceNeeds })}
-              >
-                رمز المدير
-              </Button>
+          invoiceNeeds ||
+          guard.blocks.length + guard.stockBlocks.length + guard.stockWarns.length > 0 ||
+          batchWaits ? (
+            <div className="flex flex-col gap-2">
+              <BatchBanner
+                blocks={guard.blocks}
+                approvals={batchWaits ? guard.approvals : []}
+                stockBlocks={guard.stockBlocks}
+                stockWarns={guard.stockWarns}
+                fmt={(q) => formatQuantity(q, digits)}
+                onApprove={() => setMode({ kind: 'batchApprove' })}
+              />
+              {invoiceNeeds ? (
+                <div
+                  role="alert"
+                  className="flex items-center gap-3 rounded-card border border-warning/20 bg-warning-soft py-2 ps-3 pe-2 text-sm font-semibold text-warning-ink"
+                >
+                  <WarningIcon size={20} className="shrink-0" />
+                  <span className="min-w-0 flex-1">{NEED_TEXT[invoiceNeeds]}</span>
+                  <Button
+                    variant="secondary"
+                    size="md"
+                    icon={<KeyIcon size={20} />}
+                    onClick={() => setMode({ kind: 'approve', lineNo: null, need: invoiceNeeds })}
+                  >
+                    رمز المدير
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : undefined
         }
@@ -1269,32 +1374,42 @@ export function SaleScreen(props: SaleScreenProps) {
       {quote ? <PrintableQuote data={quote} width={80} /> : null}
       {kitchen ? <PrintableKitchenTicket data={kitchen} /> : null}
       {effectiveMode.kind === 'pay' && priced ? (
-        <Suspense fallback={null}>
-          <PaymentPanel
-            cart={cart}
-            ctx={ctx}
-            totalMinor={totalMinor}
-            catalog={catalog}
-            shiftId={props.shiftId}
-            cashierId={session.userId}
-            canCredit={session.permissions.has('sale.credit')}
-            staff={staff}
-            salespersonId={seller !== session.userId ? seller : null}
-            onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
-            onBack={() => setMode({ kind: 'items' })}
-            onCompleted={(entry) => {
-              setMode({ kind: 'items' });
-              setSelected(null);
-              const order = cart.onlineOrder;
-              if (order) {
-                const ids = [...soldOnline.filter((id) => id !== order.id).slice(-49), order.id];
-                setSoldOnline(ids);
-                void pos.local.set(ONLINE_SOLD_KEY, ids);
-              }
-              props.onSaved(entry);
-            }}
-          />
-        </Suspense>
+        <TillBoundary onBack={() => setMode({ kind: 'items' })}>
+          <Suspense fallback={null}>
+            <PaymentPanel
+              cart={cart}
+              ctx={ctx}
+              totalMinor={totalMinor}
+              catalog={catalog}
+              shiftId={props.shiftId}
+              cashierId={session.userId}
+              canCredit={session.permissions.has('sale.credit')}
+              staff={staff}
+              salespersonId={seller !== session.userId ? seller : null}
+              onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
+              onContractPrices={async (customerId) => {
+                // A hospital's or clinic's contract prices (03 › أسعار العقود); none offline
+                const prices = pos.device.token
+                  ? await fetchContractPrices(customerId, pos.device.token, pos.fetch)
+                  : [];
+                if (prices.length > 0) setCart((c) => applyContractPrices(c, prices));
+                return prices.length > 0;
+              }}
+              onBack={() => setMode({ kind: 'items' })}
+              onCompleted={(entry) => {
+                setMode({ kind: 'items' });
+                setSelected(null);
+                const order = cart.onlineOrder;
+                if (order) {
+                  const ids = [...soldOnline.filter((id) => id !== order.id).slice(-49), order.id];
+                  setSoldOnline(ids);
+                  void pos.local.set(ONLINE_SOLD_KEY, ids);
+                }
+                props.onSaved(entry);
+              }}
+            />
+          </Suspense>
+        </TillBoundary>
       ) : effectiveMode.kind === 'done' ? (
         props.done
       ) : effectiveMode.kind === 'line' && lineOf(effectiveMode.lineNo) ? (
@@ -1396,6 +1511,19 @@ export function SaleScreen(props: SaleScreenProps) {
             onCancel={() => setMode({ kind: 'items' })}
           />
         </SalePanel>
+      ) : effectiveMode.kind === 'batchApprove' ? (
+        <SalePanel title="موافقة على بيع بلا دفعة صالحة" icon={<KeyIcon size={20} />}>
+          <ManagerCode
+            staff={staff}
+            permission="sale.discount_over_limit"
+            reason="لا دفعة صالحة تكفي بعض الأصناف: يوافق المدير على بيعها"
+            onApproved={(approval) => {
+              setCart((c) => ({ ...c, batchApproval: { sig: batchPlan.signature, approval } }));
+              setMode({ kind: 'items' });
+            }}
+            onCancel={() => setMode({ kind: 'items' })}
+          />
+        </SalePanel>
       ) : effectiveMode.kind === 'rx' ? (
         <PrescriptionPanel
           need={rxNeed}
@@ -1416,8 +1544,16 @@ export function SaleScreen(props: SaleScreenProps) {
               cart.lines.filter((l) => l.lineNo !== effectiveMode.lineNo).flatMap((l) => l.serials ?? []),
             )
           }
-          onSave={(serials) => {
-            setCart((c) => updateLine(c, effectiveMode.lineNo, { serials }));
+          catalog={catalog}
+          staff={staff}
+          onSave={(serials, override) => {
+            setCart((c) =>
+              updateLine(c, effectiveMode.lineNo, {
+                serials,
+                serialOverrides: override ? serials : [],
+                serialApprovedBy: override?.approval.userId ?? null,
+              }),
+            );
             setMode({ kind: 'items' });
           }}
           onCancel={() => setMode({ kind: 'items' })}

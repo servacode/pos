@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import type { Cheque, ChequeStatus, CurrencyCode } from '@serva/core';
+import { CHEQUE_DUE_SOON_DAYS, type Cheque, type ChequeStatus, type CurrencyCode } from '@serva/core';
 import {
   Alert,
   Avatar,
@@ -47,6 +47,19 @@ const EMPTY_TITLE: Record<ChequeStatus | 'all', string> = {
 /** Today on the store's clock, «2026-11-03» */
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Damascus' }).format(new Date());
 
+/** The day `days` after `day` («2026-11-03», 7 → «2026-11-10»), on calendar days */
+export function addDays(day: string, days: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Cheques still waiting whose due day is today or within the next days; the home page counts them too */
+export function dueSoon(items: readonly Cheque[], day: string): Cheque[] {
+  const until = addDays(day, CHEQUE_DUE_SOON_DAYS);
+  return items.filter((c) => c.status === 'pending' && c.dueDate && c.dueDate <= until);
+}
+
 /**
  * «الشيكات» (03 › الجملة: الآجل والشيكات): every cheque a till took, for a sale or a customer's
  * payment, waiting in «شيكات تحت التحصيل» until the owner marks it cashed into the bank or bounced
@@ -56,6 +69,7 @@ export function ChequesPage() {
   const me = useMe();
   const canManage = me.user.permissions.includes('customers.manage');
   const [filter, setFilter] = useState<ChequeStatus | 'all'>('pending');
+  const [order, setOrder] = useState<'recent' | 'due'>('recent');
   const [items, setItems] = useState<Cheque[] | null>(null);
   const [base, setBase] = useState<CurrencyCode>('SYP');
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +87,7 @@ export function ChequesPage() {
   useEffect(load, [load]);
 
   async function mark(c: Cheque, action: 'cleared' | 'bounced') {
+    if (c.sourceType === 'supplier_payment') return;
     const key = `${c.sourceId}-${c.paymentNo}`;
     setBusy(key);
     setError(null);
@@ -92,8 +107,14 @@ export function ChequesPage() {
     }
   }
 
+  // By due date: the soonest first, the ones without a date last
+  const shown =
+    order === 'due'
+      ? [...(items ?? [])].sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'))
+      : (items ?? []);
+  const soon = dueSoon(items ?? [], today());
   const pendingTotal = (items ?? [])
-    .filter((c) => c.status === 'pending')
+    .filter((c) => c.status === 'pending' && c.direction !== 'out')
     .reduce((sum, c) => sum + c.amountMinor, 0);
   // A number of the tiles: a placeholder while the list loads, a dash when it could not.
   const kpi = (value: ReactNode) => (items ? value : error ? '—' : <Skeleton className="h-9 w-24" />);
@@ -101,7 +122,9 @@ export function ChequesPage() {
   // The status: its badge, and the day it was marked under it.
   const status = (c: Cheque) => (
     <span className="flex flex-col items-start gap-0.5">
-      <Badge tone={STATUS_TONE[c.status]}>{STATUS_TEXT[c.status]}</Badge>
+      <Badge tone={c.direction === 'out' ? 'neutral' : STATUS_TONE[c.status]}>
+        {c.direction === 'out' ? 'صادر للمورد' : STATUS_TEXT[c.status]}
+      </Badge>
       {c.actionDate ? <bdi className="num ps-1 text-xs text-ink-subtle">{c.actionDate}</bdi> : null}
     </span>
   );
@@ -136,11 +159,40 @@ export function ChequesPage() {
       header: 'الزبون',
       className: 'hidden sm:table-cell',
       cell: (c) =>
-        c.customerName ? (
+        c.direction === 'out' ? (
+          <span className="font-semibold">{c.supplierName ?? '—'}</span>
+        ) : c.customerName ? (
           <span className="flex items-center gap-2.5">
             <Avatar name={c.customerName} size="sm" />
             <span className="font-semibold">{c.customerName}</span>
           </span>
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        ),
+    },
+    {
+      key: 'bank',
+      header: 'البنك',
+      className: 'hidden md:table-cell',
+      cell: (c) => (
+        <span className="flex flex-col items-start">
+          <span>{c.bank ?? <span className="text-ink-subtle">—</span>}</span>
+          {c.drawer ? <span className="text-xs text-ink-muted">الساحب: {c.drawer}</span> : null}
+        </span>
+      ),
+    },
+    {
+      key: 'due',
+      header: 'الاستحقاق',
+      cell: (c) =>
+        c.dueDate ? (
+          <bdi
+            className={`num whitespace-nowrap ${
+              c.status === 'pending' && c.dueDate <= today() ? 'font-semibold text-danger-ink' : 'text-ink'
+            }`}
+          >
+            {c.dueDate}
+          </bdi>
         ) : (
           <span className="text-ink-subtle">—</span>
         ),
@@ -169,7 +221,7 @@ export function ChequesPage() {
       header: <span className="sr-only">إجراءات</span>,
       className: 'relative w-px',
       cell: (c) =>
-        c.status === 'pending' && canManage ? (
+        c.status === 'pending' && canManage && c.direction !== 'out' ? (
           <span className="flex flex-col items-stretch gap-1.5 py-2 sm:flex-row sm:justify-end sm:py-0">
             <Button
               size="sm"
@@ -229,7 +281,22 @@ export function ChequesPage() {
                 { value: 'all', label: 'الكل' },
               ]}
             />
+            <SegmentedControl
+              label="رتّب"
+              value={order}
+              onValueChange={setOrder}
+              options={[
+                { value: 'recent', label: 'الأحدث' },
+                { value: 'due', label: 'تاريخ الاستحقاق' },
+              ]}
+            />
           </div>
+          {soon.length > 0 ? (
+            <Alert tone="warning">
+              <bdi className="num">{soon.length}</bdi> {soon.length === 1 ? 'شيك يستحق' : 'شيكات تستحق'} خلال{' '}
+              {CHEQUE_DUE_SOON_DAYS} أيام أو فات موعدها.
+            </Alert>
+          ) : null}
           <Alert tone="info">
             «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد واحد في
             الدفاتر.
@@ -237,7 +304,7 @@ export function ChequesPage() {
           <DataTable
             caption="الشيكات"
             columns={columns}
-            rows={items ?? []}
+            rows={shown}
             rowKey={(c) => `${c.sourceType}-${c.sourceId}-${c.paymentNo}`}
             loading={!items && !error}
             {...(error && !items ? { error, onRetry: load } : {})}

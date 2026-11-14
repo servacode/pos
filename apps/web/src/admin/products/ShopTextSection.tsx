@@ -3,6 +3,7 @@ import type { ProductTexts, StockAlert } from '@serva/core';
 import { Alert, Badge, Button, CheckIcon, SendIcon, StoreIcon } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { apiFetch, errorMessage } from '../../lib/api';
+import { storeSells } from '../../lib/sectors';
 import { SectionCard } from './parts';
 
 /**
@@ -32,6 +33,8 @@ export function ShopTextSection({
   disabled?: boolean;
 }) {
   const me = useMe();
+  // Sizes and their guide belong to clothes and shoes; other stores see no size wording
+  const fashion = storeSells(me.tenant.sectors, ['clothing']);
   const descId = useId();
   const guideId = useId();
   const [texts, setTexts] = useState<ProductTexts | null>(null);
@@ -122,7 +125,7 @@ export function ShopTextSection({
       </div>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={guideId} className="text-sm font-semibold text-ink-muted">
-          دليل المقاسات
+          {fashion ? 'دليل المقاسات' : 'معلومات إضافية للزبون'}
         </label>
         <textarea
           id={guideId}

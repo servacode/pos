@@ -122,3 +122,45 @@ export function truthy(value: string | null): boolean {
   const v = toLatinDigits(value).toLowerCase();
   return ['نعم', 'اجل', 'أجل', 'yes', 'y', 'true', '1', 'جملة', 'wholesale'].includes(v);
 }
+
+/** A real calendar date as YYYY-MM-DD, or null. */
+function isoDate(year: number, month: number, day: number): string | null {
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * A date cell as YYYY-MM-DD: «2027-06-30», «30/6/2027», «30-06-2027» (day first, as in Syria), or an
+ * Excel serial number. Null when empty; a message on the field when it is not a date.
+ */
+export function dateOf(row: ImportRow, key: string, label: string, issues: Issues): string | null {
+  const cell = row.values[key];
+  const text = textOf(cell);
+  if (text === null) return null;
+  const latin = toLatinDigits(text).replace(/\s/g, '');
+  let found: string | null = null;
+  const iso = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:T.*)?$/.exec(latin);
+  const dmy = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(latin);
+  if (iso) found = isoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  else if (dmy) found = isoDate(Number(dmy[3]), Number(dmy[2]), Number(dmy[1]));
+  else if (/^\d{5}(\.\d+)?$/.test(latin)) {
+    // Excel counts days from 1899-12-30
+    found = new Date(Date.UTC(1899, 11, 30) + Math.floor(Number(latin)) * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+  }
+  if (found === null) issues.add(key, `${label} ليس تاريخاً صحيحاً. اكتبه هكذا: 2027-06-30`);
+  return found;
+}
+
+/** The items of a list cell («A1, A2» or one per line), trimmed, empty ones dropped. */
+export function listOf(cell: Cell): string[] {
+  const text = textOf(String(cell ?? '').replace(/[\n\r]+/g, ','));
+  return text === null
+    ? []
+    : text
+        .split(/[,،;؛\s]+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+}

@@ -7,6 +7,7 @@ import { useDevice } from '../offline/useDevice';
 import { loadCatalog, type Catalog } from './catalog';
 import { PosProvider, saveWith, type PosServices } from './services';
 import { staffRoster, type StaffSession } from './staff/staff';
+import { TillBoundary } from './chunks';
 import { StatusBar, type OutboxStatus } from './StatusBar';
 import { useOnline } from './useOnline';
 
@@ -87,16 +88,18 @@ export function PosSession({ services, persisted }: { services: PosServices; per
     <PosProvider services={pos}>
       <DigitsProvider digits={digits}>
         {session && catalog ? (
-          <Suspense fallback={null}>
-            <CashierApp
-              session={session}
-              catalog={catalog}
-              persisted={persisted}
-              online={online}
-              outbox={outbox}
-              onSignOut={signOut}
-            />
-          </Suspense>
+          <TillBoundary>
+            <Suspense fallback={null}>
+              <CashierApp
+                session={session}
+                catalog={catalog}
+                persisted={persisted}
+                online={online}
+                outbox={outbox}
+                onSignOut={signOut}
+              />
+            </Suspense>
+          </TillBoundary>
         ) : (
           <CashierShell
             statusBar={

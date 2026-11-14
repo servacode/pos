@@ -46,10 +46,31 @@ describe('«الصندوق» in the settings', () => {
     await user.click(within(form).getByRole('switch', { name: /رقم الموافقة إلزامي/ }));
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
-    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toEqual({
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({
       returnWindowDays: 14,
       cardApprovalRequired: true,
+      // The warranty rules: off for a supermarket until the owner turns them on
+      warrantyAskCustomer: false,
+      warrantyTerms: null,
     });
+  });
+
+  it('saves «امنع البيع فوق المخزون», off until turned on', async () => {
+    const current = store(['supermarket']);
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    const block = within(form).getByRole('switch', { name: /امنع البيع فوق المخزون/ });
+    expect(block).not.toBeChecked();
+    await user.click(block);
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({ blockNegativeStock: true });
   });
 
   it('refuses a window outside 1 to 365 and shows a failed save', async () => {

@@ -3,6 +3,7 @@ import type {
   CurrencyCode,
   CustomerDetail,
   CustomerInput,
+  CustomerKind,
   CustomerListItem,
   CustomerListResponse,
   CustomerPurchases,
@@ -41,6 +42,9 @@ type Row = {
   price_tier: string;
   no_messages: boolean;
   archived_at: string | null;
+  kind: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
   balance: string;
 };
 
@@ -59,19 +63,23 @@ const item = (r: Row): CustomerListItem => ({
   priceTier: r.price_tier === 'wholesale' ? 'wholesale' : 'retail',
   noMessages: r.no_messages,
   archived: r.archived_at !== null,
+  kind: (r.kind as CustomerKind | null) ?? null,
+  contactName: r.contact_name,
+  contactPhone: r.contact_phone,
 });
 
 export async function listCustomers(
   db: Database,
   auth: AccessClaims,
-  query: { q?: string; owing?: boolean },
+  query: { q?: string; owing?: boolean; kind?: CustomerKind },
 ): Promise<CustomerListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
     const rows = await tx.execute<Row>(sql`
       select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
-             coalesce(b.balance, 0)::text as balance
+             c.kind, c.contact_name, c.contact_phone, coalesce(b.balance, 0)::text as balance
       from customers c left join (${balances}) b on b.customer_id = c.id
+      where ${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
       order by coalesce(b.balance, 0) desc, c.name, c.id`);
     const q = query.q ? normalizeArabic(query.q) : '';
     const digits = query.q?.replace(/\D/g, '') ?? '';
@@ -97,6 +105,7 @@ async function detail(tx: Transaction, id: string): Promise<CustomerDetail> {
     Row & { tax_number: string | null; address: string | null; notes: string | null; created_at: string }
   >(sql`
     select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at, c.tax_number, c.address,
+           c.kind, c.contact_name, c.contact_phone,
            c.notes, c.created_at, coalesce(b.balance, 0)::text as balance
     from customers c left join (${balances}) b on b.customer_id = c.id
     where c.id = ${id}`);
@@ -158,6 +167,9 @@ const fields = (input: CustomerInput, now: Date) => ({
   ...(input.creditLimitMinor !== undefined ? { creditLimitMinor: input.creditLimitMinor } : {}),
   ...(input.priceTier !== undefined ? { priceTier: input.priceTier } : {}),
   ...(input.noMessages !== undefined ? { noMessages: input.noMessages } : {}),
+  ...(input.kind !== undefined ? { kind: input.kind } : {}),
+  ...(input.contactName !== undefined ? { contactName: input.contactName } : {}),
+  ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
   ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
 });
 
@@ -238,6 +250,9 @@ export async function updateCustomerTx(
     'notes',
     'creditLimitMinor',
     'priceTier',
+    'kind',
+    'contactName',
+    'contactPhone',
     'archived',
   ] as const) {
     if (before[key] !== after[key]) changes[key] = [before[key], after[key]];
@@ -307,6 +322,10 @@ async function purchasesOf(tx: Transaction, id: string): Promise<CustomerPurchas
             - coalesce((select sum(r.total_minor) from sale_returns r
                         join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
                         where i.customer_id = ${id}), 0))::text as spent`);
+  // What the customer owes now (account 1200), for the till's credit limit and the receipt
+  const [owed] = await tx.execute<{ balance: string }>(sql`
+    select coalesce(b.balance, 0)::text as balance
+    from (select 1) one left join (${balances}) b on b.customer_id = ${id}::uuid`);
   const byName = new Map<string, { value: string; qty: number }[]>();
   for (const s of sizes) {
     const list = byName.get(s.name) ?? [];
@@ -333,6 +352,7 @@ async function purchasesOf(tx: Transaction, id: string): Promise<CustomerPurchas
     })),
     pieces: Number(totals?.pieces ?? 0),
     spentMinor: Number(totals?.spent ?? 0),
+    balanceMinor: Number(owed?.balance ?? 0),
   };
 }
 

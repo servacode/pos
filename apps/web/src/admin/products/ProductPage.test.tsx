@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MeResponse, Permission } from '@serva/core';
-import { catalogMe, ids, lookupRoutes, product, shownText, variant } from '../../test/catalog';
+import { catalogMe, ids, lookupRoutes, product, shownText, taxRates, variant } from '../../test/catalog';
 import { apiError, mockFetch, type MockReply, type MockRequest } from '../../test/fetchMock';
 import { signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
@@ -28,7 +28,8 @@ function openCard(
   return { ...mock, ...renderApp(path) };
 }
 
-const notFound = apiError(404, 'not_found', 'لا يوجد.');
+/** A clothing store: its product card talks about sizes and colours */
+const openClothes = (path: string, routes: Routes = {}) => openCard(path, routes, undefined, ['clothing']);
 
 describe('the fields each business type uses', () => {
   it('shows a clothing shop no scientific name, weight, IMEI or kitchen extras', async () => {
@@ -58,10 +59,27 @@ describe('the fields each business type uses', () => {
 });
 
 describe('a new product', () => {
+  it('starts with the store’s default tax rate, and points to «الضرائب» while there are none', async () => {
+    openCard('/products/new', {
+      'GET /v1/tax-rates': { status: 200, body: { items: taxRates, defaultRateBp: 500 } },
+    });
+    await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
+    expect(screen.getByLabelText('الضريبة')).toHaveValue(ids.tax);
+  });
+
+  it('shows a new product no tax when the store chose no default, with a link to add rates when it has none', async () => {
+    openCard('/products/new', {
+      'GET /v1/tax-rates': { status: 200, body: { items: [], defaultRateBp: 0 } },
+    });
+    await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
+    expect(screen.getByLabelText('الضريبة')).toHaveValue('');
+    expect(screen.getByRole('link', { name: /لا ضرائب بعد/ })).toHaveAttribute('href', '/tax-rates');
+  });
+
   it('saves the name, category, price and barcodes in one request, then opens the saved card', async () => {
     const saved = product({ nameAr: 'سكر أبيض 1 كغ', version: 1 });
     const { user, requestsTo } = openCard('/products/new', {
-      'GET /v1/barcodes/6290360100125': notFound,
+      'GET /v1/barcodes/6290360100125?free=1': { status: 200, body: { exists: false } },
       'POST /v1/products': { status: 201, body: saved },
       [`GET ${productPath}`]: { status: 200, body: saved },
     });
@@ -98,8 +116,21 @@ describe('a new product', () => {
           wholesalePriceMinor: null,
           minStockQty: null,
           barcodes: [
-            { kind: 'standard', code: '6290360100125', packQty: 1000, packName: null, packPriceMinor: null },
-            { kind: 'internal', packQty: 1000, packName: null, packPriceMinor: null },
+            {
+              kind: 'standard',
+              code: '6290360100125',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
+            {
+              kind: 'internal',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
           ],
         },
       ],
@@ -109,7 +140,7 @@ describe('a new product', () => {
 
   it('refuses to save while a barcode is typed in the scan box and not added, and keeps the other product named', async () => {
     const { user, requestsTo } = openCard('/products/new', {
-      'GET /v1/barcodes/6291041500213': {
+      'GET /v1/barcodes/6291041500213?free=1': {
         status: 200,
         body: { productId: ids.milk, variantId: 'x', barcode: {} },
       },
@@ -182,7 +213,7 @@ describe('a new product', () => {
 
   it('refuses a barcode another product holds, with a link to it', async () => {
     const { user } = openCard('/products/new', {
-      'GET /v1/barcodes/6281007035105': {
+      'GET /v1/barcodes/6281007035105?free=1': {
         status: 200,
         body: { productId: ids.milk, variantId: ids.milkVariant, barcode: variant().barcodes[0] },
       },
@@ -207,7 +238,7 @@ describe('a new product', () => {
     await user.clear(field);
     await user.type(field, '٦٢٩٠٣٦٠١٠٠١٢٥{Enter}');
     expect(screen.getByText('الباركود مكرر في هذا المنتج')).toBeInTheDocument();
-    expect(requestsTo('GET', '/v1/barcodes/6290360100125')).toHaveLength(0);
+    expect(requestsTo('GET', '/v1/barcodes/6290360100125?free=1')).toHaveLength(0);
   });
 
   it('prices in dollars and says the cashier converts at the day’s rate', async () => {
@@ -249,7 +280,7 @@ describe('a new product', () => {
   });
 
   it('builds the size × colour matrix and sends every combination', async () => {
-    const { user, requestsTo } = openCard('/products/new', {
+    const { user, requestsTo } = openClothes('/products/new', {
       'POST /v1/products': { status: 201, body: product() },
     });
     await user.type(await screen.findByLabelText('اسم المنتج'), 'قميص قطن');
@@ -282,7 +313,7 @@ describe('a new product', () => {
 
 describe('ready sizes, shoe numbers, ages and colours', () => {
   it('taps the built-in values in shop order, and offers the store’s own beside them', async () => {
-    const { user, requestsTo } = openCard('/products/new', {
+    const { user, requestsTo } = openClothes('/products/new', {
       'POST /v1/products': { status: 201, body: product() },
       'GET /v1/products/options': {
         status: 200,
@@ -320,7 +351,7 @@ describe('ready sizes, shoe numbers, ages and colours', () => {
   });
 
   it('lists children’s ages, and takes a whole group at once', async () => {
-    const { user } = openCard('/products/new');
+    const { user } = openClothes('/products/new');
     await user.type(await screen.findByLabelText('اسم المنتج'), 'بيجاما أطفال');
     await user.click(screen.getByRole('switch', { name: 'له مقاسات أو ألوان' }));
     await user.click(screen.getByRole('button', { name: 'عمر (أطفال)' }));
@@ -436,7 +467,7 @@ describe('an existing product', () => {
   });
 
   it('shows a product with sizes as one block per variant', async () => {
-    openCard(`/products/${ids.milk}`, {
+    openClothes(`/products/${ids.milk}`, {
       [`GET ${productPath}`]: {
         status: 200,
         body: product({

@@ -30,6 +30,7 @@ import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { ensureAlterationItem } from './catalog-defaults';
+import { ensureServiceItem, MAINTENANCE_ITEM_NAME, RENTAL_ITEM_NAME } from './contracts-common';
 
 /**
  * The store's own settings (packages/core › contracts/store.ts): the start wizard and the settings
@@ -108,6 +109,11 @@ export function updateProfile(
       .where(eq(tenants.id, auth.tenantId));
     // A clothing store sells alterations: the service item is there from the moment it is one
     if (input.sectors.includes('clothing')) await ensureAlterationItem(tx, auth.tenantId);
+    // A medical-supplies store rents devices and sells maintenance contracts: their services too
+    if (input.sectors.includes('medical_supplies')) {
+      await ensureServiceItem(tx, auth.tenantId, RENTAL_ITEM_NAME);
+      await ensureServiceItem(tx, auth.tenantId, MAINTENANCE_ITEM_NAME);
+    }
     const branch = await mainBranch(tx);
     if (branch && (input.address !== undefined || input.phone !== undefined)) {
       await tx

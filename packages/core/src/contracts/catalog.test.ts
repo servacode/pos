@@ -232,3 +232,13 @@ describe('pull set rows', () => {
     expect(noCost).toBe(true);
   });
 });
+
+describe('the shelf price cap', () => {
+  it('refuses an absurd price with a clear message and accepts a large believable one', async () => {
+    const { priceInputSchema } = await import('./catalog');
+    const huge = priceInputSchema.safeParse({ currency: 'SYP', priceMinor: 99_999_999_999_999 });
+    expect(huge.success).toBe(false);
+    expect(huge.error?.issues[0]?.message).toBe('السعر كبير جداً. تحقق من الأرقام.');
+    expect(priceInputSchema.safeParse({ currency: 'SYP', priceMinor: 500_000_000_00 }).success).toBe(true);
+  });
+});

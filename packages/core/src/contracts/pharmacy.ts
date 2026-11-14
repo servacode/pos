@@ -34,6 +34,8 @@ export const pharmacySettingsSchema = z.object({
   returns: z.enum(MEDICINE_RETURN_POLICIES).optional(),
   controlledReturns: z.boolean().optional(),
   autoBatch: z.boolean().optional(),
+  /** «امنع البيع بلا دفعة صالحة»: no sale when no valid batch covers it (off: a manager approves) */
+  blockNoBatch: z.boolean().optional(),
 });
 export type PharmacySettings = z.output<typeof pharmacySettingsSchema>;
 
@@ -44,6 +46,19 @@ export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = { prescription: 'opti
  * One batch still on an item's shelf (estimated from the receipts, services/expiry.ts), in the
  * order of the nearest expiry. No quantity: the set changes only when a batch runs out.
  */
+/**
+ * A batch this branch holds, with what is left of it (real per-batch balance, services/batches.ts),
+ * carried on the item's stock level row to the till. Expired batches stay listed until written off.
+ */
+export interface StockBatch {
+  batchNo: string | null;
+  expiry: string | null;
+  /** Base units, thousandths */
+  qty: number;
+  /** Blocked by hand (a recall): the till refuses it */
+  blocked?: boolean;
+}
+
 export interface ShelfBatch {
   batchNo: string | null;
   expiry: string;

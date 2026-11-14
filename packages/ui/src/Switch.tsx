@@ -31,6 +31,7 @@ const SIZE: Record<Density, { targetWidth: string; track: string; thumb: string 
 export function Switch({ label, description, checked, onCheckedChange, disabled, className }: SwitchProps) {
   const density = useDensity();
   const id = useId();
+  const labelId = `${id}-label`;
   const descriptionId = description ? `${id}-description` : undefined;
   const size = SIZE[density];
 
@@ -47,6 +48,7 @@ export function Switch({ label, description, checked, onCheckedChange, disabled,
     <div className={cn('flex items-center justify-between gap-4', CONTROL_HEIGHT[density], className)}>
       <span className="flex min-w-0 flex-col">
         <label
+          id={labelId}
           htmlFor={id}
           className={cn(
             'text-[0.9375rem]',
@@ -66,6 +68,7 @@ export function Switch({ label, description, checked, onCheckedChange, disabled,
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-labelledby={labelId}
         aria-describedby={descriptionId}
         disabled={disabled}
         onClick={() => onCheckedChange(!checked)}

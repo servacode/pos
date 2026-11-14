@@ -77,9 +77,22 @@ describe('the create body', () => {
           wholesalePriceMinor: null,
           minStockQty: 5000,
           barcodes: [
-            { kind: 'standard', code: '6290360100125', packQty: 1000, packName: null, packPriceMinor: null },
+            {
+              kind: 'standard',
+              code: '6290360100125',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
             // No code: the server makes the next internal one (prefix 29).
-            { kind: 'internal', packQty: 1000, packName: null, packPriceMinor: null },
+            {
+              kind: 'internal',
+              packQty: 1000,
+              packName: null,
+              packPriceMinor: null,
+              packWholesaleMinor: null,
+            },
           ],
         },
       ],
@@ -153,8 +166,16 @@ describe('the PATCH body (17: only what changed)', () => {
             packQty: 1000,
             packName: null,
             packPriceMinor: null,
+            packWholesaleMinor: null,
           },
-          { kind: 'standard', code: '16281007035102', packQty: 1000, packName: null, packPriceMinor: null },
+          {
+            kind: 'standard',
+            code: '16281007035102',
+            packQty: 1000,
+            packName: null,
+            packPriceMinor: null,
+            packWholesaleMinor: null,
+          },
         ],
       },
     ]);
@@ -343,6 +364,29 @@ describe('the pharmacy flags of a product', () => {
       requiresPrescription: false,
       controlled: false,
     });
+  });
+});
+
+describe('«يتطلب صلاحية» on a product', () => {
+  it('is sent when set on a new product, and nothing when it is off', () => {
+    const draft = simpleDraft();
+    expect('requiresExpiry' in buildCreate(draft).body).toBe(false);
+    draft.requiresExpiry = true;
+    expect(buildCreate(draft).body).toMatchObject({ requiresExpiry: true });
+  });
+
+  it('is sent alone in the PATCH when changed, and a card from before it existed reads as off', () => {
+    const detail = product({ requiresExpiry: true });
+    const draft = draftFromDetail(detail);
+    expect(draft.requiresExpiry).toBe(true);
+    expect(buildUpdate(draft, detail).body).toEqual({ version: 3 });
+    draft.requiresExpiry = false;
+    const { body } = buildUpdate(draft, detail);
+    expect(body).toEqual({ version: 3, requiresExpiry: false });
+    expect(updateProductInput.safeParse(body).success).toBe(true);
+    const old = { ...product() } as Partial<ReturnType<typeof product>>;
+    delete old.requiresExpiry;
+    expect(draftFromDetail(old as ReturnType<typeof product>).requiresExpiry).toBe(false);
   });
 });
 

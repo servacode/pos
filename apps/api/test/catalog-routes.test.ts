@@ -33,7 +33,12 @@ beforeEach(async () => {
   s = await testStore(app);
 });
 
-const call = (method: 'GET' | 'POST' | 'PATCH', url: string, payload?: unknown, token = s.accessToken) =>
+const call = (
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT',
+  url: string,
+  payload?: unknown,
+  token = s.accessToken,
+) =>
   app.inject({
     method,
     url,
@@ -407,6 +412,10 @@ describe('GET /v1/products and GET /v1/barcodes/{code}', () => {
       barcode: detail.variants[0]!.barcodes[0],
     });
     expect((await call('GET', '/v1/barcodes/0000000')).statusCode).toBe(404);
+    // ?free=1: a code nobody has is an answer, not an error
+    const free = await call('GET', '/v1/barcodes/0000000?free=1');
+    expect(free.statusCode).toBe(200);
+    expect(free.json()).toEqual({ exists: false });
   });
 });
 
@@ -505,6 +514,31 @@ describe('categories, units and tax rates', () => {
       showOnReceipt: false,
     });
     expect(edited.json()).toMatchObject({ rateBp: 500, showOnReceipt: false, version: 2 });
+  });
+
+  it('the owner chooses the default tax rate; an archived one, an unknown one and a manager cannot', async () => {
+    const rate = (
+      await call('POST', '/v1/tax-rates', { name: 'مبيعات 5%', rateBp: 500, kind: 'sales' })
+    ).json<TaxRate>();
+    expect((await call('GET', '/v1/tax-rates')).json()).toMatchObject({ defaultRateBp: 0 });
+    const set = await call('PUT', '/v1/tax-rates/default', { taxRateId: rate.id });
+    expect(set.statusCode, set.body).toBe(200);
+    expect(set.json()).toMatchObject({ defaultRateBp: 500 });
+    expect((await call('GET', '/v1/tax-rates')).json()).toMatchObject({ defaultRateBp: 500 });
+    // «بلا ضريبة» clears it
+    expect((await call('PUT', '/v1/tax-rates/default', { taxRateId: null })).json()).toMatchObject({
+      defaultRateBp: 0,
+    });
+    const manager = await staffUser(app, s, 'manager', '0933333333');
+    expect(
+      (await call('PUT', '/v1/tax-rates/default', { taxRateId: rate.id }, manager.accessToken)).statusCode,
+    ).toBe(403);
+    expect(
+      (await call('PUT', '/v1/tax-rates/default', { taxRateId: '0192a000-0000-7000-8000-000000000001' }))
+        .statusCode,
+    ).toBe(404);
+    await call('PATCH', `/v1/tax-rates/${rate.id}`, { version: 1, archived: true });
+    expect((await call('PUT', '/v1/tax-rates/default', { taxRateId: rate.id })).statusCode).toBe(400);
   });
 });
 

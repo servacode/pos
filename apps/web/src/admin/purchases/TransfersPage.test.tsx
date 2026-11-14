@@ -52,7 +52,7 @@ describe('«التحويل بين الفروع»', () => {
         body: {
           id: 'p-1',
           nameAr: 'قميص',
-          variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [] }],
+          variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [], barcodes: [] }],
         },
       },
       'POST /v1/transfers': (_r: MockRequest) => {

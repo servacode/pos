@@ -20,7 +20,7 @@ import {
   useDensity,
 } from '@serva/ui';
 import { ApiError } from '../../lib/api';
-import { lookupBarcode } from '../catalog/api';
+import { probeBarcode } from '../catalog/api';
 import { barcodeOf } from '../catalog/catalog';
 import { newBarcode, variantLabel, type BarcodeDraft, type FieldErrors, type VariantDraft } from './form';
 
@@ -129,8 +129,8 @@ export const VariantBlock = memo(function VariantBlock({
     }
     setChecking(true);
     try {
-      const found = await lookupBarcode(code);
-      if (found.productId !== productId) {
+      const found = await probeBarcode(code);
+      if (found && found.productId !== productId) {
         setAddError({ text: 'هذا الباركود على منتج آخر.', productId: found.productId });
         return;
       }
@@ -173,7 +173,7 @@ export const VariantBlock = memo(function VariantBlock({
             priceMinor: null,
             minPriceMinor: null,
             wholesalePriceMinor: null,
-            barcodes: variant.barcodes.map((b) => ({ ...b, packPriceMinor: null })),
+            barcodes: variant.barcodes.map((b) => ({ ...b, packPriceMinor: null, packWholesaleMinor: null })),
           })
         }
         className={titled ? undefined : 'w-28'}
@@ -377,8 +377,17 @@ function BarcodeRow({ barcode, currency, errors, onChange, onRemove }: BarcodeRo
   const packId = useId();
   const [opened, setOpened] = useState(false);
   const name = barcode.code || `${INTERNAL_BARCODE_PREFIX}…`;
-  const isPack = barcode.packCount !== '1' || barcode.packName !== '' || barcode.packPriceMinor !== null;
-  const packError = Boolean(errors[k('packQty')] || errors[k('packName')] || errors[k('packPriceMinor')]);
+  const isPack =
+    barcode.packCount !== '1' ||
+    barcode.packName !== '' ||
+    barcode.packPriceMinor !== null ||
+    barcode.packWholesaleMinor !== null;
+  const packError = Boolean(
+    errors[k('packQty')] ||
+    errors[k('packName')] ||
+    errors[k('packPriceMinor')] ||
+    errors[k('packWholesaleMinor')],
+  );
   const showPack = opened || isPack || packError;
   return (
     <li className="flex flex-col gap-3 rounded-control border border-line bg-surface px-3 py-2">
@@ -442,6 +451,16 @@ function BarcodeRow({ barcode, currency, errors, onChange, onRemove }: BarcodeRo
             valueMinor={barcode.packPriceMinor}
             onValueChange={(packPriceMinor) => onChange({ ...barcode, packPriceMinor })}
             error={errors[k('packPriceMinor')]}
+          />
+          <MoneyField
+            key={`${currency}-w`}
+            name={k('packWholesaleMinor')}
+            label="سعر جملة العبوة"
+            placeholder="جملة القطعة × العدد"
+            currency={currency}
+            valueMinor={barcode.packWholesaleMinor}
+            onValueChange={(packWholesaleMinor) => onChange({ ...barcode, packWholesaleMinor })}
+            error={errors[k('packWholesaleMinor')]}
           />
         </div>
       ) : null}

@@ -52,6 +52,13 @@ import {
   type ShiftActivity,
 } from './shift';
 
+/** The last opening count of each drawer, to notice a count that jumps */
+const LAST_OPENING_KEY = 'lastOpeningCount';
+/** An opening count more than this many times the last one is asked about */
+const OPENING_JUMP = 100;
+/** Above this (in minor units) no opening count is believable, whatever the history */
+const ABSURD_OPENING_MINOR = 1_000_000_000_000;
+
 /** The drawers of the store: its base currency and each enabled one with a rate (10 › درج لكل عملة). */
 export function drawerCurrencies(catalog: Catalog): CurrencyCode[] {
   const settings = catalog.settings!;
@@ -153,11 +160,26 @@ export function ShiftOpenScreen({
   const businessDate = useBusinessDate(catalog);
   const [counts, setCounts] = useState<DrawerCount[]>(() => drawerCurrencies(catalog).map(emptyCount));
   const [saving, setSaving] = useState(false);
+  const [warn, setWarn] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function open() {
-    setSaving(true);
+  async function open(confirmed = false) {
     setError(null);
+    // A count far above the usual opening is most likely a slipped key: ask once before it is saved
+    if (!confirmed) {
+      const usual = await pos.local.get<Record<string, number>>(LAST_OPENING_KEY);
+      const odd = counts.some((c) => {
+        const total = countTotal(c);
+        const before = usual?.[c.currency] ?? 0;
+        return total > ABSURD_OPENING_MINOR || (before > 0 && total > before * OPENING_JUMP);
+      });
+      if (odd) {
+        setWarn(true);
+        return;
+      }
+    }
+    setWarn(false);
+    setSaving(true);
     try {
       const lastClosed = await pos.local.get<string>(LAST_CLOSED_KEY);
       const payload = shiftOpenPayload(session.userId, mode, lastClosed, counts);
@@ -179,6 +201,10 @@ export function ShiftOpenScreen({
         opening: payload.opening,
       };
       await pos.local.set(key, shift);
+      await pos.local.set(
+        LAST_OPENING_KEY,
+        Object.fromEntries(counts.map((c) => [c.currency, countTotal(c)])),
+      );
       onOpened(shift);
     } catch {
       setSaving(false);
@@ -195,8 +221,13 @@ export function ShiftOpenScreen({
       />
       <CountLayout counts={counts} setCounts={setCounts}>
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <Button size="lg" fullWidth icon={<CashIcon />} onClick={open} loading={saving}>
-          افتح الوردية
+        {warn ? (
+          <Alert tone="warning">
+            مبلغ الافتتاح أكبر بكثير من المعتاد. تأكد من الأرقام، فقد تكون زادت خانة بالخطأ.
+          </Alert>
+        ) : null}
+        <Button size="lg" fullWidth icon={<CashIcon />} onClick={() => void open(warn)} loading={saving}>
+          {warn ? 'نعم، المبلغ صحيح، افتح الوردية' : 'افتح الوردية'}
         </Button>
       </CountLayout>
     </div>

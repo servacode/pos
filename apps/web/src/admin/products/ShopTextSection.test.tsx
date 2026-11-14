@@ -51,7 +51,7 @@ describe('«وصف المتجر الإلكتروني» on the product page', () 
     // Nothing typed: nothing to save
     expect(save).toBeDisabled();
     await user.type(await within(section).findByLabelText('الوصف'), 'حليب طازج');
-    await user.type(within(section).getByLabelText('دليل المقاسات'), 'علبة 1 لتر');
+    await user.type(within(section).getByLabelText('معلومات إضافية للزبون'), 'علبة 1 لتر');
     await user.click(save);
     expect(await within(section).findByText('حُفظ الوصف.')).toBeInTheDocument();
     expect(requestsTo('PUT', `/v1/products/${ids.milk}/shop-text`)[0]!.body).toEqual({
@@ -64,7 +64,7 @@ describe('«وصف المتجر الإلكتروني» on the product page', () 
   it('shows what is saved, and the server’s refusal', async () => {
     const { user } = open({ description: 'x'.repeat(3100), sizeGuide: 'M: 38' });
     const section = await screen.findByRole('region', { name: 'وصف المتجر الإلكتروني' });
-    expect(await within(section).findByLabelText('دليل المقاسات')).toHaveValue('M: 38');
+    expect(await within(section).findByLabelText('معلومات إضافية للزبون')).toHaveValue('M: 38');
     await user.type(within(section).getByLabelText('الوصف'), 'y');
     await user.click(within(section).getByRole('button', { name: 'احفظ الوصف' }));
     expect(await within(section).findByText('الوصف طويل')).toBeInTheDocument();

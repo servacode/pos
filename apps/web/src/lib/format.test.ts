@@ -20,6 +20,8 @@ describe('formatDays', () => {
 describe('firstName', () => {
   it('returns the first word of a full name', () => {
     expect(firstName('  أحمد الخطيب ')).toBe('أحمد');
+    expect(firstName('د. سامر المصري')).toBe('سامر');
+    expect(firstName('م. أبو خالد')).toBe('أبو خالد');
   });
 
   it('keeps «أبو», «أم» and «عبد» with the word after them', () => {

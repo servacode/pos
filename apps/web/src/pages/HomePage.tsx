@@ -47,7 +47,10 @@ import {
 } from '@serva/ui';
 import { ButtonLink } from '../admin/products/parts';
 import { getProfit, listExpiry } from '../admin/purchases/api';
+import { listCheques } from '../admin/cheques/api';
+import { dueSoon } from '../admin/cheques/ChequesPage';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
+import { ContractAttention, seesContractAttention } from './ContractAttention';
 import { getDayReport } from '../admin/reports/api';
 import { getSalesBreakdown } from '../admin/reports/SalesReportPage';
 import { daysAgo, getMerchandise } from '../admin/reports/MerchandisePage';
@@ -301,7 +304,12 @@ function KpiBand({
   day: DayState;
   /** The last seven days, oldest first, today last. */
   points: readonly DayPoint[];
-  profit: ReportState<{ grossProfitMinor: number; netSalesMinor: number; baseCurrency: CurrencyCode }>;
+  profit: ReportState<{
+    grossProfitMinor: number;
+    netSalesMinor: number;
+    costOfSalesMinor?: number;
+    baseCurrency: CurrencyCode;
+  }>;
   seesProfit: boolean;
 }) {
   const digits = me.settings.numberFormat;
@@ -375,9 +383,13 @@ function KpiBand({
               label="الربح الإجمالي"
               value={<Money minor={profit.data.grossProfitMinor} currency={profit.data.baseCurrency} />}
               footnote={
-                profit.data.netSalesMinor > 0
-                  ? `هامش ${formatNumber(Math.round((profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100), digits)}% من صافي المبيعات`
-                  : undefined
+                profit.data.netSalesMinor > 0 &&
+                profit.data.costOfSalesMinor !== undefined &&
+                profit.data.costOfSalesMinor < profit.data.netSalesMinor / 50
+                  ? 'التكلفة غير مكتملة بعد، لذلك لا يُعرض الهامش'
+                  : profit.data.netSalesMinor > 0
+                    ? `هامش ${formatNumber(Math.round((profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100), digits)}% من صافي المبيعات`
+                    : undefined
               }
             />
           ) : (
@@ -649,6 +661,7 @@ const SIZED_ROWS = 4;
 type OrdersState = ReportState<{ items: OnlineOrder[] }>;
 type MerchState = ReportState<Awaited<ReturnType<typeof getMerchandise>>>;
 type ExpiryState = ReportState<Awaited<ReturnType<typeof listExpiry>>>;
+type ChequesState = ReportState<Awaited<ReturnType<typeof listCheques>>>;
 
 function Waiting({
   orders,
@@ -658,8 +671,13 @@ function Waiting({
   seesStock,
   seesExpiry,
   sizes,
+  cheques,
+  today,
 }: {
   sizes: boolean;
+  /** Cheques falling due within a week (customers.view); omitted where the store takes none */
+  cheques?: ChequesState | null;
+  today?: string;
   orders: OrdersState;
   merch: MerchState;
   expiry: ExpiryState;
@@ -678,7 +696,8 @@ function Waiting({
   const expiring = expiry.data?.items.length ?? 0;
   const loading =
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
-  const empty = online + holds + low + sized.length + expiring === 0;
+  const chequesDue = cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
+  const empty = online + holds + low + sized.length + expiring + chequesDue === 0;
   return (
     <Card className="flex flex-col gap-3">
       <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
@@ -718,6 +737,11 @@ function Waiting({
           {low > 0 ? (
             <WaitingRow to="/reports/merchandise" count={low} tone="danger" icon={<WarningIcon />}>
               {low === 1 ? 'صنف يوشك مخزونه على النفاد' : 'أصناف يوشك مخزونها على النفاد'}
+            </WaitingRow>
+          ) : null}
+          {chequesDue > 0 ? (
+            <WaitingRow to="/cheques" count={chequesDue} tone="warning" icon={<CalendarIcon />}>
+              {chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
             </WaitingRow>
           ) : null}
           {expiring > 0 ? (
@@ -839,6 +863,7 @@ export function HomePage() {
   const seesStock = holdsAny(me, ['report.view']);
   const seesProfit = holdsAny(me, ['reports.financial']);
   const seesExpiry = holdsAny(me, ['purchases.manage']);
+  const seesCheques = holdsAny(me, ['customers.view']);
   const today = isoDay(Date.now(), me.tenant.timezone);
 
   const day = useReport(seesSales ? `day:${today}` : null, () =>
@@ -860,6 +885,7 @@ export function HomePage() {
     getSalesBreakdown({ from: shiftDay(today, 6), to: today, by: 'product' }),
   );
   const expiry = useReport(seesExpiry ? 'home:expiry' : null, () => listExpiry(30));
+  const cheques = useReport(seesCheques ? 'home:cheques' : null, () => listCheques(undefined));
 
   // A new store starts in the wizard (04 › معالج البداية); the owner can leave it and come back.
   if (!me.onboarding.done && me.user.permissions.includes('settings.manage')) {
@@ -887,7 +913,7 @@ export function HomePage() {
     weekPoints.every((p) => !p.total);
 
   const canCatalog = holdsAny(me, ['catalog.manage']);
-  const showWaiting = seesOrders || seesStock || seesExpiry;
+  const showWaiting = seesOrders || seesStock || seesExpiry || seesCheques;
 
   return (
     <AppShell>
@@ -942,6 +968,7 @@ export function HomePage() {
             {!seesSales ? <StoreCard me={me} /> : null}
           </div>
           <div className="flex min-w-0 flex-col gap-6">
+            {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
             {showWaiting ? (
               <Waiting
                 orders={orders}
@@ -950,6 +977,8 @@ export function HomePage() {
                 seesOrders={seesOrders}
                 seesStock={seesStock}
                 seesExpiry={seesExpiry}
+                cheques={cheques}
+                today={today}
                 sizes={me.tenant.sectors.includes('clothing')}
               />
             ) : null}

@@ -1,6 +1,12 @@
 import type { CurrencyCode } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
-import type { Approval, OrderType, Prescription, SaleLine } from '@serva/core/contracts/documents';
+import type {
+  Approval,
+  BatchAllocation,
+  OrderType,
+  Prescription,
+  SaleLine,
+} from '@serva/core/contracts/documents';
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { OrderCouponRule } from '@serva/core/contracts/shop';
 import type { PricedInvoice } from '@serva/core/pricing';
@@ -58,12 +64,19 @@ export interface CartLine {
   /** The product sells each piece by its serial number or IMEI: one per piece before payment */
   tracksSerial?: boolean;
   serials?: readonly string[];
+  /** Numbers a manager let through though the store never received them, and who (03 › الإلكترونيات) */
+  serialOverrides?: readonly string[];
+  serialApprovedBy?: string | null;
+  /** The product's warranty in months: the receipt prints its end date per serial */
+  warrantyMonths?: number | null;
   /** The batch the till picked for the line, nearest expiry first (03 › الصيدليات); metadata only */
   batchNo?: string | null;
   batchExpiry?: string | null;
   /** One pack at the shelf price and at the wholesale price (null: none), in priceCurrency */
   retailPriceMinor?: number;
   wholesalePriceMinor?: number | null;
+  /** The average cost of one unit in priceCurrency, when the till knows it («أقل من التكلفة») */
+  costMinor?: number | null;
 }
 
 /** One choice of a modifier group: «الحجم: كبير» adding its price to one unit */
@@ -98,6 +111,8 @@ export interface Cart {
     /** This cart is one part of a split bill: the sale charges only these lines, or one equal share */
     part?: { lineIds: string[] } | { equal: { parts: number; index: number } };
   };
+  /** A manager let the sale go through though no valid batch covers some lines (03 › الصيدليات); `sig` names what was shown */
+  batchApproval?: { sig: string; approval: Approval } | null;
   /** «سعر الجملة» (03 › الجملة): every line at its wholesale price where it has one */
   priceTier?: 'retail' | 'wholesale';
   /** An exchange (03 › الملابس): the voucher of the return just saved, offered first at payment */
@@ -112,6 +127,12 @@ export interface Cart {
   };
   /** A sale that delivers an alteration ticket (03 › التعديل والتقصير): the ticket turns delivered once it is saved */
   alteration?: { id: string; number: string; version: number };
+  /** A sale made from a quotation (03 › الجملة): the quotation turns converted once the sale is saved */
+  quotation?: { id: string; number: string; version: number };
+  /** A sale that returns a rental (03 › التأجير): the rental closes once the sale of its rent is saved */
+  rental?: { id: string; number: string; version: number };
+  /** A sale that bills a maintenance contract (03 › عقود الصيانة): the contract is marked billed once it is saved */
+  maintenance?: { id: string; number: string; version: number };
   /** A pharmacy sale's prescription (03 › الصيدليات), asked before payment when an item needs it */
   prescription?: Prescription;
   invoiceDiscount: { type: 'percent'; bp: number } | { type: 'amount'; minor: number } | null;
@@ -130,6 +151,8 @@ export interface PricingContext {
   rates: readonly TradeRate[];
   /** The promotions running now (promotionActive): each line without a typed discount gets its best one */
   promotions?: readonly PromotionRule[];
+  /** What each line takes from which batch, first expiry first (sale/batches.ts); a line not in it has none */
+  batchPlan?: ReadonlyMap<number, readonly BatchAllocation[]>;
 }
 
 const choiceKey = (choices: readonly Choice[] | undefined, note: string | null | undefined) =>
@@ -176,7 +199,12 @@ export function addItem(
     (hit ? packPrice(item.price.priceMinor, packQty, hit.barcode.packPriceMinor) : item.price.priceMinor) +
     extraPerPack;
   const wholesaleUnit = item.price.wholesalePriceMinor ?? null;
-  const wholesale = wholesaleUnit === null ? null : packPrice(wholesaleUnit, packQty, null) + extraPerPack;
+  // A pack has its own wholesale price when the owner set one, else the piece's times the pieces
+  const packWholesale = hit?.barcode.packWholesaleMinor ?? null;
+  const wholesale =
+    wholesaleUnit === null && packWholesale === null
+      ? null
+      : packPrice(wholesaleUnit ?? 0, packQty, packWholesale) + extraPerPack;
   const line: CartLine = {
     lineNo: cart.nextLineNo,
     variantId: item.variantId,
@@ -197,6 +225,7 @@ export function addItem(
     priceMinor: cart.priceTier === 'wholesale' && wholesale !== null ? wholesale : retail,
     retailPriceMinor: retail,
     wholesalePriceMinor: wholesale,
+    ...(typeof item.price.costMinor === 'number' ? { costMinor: item.price.costMinor } : {}),
     minPriceMinor: item.price.minPriceMinor,
     taxRateId: item.taxRate?.id ?? null,
     taxRateBp: item.taxRate?.rateBp ?? 0,
@@ -204,7 +233,13 @@ export function addItem(
     approval: null,
     categoryPath: item.categoryPath ?? [],
     ...(choice ? { choices: choice.choices, note: choice.note } : {}),
-    ...(item.tracksSerial ? { tracksSerial: true, serials: [] } : {}),
+    ...(item.tracksSerial
+      ? {
+          tracksSerial: true,
+          serials: [],
+          ...(item.warrantyMonths ? { warrantyMonths: item.warrantyMonths } : {}),
+        }
+      : {}),
     ...(batch?.batchNo ? { batchNo: batch.batchNo, batchExpiry: batch.expiry } : {}),
   };
   return { ...cart, lines: [...cart.lines, line], nextLineNo: cart.nextLineNo + 1 };
@@ -311,6 +346,20 @@ function lineDiscount(line: CartLine, ctx: PricingContext): SaleDiscount | null 
   };
 }
 
+/** The line's batches as the sale carries them: the allocations, and the first as the older single batch */
+function batchesOf(
+  batches: readonly BatchAllocation[] | undefined,
+):
+  | { batches: readonly BatchAllocation[]; batchNo?: string; batchExpiry?: string | null }
+  | Record<string, never> {
+  if (!batches || batches.length === 0) return {};
+  const first = batches[0]!;
+  return {
+    batches,
+    ...(first.batchNo ? { batchNo: first.batchNo, batchExpiry: first.expiry } : {}),
+  };
+}
+
 export function pricingInput(cart: Cart, ctx: PricingContext): SalePricingInput {
   const lines: SaleCartLine[] = cart.lines.map((line) => ({
     lineNo: line.lineNo,
@@ -327,7 +376,12 @@ export function pricingInput(cart: Cart, ctx: PricingContext): SalePricingInput 
     taxRateBp: line.taxRateBp,
     discount: lineDiscount(line, ctx),
     ...(line.serials?.length ? { serials: line.serials } : {}),
+    ...(line.serials?.length && line.warrantyMonths ? { warrantyMonths: line.warrantyMonths } : {}),
+    ...(line.serialOverrides?.length
+      ? { serialOverrides: line.serialOverrides, serialApprovedBy: line.serialApprovedBy ?? null }
+      : {}),
     ...(line.batchNo ? { batchNo: line.batchNo, batchExpiry: line.batchExpiry ?? null } : {}),
+    ...batchesOf(ctx.batchPlan?.get(line.lineNo)),
   }));
   return {
     currency: ctx.currency,
@@ -420,4 +474,30 @@ const piecesOf = (line: CartLine) => Math.round((line.qty * line.packQty) / 1_00
 /** Lines of serial-numbered products still missing numbers (03 › الإلكترونيات). */
 export function missingSerials(cart: Cart): CartLine[] {
   return cart.lines.filter((l) => l.tracksSerial && (l.serials?.length ?? 0) !== piecesOf(l));
+}
+
+/** Whether the cart has a device sold with a warranty (the till then asks who the customer is) */
+export const hasWarrantyDevice = (cart: Cart): boolean =>
+  cart.lines.some((l) => l.tracksSerial && Boolean(l.warrantyMonths));
+
+/**
+ * A customer's contract prices (03 › أسعار العقود: a hospital's tender price): each line of a product
+ * that has one is priced at it, per pack, in place of the shelf or wholesale price. A line whose price
+ * the cashier typed, or in another currency than the contract's, is left as it is.
+ */
+export function applyContractPrices(
+  cart: Cart,
+  prices: readonly { variantId: string; currency: string; priceMinor: number }[],
+): Cart {
+  if (prices.length === 0) return cart;
+  const byVariant = new Map(prices.map((p) => [p.variantId, p]));
+  return {
+    ...cart,
+    lines: cart.lines.map((line) => {
+      const contract = byVariant.get(line.variantId);
+      if (!contract || contract.currency !== line.priceCurrency || line.adjustment !== null) return line;
+      const price = packPrice(contract.priceMinor, line.packQty, null);
+      return { ...line, priceMinor: price, retailPriceMinor: price, wholesalePriceMinor: price };
+    }),
+  };
 }

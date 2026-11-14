@@ -300,3 +300,51 @@ describe('a claim', () => {
     expect(seen.statusCode).toBe(404);
   });
 });
+
+describe('a claim’s repair details', () => {
+  it('keeps the technician, the loan unit, the cost and the paid repair, and finds the piece by invoice and customer', async () => {
+    const { store, sold } = await storeWithSoldPhone();
+    const made = await post(store, '/v1/warranty/claims', {
+      serial: 'IMEI001',
+      issue: 'لا يشحن',
+      technician: 'أبو خالد',
+      loanItem: 'جوال بديل A05',
+      paidRepair: true,
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const claim = made.json<WarrantyClaim>();
+    expect(claim).toMatchObject({
+      technician: 'أبو خالد',
+      loanItem: 'جوال بديل A05',
+      paidRepair: true,
+      costMinor: null,
+      repairSaleNumber: null,
+    });
+    const ready = await post(store, `/v1/warranty/claims/${claim.id}/status`, {
+      status: 'ready',
+      version: claim.version,
+      costMinor: 150_000,
+      repairSaleNumber: 'INV-001-001-0000099',
+    });
+    expect(ready.statusCode, ready.body).toBe(200);
+    expect(ready.json<WarrantyClaim>()).toMatchObject({
+      costMinor: 150_000,
+      technician: 'أبو خالد',
+      repairSaleNumber: 'INV-001-001-0000099',
+    });
+
+    // From the invoice and from the customer: the serial with its buyer, ready to open a claim on
+    const [invoice] = await ownerDb()<
+      { id: string }[]
+    >`select id from invoices where number = ${sold.number!}`;
+    const saleId = invoice!.id;
+    const bySale = await app.inject({
+      method: 'GET',
+      url: `/v1/serials?saleId=${saleId}`,
+      headers: as(store),
+    });
+    expect(bySale.json<{ items: { serial: string; customerName: string | null }[] }>().items).toEqual([
+      expect.objectContaining({ serial: 'IMEI001', customerName: 'سامر الحلبي' }),
+    ]);
+  });
+});

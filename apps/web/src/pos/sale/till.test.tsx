@@ -439,7 +439,10 @@ describe('the price checker', () => {
 
     // A tile shows the same, and a known item says it too
     await scan(user, PRODUCTS.tea.barcode!.code);
-    expect(within(check).getByRole('list', { name: 'أسعار الصنف' })).toHaveTextContent('شاي أحمر 400 غ');
+    // The name is the heading once; the row says «سعر القطعة», never the name again
+    expect(within(check).getByRole('heading', { name: 'شاي أحمر 400 غ' })).toBeInTheDocument();
+    expect(within(check).getByRole('list', { name: 'أسعار الصنف' })).toHaveTextContent('سعر القطعة');
+    expect(within(check).getByRole('list', { name: 'أسعار الصنف' })).not.toHaveTextContent('شاي');
     expect(within(check).getByRole('list', { name: 'أسعار الصنف' })).toHaveTextContent('المتوفر غير معروف');
     expect(screen.getByText('السلة فارغة')).toBeInTheDocument();
 
@@ -448,6 +451,66 @@ describe('the price checker', () => {
     expect(screen.queryByRole('region', { name: 'سعر صنف' })).not.toBeInTheDocument();
     await scan(user, PRODUCTS.tea.barcode!.code);
     expect(cartLines()).toHaveTextContent('شاي أحمر');
+  });
+
+  it('shows the pack price and the piece price for a scanned pack, with the batches and their dates', async () => {
+    const base = posSets();
+    const sets = {
+      ...base,
+      variants: base.variants.map((v) =>
+        v.id === PRODUCTS.tea.variant.id
+          ? { ...v, shelfBatches: [{ batchNo: 'T-9', expiry: '2026-12-01' }] }
+          : v,
+      ),
+      barcodes: [
+        ...base.barcodes,
+        {
+          id: '00000000-0000-4000-8000-00000000d001',
+          variantId: PRODUCTS.tea.variant.id,
+          code: '5550009998887',
+          kind: 'standard' as const,
+          packQty: 12_000,
+          packName: 'كرتونة',
+          packPriceMinor: 400_000,
+          version: 1,
+        },
+      ],
+    };
+    const { user } = await saleScreen({ sets });
+    await user.keyboard('{F9}');
+    const check = await screen.findByRole('region', { name: 'سعر صنف' });
+    await scan(user, '5550009998887');
+    expect(plain(check)).toContain('كرتونة');
+    expect(plain(check)).toContain('4,000');
+    expect(plain(check)).toContain('350 ل.س');
+    expect(plain(check)).toContain('T-9');
+    expect(plain(check)).toContain('1 كانون الأول 2026');
+    expect(plain(check)).not.toContain('01-12-2026');
+    expect(screen.getByText('السلة فارغة')).toBeInTheDocument();
+  });
+
+  it('sells a scanned pack by the pack and says what it comes to in pieces: «2 كرتونة (24 قطعة)»', async () => {
+    const base = posSets();
+    const sets = {
+      ...base,
+      barcodes: [
+        ...base.barcodes,
+        {
+          id: '00000000-0000-4000-8000-00000000d002',
+          variantId: PRODUCTS.tea.variant.id,
+          code: '5550009998888',
+          kind: 'standard' as const,
+          packQty: 12_000,
+          packName: 'كرتونة',
+          packPriceMinor: 400_000,
+          version: 1,
+        },
+      ],
+    };
+    const { user } = await saleScreen({ sets });
+    await scan(user, '5550009998888');
+    await scan(user, '5550009998888');
+    expect(cartLines()).toHaveTextContent('2 كرتونة (24 قطعة)');
   });
 
   it('opens from its button too, and a model tile lists its pieces', async () => {

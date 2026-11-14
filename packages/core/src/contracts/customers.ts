@@ -25,6 +25,17 @@ import {
 export const PRICE_TIERS = ['retail', 'wholesale'] as const;
 export type PriceTier = (typeof PRICE_TIERS)[number];
 
+/** What kind of customer: clinic, hospital, pharmacy, individual, government body */
+export const CUSTOMER_KINDS = ['clinic', 'hospital', 'pharmacy', 'individual', 'government'] as const;
+export type CustomerKind = (typeof CUSTOMER_KINDS)[number];
+export const CUSTOMER_KIND_LABELS: Record<CustomerKind, string> = {
+  clinic: 'عيادة',
+  hospital: 'مشفى',
+  pharmacy: 'صيدلية',
+  individual: 'فرد',
+  government: 'جهة حكومية',
+};
+
 const optionalText = (max: number, message: string) =>
   z
     .string()
@@ -46,6 +57,11 @@ export const customerInput = z.object({
   priceTier: z.enum(PRICE_TIERS).optional(),
   /** «لا يريد رسائل»: left out of every message to customers */
   noMessages: z.boolean().optional(),
+  /** «نوع الزبون»; null clears it */
+  kind: z.enum(CUSTOMER_KINDS).nullable().optional(),
+  /** The person to ask for at a clinic, hospital or office, and their phone */
+  contactName: optionalText(80, 'الاسم طويل'),
+  contactPhone: optionalText(30, 'الرقم طويل'),
   archived: z.boolean().optional(),
 });
 export type CustomerInput = z.output<typeof customerInput>;
@@ -57,6 +73,8 @@ export const customerListQuery = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .optional(),
+  /** Only customers of one kind */
+  kind: z.enum(CUSTOMER_KINDS).optional(),
 });
 
 /** `customers` pull set: what a till needs to find a customer and sell to them on credit */
@@ -82,6 +100,9 @@ export interface CustomerListItem {
   priceTier: PriceTier;
   noMessages: boolean;
   archived: boolean;
+  kind: CustomerKind | null;
+  contactName: string | null;
+  contactPhone: string | null;
 }
 
 export interface CustomerListResponse {
@@ -215,4 +236,6 @@ export interface CustomerPurchases {
   /** Pieces bought in all, and what they came to, net of returns */
   pieces: number;
   spentMinor: number;
+  /** What the customer owes the store now, base currency (negative: the store owes them) */
+  balanceMinor?: number;
 }

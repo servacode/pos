@@ -161,6 +161,8 @@ export interface MeResponse {
     numberFormat: 'latn' | 'arab';
     /** «خيارات الأصناف»: barcode generation and size runs; the defaults until the owner chooses */
     catalogOptions?: CatalogOptions;
+    /** The terms printed on the warranty certificate (الصندوق › شروط الكفالة) */
+    warrantyTerms?: string | null;
   };
   subscription: {
     status: SubscriptionStatus;

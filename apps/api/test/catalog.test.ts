@@ -199,6 +199,7 @@ describe('sync tables', () => {
       'products',
       'promotions',
       'roles',
+      'serials',
       'stock_levels',
       'tax_rates',
       'tenant_settings',

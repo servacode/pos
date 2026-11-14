@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router';
 import {
   WARRANTY_NEXT,
   WARRANTY_STATUS_LABELS,
+  toMinor,
+  formatMoney,
   type WarrantyClaim,
   type WarrantyLookup,
   type WarrantyStatus,
@@ -22,6 +25,7 @@ import {
   TextField,
   type BadgeTone,
 } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { SectionHead } from '../purchases/parts';
@@ -96,6 +100,24 @@ function ClaimSlip({ claim }: { claim: WarrantyClaim }) {
             <dd className="inline">{claim.sentTo}</dd>
           </div>
         ) : null}
+        {claim.technician ? (
+          <div>
+            <dt className="inline font-semibold">الفني: </dt>
+            <dd className="inline">{claim.technician}</dd>
+          </div>
+        ) : null}
+        {claim.loanItem ? (
+          <div>
+            <dt className="inline font-semibold">جهاز بديل مُعار: </dt>
+            <dd className="inline">{claim.loanItem}</dd>
+          </div>
+        ) : null}
+        {claim.paidRepair ? (
+          <div>
+            <dt className="inline font-semibold">صيانة مدفوعة: </dt>
+            <dd className="inline">{claim.repairSaleNumber ?? 'تُحاسب بفاتورة بيع (بند صيانة)'}</dd>
+          </div>
+        ) : null}
       </dl>
       <ol className="mt-4 list-decimal ps-5 text-sm">
         {claim.events.map((event, i) => (
@@ -123,8 +145,12 @@ function StepDialog({
   onDone: (claim: WarrantyClaim) => void;
 }) {
   const [sentTo, setSentTo] = useState(claim.sentTo ?? '');
+  const me = useMe();
   const [on, setOn] = useState('');
   const [note, setNote] = useState('');
+  const [technician, setTechnician] = useState(claim.technician ?? '');
+  const [cost, setCost] = useState('');
+  const [repairSale, setRepairSale] = useState(claim.repairSaleNumber ?? '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -132,6 +158,14 @@ function StepDialog({
     event.preventDefault();
     setSaving(true);
     setError(null);
+    let costMinor: number | undefined;
+    try {
+      costMinor = cost.trim() ? toMinor(cost, me.settings.baseCurrency) : undefined;
+    } catch {
+      setSaving(false);
+      setError('اكتب التكلفة رقماً.');
+      return;
+    }
     try {
       onDone(
         await moveClaim(claim.id, {
@@ -140,6 +174,9 @@ function StepDialog({
           ...(on ? { on } : {}),
           ...(note.trim() ? { note: note.trim() } : {}),
           ...(status === 'sent' ? { sentTo: sentTo.trim() } : {}),
+          ...(technician.trim() ? { technician: technician.trim() } : {}),
+          ...(costMinor !== undefined ? { costMinor } : {}),
+          ...(repairSale.trim() ? { repairSaleNumber: repairSale.trim() } : {}),
         }),
       );
     } catch (e) {
@@ -179,6 +216,28 @@ function StepDialog({
           onChange={(e) => setOn(e.target.value)}
         />
         <TextField label="ملاحظة (اختياري)" value={note} onChange={(e) => setNote(e.target.value)} />
+        <TextField
+          label="الفني (اختياري)"
+          value={technician}
+          onChange={(e) => setTechnician(e.target.value)}
+        />
+        <TextField
+          label="تكلفة الصيانة (اختياري)"
+          dir="ltr"
+          inputClassName="num"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
+        />
+        {claim.paidRepair ? (
+          <TextField
+            label="رقم فاتورة الصيانة المدفوعة"
+            dir="ltr"
+            inputClassName="num"
+            hint="بعتَ بند «صيانة» من الصندوق؟ اكتب رقم فاتورته هنا."
+            value={repairSale}
+            onChange={(e) => setRepairSale(e.target.value)}
+          />
+        ) : null}
       </form>
     </Dialog>
   );
@@ -191,13 +250,17 @@ function StepDialog({
  * moves no stock and posts nothing.
  */
 export function WarrantyPage() {
-  const [serial, setSerial] = useState('');
+  const me = useMe();
+  const [params] = useSearchParams();
+  const [serial, setSerial] = useState(params.get('serial') ?? '');
   const [found, setFound] = useState<WarrantyLookup | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [issue, setIssue] = useState('');
   const [receivedOn, setReceivedOn] = useState('');
   const [note, setNote] = useState('');
+  const [technician, setTechnician] = useState('');
+  const [loanItem, setLoanItem] = useState('');
   const [openError, setOpenError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
 
@@ -218,20 +281,28 @@ export function WarrantyPage() {
   }, [status]);
   useEffect(reload, [reload]);
 
-  async function search(event: FormEvent) {
-    event.preventDefault();
+  async function search(event: FormEvent | null, typed = serial) {
+    event?.preventDefault();
     setSearching(true);
     setLookupError(null);
     setFound(null);
     setOpenError(null);
     try {
-      setFound(await lookupWarranty(serial.trim()));
+      setFound(await lookupWarranty(typed.trim()));
     } catch (e) {
       setLookupError(fieldError(e));
     } finally {
       setSearching(false);
     }
   }
+
+  // Coming from an invoice or a customer page: the serial is there, look it up at once
+  const prefilled = params.get('serial');
+  useEffect(() => {
+    if (prefilled) void search(null, prefilled);
+    // Once per arrival
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefilled]);
 
   async function open(event: FormEvent) {
     event.preventDefault();
@@ -244,7 +315,13 @@ export function WarrantyPage() {
         issue,
         ...(receivedOn ? { receivedOn } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(technician.trim() ? { technician: technician.trim() } : {}),
+        ...(loanItem.trim() ? { loanItem: loanItem.trim() } : {}),
+        // After the warranty a repair is paid for, by a till sale of a «صيانة» line
+        ...(!found.underWarranty ? { paidRepair: true } : {}),
       });
+      setTechnician('');
+      setLoanItem('');
       setIssue('');
       setReceivedOn('');
       setNote('');
@@ -352,6 +429,25 @@ export function WarrantyPage() {
                         onChange={(e) => setReceivedOn(e.target.value)}
                       />
                     </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <TextField
+                        label="الفني (اختياري)"
+                        value={technician}
+                        onChange={(e) => setTechnician(e.target.value)}
+                      />
+                      <TextField
+                        label="جهاز بديل مُعار للزبون (اختياري)"
+                        hint="اسم الجهاز ورقمه إن أعرتَ الزبون جهازاً مكانه."
+                        value={loanItem}
+                        onChange={(e) => setLoanItem(e.target.value)}
+                      />
+                    </div>
+                    {!found.underWarranty ? (
+                      <Alert tone="info">
+                        خارج الكفالة: الصيانة مدفوعة. حاسب الزبون من الصندوق ببند «صيانة»، ثم اكتب رقم
+                        الفاتورة عند تسليم الجهاز.
+                      </Alert>
+                    ) : null}
                     <TextField
                       label="ملاحظة (اختياري)"
                       value={note}
@@ -415,6 +511,12 @@ export function WarrantyPage() {
                       {' · '}
                       {claim.customerName ?? 'بدون زبون'}
                       {claim.sentTo ? ` · عند ${claim.sentTo}` : ''}
+                      {claim.technician ? ` · الفني ${claim.technician}` : ''}
+                      {claim.loanItem ? ` · أُعير ${claim.loanItem}` : ''}
+                      {claim.paidRepair ? ' · صيانة مدفوعة' : ''}
+                      {claim.costMinor !== null
+                        ? ` · التكلفة ${formatMoney(claim.costMinor, me.settings.baseCurrency)}`
+                        : ''}
                     </span>
                   </p>
                   <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">

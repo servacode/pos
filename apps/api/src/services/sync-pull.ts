@@ -11,6 +11,7 @@ import {
   products,
   promotions,
   roles,
+  serials,
   stockLevels,
   syncTombstones,
   taxRates,
@@ -212,6 +213,7 @@ const PULL_SETS: Record<string, PullSet> = {
       packQty: barcodes.packQty,
       packName: barcodes.packName,
       packPriceMinor: barcodes.packPriceMinor,
+      packWholesaleMinor: barcodes.packWholesaleMinor,
       version: barcodes.version,
     },
   },
@@ -260,6 +262,8 @@ const PULL_SETS: Record<string, PullSet> = {
       variantId: stockLevels.variantId,
       qty: stockLevels.qty,
       reservedQty: stockLevels.reservedQty,
+      // What is left of each batch here (03 › الصيدليات): the till allocates a sale from it
+      batches: stockLevels.batches,
       version: stockLevels.version,
     },
     // The device's own branch only (17 › السحب).
@@ -354,6 +358,24 @@ const PULL_SETS: Record<string, PullSet> = {
     },
     scope: () =>
       sql`${onlineOrders.status} <> 'pending' and (${onlineOrders.status} = 'accepted' or ${onlineOrders.decidedAt} > now() - interval '30 days')`,
+  },
+  // The branch's pieces of serial-tracked products, in stock or sold lately (03 › الإلكترونيات): the
+  // till refuses a number that is not in stock, offline too.
+  serials: {
+    table: serials,
+    id: serials.id,
+    tenantId: serials.tenantId,
+    columns: {
+      variantId: serials.variantId,
+      serial: serials.serial,
+      status: serials.status,
+      saleNumber: sql<
+        string | null
+      >`(select i.number from invoices i where i.tenant_id = serials.tenant_id and i.id = serials.sale_id)`,
+      version: serials.version,
+    },
+    scope: (device) =>
+      sql`${serials.branchId} = ${device.branchId} and (${serials.status} in ('in_stock', 'rented') or ${serials.soldOn} > current_date - 45)`,
   },
 };
 

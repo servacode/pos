@@ -34,7 +34,10 @@ import { AppShell } from '../../layout/AppShell';
 import { apiFetch, ApiError, errorMessage } from '../../lib/api';
 import { listSuppliers, moneyOf, qtyOf, today } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } from './parts';
-import { VariantPicker } from './VariantPicker';
+import { PackQty } from './PackQty';
+import { baseQtyOf, packSummary, withPackChange } from './packLines';
+import { BatchSelect, type BatchChoice } from './BatchSelect';
+import { VariantPicker, type PickedVariant } from './VariantPicker';
 
 const listReturns = () => apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true });
 const createReturn = (input: SupplierReturnInput) =>
@@ -56,16 +59,20 @@ const REFUND_CHOICE: Record<
   bank: { title: 'تحويل بنكي', hint: 'تدخل حساب البنك', icon: ChequeIcon, tone: 'info' },
 };
 
-interface Line {
-  variantId: string;
-  name: string;
+interface Line extends PickedVariant {
+  /** Pieces, or packs of `packQty` pieces (thousandths) when the item has packs */
   qty: string;
+  packQty: number;
   /** What the supplier credits for the line; empty means the pieces' cost */
   amount: string;
+  /** The batch sent back; null: the earliest expiry goes first */
+  batch?: BatchChoice | null;
+  /** Serial numbers of a device sent back, one per piece (shown when the product tracks them) */
+  serials?: string;
 }
 
 /** The grid of a return line: the item, its quantity, what the supplier credits and the bin. */
-const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_7rem_11rem_2.5rem]';
+const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_14rem_11rem_2.5rem]';
 
 /**
  * «مرتجع إلى المورد» (09 › purchase returns): pieces sent back to their supplier, out of the branch
@@ -106,7 +113,7 @@ export function SupplierReturnsPage() {
   }, []);
 
   const parsed = lines.map((l) => ({
-    qty: qtyOf(l.qty),
+    qty: baseQtyOf(l),
     amount: l.amount.trim() ? moneyOf(l.amount) : undefined,
   }));
   const ready =
@@ -131,6 +138,15 @@ export function SupplierReturnsPage() {
             variantId: l.variantId,
             qty: parsed[i]!.qty!,
             amountMinor: parsed[i]!.amount ?? null,
+            ...(l.batch ? { batchNo: l.batch.batchNo, expiryDate: l.batch.expiryDate } : {}),
+            ...(l.serials?.trim()
+              ? {
+                  serials: l.serials
+                    .split(/[\n,،]+/)
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+                }
+              : {}),
           })),
         }),
       );
@@ -279,16 +295,19 @@ export function SupplierReturnsPage() {
               </div>
               <VariantPicker
                 onPick={(v) =>
-                  setLines((list) =>
-                    list.some((l) => l.variantId === v.variantId)
-                      ? list
-                      : [...list, { ...v, qty: '', amount: '' }],
-                  )
+                  // The same item may come twice, each from its own batch
+                  setLines((list) => [...list, { ...v, qty: '', packQty: 1000, amount: '' }])
                 }
                 onPickGrid={(picked) =>
                   setLines((list) => [
                     ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
-                    ...picked.map((p) => ({ variantId: p.variantId, name: p.name, qty: p.qty, amount: '' })),
+                    ...picked.map((p) => ({
+                      variantId: p.variantId,
+                      name: p.name,
+                      qty: p.qty,
+                      packQty: 1000,
+                      amount: '',
+                    })),
                   ])
                 }
               />
@@ -306,30 +325,35 @@ export function SupplierReturnsPage() {
                 >
                   {lines.map((l, i) => (
                     <li
-                      key={l.variantId}
+                      key={`${l.variantId}-${i}`}
                       className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 px-4 py-3 md:items-center ${LINE_COLUMNS}`}
                     >
-                      <span className="col-span-2 min-w-0 truncate font-semibold text-ink md:col-span-1">
-                        {l.name}
+                      <span className="col-span-2 flex min-w-0 flex-col md:col-span-1">
+                        <span className="truncate font-semibold text-ink">{l.name}</span>
+                        {l.packQty > 1000 && parsed[i]!.qty ? (
+                          <span className="text-xs text-ink-subtle">
+                            {packSummary(
+                              qtyOf(l.qty) ?? 0,
+                              l.packs?.find((x) => x.qty === l.packQty) ?? null,
+                              (q) => formatQuantity(q, digits),
+                            )}
+                          </span>
+                        ) : null}
                       </span>
-                      <div className="col-start-1 row-start-2 md:col-start-auto md:row-start-auto">
+                      <div className="col-span-3 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
                         <Caption>الكمية</Caption>
-                        <TextField
-                          label={`كمية ${l.name}`}
-                          hideLabel
-                          dir="ltr"
-                          inputMode="decimal"
-                          value={l.qty}
-                          onChange={(e) =>
-                            setLines((all) =>
-                              all.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)),
-                            )
+                        <PackQty
+                          name={l.name}
+                          packs={l.packs}
+                          qty={l.qty}
+                          packQty={l.packQty}
+                          onChange={(patch) =>
+                            setLines((all) => all.map((x, j) => (j === i ? withPackChange(x, patch) : x)))
                           }
                           error={fields[`lines.${i}.qty`]}
-                          inputClassName="num"
                         />
                       </div>
-                      <div className="col-span-2 col-start-2 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
+                      <div className="col-span-3 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
                         <Caption>المبلغ (فارغ: بكلفتها)</Caption>
                         <TextField
                           label={`مبلغ ${l.name}`}
@@ -352,6 +376,42 @@ export function SupplierReturnsPage() {
                           onRemove={() => setLines((all) => all.filter((_, j) => j !== i))}
                         />
                       </div>
+                      <div className="col-span-3 row-start-4 md:col-span-4 md:row-start-auto">
+                        <BatchSelect
+                          variantId={l.variantId}
+                          branchId={branchId || undefined}
+                          value={l.batch ?? null}
+                          onChange={(batch) =>
+                            setLines((all) => all.map((x, j) => (j === i ? { ...x, batch } : x)))
+                          }
+                          error={fields[`lines.${i}.batchNo`]}
+                        />
+                      </div>
+
+                      {fields[`lines.${i}.serials`] || l.serials ? (
+                        <div className="col-span-3 md:col-span-4">
+                          <label className="flex flex-col gap-1.5">
+                            <span className="text-xs font-semibold text-ink-subtle">
+                              الأرقام التسلسلية (رقم لكل قطعة، واحد في كل سطر)
+                            </span>
+                            <textarea
+                              aria-label={`أرقام ${l.name}`}
+                              dir="ltr"
+                              rows={2}
+                              value={l.serials ?? ''}
+                              onChange={(e) =>
+                                setLines((all) =>
+                                  all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)),
+                                )
+                              }
+                              className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden"
+                            />
+                            {fields[`lines.${i}.serials`] ? (
+                              <span className="text-sm text-danger-ink">{fields[`lines.${i}.serials`]}</span>
+                            ) : null}
+                          </label>
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </LinesTable>

@@ -101,6 +101,7 @@ export async function loadMe(
         taxInclusive: settings.taxInclusive,
         numberFormat: settings.numberFormat === 'arab' ? 'arab' : 'latn',
         catalogOptions: catalogOptionsOf(settings.catalogOptions),
+        warrantyTerms: settings.till?.warrantyTerms ?? null,
       },
       subscription: {
         status: s.status,

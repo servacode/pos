@@ -30,7 +30,7 @@ export function FlowHeader({
   return (
     <header className="flex flex-wrap items-center gap-x-5 gap-y-3">
       {onBack ? (
-        <Button variant="secondary" icon={<BackIcon />} onClick={onBack}>
+        <Button key={backLabel} variant="secondary" icon={<BackIcon />} onClick={onBack}>
           {backLabel}
         </Button>
       ) : null}

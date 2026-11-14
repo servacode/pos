@@ -41,6 +41,11 @@ const claimOf = (r: typeof warrantyClaims.$inferSelect): WarrantyClaim => ({
   customerPhone: r.customerPhone,
   issue: r.issue,
   sentTo: r.sentTo,
+  costMinor: r.costMinor,
+  technician: r.technician,
+  loanItem: r.loanItem,
+  paidRepair: r.paidRepair,
+  repairSaleNumber: r.repairSaleNumber,
   events: r.events as WarrantyEvent[],
   createdAt: r.createdAt.toISOString(),
   version: r.version,
@@ -184,6 +189,12 @@ export function createWarrantyClaim(
         customerName: found.customerName,
         customerPhone: found.customerPhone,
         issue: input.issue,
+        costMinor: input.costMinor ?? null,
+        technician: input.technician || null,
+        loanItem: input.loanItem || null,
+        // Out of warranty, a repair is paid for (a till sale of a «صيانة» line)
+        paidRepair: input.paidRepair ?? false,
+        repairSaleNumber: input.repairSaleNumber || null,
         events: [{ status: 'received', on, note: input.note || null }],
         createdBy: auth.userId,
       })
@@ -233,6 +244,12 @@ export function setWarrantyStatus(
       .set({
         status: input.status,
         sentTo: input.status === 'sent' ? (input.sentTo ?? null) : row.sentTo,
+        costMinor: input.costMinor === undefined ? row.costMinor : input.costMinor,
+        technician: input.technician === undefined ? row.technician : input.technician || null,
+        loanItem: input.loanItem === undefined ? row.loanItem : input.loanItem || null,
+        paidRepair: input.paidRepair ?? row.paidRepair,
+        repairSaleNumber:
+          input.repairSaleNumber === undefined ? row.repairSaleNumber : input.repairSaleNumber || null,
         events: [...events, { status: input.status, on, note: input.note || null }],
         updatedAt: sql`now()`,
       })

@@ -133,11 +133,22 @@ describe('the receipt as printer lines', () => {
         withRx({ ref: 'RX-77', doctor: 'د. سامر', patientName: 'ليلى', patientId: '01020304' }),
       );
       const text = JSON.stringify(lines);
-      expect(text).toContain('دفعة B-07 · تنتهي 2027-01-01');
+      expect(text).toContain('دفعة B-07 · تنتهي 1 كانون الثاني 2027');
       expect(lines).toContainEqual({ kind: 'pair', start: 'رقم الوصفة', end: 'RX-77' });
       expect(lines).toContainEqual({ kind: 'pair', start: 'الطبيب', end: 'د. سامر' });
       expect(lines).toContainEqual({ kind: 'pair', start: 'المريض', end: 'ليلى' });
       expect(text).not.toContain('01020304');
+    });
+
+    it('prints each batch a line was split over, with what it took from it', () => {
+      const split = withRx(null, false);
+      (split.doc.payload as { lines: { batches?: object[] }[] }).lines[0]!.batches = [
+        { batchNo: 'G-OLD', expiry: '2027-01-01', qty: 2000 },
+        { batchNo: null, expiry: null, qty: 1000 },
+      ];
+      const text = JSON.stringify(receiptLines(split));
+      expect(text).toContain('دفعة G-OLD · تنتهي 1 كانون الثاني 2027 ×');
+      expect(text).toContain('دفعة — ×');
     });
 
     it('prints a batch without a date, and nothing when the prescription is empty', () => {

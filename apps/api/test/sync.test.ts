@@ -491,6 +491,7 @@ describe('GET /v1/sync/pull', () => {
       'products',
       'promotions',
       'roles',
+      'serials',
       'settings',
       'stock_levels',
       'tax_rates',

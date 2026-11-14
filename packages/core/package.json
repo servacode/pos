@@ -14,6 +14,7 @@
     "./pharmacy": "./src/pharmacy.ts",
     "./costing": "./src/costing.ts",
     "./scale": "./src/scale.ts",
+    "./rentals": "./src/rentals.ts",
     "./promotions": "./src/promotions.ts",
     "./currencies": "./src/currencies.ts",
     "./text": "./src/text.ts",

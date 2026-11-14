@@ -65,7 +65,13 @@ import {
   type VariantDraft,
 } from './form';
 import { normalizeArabic, type SectorKey } from '@serva/core';
-import { MODIFIER_SECTORS, SERIAL_SECTORS, storeSells, WEIGHED_SECTORS } from '../../lib/sectors';
+import {
+  MODIFIER_SECTORS,
+  RENTAL_SECTORS,
+  SERIAL_SECTORS,
+  storeSells,
+  WEIGHED_SECTORS,
+} from '../../lib/sectors';
 import { ModifiersEditor } from './ModifiersEditor';
 import { ImagesEditor } from './ImagesEditor';
 import { RecipeSection } from './RecipeSection';
@@ -74,6 +80,7 @@ import { BulkApply } from './BulkApply';
 import { OptionsEditor } from './OptionsEditor';
 import { ButtonLink, Fact, SectionCard } from './parts';
 import { StockGrid } from './StockGrid';
+import { UnitsDialog } from './UnitsDialog';
 import { VariantBlock, VariantGrid } from './VariantBlock';
 
 interface Lookups {
@@ -92,7 +99,9 @@ const TOP_FIELDS = [
   'genericName',
   'requiresPrescription',
   'controlled',
+  'requiresExpiry',
   'tracksSerial',
+  'rentable',
   'warrantyMonths',
   'type',
   'unitId',
@@ -216,6 +225,7 @@ function ProductCard() {
   const [conflict, setConflict] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState<'ask' | 'busy' | null>(null);
+  const [unitsOpen, setUnitsOpen] = useState(false);
 
   const { enabledCurrencies, baseCurrency } = me.settings;
   const currencies: CurrencyCode[] = useMemo(
@@ -238,13 +248,18 @@ function ProductCard() {
       if (detail) setDraft(draftFromDetail(detail));
       else {
         const piece = units.items.find((u) => !u.allowsFraction && !u.archivedAt) ?? units.items[0];
-        setDraft(
-          emptyDraft({
+        // A new product starts with the store's default tax rate (الضرائب), when it chose one
+        const defaultBp = taxRates.defaultRateBp ?? 0;
+        const defaultTax =
+          defaultBp > 0 ? taxRates.items.find((t) => !t.archivedAt && t.rateBp === defaultBp) : undefined;
+        setDraft({
+          ...emptyDraft({
             currency: me.settings.baseCurrency,
             unitId: piece?.id ?? '',
             barcode: initialBarcode ? barcodeOf(initialBarcode) : undefined,
           }),
-        );
+          taxRateId: defaultTax?.id ?? '',
+        });
       }
     } catch (error) {
       setLoadError(errorMessage(error));
@@ -602,6 +617,17 @@ function ProductCard() {
                       />
                     </div>
                   ) : null}
+                  {fits(['pharmacy', 'medical_supplies']) || draft.requiresExpiry ? (
+                    <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
+                      <Switch
+                        label="يتطلب صلاحية"
+                        description="فاتورة الشراء لا تقبل هذا الصنف بلا تاريخ انتهاء، ويحكم الكاشير على دفعاته."
+                        checked={draft.requiresExpiry ?? false}
+                        disabled={!canManage}
+                        onCheckedChange={(requiresExpiry) => update({ requiresExpiry })}
+                      />
+                    </div>
+                  ) : null}
                   {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
                     <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
                       <Switch
@@ -612,6 +638,16 @@ function ProductCard() {
                         onCheckedChange={(tracksSerial) => update({ tracksSerial })}
                         className="sm:col-span-2"
                       />
+                      {fits(RENTAL_SECTORS) || draft.rentable ? (
+                        <Switch
+                          label="قابل للتأجير"
+                          description="تُؤجَّر قطعه من شاشة التأجير على الصندوق، وتُمنع من البيع وهي عند الزبون."
+                          checked={draft.rentable ?? false}
+                          disabled={!canManage || !draft.tracksSerial}
+                          onCheckedChange={(rentable) => update({ rentable })}
+                          className="sm:col-span-2"
+                        />
+                      ) : null}
                       <TextField
                         name="warrantyMonths"
                         label="الكفالة بالأشهر (اختياري)"
@@ -627,8 +663,16 @@ function ProductCard() {
                 </div>
               </SectionCard>
 
-              <SectionCard title="المقاسات والألوان" icon={<ShirtIcon />}>
-                <OptionsEditor axes={draft.axes} variantCount={liveVariants.length} onChange={setAxes} />
+              <SectionCard
+                title={fits(['clothing']) ? 'المقاسات والألوان' : 'الأنواع والخيارات'}
+                icon={<ShirtIcon />}
+              >
+                <OptionsEditor
+                  axes={draft.axes}
+                  variantCount={liveVariants.length}
+                  onChange={setAxes}
+                  fashion={fits(['clothing'])}
+                />
                 {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
               </SectionCard>
 
@@ -637,7 +681,9 @@ function ProductCard() {
                 icon={<BarcodeIcon />}
                 description={
                   titled
-                    ? 'لكل مقاس ولون سعره وباركوده. القطعة الجديدة تبدأ بسعر الأولى.'
+                    ? fits(['clothing'])
+                      ? 'لكل مقاس ولون سعره وباركوده. القطعة الجديدة تبدأ بسعر الأولى.'
+                      : 'لكل نوع سعره وباركوده. النوع الجديد يبدأ بسعر الأول.'
                     : 'سعر البيع على الكاشير، والباركودات التي تُمسح له.'
                 }
               >
@@ -801,6 +847,17 @@ function ProductCard() {
                     value={draft.unitId}
                     onChange={(event) => update({ unitId: event.target.value })}
                     error={errors.unitId}
+                    hint={
+                      canManage ? (
+                        <button
+                          type="button"
+                          onClick={() => setUnitsOpen(true)}
+                          className="rounded-small font-semibold text-brand-ink underline-offset-4 hover:underline"
+                        >
+                          أضف وحدة (علبة، كرتونة، متر…)
+                        </button>
+                      ) : undefined
+                    }
                   >
                     {lookups.units
                       .filter((u) => !u.archivedAt || u.id === draft.unitId)
@@ -816,6 +873,13 @@ function ProductCard() {
                     value={draft.taxRateId}
                     onChange={(event) => update({ taxRateId: event.target.value })}
                     error={errors.taxRateId}
+                    hint={
+                      lookups.taxRates.length === 0 ? (
+                        <Link to="/tax-rates" className="font-semibold underline underline-offset-4">
+                          لا ضرائب بعد: أضفها من «الضرائب»
+                        </Link>
+                      ) : undefined
+                    }
                   >
                     <option value="">بلا ضريبة</option>
                     {lookups.taxRates
@@ -908,6 +972,14 @@ function ProductCard() {
           </div>
         ) : null}
       </form>
+
+      {unitsOpen ? (
+        <UnitsDialog
+          units={lookups.units}
+          onChange={(units) => setLookups((l) => (l ? { ...l, units } : l))}
+          onClose={() => setUnitsOpen(false)}
+        />
+      ) : null}
 
       <Dialog
         open={archiving !== null}

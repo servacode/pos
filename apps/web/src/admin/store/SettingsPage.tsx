@@ -166,7 +166,13 @@ export function SettingsPage() {
     ...(weighs ? [SETTINGS_SECTIONS.scale] : []),
     ...(serves ? [SETTINGS_SECTIONS.service] : []),
     SETTINGS_SECTIONS.till,
-    ...(batches ? [medicinal ? SETTINGS_SECTIONS.pharmacy : SETTINGS_SECTIONS.batches] : []),
+    ...(batches
+      ? [
+          store && storeSells(store.sectors, ['pharmacy'])
+            ? SETTINGS_SECTIONS.pharmacy
+            : SETTINGS_SECTIONS.batches,
+        ]
+      : []),
     SETTINGS_SECTIONS.loyalty,
     SETTINGS_SECTIONS.data,
   ];

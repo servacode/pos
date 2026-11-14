@@ -41,9 +41,11 @@ import {
 } from '../admin/reports/access';
 import {
   CHEQUE_SECTORS,
+  CONTRACT_PRICE_SECTORS,
   EXPIRY_SECTORS,
   HALL_SECTORS,
   MODIFIER_SECTORS,
+  RENTAL_SECTORS,
   SERIAL_SECTORS,
   storeSells,
   WARRANTY_SECTORS,
@@ -129,6 +131,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     icon: ListIcon,
     permission: ['report.view'],
   },
+  {
+    section: 'sales',
+    to: '/quotations',
+    label: 'عروض الأسعار',
+    icon: ListIcon,
+    permission: ['customers.manage'],
+  },
   { section: 'sales', to: '/shifts', label: 'الورديات', icon: ClockIcon, permission: SHIFTS_ACCESS },
   {
     section: 'customers',
@@ -144,6 +153,30 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     icon: ChequeIcon,
     permission: ['customers.view'],
     sectors: CHEQUE_SECTORS,
+  },
+  {
+    section: 'customers',
+    to: '/rentals',
+    label: 'التأجير',
+    icon: SerialIcon,
+    permission: ['customers.view'],
+    sectors: RENTAL_SECTORS,
+  },
+  {
+    section: 'customers',
+    to: '/maintenance',
+    label: 'عقود الصيانة',
+    icon: ShieldCheckIcon,
+    permission: ['catalog.manage'],
+    sectors: RENTAL_SECTORS,
+  },
+  {
+    section: 'customers',
+    to: '/contract-prices',
+    label: 'أسعار العقود',
+    icon: OfferIcon,
+    permission: ['catalog.manage'],
+    sectors: CONTRACT_PRICE_SECTORS,
   },
   {
     section: 'customers',
@@ -260,6 +293,14 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'inventory',
+    to: '/recall',
+    label: 'سحب دفعة',
+    icon: ShieldCheckIcon,
+    permission: ['purchases.manage'],
+    sectors: EXPIRY_SECTORS,
+  },
+  {
+    section: 'inventory',
     to: '/controlled-register',
     label: 'سجل الأدوية المراقبة',
     icon: ShieldCheckIcon,
@@ -281,6 +322,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     icon: SerialIcon,
     permission: ['catalog.manage'],
     sectors: SERIAL_SECTORS,
+  },
+  {
+    section: 'reports',
+    to: '/reports/debt-ageing',
+    label: 'أعمار الديون',
+    icon: CustomersIcon,
+    permission: ['customers.view'],
   },
   {
     section: 'reports',
@@ -347,6 +395,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     label: 'الموظفون',
     icon: UserIcon,
     permission: ['users.manage'],
+  },
+  {
+    section: 'settings',
+    to: '/tax-rates',
+    label: 'الضرائب',
+    icon: PercentIcon,
+    permission: ['settings.manage'],
   },
   { section: 'settings', to: '/devices', label: 'الأجهزة', icon: DeviceIcon, permission: ['devices.view'] },
   {

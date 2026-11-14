@@ -12,10 +12,19 @@ import type {
 import { rateFor } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
 import { cn, displayNumber, formatQuantity, Money, useDigits } from '@serva/ui';
+import { packPiecesNote } from '../sale/packText';
 import { clockText, dateText } from '../format';
 import { Bars } from '../../lib/Bars';
+import { dayText } from '../../lib/dates';
 import { discountLabel, VOUCHER_NOTE } from '../print/lines';
 import { ORDER_TYPE_TEXT } from './KitchenTicket';
+import { serialText, warrantyText } from './warranty';
+
+/** « (200 قطعة)» after the packs of a line sold by the box, nothing for single units. */
+const packNote = (line: { qty: number; packQty?: number }, digits: Parameters<typeof formatQuantity>[1]) => {
+  const note = packPiecesNote(line, (q) => formatQuantity(q, digits));
+  return note === null ? '' : ` ${note}`;
+};
 
 export type PaperWidth = 80 | 58;
 
@@ -373,7 +382,8 @@ export function Receipt({
             <div className="flex justify-between gap-2">
               <bdi dir="rtl" className="num">
                 {formatQuantity(line.qty, digits)}
-                {line.unitName ? ` ${line.unitName}` : ''} ×{' '}
+                {line.unitName ? ` ${line.unitName}` : ''}
+                {packNote(line, digits)} ×{' '}
                 <Money minor={line.unitPriceMinor} currency={base} symbol={false} />
               </bdi>
               <span className="num">{amount(line.priced.grossMinor)}</span>
@@ -385,16 +395,34 @@ export function Receipt({
             ) : null}
             {line.serials?.length ? (
               <bdi dir="ltr" className="num text-start">
-                IMEI {line.serials.join('، ')}
+                {serialText(line, data.settings)}
               </bdi>
             ) : null}
-            {line.batchNo ? (
+            {warrantyText(line, data.doc.deviceTime, data.settings) ? (
+              <span className="text-xs">{warrantyText(line, data.doc.deviceTime, data.settings)}</span>
+            ) : null}
+            {line.batches && line.batches.length > 0 ? (
+              <span className="flex flex-col text-xs">
+                {line.batches.map((b, n) => (
+                  <span key={n}>
+                    دفعة <bdi dir="ltr">{b.batchNo ?? '—'}</bdi>
+                    {b.expiry ? (
+                      <>
+                        {' '}
+                        · تنتهي <bdi>{dayText(b.expiry, digits)}</bdi>
+                      </>
+                    ) : null}{' '}
+                    × <bdi className="num">{formatQuantity(b.qty, digits)}</bdi>
+                  </span>
+                ))}
+              </span>
+            ) : line.batchNo ? (
               <span className="text-xs">
                 دفعة <bdi dir="ltr">{line.batchNo}</bdi>
                 {line.batchExpiry ? (
                   <>
                     {' '}
-                    · تنتهي <bdi className="num">{line.batchExpiry}</bdi>
+                    · تنتهي <bdi>{dayText(line.batchExpiry, digits)}</bdi>
                   </>
                 ) : null}
               </span>
@@ -446,6 +474,19 @@ export function Receipt({
           ) : null}
         </div>
       ))}
+      {sale.payments.some((p) => p.method === 'credit') ? (
+        <>
+          {sale.customerBalanceAfterMinor !== null && sale.customerBalanceAfterMinor !== undefined ? (
+            <Row label="رصيد الزبون الجديد" strong>
+              <Money minor={sale.customerBalanceAfterMinor} currency={base} />
+            </Row>
+          ) : null}
+          <div className="flex flex-col gap-1 pt-3" aria-label="توقيع المستلم">
+            <span className="text-xs">توقيع المستلم</span>
+            <span className="mt-4 block border-b border-dashed border-current" />
+          </div>
+        </>
+      ) : null}
       {data.vouchersAfter?.map((v) => (
         <Row key={v.code} label={<span className="text-xs">الباقي على القسيمة</span>}>
           <Money minor={v.balanceMinor} currency={v.currency} />

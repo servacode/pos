@@ -56,6 +56,7 @@ function open() {
           id: `v-${size}${i}`,
           label: `${size} · ${colour}`,
           archivedAt: null,
+          barcodes: [],
           attributes: [
             { name: 'المقاس', value: size },
             { name: 'اللون', value: colour },
@@ -69,7 +70,11 @@ function open() {
     }),
     'GET /v1/products/p-1': () => ({
       status: 200,
-      body: { id: 'p-1', nameAr: 'حليب طازج', variants: [{ id: 'v-1', label: null, archivedAt: null }] },
+      body: {
+        id: 'p-1',
+        nameAr: 'حليب طازج',
+        variants: [{ id: 'v-1', label: null, archivedAt: null, barcodes: [] }],
+      },
     }),
     'POST /v1/purchases': () => ({ status: 201, body: { id: 'pu-1', number: 'PUR-2026-000001' } }),
   });
@@ -260,6 +265,23 @@ describe('payments and duplicate suppliers', () => {
     expect(requestsTo('POST', '/v1/supplier-payments')[0]?.body).toMatchObject({
       amountMinor: 500_000,
       advance: true,
+    });
+  });
+
+  it('pays by cheque with its bank, number and due date, out of the bank', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '10');
+    await user.click(screen.getByRole('radio', { name: 'بشيك' }));
+    const submit = screen.getByRole('button', { name: 'سجّل الدفعة' });
+    expect(submit).toBeDisabled();
+    await user.type(screen.getByLabelText('البنك'), 'بنك سورية');
+    await user.type(screen.getByLabelText('رقم الشيك'), '4410');
+    await user.click(submit);
+    expect(await screen.findByText('سُجّل سند الدفع PAY-1.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/supplier-payments')[0]?.body).toMatchObject({
+      method: 'bank',
+      cheque: { bank: 'بنك سورية', number: '4410' },
     });
   });
 
