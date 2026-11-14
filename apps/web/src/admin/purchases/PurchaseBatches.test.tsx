@@ -86,6 +86,24 @@ describe('a receipt with batches', () => {
     });
   });
 
+  it('says why the receipt waits: the missing numbers, then the missing expiry date, by item name', async () => {
+    const { user } = open();
+    await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'قفازات');
+    await user.click(await screen.findByRole('button', { name: 'قفازات طبية' }));
+    expect(await screen.findByText('اكتب الكمية والكلفة لكل صنف ليُسجَّل.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('كمية قفازات طبية'), '10');
+    await user.type(screen.getByLabelText('كلفة قفازات طبية'), '16000');
+    expect(await screen.findByText('اكتب تاريخ الانتهاء لـ قفازات طبية ليُسجَّل.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'سجّل الفاتورة' })).toHaveAccessibleDescription(
+      'اكتب تاريخ الانتهاء لـ قفازات طبية ليُسجَّل.',
+    );
+    // The line cost is read back with its separator and currency
+    expect(screen.getAllByText(/16,000/).length).toBeGreaterThanOrEqual(2);
+    await user.type(screen.getByLabelText('تاريخ الانتهاء (مطلوب)'), '01/03/2099');
+    expect(screen.queryByText(/ليُسجَّل/)).toBeNull();
+  });
+
   it('warns about an expiry date that is already past, and still lets it be saved', async () => {
     const { user } = open();
     await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));

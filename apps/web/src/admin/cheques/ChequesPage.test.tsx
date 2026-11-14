@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { Cheque, MeResponse } from '@serva/core';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
@@ -168,7 +168,10 @@ describe('cheque reminders', () => {
     expect(await screen.findByText(/شيك صادر للمورد يستحق/)).toBeInTheDocument();
     const table = await screen.findByRole('table', { name: 'الشيكات' });
     // A supplier cheque left the bank on the day it was paid: a note, no action to take
-    expect(await within(table).findByText('خُصم من البنك يوم الدفع')).toBeInTheDocument();
+    const left = await within(table).findByText('خُصم من البنك يوم الدفع');
+    expect(left).toBeInTheDocument();
+    // It wraps inside its cell instead of running off the table's edge
+    expect(left).not.toHaveClass('whitespace-nowrap');
     const row = (await within(table).findByText('NEAR-1')).closest('tr') as HTMLElement;
     await user.click(within(row).getByRole('button', { name: 'مرتجع' }));
     const sure = await screen.findByRole('dialog');
@@ -196,7 +199,7 @@ describe('cheque reminders', () => {
     renderApp('/cheques');
     const customers = (await screen.findByText('شيكات الزبائن')).parentElement as HTMLElement;
     const suppliers = screen.getByText('شيكات صادرة للموردين').parentElement as HTMLElement;
-    expect(customers).toHaveTextContent('2');
+    await waitFor(() => expect(customers).toHaveTextContent('2'));
     expect(suppliers).toHaveTextContent('1');
     expect(screen.queryByText('عدد الشيكات')).not.toBeInTheDocument();
   });

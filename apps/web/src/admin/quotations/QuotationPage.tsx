@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import {
+  packOptionsOf,
   priceQuotation,
   QUOTATION_NEXT,
   QUOTATION_STATUS_LABELS,
@@ -33,7 +34,7 @@ import { ReportScreen } from '../reports/parts';
 import { ApiError, errorMessage } from '../../lib/api';
 import { isoDay } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
-import { listTaxRates, listUnits } from '../catalog/api';
+import { getProduct, listTaxRates, listUnits } from '../catalog/api';
 import { getCustomer, listCustomers } from '../customers/api';
 import { PackQty } from '../purchases/PackQty';
 import { getStore } from '../store/api';
@@ -100,6 +101,7 @@ export function QuotationPage() {
   const [lines, setLines] = useState<EditorLine[]>([]);
   const [pricing, setPricing] = useState<CustomerPricing | null>(null);
   const [customerQ, setCustomerQ] = useState('');
+  const [noTill, setNoTill] = useState(false);
   const [customerHits, setCustomerHits] = useState<{ id: string; name: string }[]>([]);
 
   const locked = saved?.status === 'converted';
@@ -127,7 +129,31 @@ export function QuotationPage() {
     setNotes(q.notes ?? '');
     setTerms(q.terms ?? '');
     setLines(q.lines.map(editorLineOf));
+    void showItemPacks(q);
     if (q.customerId) void loadPricing(q.customerId, false);
+  }
+
+  /**
+   * A saved line keeps only the pack it was typed in, so its unit shows from that; here the item's own
+   * packs are read to show the whole pick. Display only: no price or quantity changes.
+   */
+  async function showItemPacks(q: Quotation) {
+    const productIds = [...new Set(q.lines.map((l) => l.productId).filter((p): p is string => !!p))];
+    for (const productId of productIds) {
+      try {
+        const detail = await getProduct(productId);
+        setLines((list) =>
+          list.map((l) => {
+            const variant = detail.variants.find((v) => v.id === l.variantId);
+            if (l.productId !== productId || !variant) return l;
+            const packs = packOptionsOf(variant.barcodes);
+            return packs.some((p) => p.qty === l.packQty) || l.packQty === 1000 ? { ...l, packs } : l;
+          }),
+        );
+      } catch {
+        // The unit the line was saved with stays
+      }
+    }
   }
 
   useEffect(() => {
@@ -282,6 +308,24 @@ export function QuotationPage() {
     }
   }
 
+  /** The till takes a quotation only in a browser that is paired as one: ask first, never land on the pairing screen blind */
+  async function toTill(quotationId: string) {
+    setNoTill(false);
+    try {
+      const [{ deviceStore }, { loadDevice }] = await Promise.all([
+        import('../../offline/database'),
+        import('../../offline/device'),
+      ]);
+      if (!(await loadDevice(deviceStore()))) {
+        setNoTill(true);
+        return;
+      }
+    } catch {
+      // Cannot tell: let the till decide
+    }
+    void navigate(`/pos?quotation=${quotationId}`);
+  }
+
   const next = saved ? QUOTATION_NEXT[saved.status] : [];
   const totals = saved && !preview ? saved.totals : preview?.totals;
   const quotationForPrint: Quotation | null = saved
@@ -317,6 +361,21 @@ export function QuotationPage() {
             انتهت صلاحية هذا العرض في {saved.validUntil}. غيّر «صالح حتى» واحفظ ليعود مفتوحاً.
           </Alert>
         ) : null}
+        {noTill && saved ? (
+          <Alert tone="info" title="هذا المتصفح غير مربوط بكاشير">
+            <span className="flex flex-col gap-2">
+              <span>
+                افتح عرض السعر من جهاز الكاشير ليتحول إلى فاتورة، أو اربط هذا المتصفح بالكاشير أولاً.
+              </span>
+              <Link
+                to={`/pos?quotation=${saved.id}`}
+                className="w-fit font-semibold text-brand-ink underline underline-offset-4"
+              >
+                اربط هذا المتصفح بالكاشير
+              </Link>
+            </span>
+          </Alert>
+        ) : null}
         {locked ? (
           <Alert tone="info">
             حُوّل هذا العرض إلى فاتورة، فلا يُعدَّل. اضغط «أعده مرسلاً» لفتحه من جديد.
@@ -334,9 +393,7 @@ export function QuotationPage() {
                     size="sm"
                     variant={s === 'converted' ? 'primary' : 'secondary'}
                     loading={busy}
-                    onClick={() =>
-                      s === 'converted' ? void navigate(`/pos?quotation=${saved.id}`) : void move(s)
-                    }
+                    onClick={() => (s === 'converted' ? void toTill(saved.id) : void move(s))}
                   >
                     {s === 'converted'
                       ? 'حوّل إلى فاتورة'
@@ -494,9 +551,9 @@ export function QuotationPage() {
                 <p className="text-sm text-ink-muted">ابحث عن صنف فوق لتضيفه.</p>
               )}
               {totals ? (
-                <dl className="ms-auto flex w-full max-w-60 flex-col gap-1 text-sm">
+                <dl className="ms-auto flex w-fit min-w-40 max-w-full flex-col gap-1 text-sm">
                   {totals.discountMinor > 0 ? (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-6">
                       <dt>الخصم</dt>
                       <dd>
                         <Money minor={totals.discountMinor} currency={currency} />
@@ -504,14 +561,14 @@ export function QuotationPage() {
                     </div>
                   ) : null}
                   {totals.taxMinor > 0 ? (
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-6">
                       <dt>{me.settings.taxInclusive ? 'منها ضريبة' : 'الضريبة'}</dt>
                       <dd>
                         <Money minor={totals.taxMinor} currency={currency} />
                       </dd>
                     </div>
                   ) : null}
-                  <div className="flex justify-between border-t border-line pt-1 text-base font-bold">
+                  <div className="flex justify-between gap-6 border-t border-line pt-1 text-base font-bold">
                     <dt>الإجمالي</dt>
                     <dd>
                       <Money minor={totals.totalMinor} currency={currency} />

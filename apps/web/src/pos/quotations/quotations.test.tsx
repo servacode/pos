@@ -296,3 +296,51 @@ describe('quotationCart', () => {
     expect(unknown.cart.priceTier).toBeUndefined();
   });
 });
+
+describe('a pack line on a quotation', () => {
+  it('reads as the till names it: name · pack, not the quotation’s own wording', () => {
+    const item = {
+      variantId: 'v-1',
+      productId: 'p-1',
+      name: 'قفازات فحص M',
+      price: { priceMinor: 1_000, currency: 'SYP' },
+    };
+    const catalog = { byVariant: new Map([['v-1', item]]), customers: [] } as never;
+    const line = {
+      ...OFFER.lines[0]!,
+      variantId: 'v-1',
+      name: 'قفازات فحص M علبة 100',
+      packName: 'علبة',
+      packQty: 100_000,
+    };
+    const { cart } = quotationCart({ ...OFFER, lines: [line] }, catalog);
+    expect(cart.lines[0]!.name).toBe('قفازات فحص M · علبة');
+  });
+});
+
+describe('a quotation from the address while a sale is in progress', () => {
+  it('puts the sale aside, opens the quotation and says so', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const base = server([]);
+    const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url) === '/v1/device/quotations/q-1'
+        ? new Response(JSON.stringify({ ...OFFER, lines: [OFFER.lines[0]!] }), { status: 200 })
+        : base.fetch(url, init),
+    ) as unknown as typeof fetch;
+    // A sale in progress is kept on the device; the till then opens at the quotation's address
+    const first = renderPos({ local, fetch: fetchFn });
+    await signIn(first.user);
+    await scan(first.user, PRODUCTS.milk.barcode!.code);
+    await waitFor(async () => expect(await local.get('currentCart')).not.toBeNull());
+    first.view.unmount();
+    window.history.pushState(null, '', '/pos?quotation=q-1');
+    const { user } = renderPos({ local, fetch: fetchFn });
+    await signIn(user);
+    expect(await screen.findByText(/فعلّقناها وفتحنا عرض السعر/)).toBeInTheDocument();
+    expect(plain(screen.getByRole('status', { name: 'المطلوب' }))).toContain('1,400 ل.س');
+    // The sale put aside waits under «المعلّقة»
+    expect(await local.get<unknown[]>('heldCarts')).toHaveLength(1);
+    window.history.replaceState(null, '', '/');
+  });
+});

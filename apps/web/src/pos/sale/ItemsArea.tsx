@@ -39,6 +39,13 @@ export interface PriceCheck {
   focus: string | null;
   /** The pack that was scanned (a box of 12): its name, size and price */
   pack?: { name: string | null; qty: number; priceMinor: number; currency: CurrencyCode } | null;
+  /** The boxes each piece is sold in (by variant), with the box's price: shown under the piece's price */
+  packs?: Readonly<
+    Record<
+      string,
+      readonly { name: string | null; qty: number; priceMinor: number; currency: CurrencyCode }[]
+    >
+  >;
 }
 
 export interface ItemsAreaProps {
@@ -412,12 +419,12 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
         {check.pieces.map((piece) => {
           // What can be sold: a piece that keeps batches leaves out the expired and blocked ones (display only)
           const batched = today && Array.isArray(piece.stockBatches) ? piece.stockBatches : null;
-          const unsellable = batched
-            ? batched.reduce(
-                (sum, b) => sum + (['expired', 'blocked'].includes(batchState(b, today!)) ? b.qty : 0),
-                0,
-              )
-            : 0;
+          const stateQty = (state: 'expired' | 'blocked') =>
+            batched ? batched.reduce((sum, b) => sum + (batchState(b, today!) === state ? b.qty : 0), 0) : 0;
+          const expiredQty = stateQty('expired');
+          const unsellable = expiredQty + stateQty('blocked');
+          const why = expiredQty === 0 ? 'موقوفة' : expiredQty === unsellable ? 'منتهية' : 'منتهية أو موقوفة';
+          const boxes = check.packs?.[piece.variantId] ?? [];
           const left = batched
             ? batched.reduce((sum, b) => sum + (batchState(b, today!) === 'ok' ? b.qty : 0), 0)
             : (piece.stockQty ?? null);
@@ -434,6 +441,16 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
                 {piece.unit?.allowsFraction ? (
                   <span className="text-sm text-ink-muted"> · للكيلو</span>
                 ) : null}
+                {boxes.map((box) => (
+                  <span key={box.qty} className="block text-sm font-normal text-ink-muted">
+                    {box.name ? <bdi>{box.name}</bdi> : 'عبوة'} ({formatQuantity(box.qty, digits)} قطعة){' '}
+                    <Money
+                      minor={box.priceMinor}
+                      currency={box.currency}
+                      className="font-semibold text-ink"
+                    />
+                  </span>
+                ))}
               </span>
               <Money minor={piece.price.priceMinor} currency={piece.price.currency} className="font-bold" />
               <span
@@ -457,7 +474,7 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
                       }`}
                 {unsellable > 0 ? (
                   <span className="block text-xs font-semibold text-danger-ink">
-                    غير صالح للبيع {formatQuantity(unsellable, digits)} (منتهية أو موقوفة)
+                    غير صالح للبيع {formatQuantity(unsellable, digits)} ({why})
                   </span>
                 ) : null}
               </span>

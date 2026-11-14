@@ -127,7 +127,7 @@ export function SaleDone({
           </p>
         ) : null}
         <span className="flex-1" />
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <Button
             variant="secondary"
             size="lg"
@@ -152,7 +152,7 @@ export function SaleDone({
               اطبع شهادة الكفالة
             </Button>
           ) : null}
-          <Button size="pay" onClick={onNewSale} className="flex-1">
+          <Button size="pay" onClick={onNewSale} className="min-w-60 flex-1 sm:basis-full">
             بيعة جديدة
             <CartIcon size={24} />
           </Button>

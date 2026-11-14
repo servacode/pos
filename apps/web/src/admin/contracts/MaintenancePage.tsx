@@ -292,6 +292,7 @@ export function MaintenancePage() {
                       </bdi>
                       <Badge tone={stateTone}>{stateText}</Badge>
                       {c.visitOverdue ? <Badge tone="danger">زيارة متأخرة</Badge> : null}
+                      {c.customerId ? null : <Badge tone="warning">بلا زبون مسجّل</Badge>}
                       <span className="min-w-0 flex-1 truncate font-semibold text-ink">{c.customerName}</span>
                       <Money minor={c.priceMinor} currency={c.currency} className="font-semibold" />
                     </div>

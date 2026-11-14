@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import type { RecallBatch, RecallResponse, RecallSale } from '@serva/core';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import type { ExpiryRow, RecallBatch, RecallResponse, RecallSale } from '@serva/core';
 import {
   Alert,
   Badge,
@@ -19,7 +19,7 @@ import {
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { downloadCsv } from '../exportCsv';
-import { getRecall, setBatchBlocked } from './api';
+import { getRecall, listExpiry, setBatchBlocked } from './api';
 import { SectionHead } from './parts';
 
 /**
@@ -35,8 +35,40 @@ export function RecallPage() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [lifting, setLifting] = useState(false);
+  const [onShelf, setOnShelf] = useState<ExpiryRow[]>([]);
 
-  async function search(next?: string) {
+  // The batches the stores hold, to pick from instead of typing a number blind (the same report the
+  // expiry page reads: two years ahead, blocked ones included)
+  useEffect(() => {
+    let alive = true;
+    listExpiry(730).then(
+      (r) => alive && setOnShelf(r.items),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const suggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const typed = batchNo.trim().toLowerCase();
+    const out: ExpiryRow[] = [];
+    for (const row of onShelf) {
+      if (!row.batchNo) continue;
+      const key = `${row.variantId}|${row.batchNo}`;
+      if (seen.has(key)) continue;
+      if (typed && !row.batchNo.toLowerCase().includes(typed) && !row.name.toLowerCase().includes(typed))
+        continue;
+      seen.add(key);
+      out.push(row);
+    }
+    return out.slice(0, 8);
+  }, [onShelf, batchNo]);
+
+  /** `keepView`: the page the person is on stays as it is while the numbers are read again */
+  async function search(next?: string, keepView = false) {
     const q = (next ?? batchNo).trim();
     if (!q) return;
     setLoading(true);
@@ -44,7 +76,7 @@ export function RecallPage() {
     try {
       setFound(await getRecall(q));
     } catch (e) {
-      setFound(null);
+      if (!keepView) setFound(null);
       setError(errorMessage(e));
     } finally {
       setLoading(false);
@@ -62,7 +94,7 @@ export function RecallPage() {
           ? `أُوقف بيع الدفعة ${found.batchNo} في كل الفروع (${done.count} صنف).`
           : `رُفع الإيقاف عن الدفعة ${found.batchNo}.`,
       );
-      await search(found.batchNo);
+      await search(found.batchNo, true);
     } catch (e) {
       setError(errorMessage(e));
     }
@@ -201,6 +233,44 @@ export function RecallPage() {
               ابحث
             </Button>
           </form>
+          {suggestions.length > 0 ? (
+            <div className="mt-4 flex flex-col gap-2">
+              <p className="text-sm font-semibold text-ink-muted">
+                {batchNo.trim() ? 'دفعات تطابق ما كتبت' : 'دفعات في المخزون، اضغط واحدة'}
+              </p>
+              <ul aria-label="دفعات مقترحة" className="flex flex-wrap gap-2">
+                {suggestions.map((row) => (
+                  <li key={`${row.variantId}|${row.batchNo}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBatchNo(row.batchNo!);
+                        void search(row.batchNo!);
+                      }}
+                      className="flex min-h-11 flex-col items-start rounded-control border border-line-control bg-surface px-3 py-1.5 text-start text-sm text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                    >
+                      <span className="font-semibold">
+                        <bdi dir="ltr" className="num">
+                          {row.batchNo}
+                        </bdi>{' '}
+                        · {row.name}
+                      </span>
+                      <span className="text-xs text-ink-muted">
+                        {row.expiryDate ? (
+                          <>
+                            تنتهي <bdi className="num">{row.expiryDate}</bdi>
+                          </>
+                        ) : (
+                          'بلا تاريخ انتهاء'
+                        )}
+                        {row.blocked ? ' · موقوفة' : ''}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </Card>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {note ? <Alert tone="success">{note}</Alert> : null}
@@ -218,7 +288,7 @@ export function RecallPage() {
                   <span className="flex flex-wrap items-center gap-2 print:hidden">
                     <Button
                       variant={blocked ? 'secondary' : 'primary'}
-                      onClick={() => (blocked ? void block(false) : setConfirming(true))}
+                      onClick={() => (blocked ? setLifting(true) : setConfirming(true))}
                     >
                       {blocked ? 'ارفع الإيقاف' : 'أوقف بيعها في كل الفروع'}
                     </Button>
@@ -282,6 +352,30 @@ export function RecallPage() {
       >
         <p className="text-sm text-ink-muted">
           لن يبيع أي صندوق في أي فرع هذه الدفعة حتى ترفع الإيقاف. هل أنت متأكد؟
+        </p>
+      </Dialog>
+      <Dialog
+        open={lifting}
+        onOpenChange={setLifting}
+        title={`ارفع الإيقاف عن الدفعة ${found?.batchNo ?? ''}`}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setLifting(false)}>
+              تراجع
+            </Button>
+            <Button
+              onClick={() => {
+                setLifting(false);
+                void block(false);
+              }}
+            >
+              ارفع الإيقاف
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-muted">
+          ستعود كل الصناديق في كل الفروع تبيع هذه الدفعة. هل أنت متأكد؟
         </p>
       </Dialog>
     </AppShell>

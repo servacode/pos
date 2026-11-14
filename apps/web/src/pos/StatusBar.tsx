@@ -122,7 +122,7 @@ export function StatusBar({
             <Avatar name={user.name} size="sm" />
             <p className="flex min-w-0 flex-col">
               <span className="truncate text-sm/tight font-semibold text-ink">{user.name}</span>
-              <span className="truncate text-xs/tight text-ink-muted">{user.detail}</span>
+              <span className="hidden truncate text-xs/tight text-ink-muted sm:block">{user.detail}</span>
             </p>
           </div>
         </>
@@ -169,6 +169,12 @@ export function StatusBar({
           >
             {connectionText(online, outbox?.pending ?? 0)}
           </span>
+          {/* On a phone the sentence is spoken only; what waits shows as a number, so it is never squeezed */}
+          {(outbox?.pending ?? 0) > 0 ? (
+            <span aria-hidden="true" className="num sm:hidden">
+              {outbox!.pending}
+            </span>
+          ) : null}
         </ConnectionPill>
         {outbox?.lastSentAt ? (
           <span className="hidden shrink-0 text-xs whitespace-nowrap text-ink-muted xl:inline">

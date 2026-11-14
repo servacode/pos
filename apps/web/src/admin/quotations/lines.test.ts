@@ -9,6 +9,7 @@ import {
   percentOf,
   priceForCustomer,
   qtyOf,
+  savedPackOf,
   type EditorLine,
 } from './lines';
 
@@ -155,5 +156,13 @@ describe('pricing a quotation for a customer', () => {
     expect(priceForCustomer(l, { ...retail, contracts: new Map([['v-1', 24_000]]) }).price).toBe('240');
     const unknown = { key: 2, variantId: 'v-2', pieceMinor: null, price: '55' } as unknown as EditorLine;
     expect(priceForCustomer(unknown, retail)).toBe(unknown);
+  });
+});
+
+describe('the unit of a saved line', () => {
+  it('comes back from the stored pack name and size: «علبة 100» is the pack «علبة» of 100', () => {
+    expect(savedPackOf({ packName: 'علبة 100', packQty: 100_000 })).toEqual([{ name: 'علبة', qty: 100_000 }]);
+    expect(savedPackOf({ packName: null, packQty: 12_000 })).toEqual([{ name: 'عبوة', qty: 12_000 }]);
+    expect(savedPackOf({ packName: null, packQty: 1000 })).toEqual([]);
   });
 });

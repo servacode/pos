@@ -91,6 +91,58 @@ describe('«سحب دفعة»', () => {
     expect(await screen.findByRole('button', { name: 'ارفع الإيقاف' })).toBeInTheDocument();
   });
 
+  it('offers the batches the stores hold to pick from, and asks before lifting a stop without resetting the page', async () => {
+    let blocked = true;
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory/expiry?days=730': () => ({
+        status: 200,
+        body: {
+          today: '2026-11-14',
+          items: [
+            {
+              variantId: 'v-1',
+              name: 'بانادول 500',
+              branchId: 'br-1',
+              branchName: 'الفرع الرئيسي',
+              batchNo: 'C-09',
+              expiryDate: '2027-03-01',
+              purchaseNumber: null,
+              supplierId: null,
+              supplierName: null,
+              receivedOn: null,
+              qty: 17_000,
+              daysLeft: 107,
+              blocked: true,
+              blockReason: null,
+            },
+          ],
+        },
+      }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: found(blocked) }),
+      'POST /v1/batches/unblock': () => {
+        blocked = false;
+        return { status: 200, body: { count: 1 } };
+      },
+    });
+    const { user } = renderApp('/recall');
+    const list = await screen.findByRole('list', { name: 'دفعات مقترحة' });
+    await user.click(within(list).getByRole('button', { name: /C-09/ }));
+    await screen.findByRole('table', { name: 'الدفعة وأصلها' });
+    expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
+
+    await user.click(screen.getByRole('button', { name: 'ارفع الإيقاف' }));
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/batches/unblock')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'ارفع الإيقاف' }));
+    expect(await screen.findByText('رُفع الإيقاف عن الدفعة C-09.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/batches/unblock')).toHaveLength(1);
+    // The page stays: the batch and its tables are still there
+    expect(screen.getByRole('table', { name: 'الدفعة وأصلها' })).toBeInTheDocument();
+    expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
+  });
+
   it('prints and downloads the list of invoices', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,

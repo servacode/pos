@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Permission } from '@serva/core';
 import type { Approval } from '@serva/core/contracts/documents';
 import { AlertCircleIcon, Button, IconChip, KeyIcon } from '@serva/ui';
@@ -32,6 +32,11 @@ export function ManagerCode({
   const approvers = approversFor(staff, permission);
   const [picked, setPicked] = useState<StaffMember | null>(approvers.length === 1 ? approvers[0]! : null);
   const [status, setStatus] = useState<PinStatus>({ kind: 'idle' });
+  // The code pad opens in view, even when the panel it sits in is taller than the screen
+  const root = useRef<HTMLElement>(null);
+  useEffect(() => {
+    root.current?.scrollIntoView?.({ block: 'nearest' });
+  }, []);
 
   async function submit(pin: string) {
     if (!picked) return;
@@ -47,6 +52,7 @@ export function ManagerCode({
 
   return (
     <section
+      ref={root}
       aria-label="رمز المدير"
       className="flex flex-col gap-4 rounded-card border border-warning/30 bg-surface p-4 shadow-e2 motion-safe:animate-rise sm:p-5"
     >

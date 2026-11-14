@@ -172,11 +172,11 @@ export function CustomerPicker({
                       priceTier: c.priceTier,
                     })
                   }
-                  className="flex min-h-14 w-full items-center gap-3 rounded-control px-2 py-1.5 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted active:bg-surface-muted"
+                  className="flex min-h-14 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-control px-2 py-1.5 text-start sm:flex-nowrap transition-colors duration-120 ease-standard hover:bg-surface-muted active:bg-surface-muted"
                 >
                   <Avatar name={c.name} />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate font-semibold text-ink">{c.name}</span>
+                  <span className="flex min-w-0 flex-1 basis-40 flex-col">
+                    <span className="font-semibold break-words text-ink sm:truncate">{c.name}</span>
                     {c.phone ? (
                       <bdi dir="ltr" className="num self-start text-sm text-ink-muted">
                         {c.phone}

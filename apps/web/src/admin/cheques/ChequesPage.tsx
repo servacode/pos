@@ -194,7 +194,7 @@ export function ChequesPage() {
       header: 'البنك',
       className: 'hidden md:table-cell',
       cell: (c) => (
-        <span className="flex flex-col items-start">
+        <span className="flex min-w-36 flex-col items-start">
           <span>{c.bank ?? <span className="text-ink-subtle">—</span>}</span>
           {c.drawer ? <span className="text-xs text-ink-muted">الساحب: {c.drawer}</span> : null}
         </span>
@@ -263,7 +263,7 @@ export function ChequesPage() {
             </Button>
           </span>
         ) : c.direction === 'out' ? (
-          <span className="block py-2 text-xs whitespace-nowrap text-ink-muted sm:py-0">
+          <span className="block min-w-32 py-2 text-xs leading-snug text-ink-muted sm:py-0 sm:text-end">
             خُصم من البنك يوم الدفع
           </span>
         ) : null,

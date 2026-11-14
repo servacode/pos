@@ -584,6 +584,14 @@ function PurchaseForm({
     parsed.every((p) => p.qty && p.qty > 0 && p.cost !== null) &&
     lines.every((l) => !l.requiresExpiry || Boolean(l.expiry));
   const total = parsed.reduce((sum, p) => sum + (p.cost ?? 0), 0);
+  /** Why «سجّل الفاتورة» waits, in words: the buttons never go grey without a reason */
+  const missingExpiry = lines.filter((l) => l.requiresExpiry && !l.expiry);
+  const notReadyWhy =
+    ready || lines.length === 0
+      ? null
+      : parsed.some((p) => !(p.qty && p.qty > 0) || p.cost === null)
+        ? 'اكتب الكمية والكلفة لكل صنف ليُسجَّل.'
+        : `اكتب تاريخ الانتهاء لـ ${missingExpiry.map((l) => l.name).join('، ')} ليُسجَّل.`;
 
   const withDates = storeSells(me.tenant.sectors, EXPIRY_SECTORS);
   const supplier = suppliers.find((x) => x.id === supplierId);
@@ -736,7 +744,9 @@ function PurchaseForm({
                         className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 md:items-center ${LINE_COLUMNS}`}
                       >
                         <div className="col-span-2 flex min-w-0 flex-col md:col-span-1">
-                          <span className="truncate font-semibold text-ink">{l.name}</span>
+                          <span title={l.name} className="line-clamp-2 leading-snug font-semibold text-ink">
+                            {l.name}
+                          </span>
                           {pack && p.qty ? (
                             <span className="text-xs text-ink-subtle">
                               {packSummary(qtyOf(l.qty) ?? 0, pack, (q) => formatQuantity(q, digits))}
@@ -796,6 +806,11 @@ function PurchaseForm({
                             }
                             error={s.fields[`lines.${i}.costMinor`]}
                           />
+                          {p.cost !== null && p.cost > 0 ? (
+                            <span className="mt-1 block text-xs text-ink-subtle">
+                              <Money minor={p.cost} currency="SYP" />
+                            </span>
+                          ) : null}
                         </div>
                         <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto">
                           <RemoveLine
@@ -912,13 +927,24 @@ function PurchaseForm({
             />
           </div>
           <div className="flex gap-3 lg:flex-col">
-            <Button type="submit" loading={s.saving} disabled={!ready} className="flex-1 lg:w-full">
+            <Button
+              type="submit"
+              loading={s.saving}
+              disabled={!ready}
+              aria-describedby={notReadyWhy ? 'purchase-not-ready' : undefined}
+              className="flex-1 lg:w-full"
+            >
               سجّل الفاتورة
             </Button>
             <Button variant="ghost" onClick={onCancel} className="lg:w-full">
               إلغاء
             </Button>
           </div>
+          {notReadyWhy ? (
+            <p id="purchase-not-ready" aria-live="polite" className="text-sm font-semibold text-warning-ink">
+              {notReadyWhy}
+            </p>
+          ) : null}
         </Card>
       </div>
     </form>

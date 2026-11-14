@@ -57,9 +57,16 @@ describe('serial numbers at the till', () => {
       .map((li) => plain(li));
     expect(shown).toEqual(['IMEI351', 'IMEI352']);
     await user.click(within(list).getByRole('button', { name: 'IMEI352' }));
-    expect(within(panel).getByLabelText('الرقم التسلسلي للجهاز')).toHaveValue('IMEI352');
-    await user.click(within(panel).getByRole('button', { name: 'احفظ الرقم' }));
+    // One tap saves it: no second «احفظ الرقم»
     expect(plain(cartLines())).toContain('IMEI352');
+  });
+
+  it('keeps the list of numbers showing after an unknown number is refused', async () => {
+    const { user, panel } = await startPhone();
+    await typeSerial(user, panel, 'ZZZ999');
+    expect(within(panel).getByText('هذا الرقم غير موجود في مخزون هذا الفرع.')).toBeInTheDocument();
+    const list = within(panel).getByRole('list', { name: 'الأرقام المتوفرة' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
   });
 
   it('asks piece or box when an item with a box barcode is picked from the grid', async () => {

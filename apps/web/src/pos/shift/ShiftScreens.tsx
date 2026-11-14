@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import type { CashMovementKind, CashMovementPayload, ShiftMode } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
@@ -162,9 +162,27 @@ export function ShiftOpenScreen({
   const [saving, setSaving] = useState(false);
   const [warn, setWarn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One click = one shift: a second click while the first is still saving does nothing
+  const inFlight = useRef(false);
 
   async function open(confirmed = false) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await openOnce(confirmed);
+    } finally {
+      inFlight.current = false;
+    }
+  }
+
+  async function openOnce(confirmed: boolean) {
     setError(null);
+    // This cashier already has an open shift on this device: carry on with it, never open another
+    const existing = await pos.local.get<OpenShift>(shiftKey(mode, session.userId));
+    if (existing) {
+      onOpened(existing);
+      return;
+    }
     // A count far above the usual opening is most likely a slipped key: ask once before it is saved
     if (!confirmed) {
       const usual = await pos.local.get<Record<string, number>>(LAST_OPENING_KEY);

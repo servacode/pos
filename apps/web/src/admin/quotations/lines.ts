@@ -138,9 +138,22 @@ export function lineInput(l: EditorLine): QuotationLineInput | { error: 'qty' | 
 let counter = 0;
 export const nextKey = (): number => ++counter;
 
+/**
+ * The pack a saved line was typed in, so its unit shows again after saving: the name is the stored
+ * «علبة 100» without the size, the size is the line's own. Display only; the item's real packs
+ * replace it when the page reads them.
+ */
+export function savedPackOf(l: Pick<QuotationLine, 'packName' | 'packQty'>): { name: string; qty: number }[] {
+  if (l.packQty <= 1000) return [];
+  const name = (l.packName ?? '').replace(/\s*[\d.٠-٩]+\s*$/, '').trim() || 'عبوة';
+  return [{ name, qty: l.packQty }];
+}
+
 /** A saved line back in the editor */
 export function editorLineOf(l: QuotationLine): EditorLine {
+  const packs = savedPackOf(l);
   return {
+    ...(packs.length > 0 ? { packs } : {}),
     key: nextKey(),
     productId: l.productId ?? null,
     variantId: l.variantId ?? null,

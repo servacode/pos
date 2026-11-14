@@ -76,7 +76,9 @@ export function SerialPanel({
   const MAX_LISTED = 12;
   // Typing narrows the list
   const typed = serialKey(value);
-  const listed = typed ? available.filter((serial) => serial.includes(typed)) : available;
+  const narrowed = typed ? available.filter((serial) => serial.includes(typed)) : available;
+  // A typed number that matches none (an unknown one) leaves the whole list showing, to pick from
+  const listed = narrowed.length > 0 ? narrowed : available;
 
   function save() {
     setUnknown(null);
@@ -152,7 +154,7 @@ export function SerialPanel({
         {listed.length > 0 ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm font-semibold text-ink-muted">
-              الأرقام المتوفرة ({listed.length}) — اضغط رقماً لاختياره
+              الأرقام المتوفرة ({listed.length}) — اضغط رقماً ليُحفظ
             </p>
             <ul aria-label="الأرقام المتوفرة" className="flex flex-wrap gap-2">
               {listed.slice(0, MAX_LISTED).map((serial) => (
@@ -161,9 +163,11 @@ export function SerialPanel({
                     type="button"
                     aria-pressed={serialKey(value) === serial}
                     onClick={() => {
+                      // One tap: the number is in this branch's stock and on no other line, so it is saved
                       setValue(serial);
                       setError(null);
                       setOffer(null);
+                      onSave([serial]);
                     }}
                     className={
                       serialKey(value) === serial

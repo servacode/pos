@@ -614,7 +614,7 @@ export function ReturnScreen({
               ) : null}
             </div>
 
-            <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 xl:sticky xl:top-0">
+            <div className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 xl:sticky xl:top-0 xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto">
               {exchange ? (
                 <>
                   <ChoiceGroup label="إن كانت البديلة أرخص" className="flex flex-wrap gap-2">

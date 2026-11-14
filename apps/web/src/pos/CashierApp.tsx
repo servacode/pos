@@ -309,9 +309,17 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     if (missing.length === 0) setView('sale');
     return missing;
   };
-  useQuotationFromAddress(cartRestored && Boolean(shift) && cartRef.current.lines.length === 0, pos, (q) => {
+  // A quotation from the address while a sale is in progress: that sale is put aside (it stays under «المعلّقة») and says so
+  const [quotationNote, setQuotationNote] = useState<string | null>(null);
+  const fromAddress = useRef<(q: Quotation) => void>(() => undefined);
+  fromAddress.current = (q) => {
+    if (cart.lines.length > 0 && session.permissions.has('sale.create')) {
+      hold();
+      setQuotationNote('كانت عندك بيعة جارية، فعلّقناها وفتحنا عرض السعر. تجدها في «المعلّقة».');
+    }
     openQuotation(q);
-  });
+  };
+  useQuotationFromAddress(cartRestored && Boolean(shift), pos, (q) => fromAddress.current(q));
 
   // The cart in progress is kept on the device on every change and dropped once it is empty (sold, held, cleared)
   useEffect(() => {
@@ -1043,7 +1051,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                     ...line,
                     lines: line.lines.map((l) => ({
                       ...l,
-                      name: `${l.name} · ${contract.number}`,
+                      // The customer shows on the line before payment, not only on the receipt
+                      name: [l.name, contract.number, contract.customerName].filter(Boolean).join(' · '),
                       priceMinor: contract.priceMinor,
                       retailPriceMinor: contract.priceMinor,
                       wholesalePriceMinor: null,
@@ -1196,6 +1205,21 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'gift' }, copy: false })
         }
       />
+      {quotationNote ? (
+        <p
+          role="status"
+          className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-warning/20 bg-warning-soft px-4 py-3 text-sm font-semibold text-warning-ink shadow-e2"
+        >
+          <span className="min-w-0 flex-1">{quotationNote}</span>
+          <button
+            type="button"
+            onClick={() => setQuotationNote(null)}
+            className="min-h-12 shrink-0 rounded-control px-3 font-bold"
+          >
+            حسناً
+          </button>
+        </p>
+      ) : null}
       {printPortal}
       {a4Portal}
     </>

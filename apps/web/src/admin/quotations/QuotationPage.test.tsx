@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Quotation, QuotationListItem } from '@serva/core';
@@ -6,6 +7,7 @@ import { ids, catalogMe, lookupRoutes, product, taxRates } from '../../test/cata
 import { signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
+import { resetDeviceStore } from '../../offline/database';
 import { productsPath } from '../catalog/api';
 import { QUOTATION_TONES } from './QuotationsPage';
 
@@ -89,7 +91,10 @@ const base = {
   'GET /v1/store': { status: 200, body: store },
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  await resetDeviceStore();
+});
 
 describe('«عروض الأسعار»', () => {
   it('lists the offers with their number, customer, status and total, and filters by status', async () => {
@@ -265,5 +270,34 @@ describe('«عروض الأسعار»', () => {
     expect(await screen.findByText(/حُوّل هذا العرض إلى فاتورة/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'احفظ التعديلات' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'أعده مرسلاً' })).toBeInTheDocument();
+  });
+
+  it('keeps the unit of a saved line, and tells a browser with no till how to turn the offer into an invoice', async () => {
+    const packed = quotation({
+      status: 'accepted',
+      lines: [
+        {
+          ...quotation().lines[0]!,
+          name: 'كمامات',
+          packName: 'علبة 100',
+          packQty: 100_000,
+          qty: 5000,
+          unitPriceMinor: 2_400_000,
+        },
+      ],
+    });
+    mockFetch({ ...base, 'GET /v1/quotations/q-1': { status: 200, body: packed } });
+    const { user } = renderApp('/quotations/q-1');
+    const unit = await screen.findByLabelText('وحدة كمامات');
+    expect(unit).toHaveValue('100000');
+    expect(within(unit).getByRole('option', { name: 'علبة 100' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'حوّل إلى فاتورة' }));
+    expect(await screen.findByText('هذا المتصفح غير مربوط بكاشير')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'اربط هذا المتصفح بالكاشير' })).toHaveAttribute(
+      'href',
+      '/pos?quotation=q-1',
+    );
+    expect(window.location.pathname).not.toBe('/pos');
   });
 });

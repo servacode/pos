@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { lazyChunk, TillBoundary } from '../chunks';
 import { dayText } from '../../lib/dates';
-import { CURRENCIES } from '@serva/core/currencies';
+import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import type { Approval } from '@serva/core/contracts/documents';
 import { businessDateOf, packPrice, rateFor } from '@serva/core/sale';
@@ -591,6 +591,31 @@ export function SaleScreen(props: SaleScreenProps) {
     return map;
   }, [cart.lines]);
 
+  /** The boxes each piece is sold in, with the box's price, for the price checker */
+  const boxesOf = useCallback(
+    (list: readonly CatalogItem[]): NonNullable<PriceCheck['packs']> => {
+      const wanted = new Set(list.map((p) => p.variantId));
+      const out: Record<
+        string,
+        { name: string | null; qty: number; priceMinor: number; currency: CurrencyCode }[]
+      > = {};
+      for (const hit of catalog.byBarcode.values()) {
+        const { item, barcode } = hit;
+        if (barcode.packQty === 1000 || !wanted.has(item.variantId)) continue;
+        const rows = (out[item.variantId] ??= []);
+        if (rows.some((r) => r.qty === barcode.packQty)) continue;
+        rows.push({
+          name: barcode.packName,
+          qty: barcode.packQty,
+          priceMinor: packPrice(item.price.priceMinor, barcode.packQty, barcode.packPriceMinor),
+          currency: item.price.currency,
+        });
+      }
+      return out;
+    },
+    [catalog.byBarcode],
+  );
+
   /** Shows an item's price and stock (all its sizes and colours) and adds nothing */
   const showPrice = useCallback(
     (item: CatalogItem, hit?: BarcodeHit | null) => {
@@ -600,6 +625,7 @@ export function SaleScreen(props: SaleScreenProps) {
         name: model ? (model[0]!.productName ?? item.name) : item.name,
         pieces: model ? orderPieces(model) : [item],
         focus: item.variantId,
+        packs: boxesOf(model ?? [item]),
         pack:
           hit && packQty !== 1000
             ? {
@@ -611,7 +637,7 @@ export function SaleScreen(props: SaleScreenProps) {
             : null,
       });
     },
-    [pieces],
+    [pieces, boxesOf],
   );
 
   // The tiles and the search field call these; they stay the same function while the cart changes,
@@ -645,10 +671,11 @@ export function SaleScreen(props: SaleScreenProps) {
             name: model[0]!.productName ?? model[0]!.name,
             pieces: orderPieces(model),
             focus: null,
+            packs: boxesOf(model),
           });
       } else setMode({ kind: 'pick', productId });
     },
-    [pieces],
+    [pieces, boxesOf],
   );
   const scanCode = useCallback((code: string) => handlers.current.scan(code), []);
   const dismissNotice = useCallback(() => setNotice(null), []);

@@ -137,6 +137,24 @@ describe('«عقود الصيانة»', () => {
   });
 });
 
+describe('«عقود الصيانة» without a customer record', () => {
+  it('marks a contract tied to no customer record, and not one that is', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: manager() }),
+      'GET /v1/maintenance?view=upcoming': () => ({
+        status: 200,
+        body: {
+          items: [contract(), contract({ id: 'm-2', number: 'MC-000002', customerId: 'c-1' })],
+        },
+      }),
+    });
+    renderApp('/maintenance');
+    expect(await screen.findByText('MC-000002')).toBeInTheDocument();
+    expect(screen.getAllByText('بلا زبون مسجّل')).toHaveLength(1);
+  });
+});
+
 describe('«أسعار العقود»', () => {
   it('lists the prices of a type and a customer', async () => {
     const prices: ContractPrice[] = [

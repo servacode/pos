@@ -35,7 +35,8 @@ export function quotationCart(
     if (cart.nextLineNo === before) continue;
     const added = cart.lines[cart.lines.length - 1]!;
     cart = updateLine(cart, added.lineNo, {
-      name: line.name,
+      // A pack reads as the till names it: «name · pack», not the quotation's own wording
+      name: line.packName ? `${item.name} · ${line.packName}` : line.name,
       packQty: line.packQty,
       packName: line.packName ?? null,
       priceCurrency: q.currency,

@@ -65,6 +65,15 @@ describe('shift', () => {
     expect(screen.getByText(/وردية منذ/)).toBeInTheDocument();
   });
 
+  it('a double click on «افتح الوردية» opens one shift, not two', async () => {
+    const { user, outbox } = renderPos();
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    await user.dblClick(screen.getByRole('button', { name: 'افتح الوردية' }));
+    expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
+    expect(docsOf<ShiftOpenPayload>(outbox, 'shift_open')).toHaveLength(1);
+  });
+
   it('asks again before saving an opening count far above the usual one', async () => {
     const { user, outbox, local } = renderPos();
     // Last time the drawer opened with 1,100 ل.س; now a slipped key makes it 100 times that

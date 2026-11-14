@@ -112,7 +112,7 @@ export function TopBar({
   return (
     <>
       {/* The start: the sidebar's button, and where you are */}
-      <div className="flex min-w-0 flex-1 items-center gap-2 @5xl:basis-0">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <IconButton
           label="افتح القائمة"
           icon={<MenuIcon />}
@@ -138,7 +138,7 @@ export function TopBar({
                 <IconChip size="sm">
                   <span className="text-xs font-bold">{storeInitials}</span>
                 </IconChip>
-                <span title={storeName} className="line-clamp-2 leading-tight sm:line-clamp-none sm:truncate">
+                <span title={storeName} className="line-clamp-2 leading-tight">
                   {storeName}
                 </span>
               </Link>
@@ -148,12 +148,17 @@ export function TopBar({
                 {page && page.label !== current.label ? (
                   <Link
                     to={current.pages[0]!.to}
-                    className="truncate text-ink-muted transition-colors duration-120 ease-standard hover:text-ink"
+                    title={current.label}
+                    className="line-clamp-2 leading-tight text-ink-muted transition-colors duration-120 ease-standard hover:text-ink"
                   >
                     {current.label}
                   </Link>
                 ) : (
-                  <span aria-current="page" className="truncate font-semibold text-ink">
+                  <span
+                    aria-current="page"
+                    title={current.label}
+                    className="line-clamp-2 leading-tight font-semibold text-ink"
+                  >
                     {current.label}
                   </span>
                 )}
@@ -161,7 +166,11 @@ export function TopBar({
             ) : null}
             {current && page && page.label !== current.label ? (
               <Crumb>
-                <span aria-current="page" className="truncate font-semibold text-ink">
+                <span
+                  aria-current="page"
+                  title={page.label}
+                  className="line-clamp-2 leading-tight font-semibold text-ink"
+                >
                   {page.label}
                 </span>
               </Crumb>
@@ -192,7 +201,7 @@ export function TopBar({
       </button>
 
       {/* The end: the connection, the notices, the theme, the till, the account */}
-      <div className="flex shrink-0 items-center justify-end gap-1 @5xl:flex-1 @5xl:basis-0">
+      <div className="flex shrink-0 items-center justify-end gap-1">
         {online ? null : (
           <span className="me-1 hidden sm:flex">
             <ConnectionPill online={false}>دون إنترنت</ConnectionPill>

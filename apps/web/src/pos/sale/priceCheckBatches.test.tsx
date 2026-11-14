@@ -31,3 +31,23 @@ describe('the price checker with batches', () => {
     expect(rows[1]).not.toHaveTextContent('منتهية');
   });
 });
+
+describe('the price checker with boxes and expired batches', () => {
+  it('shows the box price under the piece and names the unsellable quantity as expired', () => {
+    render(
+      <PriceCheckCard
+        today="2026-11-14"
+        check={{
+          name: 'قفازات',
+          pieces: [piece],
+          focus: 'v1',
+          packs: { v1: [{ name: 'علبة', qty: 100_000, priceMinor: 90_000, currency: 'SYP' }] },
+        }}
+      />,
+    );
+    const row = screen.getByRole('list', { name: 'أسعار الصنف' });
+    expect(row).toHaveTextContent('علبة');
+    expect(row).toHaveTextContent('100 قطعة');
+    expect(row).toHaveTextContent(/غير صالح للبيع 500 \(منتهية\)/);
+  });
+});
