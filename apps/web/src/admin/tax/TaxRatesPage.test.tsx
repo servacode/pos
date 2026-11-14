@@ -51,7 +51,7 @@ describe('«الضرائب»', () => {
     });
     renderApp('/tax-rates');
     const table = await screen.findByRole('table', { name: 'نسب الضريبة' });
-    expect(within(table).getByText('رسم الاستهلاك')).toBeInTheDocument();
+    expect(await within(table).findByText('رسم الاستهلاك')).toBeInTheDocument();
     expect(within(table).getByText('الافتراضية')).toBeInTheDocument();
     expect(within(table).getByText('مؤرشفة')).toBeInTheDocument();
     expect(screen.getByText(/أسعار الرفوف عندك تشمل الضريبة/)).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe('«الضرائب»', () => {
     const { user } = renderApp('/tax-rates');
     await screen.findByRole('table', { name: 'نسب الضريبة' });
 
-    await user.selectOptions(screen.getByLabelText('الضريبة الافتراضية للمنتج الجديد'), ids.tax);
+    await user.selectOptions(await screen.findByLabelText('الضريبة الافتراضية للمنتج الجديد'), ids.tax);
     await waitFor(() => expect(requestsTo('PUT', '/v1/tax-rates/default')).toHaveLength(1));
     expect(requestsTo('PUT', '/v1/tax-rates/default')[0]!.body).toEqual({ taxRateId: ids.tax });
     expect(await screen.findByText('الافتراضية')).toBeInTheDocument();
