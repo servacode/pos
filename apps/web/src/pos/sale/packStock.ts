@@ -1,4 +1,5 @@
 import { displayNumber } from '@serva/ui';
+import { pieceWord } from './packText';
 
 const QTY_SCALE = 1000;
 
@@ -23,12 +24,12 @@ export function stockInPacks(
   digits: Digits,
   pieces: (qty: number) => string,
 ): string {
-  const total = `${pieces(left)} قطعة`;
+  const total = `${pieces(left)} ${pieceWord(left)}`;
   if (!pack || pack.qty <= QTY_SCALE || left < pack.qty) return total;
   const boxes = Math.floor(left / pack.qty);
   const rest = left - boxes * pack.qty;
   const count = displayNumber(String(boxes), digits);
   const head = boxes <= 2 && !pack.name ? boxWord(boxes, null) : `${count} ${boxWord(boxes, pack.name)}`;
-  const rem = rest > 0 ? ` و${pieces(rest)} قطعة` : '';
+  const rem = rest > 0 ? ` و${pieces(rest)} ${pieceWord(rest)}` : '';
   return `${head}${rem} (${total})`;
 }

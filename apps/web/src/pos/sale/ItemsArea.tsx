@@ -29,6 +29,7 @@ import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogI
 import { Kbd } from './Kbd';
 import { gridEntries, lowestPrice, piecesText, type GridEntry } from './models';
 import { stockInPacks } from './packStock';
+import { pieceWord } from './packText';
 
 export interface PriceCheck {
   /** The product's name */
@@ -410,7 +411,7 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
           <span>
             {check.pack.name ? <bdi>{check.pack.name}</bdi> : 'العبوة'} (
-            {formatQuantity(check.pack.qty, digits)} قطعة)
+            {formatQuantity(check.pack.qty, digits)} {pieceWord(check.pack.qty)})
           </span>
           <Money minor={check.pack.priceMinor} currency={check.pack.currency} className="font-bold" />
         </p>
@@ -425,9 +426,16 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
           const unsellable = expiredQty + stateQty('blocked');
           const why = expiredQty === 0 ? 'موقوفة' : expiredQty === unsellable ? 'منتهية' : 'منتهية أو موقوفة';
           const boxes = check.packs?.[piece.variantId] ?? [];
-          const left = batched
+          // Never more than the stock itself says: the batch ledger can run a few pieces over it
+          const sellable = batched
             ? batched.reduce((sum, b) => sum + (batchState(b, today!) === 'ok' ? b.qty : 0), 0)
-            : (piece.stockQty ?? null);
+            : null;
+          const left =
+            sellable === null
+              ? (piece.stockQty ?? null)
+              : piece.stockQty === null || piece.stockQty === undefined
+                ? sellable
+                : Math.min(sellable, piece.stockQty);
           return (
             <li
               key={piece.variantId}
@@ -443,7 +451,8 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
                 ) : null}
                 {boxes.map((box) => (
                   <span key={box.qty} className="block text-sm font-normal text-ink-muted">
-                    {box.name ? <bdi>{box.name}</bdi> : 'عبوة'} ({formatQuantity(box.qty, digits)} قطعة){' '}
+                    {box.name ? <bdi>{box.name}</bdi> : 'عبوة'} ({formatQuantity(box.qty, digits)}{' '}
+                    {pieceWord(box.qty)}){' '}
                     <Money
                       minor={box.priceMinor}
                       currency={box.currency}

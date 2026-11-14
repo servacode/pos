@@ -1,4 +1,5 @@
 import { packLine, packsToBase, QTY_SCALE, type PackOption } from '@serva/core';
+import { pieceWord } from '../../pos/sale/packText';
 import { moneyOf, qtyOf } from './api';
 
 /** The fields of a document line typed in a pack: «50» of the «علبة» (100 pieces) at 25 each. */
@@ -46,5 +47,5 @@ export function packSummary(
 ): string {
   if (!pack || pack.qty <= QTY_SCALE) return fmt(packs);
   const base = packsToBase(packs, pack.qty);
-  return base === null ? fmt(packs) : `${fmt(packs)} ${pack.name} (${fmt(base)} قطعة)`;
+  return base === null ? fmt(packs) : `${fmt(packs)} ${pack.name} (${fmt(base)} ${pieceWord(base)})`;
 }

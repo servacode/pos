@@ -21,8 +21,8 @@ describe('stockInPacks', () => {
     expect(stockInPacks(250_000, { name: 'كرتونة', qty: 100_000 }, 'latn', pieces)).toBe(
       '2 كرتونة و50 قطعة (250 قطعة)',
     );
-    expect(stockInPacks(5_000, { name: null, qty: 12_000 }, 'latn', pieces)).toBe('5 قطعة');
-    expect(stockInPacks(5_000, null, 'latn', pieces)).toBe('5 قطعة');
-    expect(stockInPacks(5_000, { name: null, qty: 1_000 }, 'latn', pieces)).toBe('5 قطعة');
+    expect(stockInPacks(5_000, { name: null, qty: 12_000 }, 'latn', pieces)).toBe('5 قطع');
+    expect(stockInPacks(5_000, null, 'latn', pieces)).toBe('5 قطع');
+    expect(stockInPacks(5_000, { name: null, qty: 1_000 }, 'latn', pieces)).toBe('5 قطع');
   });
 });

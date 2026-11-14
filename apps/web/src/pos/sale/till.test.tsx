@@ -371,20 +371,29 @@ describe('the quantity keypad says why it refuses', () => {
     expect(within(panel).getByRole('alert')).toHaveTextContent('مرتجع');
   });
 
+  it('«طبّق» is disabled while the value is empty or invalid, and enabled once it is usable', async () => {
+    const { user, panel } = await qtyPanel();
+    const apply = within(panel).getByRole('button', { name: 'طبّق' });
+    expect(apply).toBeDisabled();
+    await user.keyboard('0');
+    expect(apply).toBeDisabled();
+    await user.keyboard('{Backspace}3');
+    expect(apply).toBeEnabled();
+  });
+
   it('zero is explained', async () => {
     const { user, panel } = await qtyPanel();
     await user.keyboard('0');
-    await user.click(within(panel).getByRole('button', { name: 'طبّق' }));
-    expect(within(panel).getByRole('alert')).toHaveTextContent('الكمية صفر');
-    expect(within(panel).getByRole('alert')).toHaveTextContent('احذف السطر');
+    expect(within(panel).getByRole('button', { name: 'طبّق' })).toBeDisabled();
+    expect(panel).toHaveTextContent('الكمية صفر');
+    expect(panel).toHaveTextContent('احذف السطر');
   });
 
   it('a quantity over the limit names the maximum', async () => {
     const { user, panel } = await qtyPanel();
     await user.keyboard('1000000');
-    expect(panel).toHaveTextContent('الحد الأقصى للسطر الواحد (100000)');
-    await user.click(within(panel).getByRole('button', { name: 'طبّق' }));
-    expect(within(panel).getByRole('alert')).toHaveTextContent('100000');
+    expect(panel).toHaveTextContent('الحد الأقصى للسطر الواحد (100,000)');
+    expect(within(panel).getByRole('button', { name: 'طبّق' })).toBeDisabled();
   });
 
   it('explains each refusal in words', () => {

@@ -75,6 +75,53 @@ describe('«الشيكات»', () => {
   });
 });
 
+describe('cashing a cheque before its day', () => {
+  it('warns in the confirmation when the due day has not come, and not when it has', async () => {
+    const items = [
+      cheque({ sourceId: 'a', reference: 'LATER-1', dueDate: addDays(todayText(), 10) }),
+      cheque({ sourceId: 'b', reference: 'PAST-1', dueDate: addDays(todayText(), -1) }),
+    ];
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/cheques?status=pending': () => ({ status: 200, body: { items, baseCurrency: 'SYP' } }),
+    });
+    const { user } = renderApp('/cheques');
+    const table = await screen.findByRole('table', { name: 'الشيكات' });
+    const later = (await within(table).findByText('LATER-1')).closest('tr') as HTMLElement;
+    await user.click(within(later).getByRole('button', { name: 'حُصّل' }));
+    const sure = await screen.findByRole('dialog');
+    expect(sure).toHaveTextContent('لم يأتِ بعد');
+    await user.click(within(sure).getByRole('button', { name: 'تراجع' }));
+    const past = within(table).getByText('PAST-1').closest('tr') as HTMLElement;
+    await user.click(within(past).getByRole('button', { name: 'حُصّل' }));
+    expect(await screen.findByRole('dialog')).not.toHaveTextContent('لم يأتِ بعد');
+  });
+});
+
+describe('the cheques table on narrow screens', () => {
+  it('keeps the amount and the actions on every width, and drops the bank and date columns until they fit', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/cheques?status=pending': () => ({
+        status: 200,
+        body: { items: [cheque()], baseCurrency: 'SYP' },
+      }),
+    });
+    renderApp('/cheques');
+    const table = await screen.findByRole('table', { name: 'الشيكات' });
+    await within(table).findByText('CHQ-7781');
+    const head = (name: string) => within(table).getByRole('columnheader', { name, hidden: true });
+    expect(head('المبلغ').className).not.toContain('hidden');
+    expect(head('إجراءات').className).not.toContain('hidden');
+    expect(head('البنك').className).toContain('2xl:table-cell');
+    expect(head('التاريخ').className).toContain('2xl:table-cell');
+    expect(head('الزبون').className).toContain('hidden sm:table-cell');
+    expect(table.parentElement!.parentElement!.innerHTML).not.toContain('min-w-44');
+  });
+});
+
 describe('cheques by due date', () => {
   it('counts the pending ones falling due within 7 days, and none that are cashed, far or undated', () => {
     expect(addDays('2026-11-28', 7)).toBe('2026-12-05');
@@ -115,7 +162,8 @@ describe('cheques by due date', () => {
     const { user } = renderApp('/cheques');
     const table = await screen.findByRole('table', { name: 'الشيكات' });
     expect(await within(table).findByText('NEAR-1')).toBeInTheDocument();
-    expect(within(table).getByText('بنك سورية')).toBeInTheDocument();
+    // The bank shows in its own column, and under the number where that column is left out
+    expect(within(table).getAllByText('بنك سورية').length).toBeGreaterThan(0);
     expect(screen.getByText(/تستحق|يستحق/)).toBeInTheDocument();
     const refs = () =>
       within(table)
@@ -126,9 +174,9 @@ describe('cheques by due date', () => {
     expect(refs()[0]).toBe('NEAR-1');
     const outRow = within(table).getByText('OUT-1').closest('tr') as HTMLElement;
     expect(within(outRow).getByText('مورد المواد')).toBeInTheDocument();
-    // the name columns keep room so a name does not wrap into 2-3 lines; the bank column may shrink
-    expect(within(outRow).getByText('مورد المواد')).toHaveClass('min-w-44');
-    expect(within(outRow).getByText('بنك الشرق').parentElement).toHaveClass('min-w-24');
+    // a name wraps to two lines at most instead of widening the table past its box
+    expect(within(outRow).getByText('مورد المواد')).toHaveClass('line-clamp-2');
+    expect(within(outRow).getAllByText('بنك الشرق').length).toBeGreaterThan(0);
     expect(within(outRow).queryByRole('button', { name: 'حُصّل' })).not.toBeInTheDocument();
   });
 });

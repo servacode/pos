@@ -1,6 +1,7 @@
 import { packPrice } from '@serva/core/sale';
 import { Button, CloseIcon, formatQuantity, Money, ProductsIcon, useDigits } from '@serva/ui';
 import type { BarcodeHit, CatalogItem } from '../catalog';
+import { pieceWord } from './packText';
 import { SalePanel } from './SalePanel';
 
 /**
@@ -55,7 +56,7 @@ export function UnitPanel({
               <span className="min-w-0 flex-1 font-semibold text-ink">
                 {hit.barcode.packName ? <bdi>{hit.barcode.packName}</bdi> : 'علبة'}{' '}
                 <span className="text-sm font-normal text-ink-muted">
-                  ({formatQuantity(hit.barcode.packQty, digits)} قطعة)
+                  ({formatQuantity(hit.barcode.packQty, digits)} {pieceWord(hit.barcode.packQty)})
                 </span>
               </span>
               <Money

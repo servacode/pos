@@ -14,10 +14,17 @@ export function pieceCount(line: Required<PackedLine>): number {
   return Math.round((line.qty * line.packQty) / 1000);
 }
 
+/** «قطع» for three to ten whole pieces, «قطعة» otherwise (Arabic counting): «(5 قطع)», «(12 قطعة)». Thousandths. */
+export function pieceWord(thousandths: number): string {
+  const whole = thousandths / 1000;
+  return Number.isInteger(whole) && whole >= 3 && whole <= 10 ? 'قطع' : 'قطعة';
+}
+
 /** «(200 قطعة)» for a pack line, null for a line of single units. */
 export function packPiecesNote(line: PackedLine, fmt: (thousandths: number) => string): string | null {
   if (line.packQty === undefined || line.packQty <= 1000) return null;
-  return `(${fmt(pieceCount({ qty: line.qty, packQty: line.packQty }))} قطعة)`;
+  const pieces = pieceCount({ qty: line.qty, packQty: line.packQty });
+  return `(${fmt(pieces)} ${pieceWord(pieces)})`;
 }
 
 /** «2 علبة (200 قطعة)» for a pack line, null for a line of single units. */

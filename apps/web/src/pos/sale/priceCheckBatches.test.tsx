@@ -63,3 +63,16 @@ describe('the price checker row layout', () => {
     expect(group.className).toContain('shrink-0');
   });
 });
+
+describe('the price checker when the batches run over the stock', () => {
+  it('never shows more than the stock level: 516 on hand, 536 on the batches, 516 is shown', () => {
+    const over = {
+      ...piece,
+      stockQty: 516_000,
+      stockBatches: [{ batchNo: 'NEW', expiry: '2027-06-30', qty: 536_000 }],
+    } as unknown as CatalogItem;
+    render(<PriceCheckCard today="2026-11-14" check={{ name: 'قفازات', pieces: [over], focus: 'v1' }} />);
+    expect(screen.getByText(/المتوفر 516/)).toBeInTheDocument();
+    expect(screen.queryByText(/المتوفر 536/)).not.toBeInTheDocument();
+  });
+});

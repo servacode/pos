@@ -99,7 +99,7 @@ export function explainAdjust(
     if (!fractions && frac) return 'هذا الصنف يُباع بالقطعة: اكتب عدداً صحيحاً دون كسور.';
     if (frac.length > 3) return 'ثلاث منازل عشرية على الأكثر.';
     if (zero) return 'الكمية صفر: لا يُباع شيء. اكتب كمية أكبر من صفر، أو احذف السطر.';
-    return `الكمية أكبر من الحد الأقصى للسطر الواحد (${MAX_QTY / 1000}). اكتب كمية أقل.`;
+    return `الكمية أكبر من الحد الأقصى للسطر الواحد (${(MAX_QTY / 1000).toLocaleString('en-US')}). اكتب كمية أقل.`;
   }
   if (mode === 'percent') {
     if (frac.length > 2) return 'منزلتان عشريتان على الأكثر.';
@@ -302,7 +302,7 @@ export function AdjustPanel({
                 icon={<CheckIcon size={20} />}
                 aria-keyshortcuts="Enter"
                 onClick={apply}
-                disabled={text === ''}
+                disabled={text === '' || value === null}
               >
                 طبّق
                 <Kbd tone="brand">Enter</Kbd>

@@ -154,10 +154,11 @@ export function ChequesPage() {
     {
       key: 'reference',
       header: 'رقم الشيك',
+      className: 'px-2! sm:px-4!',
       cell: (c) => (
         <div className="flex flex-col items-start gap-1 py-2.5">
           {c.reference ? (
-            <bdi dir="ltr" className="num font-semibold whitespace-nowrap">
+            <bdi dir="ltr" className="num max-w-48 font-semibold break-words">
               {c.reference}
             </bdi>
           ) : (
@@ -168,7 +169,13 @@ export function ChequesPage() {
               {c.documentNumber}
             </bdi>
           </span>
+          {c.bank ? <span className="text-xs text-ink-muted 2xl:hidden">{c.bank}</span> : null}
           <span className="text-xs text-ink-muted sm:hidden">{c.customerName ?? '—'}</span>
+          {dueDayOf(c) ? (
+            <span className="text-xs text-ink-muted sm:hidden">
+              الاستحقاق <bdi className="num whitespace-nowrap">{dueDayOf(c)}</bdi>
+            </span>
+          ) : null}
           <span className="sm:hidden">{status(c)}</span>
         </div>
       ),
@@ -179,11 +186,11 @@ export function ChequesPage() {
       className: 'hidden sm:table-cell',
       cell: (c) =>
         c.direction === 'out' ? (
-          <span className="block min-w-44 font-semibold">{c.supplierName ?? '—'}</span>
+          <span className="line-clamp-2 min-w-28 font-semibold">{c.supplierName ?? '—'}</span>
         ) : c.customerName ? (
-          <span className="flex min-w-44 items-center gap-2.5">
-            <Avatar name={c.customerName} size="sm" />
-            <span className="font-semibold">{c.customerName}</span>
+          <span className="flex min-w-28 items-center gap-2.5">
+            <Avatar name={c.customerName} size="sm" className="shrink-0" />
+            <span className="line-clamp-2 font-semibold">{c.customerName}</span>
           </span>
         ) : (
           <span className="text-ink-subtle">—</span>
@@ -192,9 +199,9 @@ export function ChequesPage() {
     {
       key: 'bank',
       header: 'البنك',
-      className: 'hidden md:table-cell',
+      className: 'hidden 2xl:table-cell',
       cell: (c) => (
-        <span className="flex min-w-24 flex-col items-start">
+        <span className="flex flex-col items-start">
           <span>{c.bank ?? <span className="text-ink-subtle">—</span>}</span>
           {c.drawer ? <span className="text-xs text-ink-muted">الساحب: {c.drawer}</span> : null}
         </span>
@@ -203,6 +210,7 @@ export function ChequesPage() {
     {
       key: 'due',
       header: 'الاستحقاق',
+      className: 'hidden sm:table-cell',
       cell: (c) =>
         dueDayOf(c) ? (
           <bdi
@@ -221,13 +229,14 @@ export function ChequesPage() {
     {
       key: 'date',
       header: 'التاريخ',
-      className: 'hidden lg:table-cell',
+      className: 'hidden 2xl:table-cell',
       cell: (c) => <bdi className="num whitespace-nowrap text-ink-muted">{c.date}</bdi>,
     },
     {
       key: 'amount',
       header: 'المبلغ',
       numeric: true,
+      className: 'px-1.5! sm:px-4!',
       cell: (c) => <Money minor={c.amountMinor} currency={c.currency} className="font-semibold" />,
     },
     {
@@ -240,7 +249,7 @@ export function ChequesPage() {
       key: 'actions',
       // Positioned, so the hidden heading stays inside the table's scroll box.
       header: <span className="sr-only">إجراءات</span>,
-      className: 'relative w-px',
+      className: 'relative w-px px-1.5! sm:px-4!',
       cell: (c) =>
         c.status === 'pending' && canManage && c.direction !== 'out' ? (
           <span className="flex flex-col items-stretch gap-1.5 py-2 sm:flex-row sm:justify-end sm:py-0">
@@ -263,7 +272,7 @@ export function ChequesPage() {
             </Button>
           </span>
         ) : c.direction === 'out' ? (
-          <span className="block min-w-32 py-2 text-xs leading-snug text-ink-muted sm:py-0 sm:text-end">
+          <span className="block max-w-28 py-2 text-xs leading-snug text-ink-muted sm:max-w-none sm:min-w-32 sm:py-0 sm:text-end">
             خُصم من البنك يوم الدفع
           </span>
         ) : null,
@@ -378,11 +387,19 @@ export function ChequesPage() {
           </>
         }
       >
-        <p className="text-sm text-ink-muted">
-          {asking?.action === 'bounced'
-            ? 'يعود المبلغ ديناً على الزبون في كشف حسابه، ولا يمكن التراجع عن هذا من هنا.'
-            : 'ينتقل المبلغ إلى البنك، ولا يمكن التراجع عن هذا من هنا.'}
-        </p>
+        <div className="flex flex-col gap-3">
+          {asking?.action === 'cleared' && (dueDayOf(asking.cheque) ?? '') > today() ? (
+            <Alert tone="warning">
+              تاريخ استحقاقه <bdi className="num">{dueDayOf(asking.cheque)}</bdi> لم يأتِ بعد. تأكّد أن البنك
+              صرفه فعلاً قبل أن تسجّله محصّلاً.
+            </Alert>
+          ) : null}
+          <p className="text-sm text-ink-muted">
+            {asking?.action === 'bounced'
+              ? 'يعود المبلغ ديناً على الزبون في كشف حسابه، ولا يمكن التراجع عن هذا من هنا.'
+              : 'ينتقل المبلغ إلى البنك، ولا يمكن التراجع عن هذا من هنا.'}
+          </p>
+        </div>
       </Dialog>
     </AppShell>
   );

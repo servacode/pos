@@ -55,7 +55,7 @@ export function QuotationsScreen({
     <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
       <FlowHeader
         title="عروض الأسعار"
-        description="العروض بانتظار رد الزبون. افتح العرض في السلة لتبيعه بالأسعار المعروضة."
+        description="العروض التي لم تُحوَّل إلى فاتورة بعد: مسودة أو مرسلة أو مقبولة. افتح العرض في السلة لتبيعه بالأسعار المعروضة."
         icon={<ListIcon />}
         onBack={onBack}
         actions={
