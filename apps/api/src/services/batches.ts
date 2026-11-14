@@ -119,6 +119,32 @@ export async function batchPool(
   return pool;
 }
 
+/**
+ * The items a branch keeps batches of: any row in the ledger, even one whose balance is back to
+ * zero. A sale, a transfer or a count of such an item that no batch covers is still written to the
+ * ledger (as the no-batch row), so its sum keeps following the stock.
+ */
+export async function trackedVariants(
+  tx: Transaction,
+  branchId: string,
+  variantIds: readonly string[],
+): Promise<Set<string>> {
+  const ids = [...new Set(variantIds)];
+  if (ids.length === 0) return new Set();
+  const rows = await tx.execute<{ variant_id: string }>(sql`
+    select distinct variant_id from batch_movements
+    where branch_id = ${branchId} and variant_id = any(${uuidArray(ids)})`);
+  return new Set(rows.map((r) => r.variant_id));
+}
+
+/** Takes `qty` off the no-batch row of a branch's pool (a negative balance is allowed), so the next line sees it */
+function takeFromNoBatch(held: StockBatch[], qty: number): StockBatch[] {
+  const none = held.find((b) => sameBatch(b, { batchNo: null, expiry: null }));
+  if (none) none.qty -= qty;
+  else held.push({ batchNo: null, expiry: null, qty: -qty, blocked: false });
+  return held;
+}
+
 // ─── Sales ────────────────────────────────────────────────────────────────────
 
 interface SaleLineBatches {
@@ -134,7 +160,10 @@ interface SaleLineBatches {
  * A sale's batches into the ledger. The till's allocations are taken as printed (never refused):
  * one that goes past the batch's balance is flagged batch_over_balance, one on a blocked or
  * expired batch is flagged batch_blocked. A line with no batch (an older till, or an item the till
- * knew no batches of) is taken first-expiry-first from what the branch holds, as far as it covers.
+ * knew no batches of) is taken first-expiry-first from what the branch holds. Whatever the batches
+ * do not cover (expired or blocked ones are skipped, or the till allocated less than it sold) goes
+ * on the no-batch row and is flagged batch_over_balance, so a sale line's batch rows always add up
+ * to its stock movement.
  */
 export async function recordSaleBatches(
   tx: Transaction,
@@ -143,6 +172,11 @@ export async function recordSaleBatches(
 ): Promise<SyncFlag[]> {
   const live = lines.filter((l) => l.baseQty > 0);
   const pool = await batchPool(
+    tx,
+    scope.branchId,
+    live.map((l) => l.variantId),
+  );
+  const tracked = await trackedVariants(
     tx,
     scope.branchId,
     live.map((l) => l.variantId),
@@ -157,13 +191,17 @@ export async function recordSaleBatches(
       : line.batchNo
         ? [{ batchNo: line.batchNo, expiry: line.batchExpiry ?? null, qty: line.baseQty }]
         : [];
+    const keepsBatches = held.length > 0 || tracked.has(line.variantId);
+    if (given.length === 0 && !keepsBatches) continue;
     let allocations: readonly BatchAllocation[] = given;
+    let uncovered = 0;
     if (given.length === 0) {
-      if (held.length === 0) continue;
       const auto = allocateFefo(held, line.baseQty, scope.date);
       allocations = auto.allocations;
+      uncovered = auto.uncovered;
       pool.set(line.variantId, auto.remaining);
     } else {
+      if (keepsBatches) uncovered = Math.max(0, line.baseQty - given.reduce((sum, a) => sum + a.qty, 0));
       for (const a of given) {
         const at = held.find((b) => sameBatch(b, a));
         if (!at || at.qty < a.qty) flags.add('batch_over_balance');
@@ -183,7 +221,19 @@ export async function recordSaleBatches(
         allocNo: n,
       }),
     );
-    if (allocations.length > 0) touched.push(line.variantId);
+    if (uncovered > 0) {
+      rows.push({
+        variantId: line.variantId,
+        batchNo: null,
+        expiry: null,
+        qty: -uncovered,
+        lineNo: line.lineNo,
+        allocNo: allocations.length,
+      });
+      pool.set(line.variantId, takeFromNoBatch(pool.get(line.variantId) ?? [], uncovered));
+      flags.add('batch_over_balance');
+    }
+    if (allocations.length > 0 || uncovered > 0) touched.push(line.variantId);
   }
   await recordBatchMovements(tx, { ...scope, kind: 'sale' }, rows);
   await refreshBatches(tx, [scope.branchId], touched);
@@ -248,7 +298,13 @@ export async function recordReturnBatches(
     const allocations = sold
       .filter((s) => s.line_no === line.saleLineNo)
       .map((s) => ({ batchNo: s.batch_no || null, expiry: s.expiry, qty: Number(s.qty) }));
-    returnShares(allocations, before.get(line.saleLineNo) ?? 0, line.baseQty).forEach((share, n) => {
+    if (allocations.length === 0) continue;
+    const shares = returnShares(allocations, before.get(line.saleLineNo) ?? 0, line.baseQty);
+    // What the sale line's batch rows no longer hold (a sale written before the ledger covered
+    // every piece) goes back on the no-batch row, so the return still adds up to its stock movement
+    const left = line.baseQty - shares.reduce((sum, a) => sum + a.qty, 0);
+    if (left > 0) shares.push({ batchNo: null, expiry: null, qty: left });
+    shares.forEach((share, n) => {
       rows.push({
         variantId: line.variantId,
         batchNo: share.batchNo,
@@ -290,6 +346,11 @@ export async function takeBatches(
     branchId,
     lines.map((l) => l.variantId),
   );
+  const tracked = await trackedVariants(
+    tx,
+    branchId,
+    lines.map((l) => l.variantId),
+  );
   const rows: LedgerRow[] = [];
   for (const [i, line] of lines.entries()) {
     if (line.qty <= 0) continue;
@@ -321,6 +382,18 @@ export async function takeBatches(
         allocNo: n,
       }),
     );
+    // What no batch holds goes on the no-batch row (the stock moves by the full quantity)
+    if (taken.uncovered > 0 && (held.length > 0 || tracked.has(line.variantId))) {
+      rows.push({
+        variantId: line.variantId,
+        batchNo: null,
+        expiry: null,
+        qty: taken.uncovered,
+        lineNo: line.lineNo,
+        allocNo: taken.allocations.length,
+      });
+      pool.set(line.variantId, takeFromNoBatch(taken.remaining, taken.uncovered));
+    }
   }
   return rows;
 }

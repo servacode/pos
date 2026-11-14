@@ -156,7 +156,7 @@ export function allocateFefo(batches: readonly StockBatch[], qty: number, today:
   let left = Math.max(0, qty);
   for (const b of [...remaining].sort(byExpiry)) {
     if (left === 0) break;
-    if (batchState(b, today) !== 'ok') continue;
+    if (b.qty <= 0 || batchState(b, today) !== 'ok') continue;
     const take = Math.min(left, b.qty);
     allocations.push({ batchNo: b.batchNo, expiry: b.expiry, qty: take });
     b.qty -= take;

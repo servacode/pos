@@ -228,6 +228,16 @@ describe('batch state and FEFO allocation', () => {
     expect(allocateFefo([b('A', '2027-01-01', 5000)], -5, today).allocations).toEqual([]);
   });
 
+  it('never takes from a batch that is empty or oversold (a negative balance), so an allocation is never negative', () => {
+    const r = allocateFefo(
+      [b('N', null, -4000), b('Z', '2027-01-01', 0), b('B', '2027-02-01', 1500)],
+      3000,
+      today,
+    );
+    expect(r.allocations).toEqual([{ batchNo: 'B', expiry: '2027-02-01', qty: 1500 }]);
+    expect(r.uncovered).toBe(1500);
+  });
+
   it('orders a batch with no date last and equal dates by number, and does not change its input', () => {
     const input = [
       b('Z', null, 1000),

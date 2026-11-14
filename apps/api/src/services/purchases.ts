@@ -61,7 +61,14 @@ import {
   type StockKey,
 } from './costing';
 import { postEntry, type DraftLine } from './posting';
-import { recordBatchMovements, refreshBatches, batchPool, requiringExpiry, takeBatches } from './batches';
+import {
+  recordBatchMovements,
+  refreshBatches,
+  batchPool,
+  requiringExpiry,
+  takeBatches,
+  trackedVariants,
+} from './batches';
 import { outgoingSerials, receiveSerials, relocateSerials, returnSerialsToSupplier } from './serials';
 
 /**
@@ -385,12 +392,18 @@ export async function createPurchase(
     );
     await moveStock(tx, auth.tenantId, branchId, id, 'purchase', input.date, lines);
     await receiveSerials(tx, auth.tenantId, id, branchId, input.lines);
-    // A batch's receipt: its own line in the batch ledger (the same item twice is two batches)
+    // A batch's receipt: its own line in the batch ledger (the same item twice is two batches).
+    // Pieces of an item that keeps batches, received with none, sit on the no-batch row.
+    const keepsBatches = await trackedVariants(
+      tx,
+      branchId,
+      lines.map((l) => l.variantId),
+    );
     await recordBatchMovements(
       tx,
       { tenantId: auth.tenantId, branchId, kind: 'receipt', docId: id, date: input.date },
       lines
-        .filter((l) => l.batchNo || l.expiryDate)
+        .filter((l) => l.batchNo || l.expiryDate || keepsBatches.has(l.variantId))
         .map((l) => ({
           variantId: l.variantId,
           batchNo: l.batchNo ?? null,
@@ -771,6 +784,11 @@ export async function createStocktake(
     await moveStock(tx, auth.tenantId, branchId, id, 'stocktake', input.date, moves);
     // The batch ledger: a batch's own count or write-off, and a whole-item loss taken earliest-expiry first
     const lineOf = new Map(moves.map((m) => [m.variantId, m.lineNo]));
+    const keepsBatches = await trackedVariants(
+      tx,
+      branchId,
+      moves.map((m) => m.variantId),
+    );
     const ledger = [
       ...deltas.map((d, n) => ({
         variantId: d.variantId,
@@ -790,6 +808,10 @@ export async function createStocktake(
           () => 'lines',
         )
       ).map((r) => ({ ...r, qty: -r.qty })),
+      // A whole count that finds more of an item that keeps batches: the extra pieces sit on the no-batch row
+      ...moves
+        .filter((m) => m.qty > 0 && wholeCounted.has(m.variantId) && keepsBatches.has(m.variantId))
+        .map((m) => ({ variantId: m.variantId, batchNo: null, expiry: null, qty: m.qty, lineNo: m.lineNo })),
     ];
     await recordBatchMovements(
       tx,

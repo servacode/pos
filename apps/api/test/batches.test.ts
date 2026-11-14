@@ -654,3 +654,154 @@ describe('the store settings of the batch rules', () => {
     expect(settings.till.blockNegativeStock).toBe(true);
   });
 });
+
+describe('the batch ledger keeps adding up to the stock', () => {
+  /** stock minus the batch ledger, per branch, for the item (0 everywhere when they agree) */
+  const gaps = async (d: Day) =>
+    (
+      await ownerDb()<{ gap: string }[]>`
+        select (coalesce(sl.qty, 0) - coalesce(b.q, 0))::text as gap
+        from (select branch_id, sum(qty) as qty from stock_levels
+              where tenant_id = ${d.store.tenantId} and variant_id = ${d.variantId} group by branch_id) sl
+        full join (select branch_id, sum(qty) as q from batch_movements
+              where tenant_id = ${d.store.tenantId} and variant_id = ${d.variantId} group by branch_id) b
+          on b.branch_id = sl.branch_id`
+    ).map((r) => Number(r.gap));
+  const noBatch = async (d: Day) => {
+    const [row] = await ownerDb()<{ qty: string }[]>`
+      select coalesce(sum(qty), 0)::text as qty from batch_movements
+      where tenant_id = ${d.store.tenantId} and variant_id = ${d.variantId} and batch_no = ''`;
+    return Number(row!.qty);
+  };
+
+  it('a sale bigger than the valid batches records the rest on the no-batch row and flags it', async () => {
+    const d = await aDay();
+    const { res, doc } = await pushSale(d, saleOf(d, 30 * BOX));
+    expect(flagsOf(res, doc.id)).toContain('batch_over_balance');
+    // 25 valid boxes taken from B-07 and C-09, the expired A-01 untouched, 5 boxes on the no-batch row
+    expect(await balances(d.store)).toEqual({ 'A-01': 10 * BOX });
+    expect(await noBatch(d)).toBe(-5 * BOX);
+    expect(await gaps(d)).toEqual([0]);
+    // The next line of the same kind sees that row and does not take from it
+    await pushSale(d, saleOf(d, BOX));
+    expect(await noBatch(d)).toBe(-6 * BOX);
+    expect(await gaps(d)).toEqual([0]);
+  });
+
+  it('a till that allocated less than it sold gets the rest on the no-batch row too', async () => {
+    const d = await aDay();
+    const { res, doc } = await pushSale(
+      d,
+      saleOf(d, 7 * BOX, [{ batchNo: 'B-07', expiry: '2026-11-15', qty: 5 * BOX }]),
+    );
+    expect(flagsOf(res, doc.id)).toEqual(['batch_over_balance']);
+    expect(await noBatch(d)).toBe(-2 * BOX);
+    expect(await gaps(d)).toEqual([0]);
+  });
+
+  it('a return of such a sale puts the pieces back so the ledger still follows the stock', async () => {
+    const d = await aDay();
+    const payload = saleOf(d, 30 * BOX);
+    const { doc } = await pushSale(d, payload);
+    const ret = buildReturnPayload({
+      sale: payload,
+      saleId: doc.id,
+      saleNumber: doc.number!,
+      shiftId: d.open.id,
+      cashierId: d.store.userId,
+      reason: 'سليم',
+      picks: [{ saleLineNo: 1, qty: 8 * BOX }],
+      returned: [],
+    });
+    const { hash: _hash, ...body } = d.doc('return', ret);
+    const withDeps = { ...body, deps: [doc.id] };
+    await push(app, d.store.device, [{ ...withDeps, hash: payloadHash(withDeps) }]);
+    expect(await noBatch(d)).toBe(0);
+    expect(await gaps(d)).toEqual([0]);
+  });
+
+  it('a supplier return, a transfer and a count that no batch covers keep the ledger level with the stock', async () => {
+    const d = await aDay();
+    const [main] = await ownerDb()<
+      { id: string }[]
+    >`select id from branches where tenant_id = ${d.store.tenantId}`;
+    const [mall] = await ownerDb()<{ id: string }[]>`
+      insert into branches (tenant_id, code, name) values (${d.store.tenantId}, '002', 'فرع المول') returning id`;
+    // Ten boxes received with no batch: the item keeps batches, so they sit on the no-batch row
+    expect((await receive(d, 10, null, null)).statusCode).toBe(201);
+    expect(await noBatch(d)).toBe(10 * BOX);
+    expect(await gaps(d)).toEqual([0]);
+    // A sale takes the valid batches and the rest comes off the no-batch row (flagged), then
+    // a supplier return of what is left, named by no batch, takes the earliest expiry first
+    await pushSale(d, saleOf(d, 30 * BOX));
+    expect(await gaps(d)).toEqual([0]);
+    const back = await app.inject({
+      method: 'POST',
+      url: '/v1/supplier-returns',
+      headers: as(d.store),
+      payload: {
+        supplierId: d.supplier.id,
+        date: '2026-10-30',
+        refund: 'credit',
+        lines: [{ variantId: d.variantId, qty: 10 * BOX }],
+      },
+    });
+    expect(back.statusCode, back.body).toBe(201);
+    expect(await gaps(d)).toEqual([0]);
+    const moved = await app.inject({
+      method: 'POST',
+      url: '/v1/transfers',
+      headers: as(d.store),
+      payload: {
+        fromBranchId: main!.id,
+        toBranchId: mall!.id,
+        date: '2026-10-30',
+        lines: [{ variantId: d.variantId, qty: 5 * BOX }],
+      },
+    });
+    expect(moved.statusCode, moved.body).toBe(201);
+    expect(await gaps(d)).toEqual([0, 0]);
+    // A whole count that finds more than the book says puts the extra on the no-batch row
+    const count = await app.inject({
+      method: 'POST',
+      url: '/v1/stocktakes',
+      headers: as(d.store),
+      payload: { date: '2026-10-31', lines: [{ variantId: d.variantId, countedQty: 4 * BOX }] },
+    });
+    expect(count.statusCode, count.body).toBe(201);
+    expect(await gaps(d)).toEqual([0, 0]);
+  });
+});
+
+describe('what a document takes always moves the ledger by as much as the stock', () => {
+  it('a supplier return that the batches cannot cover still takes its full quantity off the ledger', async () => {
+    const d = await aDay();
+    // Three boxes the ledger never saw (as stores before this fix have): stock 38, ledger 35
+    await ownerDb()`update stock_levels set qty = qty + ${3 * BOX} where tenant_id = ${d.store.tenantId}`;
+    const [before] = await ownerDb()<{ gap: string }[]>`
+      select (sl.qty - b.q)::text as gap from
+        (select sum(qty) as qty from stock_levels where tenant_id = ${d.store.tenantId}) sl,
+        (select sum(qty) as q from batch_movements where tenant_id = ${d.store.tenantId}) b`;
+    expect(Number(before!.gap)).toBe(3 * BOX);
+    const back = await app.inject({
+      method: 'POST',
+      url: '/v1/supplier-returns',
+      headers: as(d.store),
+      payload: {
+        supplierId: d.supplier.id,
+        date: '2026-10-30',
+        refund: 'credit',
+        lines: [{ variantId: d.variantId, qty: 38 * BOX }],
+      },
+    });
+    expect(back.statusCode, back.body).toBe(201);
+    const [after] = await ownerDb()<{ gap: string; none: string }[]>`
+      select (sl.qty - b.q)::text as gap, b.none::text as none from
+        (select sum(qty) as qty from stock_levels where tenant_id = ${d.store.tenantId}) sl,
+        (select sum(qty) as q, coalesce(sum(qty) filter (where batch_no = ''), 0) as none
+           from batch_movements where tenant_id = ${d.store.tenantId}) b`;
+    // The ledger went down by the full 38 boxes, three of them on the no-batch row
+    expect(Number(after!.gap)).toBe(3 * BOX);
+    expect(Number(after!.none)).toBe(-3 * BOX);
+  });
+});
