@@ -44,6 +44,8 @@ describe('selling without internet', () => {
     const local = memoryLocal();
     // سامر and مريم each signed in online once on this device, so their codes work offline.
     (await saleScreen({ local })).view.unmount();
+    // Each sign-in is a fresh visit: a reload inside the idle window would keep the first one
+    globalThis.sessionStorage.clear();
     {
       const once = renderPos({ local });
       const list = await screen.findByRole('list', { name: 'الموظفون' });
@@ -51,6 +53,7 @@ describe('selling without internet', () => {
       await once.user.keyboard(PINS[ids.maryam]!);
       await screen.findByRole('heading', { name: 'افتح الوردية' });
       once.view.unmount();
+      globalThis.sessionStorage.clear();
     }
 
     const fetch = vi.fn(async () => {

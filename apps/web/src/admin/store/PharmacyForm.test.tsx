@@ -107,6 +107,11 @@ describe('«الصيدلية» in the settings', () => {
     const { user } = renderApp('/settings');
     const form = await screen.findByRole('form', { name: 'الدفعات والصلاحية' });
     expect(within(form).queryByRole('switch', { name: /الدواء المراقَب/ })).toBeNull();
+    // No prescription and no «medicines» outside a pharmacy: the policy is worded for medical supplies
+    expect(within(form).queryByRole('switch', { name: /إلزاميان/ })).toBeNull();
+    expect(within(form).queryByText(/الطبيب|الوصفة/)).toBeNull();
+    expect(within(form).getByRole('group', { name: 'مرتجع المستهلكات الطبية' })).toBeInTheDocument();
+    expect(within(form).queryByText(/مرتجع الأدوية|للأدوية/)).toBeNull();
     const batch = within(form).getByRole('switch', { name: /اختر الدفعة تلقائياً/ });
     expect(batch).not.toBeChecked();
     await user.click(batch);

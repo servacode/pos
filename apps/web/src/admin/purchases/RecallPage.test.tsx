@@ -82,6 +82,10 @@ describe('«سحب دفعة»', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
 
     await user.click(screen.getByRole('button', { name: 'أوقف بيعها في كل الفروع' }));
+    // Blocking waits for a confirmation: nothing is sent before it
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/batches/block')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'أوقف البيع' }));
     expect(await screen.findByText(/أُوقف بيع الدفعة C-09 في كل الفروع/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/batches/block').at(-1)?.body).toEqual({ batchNo: 'C-09' });
     expect(await screen.findByRole('button', { name: 'ارفع الإيقاف' })).toBeInTheDocument();

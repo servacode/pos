@@ -20,6 +20,8 @@ export interface PickedVariant {
   packs?: PackOption[];
   /** «يتطلب صلاحية»: a receipt of it needs an expiry date (03 › الصيدليات) */
   requiresExpiry?: boolean;
+  /** «يتتبّع الرقم التسلسلي»: a receipt or a return of it takes one number per piece */
+  tracksSerial?: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ export function VariantPicker({
         name: v.label ? `${detail.nameAr} ${v.label}` : detail.nameAr,
         packs: packOptionsOf(v.barcodes),
         ...(detail.requiresExpiry ? { requiresExpiry: true } : {}),
+        ...(detail.tracksSerial ? { tracksSerial: true } : {}),
       }));
     if (variants.length === 1) {
       onPick(variants[0]!);

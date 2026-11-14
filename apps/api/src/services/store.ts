@@ -77,11 +77,29 @@ async function read(tx: Transaction, tenantId: string): Promise<StoreResponse> {
     service: settings.service ?? null,
     loyalty: settings.loyalty ?? null,
     // Only a pharmacy has it; one that never chose gets the defaults
-    pharmacy: tenant.sectors.includes('pharmacy')
-      ? (settings.pharmacy ?? DEFAULT_PHARMACY_SETTINGS)
-      : (settings.pharmacy ?? null),
+    pharmacy: pharmacyOf(tenant.sectors as SectorKey[], settings.pharmacy),
     till: settings.till ?? null,
     catalogOptions: catalogOptionsOf(settings.catalogOptions),
+  };
+}
+
+/**
+ * What the till gets as the store's batch rules. A pharmacy and a medical-supplies store both
+ * refuse a sale with no valid batch unless the owner switched that off; a medical-supplies store
+ * also picks the batch itself and blocks the expired unless the owner wrote `autoBatch: false`.
+ * Only a value the owner never saved is defaulted, so no data migration is needed.
+ */
+function pharmacyOf(
+  sectors: readonly SectorKey[],
+  stored: PharmacySettings | null | undefined,
+): PharmacySettings | null {
+  const pharmacy = sectors.includes('pharmacy');
+  const medical = sectors.includes('medical_supplies');
+  if (!pharmacy && !medical) return stored ?? null;
+  return {
+    ...(stored ?? DEFAULT_PHARMACY_SETTINGS),
+    ...(medical && !pharmacy && stored?.autoBatch === undefined ? { autoBatch: true } : {}),
+    ...(stored?.blockNoBatch === undefined ? { blockNoBatch: true } : {}),
   };
 }
 
@@ -374,9 +392,11 @@ export function updatePharmacy(
     const before = await read(tx, auth.tenantId);
     // The till's batch picking is on for a pharmacy unless turned off; elsewhere only when turned on
     const isPharmacy = before.sectors.includes('pharmacy');
-    await tx
-      .update(tenantSettings)
-      .set({ pharmacy: isPharmacy ? input : { ...input, autoBatch: input.autoBatch ?? false } });
+    // A medical-supplies store also defaults on; any other store only when it turns it on
+    const medical = before.sectors.includes('medical_supplies');
+    await tx.update(tenantSettings).set({
+      pharmacy: isPharmacy ? input : { ...input, autoBatch: input.autoBatch ?? medical },
+    });
     const after = await read(tx, auth.tenantId);
     await audit(
       tx,

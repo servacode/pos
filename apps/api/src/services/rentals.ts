@@ -145,6 +145,14 @@ export function createRental(
       );
       if (!known) throw invalid({ customerId: 'هذا الزبون غير موجود.' });
     }
+    // A rental typed with only a name and phone is tied to the customer record with that phone, when it is one
+    let customerId = input.customerId ?? null;
+    if (!customerId) {
+      const found = await tx.execute<{ id: string }>(
+        sql`select id from customers where phone = ${input.phone} and archived_at is null limit 2`,
+      );
+      if (found.length === 1) customerId = found[0]!.id;
+    }
     const seq = await nextSeq(tx, device.tenantId, 'rentals');
     const [made] = await tx
       .insert(rentals)
@@ -157,7 +165,7 @@ export function createRental(
         serial,
         variantId: piece.variant_id,
         item: piece.item,
-        customerId: input.customerId ?? null,
+        customerId,
         customerName: input.customerName,
         customerPhone: input.phone,
         startDate,

@@ -69,19 +69,41 @@ export function QuotationsPage() {
       key: 'number',
       header: 'الرقم',
       cell: (r) => (
-        <Link
-          to={`/quotations/${r.id}`}
-          className="rounded-sm font-semibold text-ink underline decoration-transparent underline-offset-4 transition-[color,text-decoration-color] duration-120 ease-standard hover:text-brand-ink hover:decoration-current"
-        >
-          <bdi dir="ltr" className="num">
-            {r.number}
-          </bdi>
-        </Link>
+        <div className="flex flex-col items-start gap-1 py-2">
+          <Link
+            to={`/quotations/${r.id}`}
+            className="rounded-sm font-semibold text-ink underline decoration-transparent underline-offset-4 transition-[color,text-decoration-color] duration-120 ease-standard hover:text-brand-ink hover:decoration-current"
+          >
+            <bdi dir="ltr" className="num">
+              {r.number}
+            </bdi>
+          </Link>
+          <span className="text-xs text-ink-muted sm:hidden">{r.customerName ?? '—'}</span>
+          <span className="sm:hidden">
+            <Badge tone={QUOTATION_TONES[r.status]}>{QUOTATION_STATUS_LABELS[r.status]}</Badge>
+          </span>
+        </div>
       ),
     },
-    { key: 'customer', header: 'الزبون', cell: (r) => r.customerName ?? '—' },
-    { key: 'date', header: 'التاريخ', cell: (r) => dayText(r.issueDate, digits) },
-    { key: 'valid', header: 'صالح حتى', cell: (r) => dayText(r.validUntil, digits) },
+    // On a phone the number's cell carries the customer, the status and the day, so the total stays in view.
+    {
+      key: 'customer',
+      header: 'الزبون',
+      className: 'hidden sm:table-cell',
+      cell: (r) => r.customerName ?? '—',
+    },
+    {
+      key: 'date',
+      header: 'التاريخ',
+      className: 'hidden md:table-cell',
+      cell: (r) => dayText(r.issueDate, digits),
+    },
+    {
+      key: 'valid',
+      header: 'صالح حتى',
+      className: 'hidden lg:table-cell',
+      cell: (r) => dayText(r.validUntil, digits),
+    },
     {
       key: 'total',
       header: 'المجموع',
@@ -91,6 +113,7 @@ export function QuotationsPage() {
     {
       key: 'status',
       header: 'الحالة',
+      className: 'hidden sm:table-cell',
       cell: (r) => <Badge tone={QUOTATION_TONES[r.status]}>{QUOTATION_STATUS_LABELS[r.status]}</Badge>,
     },
   ];

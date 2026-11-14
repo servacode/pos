@@ -153,10 +153,29 @@ function Signatures({ left, right }: { left: string; right: string }) {
   );
 }
 
-const batchNote = (l: SalePayload['lines'][number]): string[] => [
-  ...(l.batchNo ? [`دفعة ${l.batchNo}`] : []),
-  ...(l.batchExpiry ? [`صلاحية ${l.batchExpiry}`] : []),
-];
+/** Every batch a line took from (qty in base units): the allocations, or the single batch of an older till */
+export const lineBatches = (
+  l: SalePayload['lines'][number],
+): { batchNo: string | null; expiry: string | null; qty: number | null }[] => {
+  if (l.batches && l.batches.length > 0)
+    return l.batches.map((b) => ({ batchNo: b.batchNo ?? null, expiry: b.expiry ?? null, qty: b.qty }));
+  if (l.batchNo || l.batchExpiry)
+    return [{ batchNo: l.batchNo ?? null, expiry: l.batchExpiry ?? null, qty: null }];
+  return [];
+};
+
+const batchNote = (l: SalePayload['lines'][number]): string[] => {
+  const all = lineBatches(l);
+  return all.map((b) =>
+    [
+      b.batchNo ? `دفعة ${b.batchNo}` : null,
+      b.expiry ? `صلاحية ${b.expiry}` : null,
+      all.length > 1 && b.qty !== null ? `الكمية ${formatQuantity(b.qty)}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  );
+};
 
 /** How the invoice was settled, as a customer reads it */
 export function paymentTerms(p: SalePayload): string {
@@ -194,7 +213,7 @@ export function InvoiceA4({ data }: { data: A4SaleData }) {
           </tr>
         </thead>
         <tbody>
-          {p.lines.map((line) => {
+          {p.lines.map((line, idx) => {
             const notes = [
               ...batchNote(line),
               ...(line.serials && line.serials.length > 0
@@ -203,7 +222,7 @@ export function InvoiceA4({ data }: { data: A4SaleData }) {
             ];
             return (
               <tr key={line.lineNo} className="break-inside-avoid">
-                <td className={`${cell} num text-center`}>{line.lineNo}</td>
+                <td className={`${cell} num text-center`}>{idx + 1}</td>
                 <td className={cell}>
                   {line.name}
                   {notes.length > 0 ? (
@@ -307,29 +326,43 @@ export function DeliveryNoteA4({ data, withPrices }: { data: A4SaleData; withPri
           </tr>
         </thead>
         <tbody>
-          {p.lines.map((line) => (
-            <tr key={line.lineNo} className="break-inside-avoid">
-              <td className={`${cell} num text-center`}>{line.lineNo}</td>
-              <td className={cell}>{line.name}</td>
-              <td className={`${cell} num text-end`}>
-                {formatQuantity(line.qty, digits)}
-                {line.unitName ? ` ${line.unitName}` : ''}
-              </td>
-              <td className={cell}>{line.batchNo ?? ''}</td>
-              <td className={`${cell} num`}>{line.batchExpiry ?? ''}</td>
-              <td className={`${cell} num`}>{line.serials?.join('، ') ?? ''}</td>
-              {withPrices ? (
-                <td className={`${cell} text-end`}>
-                  <Money minor={line.unitPriceMinor} currency={base} symbol={false} />
+          {p.lines.map((line, idx) => {
+            const bs = lineBatches(line);
+            const stack = (pick: (b: (typeof bs)[number]) => string) =>
+              bs.map((b, i) => (
+                <span key={i} className="block">
+                  {pick(b) || '—'}
+                </span>
+              ));
+            return (
+              <tr key={line.lineNo} className="break-inside-avoid">
+                <td className={`${cell} num text-center`}>{idx + 1}</td>
+                <td className={cell}>{line.name}</td>
+                <td className={`${cell} num text-end`}>
+                  {formatQuantity(line.qty, digits)}
+                  {line.unitName ? ` ${line.unitName}` : ''}
                 </td>
-              ) : null}
-              {withPrices ? (
-                <td className={`${cell} text-end`}>
-                  <Money minor={line.priced.totalMinor} currency={base} symbol={false} />
+                <td className={cell}>
+                  {stack(
+                    (b) =>
+                      `${b.batchNo ?? ''}${bs.length > 1 && b.qty !== null ? ` × ${formatQuantity(b.qty)}` : ''}`,
+                  )}
                 </td>
-              ) : null}
-            </tr>
-          ))}
+                <td className={`${cell} num`}>{stack((b) => b.expiry ?? '')}</td>
+                <td className={`${cell} num`}>{line.serials?.join('، ') ?? ''}</td>
+                {withPrices ? (
+                  <td className={`${cell} text-end`}>
+                    <Money minor={line.unitPriceMinor} currency={base} symbol={false} />
+                  </td>
+                ) : null}
+                {withPrices ? (
+                  <td className={`${cell} text-end`}>
+                    <Money minor={line.priced.totalMinor} currency={base} symbol={false} />
+                  </td>
+                ) : null}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {withPrices ? (
@@ -384,9 +417,9 @@ export function QuotationA4({ quotation, store }: { quotation: Quotation; store:
           </tr>
         </thead>
         <tbody>
-          {quotation.lines.map((line) => (
+          {quotation.lines.map((line, idx) => (
             <tr key={line.lineNo} className="break-inside-avoid">
-              <td className={`${cell} num text-center`}>{line.lineNo}</td>
+              <td className={`${cell} num text-center`}>{idx + 1}</td>
               <td className={cell}>{line.name}</td>
               <td className={`${cell} num text-end`}>
                 {formatQuantity(line.qty, digits)}

@@ -57,6 +57,12 @@ const server = (extra: Record<string, (r: MockRequest) => { status: number; body
     ...extra,
   });
 
+/** The batch's «المزيد» menu, opened on its first row, and one of its items chosen */
+async function chooseMore(user: ReturnType<typeof renderApp>['user'], table: HTMLElement, item: string) {
+  await user.click((await within(table).findAllByRole('button', { name: /المزيد/ }))[0]!);
+  await user.click(await screen.findByRole('menuitem', { name: item }));
+}
+
 describe('«الصلاحية»', () => {
   it('lists the batches by expiry with what is really left, and narrows the window', async () => {
     const { requestsTo } = server();
@@ -97,7 +103,7 @@ describe('«الصلاحية»', () => {
     });
     const { user } = renderApp('/expiry');
     const table = await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
-    await user.click((await within(table).findAllByRole('button', { name: 'عدّ' }))[0]!);
+    await chooseMore(user, table, 'عدّ');
     let dialog = await screen.findByRole('dialog');
     const counted = within(dialog).getByLabelText('الكمية التي عددتها');
     await user.clear(counted);
@@ -108,7 +114,7 @@ describe('«الصلاحية»', () => {
       lines: [{ variantId: 'v-1', countedQty: 8000, batchNo: 'A-01', expiryDate: '2026-10-25' }],
     });
 
-    await user.click((await within(table).findAllByRole('button', { name: 'أرجع للمورد' }))[0]!);
+    await chooseMore(user, table, 'أرجع للمورد');
     dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'أرجع للمورد' }));
     await screen.findByText(/أُرجعت الدفعة A-01 .* إلى مستودع الشفاء/);
@@ -125,7 +131,11 @@ describe('«الصلاحية»', () => {
     });
     const { user } = renderApp('/expiry');
     const table = await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
-    await user.click((await within(table).findAllByRole('button', { name: 'أوقف البيع' }))[0]!);
+    await chooseMore(user, table, 'أوقف البيع');
+    // Blocking waits for a confirmation
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/batches/block')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'أوقف البيع' }));
     expect(await screen.findByText(/أُوقف بيع الدفعة A-01 في كل الفروع/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/batches/block').at(-1)?.body).toEqual({
       batchNo: 'A-01',
@@ -149,10 +159,10 @@ describe('«الصلاحية»', () => {
     const { user } = renderApp('/expiry');
     const table = await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
     expect(await within(table).findByText('موقوفة')).toBeInTheDocument();
-    await user.click(within(table).getByRole('button', { name: 'ارفع الإيقاف' }));
+    await chooseMore(user, table, 'ارفع الإيقاف');
     expect(await screen.findByText(/رُفع الإيقاف عن الدفعة A-01/)).toBeInTheDocument();
     // No supplier is known for it, so it cannot be sent back from here
-    await user.click(within(table).getByRole('button', { name: 'أرجع للمورد' }));
+    await chooseMore(user, table, 'أرجع للمورد');
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'أرجع للمورد' }));
     expect(await within(dialog).findByText(/لا مورد معروف لهذه الدفعة/)).toBeInTheDocument();

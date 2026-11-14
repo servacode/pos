@@ -697,7 +697,8 @@ function Waiting({
   const loading =
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
   const chequesDue = cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
-  const empty = online + holds + low + sized.length + expiring + chequesDue === 0;
+  const chequesOut = cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
+  const empty = online + holds + low + sized.length + expiring + chequesDue + chequesOut === 0;
   return (
     <Card className="flex flex-col gap-3">
       <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
@@ -742,6 +743,13 @@ function Waiting({
           {chequesDue > 0 ? (
             <WaitingRow to="/cheques" count={chequesDue} tone="warning" icon={<CalendarIcon />}>
               {chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
+            </WaitingRow>
+          ) : null}
+          {chequesOut > 0 ? (
+            <WaitingRow to="/cheques" count={chequesOut} tone="warning" icon={<CalendarIcon />}>
+              {chequesOut === 1
+                ? 'شيك صادر للمورد يستحق خلال 7 أيام'
+                : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
             </WaitingRow>
           ) : null}
           {expiring > 0 ? (

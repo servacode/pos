@@ -237,3 +237,25 @@ describe('duplicateAnswer', () => {
     expect(duplicateAnswer('customers', other, first).status).toBe('skip');
   });
 });
+
+describe('the product columns, worded for the store', () => {
+  const labels = (sectors?: Parameters<typeof targetsOf>[2]) =>
+    targetsOf('products', [], sectors).map((t) => t.label);
+
+  it('keeps size, colour and season for clothing (and for a store with no type)', () => {
+    for (const sectors of [['clothing' as const], undefined]) {
+      expect(labels(sectors)).toEqual(expect.arrayContaining(['المقاس', 'اللون', 'الموسم/التشكيلة']));
+    }
+  });
+
+  it('calls them «الخيار 1/2» and drops the season for medical supplies, keeping the fields', () => {
+    const medical = targetsOf('products', [], ['medical_supplies']);
+    expect(medical.map((t) => t.label)).toEqual(expect.arrayContaining(['الخيار 1', 'الخيار 2']));
+    expect(medical.map((t) => t.label).join('|')).not.toMatch(/المقاس|اللون|الموسم/);
+    expect(medical.map((t) => t.key)).toEqual(expect.arrayContaining(['size', 'colour']));
+    expect(medical.map((t) => t.key)).not.toContain('season');
+    expect(templateCsv('products', ['medical_supplies'])).not.toMatch(/المقاس|اللون|الموسم/);
+    // The sheet's own headers are still understood
+    expect(guessImportFields('products', ['المقاس', 'اللون'])).toEqual(['size', 'colour']);
+  });
+});

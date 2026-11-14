@@ -168,4 +168,46 @@ describe('«مرتجع إلى المورد»', () => {
       lines: [{ variantId: 'v-1', qty: 5000, batchNo: 'SY-118', expiryDate: '2027-02-01' }],
     });
   });
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])(
+    'shows the serial field at once, and only for a product that tracks them (%s)',
+    async (tracks, count) => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: buyer() },
+        'GET /v1/suppliers': {
+          status: 200,
+          body: {
+            items: [
+              { id: 's-1', name: 'معمل الأمل', phone: null, notes: null, balanceMinor: 0, archived: false },
+            ],
+            baseCurrency: 'SYP',
+          },
+        },
+        'GET /v1/supplier-returns': { status: 200, body: { items: [] } },
+        [`GET ${productsPath({ q: 'جهاز' })}`]: {
+          status: 200,
+          body: { items: [{ id: 'p-9', nameAr: 'جهاز ضغط', type: 'stock' }], nextCursor: null },
+        },
+        'GET /v1/products/p-9': {
+          status: 200,
+          body: {
+            id: 'p-9',
+            nameAr: 'جهاز ضغط',
+            tracksSerial: tracks,
+            variants: [{ id: 'v-9', label: null, archivedAt: null, attributes: [], barcodes: [] }],
+          },
+        },
+      });
+      const { user } = renderApp('/supplier-returns');
+      await screen.findByRole('option', { name: 'معمل الأمل' });
+      await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'جهاز');
+      await user.click(await screen.findByRole('button', { name: 'جهاز ضغط' }));
+      await screen.findByLabelText('كمية جهاز ضغط');
+      expect(screen.queryAllByLabelText('أرقام جهاز ضغط')).toHaveLength(count);
+    },
+  );
 });

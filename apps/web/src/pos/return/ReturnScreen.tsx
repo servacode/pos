@@ -36,6 +36,7 @@ import {
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
 import { clockText, dateText } from '../format';
+import { fetchPurchases } from '../customers/CustomerHistory';
 import { ChoiceGroup, DoneCard, FlowHeader, OptionChip, OptionTile } from '../FlowParts';
 import { usePos } from '../services';
 import { deviceDocuments, type OpenShift } from '../shift/shift';
@@ -136,6 +137,10 @@ export function ReturnScreen({
   const [method, setMethod] = useState<RefundMethod>('cash');
   const [reference, setReference] = useState('');
   const [approving, setApproving] = useState(false);
+  // An irreversible refund (to the customer's account) waits for a second tap
+  const [confirming, setConfirming] = useState(false);
+  // What the customer owes now (the server's word, online only); null while unknown
+  const [owed, setOwed] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReturn | null>(null);
@@ -196,6 +201,22 @@ export function ReturnScreen({
     sealedConfirmed(picks, medicineRules, sealed) &&
     !hasBlockedPick(picks, medicineRules);
   const canRefund = session.permissions.has('sale.refund');
+  const accountCustomer = current?.sale.customerId ?? null;
+  useEffect(() => {
+    setConfirming(false);
+  }, [method, current?.id, draft?.totals.totalMinor]);
+  useEffect(() => {
+    setOwed(null);
+    const token = pos.device.token;
+    if (method !== 'account' || !accountCustomer || !token || !pos.online()) return;
+    let alive = true;
+    void fetchPurchases(accountCustomer, token, pos.fetch).then(
+      (got) => alive && setOwed(got?.balanceMinor ?? null),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [method, accountCustomer, pos]);
 
   /** The invoice of another till or branch: asked of the server, by number or by the receipt's barcode */
   async function findInStore() {
@@ -295,7 +316,7 @@ export function ReturnScreen({
         title="مرتجع"
         description={`اختر فاتورة من آخر ${daysText(windowDays)}، من أي جهاز في المحل، ثم ما يرجع منها. المبلغ من الفاتورة نفسها.`}
       />
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <section
           aria-label="الفواتير"
           className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4 shadow-e1 lg:sticky lg:top-0"
@@ -364,8 +385,8 @@ export function ReturnScreen({
                         : 'border-transparent hover:bg-surface-muted',
                     )}
                   >
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <bdi dir="ltr" className="num font-semibold whitespace-nowrap text-ink">
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
                         {s.number}
                       </bdi>
                       <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
@@ -641,7 +662,11 @@ export function ReturnScreen({
                     : method === 'voucher'
                       ? 'مبلغ القسيمة'
                       : method === 'account'
-                        ? 'يُحسم من دين الزبون'
+                        ? owed === null
+                          ? 'يُسجَّل على حساب الزبون'
+                          : owed > 0
+                            ? 'يُحسم من دين الزبون'
+                            : 'يُضاف رصيداً للزبون'
                         : 'المبلغ المردود'}
                 </span>
                 <Money
@@ -667,15 +692,35 @@ export function ReturnScreen({
                   onCancel={() => setApproving(false)}
                 />
               ) : (
-                <Button
-                  size="lg"
-                  fullWidth
-                  icon={<UndoIcon />}
-                  disabled={!ready || saving}
-                  onClick={() => (canRefund ? void record(null) : setApproving(true))}
-                >
-                  {exchange ? 'سجّل وبِع البديل' : 'سجّل المرتجع'}
-                </Button>
+                <>
+                  {confirming ? (
+                    <Alert tone="warning">
+                      {`سيُسجَّل المرتجع على حساب الزبون ولا يخرج من الدرج، ولا يمكن التراجع عنه بعد الحفظ. ${
+                        current?.sale.payments.some((p) => p.method === 'cheque')
+                          ? 'الشيك نفسه يبقى كما هو. '
+                          : ''
+                      }اضغط «نعم، سجّل» للتأكيد.`}
+                    </Alert>
+                  ) : null}
+                  <Button
+                    size="lg"
+                    fullWidth
+                    icon={<UndoIcon />}
+                    disabled={!ready || saving}
+                    onClick={() => {
+                      if (method === 'account' && !confirming) return setConfirming(true);
+                      if (canRefund) void record(null);
+                      else setApproving(true);
+                    }}
+                  >
+                    {confirming ? 'نعم، سجّل' : exchange ? 'سجّل وبِع البديل' : 'سجّل المرتجع'}
+                  </Button>
+                  {confirming ? (
+                    <Button variant="ghost" size="lg" fullWidth onClick={() => setConfirming(false)}>
+                      لا، ارجع
+                    </Button>
+                  ) : null}
+                </>
               )}
             </div>
           </section>

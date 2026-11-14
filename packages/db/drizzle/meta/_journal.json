@@ -435,6 +435,13 @@
       "when": 1794605380776,
       "tag": "0061_serial_returned_status",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1794642310481,
+      "tag": "0062_medical_batch_defaults",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,5 @@
 import type {
+  ContractPriceForTill,
   Quotation,
   QuotationInput,
   QuotationListItem,
@@ -28,3 +29,10 @@ export const moveQuotation = (id: string, status: QuotationStatus, version: numb
     body: { status, version },
     auth: true,
   });
+
+/** `GET /v1/quotations/customer-pricing?customerId=`: the customer's price tier and contract prices in force */
+export const getCustomerPricing = (customerId: string) =>
+  apiFetch<{ priceTier: 'retail' | 'wholesale'; items: ContractPriceForTill[] }>(
+    `/v1/quotations/customer-pricing?customerId=${encodeURIComponent(customerId)}`,
+    { auth: true },
+  );

@@ -1,11 +1,14 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { CUSTOMER_KIND_LABELS } from '@serva/core';
 import type {
   ContractPrice,
   ContractPriceForTill,
   CurrencyCode,
   CustomerKind,
+  PriceListSheet,
   contractPriceInput,
   contractPriceListQuery,
+  priceListSheetQuery,
 } from '@serva/core';
 import { contractPrices, withTenant, type Database, type Transaction } from '@serva/db';
 import type { z } from 'zod';
@@ -169,6 +172,26 @@ export function deleteContractPrice(db: Database, auth: AccessClaims, id: string
   });
 }
 
+async function pricesInForce(
+  tx: Transaction,
+  tenantId: string,
+  customerId: string,
+): Promise<ContractPriceForTill[]> {
+  const today = await storeToday(tx, tenantId);
+  const rows = await tx.execute<{ variant_id: string; currency: string; price_minor: string }>(sql`
+    select distinct on (cp.variant_id) cp.variant_id, cp.currency, cp.price_minor::text
+    from contract_prices cp
+    where (cp.customer_id = ${customerId}
+           or cp.customer_kind = (select kind from customers where id = ${customerId}))
+      and cp.valid_from <= ${today}::date and (cp.valid_to is null or cp.valid_to >= ${today}::date)
+    order by cp.variant_id, (cp.customer_id is not null) desc, cp.valid_from desc, cp.created_at desc`);
+  return rows.map((r) => ({
+    variantId: r.variant_id,
+    currency: r.currency as CurrencyCode,
+    priceMinor: Number(r.price_minor),
+  }));
+}
+
 /**
  * The prices in force today for a customer: one per product, the customer's own over the one for
  * their type, the later start over the earlier.
@@ -178,21 +201,117 @@ export function contractPricesForTill(
   device: DeviceClaims,
   customerId: string,
 ): Promise<{ items: ContractPriceForTill[] }> {
-  return withTenant(db, device.tenantId, async (tx) => {
-    const today = await storeToday(tx, device.tenantId);
-    const rows = await tx.execute<{ variant_id: string; currency: string; price_minor: string }>(sql`
-      select distinct on (cp.variant_id) cp.variant_id, cp.currency, cp.price_minor::text
-      from contract_prices cp
-      where (cp.customer_id = ${customerId}
-             or cp.customer_kind = (select kind from customers where id = ${customerId}))
-        and cp.valid_from <= ${today}::date and (cp.valid_to is null or cp.valid_to >= ${today}::date)
-      order by cp.variant_id, (cp.customer_id is not null) desc, cp.valid_from desc, cp.created_at desc`);
+  return withTenant(db, device.tenantId, async (tx) => ({
+    items: await pricesInForce(tx, device.tenantId, customerId),
+  }));
+}
+
+/** What a quotation for this customer is priced with: the wholesale tier and the contract prices */
+export function customerPricingForQuotation(
+  db: Database,
+  auth: AccessClaims,
+  customerId: string,
+): Promise<{ priceTier: 'retail' | 'wholesale'; items: ContractPriceForTill[] }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'customers.manage');
+    const [c] = await tx.execute<{ price_tier: string }>(
+      sql`select price_tier from customers where id = ${customerId}`,
+    );
+    if (!c) throw invalid({ customerId: 'هذا الزبون غير موجود.' });
     return {
-      items: rows.map((r) => ({
-        variantId: r.variant_id,
-        currency: r.currency as CurrencyCode,
-        priceMinor: Number(r.price_minor),
-      })),
+      priceTier: c.price_tier === 'wholesale' ? 'wholesale' : 'retail',
+      items: await pricesInForce(tx, auth.tenantId, customerId),
+    };
+  });
+}
+
+/**
+ * A price list to print: every live product with the price this customer (or this type of
+ * customer) pays today. A contract price in force wins; else the wholesale price when the tier is
+ * wholesale and the product has one; else the shelf price.
+ */
+export function priceListSheet(
+  db: Database,
+  auth: AccessClaims,
+  query: z.output<typeof priceListSheetQuery>,
+): Promise<PriceListSheet> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const today = await storeToday(tx, auth.tenantId);
+    let forName: string;
+    let kind: string | null = null;
+    let customerId: string | null = null;
+    let tier: 'retail' | 'wholesale' = query.tier ?? 'retail';
+    if (query.customerId) {
+      const [c] = await tx.execute<{ name: string; kind: string | null; price_tier: string }>(
+        sql`select name, kind, price_tier from customers where id = ${query.customerId}`,
+      );
+      if (!c) throw invalid({ customerId: 'هذا الزبون غير موجود.' });
+      forName = c.name;
+      kind = c.kind;
+      customerId = query.customerId;
+      tier = c.price_tier === 'wholesale' ? 'wholesale' : 'retail';
+    } else if (query.kind) {
+      forName = query.kind;
+      kind = query.kind;
+    } else {
+      throw invalid({ customerId: 'اختر زبوناً أو نوع زبائن.' });
+    }
+    const rows = await tx.execute<{
+      variant_id: string;
+      item: string;
+      sku: string | null;
+      price_minor: string;
+      wholesale_minor: string | null;
+      contract_minor: string | null;
+    }>(sql`
+      select v.id as variant_id, p.name_ar || coalesce(' ' || v.label, '') as item, v.sku,
+             pr.price_minor::text, pr.wholesale_price_minor::text as wholesale_minor,
+             (select cp.price_minor::text from contract_prices cp
+               where cp.variant_id = v.id
+                 and ((${customerId}::uuid is not null and cp.customer_id = ${customerId}::uuid)
+                      or (${kind}::text is not null and cp.customer_kind = ${kind}::text))
+                 and cp.valid_from <= ${today}::date and (cp.valid_to is null or cp.valid_to >= ${today}::date)
+               order by (cp.customer_id is not null) desc, cp.valid_from desc, cp.created_at desc
+               limit 1) as contract_minor
+      from variants v
+      join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
+      join prices pr on pr.tenant_id = v.tenant_id and pr.id = v.id
+      where v.archived_at is null and p.archived_at is null and p.type = 'stock'
+      order by p.name_ar, v.sort_order, v.label
+      limit 3000`);
+    return {
+      forName: kind && !customerId ? (CUSTOMER_KIND_LABELS[kind as CustomerKind] ?? forName) : forName,
+      tier,
+      currency: await baseCurrencyOf(tx, auth.tenantId),
+      asOf: today,
+      rows: rows.map((r) => {
+        if (r.contract_minor !== null) {
+          return {
+            variantId: r.variant_id,
+            item: r.item,
+            sku: r.sku,
+            priceMinor: Number(r.contract_minor),
+            source: 'contract' as const,
+          };
+        }
+        if (tier === 'wholesale' && r.wholesale_minor !== null) {
+          return {
+            variantId: r.variant_id,
+            item: r.item,
+            sku: r.sku,
+            priceMinor: Number(r.wholesale_minor),
+            source: 'wholesale' as const,
+          };
+        }
+        return {
+          variantId: r.variant_id,
+          item: r.item,
+          sku: r.sku,
+          priceMinor: Number(r.price_minor),
+          source: 'retail' as const,
+        };
+      }),
     };
   });
 }

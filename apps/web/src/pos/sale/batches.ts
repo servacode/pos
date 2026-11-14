@@ -133,7 +133,9 @@ export function batchGuard(
   pharmacy: PharmacySettings | null | undefined,
   blockNegativeStock: boolean,
 ): { blocks: BatchIssue[]; approvals: BatchIssue[]; stockBlocks: StockIssue[]; stockWarns: StockIssue[] } {
-  const action = (i: BatchIssue) => uncoveredAction(pharmacy, true, i.uncovered);
+  // A batch blocked for a recall is never sold, whatever the store's setting: no manager code reaches it
+  const action = (i: BatchIssue) =>
+    i.blockedQty > 0 && i.uncovered > 0 ? 'block' : uncoveredAction(pharmacy, true, i.uncovered);
   return {
     blocks: plan.uncovered.filter((i) => action(i) === 'block'),
     approvals: plan.uncovered.filter((i) => action(i) === 'approve'),

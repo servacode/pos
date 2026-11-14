@@ -6,6 +6,13 @@ import { dexieLocal } from '../offline/local';
 import { useDevice } from '../offline/useDevice';
 import { loadCatalog, type Catalog } from './catalog';
 import { PosProvider, saveWith, type PosServices } from './services';
+import {
+  DEFAULT_IDLE_MINUTES,
+  forgetSession,
+  keepSession,
+  restoreSession,
+  touchSession,
+} from './staff/persist';
 import { staffRoster, type StaffSession } from './staff/staff';
 import { TillBoundary } from './chunks';
 import { StatusBar, type OutboxStatus } from './StatusBar';
@@ -77,7 +84,47 @@ export function PosSession({ services, persisted }: { services: PosServices; per
     () => (catalog ? staffRoster(catalog.staff, services.device.branchCode) : []),
     [catalog, services.device.branchCode],
   );
-  const signOut = useCallback(() => setSession(null), []);
+  const deviceKey = services.device.deviceId ?? services.device.deviceCode ?? '';
+  const signedIn = useCallback(
+    (next: StaffSession) => {
+      keepSession(
+        next,
+        staff.find((m) => m.id === next.userId),
+        deviceKey,
+        services.now(),
+      );
+      setSession(next);
+    },
+    [staff, deviceKey, services],
+  );
+  const signOut = useCallback(() => {
+    forgetSession();
+    setSession(null);
+  }, []);
+  // A reload keeps the person signed in for the idle window, with no code kept (staff/persist.ts)
+  const [restored, setRestored] = useState(false);
+  const idleMinutes = catalog?.settings?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
+  useEffect(() => {
+    if (restored || !catalog || staff.length === 0) return;
+    setRestored(true);
+    const back = restoreSession(staff, deviceKey, services.now(), idleMinutes);
+    if (back) setSession((now) => now ?? back);
+  }, [restored, catalog, staff, deviceKey, services, idleMinutes]);
+  useEffect(() => {
+    if (!session) return;
+    let last = 0;
+    const touch = () => {
+      const t = services.now();
+      if (t - last < 5_000) return;
+      last = t;
+      touchSession(t);
+    };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    for (const type of events) window.addEventListener(type, touch, { capture: true, passive: true });
+    return () => {
+      for (const type of events) window.removeEventListener(type, touch, { capture: true });
+    };
+  }, [session, services]);
   const digits = catalog?.settings?.numberFormat ?? 'latn';
 
   useEffect(() => {
@@ -109,7 +156,7 @@ export function PosSession({ services, persisted }: { services: PosServices; per
           >
             {catalog ? (
               <Suspense fallback={null}>
-                <StaffSignIn staff={staff} onSignedIn={setSession} />
+                <StaffSignIn staff={staff} onSignedIn={signedIn} />
               </Suspense>
             ) : null}
           </CashierShell>

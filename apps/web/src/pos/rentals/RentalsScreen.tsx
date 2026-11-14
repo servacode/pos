@@ -3,6 +3,7 @@ import { RENTAL_RATE_LABELS, RENTAL_RATE_UNITS, type RentalRateUnit } from '@ser
 import type { GiftVoucherPayload } from '@serva/core/contracts/documents';
 import type { MaintenanceContract } from '@serva/core/contracts/maintenance';
 import type { RentableUnit, Rental } from '@serva/core/contracts/rentals';
+import { formatMoney } from '@serva/core/money';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
 import {
@@ -19,18 +20,22 @@ import {
   Select,
   SerialIcon,
   Skeleton,
+  Switch,
   TextField,
   useDigits,
 } from '@serva/ui';
 import { dayText, isoDay } from '../../lib/dates';
 import { PrintableRentalContract } from '../../lib/RentalContract';
 import { call } from '../alterations/api';
+import { depositLeft } from './api';
+import { CustomerPicker } from '../customers/CustomerPicker';
 import type { Catalog } from '../catalog';
 import { FlowHeader } from '../FlowParts';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import type { OpenShift } from '../shift/shift';
 import type { StaffSession } from '../staff/staff';
+import { DateField } from '../../lib/DateField';
 
 /** Today plus `days`, YYYY-MM-DD in the browser's calendar */
 const inDays = (days: number, now: number) => new Date(now + days * 86_400_000).toLocaleDateString('en-CA');
@@ -39,7 +44,8 @@ const inDays = (days: number, now: number) => new Date(now + days * 86_400_000).
  * «التأجير» (03 › الأدوات الطبية): a device of a rentable product goes out against its serial number
  * with the renter, the day it is due, a rate per day, week or month and a deposit (taken as a gift
  * voucher, spent when the device is back). The contract prints on A4. The return sells the rent as a
- * «إيجار» line less the deposit; «عقود الصيانة» lists the contracts waiting to be billed the same way.
+ * «إيجار» line less the deposit; what is left of the deposit goes back in cash («ردّ الباقي نقداً»,
+ * a return of its line) or stays on the voucher; «عقود الصيانة» lists the contracts waiting to be billed the same way.
  */
 export function RentalsScreen({
   catalog,
@@ -48,13 +54,16 @@ export function RentalsScreen({
   onBack,
   onReturn,
   onBill,
+  startTab = 'rentals',
 }: {
+  /** The section shown first: «عقود الصيانة» in the till's menu opens the contracts waiting to be billed */
+  startTab?: 'rentals' | 'maintenance';
   catalog: Catalog;
   session: StaffSession;
   shift: OpenShift;
   onBack: () => void;
   /** Opens the sale of the rent (what is left after the deposit); false when it cannot be sold here */
-  onReturn: (rental: Rental) => boolean;
+  onReturn: (rental: Rental, cashBack: boolean) => boolean;
   /** Opens the sale of a maintenance contract's price; false when it cannot be sold here */
   onBill: (contract: MaintenanceContract) => boolean;
 }) {
@@ -63,7 +72,7 @@ export function RentalsScreen({
   const settings = catalog.settings!;
   const base = settings.baseCurrency;
   const token = pos.device.token;
-  const [tab, setTab] = useState<'rentals' | 'maintenance'>('rentals');
+  const [tab, setTab] = useState<'rentals' | 'maintenance'>(startTab);
   const [rentals, setRentals] = useState<Rental[] | null>(null);
   const [contracts, setContracts] = useState<MaintenanceContract[] | null>(null);
   const [units, setUnits] = useState<RentableUnit[]>([]);
@@ -73,12 +82,17 @@ export function RentalsScreen({
   const [unit, setUnit] = useState<RentableUnit | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
   const [due, setDue] = useState(() => inDays(7, pos.now()));
   const [rateUnit, setRateUnit] = useState<RentalRateUnit>('day');
   const [rate, setRate] = useState('');
   const [deposit, setDeposit] = useState('');
   const [saving, setSaving] = useState(false);
   const [sheet, setSheet] = useState<Rental | null>(null);
+  // Rentals whose leftover deposit the cashier keeps on the voucher instead of handing back in cash
+  const [keepOnVoucher, setKeepOnVoucher] = useState<ReadonlySet<string>>(new Set());
+  const canRefund = session.permissions.has('sale.refund');
 
   const load = useCallback(async () => {
     if (!token || !pos.online()) {
@@ -169,6 +183,7 @@ export function RentalsScreen({
     const answer = await call<Rental>('/v1/device/rentals', token, pos.fetch, {
       serial: unit.serial,
       customerName: name.trim(),
+      ...(customerId ? { customerId } : {}),
       phone: phone.trim(),
       expectedReturn: due,
       rateUnit,
@@ -193,13 +208,14 @@ export function RentalsScreen({
     setFind('');
     setName('');
     setPhone('');
+    setCustomerId(null);
     setRate('');
     setDeposit('');
     void load();
   }
 
   function giveBack(r: Rental) {
-    if (!onReturn(r))
+    if (!onReturn(r, canRefund && !keepOnVoucher.has(r.id)))
       setError('لا يوجد صنف خدمة اسمه «إيجار» لبيع الأجرة به. أضفه من الأصناف ثم أعد المحاولة.');
   }
 
@@ -212,7 +228,7 @@ export function RentalsScreen({
       <FlowHeader
         onBack={onBack}
         icon={<SerialIcon size={24} />}
-        title="التأجير"
+        title={startTab === 'maintenance' ? 'عقود الصيانة' : 'التأجير'}
         description="أجهزة تُسلَّم برقمها التسلسلي بعربون، وتُباع الأجرة عند الإرجاع. وعقود الصيانة التي تنتظر التحصيل."
       />
       <SegmentedControl
@@ -281,11 +297,30 @@ export function RentalsScreen({
                 </ul>
               </>
             )}
-            <TextField
-              label="اسم المستأجر"
-              value={name}
-              onChange={(e) => setName(e.target.value.slice(0, 80))}
-            />
+            {picking ? (
+              <CustomerPicker
+                catalog={catalog}
+                createdBy={session.userId}
+                onPicked={(c) => {
+                  setName(c.name);
+                  setCustomerId(c.id);
+                  const known = catalog.customers.find((x) => x.id === c.id)?.phone;
+                  if (known) setPhone(known);
+                  setPicking(false);
+                }}
+                onCancel={() => setPicking(false)}
+              />
+            ) : (
+              <div className="flex items-center justify-between gap-3 rounded-control bg-surface-muted px-3 py-2">
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm text-ink-muted">المستأجر</span>
+                  <span className="truncate font-semibold text-ink">{name || 'لم يُختر زبون'}</span>
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => setPicking(true)}>
+                  {name ? 'غيّر' : 'اختر الزبون'}
+                </Button>
+              </div>
+            )}
             <TextField
               label="جوال المستأجر"
               dir="ltr"
@@ -294,14 +329,11 @@ export function RentalsScreen({
               onChange={(e) => setPhone(e.target.value.slice(0, 20))}
               inputClassName="num"
             />
-            <TextField
+            <DateField
               label="الإرجاع المتوقع"
-              type="date"
-              dir="ltr"
               value={due}
               hint={due ? dayText(due, digits) : undefined}
-              onChange={(e) => setDue(e.target.value)}
-              inputClassName="num"
+              onChange={setDue}
             />
             <div className="grid grid-cols-2 gap-3">
               <Select
@@ -404,6 +436,21 @@ export function RentalsScreen({
                     <p className="text-sm text-ink-muted">
                       عربون <Money minor={r.depositMinor} currency={r.currency} />
                     </p>
+                  ) : null}
+                  {depositLeft(r) > 0 && canRefund ? (
+                    <Switch
+                      label="ردّ الباقي نقداً"
+                      description={`يُرَدّ ${formatMoney(depositLeft(r), r.currency)} من العربون نقداً من الدرج؛ وإن أُطفئ بقي على القسيمة.`}
+                      checked={!keepOnVoucher.has(r.id)}
+                      onCheckedChange={(on) =>
+                        setKeepOnVoucher((prev) => {
+                          const next = new Set(prev);
+                          if (on) next.delete(r.id);
+                          else next.add(r.id);
+                          return next;
+                        })
+                      }
+                    />
                   ) : null}
                   <div className="flex gap-2">
                     <Button size="sm" variant="secondary" icon={<PrintIcon />} onClick={() => print(r)}>

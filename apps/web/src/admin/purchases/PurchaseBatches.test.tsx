@@ -100,3 +100,40 @@ describe('a receipt with batches', () => {
     expect(screen.queryByText(/هذا التاريخ مضى/)).toBeNull();
   });
 });
+
+describe('serial numbers on a receipt', () => {
+  function serialMock(tracksSerial: boolean) {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
+      'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+      [`GET ${productsPath({ q: 'جهاز' })}`]: () => ({
+        status: 200,
+        body: { items: [{ id: 'p-9', nameAr: 'جهاز ضغط', type: 'stock' }], nextCursor: null },
+      }),
+      'GET /v1/products/p-9': () => ({
+        status: 200,
+        body: {
+          id: 'p-9',
+          nameAr: 'جهاز ضغط',
+          tracksSerial,
+          variants: [{ id: 'v-9', label: null, archivedAt: null, barcodes: [] }],
+        },
+      }),
+    });
+    return renderApp('/purchases');
+  }
+
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])('shows the serial field only for a product that tracks them (%s)', async (tracks, count) => {
+    const { user } = serialMock(tracks);
+    await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'جهاز');
+    await user.click(await screen.findByRole('button', { name: 'جهاز ضغط' }));
+    await screen.findByLabelText('كمية جهاز ضغط');
+    expect(screen.queryAllByLabelText(/أرقام جهاز ضغط/)).toHaveLength(count);
+  });
+});

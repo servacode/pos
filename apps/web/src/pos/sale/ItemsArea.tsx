@@ -25,6 +25,7 @@ import {
 import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
 import { Kbd } from './Kbd';
 import { gridEntries, lowestPrice, piecesText, type GridEntry } from './models';
+import { stockInPacks } from './packStock';
 
 export interface PriceCheck {
   /** The product's name */
@@ -415,7 +416,7 @@ export function PriceCheckCard({ check }: { check: PriceCheck }) {
               <Money minor={piece.price.priceMinor} currency={piece.price.currency} className="font-bold" />
               <span
                 className={cn(
-                  'num w-28 shrink-0 text-end text-sm',
+                  'num max-w-[14rem] min-w-28 shrink-0 text-end text-sm',
                   left === null
                     ? 'text-ink-subtle'
                     : left <= 0
@@ -427,7 +428,11 @@ export function PriceCheckCard({ check }: { check: PriceCheck }) {
                   ? 'المتوفر غير معروف'
                   : left <= 0
                     ? 'نفد'
-                    : `المتوفر ${formatQuantity(left, digits)}`}
+                    : `المتوفر ${
+                        piece.variantId === check.focus && check.pack
+                          ? stockInPacks(left, check.pack, digits, (q) => formatQuantity(q, digits))
+                          : formatQuantity(left, digits)
+                      }`}
               </span>
             </li>
           );

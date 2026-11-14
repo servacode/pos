@@ -60,6 +60,10 @@ describe('«الشيكات»', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
     const row = within(table).getByText('CHQ-7781').closest('tr')!;
     await user.click(within(row as HTMLElement).getByRole('button', { name: 'حُصّل' }));
+    // One entry in the books: it waits for a confirmation
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/cheques/actions')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'نعم، حُصّل' }));
     expect(await within(table).findByText('CHQ-9002')).toBeInTheDocument();
     expect(within(table).queryByText('CHQ-7781')).not.toBeInTheDocument();
     expect(requestsTo('POST', '/v1/cheques/actions').at(-1)?.body).toMatchObject({
@@ -123,5 +127,50 @@ describe('cheques by due date', () => {
     const outRow = within(table).getByText('OUT-1').closest('tr') as HTMLElement;
     expect(within(outRow).getByText('مورد المواد')).toBeInTheDocument();
     expect(within(outRow).queryByRole('button', { name: 'حُصّل' })).not.toBeInTheDocument();
+  });
+});
+
+describe('cheque reminders', () => {
+  it('reads a due day typed into the reference, and counts a supplier cheque only until its day', () => {
+    const day = '2026-11-14';
+    const out = { direction: 'out', sourceType: 'supplier_payment' } as const;
+    const items = [
+      cheque({ reference: 'CHQ-7781 2026-11-17', dueDate: null }),
+      cheque({ reference: 'CHQ-1', dueDate: null }),
+      cheque({ ...out, dueDate: '2026-11-20' }),
+      cheque({ ...out, dueDate: '2026-11-12' }),
+      cheque({ ...out, dueDate: '2026-12-30' }),
+    ];
+    expect(dueSoon(items, day).map((c) => c.reference)).toEqual(['CHQ-7781 2026-11-17']);
+    expect(dueSoon(items, day, 'out').map((c) => c.dueDate)).toEqual(['2026-11-20']);
+  });
+
+  it('warns about a supplier cheque falling due, and asks before marking one bounced', async () => {
+    const items = [
+      cheque({ sourceId: 'a', reference: 'NEAR-1', dueDate: addDays(todayText(), 2) }),
+      cheque({
+        sourceId: 'c',
+        sourceType: 'supplier_payment',
+        direction: 'out',
+        reference: 'OUT-1',
+        customerName: null,
+        supplierName: 'مورد المواد',
+        dueDate: addDays(todayText(), 4),
+      }),
+    ];
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/cheques?status=pending': () => ({ status: 200, body: { items, baseCurrency: 'SYP' } }),
+      'POST /v1/cheques/actions': () => ({ status: 200, body: items[0] }),
+    });
+    const { user } = renderApp('/cheques');
+    expect(await screen.findByText(/شيك صادر للمورد يستحق/)).toBeInTheDocument();
+    const table = await screen.findByRole('table', { name: 'الشيكات' });
+    const row = within(table).getByText('NEAR-1').closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'مرتجع' }));
+    const sure = await screen.findByRole('dialog');
+    await user.click(within(sure).getByRole('button', { name: 'تراجع' }));
+    expect(requestsTo('POST', '/v1/cheques/actions')).toHaveLength(0);
   });
 });

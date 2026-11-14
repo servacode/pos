@@ -15,6 +15,16 @@ const POLICY_LABELS: Record<MedicineReturnPolicy, { label: string; description: 
   allowed: { label: 'مسموح', description: 'يقبل الأدوية الراجعة كباقي الأصناف.' },
 };
 
+// The same three policies, worded for a medical-supplies store (no medicines, no prescriptions)
+const SUPPLY_POLICY_LABELS: Record<MedicineReturnPolicy, { label: string; description: string }> = {
+  none: { label: 'لا مرتجع للمستهلكات الطبية', description: 'لا يقبل الكاشير أي صنف طبي راجعاً.' },
+  sealed: {
+    label: 'المغلقة فقط بتأكيد',
+    description: 'يقبل العبوة المغلقة السليمة بعد أن يؤكد الكاشير أنها لم تُفتح.',
+  },
+  allowed: { label: 'مسموح', description: 'يقبل الأصناف الطبية الراجعة كباقي الأصناف.' },
+};
+
 /**
  * «الصيدلية» (03 › الصيدليات): the prescription (whether the till must have a prescription's number
  * and the doctor's name before it sells a prescription medicine; a controlled drug always needs
@@ -32,6 +42,7 @@ export function PharmacyForm({
   const pharmacy = storeSells(store.sectors, ['pharmacy']);
   const medicinal = storeSells(store.sectors, MEDICINAL_SECTORS);
   const current = store.pharmacy;
+  const labels = pharmacy ? POLICY_LABELS : SUPPLY_POLICY_LABELS;
   const [required, setRequired] = useState(current?.prescription === 'required');
   const [returns, setReturns] = useState<MedicineReturnPolicy>(current?.returns ?? 'sealed');
   const [controlled, setControlled] = useState(current?.controlledReturns === true);
@@ -82,7 +93,7 @@ export function PharmacyForm({
       }
     >
       <div className="flex flex-col gap-5">
-        {medicinal ? (
+        {pharmacy ? (
           <Switch
             label="رقم الوصفة واسم الطبيب إلزاميان"
             description="للأصناف «تحتاج وصفة»: لا يتم البيع حتى يُكتبا. إن أُطفئ طُلبا ويجوز تخطيهما. الدواء المراقَب يطلب بياناته دائماً."
@@ -91,14 +102,14 @@ export function PharmacyForm({
           />
         ) : null}
         {medicinal ? (
-          <RadioGroup legend="مرتجع الأدوية">
+          <RadioGroup legend={pharmacy ? 'مرتجع الأدوية' : 'مرتجع المستهلكات الطبية'}>
             {MEDICINE_RETURN_POLICIES.map((policy) => (
               <Radio
                 key={policy}
                 name="medicine-returns"
                 value={policy}
-                label={POLICY_LABELS[policy].label}
-                description={POLICY_LABELS[policy].description}
+                label={labels[policy].label}
+                description={labels[policy].description}
                 checked={returns === policy}
                 onChange={() => setReturns(policy)}
               />

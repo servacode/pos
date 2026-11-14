@@ -158,4 +158,22 @@ describe('planBatches', () => {
     expect(hard.stockBlocks.map((s) => s.variantId)).toEqual(['b']);
     expect(hard.stockWarns).toEqual([]);
   });
+
+  it('a batch blocked for a recall is refused even when the store lets a manager approve', () => {
+    const pharmacy = { prescription: 'optional' as const, blockNoBatch: false };
+    const plan = planBatches({
+      cart: cartOf(line(1, 'a', 5000), line(2, 'b', 5000)),
+      catalog: catalogOf({
+        a: { stockBatches: [batch('R1', '2027-01-01', 10000, true)] },
+        b: { stockBatches: [batch('E1', '2026-01-01', 10000)] },
+      }),
+      today: TODAY,
+      pending: [],
+      pharmacy,
+    });
+    const guard = batchGuard(plan, pharmacy, false);
+    // The recalled one is a hard refusal; the expired one still waits for the manager's code
+    expect(guard.blocks.map((i) => i.lineNo)).toEqual([1]);
+    expect(guard.approvals.map((i) => i.lineNo)).toEqual([2]);
+  });
 });

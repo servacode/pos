@@ -29,6 +29,7 @@ import { call } from './api';
 import { usePos } from '../services';
 import type { OpenShift } from '../shift/shift';
 import type { StaffSession } from '../staff/staff';
+import { DateField } from '../../lib/DateField';
 
 const STATUS_TEXT: Record<AlterationTicket['status'], string> = {
   received: 'قيد التعديل',
@@ -256,14 +257,11 @@ export function AlterationsScreen({
               error={priceMinor === null ? 'مبلغ غير صحيح' : undefined}
               inputClassName="num"
             />
-            <TextField
+            <DateField
               label="موعد التسليم"
-              type="date"
-              dir="ltr"
               value={due}
               hint={due ? dayText(due, digits) : undefined}
-              onChange={(e) => setDue(e.target.value)}
-              inputClassName="num"
+              onChange={setDue}
             />
           </div>
           <TextField

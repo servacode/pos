@@ -16,7 +16,10 @@ export function quotationCart(
   let cart: Cart = {
     ...EMPTY_CART,
     quotation: { id: q.id, number: q.number, version: q.version },
-    ...(customer ? { customer: { id: customer.id, name: customer.name } } : {}),
+    // The customer the offer was made to goes with it, even when this till's list does not hold them
+    ...(q.customerId ? { customer: { id: q.customerId, name: customer?.name ?? q.customerName ?? '' } } : {}),
+    // Their wholesale tier stays on the sale; the lines keep the prices as offered
+    ...(customer?.priceTier === 'wholesale' ? { priceTier: 'wholesale' as const } : {}),
     invoiceDiscount: q.invoiceDiscount ?? null,
   };
   const missing: string[] = [];

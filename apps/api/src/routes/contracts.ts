@@ -8,6 +8,7 @@ import {
   maintenanceInput,
   maintenanceListQuery,
   maintenanceVisitInput,
+  priceListSheetQuery,
   rentableUnitQuery,
   rentalInput,
   rentalListQuery,
@@ -24,6 +25,7 @@ import {
   createContractPrice,
   deleteContractPrice,
   listContractPrices,
+  priceListSheet,
   updateContractPrice,
 } from '../services/contract-prices';
 import { debtAgeing } from '../services/debt-ageing';
@@ -140,6 +142,10 @@ export async function contractRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/contract-prices', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return listContractPrices(app.db, request.auth, parseBody(contractPriceListQuery, request.query));
+  });
+  app.get('/v1/contract-prices/price-list', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return priceListSheet(app.db, request.auth, parseBody(priceListSheetQuery, request.query));
   });
   app.post('/v1/contract-prices', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.auth) throw unauthorized();

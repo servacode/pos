@@ -69,7 +69,7 @@ const CONTRACT: MaintenanceContract = {
 const UNITS: RentableUnit[] = [{ serial: 'WC002', variantId: 'v-1', item: 'كرسي متحرك' }];
 
 /** The server of the rental calls over the staff one; every call is kept */
-function server(prices: ContractPriceForTill[] = []) {
+function server(prices: ContractPriceForTill[] = [], rental: Rental = RENTAL) {
   const staff = staffServer();
   const sent: { url: string; body: unknown }[] = [];
   const fn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -78,7 +78,7 @@ function server(prices: ContractPriceForTill[] = []) {
     const body = init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined;
     sent.push({ url: path, body });
     const ok = (json: unknown, status = 200) => new Response(JSON.stringify(json), { status });
-    if (path === '/v1/device/rentals' && !body) return ok({ items: [RENTAL] });
+    if (path === '/v1/device/rentals' && !body) return ok({ items: [rental] });
     if (path === '/v1/device/rentals') return ok({ ...RENTAL, id: 'r-2', number: 'RNT-000002' }, 201);
     if (path.startsWith('/v1/device/rentals/units')) return ok({ items: UNITS });
     if (path.endsWith('/return')) return ok({ ...RENTAL, status: 'returned' });
@@ -90,13 +90,16 @@ function server(prices: ContractPriceForTill[] = []) {
   return { fetch: fn as unknown as typeof fetch, sent };
 }
 
-async function openRentals(user: ReturnType<typeof renderPos>['user']) {
+async function openRentals(
+  user: ReturnType<typeof renderPos>['user'],
+  { who = ids.samer, name = /سامر/, entry = 'التأجير' }: { who?: string; name?: RegExp; entry?: string } = {},
+) {
   const list = await screen.findByRole('list', { name: 'الموظفون' });
-  await user.click(within(list).getByRole('button', { name: /سامر/ }));
-  await user.keyboard(PINS[ids.samer]!);
+  await user.click(within(list).getByRole('button', { name }));
+  await user.keyboard(PINS[who]!);
   await screen.findByRole('list', { name: 'الأصناف' });
   await user.click(screen.getByRole('button', { name: 'المزيد' }));
-  await user.click(screen.getByRole('menuitem', { name: 'التأجير' }));
+  await user.click(screen.getByRole('menuitem', { name: entry }));
 }
 
 function withServices() {
@@ -120,7 +123,10 @@ describe('«التأجير» on the till', () => {
     await openRentals(user);
     const form = await screen.findByRole('region', { name: 'تأجير جديد' });
     await user.click(await within(form).findByRole('button', { name: /WC002/ }));
-    await user.type(within(form).getByLabelText('اسم المستأجر'), 'مشفى الأمل');
+    await user.click(within(form).getByRole('button', { name: 'اختر الزبون' }));
+    await user.type(await within(form).findByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
+    await user.click(await within(form).findByRole('button', { name: /أبو خالد/ }));
+    await user.clear(within(form).getByLabelText('جوال المستأجر'));
     await user.type(within(form).getByLabelText('جوال المستأجر'), '0944555666');
     await user.type(within(form).getByLabelText('المبلغ'), '300');
     await user.type(within(form).getByLabelText('العربون (اختياري)'), '200');
@@ -131,12 +137,13 @@ describe('«التأجير» on the till', () => {
     expect(gift.doc.payload as unknown as GiftVoucherPayload).toMatchObject({
       amountMinor: 20_000,
       method: 'cash',
-      forName: 'مشفى الأمل',
+      forName: 'أبو خالد',
     });
     const made = sent.find((s) => s.url === '/v1/device/rentals' && s.body)!;
     expect(made.body).toMatchObject({
       serial: 'WC002',
-      customerName: 'مشفى الأمل',
+      customerName: 'أبو خالد',
+      customerId: ids.abuKhaled,
       rateUnit: 'day',
       rateMinor: 30_000,
       depositMinor: 20_000,
@@ -170,6 +177,68 @@ describe('«التأجير» on the till', () => {
     await vi.waitFor(() =>
       expect(sent.at(-1)).toMatchObject({ url: '/v1/device/rentals/r-1/return', body: { version: 3 } }),
     );
+  });
+
+  it('hands the rest of the deposit back in cash: the rent and the deposit line are sold, the deposit line is returned for cash', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { fetch } = server([], { ...RENTAL, depositMinor: 100_000, chargeMinor: 20_000 });
+    const { user, outbox } = renderPos({ local, fetch, sets: withServices() });
+    await openRentals(user, { who: ids.maryam, name: /مريم/ });
+    const card = await screen.findByRole('listitem', { name: 'التأجير RNT-000001' });
+    // 100,000 deposit less 20,000 rent: 80,000 goes back, and the cashier may switch that off
+    expect(within(card).getByRole('switch', { name: 'ردّ الباقي نقداً' })).toBeChecked();
+    await user.click(within(card).getByRole('button', { name: 'استلام الجهاز' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    expect(screen.getByText(/إيجار · RNT-000001/)).toBeInTheDocument();
+    expect(screen.getByText(/ردّ العربون · RNT-000001/)).toBeInTheDocument();
+    await user.keyboard('{F12}');
+    await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(screen.getByRole('button', { name: 'نقد بالليرة' }));
+    await user.keyboard('1000{Enter}');
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    const sale = outbox.find((e) => e.type === 'sale')!;
+    expect((sale.doc.payload as unknown as SalePayload).lines).toHaveLength(2);
+    await vi.waitFor(() => expect(outbox.some((e) => e.type === 'return')).toBe(true));
+    const back = outbox.find((e) => e.type === 'return')!;
+    expect(back.doc.payload).toMatchObject({
+      totals: { totalMinor: 80_000 },
+      refunds: [{ method: 'cash', amountMinor: 80_000 }],
+    });
+    expect(back.doc.deps).toEqual([sale.doc.id]);
+    expect(await screen.findByText(/سلّم الزبون/)).toBeInTheDocument();
+  });
+
+  it('keeps the rest on the voucher when the cashier switches «ردّ الباقي نقداً» off', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { fetch } = server([], { ...RENTAL, depositMinor: 100_000, chargeMinor: 20_000 });
+    const { user, outbox } = renderPos({ local, fetch, sets: withServices() });
+    await openRentals(user, { who: ids.maryam, name: /مريم/ });
+    const card = await screen.findByRole('listitem', { name: 'التأجير RNT-000001' });
+    await user.click(within(card).getByRole('switch', { name: 'ردّ الباقي نقداً' }));
+    await user.click(within(card).getByRole('button', { name: 'استلام الجهاز' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    expect(screen.queryByText(/ردّ العربون/)).not.toBeInTheDocument();
+    await user.keyboard('{F12}');
+    await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(screen.getByRole('button', { name: 'نقد بالليرة' }));
+    await user.keyboard('200{Enter}');
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    expect(outbox.some((e) => e.type === 'return')).toBe(false);
+  });
+
+  it('opens «عقود الصيانة» from the till menu on the contracts waiting to be billed', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { fetch } = server();
+    const { user } = renderPos({ local, fetch, sets: withServices() });
+    await openRentals(user, { who: ids.maryam, name: /مريم/, entry: 'عقود الصيانة' });
+    expect(await screen.findByRole('heading', { name: 'عقود الصيانة' })).toBeInTheDocument();
+    const card = await screen.findByRole('listitem', { name: 'العقد MC-000001' });
+    await user.click(within(card).getByRole('button', { name: 'حصّل سعر العقد' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    expect(screen.getByText(/عقد صيانة · MC-000001/)).toBeInTheDocument();
   });
 
   it('says what is missing when the store sells no «إيجار» service', async () => {

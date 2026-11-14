@@ -66,6 +66,16 @@ export function ItemPicker({
             if (b.packQty > 1000 && b.packPriceMinor !== null && inCurrency)
               packPrices[b.packQty] = b.packPriceMinor;
           }
+          const packWholesale: Record<number, number> = {};
+          for (const b of v.barcodes) {
+            if (
+              b.packQty > 1000 &&
+              b.packWholesaleMinor !== null &&
+              b.packWholesaleMinor !== undefined &&
+              inCurrency
+            )
+              packWholesale[b.packQty] = b.packWholesaleMinor;
+          }
           const line: EditorLine = {
             key: nextKey(),
             productId: detail.id,
@@ -77,6 +87,8 @@ export function ItemPicker({
             packs: packOptionsOf(v.barcodes),
             pieceMinor: inCurrency ? v.price.priceMinor : null,
             packPrices,
+            wholesaleMinor: inCurrency ? v.wholesalePriceMinor : null,
+            packWholesale,
             qty: '1',
             price: '',
             discount: '',

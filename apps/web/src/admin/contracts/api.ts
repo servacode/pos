@@ -5,6 +5,7 @@ import type {
   DebtAgeingReport,
   MaintenanceContract,
   MaintenanceInput,
+  PriceListSheet,
   Rental,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
@@ -62,3 +63,16 @@ export const deleteContractPrice = (id: string) =>
 /** `GET /v1/reports/debt-ageing?asOf=` (customers.view) */
 export const getDebtAgeing = (asOf?: string) =>
   apiFetch<DebtAgeingReport>(`/v1/reports/debt-ageing${asOf ? `?asOf=${asOf}` : ''}`, { auth: true });
+
+/** `GET /v1/contract-prices/price-list` (catalog.manage): every product with the price one customer or type pays today */
+export const getPriceListSheet = (
+  who: { customerId: string } | { kind: CustomerKind; tier: 'retail' | 'wholesale' },
+) => {
+  const params = new URLSearchParams();
+  if ('customerId' in who) params.set('customerId', who.customerId);
+  else {
+    params.set('kind', who.kind);
+    params.set('tier', who.tier);
+  }
+  return apiFetch<PriceListSheet>(`/v1/contract-prices/price-list?${params.toString()}`, { auth: true });
+};

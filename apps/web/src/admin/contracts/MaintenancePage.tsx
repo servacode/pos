@@ -22,6 +22,8 @@ import { dayText } from '../../lib/dates';
 import { ApiError, errorMessage } from '../../lib/api';
 import { SectionHead } from '../purchases/parts';
 import { createContract, listContracts, logVisit, renewContract } from './api';
+import { DateField } from '../../lib/DateField';
+import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
 
 const fieldError = (e: unknown) =>
   e instanceof ApiError && e.fields ? Object.values(e.fields)[0]! : errorMessage(e);
@@ -38,8 +40,8 @@ const isoOf = (ms: number) => new Date(ms).toLocaleDateString('en-CA');
 
 function NewContract({ onDone }: { onDone: () => void }) {
   const me = useMe();
-  const [customerName, setCustomerName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  const [customerError, setCustomerError] = useState<string | undefined>();
   const [serials, setSerials] = useState('');
   const [startDate, setStartDate] = useState(() => isoOf(Date.now()));
   const [endDate, setEndDate] = useState(() => isoOf(Date.now() + 365 * 86_400_000));
@@ -51,6 +53,11 @@ function NewContract({ onDone }: { onDone: () => void }) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setCustomerError(undefined);
+    if (!customer) {
+      setCustomerError('اختر الزبون من القائمة أو أضفه زبوناً جديداً.');
+      return;
+    }
     let priceMinor: number;
     try {
       priceMinor = price.trim() ? toMinor(price, me.settings.baseCurrency) : 0;
@@ -66,16 +73,16 @@ function NewContract({ onDone }: { onDone: () => void }) {
     setSaving(true);
     try {
       await createContract({
-        customerName: customerName.trim(),
-        customerPhone: phone.trim() || null,
+        customerId: customer.id,
+        customerName: customer.name,
+        customerPhone: customer.phone,
         devices,
         startDate,
         endDate,
         visitEveryMonths: Number(every),
         priceMinor,
       });
-      setCustomerName('');
-      setPhone('');
+      setCustomer(null);
       setSerials('');
       setPrice('');
       onDone();
@@ -90,16 +97,7 @@ function NewContract({ onDone }: { onDone: () => void }) {
     <Card>
       <form noValidate onSubmit={(e) => void submit(e)} className="flex flex-col gap-4">
         {error ? <Alert tone="error">{error}</Alert> : null}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <TextField label="الزبون" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-          <TextField
-            label="جوال الزبون (اختياري)"
-            dir="ltr"
-            inputClassName="num"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-        </div>
+        <CustomerPicker value={customer} onChange={setCustomer} error={customerError} />
         <label className="flex flex-col gap-1.5 text-sm font-semibold text-ink">
           الأجهزة: رقم تسلسلي في كل سطر
           <textarea
@@ -111,20 +109,8 @@ function NewContract({ onDone }: { onDone: () => void }) {
           />
         </label>
         <div className="grid gap-4 sm:grid-cols-4">
-          <TextField
-            label="من"
-            type="date"
-            dir="ltr"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
-          <TextField
-            label="إلى"
-            type="date"
-            dir="ltr"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
+          <DateField label="من" value={startDate} onChange={setStartDate} />
+          <DateField label="إلى" value={endDate} onChange={setEndDate} />
           <TextField
             label="زيارة كل (أشهر)"
             dir="ltr"
@@ -143,12 +129,7 @@ function NewContract({ onDone }: { onDone: () => void }) {
           />
         </div>
         <div>
-          <Button
-            type="submit"
-            icon={<AddIcon />}
-            loading={saving}
-            disabled={!customerName.trim() || !serials.trim()}
-          >
+          <Button type="submit" icon={<AddIcon />} loading={saving} disabled={!serials.trim()}>
             أضف العقد
           </Button>
         </div>
@@ -216,13 +197,7 @@ function VisitDialog({
       >
         {error ? <Alert tone="error">{error}</Alert> : null}
         <TextField label="الفني" value={technician} onChange={(e) => setTechnician(e.target.value)} />
-        <TextField
-          label="التاريخ (اتركه فارغاً لليوم)"
-          type="date"
-          dir="ltr"
-          value={on}
-          onChange={(e) => setOn(e.target.value)}
-        />
+        <DateField label="التاريخ (اتركه فارغاً لليوم)" value={on} onChange={setOn} />
         <TextField label="ملاحظات (اختياري)" value={note} onChange={(e) => setNote(e.target.value)} />
       </form>
     </Dialog>

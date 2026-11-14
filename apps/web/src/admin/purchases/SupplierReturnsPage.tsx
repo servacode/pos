@@ -388,7 +388,7 @@ export function SupplierReturnsPage() {
                         />
                       </div>
 
-                      {fields[`lines.${i}.serials`] || l.serials ? (
+                      {l.tracksSerial || fields[`lines.${i}.serials`] || l.serials ? (
                         <div className="col-span-3 md:col-span-4">
                           <label className="flex flex-col gap-1.5">
                             <span className="text-xs font-semibold text-ink-subtle">

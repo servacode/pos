@@ -16,6 +16,9 @@ export interface EditorLine {
   pieceMinor: number | null;
   /** The price of each named pack, when one is set */
   packPrices?: Record<number, number>;
+  /** The wholesale price of one piece, and of each named pack when one is set */
+  wholesaleMinor?: number | null;
+  packWholesale?: Record<number, number>;
   qty: string;
   price: string;
   /** Percent, as typed («10» or «7.5») */
@@ -68,6 +71,40 @@ export function packPriceOf(
   const own = line.packPrices?.[packQty];
   if (own !== undefined) return own;
   return line.pieceMinor === null ? null : Math.round((line.pieceMinor * packQty) / 1000);
+}
+
+/** What a chosen customer is quoted: the wholesale tier and the contract prices in force (per piece) */
+export interface CustomerPricing {
+  tier: 'retail' | 'wholesale';
+  contracts: ReadonlyMap<string, number>;
+}
+
+/**
+ * The price of one pack for this customer: the contract price (per piece, times the pack's size), else the
+ * wholesale price when the customer buys wholesale and the item has one, else the shelf price.
+ */
+export function customerPackPrice(
+  line: Pick<EditorLine, 'variantId' | 'pieceMinor' | 'packPrices' | 'wholesaleMinor' | 'packWholesale'>,
+  packQty: number,
+  pricing: CustomerPricing | null,
+): number | null {
+  if (pricing) {
+    const contract = line.variantId ? pricing.contracts.get(line.variantId) : undefined;
+    if (contract !== undefined) return Math.round((contract * packQty) / 1000);
+    if (pricing.tier === 'wholesale') {
+      const own = line.packWholesale?.[packQty];
+      if (own !== undefined) return own;
+      if (line.wholesaleMinor !== null && line.wholesaleMinor !== undefined)
+        return Math.round((line.wholesaleMinor * packQty) / 1000);
+    }
+  }
+  return packPriceOf(line, packQty);
+}
+
+/** The line priced for the customer; a line whose shelf price is unknown and has no contract is left as typed */
+export function priceForCustomer(l: EditorLine, pricing: CustomerPricing | null): EditorLine {
+  const price = customerPackPrice(l, l.packQty, pricing);
+  return price === null ? l : { ...l, price: moneyText(price) };
 }
 
 /** What the server takes for a line, or the name of the field that is wrong */

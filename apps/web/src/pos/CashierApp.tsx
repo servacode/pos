@@ -1,6 +1,9 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HallOrder } from '@serva/core';
 import type { SalePayload } from '@serva/core/contracts/documents';
+import { formatMoney } from '@serva/core/money';
+import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
+import { businessDateOf } from '@serva/core/sale';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
 import {
   Button,
@@ -38,7 +41,13 @@ import { sendToPrinter } from './print/usb';
 import { SaleDone } from './receipt/SaleDone';
 import { A4Print, type A4Kind } from './receipt/A4Print';
 import { deliverTicket } from './alterations/api';
-import { markContractBilled, returnRental } from './rentals/api';
+import {
+  DEPOSIT_BACK_NAME,
+  depositBackReturn,
+  depositLeft,
+  markContractBilled,
+  returnRental,
+} from './rentals/api';
 import type { Quotation } from '@serva/core/contracts/quotations';
 import { convertQuotation } from './quotations/api';
 import { quotationCart } from './quotations/quotationCart';
@@ -57,6 +66,7 @@ import { staffRoster, type StaffSession } from './staff/staff';
 import { SubscriptionChip, useTillSubscription } from '../layout/subscription-banner';
 import { StatusBar, type OutboxStatus } from './StatusBar';
 import { useIdle } from './useIdle';
+import { DEFAULT_IDLE_MINUTES } from './staff/persist';
 import { cartAlreadySold } from './soldCart';
 import { ALTERATION_SECTORS, GIFT_SECTORS, RENTAL_SECTORS, storeSells } from '../lib/sectors';
 import { lazyChunk, preloadTill, TillBoundary } from './chunks';
@@ -89,8 +99,7 @@ const CashMovementScreen = lazyChunk(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.CashMovementScreen })),
 );
 
-/** Minutes without a touch or a key before the device signs the cashier out (09 › tenant_settings). */
-export const DEFAULT_IDLE_MINUTES = 5;
+export { DEFAULT_IDLE_MINUTES };
 
 /** Whether the document took cash into the drawer: then the drawer opens after printing */
 function paidInCash(data: ReceiptData): boolean {
@@ -143,6 +152,7 @@ type View =
   | 'gift'
   | 'alterations'
   | 'rentals'
+  | 'maintenance'
   | 'quotations'
   | 'printer';
 
@@ -200,6 +210,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const staffRef = useRef<{ id: string; fullName: string }[]>([]);
   const [lastSale, setLastSale] = useState<LastSale | null>(null);
   const [done, setDone] = useState<ReceiptData | null>(null);
+  // What to hand the customer when a rental's deposit comes back in cash
+  const [cashBack, setCashBack] = useState<string | null>(null);
   const [paper, setPaper] = useState<PaperWidth>(80);
   const [printJob, setPrintJob] = useState<{
     data: ReceiptData;
@@ -271,9 +283,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     (update: (cart: Cart) => Cart) =>
       setCartState((c) => {
         const next = update(c);
-        return c.lines.length > 0 && next.lines.length === 0 && next.priceTier === 'wholesale'
-          ? { ...next, priceTier: 'retail' }
-          : next;
+        if (!(c.lines.length > 0 && next.lines.length === 0)) return next;
+        const { contractPriced: _gone, ...rest } = next;
+        return next.priceTier === 'wholesale' ? { ...rest, priceTier: 'retail' } : rest;
       }),
     [],
   );
@@ -437,6 +449,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   }
 
   function saved(entry: OutboxEntry) {
+    setCashBack(null);
     const last: LastSale = {
       doc: {
         id: entry.doc.id,
@@ -455,6 +468,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     // A sale that returns a rental, or bills a maintenance contract: the server closes or marks it now
     const returning = cartRef.current.rental;
     if (returning && pos.device.token) void returnRental(returning, pos.device.token, pos.fetch);
+    // The rest of the deposit goes back in cash: the deposit line of this sale is returned now
+    if (returning?.cashBackMinor && shift) void handBackDeposit(entry, shift.id);
     const billing = cartRef.current.maintenance;
     if (billing && pos.device.token) void markContractBilled(billing, pos.device.token, pos.fetch);
     // A sale made from a quotation: the quotation turns «حُوّل إلى فاتورة»
@@ -478,6 +493,30 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       setDone(withBalance);
       setPrintJob({ data: withBalance, copy: false });
     });
+  }
+
+  /** Saves the cash return of the rental sale's deposit line, and tells the cashier what to hand over */
+  async function handBackDeposit(entry: OutboxEntry, shiftId: string) {
+    const ret = depositBackReturn({
+      sale: { id: entry.doc.id, number: entry.doc.number ?? entry.doc.id, payload: entry.doc.payload },
+      shiftId,
+      cashierId: session.userId,
+    });
+    try {
+      if (!ret) throw new Error('no deposit line');
+      const saved = await pos.save({
+        type: 'return',
+        payload: ret as unknown as Record<string, unknown>,
+        deps: [entry.doc.id],
+        businessDate: businessDateOf(pos.now(), settings!.timezone, settings!.businessDayCutoff),
+        engineVersion: PRICING_ENGINE_VERSION,
+      });
+      setCashBack(
+        `سلّم الزبون ${formatMoney(ret.totals.totalMinor, ret.currency)} نقداً من الدرج (مرتجع ${saved.doc.number}).`,
+      );
+    } catch {
+      setCashBack('تعذّر تسجيل ردّ باقي العربون. لا تسلّم نقداً؛ سجّله من «مرتجع» على فاتورة التأجير.');
+    }
   }
 
   /** Puts the cart aside under a name (the customer's, when attached); several can wait together. */
@@ -816,6 +855,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               التأجير
             </MenuItem>
           ) : null}
+          {rents && shift && session.permissions.has('sale.create') ? (
+            <MenuItem icon={<ListIcon />} onSelect={() => setView('maintenance')}>
+              عقود الصيانة
+            </MenuItem>
+          ) : null}
           {shift && session.permissions.has('sale.create') ? (
             <MenuItem icon={<ListIcon />} onSelect={() => setView('quotations')}>
               عروض الأسعار
@@ -931,29 +975,47 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               />
             ) : view === 'quotations' ? (
               <QuotationsScreen onBack={() => setView('sale')} onOpen={openQuotation} />
-            ) : view === 'rentals' ? (
+            ) : view === 'rentals' || view === 'maintenance' ? (
               <RentalsScreen
+                startTab={view === 'maintenance' ? 'maintenance' : 'rentals'}
                 catalog={catalog}
                 session={session}
                 shift={shift}
                 onBack={() => setView('sale')}
-                onReturn={(rental) => {
-                  // The rent is sold as the «إيجار» service; the deposit voucher pays part of it
+                onReturn={(rental, cashBack) => {
+                  // The rent is sold as the «إيجار» service; the deposit voucher pays part of it. With
+                  // «ردّ الباقي نقداً» a second line carries the rest of the deposit, so the voucher
+                  // pays it all and that line is returned for cash once the sale is saved
                   const service = catalog.items.find((i) => i.name.includes('إيجار'));
                   if (!service) return false;
                   const line = addItem(EMPTY_CART, service);
+                  const left = cashBack ? depositLeft(rental) : 0;
+                  const priced = line.lines.map((l) => ({
+                    ...l,
+                    name: `${l.name} · ${rental.number}`,
+                    priceMinor: rental.chargeMinor,
+                    retailPriceMinor: rental.chargeMinor,
+                    wholesalePriceMinor: null,
+                    priceCurrency: rental.currency,
+                  }));
+                  const back = priced.map((l) => ({
+                    ...l,
+                    lineNo: line.nextLineNo,
+                    name: `${DEPOSIT_BACK_NAME} · ${rental.number}`,
+                    priceMinor: left,
+                    retailPriceMinor: left,
+                  }));
                   setCart(() => ({
                     ...line,
-                    lines: line.lines.map((l) => ({
-                      ...l,
-                      name: `${l.name} · ${rental.number}`,
-                      priceMinor: rental.chargeMinor,
-                      retailPriceMinor: rental.chargeMinor,
-                      wholesalePriceMinor: null,
-                      priceCurrency: rental.currency,
-                    })),
+                    lines: left > 0 ? [...priced, ...back] : priced,
+                    nextLineNo: left > 0 ? line.nextLineNo + 1 : line.nextLineNo,
                     ...(rental.depositVoucher ? { voucher: rental.depositVoucher } : {}),
-                    rental: { id: rental.id, number: rental.number, version: rental.version },
+                    rental: {
+                      id: rental.id,
+                      number: rental.number,
+                      version: rental.version,
+                      ...(left > 0 ? { cashBackMinor: left } : {}),
+                    },
                   }));
                   setDone(null);
                   setView('sale');
@@ -1083,23 +1145,33 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         onSaved={saved}
         done={
           done ? (
-            <SaleDone
-              data={done}
-              online={online}
-              width={paper}
-              onWidth={(w) => {
-                setPaper(w);
-                void pos.local.set(PAPER_KEY, w);
-              }}
-              onPrint={() => setPrintJob({ data: done, copy: false })}
-              onPrintA4={(kind) => setA4Job({ data: done, kind })}
-              onPrintWarranty={
-                certificateOf(done, null)
-                  ? () => setPrintJob({ data: done, copy: false, certificate: true })
-                  : undefined
-              }
-              onNewSale={() => setDone(null)}
-            />
+            <>
+              {cashBack ? (
+                <p
+                  role="status"
+                  className="rounded-card border border-line bg-surface-muted p-3 font-semibold text-ink"
+                >
+                  {cashBack}
+                </p>
+              ) : null}
+              <SaleDone
+                data={done}
+                online={online}
+                width={paper}
+                onWidth={(w) => {
+                  setPaper(w);
+                  void pos.local.set(PAPER_KEY, w);
+                }}
+                onPrint={() => setPrintJob({ data: done, copy: false })}
+                onPrintA4={(kind) => setA4Job({ data: done, kind })}
+                onPrintWarranty={
+                  certificateOf(done, null)
+                    ? () => setPrintJob({ data: done, copy: false, certificate: true })
+                    : undefined
+                }
+                onNewSale={() => setDone(null)}
+              />
+            </>
           ) : null
         }
         onNextSale={() => setDone(null)}

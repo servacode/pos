@@ -7,6 +7,7 @@ import {
   Card,
   CardHeader,
   DataTable,
+  Dialog,
   EmptyState,
   formatQuantity,
   PageHeader,
@@ -33,6 +34,7 @@ export function RecallPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   async function search(next?: string) {
     const q = (next ?? batchNo).trim();
@@ -214,7 +216,10 @@ export function RecallPage() {
               <section aria-label="الدفعة" className="flex flex-col gap-3">
                 <SectionHead title={`الدفعة ${found.batchNo}`} description="المنتج وأصل الدفعة وما بقي منها.">
                   <span className="flex flex-wrap items-center gap-2 print:hidden">
-                    <Button variant={blocked ? 'secondary' : 'primary'} onClick={() => void block(!blocked)}>
+                    <Button
+                      variant={blocked ? 'secondary' : 'primary'}
+                      onClick={() => (blocked ? void block(false) : setConfirming(true))}
+                    >
                       {blocked ? 'ارفع الإيقاف' : 'أوقف بيعها في كل الفروع'}
                     </Button>
                     <Button variant="secondary" onClick={() => window.print()}>
@@ -255,6 +260,30 @@ export function RecallPage() {
           )
         ) : null}
       </div>
+      <Dialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`أوقف بيع الدفعة ${found?.batchNo ?? ''}`}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setConfirming(false)}>
+              تراجع
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirming(false);
+                void block(true);
+              }}
+            >
+              أوقف البيع
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-muted">
+          لن يبيع أي صندوق في أي فرع هذه الدفعة حتى ترفع الإيقاف. هل أنت متأكد؟
+        </p>
+      </Dialog>
     </AppShell>
   );
 }

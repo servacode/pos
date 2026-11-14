@@ -42,7 +42,7 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { DateField } from '../../lib/DateField';
-import { EXPIRY_SECTORS, SERIAL_SECTORS, storeSells } from '../../lib/sectors';
+import { EXPIRY_SECTORS, storeSells } from '../../lib/sectors';
 import {
   createPurchase,
   createSupplier,
@@ -586,15 +586,8 @@ function PurchaseForm({
   const total = parsed.reduce((sum, p) => sum + (p.cost ?? 0), 0);
 
   const withDates = storeSells(me.tenant.sectors, EXPIRY_SECTORS);
-  const withSerials = storeSells(me.tenant.sectors, SERIAL_SECTORS);
   const supplier = suppliers.find((x) => x.id === supplierId);
   const pieces = parsed.reduce((sum, p) => sum + (p.qty ?? 0), 0);
-  const hiddenFields =
-    !withDates && !withSerials
-      ? 'الدفعة والانتهاء والأرقام التسلسلية'
-      : !withDates
-        ? 'الدفعة وتاريخ الانتهاء'
-        : 'الأرقام التسلسلية لكل سطر';
 
   return (
     <form
@@ -703,9 +696,9 @@ function PurchaseForm({
                 ])
               }
             />
-            {lines.length > 0 && !(withDates && withSerials) ? (
+            {lines.length > 0 && !withDates ? (
               <Switch
-                label={hiddenFields}
+                label="الدفعة وتاريخ الانتهاء"
                 checked={allFields}
                 onCheckedChange={setAllFields}
                 className="self-end"
@@ -734,8 +727,9 @@ function PurchaseForm({
                     allFields ||
                     l.requiresExpiry === true ||
                     Boolean(l.batch || l.expiry || s.fields[`lines.${i}.expiryDate`]);
+                  // Serial numbers only for a product that tracks them (one number per piece)
                   const showSerials =
-                    withSerials || allFields || Boolean(l.serials || s.fields[`lines.${i}.serials`]);
+                    l.tracksSerial === true || Boolean(l.serials || s.fields[`lines.${i}.serials`]);
                   return (
                     <li key={`${l.variantId}-${i}`} className="flex flex-col gap-3 px-4 py-3">
                       <div

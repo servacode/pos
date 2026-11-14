@@ -24,7 +24,10 @@ export function BatchBanner(props: {
     ...props.blocks.map((i) => ({
       tone: 'danger' as const,
       key: `b${i.lineNo}`,
-      text: `لا دفعة صالحة تكفي «${i.name}»: ينقص ${fmt(i.uncovered)}${why(i)}. لا يُباع بلا دفعة صالحة.`,
+      text:
+        i.blockedQty > 0
+          ? `«${i.name}»: فيه دفعة موقوفة بسبب سحب من السوق (استدعاء)، وينقص ${fmt(i.uncovered)} من الصالح. لا يُباع ولا يُتجاوز برمز المدير.`
+          : `لا دفعة صالحة تكفي «${i.name}»: ينقص ${fmt(i.uncovered)}${why(i)}. لا يُباع بلا دفعة صالحة.`,
     })),
     ...props.approvals.map((i) => ({
       tone: 'warning' as const,

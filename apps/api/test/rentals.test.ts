@@ -86,6 +86,21 @@ const serialStatus = async (serial: string) =>
   (await ownerDb()<{ status: string }[]>`select status from serials where serial = ${serial}`)[0]!.status;
 
 describe('a rental', () => {
+  it('is tied to the customer record that has its phone', async () => {
+    const { store } = await storeWithWheelchairs();
+    const day = await today(store);
+    const customer = (await post(store, '/v1/customers', { name: 'مشفى الأمل', phone: '0944555666' })).json<{
+      id: string;
+    }>();
+    const made = await postDevice(store, '/v1/device/rentals', {
+      ...RENT,
+      serial: 'WC001',
+      expectedReturn: plusDays(day, 7),
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    expect(made.json<Rental>().customerId).toBe(customer.id);
+  });
+
   it('lists the rentable pieces in the store, and only those', async () => {
     const { store } = await storeWithWheelchairs();
     const res = await app.inject({ method: 'GET', url: '/v1/device/rentals/units', headers: dev(store) });
@@ -268,20 +283,76 @@ const CONTRACT = {
   priceMinor: 400_000,
 };
 
+/** A store with its pieces marked sold, and a customer record for the contracts */
+async function storeWithSoldPieces() {
+  const made = await storeWithWheelchairs();
+  await ownerDb()`update serials set status = 'sold' where serial in ('WC001', 'WC002', 'BP001')`;
+  const customer = (await post(made.store, '/v1/customers', { name: 'عيادة النور' })).json<{ id: string }>();
+  return { ...made, customerId: customer.id };
+}
+
 describe('a maintenance contract', () => {
-  it('names the devices it knows, schedules the visits and logs them', async () => {
-    const { store } = await storeWithWheelchairs();
+  it('refuses a serial the store never had or still holds, and a contract with no customer record', async () => {
+    const { store, customerId } = await storeWithWheelchairs().then(async (m) => ({
+      ...m,
+      customerId: (await post(m.store, '/v1/customers', { name: 'عيادة النور' })).json<{ id: string }>().id,
+    }));
+    const unknown = await post(store, '/v1/maintenance', {
+      ...CONTRACT,
+      customerId,
+      devices: [{ serial: 'NOPE-1' }],
+    });
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.body).toContain('NOPE-1 غير موجود في المحل');
+    // WC001 was bought but never sold: it is still on the shelf
+    const held = await post(store, '/v1/maintenance', {
+      ...CONTRACT,
+      customerId,
+      devices: [{ serial: 'wc001' }],
+    });
+    expect(held.statusCode).toBe(400);
+    expect(held.body).toContain('لم يُبَع');
+    await ownerDb()`update serials set status = 'sold' where serial = 'WC001'`;
+    const noCustomer = await post(store, '/v1/maintenance', { ...CONTRACT, devices: [{ serial: 'WC001' }] });
+    expect(noCustomer.statusCode).toBe(400);
+    expect(noCustomer.body).toContain('اختر الزبون');
+    const [count] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from maintenance_contracts`;
+    expect(count!.n).toBe(0);
+  });
+
+  it('takes the customer record by its phone when only a name and phone came, and its name from the record', async () => {
+    const { store } = await storeWithSoldPieces();
+    await post(store, '/v1/customers', { name: 'مشفى الأمل', phone: '0944555666' });
     const made = await post(store, '/v1/maintenance', {
       ...CONTRACT,
-      devices: [{ serial: 'bp001' }, { serial: 'OX-9', item: 'مكثف أكسجين' }],
+      customerName: 'اسم آخر',
+      customerPhone: '0944555666',
+      devices: [{ serial: 'WC002' }],
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    expect(made.json<MaintenanceContract>()).toMatchObject({
+      customerName: 'مشفى الأمل',
+      customerPhone: '+963944555666',
+    });
+    expect(made.json<MaintenanceContract>().customerId).not.toBeNull();
+  });
+
+  it('names the devices it knows, schedules the visits and logs them', async () => {
+    const { store, customerId } = await storeWithSoldPieces();
+    const made = await post(store, '/v1/maintenance', {
+      ...CONTRACT,
+      customerId,
+      devices: [{ serial: 'bp001' }, { serial: 'wc002' }],
     });
     expect(made.statusCode, made.body).toBe(201);
     const c = made.json<MaintenanceContract>();
     expect(c).toMatchObject({
       number: 'MC-000001',
+      customerId,
+      customerName: 'عيادة النور',
       devices: [
         { serial: 'BP001', item: 'جهاز ضغط' },
-        { serial: 'OX-9', item: 'مكثف أكسجين' },
+        { serial: 'WC002', item: 'كرسي متحرك' },
       ],
       nextVisit: '2026-04-15',
       visits: [],
@@ -306,14 +377,15 @@ describe('a maintenance contract', () => {
   });
 
   it('lists the upcoming and overdue visits with the soonest first', async () => {
-    const { store } = await storeWithWheelchairs();
+    const { store, customerId } = await storeWithSoldPieces();
     const day = await today(store);
     // Started three months ago, every three months: the first visit is due today
     const start = plusDays(day, -91);
     const soon = await post(store, '/v1/maintenance', {
       ...CONTRACT,
+      customerId,
       customerName: 'عيادة أ',
-      devices: [{ serial: 'A1' }],
+      devices: [{ serial: 'WC001' }],
       startDate: start,
       endDate: plusDays(day, 300),
       visitEveryMonths: 3,
@@ -321,8 +393,9 @@ describe('a maintenance contract', () => {
     expect(soon.statusCode, soon.body).toBe(201);
     await post(store, '/v1/maintenance', {
       ...CONTRACT,
+      customerId,
       customerName: 'عيادة ب',
-      devices: [{ serial: 'B1' }],
+      devices: [{ serial: 'WC002' }],
       startDate: day,
       endDate: plusDays(day, 400),
     });
@@ -331,17 +404,17 @@ describe('a maintenance contract', () => {
       url: '/v1/maintenance?view=upcoming',
       headers: as(store),
     });
-    expect(upcoming.json<{ items: MaintenanceContract[] }>().items.map((c) => c.customerName)).toEqual([
-      'عيادة أ',
+    expect(upcoming.json<{ items: MaintenanceContract[] }>().items.map((c) => c.devices[0]!.serial)).toEqual([
+      'WC001',
     ]);
     const all = await app.inject({ method: 'GET', url: '/v1/maintenance', headers: as(store) });
     expect(all.json<{ items: MaintenanceContract[] }>().items).toHaveLength(2);
   });
 
   it('renews into a new contract from the day after the end, for as long', async () => {
-    const { store } = await storeWithWheelchairs();
+    const { store, customerId } = await storeWithSoldPieces();
     const made = (
-      await post(store, '/v1/maintenance', { ...CONTRACT, devices: [{ serial: 'A1' }] })
+      await post(store, '/v1/maintenance', { ...CONTRACT, customerId, devices: [{ serial: 'WC001' }] })
     ).json<MaintenanceContract>();
     const renewed = await post(store, `/v1/maintenance/${made.id}/renew`, { version: made.version });
     expect(renewed.statusCode, renewed.body).toBe(201);
@@ -350,17 +423,18 @@ describe('a maintenance contract', () => {
       startDate: '2027-01-01',
       endDate: '2027-12-17',
       priceMinor: 400_000,
-      devices: [{ serial: 'A1', item: 'A1' }],
+      devices: [{ serial: 'WC001', item: 'كرسي متحرك' }],
     });
   });
 
   it('is offered to the till until its price is sold, then marked billed', async () => {
-    const { store } = await storeWithWheelchairs();
+    const { store, customerId } = await storeWithSoldPieces();
     const day = await today(store);
     const made = (
       await post(store, '/v1/maintenance', {
         ...CONTRACT,
-        devices: [{ serial: 'A1' }],
+        customerId,
+        devices: [{ serial: 'WC001' }],
         startDate: day,
         endDate: plusDays(day, 365),
       })
@@ -473,6 +547,89 @@ describe('contract prices', () => {
     });
     expect(ends.statusCode).toBe(201);
     expect((await forTill(store, hospital.id)).map((p) => p.priceMinor)).toEqual([3]);
+  });
+
+  it('makes a price list for a customer or a type: contract price, then wholesale, then the shelf price', async () => {
+    const { store, chairVariant, monitorVariant, hospital } = await setup();
+    const day = await today(store);
+    await ownerDb()`update prices set wholesale_price_minor = 1_900_000 where id = ${chairVariant}`;
+    await ownerDb()`update prices set wholesale_price_minor = 450_000 where id = ${monitorVariant}`;
+    await post(store, '/v1/contract-prices', {
+      customerKind: 'hospital',
+      variantId: chairVariant,
+      priceMinor: 1_800_000,
+      validFrom: plusDays(day, -30),
+    });
+    await post(store, '/v1/contract-prices', {
+      customerKind: 'hospital',
+      variantId: monitorVariant,
+      priceMinor: 1,
+      validFrom: plusDays(day, 5),
+    });
+    type Sheet = {
+      forName: string;
+      tier: string;
+      rows: { item: string; priceMinor: number; source: string }[];
+    };
+    const list = async (query: string) => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/contract-prices/price-list?${query}`,
+        headers: as(store),
+      });
+      expect(res.statusCode, res.body).toBe(200);
+      return res.json<Sheet>();
+    };
+    // A type at the shelf price: the chair has a contract price; the monitor's is not in force yet
+    const retail = await list('kind=hospital&tier=retail');
+    expect(retail.tier).toBe('retail');
+    expect(retail.rows.map((r) => [r.item, r.priceMinor, r.source])).toEqual([
+      ['جهاز ضغط', 2_000_000, 'retail'],
+      ['كرسي متحرك', 1_800_000, 'contract'],
+    ]);
+    // The same type at the wholesale tier
+    const wholesale = await list('kind=hospital&tier=wholesale');
+    expect(wholesale.rows.map((r) => [r.priceMinor, r.source])).toEqual([
+      [450_000, 'wholesale'],
+      [1_800_000, 'contract'],
+    ]);
+    // A customer of that type gets the type's contract price and their own tier
+    const forCustomer = await list(`customerId=${hospital.id}`);
+    expect(forCustomer.forName).toBe('مشفى الأمل');
+    expect(forCustomer.rows.at(-1)).toMatchObject({ priceMinor: 1_800_000, source: 'contract' });
+    const neither = await app.inject({
+      method: 'GET',
+      url: '/v1/contract-prices/price-list',
+      headers: as(store),
+    });
+    expect(neither.statusCode).toBe(400);
+  });
+
+  it('gives a quotation the customer tier and the contract prices in force', async () => {
+    const { store, chairVariant, hospital } = await setup();
+    const day = await today(store);
+    await post(store, '/v1/contract-prices', {
+      customerId: hospital.id,
+      variantId: chairVariant,
+      priceMinor: 24_000,
+      validFrom: plusDays(day, -1),
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/quotations/customer-pricing?customerId=${hospital.id}`,
+      headers: as(store),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({
+      priceTier: 'retail',
+      items: [{ variantId: chairVariant, currency: 'SYP', priceMinor: 24_000 }],
+    });
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/v1/quotations/customer-pricing?customerId=0192a000-0000-7000-8000-000000000001',
+      headers: as(store),
+    });
+    expect(missing.statusCode).toBe(400);
   });
 
   it('is edited and deleted, and refuses a price for nobody or for a missing product', async () => {

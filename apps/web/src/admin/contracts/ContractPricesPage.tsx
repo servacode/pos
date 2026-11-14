@@ -14,6 +14,7 @@ import {
   Button,
   Card,
   DeleteIcon,
+  Dialog,
   EmptyState,
   IconButton,
   Money,
@@ -31,6 +32,8 @@ import { listCustomers } from '../customers/api';
 import { VariantPicker, type PickedVariant } from '../purchases/VariantPicker';
 import { SectionHead } from '../purchases/parts';
 import { deleteContractPrice, listContractPrices, saveContractPrice } from './api';
+import { DateField } from '../../lib/DateField';
+import { PriceListSection } from './PriceListSection';
 
 const fieldError = (e: unknown) =>
   e instanceof ApiError && e.fields ? Object.values(e.fields)[0]! : errorMessage(e);
@@ -61,6 +64,7 @@ export function ContractPricesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<ContractPrice | null>(null);
+  const [removing, setRemoving] = useState<ContractPrice | null>(null);
   const [target, setTarget] = useState<Target>('');
   const [variant, setVariant] = useState<PickedVariant | null>(null);
   const [price, setPrice] = useState('');
@@ -198,20 +202,8 @@ export function ContractPricesPage() {
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
                 />
-                <TextField
-                  label="من"
-                  type="date"
-                  dir="ltr"
-                  value={validFrom}
-                  onChange={(e) => setValidFrom(e.target.value)}
-                />
-                <TextField
-                  label="إلى (اختياري)"
-                  type="date"
-                  dir="ltr"
-                  value={validTo}
-                  onChange={(e) => setValidTo(e.target.value)}
-                />
+                <DateField label="من" value={validFrom} onChange={setValidFrom} />
+                <DateField label="إلى (اختياري)" value={validTo} onChange={setValidTo} />
               </div>
               <div className="flex gap-2">
                 <Button
@@ -276,14 +268,42 @@ export function ContractPricesPage() {
                   <IconButton
                     label={`احذف سعر ${p.item}`}
                     icon={<DeleteIcon />}
-                    onClick={() => void remove(p)}
+                    onClick={() => setRemoving(p)}
                   />
                 </Card>
               </li>
             ))}
           </ul>
         </section>
+        <PriceListSection customers={customers} />
       </div>
+      <Dialog
+        open={removing !== null}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title="احذف سعر العقد"
+        description={removing?.item}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setRemoving(null)}>
+              تراجع
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                const p = removing;
+                setRemoving(null);
+                if (p) void remove(p);
+              }}
+            >
+              احذف السعر
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-muted">
+          يعود الصندوق إلى سعر المحل العادي لهذا الصنف مع هذا الزبون. لا يمكن التراجع عن الحذف.
+        </p>
+      </Dialog>
     </AppShell>
   );
 }

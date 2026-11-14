@@ -9,6 +9,7 @@ import {
   ChequeIcon,
   ClockIcon,
   DataTable,
+  Dialog,
   EmptyState,
   Money,
   PageHeader,
@@ -54,10 +55,23 @@ export function addDays(day: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Cheques still waiting whose due day is today or within the next days; the home page counts them too */
-export function dueSoon(items: readonly Cheque[], day: string): Cheque[] {
+/** The day a cheque falls due: its own due day, or the day typed into its reference («CHQ-7 2026-11-30») */
+export function dueDayOf(c: Pick<Cheque, 'dueDate' | 'reference'>): string | null {
+  return c.dueDate ?? /\d{4}-\d{2}-\d{2}/.exec(c.reference ?? '')?.[0] ?? null;
+}
+
+/**
+ * Cheques still waiting whose due day is within the next days. A customer's cheque counts from
+ * today and also past due (it still has to be cashed or bounced); a cheque we gave a supplier has
+ * no mark, so it counts only until its day. The home page counts both too.
+ */
+export function dueSoon(items: readonly Cheque[], day: string, direction: 'in' | 'out' = 'in'): Cheque[] {
   const until = addDays(day, CHEQUE_DUE_SOON_DAYS);
-  return items.filter((c) => c.status === 'pending' && c.dueDate && c.dueDate <= until);
+  return items.filter((c) => {
+    const due = dueDayOf(c);
+    if (c.status !== 'pending' || !due || due > until) return false;
+    return direction === 'out' ? c.direction === 'out' && due >= day : c.direction !== 'out';
+  });
 }
 
 /**
@@ -74,6 +88,8 @@ export function ChequesPage() {
   const [base, setBase] = useState<CurrencyCode>('SYP');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // A cheque marked cashed or bounced is one entry in the books: it waits for a confirmation
+  const [asking, setAsking] = useState<{ cheque: Cheque; action: 'cleared' | 'bounced' } | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -110,9 +126,10 @@ export function ChequesPage() {
   // By due date: the soonest first, the ones without a date last
   const shown =
     order === 'due'
-      ? [...(items ?? [])].sort((a, b) => (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999'))
+      ? [...(items ?? [])].sort((a, b) => (dueDayOf(a) ?? '9999').localeCompare(dueDayOf(b) ?? '9999'))
       : (items ?? []);
   const soon = dueSoon(items ?? [], today());
+  const soonOut = dueSoon(items ?? [], today(), 'out');
   const pendingTotal = (items ?? [])
     .filter((c) => c.status === 'pending' && c.direction !== 'out')
     .reduce((sum, c) => sum + c.amountMinor, 0);
@@ -185,13 +202,15 @@ export function ChequesPage() {
       key: 'due',
       header: 'الاستحقاق',
       cell: (c) =>
-        c.dueDate ? (
+        dueDayOf(c) ? (
           <bdi
             className={`num whitespace-nowrap ${
-              c.status === 'pending' && c.dueDate <= today() ? 'font-semibold text-danger-ink' : 'text-ink'
+              c.status === 'pending' && c.direction !== 'out' && dueDayOf(c)! <= today()
+                ? 'font-semibold text-danger-ink'
+                : 'text-ink'
             }`}
           >
-            {c.dueDate}
+            {dueDayOf(c)}
           </bdi>
         ) : (
           <span className="text-ink-subtle">—</span>
@@ -228,7 +247,7 @@ export function ChequesPage() {
               variant="secondary"
               icon={<CheckIcon size={16} />}
               loading={busy === `${c.sourceId}-${c.paymentNo}`}
-              onClick={() => void mark(c, 'cleared')}
+              onClick={() => setAsking({ cheque: c, action: 'cleared' })}
             >
               حُصّل
             </Button>
@@ -236,7 +255,7 @@ export function ChequesPage() {
               size="sm"
               variant="ghost"
               icon={<UndoIcon size={16} />}
-              onClick={() => void mark(c, 'bounced')}
+              onClick={() => setAsking({ cheque: c, action: 'bounced' })}
             >
               مرتجع
             </Button>
@@ -297,6 +316,13 @@ export function ChequesPage() {
               {CHEQUE_DUE_SOON_DAYS} أيام أو فات موعدها.
             </Alert>
           ) : null}
+          {soonOut.length > 0 ? (
+            <Alert tone="warning">
+              <bdi className="num">{soonOut.length}</bdi>{' '}
+              {soonOut.length === 1 ? 'شيك صادر للمورد يستحق' : 'شيكات صادرة للموردين تستحق'} خلال{' '}
+              {CHEQUE_DUE_SOON_DAYS} أيام: جهّز الرصيد في البنك.
+            </Alert>
+          ) : null}
           <Alert tone="info">
             «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد واحد في
             الدفاتر.
@@ -318,6 +344,34 @@ export function ChequesPage() {
           />
         </div>
       </div>
+      <Dialog
+        open={asking !== null}
+        onOpenChange={(o) => !o && setAsking(null)}
+        title={asking?.action === 'bounced' ? 'سجّل الشيك مرتجعاً' : 'سجّل الشيك محصّلاً'}
+        description={asking?.cheque.reference ?? asking?.cheque.documentNumber}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setAsking(null)}>
+              تراجع
+            </Button>
+            <Button
+              onClick={() => {
+                const a = asking;
+                setAsking(null);
+                if (a) void mark(a.cheque, a.action);
+              }}
+            >
+              {asking?.action === 'bounced' ? 'نعم، مرتجع' : 'نعم، حُصّل'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-muted">
+          {asking?.action === 'bounced'
+            ? 'يعود المبلغ ديناً على الزبون في كشف حسابه، ولا يمكن التراجع عن هذا من هنا.'
+            : 'ينتقل المبلغ إلى البنك، ولا يمكن التراجع عن هذا من هنا.'}
+        </p>
+      </Dialog>
     </AppShell>
   );
 }

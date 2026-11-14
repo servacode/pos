@@ -910,7 +910,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
                 }
               >
-                سعر الجملة
+                {cart.contractPriced ? 'سعر العقد' : 'سعر الجملة'}
               </Button>
             ) : null}
             <span className="flex-1" />
@@ -1392,7 +1392,8 @@ export function SaleScreen(props: SaleScreenProps) {
                 const prices = pos.device.token
                   ? await fetchContractPrices(customerId, pos.device.token, pos.fetch)
                   : [];
-                if (prices.length > 0) setCart((c) => applyContractPrices(c, prices));
+                if (prices.length > 0)
+                  setCart((c) => ({ ...applyContractPrices(c, prices), contractPriced: true }));
                 return prices.length > 0;
               }}
               onBack={() => setMode({ kind: 'items' })}

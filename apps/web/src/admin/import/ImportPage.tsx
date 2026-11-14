@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import {
-  IMPORT_FIELDS,
   IMPORT_TYPES,
   IMPORT_TYPE_LABELS,
   emptyImportTotals,
@@ -37,6 +36,7 @@ import {
   chunkRows,
   duplicateAnswer,
   initialMapping,
+  fieldsFor,
   missingRequired,
   prepareRows,
   reportCsv,
@@ -120,7 +120,10 @@ function Import() {
   const cancel = useRef(false);
 
   const branches = me.branches.map((b) => ({ id: b.id, name: b.name }));
-  const targets = useMemo(() => targetsOf(type, branches), [type, me.branches]); // eslint-disable-line react-hooks/exhaustive-deps
+  const targets = useMemo(
+    () => targetsOf(type, branches, me.tenant.sectors),
+    [type, me.branches, me.tenant.sectors],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
   const prepared = useMemo(() => prepareRows(type, table, mapping), [type, table, mapping]);
   const byLine = useMemo(() => new Map(prepared.map((r) => [r.line, r])), [prepared]);
   const missing = missingRequired(type, mapping);
@@ -254,7 +257,7 @@ function Import() {
           : [{ line: r.line, status: statusWord('skip'), field: '_', message: r.notes.join('، ') }],
       );
 
-  const chosen = IMPORT_FIELDS[type];
+  const chosen = fieldsFor(type, me.tenant.sectors);
   const finished = phase === 'done';
   const sheetPick = sheets.length > 1;
   const nameOf = (line: number) => String(byLine.get(line)?.values.name ?? '—');
@@ -317,7 +320,10 @@ function Import() {
               onValueChange={(t) => reset(t)}
             />
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="secondary" onClick={() => downloadText(templateName(type), templateCsv(type))}>
+              <Button
+                variant="secondary"
+                onClick={() => downloadText(templateName(type), templateCsv(type, me.tenant.sectors))}
+              >
                 نزّل القالب الجاهز
               </Button>
               <p className="text-sm text-ink-muted">

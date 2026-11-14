@@ -15,7 +15,6 @@ import {
   EmptyState,
   Money,
   PageHeader,
-  TextField,
   type DataColumn,
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
@@ -23,6 +22,7 @@ import { errorMessage } from '../../lib/api';
 import { downloadCsv } from '../exportCsv';
 import { SectionHead } from '../purchases/parts';
 import { getDebtAgeing } from './api';
+import { DateField } from '../../lib/DateField';
 
 /** An amount as a spreadsheet cell: major units, no thousands separator */
 const cellText = (minor: number, report: DebtAgeingReport) =>
@@ -109,13 +109,7 @@ export function DebtAgeingPage() {
         {error ? <Alert tone="error">{error}</Alert> : null}
         <section aria-label="الذمم" className="flex flex-col gap-3">
           <SectionHead title="الزبائن المدينون">
-            <TextField
-              label="حتى تاريخ (فارغ: اليوم)"
-              type="date"
-              dir="ltr"
-              value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-            />
+            <DateField label="حتى تاريخ (فارغ: اليوم)" value={asOf} onChange={setAsOf} />
             <Button
               variant="secondary"
               disabled={!report || report.items.length === 0}

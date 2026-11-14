@@ -115,6 +115,8 @@ export interface Cart {
   batchApproval?: { sig: string; approval: Approval } | null;
   /** «سعر الجملة» (03 › الجملة): every line at its wholesale price where it has one */
   priceTier?: 'retail' | 'wholesale';
+  /** The customer's contract prices were applied (03 › أسعار العقود): the till says «سعر العقد», not «سعر الجملة» */
+  contractPriced?: boolean;
   /** An exchange (03 › الملابس): the voucher of the return just saved, offered first at payment */
   voucher?: string;
   /** An online shop order opened at the till (26 › حياة الطلب): the sale closes it */
@@ -130,7 +132,7 @@ export interface Cart {
   /** A sale made from a quotation (03 › الجملة): the quotation turns converted once the sale is saved */
   quotation?: { id: string; number: string; version: number };
   /** A sale that returns a rental (03 › التأجير): the rental closes once the sale of its rent is saved */
-  rental?: { id: string; number: string; version: number };
+  rental?: { id: string; number: string; version: number; cashBackMinor?: number };
   /** A sale that bills a maintenance contract (03 › عقود الصيانة): the contract is marked billed once it is saved */
   maintenance?: { id: string; number: string; version: number };
   /** A pharmacy sale's prescription (03 › الصيدليات), asked before payment when an item needs it */

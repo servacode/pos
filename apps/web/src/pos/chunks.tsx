@@ -53,7 +53,7 @@ export class TillBoundary extends Component<{ children: ReactNode; onBack?: () =
   override render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div role="alert" className="grid place-items-center gap-4 p-8 text-center">
+      <div role="alert" className="flex flex-col items-center justify-center gap-4 p-8 text-center">
         <p className="text-lg font-bold">تعذّر فتح هذه الشاشة. تأكد من الاتصال ثم أعد المحاولة.</p>
         <div className="flex gap-3">
           <button type="button" className="rounded-lg border px-5 py-3 font-bold" onClick={this.retry}>

@@ -7,8 +7,32 @@ import {
   type ImportRow,
   type ImportRowResult,
   type ImportType,
+  type SectorKey,
 } from '@serva/core';
+import { storeSells } from '../../lib/sectors';
 import type { FileCell } from './file';
+
+type Field = (typeof IMPORT_FIELDS)[ImportType][number];
+
+/**
+ * The fields of a type as this store's sectors word them: outside clothing the size and colour
+ * columns are the generic «الخيار 1/2» (the fields stay) and the season column is left out.
+ */
+export function fieldsFor(type: ImportType, sectors?: readonly SectorKey[]): Field[] {
+  const clothing = storeSells(sectors, ['clothing']);
+  if (type !== 'products' || clothing) return [...IMPORT_FIELDS[type]];
+  return IMPORT_FIELDS[type]
+    .filter((f) => f.key !== 'season')
+    .map((f) => {
+      if (f.key === 'size')
+        return { ...f, label: 'الخيار 1', hint: 'اختياري: خيار أول للصنف، مثل الحجم أو القياس' };
+      if (f.key === 'colour')
+        return { ...f, label: 'الخيار 2', hint: 'اختياري: خيار ثانٍ للصنف، مثل اللون أو النوع' };
+      if (f.key === 'model')
+        return { ...f, hint: 'اختياري: الصفوف التي لها رمز الموديل نفسه تصير منتجاً واحداً بخيارات' };
+      return f;
+    });
+}
 
 /** For each column of the sheet, the field it feeds (a key of IMPORT_FIELDS, or «qty:<branch>»), or null. */
 export type Mapping = (string | null)[];
@@ -41,8 +65,9 @@ export function tableOf(rows: FileCell[][]): Table {
 export function targetsOf(
   type: ImportType,
   branches: readonly Branch[],
+  sectors?: readonly SectorKey[],
 ): { key: string; label: string; required: boolean }[] {
-  const fields = IMPORT_FIELDS[type].map((f) => ({
+  const fields = fieldsFor(type, sectors).map((f) => ({
     key: f.key,
     label: f.label,
     required: f.required === true,
@@ -235,8 +260,8 @@ export function csvField(value: string): string {
 }
 
 /** The template of a type: the field names as headers, a sample row, and the hints as a second sheet line. */
-export function templateCsv(type: ImportType): string {
-  const fields = IMPORT_FIELDS[type];
+export function templateCsv(type: ImportType, sectors?: readonly SectorKey[]): string {
+  const fields = fieldsFor(type, sectors);
   const lines = [fields.map((f) => csvField(f.label)), fields.map((f) => csvField(f.example))];
   return `${BOM}${lines.map((l) => l.join(',')).join('\r\n')}\r\n`;
 }

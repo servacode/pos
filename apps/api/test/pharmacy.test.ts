@@ -262,9 +262,10 @@ describe('batches the till picks from, and the prescription flags', () => {
     expect(sets.settings.upserts[0]!.pharmacy).toBeNull();
 
     await ownerDb()`update tenants set sectors = array['pharmacy'] where id = ${store.tenantId}`;
-    expect((await read()).pharmacy).toEqual({ prescription: 'optional' });
+    // Refusing a sale with no valid batch is the pharmacy's default until its owner turns it off
+    expect((await read()).pharmacy).toEqual({ prescription: 'optional', blockNoBatch: true });
     sets = await pull(store);
-    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'optional' });
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'optional', blockNoBatch: true });
 
     const put = await app.inject({
       method: 'PUT',
@@ -273,9 +274,9 @@ describe('batches the till picks from, and the prescription flags', () => {
       payload: { prescription: 'required' },
     });
     expect(put.statusCode, put.body).toBe(200);
-    expect(put.json<StoreResponse>().pharmacy).toEqual({ prescription: 'required' });
+    expect(put.json<StoreResponse>().pharmacy).toEqual({ prescription: 'required', blockNoBatch: true });
     sets = await pull(store);
-    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'required' });
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'required', blockNoBatch: true });
 
     const bad = await app.inject({
       method: 'PUT',
@@ -306,34 +307,47 @@ describe('medicine returns and batch picking, for a pharmacy and for medical sup
     const res = await put(store, policy);
     expect(res.statusCode, res.body).toBe(200);
     // Not written: the pharmacy's default (batch picking on) holds
-    expect(res.json<StoreResponse>().pharmacy).toEqual(policy);
+    expect(res.json<StoreResponse>().pharmacy).toEqual({ ...policy, blockNoBatch: true });
     let sets = await pull(store);
-    expect(sets.settings.upserts[0]!.pharmacy).toEqual(policy);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, blockNoBatch: true });
 
     expect((await put(store, { ...policy, autoBatch: false })).statusCode).toBe(200);
     sets = await pull(store);
-    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, autoBatch: false });
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, autoBatch: false, blockNoBatch: true });
+    // A pharmacy owner who turned the block off keeps it off
+    expect((await put(store, { ...policy, blockNoBatch: false })).statusCode).toBe(200);
+    sets = await pull(store);
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ ...policy, blockNoBatch: false });
     expect((await put(store, { prescription: 'optional', returns: 'sometimes' })).statusCode).toBe(400);
   });
 
-  it('a medical-supplies store has batch picking off until it turns it on, and its tills get the shelf batches', async () => {
+  it('a medical-supplies store has batch picking and the no-valid-batch block on until it turns them off, and its tills get the shelf batches', async () => {
     const store = await openStore(app);
     await ownerDb()`update tenants set sectors = array['medical_supplies'] where id = ${store.tenantId}`;
     const read = async () =>
       (await app.inject({ method: 'GET', url: '/v1/store', headers: as(store) })).json<StoreResponse>();
-    expect((await read()).pharmacy).toBeNull();
+    const on = { prescription: 'optional', autoBatch: true, blockNoBatch: true };
+    // The owner never chose: both are on, on the read and on what the tills pull
+    expect((await read()).pharmacy).toEqual(on);
+    expect((await pull(store)).settings.upserts[0]!.pharmacy).toEqual(on);
 
     expect((await put(store, { prescription: 'optional', returns: 'allowed' })).statusCode).toBe(200);
+    expect((await read()).pharmacy).toEqual({ ...on, returns: 'allowed' });
+
+    // What the owner chose is kept
+    expect(
+      (await put(store, { prescription: 'optional', autoBatch: false, blockNoBatch: false })).statusCode,
+    ).toBe(200);
     expect((await read()).pharmacy).toEqual({
       prescription: 'optional',
-      returns: 'allowed',
       autoBatch: false,
+      blockNoBatch: false,
     });
 
     expect((await put(store, { prescription: 'optional', autoBatch: true })).statusCode).toBe(200);
-    expect((await read()).pharmacy).toEqual({ prescription: 'optional', autoBatch: true });
+    expect((await read()).pharmacy).toEqual(on);
     const sets = await pull(store);
-    expect(sets.settings.upserts[0]!.pharmacy).toEqual({ prescription: 'optional', autoBatch: true });
+    expect(sets.settings.upserts[0]!.pharmacy).toEqual(on);
 
     const s = (
       await app.inject({

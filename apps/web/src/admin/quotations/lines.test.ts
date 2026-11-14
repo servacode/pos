@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  customerPackPrice,
   editorLineOf,
   lineInput,
   moneyOf,
   moneyText,
   packPriceOf,
   percentOf,
+  priceForCustomer,
   qtyOf,
   type EditorLine,
 } from './lines';
@@ -112,5 +114,46 @@ describe('editorLineOf', () => {
       amountDiscountMinor: 300,
     });
     expect(editorLineOf({ ...base, discount: null }).discount).toBe('');
+  });
+});
+
+describe('pricing a quotation for a customer', () => {
+  const line = {
+    variantId: 'v-1',
+    pieceMinor: 30_000,
+    packPrices: {},
+    wholesaleMinor: 27_000,
+    packWholesale: {},
+  };
+  const retail = { tier: 'retail' as const, contracts: new Map<string, number>() };
+
+  it('keeps the shelf price with no customer', () => {
+    expect(customerPackPrice(line, 1000, null)).toBe(30_000);
+    expect(customerPackPrice(line, 1000, retail)).toBe(30_000);
+  });
+
+  it('quotes the contract price (240 for a hospital, not 300) and scales it to the pack', () => {
+    const hospital = { tier: 'retail' as const, contracts: new Map([['v-1', 24_000]]) };
+    expect(customerPackPrice(line, 1000, hospital)).toBe(24_000);
+    expect(customerPackPrice(line, 12_000, hospital)).toBe(288_000);
+  });
+
+  it('uses the wholesale price for a wholesale customer, the pack one first, and the contract over both', () => {
+    const wholesale = { tier: 'wholesale' as const, contracts: new Map<string, number>() };
+    expect(customerPackPrice(line, 1000, wholesale)).toBe(27_000);
+    expect(customerPackPrice({ ...line, packWholesale: { 10_000: 250_000 } }, 10_000, wholesale)).toBe(
+      250_000,
+    );
+    expect(customerPackPrice(line, 1000, { ...wholesale, contracts: new Map([['v-1', 24_000]]) })).toBe(
+      24_000,
+    );
+    expect(customerPackPrice({ ...line, wholesaleMinor: null }, 1000, wholesale)).toBe(30_000);
+  });
+
+  it('puts the price into the line text, and leaves a line with no known price as typed', () => {
+    const l = { ...line, key: 1, packQty: 1000, price: '' } as unknown as EditorLine;
+    expect(priceForCustomer(l, { ...retail, contracts: new Map([['v-1', 24_000]]) }).price).toBe('240');
+    const unknown = { key: 2, variantId: 'v-2', pieceMinor: null, price: '55' } as unknown as EditorLine;
+    expect(priceForCustomer(unknown, retail)).toBe(unknown);
   });
 });

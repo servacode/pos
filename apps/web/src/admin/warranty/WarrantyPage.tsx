@@ -30,6 +30,7 @@ import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { SectionHead } from '../purchases/parts';
 import { listClaims, lookupWarranty, moveClaim, openClaim } from './api';
+import { DateField } from '../../lib/DateField';
 
 const TONES: Record<WarrantyStatus, BadgeTone> = {
   received: 'info',
@@ -208,13 +209,7 @@ function StepDialog({
         {status === 'sent' ? (
           <TextField label="المورد أو الورشة" value={sentTo} onChange={(e) => setSentTo(e.target.value)} />
         ) : null}
-        <TextField
-          label="التاريخ (اتركه فارغاً لليوم)"
-          type="date"
-          dir="ltr"
-          value={on}
-          onChange={(e) => setOn(e.target.value)}
-        />
+        <DateField label="التاريخ (اتركه فارغاً لليوم)" value={on} onChange={setOn} />
         <TextField label="ملاحظة (اختياري)" value={note} onChange={(e) => setNote(e.target.value)} />
         <TextField
           label="الفني (اختياري)"
@@ -421,12 +416,10 @@ export function WarrantyPage() {
                     {openError ? <Alert tone="error">{openError}</Alert> : null}
                     <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                       <TextField label="العطل" value={issue} onChange={(e) => setIssue(e.target.value)} />
-                      <TextField
+                      <DateField
                         label="تاريخ الاستلام (اتركه فارغاً لليوم)"
-                        type="date"
-                        dir="ltr"
                         value={receivedOn}
-                        onChange={(e) => setReceivedOn(e.target.value)}
+                        onChange={setReceivedOn}
                       />
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">

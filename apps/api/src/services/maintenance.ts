@@ -153,13 +153,58 @@ async function insertContract(
   return made!;
 }
 
+/**
+ * A new contract covers pieces the store sold: a serial the store never had, or still holds, is
+ * refused by name. The customer is a record of the store, whose name and phone the contract takes.
+ */
+async function checkedNewContract(tx: Transaction, input: z.output<typeof maintenanceInput>) {
+  for (const d of input.devices) {
+    const serial = normalizeSerial(d.serial);
+    const [piece] = await tx.execute<{ status: string }>(
+      sql`select status from serials where serial = ${serial}`,
+    );
+    if (!piece) {
+      throw invalid({
+        devices: `الرقم التسلسلي ${serial} غير موجود في المحل. تأكد من الرقم أو من الفاتورة.`,
+      });
+    }
+    if (piece.status !== 'sold') {
+      throw invalid({
+        devices: `الجهاز ${serial} لم يُبَع لزبون بعد (حالته عندنا غير «مباع»)، فلا عقد صيانة عليه.`,
+      });
+    }
+  }
+  let customerId = input.customerId ?? null;
+  if (!customerId && input.customerPhone) {
+    // An old client that sent only a name and a phone: the customer with that phone, when there is one
+    const found = await tx.execute<{ id: string }>(
+      sql`select id from customers where phone = ${input.customerPhone} and archived_at is null limit 2`,
+    );
+    if (found.length === 1) customerId = found[0]!.id;
+  }
+  if (!customerId) {
+    throw invalid({ customerId: 'اختر الزبون من القائمة أو أضفه زبوناً جديداً قبل حفظ العقد.' });
+  }
+  const [customer] = await tx.execute<{ name: string; phone: string | null }>(
+    sql`select name, phone from customers where id = ${customerId}`,
+  );
+  if (!customer) throw invalid({ customerId: 'هذا الزبون غير موجود.' });
+  return {
+    ...input,
+    customerId,
+    customerName: customer.name,
+    customerPhone: customer.phone ?? input.customerPhone ?? null,
+  };
+}
+
 export function createContract(
   db: Database,
   auth: AccessClaims,
-  input: z.output<typeof maintenanceInput>,
+  raw: z.output<typeof maintenanceInput>,
 ): Promise<MaintenanceContract> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'catalog.manage');
+    const input = await checkedNewContract(tx, raw);
     const made = await insertContract(tx, auth.tenantId, input, await namedDevices(tx, input.devices));
     return contractOf(made, await storeToday(tx, auth.tenantId));
   });

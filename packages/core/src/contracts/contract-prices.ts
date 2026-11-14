@@ -13,6 +13,7 @@ import { CUSTOMER_KINDS, type CustomerKind } from './customers';
  *   POST   /v1/contract-prices                                 contractPriceInput → ContractPrice (201)
  *   PUT    /v1/contract-prices/{id}                            contractPriceUpdateInput → ContractPrice
  *   DELETE /v1/contract-prices/{id}
+ *   GET    /v1/contract-prices/price-list?customerId=|kind=&tier=   → PriceListSheet (catalog.manage)
  *   GET    /v1/device/contract-prices?customerId=              → { items: ContractPriceForTill[] } (Device)
  */
 
@@ -43,6 +44,33 @@ export const contractPriceListQuery = z.object({
   kind: z.enum(CUSTOMER_KINDS).optional(),
   variantId: uuidSchema.optional(),
 });
+
+/** The price list to print: for one customer (their tier and contract prices) or for one type of customer */
+export const priceListSheetQuery = z.object({
+  customerId: uuidSchema.optional(),
+  kind: z.enum(CUSTOMER_KINDS).optional(),
+  /** With a type of customer: whether the list is at the wholesale price (the customer's own tier decides otherwise) */
+  tier: z.enum(['retail', 'wholesale']).optional(),
+});
+
+export interface PriceListSheetRow {
+  variantId: string;
+  item: string;
+  sku: string | null;
+  priceMinor: number;
+  /** contract: a contract price in force; wholesale: the wholesale tier; retail: the shelf price */
+  source: 'contract' | 'wholesale' | 'retail';
+}
+
+export interface PriceListSheet {
+  /** Whose list: the customer's name, or the type's name */
+  forName: string;
+  tier: 'retail' | 'wholesale';
+  currency: CurrencyCode;
+  /** The day the prices were read */
+  asOf: string;
+  rows: PriceListSheetRow[];
+}
 
 export const tillContractPriceQuery = z.object({ customerId: uuidSchema });
 

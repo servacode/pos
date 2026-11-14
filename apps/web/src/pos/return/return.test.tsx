@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReturnPayload, SalePayload, ShiftClosePayload } from '@serva/core/contracts/documents';
 import { validateDocumentPayload } from '@serva/core/contracts/documents';
 import { memoryLocal } from '../../offline/local';
-import { ids, PINS, PRODUCTS } from '../../test/pos';
+import { ids, PINS, PRODUCTS, staffServer } from '../../test/pos';
 import { openShift, renderPos, scan, SHIFT_ID } from '../../test/renderPos';
 import { matchesNumber, returnableSales } from './returns';
 
@@ -152,6 +152,7 @@ describe('a return of a credit sale (08 › مرتجع مبيعات: تخفيض 
     await user.click(screen.getByRole('button', { name: 'الكل' }));
     expect(screen.queryByLabelText('رقم العملية')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، سجّل' }));
     await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
     const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
     expect(validateDocumentPayload('return', payload)).toEqual({ ok: true, checked: true });
@@ -159,6 +160,45 @@ describe('a return of a credit sale (08 › مرتجع مبيعات: تخفيض 
       customerId: ids.abuKhaled,
       refunds: [{ method: 'account', currency: 'SYP', amountMinor: 25_000, reference: null }],
     });
+  });
+});
+
+describe('what an account refund says about the debt', () => {
+  async function accountReturn(balanceMinor: number) {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const staff = staffServer();
+    const fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url).endsWith('/purchases')
+        ? new Response(JSON.stringify({ balanceMinor, items: [], sizes: [] }), { status: 200 })
+        : staff(url, init),
+    ) as unknown as typeof globalThis.fetch;
+    const { user } = renderPos({ local, fetch });
+    await signIn(user, 'مريم');
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    await user.type(within(pay).getByLabelText('ابحث بالاسم أو الجوال'), 'خالد');
+    await user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
+    await user.click(within(pay).getByRole('button', { name: 'آجل على الحساب' }));
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    await user.click(screen.getByRole('button', { name: 'الكل' }));
+  }
+
+  it('says «يُحسم من دين الزبون» only when the customer owes something', async () => {
+    await accountReturn(100_000);
+    expect(await screen.findByText('يُحسم من دين الزبون')).toBeInTheDocument();
+  });
+
+  it('says it becomes a credit for the customer when they owe nothing', async () => {
+    await accountReturn(0);
+    expect(await screen.findByText('يُضاف رصيداً للزبون')).toBeInTheDocument();
+    expect(screen.queryByText('يُحسم من دين الزبون')).not.toBeInTheDocument();
   });
 });
 
@@ -188,7 +228,14 @@ describe('a return of a sale paid by cheque', () => {
     expect(screen.getByRole('button', { name: 'إلى حساب الزبون' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText(/الشيك نفسه يبقى كما هو/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'الكل' }));
+    // Irreversible: the first tap only asks, nothing is saved until it is confirmed
     await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    expect(screen.getByText(/ولا يمكن التراجع عنه/)).toBeInTheDocument();
+    expect(outbox.some((e) => e.type === 'return')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'لا، ارجع' }));
+    expect(outbox.some((e) => e.type === 'return')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، سجّل' }));
     await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
     const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
     expect(payload.refunds).toEqual([

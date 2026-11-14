@@ -166,6 +166,8 @@ describe('the cart in progress survives a refresh', () => {
     await scan(first.user, PRODUCTS.tea.barcode!.code);
     await waitFor(async () => expect(await local.get('currentCart')).not.toBeNull());
     first.view.unmount();
+    // The first cashier is gone (locked or idle): the next one signs in with their own code
+    globalThis.sessionStorage.clear();
 
     await openShift(local, ids.maryam);
     const second = renderPos({ local });

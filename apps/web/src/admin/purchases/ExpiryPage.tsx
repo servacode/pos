@@ -10,6 +10,9 @@ import {
   Dialog,
   EmptyState,
   formatQuantity,
+  Menu,
+  MenuItem,
+  MoreIcon,
   PageHeader,
   SegmentedControl,
   Skeleton,
@@ -63,6 +66,8 @@ export function ExpiryPage() {
   const [qty, setQty] = useState('');
   const [saving, setSaving] = useState(false);
   const [printing, setPrinting] = useState<ExpiryRow | null>(null);
+  // A batch asked to be blocked: nothing is sent until it is confirmed
+  const [blocking, setBlocking] = useState<ExpiryRow | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -230,24 +235,28 @@ export function ExpiryPage() {
       key: 'actions',
       header: 'إجراءات',
       cell: (r) => (
-        <span className="flex flex-wrap items-center gap-1.5 print:hidden">
+        <span className="flex items-center gap-1.5 whitespace-nowrap print:hidden">
           <Button size="sm" variant="secondary" onClick={() => open('writeoff', r)}>
             أتلف الدفعة
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => open('count', r)}>
-            عدّ
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => open('return', r)}>
-            أرجع للمورد
-          </Button>
-          {r.batchNo ? (
-            <Button size="sm" variant="secondary" onClick={() => void toggleBlock(r)}>
-              {r.blocked ? 'ارفع الإيقاف' : 'أوقف البيع'}
-            </Button>
-          ) : null}
-          <Button size="sm" variant="secondary" onClick={() => setPrinting(r)}>
-            اطبع
-          </Button>
+          <Menu
+            label={`المزيد لدفعة «${r.name}»`}
+            align="end"
+            trigger={
+              <Button size="sm" variant="ghost" icon={<MoreIcon size={16} />}>
+                المزيد
+              </Button>
+            }
+          >
+            <MenuItem onSelect={() => open('count', r)}>عدّ</MenuItem>
+            <MenuItem onSelect={() => open('return', r)}>أرجع للمورد</MenuItem>
+            {r.batchNo ? (
+              <MenuItem onSelect={() => (r.blocked ? void toggleBlock(r) : setBlocking(r))}>
+                {r.blocked ? 'ارفع الإيقاف' : 'أوقف البيع'}
+              </MenuItem>
+            ) : null}
+            <MenuItem onSelect={() => setPrinting(r)}>اطبع</MenuItem>
+          </Menu>
         </span>
       ),
     },
@@ -356,6 +365,32 @@ export function ExpiryPage() {
           <p>المورد: {printing.supplierName ?? '—'}</p>
         </div>
       ) : null}
+      <Dialog
+        open={blocking !== null}
+        onOpenChange={(o) => !o && setBlocking(null)}
+        title={`أوقف بيع الدفعة ${blocking?.batchNo ?? ''}`}
+        description={blocking?.name}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setBlocking(null)}>
+              تراجع
+            </Button>
+            <Button
+              onClick={() => {
+                const row = blocking;
+                setBlocking(null);
+                if (row) void toggleBlock(row);
+              }}
+            >
+              أوقف البيع
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-muted">
+          لن يبيع أي صندوق في أي فرع هذه الدفعة حتى ترفع الإيقاف من هذه الصفحة. هل أنت متأكد؟
+        </p>
+      </Dialog>
       <Dialog
         open={action !== null}
         onOpenChange={(o) => !o && setAction(null)}

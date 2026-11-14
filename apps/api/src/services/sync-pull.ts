@@ -79,11 +79,17 @@ const PULL_SETS: Record<string, PullSet> = {
       scaleBarcode: tenantSettings.scaleBarcode,
       service: tenantSettings.service,
       loyalty: tenantSettings.loyalty,
-      // A pharmacy that never chose gets the defaults, so its tills enforce the batch rules
-      pharmacy: sql<PharmacySettings | null>`coalesce(tenant_settings.pharmacy,
-        case when exists (select 1 from tenants t
-                          where t.id = tenant_settings.tenant_id and 'pharmacy' = any(t.sectors))
-             then '{"prescription":"optional"}'::jsonb end)`,
+      // A pharmacy or medical-supplies store gets the defaults for what its owner never chose, so its
+      // tills enforce the batch rules (same as services/store.ts › pharmacyOf): the owner's values win
+      pharmacy: sql<PharmacySettings | null>`case
+        when exists (select 1 from tenants t
+                     where t.id = tenant_settings.tenant_id and 'pharmacy' = any(t.sectors))
+          then '{"prescription":"optional","blockNoBatch":true}'::jsonb || coalesce(tenant_settings.pharmacy, '{}'::jsonb)
+        when exists (select 1 from tenants t
+                     where t.id = tenant_settings.tenant_id and 'medical_supplies' = any(t.sectors))
+          then '{"prescription":"optional","autoBatch":true,"blockNoBatch":true}'::jsonb
+               || coalesce(tenant_settings.pharmacy, '{}'::jsonb)
+        else tenant_settings.pharmacy end`,
       till: tenantSettings.till,
       sectors: sql<string[]>`(select t.sectors from tenants t where t.id = tenant_settings.tenant_id)`,
       version: tenantSettings.version,

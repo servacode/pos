@@ -5,11 +5,13 @@ import {
   quotationListQuery,
   quotationStatusInput,
   quotationUpdateInput,
+  tillContractPriceQuery,
   uuidSchema,
 } from '@serva/core';
 import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
+import { customerPricingForQuotation } from '../services/contract-prices';
 import {
   adminActor,
   convertQuotation,
@@ -35,6 +37,14 @@ export async function quotationRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/quotations', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return listQuotations(app.db, request.auth, parseBody(quotationListQuery, request.query));
+  });
+  app.get('/v1/quotations/customer-pricing', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return customerPricingForQuotation(
+      app.db,
+      request.auth,
+      parseBody(tillContractPriceQuery, request.query).customerId,
+    );
   });
   app.get('/v1/quotations/:id', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();

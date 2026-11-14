@@ -7,6 +7,7 @@ import { memoryLocal } from '../../offline/local';
 import { ids, PINS, PRODUCTS, staffServer } from '../../test/pos';
 import { openShift, renderPos, scan } from '../../test/renderPos';
 import { quotationInputOf } from './api';
+import { quotationCart } from './quotationCart';
 
 /** «عروض الأسعار» at the till: the quote button saves a numbered one, and an offer opens as the cart. */
 
@@ -274,5 +275,24 @@ describe('quotationInputOf', () => {
       { type: 'percent', bp: 500 },
       { type: 'amount', minor: 1_000 },
     ]);
+  });
+});
+
+describe('quotationCart', () => {
+  it('carries the quotation’s customer and wholesale tier into the cart', () => {
+    const catalog = {
+      byVariant: new Map(),
+      customers: [{ id: 'c-1', name: 'مشفى الأمل', priceTier: 'wholesale' }],
+    } as never;
+    const { cart } = quotationCart({ ...OFFER, customerId: 'c-1', lines: [] }, catalog);
+    expect(cart.customer).toEqual({ id: 'c-1', name: 'مشفى الأمل' });
+    expect(cart.priceTier).toBe('wholesale');
+    // A customer this till's list does not hold still goes with the offer, by the name it was made to
+    const unknown = quotationCart({ ...OFFER, customerId: 'c-9', customerName: 'عيادة النور', lines: [] }, {
+      byVariant: new Map(),
+      customers: [],
+    } as never);
+    expect(unknown.cart.customer).toEqual({ id: 'c-9', name: 'عيادة النور' });
+    expect(unknown.cart.priceTier).toBeUndefined();
   });
 });

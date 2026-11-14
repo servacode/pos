@@ -37,10 +37,20 @@ import { listTaxRates, listUnits } from '../catalog/api';
 import { getCustomer, listCustomers } from '../customers/api';
 import { PackQty } from '../purchases/PackQty';
 import { getStore } from '../store/api';
-import { createQuotation, getQuotation, moveQuotation, updateQuotation } from './api';
+import { createQuotation, getCustomerPricing, getQuotation, moveQuotation, updateQuotation } from './api';
 import { ItemPicker } from './ItemPicker';
-import { editorLineOf, lineInput, moneyText, packPriceOf, percentOf, type EditorLine } from './lines';
+import {
+  customerPackPrice,
+  editorLineOf,
+  lineInput,
+  moneyText,
+  percentOf,
+  priceForCustomer,
+  type CustomerPricing,
+  type EditorLine,
+} from './lines';
 import { QUOTATION_TONES } from './QuotationsPage';
+import { DateField } from '../../lib/DateField';
 
 /** The words of each step button: what happened, not the state it reaches */
 const STEP_LABEL: Partial<Record<QuotationStatus, string>> = {
@@ -88,6 +98,7 @@ export function QuotationPage() {
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('');
   const [lines, setLines] = useState<EditorLine[]>([]);
+  const [pricing, setPricing] = useState<CustomerPricing | null>(null);
   const [customerQ, setCustomerQ] = useState('');
   const [customerHits, setCustomerHits] = useState<{ id: string; name: string }[]>([]);
 
@@ -116,6 +127,7 @@ export function QuotationPage() {
     setNotes(q.notes ?? '');
     setTerms(q.terms ?? '');
     setLines(q.lines.map(editorLineOf));
+    if (q.customerId) void loadPricing(q.customerId, false);
   }
 
   useEffect(() => {
@@ -147,11 +159,30 @@ export function QuotationPage() {
     };
   }, [customerQ]);
 
+  /** The customer's tier and contract prices; `reprice` quotes the lines already added at them */
+  function loadPricing(forCustomer: string, reprice: boolean) {
+    return getCustomerPricing(forCustomer).then(
+      (r) => {
+        const next: CustomerPricing = {
+          tier: r.priceTier,
+          contracts: new Map(
+            r.items.filter((p) => p.currency === currency).map((p) => [p.variantId, p.priceMinor]),
+          ),
+        };
+        setPricing(next);
+        if (reprice) setLines((list) => list.map((l) => priceForCustomer(l, next)));
+      },
+      () => undefined,
+    );
+  }
+
   async function pickCustomer(c: { id: string; name: string }) {
     setCustomerQ('');
     setCustomerHits([]);
     setCustomerId(c.id);
     setCustomerName(c.name);
+    // Quote at what this customer pays: the contract prices and the wholesale tier
+    void loadPricing(c.id, true);
     try {
       const full = await getCustomer(c.id);
       setCustomerPhone(full.phone ?? '');
@@ -168,7 +199,7 @@ export function QuotationPage() {
 
   function changePack(l: EditorLine, packQty: number) {
     const pack = l.packs?.find((p) => p.qty === packQty);
-    const price = packPriceOf(l, packQty);
+    const price = customerPackPrice(l, packQty, pricing);
     setLine(l.key, {
       packQty,
       packName: pack ? `${pack.name} ${pack.qty / 1000}` : null,
@@ -395,7 +426,7 @@ export function QuotationPage() {
                   taxRates={taxRates}
                   units={units}
                   onError={setError}
-                  onPick={(line) => setLines((list) => [...list, line])}
+                  onPick={(line) => setLines((list) => [...list, priceForCustomer(line, pricing)])}
                 />
               ) : null}
               {fieldErrors.lines ? <Alert tone="error">{fieldErrors.lines}</Alert> : null}
@@ -492,13 +523,10 @@ export function QuotationPage() {
 
             <Card className="flex flex-col gap-4">
               <h2 className="text-lg font-semibold text-ink">الصلاحية والشروط</h2>
-              <TextField
+              <DateField
                 label="صالح حتى"
-                type="date"
-                dir="ltr"
-                inputClassName="num"
                 value={validUntil}
-                onChange={(e) => setValidUntil(e.target.value)}
+                onChange={setValidUntil}
                 error={fieldErrors.validUntil}
                 disabled={locked}
                 className="sm:w-60"
