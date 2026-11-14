@@ -167,7 +167,7 @@ describe('cheque reminders', () => {
     const { user } = renderApp('/cheques');
     expect(await screen.findByText(/شيك صادر للمورد يستحق/)).toBeInTheDocument();
     const table = await screen.findByRole('table', { name: 'الشيكات' });
-    const row = within(table).getByText('NEAR-1').closest('tr') as HTMLElement;
+    const row = (await within(table).findByText('NEAR-1')).closest('tr') as HTMLElement;
     await user.click(within(row).getByRole('button', { name: 'مرتجع' }));
     const sure = await screen.findByRole('dialog');
     await user.click(within(sure).getByRole('button', { name: 'تراجع' }));

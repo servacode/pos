@@ -103,7 +103,7 @@ describe('«عروض الأسعار»', () => {
     });
     const { user } = renderApp('/quotations');
     const table = await screen.findByRole('table', { name: 'عروض الأسعار' });
-    expect(within(table).getByText('QUO-2026-000001')).toBeInTheDocument();
+    expect(await within(table).findByText('QUO-2026-000001')).toBeInTheDocument();
     expect(within(table).getByText('QUO-2026-000002')).toBeInTheDocument();
     expect(within(table).getAllByText('منتهي').length).toBeGreaterThan(0);
     expect(within(table).getAllByText('مشفى الأمل').length).toBeGreaterThanOrEqual(2);

@@ -46,7 +46,7 @@ describe('«الفروع»', () => {
     open();
     expect(await screen.findByRole('heading', { name: 'الفروع', level: 1 })).toBeInTheDocument();
     const table = await screen.findByRole('table', { name: 'الفروع' });
-    expect(within(table).getByText('الفرع الرئيسي')).toBeInTheDocument();
+    expect(await within(table).findByText('الفرع الرئيسي')).toBeInTheDocument();
     expect(within(table).getByText('جهازان')).toBeInTheDocument();
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });

@@ -100,7 +100,7 @@ describe('«مرتجع إلى المورد»', () => {
     expect(await screen.findByText(/سُجّل المرتجع PRT-2026-000001/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/supplier-returns')).toHaveLength(1);
     const table = await screen.findByRole('table', { name: 'المرتجعات إلى الموردين' });
-    expect(within(table).getByText('من رصيده')).toBeInTheDocument();
+    expect(await within(table).findByText('من رصيده')).toBeInTheDocument();
   });
 
   it('lets the line name the batch it sends back, and sends it with the number and expiry', async () => {
