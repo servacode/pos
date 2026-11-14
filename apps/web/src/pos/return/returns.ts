@@ -82,6 +82,9 @@ export function matchesNumber(number: string, typed: string): boolean {
   return number.replace(/\D/g, '').endsWith(digits) || number.includes(typed.trim());
 }
 
+/** The reason of a box that is broken or past its date: it cannot be «sealed and untouched» */
+export const DAMAGED_REASON = 'تالف أو منتهي الصلاحية';
+
 const FASHION_REASONS = ['المقاس غير مناسب', 'عيب في القطعة', 'لم يعجب الزبون', 'تبديل'] as const;
 
 /**

@@ -259,12 +259,15 @@ function ProductCard() {
             barcode: initialBarcode ? barcodeOf(initialBarcode) : undefined,
           }),
           taxRateId: defaultTax?.id ?? '',
+          // A new product of a medical supplies store starts as «يتطلب صلاحية»: only new ones, and
+          // the owner can switch it off (gauze and masks are checked by batch like the rest).
+          ...(storeSells(me.tenant.sectors, ['medical_supplies']) ? { requiresExpiry: true } : {}),
         });
       }
     } catch (error) {
       setLoadError(errorMessage(error));
     }
-  }, [productId, initialBarcode, me.settings.baseCurrency]);
+  }, [productId, initialBarcode, me.settings.baseCurrency, me.tenant.sectors]);
 
   useEffect(() => {
     void load();

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Alert, AddIcon, Button, SearchField, TextField } from '@serva/ui';
+import type { CurrencyCode } from '@serva/core';
+import { Alert, AddIcon, Button, Money, SearchField, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { createCustomer, listCustomers } from './api';
 
@@ -27,7 +28,8 @@ export function CustomerPicker({
   disabled?: boolean;
 }) {
   const [q, setQ] = useState('');
-  const [hits, setHits] = useState<PickedCustomer[]>([]);
+  const [hits, setHits] = useState<(PickedCustomer & { balanceMinor?: number })[]>([]);
+  const [base, setBase] = useState<CurrencyCode>('SYP');
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -42,7 +44,11 @@ export function CustomerPicker({
     let alive = true;
     const timer = setTimeout(() => {
       listCustomers(q.trim())
-        .then((r) => alive && setHits(r.items.filter((c) => !c.archived).slice(0, 6)))
+        .then((r) => {
+          if (!alive) return;
+          setBase(r.baseCurrency);
+          setHits(r.items.filter((c) => !c.archived).slice(0, 6));
+        })
         .catch(() => alive && setHits([]));
     }, 200);
     return () => {
@@ -114,13 +120,21 @@ export function CustomerPicker({
                     setQ('');
                     setHits([]);
                   }}
-                  className="w-full rounded-small px-2.5 py-2 text-start font-semibold text-ink hover:bg-surface-muted"
+                  className="flex w-full items-center justify-between gap-2 rounded-small px-2.5 py-2 text-start font-semibold text-ink hover:bg-surface-muted"
                 >
-                  {c.name}
-                  {c.phone ? (
-                    <bdi dir="ltr" className="num ms-2 text-xs font-normal text-ink-muted">
-                      {c.phone}
-                    </bdi>
+                  <span className="min-w-0 truncate">
+                    {c.name}
+                    {c.phone ? (
+                      <bdi dir="ltr" className="num ms-2 text-xs font-normal text-ink-muted">
+                        {c.phone}
+                      </bdi>
+                    ) : null}
+                  </span>
+                  {c.balanceMinor ? (
+                    <span className="flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted">
+                      {c.balanceMinor > 0 ? 'عليه' : 'له'}
+                      <Money minor={c.balanceMinor} currency={base} signDisplay="never" />
+                    </span>
                   ) : null}
                 </button>
               </li>

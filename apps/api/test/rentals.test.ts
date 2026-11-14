@@ -569,7 +569,7 @@ describe('contract prices', () => {
     type Sheet = {
       forName: string;
       tier: string;
-      rows: { item: string; priceMinor: number; source: string }[];
+      rows: { item: string; sku: string | null; priceMinor: number; source: string }[];
     };
     const list = async (query: string) => {
       const res = await app.inject({
@@ -586,6 +586,16 @@ describe('contract prices', () => {
     expect(retail.rows.map((r) => [r.item, r.priceMinor, r.source])).toEqual([
       ['جهاز ضغط', 2_000_000, 'retail'],
       ['كرسي متحرك', 1_800_000, 'contract'],
+    ]);
+    // The printed «الرمز»: the item's own code, else its piece barcode (never empty for a coded item)
+    await ownerDb()`update variants set sku = 'CH-100' where id = ${chairVariant}`;
+    await ownerDb()`update variants set sku = null where id = ${monitorVariant}`;
+    await ownerDb()`insert into barcodes (tenant_id, id, variant_id, code)
+      select tenant_id, gen_random_uuid(), id, '6291000000017' from variants where id = ${monitorVariant}`;
+    const coded = await list('kind=hospital&tier=retail');
+    expect(coded.rows.map((r) => [r.item, r.sku])).toEqual([
+      ['جهاز ضغط', '6291000000017'],
+      ['كرسي متحرك', 'CH-100'],
     ]);
     // The same type at the wholesale tier
     const wholesale = await list('kind=hospital&tier=wholesale');

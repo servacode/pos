@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { CurrencyCode } from '@serva/core/currencies';
 import type { CustomerRow } from '@serva/core/contracts/customers';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { normalizePhone } from '@serva/core/phone';
@@ -18,12 +19,38 @@ import {
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
 import { usePos } from '../services';
+import { fetchPurchases } from './CustomerHistory';
 
 export interface PickedCustomer {
   id: string;
   name: string;
   creditLimitMinor: number | null;
   priceTier?: 'retail' | 'wholesale';
+}
+
+/**
+ * What the customer owes now, as the server says (online only; nothing is shown offline or when
+ * the server does not answer). A negative balance is what the store owes them.
+ */
+function CustomerBalance({ id, currency }: { id: string; currency: CurrencyCode }) {
+  const pos = usePos();
+  const [balance, setBalance] = useState<number | null>(null);
+  useEffect(() => {
+    const token = pos.device.token;
+    if (!token || !pos.online()) return;
+    let alive = true;
+    void fetchPurchases(id, token, pos.fetch).then((got) => alive && setBalance(got?.balanceMinor ?? null));
+    return () => {
+      alive = false;
+    };
+  }, [id, pos]);
+  if (!balance) return null;
+  return (
+    <span className="flex shrink-0 flex-col items-end text-xs text-ink-subtle">
+      {balance > 0 ? 'عليه' : 'له'}{' '}
+      <Money minor={Math.abs(balance)} currency={currency} className="text-sm font-semibold text-ink-muted" />
+    </span>
+  );
 }
 
 /** Customers whose name or phone matches what the cashier typed, at most eight */
@@ -156,6 +183,7 @@ export function CustomerPicker({
                       </bdi>
                     ) : null}
                   </span>
+                  <CustomerBalance id={c.id} currency={settings.baseCurrency} />
                   {c.creditLimitMinor !== null ? (
                     <span className="flex shrink-0 flex-col items-end text-xs text-ink-subtle">
                       حد الدين{' '}

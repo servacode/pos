@@ -494,7 +494,7 @@ export function QuotationPage() {
                 <p className="text-sm text-ink-muted">ابحث عن صنف فوق لتضيفه.</p>
               )}
               {totals ? (
-                <dl className="ms-auto flex w-full max-w-xs flex-col gap-1 text-sm">
+                <dl className="ms-auto flex w-full max-w-60 flex-col gap-1 text-sm">
                   {totals.discountMinor > 0 ? (
                     <div className="flex justify-between">
                       <dt>الخصم</dt>

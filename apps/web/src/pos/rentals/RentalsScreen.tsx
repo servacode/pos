@@ -3,6 +3,7 @@ import { RENTAL_RATE_LABELS, RENTAL_RATE_UNITS, type RentalRateUnit } from '@ser
 import type { GiftVoucherPayload } from '@serva/core/contracts/documents';
 import type { MaintenanceContract } from '@serva/core/contracts/maintenance';
 import type { RentableUnit, Rental } from '@serva/core/contracts/rentals';
+import type { Approval } from '@serva/core/contracts/documents';
 import { formatMoney } from '@serva/core/money';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
@@ -34,7 +35,8 @@ import { FlowHeader } from '../FlowParts';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import type { OpenShift } from '../shift/shift';
-import type { StaffSession } from '../staff/staff';
+import { ManagerCode } from '../staff/ManagerCode';
+import type { StaffMember, StaffSession } from '../staff/staff';
 import { DateField } from '../../lib/DateField';
 
 /** Today plus `days`, YYYY-MM-DD in the browser's calendar */
@@ -54,6 +56,7 @@ export function RentalsScreen({
   onBack,
   onReturn,
   onBill,
+  staff = [],
   startTab = 'rentals',
 }: {
   /** The section shown first: «عقود الصيانة» in the till's menu opens the contracts waiting to be billed */
@@ -63,7 +66,9 @@ export function RentalsScreen({
   shift: OpenShift;
   onBack: () => void;
   /** Opens the sale of the rent (what is left after the deposit); false when it cannot be sold here */
-  onReturn: (rental: Rental, cashBack: boolean) => boolean;
+  onReturn: (rental: Rental, cashBack: boolean, approval?: Approval) => boolean;
+  /** Who can approve a cash refund for a cashier without «مرتجع» (the manager's code) */
+  staff?: readonly StaffMember[];
   /** Opens the sale of a maintenance contract's price; false when it cannot be sold here */
   onBill: (contract: MaintenanceContract) => boolean;
 }) {
@@ -93,6 +98,10 @@ export function RentalsScreen({
   // Rentals whose leftover deposit the cashier keeps on the voucher instead of handing back in cash
   const [keepOnVoucher, setKeepOnVoucher] = useState<ReadonlySet<string>>(new Set());
   const canRefund = session.permissions.has('sale.refund');
+  // A cashier without «مرتجع» may still hand the rest back in cash once a manager enters their code
+  const [cashAsked, setCashAsked] = useState<ReadonlySet<string>>(new Set());
+  const [approvingRental, setApprovingRental] = useState<Rental | null>(null);
+  const wantsCash = (r: Rental) => (canRefund ? !keepOnVoucher.has(r.id) : cashAsked.has(r.id));
 
   const load = useCallback(async () => {
     if (!token || !pos.online()) {
@@ -214,8 +223,13 @@ export function RentalsScreen({
     void load();
   }
 
-  function giveBack(r: Rental) {
-    if (!onReturn(r, canRefund && !keepOnVoucher.has(r.id)))
+  function giveBack(r: Rental, approval?: Approval) {
+    // Cash out of the drawer without «مرتجع»: a manager's code first
+    if (!canRefund && wantsCash(r) && depositLeft(r) > 0 && !approval && staff.length > 0) {
+      setApprovingRental(r);
+      return;
+    }
+    if (!onReturn(r, wantsCash(r) && (canRefund || Boolean(approval)), approval))
       setError('لا يوجد صنف خدمة اسمه «إيجار» لبيع الأجرة به. أضفه من الأصناف ثم أعد المحاولة.');
   }
 
@@ -437,19 +451,23 @@ export function RentalsScreen({
                       عربون <Money minor={r.depositMinor} currency={r.currency} />
                     </p>
                   ) : null}
-                  {depositLeft(r) > 0 && canRefund ? (
+                  {depositLeft(r) > 0 ? (
                     <Switch
                       label="ردّ الباقي نقداً"
-                      description={`يُرَدّ ${formatMoney(depositLeft(r), r.currency)} من العربون نقداً من الدرج؛ وإن أُطفئ بقي على القسيمة.`}
-                      checked={!keepOnVoucher.has(r.id)}
-                      onCheckedChange={(on) =>
-                        setKeepOnVoucher((prev) => {
-                          const next = new Set(prev);
-                          if (on) next.delete(r.id);
-                          else next.add(r.id);
-                          return next;
-                        })
+                      description={
+                        canRefund
+                          ? `يُرَدّ ${formatMoney(depositLeft(r), r.currency)} من العربون نقداً من الدرج؛ وإن أُطفئ بقي على القسيمة.`
+                          : `ردّ ${formatMoney(depositLeft(r), r.currency)} نقداً يحتاج رمز مدير. وإن أُطفئ بقي الباقي على القسيمة.`
                       }
+                      checked={wantsCash(r)}
+                      onCheckedChange={(on) => {
+                        const set = canRefund ? keepOnVoucher : cashAsked;
+                        const next = new Set(set);
+                        // For a refunding cashier «on» means not kept on the voucher
+                        if (on === canRefund) next.delete(r.id);
+                        else next.add(r.id);
+                        (canRefund ? setKeepOnVoucher : setCashAsked)(next);
+                      }}
                     />
                   ) : null}
                   <div className="flex gap-2">
@@ -504,6 +522,19 @@ export function RentalsScreen({
         </section>
       )}
       {sheet ? <PrintableRentalContract rental={sheet} store={settings.storeName} /> : null}
+      {approvingRental ? (
+        <ManagerCode
+          staff={staff}
+          permission="sale.refund"
+          reason="ردّ باقي العربون نقداً يُخرج مالاً من الدرج، فيحتاج رمز مدير حاضر. يُسجَّل باسمه."
+          onApproved={(approval) => {
+            const r = approvingRental;
+            setApprovingRental(null);
+            giveBack(r, approval);
+          }}
+          onCancel={() => setApprovingRental(null)}
+        />
+      ) : null}
     </div>
   );
 }

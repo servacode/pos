@@ -138,7 +138,9 @@ export function TopBar({
                 <IconChip size="sm">
                   <span className="text-xs font-bold">{storeInitials}</span>
                 </IconChip>
-                <span className="truncate">{storeName}</span>
+                <span title={storeName} className="line-clamp-2 leading-tight sm:line-clamp-none sm:truncate">
+                  {storeName}
+                </span>
               </Link>
             </li>
             {current && current.key !== 'home' ? (

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { Approval } from '@serva/core/contracts/documents';
+import { useEffect, useMemo, useState } from 'react';
+import type { Approval, SalePayload } from '@serva/core/contracts/documents';
 import { serialLabel } from '@serva/core/contracts/warranty';
 import { Alert, Button, CheckIcon, SerialIcon, TextField } from '@serva/ui';
 import type { OutboxEntry } from '@serva/sync';
@@ -52,6 +52,31 @@ export function SerialPanel({
       alive = false;
     };
   }, [pos.store]);
+
+  // The numbers in stock for this product, to pick from instead of typing: not sold on this till since,
+  // not on another line of this sale
+  const available = useMemo(() => {
+    const soldHere = new Set<string>();
+    for (const entry of entries) {
+      if (entry.doc.type !== 'sale') continue;
+      for (const l of (entry.doc.payload as unknown as SalePayload).lines ?? [])
+        for (const s of l.serials ?? []) soldHere.add(serialKey(s));
+    }
+    return catalog.serials
+      .filter(
+        (r) =>
+          r.variantId === line.variantId &&
+          r.status === 'in_stock' &&
+          !soldHere.has(r.serial) &&
+          !taken.has(r.serial),
+      )
+      .map((r) => r.serial)
+      .sort();
+  }, [catalog.serials, entries, line.variantId, taken]);
+  const MAX_LISTED = 12;
+  // Typing narrows the list
+  const typed = serialKey(value);
+  const listed = typed ? available.filter((serial) => serial.includes(typed)) : available;
 
   function save() {
     setUnknown(null);
@@ -124,6 +149,40 @@ export function SerialPanel({
           onChange={(e) => setValue(e.target.value)}
           inputClassName="num"
         />
+        {listed.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-semibold text-ink-muted">
+              الأرقام المتوفرة ({listed.length}) — اضغط رقماً لاختياره
+            </p>
+            <ul aria-label="الأرقام المتوفرة" className="flex flex-wrap gap-2">
+              {listed.slice(0, MAX_LISTED).map((serial) => (
+                <li key={serial}>
+                  <button
+                    type="button"
+                    aria-pressed={serialKey(value) === serial}
+                    onClick={() => {
+                      setValue(serial);
+                      setError(null);
+                      setOffer(null);
+                    }}
+                    className={
+                      serialKey(value) === serial
+                        ? 'num min-h-11 rounded-control border border-brand bg-brand-soft px-3 text-sm font-semibold text-ink'
+                        : 'num min-h-11 rounded-control border border-line bg-surface px-3 text-sm text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted'
+                    }
+                  >
+                    <bdi dir="ltr">{serial}</bdi>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {listed.length > MAX_LISTED ? (
+              <p className="text-xs text-ink-subtle">
+                والباقي ({listed.length - MAX_LISTED}): اكتب بداية الرقم أو امسحه.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-3">
           <Button type="submit" icon={<CheckIcon size={20} />}>
             احفظ الرقم

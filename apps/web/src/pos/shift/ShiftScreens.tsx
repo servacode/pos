@@ -449,7 +449,7 @@ export function ShiftCloseScreen({
                 ) : null}
                 {activity.vouchers.count > 0 ? (
                   <li className="flex flex-wrap items-center gap-x-1">
-                    قسائم الهدية المباعة:{' '}
+                    قسائم الهدية المباعة وعربون التأجير:{' '}
                     {counted(activity.vouchers.count, ['قسيمة واحدة', 'قسيمتان', 'قسائم', 'قسيمة'], digits)} ·{' '}
                     {activity.vouchers.byCurrency.map((v) => (
                       <Money key={v.currency} minor={v.amountMinor} currency={v.currency} />

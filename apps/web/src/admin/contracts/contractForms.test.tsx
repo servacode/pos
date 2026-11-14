@@ -68,6 +68,24 @@ describe('a new maintenance contract', () => {
     });
   });
 
+  it('shows what a found customer owes next to the name', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: manager() }),
+      'GET /v1/maintenance?view=upcoming': () => ({ status: 200, body: { items: [] } }),
+      'GET /v1/customers?q=%D9%85%D8%B4': () => ({
+        status: 200,
+        body: { ...customers, items: [{ ...customers.items[0]!, balanceMinor: 25_000_000 }] },
+      }),
+    });
+    const { user } = renderApp('/maintenance');
+    await user.click(await screen.findByRole('button', { name: 'عقد جديد' }));
+    await user.type(screen.getByLabelText(/ابحث بالاسم أو الجوال/), 'مش');
+    const hit = await screen.findByRole('button', { name: /مشفى الأمل/ });
+    expect(hit).toHaveTextContent('عليه');
+    expect(hit).toHaveTextContent('250,000');
+  });
+
   it('adds a new customer on the spot and ties the contract to it', async () => {
     let sent: unknown = null;
     mockFetch({

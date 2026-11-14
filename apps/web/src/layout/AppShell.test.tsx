@@ -51,6 +51,14 @@ describe('AppShell', () => {
     expect(document.body).not.toHaveTextContent('قريباً');
   });
 
+  it('keeps the whole store name in the breadcrumb: a hover title, and two lines on a phone', async () => {
+    signedIn();
+    await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    const crumb = within(screen.getByRole('navigation', { name: 'أنت هنا' })).getByRole('link');
+    const name = within(crumb).getByTitle(makeMe().tenant.name);
+    expect(name).toHaveClass('line-clamp-2');
+  });
+
   it('gives every link and button a 48 px target under a finger', async () => {
     const { user } = signedIn();
 

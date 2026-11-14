@@ -176,12 +176,14 @@ export function SalesReportPage() {
       <ReportFilters>
         <DayField label="من" value={from} max={to} onChange={setFrom} />
         <DayField label="إلى" value={to} max={today} onChange={setTo} />
-        <SegmentedControl
-          label="التجميع"
-          options={SALES_GROUPS.map((g) => ({ value: g, label: SALES_GROUP_LABEL[g] }))}
-          value={by}
-          onValueChange={setBy}
-        />
+        <div className="max-w-full min-w-0 overflow-x-auto">
+          <SegmentedControl
+            label="التجميع"
+            options={SALES_GROUPS.map((g) => ({ value: g, label: SALES_GROUP_LABEL[g] }))}
+            value={by}
+            onValueChange={setBy}
+          />
+        </div>
         {by === 'option' ? (
           <Select label="الخيار" value={option} onChange={(e) => setOption(e.target.value)}>
             <option value="">اختر الخيار</option>

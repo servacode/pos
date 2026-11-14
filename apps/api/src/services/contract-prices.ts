@@ -265,7 +265,11 @@ export function priceListSheet(
       wholesale_minor: string | null;
       contract_minor: string | null;
     }>(sql`
-      select v.id as variant_id, p.name_ar || coalesce(' ' || v.label, '') as item, v.sku,
+      select v.id as variant_id, p.name_ar || coalesce(' ' || v.label, '') as item,
+             -- the printed «الرمز»: the item code, else its piece barcode (many items have no code)
+             coalesce(v.sku, (select b.code from barcodes b
+                               where b.tenant_id = v.tenant_id and b.variant_id = v.id
+                               order by (b.pack_qty = 1000) desc, b.created_at, b.id limit 1)) as sku,
              pr.price_minor::text, pr.wholesale_price_minor::text as wholesale_minor,
              (select cp.price_minor::text from contract_prices cp
                where cp.variant_id = v.id

@@ -82,6 +82,8 @@ export interface PaymentPanelProps {
   onWholesaleCustomer?: () => void;
   /** A customer was picked: the till asks for their contract prices and prices the cart; true when some applied */
   onContractPrices?: (customerId: string) => Promise<boolean>;
+  /** The customer was picked or removed: the cart keeps them, so a quotation, a reload or a held cart brings them back */
+  onCustomer?: (customer: { id: string; name: string } | null) => void;
   onBack: () => void;
   onCompleted: (entry: OutboxEntry) => void;
 }
@@ -128,6 +130,7 @@ export function PaymentPanel({
   staff,
   onWholesaleCustomer,
   onContractPrices,
+  onCustomer,
   salespersonId = null,
   onBack,
   onCompleted,
@@ -136,7 +139,18 @@ export function PaymentPanel({
   const digits = useDigits();
   const settings = catalog.settings!;
   const base = ctx.currency;
-  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  // A customer already on the cart (a quotation's, a rental's, a reloaded sale) is the one paying
+  const [customer, setCustomer] = useState<PickedCustomer | null>(() => {
+    const on = cart.customer;
+    if (!on) return null;
+    const known = catalog.customers.find((c) => c.id === on.id);
+    return {
+      id: on.id,
+      name: known?.name ?? on.name,
+      creditLimitMinor: known?.creditLimitMinor ?? null,
+      priceTier: known?.priceTier,
+    };
+  });
   const [history, setHistory] = useState(false);
   // A device with a warranty is sold to a known customer (the store's setting): the picker opens first
   const needsCustomer = warrantyAsksCustomer(settings.till, settings.sectors) && hasWarrantyDevice(cart);
@@ -600,6 +614,7 @@ export function PaymentPanel({
                 createdBy={cashierId}
                 onPicked={(picked) => {
                   setCustomer(picked);
+                  onCustomer?.({ id: picked.id, name: picked.name });
                   setPicking(false);
                   if (picked.priceTier === 'wholesale' && cart.priceTier !== 'wholesale') {
                     setParts([]);
@@ -630,6 +645,7 @@ export function PaymentPanel({
                     size="md"
                     onClick={() => {
                       setCustomer(null);
+                      onCustomer?.(null);
                       setParts((list) => list.filter((p) => !onAccount(p.option.method)));
                       if (onAccount(option.method)) pick(options[0]!);
                     }}

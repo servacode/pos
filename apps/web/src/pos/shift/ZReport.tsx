@@ -114,7 +114,7 @@ export function ZReport({
           </Line>
         ))}
       </Section>
-      <Section title="قسائم الهدية المباعة">
+      <Section title="قسائم الهدية المباعة وعربون التأجير">
         <Line label="العدد">{counted(activity.vouchers.count, VOUCHERS, digits)}</Line>
         {activity.vouchers.byCurrency.map((row) => (
           <Line key={row.currency} label="قيمتها">

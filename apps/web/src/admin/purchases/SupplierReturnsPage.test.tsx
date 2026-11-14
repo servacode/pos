@@ -169,6 +169,57 @@ describe('«مرتجع إلى المورد»', () => {
     });
   });
 
+  it('shows the real reason in the banner, and groups the amount while it is typed', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/suppliers': {
+        status: 200,
+        body: {
+          items: [
+            { id: 's-1', name: 'معمل الأمل', phone: null, notes: null, balanceMinor: 0, archived: false },
+          ],
+          baseCurrency: 'SYP',
+        },
+      },
+      'GET /v1/supplier-returns': { status: 200, body: { items: [] } },
+      [`GET ${productsPath({ q: 'مصل' })}`]: {
+        status: 200,
+        body: { items: [{ id: 'p-1', nameAr: 'مصل', type: 'stock' }], nextCursor: null },
+      },
+      'GET /v1/products/p-1': {
+        status: 200,
+        body: {
+          id: 'p-1',
+          nameAr: 'مصل',
+          variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [], barcodes: [] }],
+        },
+      },
+      'POST /v1/supplier-returns': {
+        status: 400,
+        body: {
+          error: {
+            code: 'validation_failed',
+            message: 'تحقّق من الحقول المظلّلة.',
+            fields: { 'lines.0.serials': 'الرقم ABC-1 ليس عندنا في المخزون.' },
+          },
+        },
+      },
+    });
+    const { user } = renderApp('/supplier-returns');
+    await screen.findByRole('option', { name: 'معمل الأمل' });
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'مصل');
+    await user.click(await screen.findByRole('button', { name: 'مصل' }));
+    await user.type(await screen.findByLabelText('كمية مصل'), '5');
+    const amount = screen.getByLabelText('مبلغ مصل');
+    await user.type(amount, '100000');
+    expect(amount).toHaveValue('100,000');
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('الرقم ABC-1 ليس عندنا في المخزون.');
+    expect(alert).not.toHaveTextContent('تحقّق من الحقول المظلّلة');
+  });
+
   it.each([
     [true, 1],
     [false, 0],

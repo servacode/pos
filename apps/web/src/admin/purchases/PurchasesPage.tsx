@@ -1034,7 +1034,7 @@ function PaymentForm({
           </Alert>
         ) : null}
         <RadioGroup legend="من أين">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2">
             {(['cash', 'bank', 'cheque'] as const).map((m) => (
               <ChoiceCard
                 key={m}
@@ -1049,7 +1049,7 @@ function PaymentForm({
           </div>
         </RadioGroup>
         {method === 'cheque' ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <TextField label="البنك" value={bank} onChange={(e) => setBank(e.target.value)} required />
             <TextField
               label="رقم الشيك"
@@ -1060,7 +1060,13 @@ function PaymentForm({
               inputClassName="num"
               required
             />
-            <DateField label="تاريخ الاستحقاق" value={dueDate} onChange={setDueDate} required />
+            <DateField
+              label="تاريخ الاستحقاق"
+              value={dueDate}
+              onChange={setDueDate}
+              required
+              className="sm:col-span-2"
+            />
           </div>
         ) : null}
         <div className="flex flex-wrap items-center justify-end gap-3 pt-1">

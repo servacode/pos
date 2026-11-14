@@ -142,7 +142,14 @@ export function DayField({
   max?: string;
 }) {
   return (
-    <DateField label={label} value={value} max={max} required onChange={onChange} className="min-w-44" />
+    <DateField
+      label={label}
+      value={value}
+      max={max}
+      required
+      onChange={onChange}
+      className="min-w-40 max-w-full"
+    />
   );
 }
 

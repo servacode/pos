@@ -21,6 +21,7 @@ import {
   BarcodeIcon,
   Button,
   CalendarIcon,
+  CheckIcon,
   CartIcon,
   CartLine,
   CashierShell,
@@ -90,6 +91,7 @@ import { quotationInputOf, saveQuotation } from '../quotations/api';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
 import { modelPieces, orderPieces } from './models';
+import { UnitPanel } from './UnitPanel';
 import { VariantPicker } from './VariantPicker';
 import { TableBoard } from './TableBoard';
 import { CancelSentLine } from '../hall/CancelSentLine';
@@ -133,7 +135,8 @@ export type SaleMode =
   | { kind: 'check' }
   | { kind: 'serial'; lineNo: number }
   | { kind: 'rx' }
-  | { kind: 'pick'; productId: string };
+  | { kind: 'pick'; productId: string }
+  | { kind: 'unit'; variantId: string };
 
 export interface SaleScreenProps {
   statusBar: ReactNode;
@@ -557,6 +560,22 @@ export function SaleScreen(props: SaleScreenProps) {
     return () => clearTimeout(timer);
   }, [removed]);
 
+  // A quotation opened as the cart keeps the prices as offered; when its customer has contract prices
+  // the till only says so («سعر العقد»), it does not price the lines again
+  const quotedFor = cart.quotation && !cart.contractPriced ? (cart.customer?.id ?? null) : null;
+  useEffect(() => {
+    const token = pos.device.token;
+    if (!quotedFor || !token || !pos.online()) return;
+    let alive = true;
+    void fetchContractPrices(quotedFor, token, pos.fetch).then((prices) => {
+      if (alive && prices.length > 0)
+        setCart((c) => (c.customer?.id === quotedFor ? { ...c, contractPriced: true } : c));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [quotedFor, pos, setCart]);
+
   const pieces = useMemo(() => modelPieces(catalog.items), [catalog.items]);
   // «سعر الجملة» shows only where some item has a wholesale price (a clothing shop has none).
   const hasWholesale = useMemo(
@@ -597,10 +616,24 @@ export function SaleScreen(props: SaleScreenProps) {
 
   // The tiles and the search field call these; they stay the same function while the cart changes,
   // so the memoised grid is not drawn again for it.
-  const handlers = useRef({ add, scan, showPrice });
-  handlers.current = { add, scan, showPrice };
+  // The boxes an item is sold in (its pack barcodes, one per box size), for the piece-or-box question
+  const packsByVariant = useMemo(() => {
+    const map = new Map<string, BarcodeHit[]>();
+    for (const hit of catalog.byBarcode.values()) {
+      if (hit.barcode.packQty === 1000) continue;
+      const list = map.get(hit.item.variantId) ?? [];
+      if (!list.some((h) => h.barcode.packQty === hit.barcode.packQty)) list.push(hit);
+      map.set(hit.item.variantId, list);
+    }
+    return map;
+  }, [catalog.byBarcode]);
+  const handlers = useRef({ add, scan, showPrice, packsByVariant });
+  handlers.current = { add, scan, showPrice, packsByVariant };
   const pickItem = useCallback((item: CatalogItem, hit?: BarcodeHit | null) => {
     if (checkingRef.current) handlers.current.showPrice(item, hit);
+    else if (!hit && handlers.current.packsByVariant.has(item.variantId))
+      // Picked with no barcode: the piece or which box?
+      setMode({ kind: 'unit', variantId: item.variantId });
     else handlers.current.add(item, hit);
   }, []);
   const pickModel = useCallback(
@@ -800,7 +833,10 @@ export function SaleScreen(props: SaleScreenProps) {
   const totals = priced?.priced.totals;
   const lineCount = cart.lines.length;
   const wholesaleOn = cart.priceTier === 'wholesale';
-  const showWholesale = (session.permissions.has('sale.wholesale') && hasWholesale) || wholesaleOn;
+  const showWholesale =
+    (session.permissions.has('sale.wholesale') && hasWholesale) ||
+    wholesaleOn ||
+    Boolean(cart.contractPriced);
   const canHoldForCustomer = priced !== null && !cart.onlineOrder;
   const ticketTools =
     waitingOnline.length > 0 || canHoldForCustomer || priced !== null || showWholesale || props.heldCount > 0;
@@ -903,9 +939,13 @@ export function SaleScreen(props: SaleScreenProps) {
             ) : null}
             {showWholesale ? (
               <Button
-                variant="ghost"
+                // A switch, not a status: lit with a tick when on, an outlined dashed button when off
+                variant={wholesaleOn ? 'primary' : 'secondary'}
                 size="md"
                 aria-pressed={wholesaleOn}
+                icon={wholesaleOn ? <CheckIcon size={16} /> : undefined}
+                className={wholesaleOn ? undefined : 'border-dashed'}
+                title={wholesaleOn ? 'اضغط للرجوع إلى سعر المفرق' : 'اضغط لتسعير السلة بسعر الجملة'}
                 onClick={() =>
                   setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
                 }
@@ -1034,7 +1074,7 @@ export function SaleScreen(props: SaleScreenProps) {
           </Button>
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-32 flex-1 overflow-y-auto">
         {lineCount === 0 ? (
           <div className="h-full p-4">
             <EmptyState
@@ -1297,7 +1337,8 @@ export function SaleScreen(props: SaleScreenProps) {
           invoiceNeeds ||
           guard.blocks.length + guard.stockBlocks.length + guard.stockWarns.length > 0 ||
           batchWaits ? (
-            <div className="flex flex-col gap-2">
+            // Capped and scrolling by itself: two warnings must not push the open line's buttons out of the panel
+            <div className="flex max-h-[26dvh] flex-col gap-2 overflow-y-auto overscroll-contain">
               <BatchBanner
                 blocks={guard.blocks}
                 approvals={batchWaits ? guard.approvals : []}
@@ -1387,6 +1428,13 @@ export function SaleScreen(props: SaleScreenProps) {
               staff={staff}
               salespersonId={seller !== session.userId ? seller : null}
               onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
+              onCustomer={(picked) =>
+                setCart((c) => {
+                  if (picked) return { ...c, customer: picked };
+                  const { customer: _gone, ...rest } = c;
+                  return rest;
+                })
+              }
               onContractPrices={async (customerId) => {
                 // A hospital's or clinic's contract prices (03 › أسعار العقود); none offline
                 const prices = pos.device.token
@@ -1556,6 +1604,18 @@ export function SaleScreen(props: SaleScreenProps) {
               }),
             );
             setMode({ kind: 'items' });
+          }}
+          onCancel={() => setMode({ kind: 'items' })}
+        />
+      ) : effectiveMode.kind === 'unit' && catalog.byVariant.has(effectiveMode.variantId) ? (
+        <UnitPanel
+          key={effectiveMode.variantId}
+          item={catalog.byVariant.get(effectiveMode.variantId)!}
+          packs={packsByVariant.get(effectiveMode.variantId) ?? []}
+          onPick={(hit) => {
+            const item = catalog.byVariant.get(effectiveMode.variantId)!;
+            setMode({ kind: 'items' });
+            add(item, hit);
           }}
           onCancel={() => setMode({ kind: 'items' })}
         />

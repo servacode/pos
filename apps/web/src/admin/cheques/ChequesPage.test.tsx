@@ -173,4 +173,29 @@ describe('cheque reminders', () => {
     await user.click(within(sure).getByRole('button', { name: 'تراجع' }));
     expect(requestsTo('POST', '/v1/cheques/actions')).toHaveLength(0);
   });
+  it('counts the customers cheques and the supplier cheques apart, so the header matches the amount card', async () => {
+    const items = [
+      cheque({ sourceId: 'a', reference: 'IN-1' }),
+      cheque({ sourceId: 'b', reference: 'IN-2' }),
+      cheque({
+        sourceId: 'c',
+        sourceType: 'supplier_payment',
+        direction: 'out',
+        reference: 'OUT-1',
+        customerName: null,
+        supplierName: 'مورد المواد',
+      }),
+    ];
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/cheques?status=pending': () => ({ status: 200, body: { items, baseCurrency: 'SYP' } }),
+    });
+    renderApp('/cheques');
+    const customers = (await screen.findByText('شيكات الزبائن')).parentElement as HTMLElement;
+    const suppliers = screen.getByText('شيكات صادرة للموردين').parentElement as HTMLElement;
+    expect(customers).toHaveTextContent('2');
+    expect(suppliers).toHaveTextContent('1');
+    expect(screen.queryByText('عدد الشيكات')).not.toBeInTheDocument();
+  });
 });

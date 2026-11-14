@@ -1,4 +1,4 @@
-import type { ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
+import type { Approval, ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
 import { buildReturnPayload } from '@serva/core/sale-return';
 import type { ContractPriceForTill } from '@serva/core/contracts/contract-prices';
 import type { MaintenanceContract } from '@serva/core/contracts/maintenance';
@@ -12,6 +12,8 @@ export interface ReturningRental {
   version: number;
   /** The deposit left after the rent, handed back in cash with this sale; absent: it stays on the voucher */
   cashBackMinor?: number;
+  /** A manager's code, when the cashier cannot refund by themselves */
+  cashBackApproval?: Approval;
 }
 
 /** The cart's mark that its sale bills a maintenance contract */
@@ -80,6 +82,7 @@ export function depositBackReturn(input: {
   sale: { id: string; number: string; payload: Record<string, unknown> };
   shiftId: string;
   cashierId: string;
+  approval?: Approval | null;
 }): ReturnPayload | null {
   const payload = input.sale.payload as unknown as SalePayload;
   const line = payload.lines.find((l) => l.name.startsWith(DEPOSIT_BACK_NAME));
@@ -93,5 +96,6 @@ export function depositBackReturn(input: {
     reason: 'ردّ باقي عربون التأجير',
     picks: [{ saleLineNo: line.lineNo, qty: line.qty }],
     refundMethod: 'cash',
+    approval: input.approval ?? null,
   });
 }

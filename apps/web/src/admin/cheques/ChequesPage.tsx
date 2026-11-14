@@ -133,6 +133,8 @@ export function ChequesPage() {
   const pendingTotal = (items ?? [])
     .filter((c) => c.status === 'pending' && c.direction !== 'out')
     .reduce((sum, c) => sum + c.amountMinor, 0);
+  const incomingCount = (items ?? []).filter((c) => c.direction !== 'out').length;
+  const outgoingCount = (items ?? []).length - incomingCount;
   // A number of the tiles: a placeholder while the list loads, a dash when it could not.
   const kpi = (value: ReactNode) => (items ? value : error ? '—' : <Skeleton className="h-9 w-24" />);
 
@@ -273,7 +275,7 @@ export function ChequesPage() {
           description="كل شيك قبضه الكاشير من بيع أو من دفعة زبون، حتى يُحصَّل في البنك أو يرتجع."
         />
         {error && items ? <Alert tone="error">{error}</Alert> : null}
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <StatTile
             label="تحت التحصيل"
             icon={<ClockIcon />}
@@ -281,10 +283,16 @@ export function ChequesPage() {
             value={kpi(<Money minor={pendingTotal} currency={base} />)}
           />
           <StatTile
-            label="عدد الشيكات"
+            label="شيكات الزبائن"
             icon={<ChequeIcon />}
             iconTone="neutral"
-            value={kpi(<bdi className="num">{items?.length ?? 0}</bdi>)}
+            value={kpi(<bdi className="num">{incomingCount}</bdi>)}
+          />
+          <StatTile
+            label="شيكات صادرة للموردين"
+            icon={<ChequeIcon />}
+            iconTone="neutral"
+            value={kpi(<bdi className="num">{outgoingCount}</bdi>)}
           />
         </div>
         <div className="flex flex-col gap-3">

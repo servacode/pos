@@ -57,7 +57,7 @@ export function CashierShell({
       <div
         className={cn(
           framed ? 'h-full' : 'h-dvh',
-          'grid grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-canvas',
+          'grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-canvas',
         )}
       >
         {statusBar}

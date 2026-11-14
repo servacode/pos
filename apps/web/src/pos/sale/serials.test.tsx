@@ -47,6 +47,44 @@ function phoneSets(withStock = true) {
 }
 
 describe('serial numbers at the till', () => {
+  it('lists the numbers in stock for the product (not sold, not another product) and picks one on a tap', async () => {
+    const { user } = await saleScreen({ sets: phoneSets() });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    const panel = await screen.findByRole('region', { name: 'الرقم التسلسلي' });
+    const list = within(panel).getByRole('list', { name: 'الأرقام المتوفرة' });
+    const shown = within(list)
+      .getAllByRole('listitem')
+      .map((li) => plain(li));
+    expect(shown).toEqual(['IMEI351', 'IMEI352']);
+    await user.click(within(list).getByRole('button', { name: 'IMEI352' }));
+    expect(within(panel).getByLabelText('الرقم التسلسلي للجهاز')).toHaveValue('IMEI352');
+    await user.click(within(panel).getByRole('button', { name: 'احفظ الرقم' }));
+    expect(plain(cartLines())).toContain('IMEI352');
+  });
+
+  it('asks piece or box when an item with a box barcode is picked from the grid', async () => {
+    const sets = posSets();
+    sets.barcodes = [
+      ...sets.barcodes,
+      {
+        id: '0192a3b4-c5d6-7e8f-9a0b-0000000000ee',
+        variantId: PRODUCTS.oil.variant.id,
+        code: '6291001999999',
+        kind: 'standard' as const,
+        packQty: 12_000,
+        packName: 'علبة',
+        packPriceMinor: null,
+        version: 1,
+      },
+    ];
+    const { user } = await saleScreen({ sets });
+    const grid = await screen.findByRole('list', { name: 'الأصناف' });
+    await user.click(within(grid).getByText(/زيت دوار الشمس/));
+    const panel = await screen.findByRole('region', { name: 'اختر الوحدة' });
+    await user.click(within(panel).getByRole('button', { name: /علبة/ }));
+    expect(plain(cartLines())).toContain('علبة');
+  });
+
   it('asks for the IMEI of each phone, a line each, and pays only once every phone has one', async () => {
     const { user, outbox } = await saleScreen({ sets: phoneSets() });
     await scan(user, PRODUCTS.oil.barcode!.code);

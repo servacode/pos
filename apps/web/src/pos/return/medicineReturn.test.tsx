@@ -72,8 +72,11 @@ describe('«مرتجع» of a medicine', () => {
   it('by default takes a sealed box back only when the cashier ticks that it is sealed', async () => {
     const { user, outbox } = await openReturn(pharmacySets({ prescription: 'optional' }, { medicine: true }));
     await user.click(screen.getByRole('button', { name: /زد زيت/ }));
+    await user.click(screen.getByText('الزبون غيّر رأيه'));
     const record = screen.getByRole('button', { name: 'سجّل المرتجع' });
     expect(record).toBeDisabled();
+    // The button says why it is off
+    expect(screen.getByText(/أكّد أن العلبة مغلقة وسليمة/)).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: /مغلقة وسليمة/ }));
     expect(record).toBeEnabled();
     await user.click(record);
@@ -103,6 +106,14 @@ describe('«مرتجع» of a medicine', () => {
     expect(screen.getByRole('button', { name: 'سجّل المرتجع' })).toBeEnabled();
   });
 
+  it('does not ask the sealed tick when the reason is damaged or expired', async () => {
+    const { user } = await openReturn(pharmacySets({ prescription: 'optional' }, { medicine: true }));
+    await user.click(screen.getByRole('button', { name: /زد زيت/ }));
+    await user.click(screen.getByText('تالف أو منتهي الصلاحية'));
+    expect(screen.queryByRole('checkbox', { name: /مغلقة وسليمة/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'سجّل المرتجع' })).toBeEnabled();
+  });
+
   it('never takes a controlled drug back, whatever the policy, unless the store allows it', async () => {
     const { user } = await openReturn(
       pharmacySets({ prescription: 'optional', returns: 'allowed' }, { controlled: true }),
@@ -117,6 +128,7 @@ describe('«مرتجع» of a medicine', () => {
       pharmacySets({ prescription: 'optional', controlledReturns: true }, { controlled: true }),
     );
     await user.click(screen.getByRole('button', { name: /زد زيت/ }));
+    await user.click(screen.getByText('الزبون غيّر رأيه'));
     expect(screen.getByRole('button', { name: 'سجّل المرتجع' })).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: /مغلقة وسليمة/ }));
     expect(screen.getByRole('button', { name: 'سجّل المرتجع' })).toBeEnabled();

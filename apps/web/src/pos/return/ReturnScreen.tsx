@@ -45,6 +45,7 @@ import type { StaffMember, StaffSession } from '../staff/staff';
 import { hasBlockedPick, medicineRulesOf, MedicineReturnNote, sealedConfirmed } from './medicineReturn';
 import {
   matchesNumber,
+  DAMAGED_REASON,
   returnableSales,
   returnReasons,
   returnWindowOf,
@@ -194,12 +195,29 @@ export function ReturnScreen({
     }
   }, [current, picks, shift.id, session.userId, why, method, reference]);
 
+  // A damaged or expired box is never «sealed»: that reason does not ask for the tick
+  const damaged = reason === DAMAGED_REASON;
+  const sealedOk = damaged || sealedConfirmed(picks, medicineRules, sealed);
   const ready =
     draft !== null &&
     why.length > 0 &&
     (!needsReference || reference.trim().length > 0) &&
-    sealedConfirmed(picks, medicineRules, sealed) &&
+    sealedOk &&
     !hasBlockedPick(picks, medicineRules);
+  // Why the button is off, said under it
+  const notReadyBecause = ready
+    ? null
+    : picks.length === 0
+      ? 'اختر الكمية المراد إرجاعها من سطر واحد على الأقل.'
+      : hasBlockedPick(picks, medicineRules)
+        ? 'سطر محدد لا يقبله المحل مرتجعاً. أزل كميته.'
+        : why.length === 0
+          ? 'اكتب سبب الإرجاع.'
+          : !sealedOk
+            ? `أكّد أن العلبة مغلقة وسليمة، أو اختر السبب «${DAMAGED_REASON}».`
+            : needsReference && reference.trim().length === 0
+              ? 'اكتب رقم المرجع أو الموافقة.'
+              : 'راجع الأسطر والكميات.';
   const canRefund = session.permissions.has('sale.refund');
   const accountCustomer = current?.sale.customerId ?? null;
   useEffect(() => {
@@ -544,7 +562,9 @@ export function ReturnScreen({
                           </Button>
                         </span>
                       )}
-                      {line.remainingQty > 0 && medicineRules.has(line.saleLineNo) ? (
+                      {line.remainingQty > 0 &&
+                      medicineRules.has(line.saleLineNo) &&
+                      !(damaged && medicineRules.get(line.saleLineNo)!.kind === 'sealed') ? (
                         <MedicineReturnNote
                           rule={medicineRules.get(line.saleLineNo)!}
                           name={line.name}
@@ -715,6 +735,11 @@ export function ReturnScreen({
                   >
                     {confirming ? 'نعم، سجّل' : exchange ? 'سجّل وبِع البديل' : 'سجّل المرتجع'}
                   </Button>
+                  {notReadyBecause ? (
+                    <p role="status" className="text-center text-sm text-ink-muted">
+                      {notReadyBecause}
+                    </p>
+                  ) : null}
                   {confirming ? (
                     <Button variant="ghost" size="lg" fullWidth onClick={() => setConfirming(false)}>
                       لا، ارجع

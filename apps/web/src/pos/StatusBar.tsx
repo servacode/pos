@@ -104,8 +104,10 @@ export function StatusBar({
       <LogoMark className="xl:hidden" />
       {device ? (
         <>
-          <Divider />
-          <p className="flex min-w-24 shrink-[2] flex-col">
+          <span className="hidden sm:contents">
+            <Divider />
+          </span>
+          <p className="hidden min-w-24 shrink-[2] flex-col sm:flex">
             <span className="truncate text-sm/tight font-semibold text-ink">{device.storeName}</span>
             <span className="truncate text-xs/tight text-ink-muted">
               {device.branchName} · {device.deviceName}
@@ -163,7 +165,7 @@ export function StatusBar({
           {/* The long sentence gives way (shortened with its full text on hover) so the store and the person keep their names */}
           <span
             title={connectionText(online, outbox?.pending ?? 0)}
-            className="block max-w-40 truncate min-[1700px]:max-w-none"
+            className="sr-only sm:not-sr-only sm:block sm:max-w-40 sm:truncate min-[1700px]:max-w-none"
           >
             {connectionText(online, outbox?.pending ?? 0)}
           </span>
@@ -174,8 +176,10 @@ export function StatusBar({
           </span>
         ) : null}
       </span>
-      <Divider />
-      <Clock />
+      <span className="hidden sm:contents">
+        <Divider />
+        <Clock />
+      </span>
       <span className="flex shrink-0 items-center gap-1">
         <ThemeToggle size="md" />
         {menu}

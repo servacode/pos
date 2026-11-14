@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HallOrder } from '@serva/core';
-import type { SalePayload } from '@serva/core/contracts/documents';
+import type { Approval, SalePayload } from '@serva/core/contracts/documents';
 import { formatMoney } from '@serva/core/money';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
@@ -102,6 +102,14 @@ const CashMovementScreen = lazyChunk(() =>
 export { DEFAULT_IDLE_MINUTES };
 
 /** Whether the document took cash into the drawer: then the drawer opens after printing */
+/** The customer a rental or a maintenance contract names, when it has one, to carry on the cart */
+function rentalCustomer(
+  id: string | null | undefined,
+  name: string,
+): { customer?: { id: string; name: string } } {
+  return id ? { customer: { id, name } } : {};
+}
+
 function paidInCash(data: ReceiptData): boolean {
   const payload = data.doc.payload as {
     payments?: { method: string }[];
@@ -284,7 +292,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       setCartState((c) => {
         const next = update(c);
         if (!(c.lines.length > 0 && next.lines.length === 0)) return next;
-        const { contractPriced: _gone, ...rest } = next;
+        // An emptied cart forgets its customer and contract prices; nothing carries to the next sale
+        const { contractPriced: _gone, customer: _who, ...rest } = next;
         return next.priceTier === 'wholesale' ? { ...rest, priceTier: 'retail' } : rest;
       }),
     [],
@@ -469,7 +478,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     const returning = cartRef.current.rental;
     if (returning && pos.device.token) void returnRental(returning, pos.device.token, pos.fetch);
     // The rest of the deposit goes back in cash: the deposit line of this sale is returned now
-    if (returning?.cashBackMinor && shift) void handBackDeposit(entry, shift.id);
+    if (returning?.cashBackMinor && shift) void handBackDeposit(entry, shift.id, returning.cashBackApproval);
     const billing = cartRef.current.maintenance;
     if (billing && pos.device.token) void markContractBilled(billing, pos.device.token, pos.fetch);
     // A sale made from a quotation: the quotation turns «حُوّل إلى فاتورة»
@@ -496,11 +505,12 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   }
 
   /** Saves the cash return of the rental sale's deposit line, and tells the cashier what to hand over */
-  async function handBackDeposit(entry: OutboxEntry, shiftId: string) {
+  async function handBackDeposit(entry: OutboxEntry, shiftId: string, cashBackApproval?: Approval) {
     const ret = depositBackReturn({
       sale: { id: entry.doc.id, number: entry.doc.number ?? entry.doc.id, payload: entry.doc.payload },
       shiftId,
       cashierId: session.userId,
+      approval: cashBackApproval ?? null,
     });
     try {
       if (!ret) throw new Error('no deposit line');
@@ -982,7 +992,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 session={session}
                 shift={shift}
                 onBack={() => setView('sale')}
-                onReturn={(rental, cashBack) => {
+                staff={staff}
+                onReturn={(rental, cashBack, approval) => {
                   // The rent is sold as the «إيجار» service; the deposit voucher pays part of it. With
                   // «ردّ الباقي نقداً» a second line carries the rest of the deposit, so the voucher
                   // pays it all and that line is returned for cash once the sale is saved
@@ -1010,11 +1021,14 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                     lines: left > 0 ? [...priced, ...back] : priced,
                     nextLineNo: left > 0 ? line.nextLineNo + 1 : line.nextLineNo,
                     ...(rental.depositVoucher ? { voucher: rental.depositVoucher } : {}),
+                    // The renter goes with the sale: the receipt names them
+                    ...rentalCustomer(rental.customerId, rental.customerName),
                     rental: {
                       id: rental.id,
                       number: rental.number,
                       version: rental.version,
                       ...(left > 0 ? { cashBackMinor: left } : {}),
+                      ...(left > 0 && approval ? { cashBackApproval: approval } : {}),
                     },
                   }));
                   setDone(null);
@@ -1035,6 +1049,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                       wholesalePriceMinor: null,
                       priceCurrency: contract.currency,
                     })),
+                    // The contract's customer goes with the sale: the receipt names them
+                    ...rentalCustomer(contract.customerId, contract.customerName),
                     maintenance: { id: contract.id, number: contract.number, version: contract.version },
                   }));
                   setDone(null);

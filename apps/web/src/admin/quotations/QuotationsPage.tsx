@@ -132,12 +132,14 @@ export function QuotationsPage() {
           }
         />
         <div className="flex flex-wrap items-center gap-3">
-          <SegmentedControl
-            label="حالة العرض"
-            value={status}
-            onValueChange={setStatus}
-            options={FILTERS.map((f) => ({ value: f.value, label: f.label }))}
-          />
+          <div className="max-w-full min-w-0 overflow-x-auto">
+            <SegmentedControl
+              label="حالة العرض"
+              value={status}
+              onValueChange={setStatus}
+              options={FILTERS.map((f) => ({ value: f.value, label: f.label }))}
+            />
+          </div>
           <SearchField
             label="ابحث برقم العرض أو اسم الزبون"
             value={q}

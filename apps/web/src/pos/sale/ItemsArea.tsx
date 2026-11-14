@@ -1,8 +1,11 @@
 import { memo, useMemo, useState, type RefObject } from 'react';
 import type { CurrencyCode } from '@serva/core/currencies';
+import { batchState } from '@serva/core/pharmacy';
+import { businessDateOf } from '@serva/core/sale';
 import { toLatinDigits } from '@serva/core/text';
 import { dayText } from '../../lib/dates';
 import {
+  Badge,
   BarcodeIcon,
   Button,
   CloseIcon,
@@ -196,7 +199,16 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
               <Kbd>Esc</Kbd>
             </Button>
           </div>
-          {props.check ? <PriceCheckCard check={props.check} /> : null}
+          {props.check ? (
+            <PriceCheckCard
+              check={props.check}
+              today={businessDateOf(
+                Date.now(),
+                props.catalog.settings?.timezone ?? 'UTC',
+                props.catalog.settings?.businessDayCutoff ?? '00:00',
+              )}
+            />
+          ) : null}
         </section>
       ) : null}
       {props.notice ? (
@@ -371,7 +383,7 @@ const ModelTile = memo(function ModelTile({
 });
 
 /** «سعر صنف»: the product's name, then a row for each size and colour with its price and what is left. */
-export function PriceCheckCard({ check }: { check: PriceCheck }) {
+export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: string }) {
   const digits = useDigits();
   // The product's name is the heading: a piece shows only what sets it apart (size, colour), never the name again
   const label = (piece: CatalogItem) =>
@@ -398,7 +410,17 @@ export function PriceCheckCard({ check }: { check: PriceCheck }) {
       ) : null}
       <ul aria-label="أسعار الصنف" className="flex flex-col divide-y divide-line">
         {check.pieces.map((piece) => {
-          const left = piece.stockQty ?? null;
+          // What can be sold: a piece that keeps batches leaves out the expired and blocked ones (display only)
+          const batched = today && Array.isArray(piece.stockBatches) ? piece.stockBatches : null;
+          const unsellable = batched
+            ? batched.reduce(
+                (sum, b) => sum + (['expired', 'blocked'].includes(batchState(b, today!)) ? b.qty : 0),
+                0,
+              )
+            : 0;
+          const left = batched
+            ? batched.reduce((sum, b) => sum + (batchState(b, today!) === 'ok' ? b.qty : 0), 0)
+            : (piece.stockQty ?? null);
           return (
             <li
               key={piece.variantId}
@@ -433,6 +455,11 @@ export function PriceCheckCard({ check }: { check: PriceCheck }) {
                           ? stockInPacks(left, check.pack, digits, (q) => formatQuantity(q, digits))
                           : formatQuantity(left, digits)
                       }`}
+                {unsellable > 0 ? (
+                  <span className="block text-xs font-semibold text-danger-ink">
+                    غير صالح للبيع {formatQuantity(unsellable, digits)} (منتهية أو موقوفة)
+                  </span>
+                ) : null}
               </span>
             </li>
           );
@@ -440,24 +467,53 @@ export function PriceCheckCard({ check }: { check: PriceCheck }) {
       </ul>
       {check.pieces
         .filter((p) => p.variantId === check.focus || check.pieces.length === 1)
-        .map((p) =>
-          p.shelfBatches && p.shelfBatches.length > 0 ? (
+        .map((p) => {
+          // Every batch with what is left in it; the expired and blocked ones are marked, not hidden
+          const rows =
+            today && Array.isArray(p.stockBatches)
+              ? [...p.stockBatches]
+                  .filter((b) => b.qty > 0)
+                  .sort((a, b) => (a.expiry ?? '9999').localeCompare(b.expiry ?? '9999'))
+                  .map((b) => ({
+                    batchNo: b.batchNo,
+                    expiry: b.expiry,
+                    qty: b.qty as number | null,
+                    state: batchState(b, today),
+                  }))
+              : (p.shelfBatches ?? []).map((b) => ({
+                  batchNo: b.batchNo,
+                  expiry: b.expiry as string | null,
+                  qty: null as number | null,
+                  state: today && b.expiry < today ? ('expired' as const) : ('ok' as const),
+                }));
+          return rows.length > 0 ? (
             <ul
               key={p.variantId}
               aria-label="الدفعات وتواريخ الصلاحية"
               className="flex flex-col gap-1 text-sm"
             >
-              {p.shelfBatches.map((b, i) => (
-                <li key={`${b.batchNo ?? ''}-${i}`} className="flex gap-2 text-ink-muted">
+              {rows.map((b, i) => (
+                <li
+                  key={`${b.batchNo ?? ''}-${i}`}
+                  className={cn(
+                    'flex flex-wrap items-center gap-x-2',
+                    b.state === 'ok' ? 'text-ink-muted' : 'text-danger-ink',
+                  )}
+                >
                   <span>دفعة {b.batchNo ? <bdi dir="ltr">{b.batchNo}</bdi> : '—'}</span>
-                  <span>
-                    · تنتهي <bdi>{dayText(b.expiry, digits)}</bdi>
-                  </span>
+                  {b.expiry ? (
+                    <span>
+                      · تنتهي <bdi>{dayText(b.expiry, digits)}</bdi>
+                    </span>
+                  ) : null}
+                  {b.qty !== null ? <span>· الكمية {formatQuantity(b.qty, digits)}</span> : null}
+                  {b.state === 'expired' ? <Badge tone="danger">منتهية</Badge> : null}
+                  {b.state === 'blocked' ? <Badge tone="danger">موقوفة</Badge> : null}
                 </li>
               ))}
             </ul>
-          ) : null,
-        )}
+          ) : null;
+        })}
     </div>
   );
 }

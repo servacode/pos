@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   SupplierListResponse,
   SupplierReturnDetail,
@@ -19,6 +19,7 @@ import {
   EmptyState,
   formatQuantity,
   Money,
+  NumberField,
   PageHeader,
   RadioGroup,
   Select,
@@ -95,6 +96,11 @@ export function SupplierReturnsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
+  const errorBox = useRef<HTMLDivElement>(null);
+  // The reason sits at the top while the button is at the bottom: bring it into view
+  useEffect(() => {
+    if (error) errorBox.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [error]);
   const [done, setDone] = useState<SupplierReturnDetail | null>(null);
 
   const load = useCallback(() => {
@@ -155,8 +161,11 @@ export function SupplierReturnsPage() {
       setNote('');
       load();
     } catch (e) {
-      setError(errorMessage(e));
-      setFields(e instanceof ApiError ? (e.fields ?? {}) : {});
+      const named = e instanceof ApiError ? (e.fields ?? {}) : {};
+      // The banner carries the real reason, not only «تحقّق من الحقول المظلّلة»
+      const reasons = [...new Set(Object.values(named))];
+      setError(reasons.length > 0 ? reasons.join(' · ') : errorMessage(e));
+      setFields(named);
     } finally {
       setSaving(false);
     }
@@ -216,7 +225,11 @@ export function SupplierReturnsPage() {
               description="اختر المورد وطريقة الاسترداد، ثم أضف القطع الراجعة."
             />
             <div className="flex flex-col gap-5">
-              {error ? <Alert tone="error">{error}</Alert> : null}
+              {error ? (
+                <div ref={errorBox}>
+                  <Alert tone="error">{error}</Alert>
+                </div>
+              ) : null}
               {done ? (
                 <Alert tone="success">
                   سُجّل المرتجع {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
@@ -355,19 +368,16 @@ export function SupplierReturnsPage() {
                       </div>
                       <div className="col-span-3 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
                         <Caption>المبلغ (فارغ: بكلفتها)</Caption>
-                        <TextField
+                        <NumberField
                           label={`مبلغ ${l.name}`}
                           hideLabel
                           placeholder="بكلفتها"
-                          dir="ltr"
-                          inputMode="decimal"
+                          decimals={2}
                           value={l.amount}
-                          onChange={(e) =>
-                            setLines((all) =>
-                              all.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)),
-                            )
+                          onValueChange={(amount) =>
+                            setLines((all) => all.map((x, j) => (j === i ? { ...x, amount } : x)))
                           }
-                          inputClassName="num"
+                          error={fields[`lines.${i}.amountMinor`]}
                         />
                       </div>
                       <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto">

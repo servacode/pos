@@ -228,6 +228,70 @@ describe('«التأجير» on the till', () => {
     expect(outbox.some((e) => e.type === 'return')).toBe(false);
   });
 
+  it('a cashier without «مرتجع» hands the rest of the deposit back in cash only with a manager code', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const { fetch } = server([], { ...RENTAL, depositMinor: 100_000, chargeMinor: 20_000 });
+    const { user, outbox } = renderPos({ local, fetch, sets: withServices() });
+    await openRentals(user);
+    const card = await screen.findByRole('listitem', { name: 'التأجير RNT-000001' });
+    // The switch is there, off, and says a manager's code is needed
+    const sw = within(card).getByRole('switch', { name: 'ردّ الباقي نقداً' });
+    expect(sw).not.toBeChecked();
+    expect(plain(card)).toContain('يحتاج رمز مدير');
+    await user.click(sw);
+    await user.click(within(card).getByRole('button', { name: 'استلام الجهاز' }));
+    const code = await screen.findByRole('region', { name: 'رمز المدير' });
+    expect(code).toBeInTheDocument();
+    await user.keyboard(PINS[ids.maryam]!);
+    await screen.findByRole('list', { name: 'الأصناف' });
+    expect(screen.getByText(/ردّ العربون · RNT-000001/)).toBeInTheDocument();
+    await user.keyboard('{F12}');
+    await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(screen.getByRole('button', { name: 'نقد بالليرة' }));
+    await user.keyboard('1000{Enter}');
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    await vi.waitFor(() => expect(outbox.some((e) => e.type === 'return')).toBe(true));
+    const back = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as {
+      approval: { userId: string } | null;
+    };
+    expect(back.approval?.userId).toBe(ids.maryam);
+  });
+
+  it('keeps the rest on the voucher for that cashier when the switch stays off', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const { fetch } = server([], { ...RENTAL, depositMinor: 100_000, chargeMinor: 20_000 });
+    const { user, outbox } = renderPos({ local, fetch, sets: withServices() });
+    await openRentals(user);
+    const card = await screen.findByRole('listitem', { name: 'التأجير RNT-000001' });
+    await user.click(within(card).getByRole('button', { name: 'استلام الجهاز' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    expect(screen.queryByText(/ردّ العربون/)).not.toBeInTheDocument();
+    expect(outbox.some((e) => e.type === 'return')).toBe(false);
+  });
+
+  it('the maintenance bill carries the contract’s customer to the payment panel', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const stub = server();
+    const contract = { ...CONTRACT, customerId: ids.abuKhaled, customerName: 'أبو خالد' };
+    const fetch = (async (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url) === '/v1/device/maintenance'
+        ? new Response(JSON.stringify({ items: [contract] }), { status: 200 })
+        : stub.fetch(url, init)) as unknown as typeof globalThis.fetch;
+    const { user } = renderPos({ local, fetch, sets: withServices() });
+    await openRentals(user, { who: ids.maryam, name: /مريم/, entry: 'عقود الصيانة' });
+    const card = await screen.findByRole('listitem', { name: 'العقد MC-000001' });
+    await user.click(within(card).getByRole('button', { name: 'حصّل سعر العقد' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    expect(plain(pay)).toContain('أبو خالد');
+    expect(within(pay).queryByRole('button', { name: /اختر الزبون/ })).not.toBeInTheDocument();
+    expect(within(pay).getByRole('button', { name: 'آجل على الحساب' })).toBeInTheDocument();
+  });
+
   it('opens «عقود الصيانة» from the till menu on the contracts waiting to be billed', async () => {
     const local = memoryLocal();
     await openShift(local, ids.maryam);

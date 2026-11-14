@@ -63,6 +63,8 @@ describe('تقرير المبيعات', () => {
     expect(await screen.findByRole('heading', { name: 'تقرير المبيعات', level: 1 })).toBeInTheDocument();
     expect(await screen.findByText('قميص قطني')).toBeInTheDocument();
     expect(screen.getByText('+50٪')).toBeInTheDocument();
+    // On a phone the grouping buttons scroll inside their own box instead of widening the page
+    expect(screen.getByRole('radiogroup', { name: 'التجميع' }).parentElement).toHaveClass('overflow-x-auto');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 

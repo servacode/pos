@@ -132,7 +132,14 @@ export interface Cart {
   /** A sale made from a quotation (03 › الجملة): the quotation turns converted once the sale is saved */
   quotation?: { id: string; number: string; version: number };
   /** A sale that returns a rental (03 › التأجير): the rental closes once the sale of its rent is saved */
-  rental?: { id: string; number: string; version: number; cashBackMinor?: number };
+  rental?: {
+    id: string;
+    number: string;
+    version: number;
+    cashBackMinor?: number;
+    /** A manager's code for the cash refund of the deposit, when the cashier cannot refund */
+    cashBackApproval?: Approval;
+  };
   /** A sale that bills a maintenance contract (03 › عقود الصيانة): the contract is marked billed once it is saved */
   maintenance?: { id: string; number: string; version: number };
   /** A pharmacy sale's prescription (03 › الصيدليات), asked before payment when an item needs it */

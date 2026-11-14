@@ -443,7 +443,7 @@ export function QuotationA4({ quotation, store }: { quotation: Quotation; store:
           ))}
         </tbody>
       </table>
-      <dl className="ms-auto flex w-80 flex-col gap-1 break-inside-avoid">
+      <dl className="ms-auto flex w-64 flex-col gap-1 break-inside-avoid">
         {quotation.totals.invoiceDiscountMinor > 0 ? (
           <div className="flex justify-between">
             <dt>خصم العرض</dt>

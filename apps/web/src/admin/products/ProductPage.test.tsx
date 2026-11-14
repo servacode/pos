@@ -42,6 +42,16 @@ describe('the fields each business type uses', () => {
     expect(screen.queryByRole('heading', { name: /الإضافات والخيارات/ })).not.toBeInTheDocument();
   });
 
+  it('starts a new product of a medical supplies store as «يتطلب صلاحية»', async () => {
+    openCard('/products/new', {}, undefined, ['medical_supplies']);
+    expect(await screen.findByRole('switch', { name: 'يتطلب صلاحية' })).toBeChecked();
+  });
+
+  it('starts a new product of a pharmacy without «يتطلب صلاحية» (only medical supplies default to it)', async () => {
+    openCard('/products/new', {}, undefined, ['pharmacy']);
+    expect(await screen.findByRole('switch', { name: 'يتطلب صلاحية' })).not.toBeChecked();
+  });
+
   it('shows a pharmacy the scientific name, and an electronics shop the IMEI', async () => {
     openCard('/products/new', {}, undefined, ['pharmacy', 'electronics']);
     expect(await screen.findByLabelText(/الاسم العلمي/)).toBeInTheDocument();

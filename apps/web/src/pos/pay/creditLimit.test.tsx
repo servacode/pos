@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
@@ -56,6 +56,24 @@ async function toCredit(owed: number, till?: Record<string, unknown>) {
 }
 
 describe('a cashier sells on account', () => {
+  it('shows what each customer owes now in the picker', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const { user } = renderPos({ local, fetch: server(50_000) });
+    const list = await screen.findByRole('list', { name: 'الموظفون' });
+    await user.click(within(list).getByRole('button', { name: /سامر/ }));
+    await user.keyboard(PINS[ids.samer]!);
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F12}');
+    const pay = await screen.findByRole('region', { name: 'الدفع' });
+    await user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    const customers = await within(pay).findByRole('list', { name: 'الزبائن' });
+    await vi.waitFor(() => expect(plain(customers)).toContain('عليه'));
+    await user.click(within(customers).getByRole('button', { name: /أبو خالد/ }));
+    expect(await within(pay).findByText('أبو خالد')).toBeInTheDocument();
+  });
+
   it('within the customer’s limit with no code, and the done screen says what stays on the account', async () => {
     const { user, pay, outbox } = await toCredit(50_000);
     await user.click(await within(pay).findByRole('button', { name: 'آجل على الحساب' }));
