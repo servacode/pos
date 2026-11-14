@@ -205,6 +205,10 @@ async function processSale({ tx, device, doc }: DocumentContext) {
       shiftLinked: await shiftOpened(tx, sale.shiftId),
       cashierId: sale.cashierId,
       salespersonId: sale.salespersonId,
+      // The seller's rate as of now: a later rate change never re-prices this sale's commission
+      commissionBp: sql<
+        number | null
+      >`(select u.commission_bp from users u where u.tenant_id = ${tenantId} and u.id = ${sale.salespersonId ?? sale.cashierId})`,
       customerId: sale.customerId,
       customerName: sale.customerName,
       currency: sale.currency,

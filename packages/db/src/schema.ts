@@ -1402,6 +1402,8 @@ export const invoices = pgTable(
     shiftLinked: boolean('shift_linked').notNull().default(false),
     cashierId: uuid('cashier_id').notNull(),
     salespersonId: uuid('salesperson_id'),
+    /** The seller's commission rate (basis points) when the sale was processed; later rate changes never touch it. Null: none was set then (reports fall back to the current rate) */
+    commissionBp: integer('commission_bp'),
     customerId: uuid('customer_id'),
     customerName: text('customer_name'),
     currency: text('currency').notNull(),

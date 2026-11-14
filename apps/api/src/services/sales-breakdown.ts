@@ -27,6 +27,9 @@ interface Raw {
   total: string;
   back: string;
   n: string;
+  /** Sum of line total x the rate that applied (basis points), and the totals of the lines that had a rate; seller view only */
+  cnum?: string;
+  rated?: string;
 }
 
 export function salesBreakdown(
@@ -98,7 +101,8 @@ export function salesBreakdown(
       },
       seller: {
         key: sql`coalesce(i.salesperson_id, i.cashier_id)::text`,
-        join: sql`join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id`,
+        join: sql`join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
+          left join users u on u.id = coalesce(i.salesperson_id, i.cashier_id)`,
       },
     };
     const optionFilter: SQL = query.by === 'option' ? sql`and o.a->>'name' = ${query.option ?? ''}` : sql``;
@@ -106,17 +110,31 @@ export function salesBreakdown(
     const run = async (from: string, to: string): Promise<Map<string, Raw>> => {
       const k = soldKey[query.by];
       const b = backKey[query.by];
+      // The rate a sale carries is the one snapshotted when it was processed; the seller's current
+      // rate only stands in where the snapshot is null (a sale made before the snapshot existed)
+      const seller = query.by === 'seller';
+      const rate = sql`coalesce(i.commission_bp, u.commission_bp)`;
       const sold = await tx.execute<Omit<Raw, 'back'>>(sql`
         select ${k.key} as key, ${k.name} as name, sum(l.base_qty)::text as qty, sum(l.total_minor)::text as total,
-               count(distinct i.id)::text as n
+               count(distinct i.id)::text as n,
+               ${seller ? sql`sum(l.total_minor * ${rate})::text` : sql`null::text`} as cnum,
+               ${seller ? sql`sum(case when ${rate} is not null then l.total_minor else 0 end)::text` : sql`null::text`} as rated
         from invoice_lines l
         join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
         ${k.join}
         where i.business_date between ${from} and ${to} and ${inBranches(sql`i.branch_id`)}
           ${optionFilter}
         group by 1`);
-      const back = await tx.execute<{ key: string; qty: string; total: string }>(sql`
-        select ${b.key} as key, sum(rl.base_qty)::text as qty, sum(rl.total_minor)::text as total
+      const back = await tx.execute<{
+        key: string;
+        qty: string;
+        total: string;
+        cnum: string | null;
+        rated: string | null;
+      }>(sql`
+        select ${b.key} as key, sum(rl.base_qty)::text as qty, sum(rl.total_minor)::text as total,
+               ${seller ? sql`sum(rl.total_minor * ${rate})::text` : sql`null::text`} as cnum,
+               ${seller ? sql`sum(case when ${rate} is not null then rl.total_minor else 0 end)::text` : sql`null::text`} as rated
         from sale_return_lines rl
         join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
         ${b.join}
@@ -124,13 +142,24 @@ export function salesBreakdown(
           ${optionFilter}
         group by 1`);
       const out = new Map<string, Raw>();
-      for (const s of sold) out.set(s.key, { ...s, back: '0' });
+      for (const s of sold) out.set(s.key, { ...s, cnum: s.cnum ?? '0', rated: s.rated ?? '0', back: '0' });
       for (const r of back) {
-        const row = out.get(r.key) ?? { key: r.key, name: null, qty: '0', total: '0', n: '0', back: '0' };
+        const row = out.get(r.key) ?? {
+          key: r.key,
+          name: null,
+          qty: '0',
+          total: '0',
+          n: '0',
+          cnum: '0',
+          rated: '0',
+          back: '0',
+        };
         out.set(r.key, {
           ...row,
           qty: String(num(row.qty) - num(r.qty)),
           total: String(num(row.total) - num(r.total)),
+          cnum: String(num(row.cnum) - num(r.cnum)),
+          rated: String(num(row.rated) - num(r.rated)),
           back: r.total,
         });
       }
@@ -143,17 +172,12 @@ export function salesBreakdown(
       select distinct a->>'name' as name from variants v cross join lateral jsonb_array_elements(v.attributes) a
       where coalesce(a->>'name', '') <> '' order by 1`);
 
-    // The staff page's rate per seller, in basis points; sales x rate is the commission
-    const rates = new Map<string, number>();
-    if (query.by === 'seller') {
-      const rated = await tx.execute<{ id: string; bp: number }>(
-        sql`select id::text as id, commission_bp as bp from users where commission_bp is not null`,
-      );
-      for (const r of rated) rates.set(r.id, r.bp);
-    }
     const rows: SalesBreakdownRow[] = [...now.values()]
       .map((r) => {
-        const bp = rates.get(r.key) ?? null;
+        // Commission follows the rate each sale carried; the shown rate is the effective one over the period
+        const rated = num(r.rated);
+        const hasRate = query.by === 'seller' && rated !== 0;
+        const bp = hasRate ? Math.round(num(r.cnum) / rated) : null;
         return {
           key: r.key,
           name: r.name ?? before.get(r.key)?.name ?? r.key,
@@ -164,7 +188,7 @@ export function salesBreakdown(
           previousQty: num(before.get(r.key)?.qty),
           previousTotalMinor: num(before.get(r.key)?.total),
           commissionBp: bp,
-          commissionMinor: bp === null ? null : Math.round((num(r.total) * bp) / 10_000),
+          commissionMinor: hasRate ? Math.round(num(r.cnum) / 10_000) : null,
         };
       })
       .sort((a, b) => b.totalMinor - a.totalMinor || a.name.localeCompare(b.name, 'ar'));

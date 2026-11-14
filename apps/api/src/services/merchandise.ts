@@ -239,24 +239,31 @@ export function merchandiseReport(
     const sellers = await tx.execute<{
       id: string;
       name: string | null;
-      bp: number | null;
+      cnum: string;
+      rated: string;
       n: string;
       total: string;
       back: string;
     }>(sql`
       with sold as (
-        select coalesce(i.salesperson_id, i.cashier_id) as id, count(*) as n, sum(i.total_minor) as total
-        from invoices i
+        select coalesce(i.salesperson_id, i.cashier_id) as id, count(*) as n, sum(i.total_minor) as total,
+               sum(i.total_minor * coalesce(i.commission_bp, cu.commission_bp)) as cnum,
+               sum(case when coalesce(i.commission_bp, cu.commission_bp) is not null then i.total_minor else 0 end) as rated
+        from invoices i left join users cu on cu.id = coalesce(i.salesperson_id, i.cashier_id)
         where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`)}
         group by 1
       ),
       back as (
-        select coalesce(i.salesperson_id, i.cashier_id) as id, sum(r.total_minor) as total
+        select coalesce(i.salesperson_id, i.cashier_id) as id, sum(r.total_minor) as total,
+               sum(r.total_minor * coalesce(i.commission_bp, cu.commission_bp)) as cnum,
+               sum(case when coalesce(i.commission_bp, cu.commission_bp) is not null then r.total_minor else 0 end) as rated
         from sale_returns r join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
+          left join users cu on cu.id = coalesce(i.salesperson_id, i.cashier_id)
         where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
         group by 1
       )
-      select s.id, u.full_name as name, u.commission_bp as bp, s.n::text as n, s.total::text as total,
+      select s.id, u.full_name as name, (coalesce(s.cnum, 0) - coalesce(b.cnum, 0))::text as cnum,
+             (coalesce(s.rated, 0) - coalesce(b.rated, 0))::text as rated, s.n::text as n, s.total::text as total,
              coalesce(b.total, 0)::text as back
       from sold s left join back b on b.id = s.id left join users u on u.id = s.id
       order by s.total desc, s.id`);
@@ -385,7 +392,8 @@ export function merchandiseReport(
         invoiceCount: num(r.n),
         totalMinor: num(r.total),
         returnedMinor: num(r.back),
-        commissionBp: r.bp,
+        // The rate the period's sales carried (snapshotted per sale); null when none had one
+        commissionBp: num(r.rated) === 0 ? null : Math.round(num(r.cnum) / num(r.rated)),
       })),
       seasons: seasonRows.map((r) => r.season),
     };
