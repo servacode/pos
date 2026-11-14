@@ -43,7 +43,7 @@ describe('catalog options', () => {
     const store = await openStore(app);
     const read = async () =>
       (await app.inject({ method: 'GET', url: '/v1/store', headers: as(store) })).json<StoreResponse>();
-    expect((await read()).catalogOptions).toMatchObject({ autoBarcode: false });
+    expect((await read()).catalogOptions).toMatchObject({ autoBarcode: true });
     expect((await read()).catalogOptions!.sizeRuns[0]).toEqual({ name: 'طقم 1-2-2-1', counts: [1, 2, 2, 1] });
 
     const put = await app.inject({

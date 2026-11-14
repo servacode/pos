@@ -85,7 +85,7 @@ describe('«سجل تغيير الأسعار»', () => {
     });
     renderApp('/price-history');
     expect(await screen.findByText('لا تغييرات في الأسعار هنا.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'صدّر CSV' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'صدّر إلى إكسل' })).toBeDisabled();
   });
 
   it('exports the rows on screen as a CSV in whole units', async () => {
@@ -105,7 +105,7 @@ describe('«سجل تغيير الأسعار»', () => {
     });
     const { user } = renderApp('/price-history');
     await screen.findByRole('table', { name: 'تغييرات الأسعار' });
-    await user.click(screen.getByRole('button', { name: 'صدّر CSV' }));
+    await user.click(screen.getByRole('button', { name: 'صدّر إلى إكسل' }));
     expect(created).toHaveLength(1);
     const text = await new Promise<string>((resolve) => {
       const reader = new FileReader();

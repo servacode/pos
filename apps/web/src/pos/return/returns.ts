@@ -5,6 +5,7 @@ import { returnWindowDays } from '@serva/core/contracts/till';
 import type { SettingsRow } from '@serva/core/contracts/catalog';
 import type { OutboxEntry } from '@serva/sync';
 import { APP_VERSION } from '../../offline/sync';
+import { normalizeArabic, toLatinDigits } from '@serva/core/text';
 import { EXPIRY_SECTORS, storeSells } from '../../lib/sectors';
 
 /** The days the till looks back for an invoice to return from: the store's setting, else by business type */
@@ -80,6 +81,31 @@ export function matchesNumber(number: string, typed: string): boolean {
   const digits = typed.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g, '');
   if (!digits) return true;
   return number.replace(/\D/g, '').endsWith(digits) || number.includes(typed.trim());
+}
+
+/**
+ * One search box for the till's own invoices: the end of the number, or part of the customer's name
+ * or phone (the phone is read from the customers the till knows).
+ */
+export function matchesInvoice(
+  sale: ReturnableSale,
+  typed: string,
+  customers: readonly { id: string; name: string; phone?: string | null }[],
+): boolean {
+  const text = typed.trim();
+  if (!text) return true;
+  const hasDigit = /[0-9٠-٩]/.test(text);
+  if (hasDigit && matchesNumber(sale.number, typed)) return true;
+  const known = customers.find((c) => c.id === sale.sale.customerId);
+  const name = normalizeArabic(sale.sale.customerName ?? known?.name ?? '');
+  if (name && name.includes(normalizeArabic(text))) return true;
+  const digits = toLatinDigits(text).replace(/\D/g, '');
+  return (
+    digits.length >= 3 &&
+    toLatinDigits(known?.phone ?? '')
+      .replace(/\D/g, '')
+      .includes(digits)
+  );
 }
 
 /** The reason of a box that is broken or past its date: it cannot be «sealed and untouched» */

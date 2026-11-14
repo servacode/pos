@@ -106,7 +106,7 @@ export function TrialBalancePage() {
       title="ميزان المراجعة"
       actions={
         <Button variant="secondary" disabled={!data || data.rows.length === 0} onClick={exportCsv}>
-          صدّر CSV
+          صدّر إلى إكسل
         </Button>
       }
     >

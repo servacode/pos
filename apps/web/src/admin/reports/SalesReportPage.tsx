@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import {
   SALES_GROUP_LABEL,
   SALES_GROUPS,
@@ -23,6 +24,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay, monthStart } from '../../lib/dates';
+import { storeSells } from '../../lib/sectors';
 import { csvField, downloadText, minorToDecimal } from '../accounting/csv';
 import { apiFetch } from '../../lib/api';
 import { commissionOf } from './MerchandisePage';
@@ -91,28 +93,47 @@ export function SalesReportPage() {
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [from, setFrom] = useState(monthStart(today));
   const [to, setTo] = useState(today);
-  const [by, setBy] = useState<SalesGroup>('product');
+  const [params] = useSearchParams();
+  const asked = params.get('by');
+  const [by, setBy] = useState<SalesGroup>(
+    (SALES_GROUPS as readonly string[]).includes(asked ?? '') ? (asked as SalesGroup) : 'product',
+  );
   const [option, setOption] = useState('');
   const [commission, setCommission] = useState('');
-  const { data, error, loading, retry } = useReport(`${from}|${to}|${by}|${option}`, () =>
-    getSalesBreakdown({ from, to, by, option }),
+  const { data, error, loading, retry } = useReport(
+    by === 'option' && !option ? null : `${from}|${to}|${by}|${option}`,
+    () => getSalesBreakdown({ from, to, by, option }),
+    { cache: 'sales-breakdown' },
   );
+  // The option names (المقاس، اللون…) come with any other grouping: asking by option without a name is refused
+  const [optionNames, setOptionNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (by !== 'option' || optionNames.length > 0) return;
+    let current = true;
+    getSalesBreakdown({ from, to, by: 'product' }).then(
+      (r) => {
+        if (!current) return;
+        setOptionNames(r.optionNames);
+        setOption((o) => o || r.optionNames[0] || '');
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [by, from, to, optionNames.length]);
   const base = data?.baseCurrency ?? me.settings.baseCurrency;
   const needsOption = by === 'option' && !option;
+  // A shop of clothes names sizes and colours; any other shop just picks one of its options
+  const groupLabel = (g: SalesGroup): string =>
+    g === 'option' && !storeSells(me.tenant.sectors, ['clothing'])
+      ? 'الخيار (النوع، الحجم…)'
+      : SALES_GROUP_LABEL[g];
+  // No history before this period: the previous-period columns would be a column of zeros and «جديد»
+  const hasHistory =
+    (data?.previousTotalMinor ?? 0) > 0 || (data?.rows ?? []).some((r) => r.previousTotalMinor > 0);
 
-  const columns: DataColumn<SalesBreakdownRow>[] = [
-    {
-      key: 'name',
-      header: SALES_GROUP_LABEL[by],
-      cell: (r) => <span className="font-semibold">{r.name}</span>,
-    },
-    { key: 'qty', header: 'الكمية', numeric: true, cell: (r) => formatQuantity(r.qty) },
-    {
-      key: 'total',
-      header: 'المبيع بعد المرتجع',
-      numeric: true,
-      cell: (r) => <Money minor={r.totalMinor} currency={base} className="font-semibold" />,
-    },
+  const historyColumns: DataColumn<SalesBreakdownRow>[] = [
     {
       key: 'previous',
       header: 'الفترة السابقة',
@@ -136,21 +157,35 @@ export function SalesReportPage() {
         );
       },
     },
-    ...(by === 'seller'
-      ? [
-          {
-            key: 'commission',
-            header: 'العمولة',
-            numeric: true,
-            cell: (r: SalesBreakdownRow) => {
-              const c = commissionFor(r, commission);
-              return c === null ? '—' : <Money minor={c} currency={base} className="font-bold" />;
-            },
-          } satisfies DataColumn<SalesBreakdownRow>,
-        ]
-      : []),
+  ];
+  const sellerColumns: DataColumn<SalesBreakdownRow>[] = [
+    {
+      key: 'commission',
+      header: 'العمولة',
+      numeric: true,
+      cell: (r) => {
+        const c = commissionFor(r, commission);
+        return c === null ? '—' : <Money minor={c} currency={base} className="font-bold" />;
+      },
+    },
   ];
 
+  const columns: DataColumn<SalesBreakdownRow>[] = [
+    {
+      key: 'name',
+      header: groupLabel(by),
+      cell: (r) => <span className="font-semibold">{r.name}</span>,
+    },
+    { key: 'qty', header: 'الكمية', numeric: true, cell: (r) => formatQuantity(r.qty) },
+    {
+      key: 'total',
+      header: 'المبيع بعد المرتجع',
+      numeric: true,
+      cell: (r) => <Money minor={r.totalMinor} currency={base} className="font-semibold" />,
+    },
+    ...(hasHistory ? historyColumns : []),
+    ...(by === 'seller' ? sellerColumns : []),
+  ];
   return (
     <ReportScreen me={me} access={['report.view']} title="تقرير المبيعات">
       <PageHeader
@@ -169,17 +204,47 @@ export function SalesReportPage() {
               )
             }
           >
-            صدّر CSV
+            صدّر إلى إكسل
           </Button>
         }
       />
       <ReportFilters>
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="مدة جاهزة">
+          {(
+            [
+              ['آخر 7 أيام', 6],
+              ['آخر 30 يوماً', 29],
+            ] as const
+          ).map(([label, back]) => (
+            <Button
+              key={label}
+              size="xs"
+              variant="secondary"
+              onClick={() => {
+                setFrom(isoDay(Date.now() - back * 86_400_000, me.tenant.timezone));
+                setTo(today);
+              }}
+            >
+              {label}
+            </Button>
+          ))}
+          <Button
+            size="xs"
+            variant="secondary"
+            onClick={() => {
+              setFrom(monthStart(today));
+              setTo(today);
+            }}
+          >
+            هذا الشهر
+          </Button>
+        </div>
         <DayField label="من" value={from} max={to} onChange={setFrom} />
         <DayField label="إلى" value={to} max={today} onChange={setTo} />
         <div className="max-w-full min-w-0 overflow-x-auto">
           <SegmentedControl
             label="التجميع"
-            options={SALES_GROUPS.map((g) => ({ value: g, label: SALES_GROUP_LABEL[g] }))}
+            options={SALES_GROUPS.map((g) => ({ value: g, label: groupLabel(g) }))}
             value={by}
             onValueChange={setBy}
           />
@@ -187,7 +252,7 @@ export function SalesReportPage() {
         {by === 'option' ? (
           <Select label="الخيار" value={option} onChange={(e) => setOption(e.target.value)}>
             <option value="">اختر الخيار</option>
-            {(data?.optionNames ?? []).map((name) => (
+            {(data?.optionNames?.length ? data.optionNames : optionNames).map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>
@@ -221,13 +286,15 @@ export function SalesReportPage() {
       ) : null}
       {data ? (
         <>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <StatTile label="مبيع المدة" value={<Money minor={data.totalMinor} currency={base} />} />
-            <StatTile
-              label="المدة السابقة"
-              value={<Money minor={data.previousTotalMinor} currency={base} />}
-              footnote={`${dayText(data.previousFrom)} إلى ${dayText(data.previousTo)}`}
-            />
+            {hasHistory ? (
+              <StatTile
+                label="المدة السابقة"
+                value={<Money minor={data.previousTotalMinor} currency={base} />}
+                footnote={`${dayText(data.previousFrom)} إلى ${dayText(data.previousTo)}`}
+              />
+            ) : null}
             {data.by === 'seller' ? (
               <StatTile
                 label="عمولات البائعين"

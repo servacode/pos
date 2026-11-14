@@ -35,7 +35,7 @@ describe('GET /v1/me', () => {
       taxInclusive: true,
       numberFormat: 'latn',
       // the size runs and barcode choice the store starts with
-      catalogOptions: { autoBarcode: false, sizeRuns: expect.any(Array) },
+      catalogOptions: { autoBarcode: true, sizeRuns: expect.any(Array) },
       // the warranty certificate's terms: none until the owner writes them
       warrantyTerms: null,
     });

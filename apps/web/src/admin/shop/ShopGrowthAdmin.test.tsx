@@ -254,6 +254,7 @@ describe('«شكل المتجر»', () => {
       'GET /v1/online-orders/cod': { status: 200, body: NO_COD },
     });
     const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     const tagline = await screen.findByLabelText('عبارة قصيرة تحت اسم المتجر (اختياري)');
     await user.type(tagline, 'أناقة كل يوم');
     await user.click(screen.getByRole('radio', { name: 'فيروزي' }));
@@ -287,6 +288,7 @@ describe('«شكل المتجر»', () => {
       'GET /v1/online-orders/cod': { status: 200, body: NO_COD },
     });
     const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     const logo = await screen.findByLabelText('الشعار', { selector: 'input' });
     await user.upload(logo, new File(['x'], 'logo.png', { type: 'image/png' }));
     expect(await screen.findByRole('img', { name: 'شعار المتجر' })).toHaveAttribute(
@@ -315,7 +317,8 @@ describe('«شكل المتجر»', () => {
       'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
       'GET /v1/online-orders/cod': { status: 200, body: NO_COD },
     });
-    renderApp('/online-store');
+    const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     expect(await screen.findByText(/احفظ إعدادات المتجر أولاً/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'أضف الشعار' })).toBeDisabled();
   });
@@ -329,6 +332,7 @@ describe('«شكل المتجر»', () => {
       'GET /v1/online-orders/cod': { status: 200, body: NO_COD },
     });
     const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     const logo = await screen.findByLabelText('الشعار', { selector: 'input' });
     await user.upload(logo, new File(['x'], 'broken.png', { type: 'image/png' }));
     expect(await screen.findByText(/ليس صورة يمكن قراءتها/)).toBeInTheDocument();

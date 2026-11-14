@@ -90,6 +90,18 @@ export function listContracts(
       .from(maintenanceContracts)
       .orderBy(desc(maintenanceContracts.seq))
       .limit(300);
+    // An old contract kept only a typed name and phone: when exactly one registered customer
+    // matches, it is shown as tied to that customer (read-only, nothing is written)
+    for (const r of rows) {
+      if (r.customerId) continue;
+      const found = await tx.execute<{ id: string }>(sql`
+        select id from customers
+        where archived_at is null
+          and ((${r.customerPhone}::text is not null and phone = ${r.customerPhone})
+            or name = ${r.customerName})
+        limit 2`);
+      if (found.length === 1) r.customerId = found[0]!.id;
+    }
     const all = rows.map((r) => contractOf(r, today));
     if (view === 'all') return { items: all };
     const upcoming = all

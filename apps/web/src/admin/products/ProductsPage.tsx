@@ -274,6 +274,8 @@ function ProductsList() {
   const q = useDebounced(filters.q, SEARCH_DEBOUNCE_MS);
   const [items, setItems] = useState<ProductListItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  // Counts over the whole store, from the server (the first page carries them)
+  const [attention, setAttention] = useState<{ zeroPrice: number; noPhoto: number } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -302,6 +304,7 @@ function ProductsList() {
       if (id !== request.current) return;
       setItems(page.items);
       setNextCursor(page.nextCursor);
+      if (page.attention) setAttention(page.attention);
     } catch (error) {
       if (id === request.current) setLoadError(errorMessage(error));
     }
@@ -405,6 +408,10 @@ function ProductsList() {
     filters.season !== '' ||
     filters.status !== 'active';
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
+  // What the shown list needs done: a price of 0 sells for nothing, and a missing picture shows as a letter
+  const zeroPrice =
+    attention?.zeroPrice ?? (items ?? []).filter((i) => i.price !== null && i.price.minMinor === 0).length;
+  const noPhoto = attention?.noPhoto ?? (items ?? []).filter((i) => i.hasImage === false).length;
   const summary = items ? summaryOf(items) : null;
   // More pages wait behind «اعرض المزيد»: the tiles count what is on screen, «+» says there is more.
   const more = nextCursor ? '+' : '';
@@ -696,6 +703,25 @@ function ProductsList() {
                   >
                     أضف منتجاً بهذا الباركود
                   </Link>
+                ) : null}
+              </span>
+            </Alert>
+          ) : null}
+
+          {items && filters.status === 'active' && (noPhoto > 0 || zeroPrice > 0) ? (
+            <Alert tone="warning">
+              <span className="flex flex-col gap-1" aria-label="تحتاج انتباهك">
+                {zeroPrice > 0 ? (
+                  <span>
+                    <bdi className="num font-semibold">{zeroPrice}</bdi> بسعر صفر: تُباع مجاناً ولا تظهر في
+                    المتجر الإلكتروني.
+                  </span>
+                ) : null}
+                {noPhoto > 0 ? (
+                  <span>
+                    <bdi className="num font-semibold">{noPhoto}</bdi> بلا صورة: الصورة تُظهرها على شاشة البيع
+                    وفي المتجر.
+                  </span>
                 ) : null}
               </span>
             </Alert>

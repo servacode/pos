@@ -122,6 +122,8 @@ describe('«حركة الأصناف»', () => {
       [`GET ${url(30, 90)}`]: () => ({ status: 200, body: report(90, false) }),
     });
     const { user } = renderApp('/reports/merchandise');
+    // The long tables are folded until opened
+    await user.click(await screen.findByRole('button', { name: 'افتح كل الأقسام' }));
     const sizes = await screen.findByRole('table', { name: 'المبيعات حسب المقاس' });
     const rows = within(sizes).getAllByRole('row');
     expect(rows[1]).toHaveTextContent('M');

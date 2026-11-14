@@ -44,6 +44,7 @@ import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
 import { hasBlockedPick, medicineRulesOf, MedicineReturnNote, sealedConfirmed } from './medicineReturn';
 import {
+  matchesInvoice,
   matchesNumber,
   DAMAGED_REASON,
   returnableSales,
@@ -110,7 +111,7 @@ export function ReturnScreen({
   onBack: () => void;
   onPrint: (saved: SavedReturn) => void;
   /** Back to the sale with the voucher just issued, to sell the other piece */
-  onExchange?: (voucherCode: string | null) => void;
+  onExchange?: (voucherCode: string | null, cashBackMinor?: number) => void;
 }) {
   const pos = usePos();
   const digits = useDigits();
@@ -159,7 +160,7 @@ export function ReturnScreen({
     [entries, pos, windowDays],
   );
   const online = pos.online();
-  const shown = sales.filter((s) => matchesNumber(s.number, search)).slice(0, 30);
+  const shown = sales.filter((s) => matchesInvoice(s, search, catalog.customers)).slice(0, 30);
 
   // The picked invoice as it is now (a return saved here a moment ago counts)
   const current = picked ? (sales.find((s) => s.id === picked.id) ?? picked) : null;
@@ -304,7 +305,11 @@ export function ReturnScreen({
       setQty({});
       setTick((t) => t + 1);
       onPrint(doc);
-      if (isExchange && doc.number && onExchange) onExchange(method === 'voucher' ? doc.number : null);
+      if (isExchange && doc.number && onExchange)
+        onExchange(
+          method === 'voucher' ? doc.number : null,
+          method === 'voucher' ? undefined : draft.totals.totalMinor,
+        );
     } catch {
       setError('لم يُسجَّل المرتجع. لم يُحفظ شيء، حاول مرة أخرى.');
     } finally {
@@ -343,10 +348,9 @@ export function ReturnScreen({
             label="رقم الفاتورة"
             hint={
               online
-                ? 'آخر أرقامها تكفي، أو امسح باركود الإيصال'
-                : 'آخر أرقامها تكفي. بلا إنترنت: فواتير هذا الجهاز فقط'
+                ? 'اكتب آخر أرقام الفاتورة أو اسم الزبون أو جواله، أو امسح باركود الإيصال. فاتورة جهاز آخر تحتاج رقمها كاملاً.'
+                : 'اكتب آخر أرقام الفاتورة أو اسم الزبون أو جواله. بلا إنترنت: فواتير هذا الجهاز فقط'
             }
-            inputMode="numeric"
             dir="ltr"
             value={search}
             onChange={(e) => {
@@ -383,7 +387,7 @@ export function ReturnScreen({
               ))}
             </div>
           ) : null}
-          {entries && shown.length === 0 ? (
+          {entries && shown.length === 0 && !remote.note ? (
             <p className="py-6 text-center text-sm text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
           ) : null}
           <ul className="-mx-1 flex max-h-[28rem] flex-col gap-1 overflow-y-auto px-1 py-0.5">
@@ -639,7 +643,7 @@ export function ReturnScreen({
                   </ChoiceGroup>
                   <Alert tone="info">
                     {exchangeCash
-                      ? 'تُسجَّل القطعة مرتجعة نقداً بكامل قيمتها، ثم تُباع القطعة الأخرى ويدفع الزبون ثمنها نقداً: يبقى في الدرج الفرق فقط.'
+                      ? 'تُرَدّ للزبون قيمة القطعة كاملة نقداً، ثم يدفع ثمن القطعة الأخرى كاملاً نقداً. المهم أن الفرق وحده هو ما يبقى في الدرج.'
                       : 'تُسجَّل القطعة مرتجعة على قسيمة بقيمتها، ثم تُباع القطعة الأخرى بالقسيمة: يدفع الزبون الفرق فقط، وإن كانت أرخص يبقى الباقي له على القسيمة.'}
                   </Alert>
                 </>

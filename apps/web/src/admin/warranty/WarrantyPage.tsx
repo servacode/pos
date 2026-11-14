@@ -28,6 +28,7 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
+import { recallAnswer, rememberAnswer } from '../reports/useReport';
 import { SectionHead } from '../purchases/parts';
 import { listClaims, lookupWarranty, moveClaim, openClaim } from './api';
 import { DateField } from '../../lib/DateField';
@@ -270,8 +271,14 @@ export function WarrantyPage() {
 
   const reload = useCallback(() => {
     setListError(null);
+    const key = `warranty|${status}`;
+    // The last list stays on screen while the new one loads
+    setClaims(recallAnswer<WarrantyClaim[]>(key));
     listClaims(status)
-      .then((r) => setClaims(r.items))
+      .then((r) => {
+        rememberAnswer(key, r.items);
+        setClaims(r.items);
+      })
       .catch((e: unknown) => setListError(errorMessage(e)));
   }, [status]);
   useEffect(reload, [reload]);
@@ -521,10 +528,10 @@ export function WarrantyPage() {
                     ))}
                   </ol>
                   <div className="flex flex-wrap gap-2">
-                    {WARRANTY_NEXT[claim.status].map((next) => (
+                    {WARRANTY_NEXT[claim.status].map((next, at) => (
                       <Button
                         key={next}
-                        variant={next === 'delivered' ? 'primary' : 'secondary'}
+                        variant={at === 0 ? 'primary' : 'secondary'}
                         onClick={() =>
                           setStep({ claim, status: next as Exclude<WarrantyStatus, 'received'> })
                         }

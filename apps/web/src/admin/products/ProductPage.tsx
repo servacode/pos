@@ -37,6 +37,7 @@ import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { dayText, isoDay, zonedDateTime } from '../../lib/dates';
 import {
+  addProductImage,
   createProduct,
   getProduct,
   listCategories,
@@ -74,6 +75,7 @@ import {
 } from '../../lib/sectors';
 import { ModifiersEditor } from './ModifiersEditor';
 import { ImagesEditor } from './ImagesEditor';
+import type { ResizedImage } from '../../lib/images';
 import { RecipeSection } from './RecipeSection';
 import { ShopTextSection } from './ShopTextSection';
 import { BulkApply } from './BulkApply';
@@ -219,9 +221,15 @@ function ProductCard() {
   };
   const [notice, setNotice] = useState<string | null>(
     (location.state as { saved?: boolean } | null)?.saved
-      ? 'حُفظ المنتج، ويصل إلى أجهزة الكاشير مع أول اتصال.'
+      ? (location.state as { imagesLost?: number }).imagesLost
+        ? 'حُفظ المنتج، لكن لم تُرفع بعض الصور: أضفها من قسم «الصور».'
+        : 'حُفظ المنتج، ويصل إلى أجهزة الكاشير مع أول اتصال.'
       : null,
   );
+  // Pictures picked before the first save: sent as soon as the product has an id
+  const [pendingImages, setPendingImages] = useState<ResizedImage[]>([]);
+  // The variants grid shows name and price; the rest opens on request (see `advanced` below)
+  const [moreFields, setMoreFields] = useState(false);
   const [conflict, setConflict] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState<'ask' | 'busy' | null>(null);
@@ -373,7 +381,18 @@ function ProductCard() {
         setNotice('حُفظ المنتج، ويصل إلى أجهزة الكاشير مع أول اتصال.');
       } else if (!('version' in built.body)) {
         const saved = await createProduct(built.body);
-        void navigate(`/products/${saved.id}`, { replace: true, state: { saved: true } });
+        let imagesLost = 0;
+        for (const picture of pendingImages) {
+          try {
+            await addProductImage(saved.id, { ...picture, optionValue: null });
+          } catch {
+            imagesLost += 1;
+          }
+        }
+        void navigate(`/products/${saved.id}`, {
+          replace: true,
+          state: { saved: true, imagesLost },
+        });
       }
     } catch (error) {
       if (product && error instanceof ApiError && error.code === 'stale_version') {
@@ -481,6 +500,17 @@ function ProductCard() {
   const archived = Boolean(product?.archivedAt);
   const barcodeCount = liveVariants.reduce((sum, v) => sum + v.barcodes.length, 0);
 
+  // The grid shows name and price; the floor, wholesale, minimum and barcodes open on request, and
+  // open by themselves when one holds a value or an error
+  const moreNeeded =
+    liveVariants.some(
+      (v) => v.minPriceMinor !== null || (v.wholesalePriceMinor ?? null) !== null || v.minStock.trim() !== '',
+    ) ||
+    Object.keys(errors).some((k) =>
+      /^v.[^.]+.(minPriceMinor|wholesalePriceMinor|minStockQty|pending)$|^b./.test(k),
+    );
+  const advanced = moreFields || moreNeeded;
+
   const variantBlock = (variant: VariantDraft) => (
     <VariantBlock
       key={variant.key}
@@ -492,6 +522,7 @@ function ProductCard() {
       allowsFraction={unit?.allowsFraction ?? false}
       errors={errors}
       codesInCard={codesInCard}
+      advanced={advanced}
       onChange={updateVariant}
     />
   );
@@ -667,6 +698,20 @@ function ProductCard() {
               </SectionCard>
 
               <SectionCard
+                title="الصور"
+                icon={<CameraIcon />}
+                description="تظهر على شاشة البيع وفي المتجر الإلكتروني؛ الأولى هي الرئيسية."
+              >
+                <ImagesEditor
+                  productId={product?.id ?? null}
+                  optionValues={optionValues}
+                  disabled={!canManage}
+                  pending={pendingImages}
+                  onPendingChange={setPendingImages}
+                />
+              </SectionCard>
+
+              <SectionCard
                 title={fits(['clothing']) ? 'المقاسات والألوان' : 'الأنواع والخيارات'}
                 icon={<ShirtIcon />}
               >
@@ -678,7 +723,14 @@ function ProductCard() {
                 />
                 {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
               </SectionCard>
+            </fieldset>
 
+            {/* What is on the shelf, sizes down and colours across, comes before the price rows */}
+            {product && draft.type === 'stock' && titled ? (
+              <StockGrid product={product} numberFormat={me.settings.numberFormat} />
+            ) : null}
+
+            <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
               <SectionCard
                 title={titled ? 'الأسعار والباركودات' : 'السعر والباركود'}
                 icon={<BarcodeIcon />}
@@ -702,8 +754,23 @@ function ProductCard() {
                         onChange={(variants) => update({ variants })}
                       />
                     ) : null}
-                    <VariantGrid currencies={currencies}>{liveVariants.map(variantBlock)}</VariantGrid>
-                    <ul className="flex flex-col gap-1 text-sm text-ink-subtle">
+                    <VariantGrid currencies={currencies} advanced={advanced}>
+                      {liveVariants.map(variantBlock)}
+                    </VariantGrid>
+                    {moreNeeded ? null : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="self-start"
+                        aria-expanded={moreFields}
+                        onClick={() => setMoreFields((open) => !open)}
+                      >
+                        {moreFields
+                          ? 'أخفِ الحقول الإضافية'
+                          : 'حقول إضافية: الأدنى للمفاصلة، الجملة، الحد الأدنى، الباركودات'}
+                      </Button>
+                    )}
+                    <ul className={cn('flex flex-col gap-1 text-sm text-ink-subtle', !advanced && 'hidden')}>
                       <li>الأدنى للمفاصلة: الكاشير ينزل حتى هذا السعر دون رمز المدير.</li>
                       <li>سعر الجملة: يُباع به عند اختيار «سعر الجملة» على الكاشير أو لزبون جملة.</li>
                       <li>الحد الأدنى في الفرع: تحته يصلك تنبيه النقص.</li>
@@ -728,18 +795,6 @@ function ProductCard() {
                     </span>
                   </p>
                 ) : null}
-              </SectionCard>
-
-              <SectionCard
-                title="الصور"
-                icon={<CameraIcon />}
-                description="تظهر في المتجر الإلكتروني؛ الأولى هي الرئيسية."
-              >
-                <ImagesEditor
-                  productId={product?.id ?? null}
-                  optionValues={optionValues}
-                  disabled={!canManage}
-                />
               </SectionCard>
 
               <ShopTextSection
@@ -769,7 +824,7 @@ function ProductCard() {
               ) : null}
             </fieldset>
 
-            {product && draft.type === 'stock' ? (
+            {product && draft.type === 'stock' && !titled ? (
               <StockGrid product={product} numberFormat={me.settings.numberFormat} />
             ) : null}
           </div>

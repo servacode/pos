@@ -18,6 +18,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';
+import { recallAnswer, rememberAnswer } from '../reports/useReport';
 import { errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
 import { listQuotations } from './api';
@@ -54,9 +55,13 @@ export function QuotationsPage() {
 
   const load = useCallback(() => {
     setError(null);
-    setRows(null);
+    const key = `quotations|${status}|${q}`;
+    setRows(recallAnswer<QuotationListItem[]>(key));
     listQuotations(status, q)
-      .then((r) => setRows(r.items))
+      .then((r) => {
+        rememberAnswer(key, r.items);
+        setRows(r.items);
+      })
       .catch((e: unknown) => setError(errorMessage(e)));
   }, [status, q]);
   useEffect(() => {

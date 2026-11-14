@@ -120,6 +120,45 @@ describe('«طباعة الملصقات»', () => {
     expect(within(screen.getByRole('list', { name: 'الملصقات' })).getAllByRole('listitem')).toHaveLength(1);
   });
 
+  it('adds every piece of the last two weeks purchases in one press', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const purchase = {
+      id: 'pur-1',
+      lines: [
+        {
+          lineNo: 1,
+          variantId: 'v-m',
+          productId: 'p-shirt',
+          name: 'قميص',
+          qty: 6000,
+          costMinor: 1,
+          batchNo: null,
+          expiryDate: null,
+          serials: [],
+        },
+      ],
+    } as unknown as PurchaseDetail;
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/purchases': {
+        status: 200,
+        body: {
+          items: [
+            { id: 'pur-1', date: today },
+            { id: 'pur-0', date: '2019-01-01' },
+          ],
+          baseCurrency: 'SYP',
+        },
+      },
+      'GET /v1/purchases/pur-1': () => ({ status: 200, body: purchase }),
+      'GET /v1/products/p-shirt': () => ({ status: 200, body: shirt(true) }),
+    });
+    const { user } = renderApp('/labels');
+    await user.click(await screen.findByRole('button', { name: /أضف كل الوارد الجديد/ }));
+    expect(await screen.findByRole('button', { name: 'اطبع 6 ملصقاً' })).toBeEnabled();
+  });
+
   it('prints the price before a markdown struck through beside the new one', () => {
     const marked = product({
       id: 'p-shirt',

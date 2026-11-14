@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { formatMoney, type Category, type MerchandiseReport, type OptionSales } from '@serva/core';
 import {
   Alert,
   Badge,
   BarChart,
+  Button,
   Card,
   DataTable,
+  ExpandIcon,
+  cn,
   formatQuantity,
   Money,
   PageHeader,
@@ -20,6 +23,7 @@ import {
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
+import { recallAnswer, rememberAnswer } from './useReport';
 import { listCategories } from '../catalog/api';
 
 type Slow = MerchandiseReport['slowMovers'][number];
@@ -40,6 +44,42 @@ export const getMerchandise = (from: string, to: string, idleDays: number, categ
     `/v1/reports/merchandise?from=${from}&to=${to}&idleDays=${idleDays}${categoryId ? `&categoryId=${categoryId}` : ''}${season ? `&season=${encodeURIComponent(season)}` : ''}`,
     { auth: true },
   );
+
+/** A section of the report that stays folded until its head is pressed; its tables are kept in the page, hidden */
+function Fold({
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section aria-label={`قسم ${title}`} className="flex flex-col gap-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="flex min-h-11 items-center justify-between gap-3 rounded-control border border-line bg-surface px-4 text-start text-lg font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted print:hidden"
+      >
+        {title}
+        <ExpandIcon
+          size={20}
+          className={cn(
+            'shrink-0 text-ink-subtle transition-transform duration-120 ease-standard',
+            open && 'rotate-180',
+          )}
+        />
+      </button>
+      <div hidden={!open} className="flex flex-col gap-4 print:block!">
+        {children}
+      </div>
+    </section>
+  );
+}
 
 const COMMISSION_KEY = 'serva-commission-percent';
 const readCommission = () => {
@@ -96,9 +136,12 @@ export function MerchandisePage() {
 
   const load = useCallback(() => {
     setError(null);
-    setData(null);
+    // The last answer for these filters stays on screen while the new one loads
+    const key = `merchandise|${period}|${idle}|${department}|${season}`;
+    setData(recallAnswer<MerchandiseReport>(key));
     getMerchandise(daysAgo(Number(period)), daysAgo(0), Number(idle), department, season)
       .then((report) => {
+        rememberAnswer(key, report);
         setData(report);
         setSeasons((known) => (report.seasons?.length ? report.seasons : known));
       })
@@ -175,6 +218,18 @@ export function MerchandisePage() {
     },
   ];
 
+  // The long tables open one at a time (or all together), so the page is one screen long
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const FOLDS = ['dept', 'options', 'models', 'sellers', 'low', 'slow'] as const;
+  const isOpen = (id: string) => opened.has(id);
+  const toggle = (id: string) =>
+    setOpened((o) => {
+      const next = new Set(o);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const allOpen = FOLDS.every((id) => opened.has(id));
+
   return (
     <AppShell>
       <title>حركة الأصناف · SERFA</title>
@@ -245,65 +300,72 @@ export function MerchandisePage() {
           ) : null}
         </div>
 
-        {data && data.byDepartment.length > 1 ? (
-          <Card className="flex flex-col gap-3">
-            <h2 className="text-lg font-semibold text-ink">المبيعات حسب القسم</h2>
-            <BarChart
-              label="صافي المبيعات حسب القسم بعد المرتجع"
-              orientation="horizontal"
-              labels={data.byDepartment.map((d) => d.name)}
-              series={[
-                {
-                  key: 'net',
-                  label: 'الصافي',
-                  values: data.byDepartment.map((d) => d.totalMinor - d.returnedMinor),
-                },
-              ]}
-              formatValue={(value) => formatMoney(value, base, { digits })}
-              labelHeader="القسم"
-            />
-          </Card>
-        ) : null}
+        <div className="flex justify-end print:hidden">
+          <Button variant="ghost" size="sm" onClick={() => setOpened(allOpen ? new Set() : new Set(FOLDS))}>
+            {allOpen ? 'اطوِ كل الأقسام' : 'افتح كل الأقسام'}
+          </Button>
+        </div>
 
         {data && data.byDepartment.length > 0 ? (
-          <DataTable
-            caption="المبيعات حسب القسم"
-            columns={[
-              {
-                key: 'name',
-                header: 'القسم',
-                cell: (r) => <span className="font-semibold">{r.name}</span>,
-              },
-              {
-                key: 'sold',
-                header: 'القطع',
-                numeric: true,
-                cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
-              },
-              {
-                key: 'total',
-                header: 'المبيع',
-                numeric: true,
-                cell: (r) => <Money minor={r.totalMinor} currency={base} />,
-              },
-              {
-                key: 'back',
-                header: 'رجع منه',
-                numeric: true,
-                cell: (r) => <Money minor={r.returnedMinor} currency={base} />,
-              },
-              {
-                key: 'share',
-                header: 'النصيب',
-                numeric: true,
-                cell: (r) => (
-                  <span className="num">{shareOf(r.totalMinor - r.returnedMinor, data.byDepartment)}</span>
-                ),
-              },
-            ]}
-            rows={data.byDepartment}
-            rowKey={(r) => r.categoryId ?? 'none'}
-          />
+          <Fold title="المبيعات حسب القسم" open={isOpen('dept')} onToggle={() => toggle('dept')}>
+            {data.byDepartment.length > 1 ? (
+              <Card className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold text-ink">المبيعات حسب القسم</h2>
+                <BarChart
+                  label="صافي المبيعات حسب القسم بعد المرتجع"
+                  orientation="horizontal"
+                  labels={data.byDepartment.map((d) => d.name)}
+                  series={[
+                    {
+                      key: 'net',
+                      label: 'الصافي',
+                      values: data.byDepartment.map((d) => d.totalMinor - d.returnedMinor),
+                    },
+                  ]}
+                  formatValue={(value) => formatMoney(value, base, { digits })}
+                  labelHeader="القسم"
+                />
+              </Card>
+            ) : null}
+            <DataTable
+              caption="المبيعات حسب القسم"
+              columns={[
+                {
+                  key: 'name',
+                  header: 'القسم',
+                  cell: (r) => <span className="font-semibold">{r.name}</span>,
+                },
+                {
+                  key: 'sold',
+                  header: 'القطع',
+                  numeric: true,
+                  cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+                },
+                {
+                  key: 'total',
+                  header: 'المبيع',
+                  numeric: true,
+                  cell: (r) => <Money minor={r.totalMinor} currency={base} />,
+                },
+                {
+                  key: 'back',
+                  header: 'رجع منه',
+                  numeric: true,
+                  cell: (r) => <Money minor={r.returnedMinor} currency={base} />,
+                },
+                {
+                  key: 'share',
+                  header: 'النصيب',
+                  numeric: true,
+                  cell: (r) => (
+                    <span className="num">{shareOf(r.totalMinor - r.returnedMinor, data.byDepartment)}</span>
+                  ),
+                },
+              ]}
+              rows={data.byDepartment}
+              rowKey={(r) => r.categoryId ?? 'none'}
+            />
+          </Fold>
         ) : null}
 
         {data && data.byOption.length === 0 ? (
@@ -311,19 +373,26 @@ export function MerchandisePage() {
             لا مبيعات لقطع لها مقاس أو لون في هذه المدة. أضف «المقاسات والألوان» في بطاقة المنتج.
           </Alert>
         ) : null}
-        {data?.byOption.map((group) => (
-          <DataTable
-            key={group.name}
-            caption={`المبيعات حسب ${group.name}`}
-            columns={optionColumns}
-            rows={group.values}
-            rowKey={(r) => r.value}
-          />
-        ))}
+        {data && data.byOption.length > 0 ? (
+          <Fold
+            title={`المبيعات حسب ${data.byOption.map((g) => g.name).join(' و')}`}
+            open={isOpen('options')}
+            onToggle={() => toggle('options')}
+          >
+            {data.byOption.map((group) => (
+              <DataTable
+                key={group.name}
+                caption={`المبيعات حسب ${group.name}`}
+                columns={optionColumns}
+                rows={group.values}
+                rowKey={(r) => r.value}
+              />
+            ))}
+          </Fold>
+        ) : null}
 
         {data && data.models.length > 0 ? (
-          <section aria-label="الموديلات الأكثر مبيعاً" className="flex flex-col gap-4">
-            <h2 className="text-xl font-bold text-ink">الموديلات الأكثر مبيعاً</h2>
+          <Fold title="الموديلات الأكثر مبيعاً" open={isOpen('models')} onToggle={() => toggle('models')}>
             {data.models.map((m) => (
               <DataTable
                 key={m.productId}
@@ -333,13 +402,17 @@ export function MerchandisePage() {
                 rowKey={(r) => r.variantId}
               />
             ))}
-          </section>
+          </Fold>
         ) : null}
 
         {data && data.bySeller.length > 0 ? (
-          <section aria-label="المبيعات حسب البائع" className="flex flex-col gap-3">
+          <Fold
+            title="المبيعات حسب البائع والعمولة"
+            open={isOpen('sellers')}
+            onToggle={() => toggle('sellers')}
+          >
             <div className="flex flex-wrap items-end gap-3">
-              <h2 className="flex-1 text-xl font-bold text-ink">المبيعات حسب البائع والعمولة</h2>
+              <span className="flex-1" />
               <TextField
                 label="نسبة العمولة ٪"
                 hint="احتياطية: لمن لا نسبة له في صفحة الموظفين"
@@ -400,61 +473,65 @@ export function MerchandisePage() {
               rows={data.bySeller}
               rowKey={(r) => r.userId}
             />
-          </section>
+          </Fold>
         ) : null}
 
         {data && data.lowStock.length > 0 ? (
-          <DataTable
-            caption="يوشك على النفاد"
-            columns={[
-              {
-                key: 'name',
-                header: 'القطعة',
-                cell: (r) => (
-                  <Link to={`/products/${r.productId}`} className="font-semibold text-brand-ink underline">
-                    {r.label ? `${r.name} ${r.label}` : r.name}
-                  </Link>
-                ),
-              },
-              {
-                key: 'stock',
-                header: 'بقي',
-                numeric: true,
-                cell: (r) => (
-                  <span className={r.stockQty <= 0 ? 'num font-bold text-danger-ink' : 'num font-bold'}>
-                    {r.stockQty <= 0 ? 'نفد' : r.stockQty / 1000}
-                  </span>
-                ),
-              },
-              {
-                key: 'sold',
-                header: 'بيع في المدة',
-                numeric: true,
-                cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
-              },
-              {
-                key: 'min',
-                header: 'الحد الأدنى',
-                numeric: true,
-                cell: (r) => (
-                  <span className="num">{r.minStockQty === null ? '—' : r.minStockQty / 1000}</span>
-                ),
-              },
-            ]}
-            rows={data.lowStock}
-            rowKey={(r) => r.variantId}
-          />
+          <Fold title="يوشك على النفاد" open={isOpen('low')} onToggle={() => toggle('low')}>
+            <DataTable
+              caption="يوشك على النفاد"
+              columns={[
+                {
+                  key: 'name',
+                  header: 'القطعة',
+                  cell: (r) => (
+                    <Link to={`/products/${r.productId}`} className="font-semibold text-brand-ink underline">
+                      {r.label ? `${r.name} ${r.label}` : r.name}
+                    </Link>
+                  ),
+                },
+                {
+                  key: 'stock',
+                  header: 'بقي',
+                  numeric: true,
+                  cell: (r) => (
+                    <span className={r.stockQty <= 0 ? 'num font-bold text-danger-ink' : 'num font-bold'}>
+                      {r.stockQty <= 0 ? 'نفد' : r.stockQty / 1000}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'sold',
+                  header: 'بيع في المدة',
+                  numeric: true,
+                  cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+                },
+                {
+                  key: 'min',
+                  header: 'الحد الأدنى',
+                  numeric: true,
+                  cell: (r) => (
+                    <span className="num">{r.minStockQty === null ? '—' : r.minStockQty / 1000}</span>
+                  ),
+                },
+              ]}
+              rows={data.lowStock}
+              rowKey={(r) => r.variantId}
+            />
+          </Fold>
         ) : null}
 
-        <DataTable
-          caption="القطع الراكدة"
-          columns={slowColumns}
-          rows={data?.slowMovers ?? []}
-          rowKey={(r) => r.variantId}
-          loading={!data && !error}
-          {...(error ? { onRetry: load } : {})}
-          empty="لا قطع راكدة: كل ما على الرف بيع منه شيء أو وصل حديثاً."
-        />
+        <Fold title="القطع الراكدة" open={isOpen('slow') || !data} onToggle={() => toggle('slow')}>
+          <DataTable
+            caption="القطع الراكدة"
+            columns={slowColumns}
+            rows={data?.slowMovers ?? []}
+            rowKey={(r) => r.variantId}
+            loading={!data && !error}
+            {...(error ? { onRetry: load } : {})}
+            empty="لا قطع راكدة: كل ما على الرف بيع منه شيء أو وصل حديثاً."
+          />
+        </Fold>
       </div>
     </AppShell>
   );

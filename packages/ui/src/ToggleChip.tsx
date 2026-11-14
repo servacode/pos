@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { cn } from './cn';
 import { CONTROL_HEIGHT, useDensity, type Density } from './context';
 import { CheckIcon, type Icon } from './icons';
@@ -7,6 +7,8 @@ interface ToggleChipProps extends Omit<ComponentProps<'input'>, 'type' | 'size'>
   label: string;
   /** A glyph before the label (the activity icons) */
   icon?: Icon;
+  /** Anything small before the label, after the glyph: a colour dot, say */
+  leading?: ReactNode;
   type?: 'checkbox' | 'radio';
 }
 
@@ -26,6 +28,7 @@ const CHIP: Record<Density, string> = {
 export function ToggleChip({
   label,
   icon: Glyph,
+  leading,
   type = 'checkbox',
   className,
   ...inputProps
@@ -58,6 +61,7 @@ export function ToggleChip({
         />
       </span>
       {Glyph ? <Glyph size={16} /> : null}
+      {leading}
       {label}
     </label>
   );

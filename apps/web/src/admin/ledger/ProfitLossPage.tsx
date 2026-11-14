@@ -143,7 +143,7 @@ export function ProfitLossPage() {
               data && downloadText(`قائمة-الدخل-${data.from}-${data.to}.csv`, profitLossCsv(data))
             }
           >
-            صدّر CSV
+            صدّر إلى إكسل
           </Button>
           <Button variant="secondary" icon={<PrintIcon />} disabled={!data} onClick={() => print('A4')}>
             اطبع

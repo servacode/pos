@@ -72,7 +72,7 @@ export const getPurchase = (id: string) => apiFetch<PurchaseDetail>(`/v1/purchas
 /** `GET /v1/inventory/expiry?variantId=` (purchases.manage): every batch of one item, whatever its date */
 export const listBatchesOf = (variantId: string, branchId?: string) =>
   apiFetch<ExpiryResponse>(
-    `/v1/inventory/expiry?days=730&variantId=${variantId}${branchId ? `&branchId=${branchId}` : ''}`,
+    `/v1/inventory/expiry?days=3650&variantId=${variantId}${branchId ? `&branchId=${branchId}` : ''}`,
     { auth: true },
   );
 

@@ -36,6 +36,29 @@ interface DeviceLinkProps {
   helpers?: LinkHelpers;
   /** What this device is for: a till by default; the kitchen and waiter screens link as theirs */
   kind?: DeviceKind;
+  /** The way offered first; by default the owner's own sign-in, or the last way picked in this tab */
+  defaultMethod?: LinkMethod;
+}
+
+const METHOD_KEY = 'serva.link.method';
+const METHODS: readonly LinkMethod[] = ['qr', 'code', 'owner'];
+
+/** The way picked before a reload in this tab (never the typed codes): null when none or storage is closed */
+function savedMethod(): LinkMethod | null {
+  try {
+    const value = sessionStorage.getItem(METHOD_KEY);
+    return METHODS.find((m) => m === value) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberMethod(method: LinkMethod): void {
+  try {
+    sessionStorage.setItem(METHOD_KEY, method);
+  } catch {
+    // Storage is closed: the next reload starts on the default way
+  }
 }
 
 /**
@@ -47,6 +70,7 @@ export function DeviceLink({
   store = deviceStore(),
   helpers = linkHelpers,
   kind = 'cashier',
+  defaultMethod,
 }: DeviceLinkProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -62,7 +86,7 @@ export function DeviceLink({
       if (!alive) return;
       if (link) setStage({ step: 'waiting', link });
       else if (scanned) setStage({ step: 'name', credentials: { method: 'qr', qrToken: scanned } });
-      else setStage({ step: 'method', method: 'code' });
+      else setStage({ step: 'method', method: defaultMethod ?? savedMethod() ?? 'owner' });
     });
     if (scanned) void navigate({ pathname: location.pathname, hash: '' }, { replace: true });
     return () => {
@@ -73,12 +97,12 @@ export function DeviceLink({
   }, []);
 
   const restart = useCallback(
-    async (method: LinkMethod = 'code') => {
+    async (method: LinkMethod = defaultMethod ?? 'owner') => {
       await clearPendingLink(store).catch(() => undefined);
       setError(null);
       setStage({ step: 'method', method });
     },
-    [store],
+    [store, defaultMethod],
   );
 
   async function activate(credentials: LinkCredentials, named: NamedDevice) {
@@ -177,7 +201,10 @@ export function DeviceLink({
           method={stage.method}
           initialCode={stage.code}
           kind={kind}
-          onMethodChange={(method) => setStage({ step: 'method', method })}
+          onMethodChange={(method) => {
+            rememberMethod(method);
+            setStage({ step: 'method', method });
+          }}
           onNext={(credentials) => {
             setError(null);
             setStage({ step: 'name', credentials });

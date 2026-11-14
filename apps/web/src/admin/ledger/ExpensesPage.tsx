@@ -410,7 +410,7 @@ export function ExpensesPage() {
                 data && downloadText(`المصاريف-${from}-${to}.csv`, expensesCsv(data, data.items))
               }
             >
-              صدّر CSV
+              صدّر إلى إكسل
             </Button>
             <Button icon={<AddIcon />} onClick={() => setAdding(true)}>
               مصروف جديد

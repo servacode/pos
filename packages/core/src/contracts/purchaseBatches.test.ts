@@ -84,6 +84,9 @@ describe('batches on the purchase documents', () => {
       branchId: S,
     });
     expect(expiryQuery.safeParse({ days: '0' }).success).toBe(false);
+    // The recall page lists every batch on the shelf: ten years ahead, no more
+    expect(expiryQuery.parse({ days: '3650' }).days).toBe(3650);
+    expect(expiryQuery.safeParse({ days: '3651' }).success).toBe(false);
     expect(batchBlockInput.parse({ batchNo: ' C-09 ', reason: '' })).toEqual({
       batchNo: 'C-09',
       reason: null,

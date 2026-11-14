@@ -220,6 +220,15 @@ export function ContractPricesPage() {
                   </Button>
                 ) : null}
               </div>
+              {!variant || !target || !price.trim() ? (
+                <p className="text-sm text-ink-muted">
+                  {!variant
+                    ? 'اختر الصنف أولاً.'
+                    : !target
+                      ? 'اختر الزبون أو نوع الزبون.'
+                      : 'اكتب السعر للوحدة ليُحفظ.'}
+                </p>
+              ) : null}
             </form>
           </Card>
         </section>

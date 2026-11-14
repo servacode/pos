@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { CurrencyId } from '@serva/core';
 import { cn } from '../cn';
 import { OfferIcon, WeighedIcon } from '../icons';
@@ -27,6 +28,8 @@ export interface ItemTileProps {
    * grid with no photos at all, so it reads apart from single items at a glance.
    */
   initial?: boolean;
+  /** Small marks under the price (stock left, an expiry date, «برقم تسلسلي») */
+  extra?: ReactNode;
   onSelect: () => void;
   className?: string;
 }
@@ -54,6 +57,7 @@ export function ItemTile({
   detail,
   pictureSlot = false,
   initial = false,
+  extra,
   onSelect,
   className,
 }: ItemTileProps) {
@@ -144,6 +148,9 @@ export function ItemTile({
           </span>
         ) : null}
       </span>
+      {extra ? (
+        <span className={cn('flex flex-wrap items-center gap-1', picture && 'px-1.5')}>{extra}</span>
+      ) : null}
     </button>
   );
 }

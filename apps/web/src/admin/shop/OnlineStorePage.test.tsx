@@ -81,6 +81,7 @@ describe('«المتجر الإلكتروني» on the dashboard', () => {
       },
     });
     const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     await user.click(await screen.findByRole('switch', { name: /المتجر مفعّل/ }));
     const slug = screen.getByLabelText('رابط المتجر');
     await user.clear(slug);
@@ -97,6 +98,7 @@ describe('«المتجر الإلكتروني» on the dashboard', () => {
       whatsapp: '0933123456',
     });
 
+    await user.click(screen.getByRole('radio', { name: 'الطلبات' }));
     const box = await screen.findByRole('list', { name: 'طلبات المتجر' });
     const one = within(box).getByRole('listitem', { name: 'الطلب ONL-000001' });
     expect(one).toHaveTextContent('قميص كتان (L · أبيض) × 2');
@@ -123,6 +125,7 @@ describe('«اعرض الأسعار في المتجر الإلكتروني»', (
       'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
     });
     const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     const toggle = await screen.findByRole('switch', { name: /اعرض الأسعار في المتجر الإلكتروني/ });
     expect(toggle).toBeChecked();
     await user.click(toggle);
@@ -149,6 +152,7 @@ describe('the settings’ save bar and the WhatsApp number', () => {
   it('shows the save bar only while there are unsaved changes', async () => {
     open();
     const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     const toggle = await screen.findByRole('switch', { name: /اعرض القطع التي نفدت/ });
     expect(screen.queryByRole('button', { name: 'احفظ' })).not.toBeInTheDocument();
     await user.click(toggle);
@@ -161,6 +165,7 @@ describe('the settings’ save bar and the WhatsApp number', () => {
   it('says a number with letters is wrong, as it is typed, and does not save it', async () => {
     const { requestsTo } = open();
     const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
     const number = await screen.findByLabelText('رقم واتساب الطلبات');
     await user.type(number, '09ab33');
     expect(screen.getByText(/رقم غير صحيح: اكتب أرقاماً فقط/)).toBeInTheDocument();
@@ -201,6 +206,48 @@ describe('deciding an order', () => {
     await user.dblClick(accept);
     expect(within(one).getByRole('button', { name: 'ارفض' })).toBeDisabled();
     release();
+    expect(await screen.findByText('لا طلبات هنا.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/online-orders/o-1/status')).toHaveLength(1);
+  });
+
+  it('warns before accepting an order the shelf cannot cover, and accepts on the second press', async () => {
+    let current = order('pending');
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: owner() },
+      'GET /v1/online-store': { status: 200, body: settings },
+      'GET /v1/online-orders?status=pending': () => ({
+        status: 200,
+        body: { items: current.status === 'pending' ? [current] : [] },
+      }),
+      'GET /v1/inventory': {
+        status: 200,
+        body: {
+          items: [
+            {
+              variantId: 'v',
+              name: 'قميص كتان',
+              branchId: 'b',
+              qty: 1000,
+              valueMinor: 0,
+              unitCostMinor: null,
+            },
+          ],
+          totalValueMinor: 0,
+          baseCurrency: 'SYP',
+        },
+      },
+      'POST /v1/online-orders/o-1/status': () => {
+        current = { ...current, status: 'accepted', version: 2 };
+        return { status: 200, body: current };
+      },
+    });
+    const { user } = renderApp('/online-store');
+    const one = await screen.findByRole('listitem', { name: 'الطلب ONL-000001' });
+    await user.click(within(one).getByRole('button', { name: 'اقبل' }));
+    expect(await within(one).findByText(/لا يكفي المخزون لهذه القطع/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/online-orders/o-1/status')).toHaveLength(0);
+    await user.click(within(one).getByRole('button', { name: 'اقبل رغم النقص' }));
     expect(await screen.findByText('لا طلبات هنا.')).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/online-orders/o-1/status')).toHaveLength(1);
   });

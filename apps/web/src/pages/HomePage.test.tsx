@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
@@ -227,11 +227,10 @@ describe('HomePage', () => {
       renderApp('/');
 
       const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
-      // The hero's week, and the two tiles that would have drawn a line
-      expect((await within(sales).findAllByText('لا بيانات قبل اليوم')).length).toBe(3);
+      // Said once, in the hero; no week bars, sparklines or one-point chart repeat it
+      expect(await within(sales).findAllByText('لا بيانات قبل اليوم')).toHaveLength(1);
       expect(within(sales).queryByText('آخر 7 أيام')).not.toBeInTheDocument();
-      // The trend chart draws the single point and adds the same note, with no line to zero
-      await waitFor(() => expect(screen.getAllByText('لا بيانات قبل اليوم')).toHaveLength(4));
+      expect(screen.queryByText('اتجاه المبيعات')).not.toBeInTheDocument();
     });
 
     it('greets «أبو» and «أم» names whole', async () => {

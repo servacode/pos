@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import type { AuthResponse, LoginInput, MeResponse } from '@serva/core';
 import { apiFetch, onSessionExpired, refreshAccessToken, setAccessToken } from '../lib/api';
 import { AuthContext, type AuthContextValue, type AuthState } from './AuthContext';
+import { clearReportCache } from '../admin/reports/useReport';
 
 function fetchMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>('/v1/me', { auth: true });
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onSessionExpired(() => {
+        clearReportCache();
         setState({ status: 'signedOut', reason: 'expired' });
       }),
     [],
@@ -42,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const startSession = useCallback(
     async (auth: AuthResponse) => {
+      clearReportCache();
       setAccessToken(auth.accessToken);
       await refreshMe();
     },
@@ -57,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await apiFetch<void>('/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
+    clearReportCache();
     setAccessToken(null);
     setState({ status: 'signedOut' });
   }, []);

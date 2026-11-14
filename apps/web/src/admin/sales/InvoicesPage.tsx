@@ -123,15 +123,16 @@ export function InvoicesPage() {
   const today = isoDay(Date.now(), me.tenant.timezone);
   const base = me.settings.baseCurrency;
   const customerId = params.get('customerId');
-  const [from, setFrom] = useState(customerId ? '2020-01-01' : monthStart(today));
+  const numberQuery = params.get('q') ?? '';
+  const [from, setFrom] = useState(customerId || numberQuery ? '2020-01-01' : monthStart(today));
   const [to, setTo] = useState(today);
   const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
   const [method, setMethod] = useState('');
   const [status, setStatus] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [cashierId, setCashierId] = useState('');
-  const [typed, setTyped] = useState('');
-  const [q, setQ] = useState('');
+  const [typed, setTyped] = useState(numberQuery);
+  const [q, setQ] = useState(numberQuery);
   const [min, setMin] = useState('');
   const [max, setMax] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
@@ -274,7 +275,7 @@ export function InvoicesPage() {
             disabled={loading || items.length === 0}
             onClick={() => void exportCsv()}
           >
-            صدّر CSV
+            صدّر إلى إكسل
           </Button>
         }
       />

@@ -81,7 +81,7 @@ describe('«كشف حساب»', () => {
     expect(rows[1]).toContain('سند قبض');
     expect(screen.getByText('رصيد أول المدة')).toBeInTheDocument();
     expect(screen.getByText('رصيد آخر المدة')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'صدّر CSV' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'صدّر إلى إكسل' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'اطبع' })).toBeEnabled();
   });
 

@@ -498,6 +498,24 @@ describe('an existing product', () => {
     expect(screen.getByRole('list', { name: 'قيم اللون' })).toHaveTextContent('أبيضأسود');
   });
 
+  it('keeps the price rows short: the floor, wholesale, minimum and barcodes open on request', async () => {
+    const { user } = openClothes(`/products/${ids.milk}`, {
+      [`GET ${productPath}`]: {
+        status: 200,
+        body: product({
+          variants: [
+            variant({ id: ids.white, attributes: [{ name: 'اللون', value: 'أبيض' }], minPriceMinor: null }),
+            variant({ id: ids.black, attributes: [{ name: 'اللون', value: 'أسود' }], minPriceMinor: null }),
+          ],
+        }),
+      },
+    });
+    await screen.findByRole('group', { name: 'أبيض' });
+    expect(screen.queryAllByLabelText('السعر الأدنى للمفاصلة')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: /حقول إضافية/ }));
+    expect(screen.getAllByLabelText('السعر الأدنى للمفاصلة')).toHaveLength(2);
+  });
+
   it('is read-only for whoever cannot change the catalog', async () => {
     openCard(`/products/${ids.milk}`, {}, ['sale.create']);
 

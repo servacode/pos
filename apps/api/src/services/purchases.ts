@@ -639,8 +639,12 @@ export async function inventory(
       name: string;
       qty: string;
       value_minor: string;
+      attributes: { name: string; value: string }[] | null;
+      product_id: string;
+      product_name: string;
     }>(sql`
       select l.variant_id, l.branch_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
+             v.attributes, p.id as product_id, p.name_ar as product_name,
              l.qty::text, coalesce(sv.value_minor, 0)::text as value_minor
       from stock_levels l
       join variants v on v.tenant_id = l.tenant_id and v.id = l.variant_id
@@ -655,6 +659,9 @@ export async function inventory(
         variantId: r.variant_id,
         branchId: r.branch_id,
         name: r.name,
+        attributes: r.attributes ?? [],
+        productId: r.product_id,
+        productName: r.product_name,
         qty,
         valueMinor: value,
         unitCostMinor: qty > 0 ? Math.round((value * 1000 * 10_000) / qty) / 10_000 : null,

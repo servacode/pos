@@ -259,7 +259,8 @@ function pricing(
   };
 }
 
-const sellable = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos`;
+/** Active, for sale, and priced: an item at price 0 (a service, an unpriced piece) never reaches the public shop */
+const sellable = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos and pr.price_minor > 0`;
 const liveVariant = sql`v.archived_at is null`;
 /** Pieces held by accepted orders not sold yet, in stock units (a thousandth of a piece) */
 const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online_orders o

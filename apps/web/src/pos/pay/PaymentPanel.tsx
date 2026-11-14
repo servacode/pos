@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CURRENCIES } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
-import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
+import { PRICING_ENGINE_VERSION, roundCashDue } from '@serva/core/pricing';
 import {
   buildSalePayload,
   businessDateOf,
@@ -152,6 +152,8 @@ export function PaymentPanel({
     };
   });
   const [history, setHistory] = useState(false);
+  // The total when the customer was picked: if it moves after (wholesale or contract prices), the cashier is told
+  const [totalAtPick, setTotalAtPick] = useState<number | null>(null);
   // A device with a warranty is sold to a known customer (the store's setting): the picker opens first
   const needsCustomer = warrantyAsksCustomer(settings.till, settings.sectors) && hasWarrantyDevice(cart);
   const [picking, setPicking] = useState(needsCustomer);
@@ -364,7 +366,11 @@ export function PaymentPanel({
     !(needsCustomer && !customer) &&
     tenders.length > 0;
 
-  const dueHere = dueIn(option.currency, base, remainingBase, ctx.rates);
+  // Cash in the sale's own currency is due rounded to the cash step: the same figure the footer shows
+  const dueHere =
+    option.method === 'cash' && option.currency === base
+      ? roundCashDue(remainingBase, cashSteps[base] ?? 0).dueMinor
+      : dueIn(option.currency, base, remainingBase, ctx.rates);
   const quick = option.method === 'cash' ? quickAmounts(dueHere, option.currency) : [];
 
   // An exchange: once this till's documents are read, the voucher goes in as the first part when
@@ -390,6 +396,10 @@ export function PaymentPanel({
   }
 
   function pick(next: PayOption) {
+    // A split part typed and not yet added is kept: choosing another method adds it first
+    if (split && text && current && !voucherProblem && !needsReference && next.key !== option.key) {
+      setParts((list) => [...list, { option, tender: current }]);
+    }
     setOption(next);
     setText('');
     setReference('');
@@ -605,6 +615,12 @@ export function PaymentPanel({
                 );
               })}
             </div>
+            {customer && totalAtPick !== null && totalAtPick !== totalMinor ? (
+              <Alert tone="info">
+                تغيّر السعر حسب سعر الزبون: من <Money minor={totalAtPick} currency={base} /> إلى{' '}
+                <Money minor={totalMinor} currency={base} />.
+              </Alert>
+            ) : null}
             {needsCustomer && !customer ? (
               <Alert tone="warning">جهاز بكفالة: اطلب اسم الزبون وجواله، فالكفالة تُسجَّل باسمه.</Alert>
             ) : null}
@@ -613,6 +629,7 @@ export function PaymentPanel({
                 catalog={catalog}
                 createdBy={cashierId}
                 onPicked={(picked) => {
+                  setTotalAtPick(totalMinor);
                   setCustomer(picked);
                   onCustomer?.({ id: picked.id, name: picked.name });
                   setPicking(false);
@@ -909,7 +926,7 @@ export function PaymentPanel({
       <footer className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-line bg-surface-total px-5 py-2 @3xl/pay:py-3">
         <div role="status" className="flex items-baseline gap-3">
           <span className="text-base font-semibold text-ink-muted">
-            {short ? 'ناقص من الزبون' : 'الباقي'}
+            {short ? 'المتبقي' : 'الباقي للزبون'}
           </span>
           <span
             className={cn(

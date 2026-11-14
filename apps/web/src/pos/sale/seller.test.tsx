@@ -22,7 +22,7 @@ async function pay(user: Awaited<ReturnType<typeof saleScreen>>['user']) {
 }
 
 describe('the seller', () => {
-  it('is the cashier by default, and the one picked for the next sales', async () => {
+  it('is the cashier by default, and a picked seller counts for that sale only', async () => {
     const { user, outbox } = await saleScreen();
     await scan(user, PRODUCTS.oil.barcode!.code);
     await pay(user);
@@ -34,6 +34,7 @@ describe('the seller', () => {
     const sellers = outbox
       .filter((e) => e.type === 'sale')
       .map((e) => (e.doc.payload as unknown as SalePayload).salespersonId);
-    expect(sellers).toEqual([null, ids.maryam, ids.maryam]);
+    // The picked seller goes back to the cashier after each sale, so a later sale is never credited by mistake
+    expect(sellers).toEqual([null, ids.maryam, null]);
   });
 });

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type RefObject } from 'react';
+import { memo, useEffect, useMemo, useState, type RefObject } from 'react';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { batchState } from '@serva/core/pharmacy';
 import { businessDateOf } from '@serva/core/sale';
@@ -29,7 +29,10 @@ import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogI
 import { Kbd } from './Kbd';
 import { gridEntries, lowestPrice, piecesText, type GridEntry } from './models';
 import { stockInPacks } from './packStock';
+import { expiryText, tileInfo } from './tileInfo';
 import { pieceWord } from './packText';
+
+const PHOTOS_OFF_KEY = 'tillPhotosOff';
 
 export interface PriceCheck {
   /** The product's name */
@@ -102,6 +105,30 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
     [catalog, query, category],
   );
   const entries = useMemo(() => gridEntries(results, pieces), [results, pieces]);
+  // Photos in the grid where the products have any; one tap turns them off for a compact grid (kept on this device)
+  const anyPhoto = useMemo(() => catalog.items.some((i) => Boolean(i.imageUrl)), [catalog.items]);
+  const [photosOff, setPhotosOff] = useState(() => {
+    try {
+      return localStorage.getItem(PHOTOS_OFF_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (photosOff) localStorage.setItem(PHOTOS_OFF_KEY, '1');
+      else localStorage.removeItem(PHOTOS_OFF_KEY);
+    } catch {
+      // Storage is closed: the choice lasts until the page is reloaded
+    }
+  }, [photosOff]);
+  // The picture's place (photo or letter) stays unless the cashier chose the compact grid, offered where photos exist
+  const photos = !(anyPhoto && photosOff);
+  const today = businessDateOf(
+    Date.now(),
+    catalog.settings?.timezone ?? 'UTC',
+    catalog.settings?.businessDayCutoff ?? '00:00',
+  );
 
   function onSearchKey(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') {
@@ -274,6 +301,13 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           })}
         </div>
       ) : null}
+      {anyPhoto && results.length > 0 ? (
+        <div className="-mt-1 flex shrink-0 justify-end">
+          <Button variant="ghost" size="md" aria-pressed={photos} onClick={() => setPhotosOff(photos)}>
+            {photos ? 'أخفِ الصور' : 'أظهر الصور'}
+          </Button>
+        </div>
+      ) : null}
       {results.length === 0 ? (
         <EmptyState
           icon={catalog.items.length === 0 ? ProductsIcon : SearchIcon}
@@ -289,6 +323,8 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           entries={entries}
           inCart={inCart}
           pickingProduct={pickingProduct}
+          today={today}
+          photos={photos}
           onPickItem={onPickItem}
           onPickModel={props.onPickModel}
         />
@@ -302,12 +338,16 @@ const Grid = memo(function Grid({
   entries,
   inCart,
   pickingProduct,
+  today,
+  photos,
   onPickItem,
   onPickModel,
 }: {
+  photos: boolean;
   entries: readonly GridEntry[];
   inCart: ReadonlySet<string>;
   pickingProduct: string | null;
+  today: string;
   onPickItem: ItemsAreaProps['onPickItem'];
   onPickModel: (productId: string) => void;
 }) {
@@ -325,12 +365,20 @@ const Grid = memo(function Grid({
                 entry={entry}
                 picking={pickingProduct === entry.productId}
                 inCart={entry.pieces.some((p) => inCart.has(p.variantId))}
+                today={today}
+                photos={photos}
                 onPick={onPickModel}
               />
             </li>
           ) : (
             <li key={entry.item.variantId}>
-              <ItemTileMemo item={entry.item} inCart={inCart.has(entry.item.variantId)} onPick={onPickItem} />
+              <ItemTileMemo
+                item={entry.item}
+                inCart={inCart.has(entry.item.variantId)}
+                today={today}
+                photos={photos}
+                onPick={onPickItem}
+              />
             </li>
           ),
         )}
@@ -342,10 +390,14 @@ const Grid = memo(function Grid({
 const ItemTileMemo = memo(function ItemTileMemo({
   item,
   inCart,
+  today,
+  photos,
   onPick,
 }: {
   item: CatalogItem;
   inCart: boolean;
+  today: string;
+  photos: boolean;
   onPick: ItemsAreaProps['onPickItem'];
 }) {
   return (
@@ -354,9 +406,10 @@ const ItemTileMemo = memo(function ItemTileMemo({
       priceMinor={item.price.priceMinor}
       currency={item.price.currency}
       weighed={item.unit?.allowsFraction ?? false}
-      {...(item.imageUrl ? { imageUrl: item.imageUrl } : {})}
-      pictureSlot
+      {...(photos && item.imageUrl ? { imageUrl: item.imageUrl } : {})}
+      pictureSlot={photos}
       selected={inCart}
+      extra={<TileMarks pieces={[item]} today={today} />}
       onSelect={() => onPick(item)}
       className="h-full w-full"
     />
@@ -367,11 +420,15 @@ const ModelTile = memo(function ModelTile({
   entry,
   picking,
   inCart,
+  today,
+  photos,
   onPick,
 }: {
   entry: Extract<GridEntry, { kind: 'model' }>;
   picking: boolean;
   inCart: boolean;
+  today: string;
+  photos: boolean;
   onPick: (productId: string) => void;
 }) {
   const price = lowestPrice(entry.pieces);
@@ -381,14 +438,40 @@ const ModelTile = memo(function ModelTile({
       priceMinor={price.priceMinor}
       currency={price.currency}
       detail={piecesText(entry.pieces.length)}
-      pictureSlot
-      {...(entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
+      pictureSlot={photos}
+      initial={!photos}
+      {...(photos && entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
       selected={picking || inCart}
+      extra={<TileMarks pieces={entry.pieces} today={today} />}
       onSelect={() => onPick(entry.productId)}
       className="h-full w-full"
     />
   );
 });
+
+/** Under a tile's price: what is left, the nearest expiry (amber, then red) and «برقم تسلسلي» */
+function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: string }) {
+  const digits = useDigits();
+  const info = tileInfo(pieces, today);
+  if (info.stockQty === null && !info.expiry && !info.tracksSerial) return null;
+  return (
+    <>
+      {info.stockQty !== null ? (
+        <span
+          className={cn('num text-xs font-medium', info.stockQty <= 0 ? 'text-danger-ink' : 'text-ink-muted')}
+        >
+          {info.stockQty <= 0 ? 'نفد' : `المتوفر ${formatQuantity(info.stockQty, digits)}`}
+        </span>
+      ) : null}
+      {info.expiry ? (
+        <Badge tone={info.expiry.tone}>
+          {expiryText(info.expiry.days, (n) => displayNumber(String(n), digits))}
+        </Badge>
+      ) : null}
+      {info.tracksSerial ? <Badge tone="neutral">برقم تسلسلي</Badge> : null}
+    </>
+  );
+}
 
 /** «سعر صنف»: the product's name, then a row for each size and colour with its price and what is left. */
 export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: string }) {
@@ -410,7 +493,7 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
       {check.pack ? (
         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold">
           <span>
-            {check.pack.name ? <bdi>{check.pack.name}</bdi> : 'العبوة'} (
+            {check.pack.name ? <bdi>{check.pack.name}</bdi> : 'العلبة'} (
             {formatQuantity(check.pack.qty, digits)} {pieceWord(check.pack.qty)})
           </span>
           <Money minor={check.pack.priceMinor} currency={check.pack.currency} className="font-bold" />
@@ -451,7 +534,7 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
                 ) : null}
                 {boxes.map((box) => (
                   <span key={box.qty} className="block text-sm font-normal text-ink-muted">
-                    {box.name ? <bdi>{box.name}</bdi> : 'عبوة'} ({formatQuantity(box.qty, digits)}{' '}
+                    {box.name ? <bdi>{box.name}</bdi> : 'علبة'} ({formatQuantity(box.qty, digits)}{' '}
                     {pieceWord(box.qty)}){' '}
                     <Money
                       minor={box.priceMinor}
@@ -501,7 +584,8 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
           const rows =
             today && Array.isArray(p.stockBatches)
               ? [...p.stockBatches]
-                  .filter((b) => b.qty > 0)
+                  // The no-batch row shows too, even below zero, so the rows add up to what is left
+                  .filter((b) => b.qty > 0 || (!b.batchNo && b.qty !== 0))
                   .sort((a, b) => (a.expiry ?? '9999').localeCompare(b.expiry ?? '9999'))
                   .map((b) => ({
                     batchNo: b.batchNo,
@@ -526,10 +610,18 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
                   key={`${b.batchNo ?? ''}-${i}`}
                   className={cn(
                     'flex flex-wrap items-center gap-x-2',
-                    b.state === 'ok' ? 'text-ink-muted' : 'text-danger-ink',
+                    b.state === 'ok' || b.state === 'empty' ? 'text-ink-muted' : 'text-danger-ink',
                   )}
                 >
-                  <span>دفعة {b.batchNo ? <bdi dir="ltr">{b.batchNo}</bdi> : '—'}</span>
+                  <span>
+                    {b.batchNo ? (
+                      <>
+                        دفعة <bdi dir="ltr">{b.batchNo}</bdi>
+                      </>
+                    ) : (
+                      'بلا دفعة'
+                    )}
+                  </span>
                   {b.expiry ? (
                     <span>
                       · تنتهي <bdi>{dayText(b.expiry, digits)}</bdi>

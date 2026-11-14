@@ -49,7 +49,12 @@ export function CardHeader({
 }) {
   return (
     <div className={cn('mb-4 flex items-center justify-between gap-4', className)}>
-      <div className={cn('flex min-w-0 flex-1 gap-3', description ? 'items-start' : 'items-center')}>
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 gap-3 [.flex-wrap>&]:min-w-40',
+          description ? 'items-start' : 'items-center',
+        )}
+      >
         {icon ? <IconChip>{icon}</IconChip> : null}
         <div className="flex min-w-0 flex-col gap-0.5">
           <h3 className="text-lg font-semibold text-ink">{title}</h3>
@@ -154,7 +159,8 @@ export function StatTile({
   return (
     <Card
       className={cn(
-        'grid content-start gap-x-3 gap-y-3',
+        // On a phone every figure tile is the same compact block: less padding, a smaller number
+        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-1.5 max-sm:p-4',
         trend ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-1',
         className,
       )}
@@ -170,7 +176,7 @@ export function StatTile({
       <p
         className={cn(
           'col-span-full num font-bold tracking-tight text-ink',
-          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi', VALUE_UNIT),
+          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-2xl', VALUE_UNIT),
         )}
       >
         {value}

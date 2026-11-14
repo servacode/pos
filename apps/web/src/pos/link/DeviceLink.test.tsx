@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { DirectionProvider } from '@radix-ui/react-direction';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -21,14 +21,20 @@ function renderLink({
   path = '/pos',
   helpers = fakeLinkHelpers(),
   timers = false,
-}: { path?: string; helpers?: ReturnType<typeof fakeLinkHelpers>; timers?: boolean } = {}) {
+  method = 'code',
+}: {
+  path?: string;
+  helpers?: ReturnType<typeof fakeLinkHelpers>;
+  timers?: boolean;
+  method?: 'code' | null;
+} = {}) {
   const user = userEvent.setup(timers ? { advanceTimers: vi.advanceTimersByTime.bind(vi) } : {});
   const onLinked = vi.fn();
   render(
     <DirectionProvider dir="rtl">
       <DensityProvider density="touch">
         <MemoryRouter initialEntries={[path]}>
-          <DeviceLink onLinked={onLinked} helpers={helpers} />
+          <DeviceLink onLinked={onLinked} helpers={helpers} {...(method ? { defaultMethod: method } : {})} />
         </MemoryRouter>
       </DensityProvider>
     </DirectionProvider>,
@@ -163,6 +169,20 @@ describe('step 1 «هل هذا جهاز كاشير؟»', () => {
     renderLink({ path: `/pos#${QR_TOKEN}` });
 
     expect(await screen.findByRole('heading', { name: 'سمِّ هذا الجهاز' })).toBeInTheDocument();
+  });
+});
+
+describe('the way offered first', () => {
+  afterEach(() => sessionStorage.clear());
+
+  it('starts on the owner sign-in and remembers a way picked, through a reload of the tab', async () => {
+    mockFetch({});
+    const first = renderLink({ method: null });
+    expect(await screen.findByRole('radio', { name: /ادخل بحساب المالك/ })).toBeChecked();
+    await first.user.click(screen.getByRole('radio', { name: /اكتب رمز الربط/ }));
+    cleanup();
+    renderLink({ method: null });
+    expect(await screen.findByRole('radio', { name: /اكتب رمز الربط/ })).toBeChecked();
   });
 });
 

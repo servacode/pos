@@ -186,9 +186,9 @@ describe('the online shop', () => {
     await user.click(within(page).getByRole('button', { name: 'M' }));
     await user.click(within(page).getByRole('button', { name: 'أنقص' }));
     await user.click(within(page).getByRole('button', { name: 'أضف إلى السلة' }));
-    expect(screen.getByRole('link', { name: 'السلة، 3 قطعة' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'السلة، 3 قطع' })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('link', { name: 'السلة، 3 قطعة' }));
+    await user.click(screen.getByRole('link', { name: 'السلة، 3 قطع' }));
     const cart = await screen.findByRole('region', { name: 'السلة' });
     expect(cart).toHaveTextContent('L · أبيض');
     expect(cart).toHaveTextContent('13,700');

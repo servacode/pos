@@ -7,9 +7,9 @@ import {
 } from './catalog-options';
 
 describe('catalog options', () => {
-  it('starts with no barcodes made for new variants and two ready size runs', () => {
+  it('starts with a barcode made for every new variant and two ready size runs', () => {
     expect(catalogOptionsOf(null)).toEqual(DEFAULT_CATALOG_OPTIONS);
-    expect(catalogOptionsOf(undefined).autoBarcode).toBe(false);
+    expect(catalogOptionsOf(undefined).autoBarcode).toBe(true);
     expect(catalogOptionsOf(null).sizeRuns[0]).toEqual({ name: 'طقم 1-2-2-1', counts: [1, 2, 2, 1] });
   });
 
@@ -18,7 +18,7 @@ describe('catalog options', () => {
       autoBarcode: true,
       sizeRuns: DEFAULT_CATALOG_OPTIONS.sizeRuns,
     });
-    expect(catalogOptionsOf({ sizeRuns: [] })).toEqual({ autoBarcode: false, sizeRuns: [] });
+    expect(catalogOptionsOf({ sizeRuns: [] })).toEqual({ autoBarcode: true, sizeRuns: [] });
   });
 
   it('refuses a run with no pieces, a long name and too many runs, in Arabic', () => {

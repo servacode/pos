@@ -52,6 +52,9 @@ describe('«سجّل هدراً» (03 › الخضار والمخابز)', () =>
     await user.selectOptions(within(form).getByLabelText('الصنف التالف'), 'b-1:v-1');
     await user.type(within(form).getByLabelText('كمية الهدر'), '2.5');
     await user.click(within(form).getByRole('button', { name: 'سجّل الهدر' }));
+    // Nothing leaves the stock until it is confirmed
+    expect(requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
+    await user.click(within(form).getByRole('button', { name: 'أكّد الهدر' }));
     expect(await screen.findByText(/سُجّل الجرد STK-0001/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/stocktakes').at(-1)?.body).toMatchObject({
       branchId: 'b-1',
@@ -123,5 +126,43 @@ describe('counting the shelf by hand', () => {
     await user.type(screen.getByLabelText('المعدود من بندورة'), '-3');
     expect(await screen.findByText(/العدد لا يكون سالباً/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'راجع الجرد' })).toBeDisabled();
+  });
+});
+
+describe('شبكة المقاس واللون في المخزون', () => {
+  it('lays a model out with sizes down and colours across, and goes back to the list', async () => {
+    const piece = (id: string, size: string, colour: string, qty: number) => ({
+      variantId: id,
+      name: `قميص ${size} · ${colour}`,
+      productId: 'p-1',
+      productName: 'قميص',
+      attributes: [
+        { name: 'المقاس', value: size },
+        { name: 'اللون', value: colour },
+      ],
+      branchId: 'b-1',
+      qty,
+      valueMinor: 0,
+      unitCostMinor: null,
+    });
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          items: [piece('a', 'M', 'أبيض', 3000), piece('b', 'L', 'أبيض', 0), piece('c', 'M', 'أزرق', 5000)],
+          totalValueMinor: 0,
+          baseCurrency: 'SYP',
+        } satisfies InventoryResponse,
+      }),
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('radio', { name: 'شبكة المقاس واللون' }));
+    const grid = await screen.findByRole('region', { name: 'شبكة قميص' });
+    expect(within(grid).getByRole('columnheader', { name: 'أزرق' })).toBeInTheDocument();
+    expect(within(grid).getByRole('rowheader', { name: 'L' })).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'قائمة' }));
+    expect(await screen.findByRole('table', { name: 'المخزون' })).toBeInTheDocument();
   });
 });

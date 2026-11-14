@@ -81,10 +81,37 @@ export async function listCustomers(
       from customers c left join (${balances}) b on b.customer_id = c.id
       where ${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
       order by coalesce(b.balance, 0) desc, c.name, c.id`);
+    // What each customer bought: the last day, the total net of returns, and the size they take most
+    const sold = await tx.execute<{ customer_id: string; last: string; spent: string }>(sql`
+      select i.customer_id, max(i.business_date)::text as last,
+             (sum(i.total_minor) - coalesce(sum((select sum(r.total_minor) from sale_returns r
+                                                 where r.tenant_id = i.tenant_id and r.sale_id = i.id)), 0))::text as spent
+      from invoices i where i.customer_id is not null group by i.customer_id`);
+    const sizes = await tx.execute<{ customer_id: string; value: string }>(sql`
+      select distinct on (customer_id) customer_id, value from (
+        select i.customer_id, a->>'value' as value,
+               sum(l.base_qty - coalesce((select sum(rl.base_qty) from sale_return_lines rl
+                 join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+                 where r.sale_id = l.invoice_id and rl.sale_line_no = l.line_no), 0)) as qty
+        from invoice_lines l
+        join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+        join variants v on v.id = l.variant_id
+        cross join lateral jsonb_array_elements(v.attributes) a
+        where i.customer_id is not null and coalesce(a->>'name', '') <> '' and coalesce(a->>'value', '') <> ''
+          and a->>'name' not like '%لون%'
+        group by 1, 2) t
+      where qty > 0 order by customer_id, qty desc, value`);
+    const soldBy = new Map(sold.map((r) => [r.customer_id, r]));
+    const sizeBy = new Map(sizes.map((r) => [r.customer_id, r.value]));
     const q = query.q ? normalizeArabic(query.q) : '';
     const digits = query.q?.replace(/\D/g, '') ?? '';
     const items = rows
-      .map(item)
+      .map((r) => ({
+        ...item(r),
+        lastPurchaseDate: soldBy.get(r.id)?.last ?? null,
+        spentMinor: Number(soldBy.get(r.id)?.spent ?? 0),
+        favouriteSize: sizeBy.get(r.id) ?? null,
+      }))
       .filter(
         (c) =>
           !q ||

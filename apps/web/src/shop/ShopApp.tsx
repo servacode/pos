@@ -47,6 +47,7 @@ import {
 } from '@serva/ui';
 import { ApiError, apiFetch, errorMessage } from '../lib/api';
 import { counted } from '../pos/format';
+import { isColourOption, swatchOf } from '../pos/sale/swatch';
 import { canChoose, canPick, cartCount, cartTotal, MAX_QTY, useShopCart, variantFor } from './cart';
 import { openWhatsApp, withTrackingLink } from './open';
 import { getOnce } from './getOnce';
@@ -127,7 +128,7 @@ export function ShopApp() {
           </Link>
           <Link
             to={`${base}/cart`}
-            aria-label={`السلة، ${count} قطعة`}
+            aria-label={`السلة، ${counted(count, PIECES)}`}
             className={cn(
               CONTROL_HEIGHT[density],
               'min-h-11! inline-flex shrink-0 items-center gap-2 rounded-control border border-line-control/50 bg-surface ps-3 pe-2.5 text-sm font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted',
@@ -202,6 +203,7 @@ const digitsOf = (text: string) => [...text].filter((ch) => ch >= '0' && ch <= '
 
 /** «قطعة واحدة», «قطعتان», «3 قطع», «16 قطعة»: the count and its noun agree, as Arabic counts. */
 const PIECES = ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'] as const;
+const PRODUCTS = ['منتج واحد', 'منتجان', 'منتجات', 'منتجاً'] as const;
 
 /**
  * A link drawn as a button (هوية 4 › الزر), the density's control height: the way on to WhatsApp, to
@@ -287,7 +289,7 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
           <div className="flex min-w-0 flex-col gap-1">
             <h1 className="text-2xl font-bold text-ink sm:text-3xl">{title}</h1>
             <p className="text-sm text-ink-muted">
-              {counted(shown.length, PIECES)}
+              {counted(shown.length, PRODUCTS)}
               {home.store.delivery ? ' · توصيل' : ''}
               {home.store.pickup ? ' · استلام من المحل' : ''}
             </p>
@@ -600,6 +602,13 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                                 : 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted',
                           )}
                         >
+                          {isColourOption(option.name) && swatchOf(value) ? (
+                            <span
+                              aria-hidden="true"
+                              className="me-2 inline-block size-3.5 shrink-0 rounded-full border border-line-control align-middle"
+                              style={{ backgroundColor: swatchOf(value) ?? undefined }}
+                            />
+                          ) : null}
                           {value}
                           {!can ? (
                             <span aria-hidden="true" className="ms-1.5 text-xs font-semibold no-underline">

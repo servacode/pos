@@ -12,6 +12,7 @@ import {
   formatQuantity,
   PageHeader,
   SearchIcon,
+  SegmentedControl,
   TextField,
   useDigits,
   type DataColumn,
@@ -37,12 +38,14 @@ export function RecallPage() {
   const [confirming, setConfirming] = useState(false);
   const [lifting, setLifting] = useState(false);
   const [onShelf, setOnShelf] = useState<ExpiryRow[]>([]);
+  // Which batches the picker offers: all, the stopped ones, or those ending within three months
+  const [shelfFilter, setShelfFilter] = useState<'all' | 'blocked' | 'soon'>('all');
 
   // The batches the stores hold, to pick from instead of typing a number blind (the same report the
-  // expiry page reads: two years ahead, blocked ones included)
+  // expiry page reads: every batch on the shelf, blocked ones included)
   useEffect(() => {
     let alive = true;
-    listExpiry(730).then(
+    listExpiry(3650).then(
       (r) => alive && setOnShelf(r.items),
       () => undefined,
     );
@@ -59,13 +62,15 @@ export function RecallPage() {
       if (!row.batchNo) continue;
       const key = `${row.variantId}|${row.batchNo}`;
       if (seen.has(key)) continue;
+      if (shelfFilter === 'blocked' && !row.blocked) continue;
+      if (shelfFilter === 'soon' && (row.daysLeft === null || row.daysLeft > 90)) continue;
       if (typed && !row.batchNo.toLowerCase().includes(typed) && !row.name.toLowerCase().includes(typed))
         continue;
       seen.add(key);
       out.push(row);
     }
     return out.slice(0, 8);
-  }, [onShelf, batchNo]);
+  }, [onShelf, batchNo, shelfFilter]);
 
   /** `keepView`: the page the person is on stays as it is while the numbers are read again */
   async function search(next?: string, keepView = false) {
@@ -96,7 +101,7 @@ export function RecallPage() {
       );
       await search(found.batchNo, true);
       // the chips under the search box read the same flag: read them again too
-      await listExpiry(730).then(
+      await listExpiry(3650).then(
         (r) => setOnShelf(r.items),
         () => undefined,
       );
@@ -238,6 +243,20 @@ export function RecallPage() {
               ابحث
             </Button>
           </form>
+          {onShelf.some((r) => r.batchNo) ? (
+            <div className="mt-4">
+              <SegmentedControl
+                label="الدفعات المعروضة"
+                value={shelfFilter}
+                onValueChange={setShelfFilter}
+                options={[
+                  { value: 'all', label: 'كل الدفعات' },
+                  { value: 'soon', label: 'تنتهي قريباً' },
+                  { value: 'blocked', label: 'الموقوفة' },
+                ]}
+              />
+            </div>
+          ) : null}
           {suggestions.length > 0 ? (
             <div className="mt-4 flex flex-col gap-2">
               <p className="text-sm font-semibold text-ink-muted">

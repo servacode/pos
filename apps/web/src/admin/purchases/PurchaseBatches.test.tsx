@@ -113,6 +113,8 @@ describe('a receipt with batches', () => {
     await user.type(date, '01/01/2020');
     const warning = await screen.findByRole('status');
     expect(within(warning.parentElement!).getByText(/هذا التاريخ مضى/)).toBeInTheDocument();
+    // saved only after the buyer says the past date is right
+    expect(screen.getByRole('switch', { name: /تاريخ الانتهاء الماضي صحيح/ })).not.toBeChecked();
     await user.clear(date);
     await user.type(date, '01/01/2099');
     expect(screen.queryByText(/هذا التاريخ مضى/)).toBeNull();

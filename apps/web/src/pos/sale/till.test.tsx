@@ -277,6 +277,8 @@ describe('the size picker', () => {
     ]);
     const { user } = await saleScreen({ sets });
     const open = async () => {
+      // A tap right after the picker's «أضف» is the double tap that is swallowed: a real one comes later
+      await new Promise((resolve) => setTimeout(resolve, 400));
       await user.click(
         within(screen.getByRole('list', { name: 'الأصناف' })).getByRole('button', { name: /قميص كتان/ }),
       );
@@ -290,6 +292,28 @@ describe('the size picker', () => {
     const s = within(picker).getByRole('button', { name: 'S' });
     expect(s).toHaveTextContent('نفد');
     expect(within(picker).getByRole('button', { name: 'M' })).toHaveTextContent('5');
+  });
+
+  it('swallows the second tap of a double tap on «أضف», which would land on the tile under it', async () => {
+    const { user } = await saleScreen({
+      sets: shirtSets([
+        ['S', 'أبيض', 2],
+        ['M', 'أبيض', 5],
+      ]),
+    });
+    await user.click(
+      within(screen.getByRole('list', { name: 'الأصناف' })).getByRole('button', { name: /قميص كتان/ }),
+    );
+    const picker = await screen.findByRole('region', { name: 'اختر من قميص كتان' });
+    // The clock stands still between the two taps, as a real double tap lands within a few tenths of a second
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    await user.click(within(picker).getByRole('button', { name: 'S' }));
+    // The very next tap, on the grid that is back, opens nothing
+    await user.click(
+      within(screen.getByRole('list', { name: 'الأصناف' })).getByRole('button', { name: /قميص كتان/ }),
+    );
+    now.mockRestore();
+    expect(screen.queryByRole('region', { name: 'اختر من قميص كتان' })).not.toBeInTheDocument();
   });
 
   it('orders values: letters, numbers, shoe sizes, ages; colours keep the product order', () => {

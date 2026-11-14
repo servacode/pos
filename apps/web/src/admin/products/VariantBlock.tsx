@@ -38,6 +38,8 @@ interface VariantBlockProps {
   errors: FieldErrors;
   /** Every code already in the card, to refuse a repeat before asking the server */
   codesInCard: ReadonlySet<string>;
+  /** A row of the grid: the floor, wholesale, minimum and barcodes show only when asked for */
+  advanced?: boolean;
   onChange: (variant: VariantDraft) => void;
 }
 
@@ -47,6 +49,8 @@ type AddError = { text: string; productId?: string } | null;
 // prices and minimum, one column each. On a phone it scrolls sideways inside its card and the
 // variant's name stays in view at the start.
 const GRID_COLUMNS = {
+  simple: 'grid-cols-[minmax(6rem,auto)_minmax(8.5rem,1.3fr)]',
+  simpleMany: 'grid-cols-[minmax(6rem,auto)_minmax(8.5rem,1.3fr)_minmax(5.5rem,auto)]',
   one: 'grid-cols-[minmax(6rem,auto)_minmax(8.5rem,1.3fr)_repeat(2,minmax(7.5rem,1fr))_minmax(6.5rem,1fr)]',
   many: 'grid-cols-[minmax(6rem,auto)_minmax(8.5rem,1.3fr)_minmax(5.5rem,auto)_repeat(2,minmax(7.5rem,1fr))_minmax(6.5rem,1fr)]',
 } as const;
@@ -60,16 +64,29 @@ const GRID_HEADS = ['سعر البيع', 'الأدنى للمفاصلة', 'سع�
  */
 export function VariantGrid({
   currencies,
+  advanced = true,
   children,
 }: {
   currencies: readonly CurrencyCode[];
+  advanced?: boolean;
   children: ReactNode;
 }) {
   const many = currencies.length > 1;
   return (
     // `relative` keeps the fields' hidden labels inside the sideways scroll on a phone.
     <div className="relative -mx-5 overflow-x-auto px-5 sm:-mx-6 sm:px-6">
-      <div className={cn('grid gap-x-3', many ? GRID_COLUMNS.many : GRID_COLUMNS.one)}>
+      <div
+        className={cn(
+          'grid gap-x-3',
+          advanced
+            ? many
+              ? GRID_COLUMNS.many
+              : GRID_COLUMNS.one
+            : many
+              ? GRID_COLUMNS.simpleMany
+              : GRID_COLUMNS.simple,
+        )}
+      >
         <div
           aria-hidden="true"
           className="col-span-full grid grid-cols-subgrid items-end border-b border-line pb-2 text-xs font-semibold text-ink-subtle"
@@ -77,9 +94,13 @@ export function VariantGrid({
           <span className="sticky start-0 z-1 bg-surface">المتغيّر</span>
           <span>{GRID_HEADS[0]}</span>
           {many ? <span>العملة</span> : null}
-          <span>{GRID_HEADS[1]}</span>
-          <span>{GRID_HEADS[2]}</span>
-          <span>{GRID_HEADS[3]}</span>
+          {advanced ? (
+            <>
+              <span>{GRID_HEADS[1]}</span>
+              <span>{GRID_HEADS[2]}</span>
+              <span>{GRID_HEADS[3]}</span>
+            </>
+          ) : null}
         </div>
         {children}
       </div>
@@ -101,6 +122,7 @@ export const VariantBlock = memo(function VariantBlock({
   allowsFraction,
   errors,
   codesInCard,
+  advanced = true,
   onChange,
 }: VariantBlockProps) {
   const [newCode, setNewCode] = useState('');
@@ -321,11 +343,15 @@ export const VariantBlock = memo(function VariantBlock({
         </span>
         {price}
         {currency}
-        {minPrice}
-        {wholesale}
-        {minStock}
+        {advanced ? (
+          <>
+            {minPrice}
+            {wholesale}
+            {minStock}
+          </>
+        ) : null}
         {attributesError ? <div className="col-start-2 -col-end-1">{attributesError}</div> : null}
-        <div className="col-start-2 -col-end-1">{barcodes}</div>
+        {advanced ? <div className="col-start-2 -col-end-1">{barcodes}</div> : null}
       </div>
     );
   }

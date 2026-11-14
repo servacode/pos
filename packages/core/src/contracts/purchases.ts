@@ -175,6 +175,10 @@ export const inventoryQuery = z.object({ branchId: uuidSchema.optional() });
 export interface InventoryRow {
   variantId: string;
   name: string;
+  /** The piece's options (المقاس، اللون…) and its model, for laying a model out as a grid; absent from older servers */
+  attributes?: { name: string; value: string }[];
+  productId?: string;
+  productName?: string;
   branchId: string;
   /** Base units, thousandths */
   qty: number;
@@ -236,7 +240,7 @@ export interface StocktakeDetail {
 
 /** Batches still on the shelf that end within `days` (90 by default), or already have. */
 export const expiryQuery = z.object({
-  days: z.coerce.number().int().min(1).max(730).default(90),
+  days: z.coerce.number().int().min(1).max(3650).default(90),
   /** One item's batches, whatever their dates (the supplier return and the count pick from them) */
   variantId: uuidSchema.optional(),
   branchId: uuidSchema.optional(),

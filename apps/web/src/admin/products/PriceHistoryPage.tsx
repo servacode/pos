@@ -211,7 +211,7 @@ function PriceHistory() {
                 if (items) downloadCsv('سجل-الأسعار', HISTORY_HEADERS, historyRows(items));
               }}
             >
-              صدّر CSV
+              صدّر إلى إكسل
             </Button>
             {from || to || productId ? (
               <Button

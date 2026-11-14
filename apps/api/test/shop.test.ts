@@ -212,6 +212,40 @@ describe('the online shop', () => {
     ]);
   });
 
+  it('never shows an item priced at 0 (an alteration service), and cannot be ordered', async () => {
+    const store = await openStore(app);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: as(store),
+      payload: {
+        nameAr: 'تقصير',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 0 } }],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const paid = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: as(store),
+      payload: {
+        nameAr: 'خياطة',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 50_000 } }],
+      },
+    });
+    expect(paid.statusCode, paid.body).toBe(201);
+    await openShop(store);
+    const home = (await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' })).json<ShopHome>();
+    expect(home.products.map((p) => p.name)).toEqual(['خياطة']);
+    const free = made.json<ProductDetail>();
+    const page = await app.inject({ method: 'GET', url: `/v1/shop/nour-fashion/products/${free.id}` });
+    expect(page.statusCode).toBe(404);
+    const tried = await order('nour-fashion', [{ variantId: free.variants[0]!.id, qty: 1 }]);
+    expect(tried.statusCode).toBe(400);
+  });
+
   it('saves an order at the server’s prices, writes it for WhatsApp, and the shop follows it', async () => {
     const store = await openStore(app);
     const { l, m } = await goods(store);

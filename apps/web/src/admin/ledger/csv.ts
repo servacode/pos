@@ -11,11 +11,16 @@ const BOM = '﻿';
 const join = (rows: string[][]) => `${BOM}${rows.map((cells) => cells.join(',')).join('\r\n')}\r\n`;
 
 /** What a statement line is called: its document's kind, falling back to the entry's memo. */
-export const statementWhat = (line: { sourceType: string; memo: string }) =>
+export const statementWhat = (line: { sourceType: string; memo: string; debitMinor?: number }) =>
   // A manual entry says what it is in its memo: «سند قبض …», «رصيد افتتاحي — …»
   line.sourceType === 'manual' && line.memo
     ? line.memo
-    : (STATEMENT_SOURCE_LABEL[line.sourceType] ?? line.memo);
+    : line.sourceType === 'cheque' && (line.memo.startsWith('رد ') || (line.debitMinor ?? 0) > 0)
+      ? // A cheque that came back puts the debt on the customer again
+        'شيك مرتجع'
+      : line.sourceType === 'cheque' && line.memo.startsWith('تحصيل ')
+        ? 'تحصيل شيك'
+        : (STATEMENT_SOURCE_LABEL[line.sourceType] ?? line.memo);
 
 /**
  * A party's statement as CSV for Excel: the party and the period first, then the opening balance,

@@ -47,6 +47,12 @@ const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
 );
 const FoodCostPage = lazy(() => import('./reports/FoodCostPage').then((m) => ({ default: m.FoodCostPage })));
+const SuppliersPage = lazy(() =>
+  import('./purchases/SuppliersPage').then((m) => ({ default: m.SuppliersPage })),
+);
+const ReportsHomePage = lazy(() =>
+  import('./reports/ReportsHomePage').then((m) => ({ default: m.ReportsHomePage })),
+);
 const SalesReportPage = lazy(() =>
   import('./reports/SalesReportPage').then((m) => ({ default: m.SalesReportPage })),
 );
@@ -171,6 +177,7 @@ export function AdminApp() {
           <Route path="/customers" element={page(<CustomersPage />)} />
           <Route path="/messages" element={page(<BroadcastsPage />)} />
           <Route path="/purchases" element={page(<PurchasesPage />)} />
+          <Route path="/suppliers" element={page(<SuppliersPage />)} />
           <Route path="/inventory" element={page(<InventoryPage />)} />
           <Route
             path="/expiry"
@@ -203,6 +210,7 @@ export function AdminApp() {
           <Route path="/import" element={page(<ImportPage />)} />
           <Route path="/transfers" element={page(<TransfersPage />)} />
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
+          <Route path="/reports" element={page(<ReportsHomePage />)} />
           <Route path="/reports/sales" element={page(<SalesReportPage />)} />
           <Route path="/reports/food-cost" element={page(<FoodCostPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />

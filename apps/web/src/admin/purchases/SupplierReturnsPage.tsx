@@ -164,7 +164,17 @@ export function SupplierReturnsPage() {
       const named = e instanceof ApiError ? (e.fields ?? {}) : {};
       // The banner carries the real reason, not only «تحقّق من الحقول المظلّلة»
       const reasons = [...new Set(Object.values(named))];
-      setError(reasons.length > 0 ? reasons.join(' · ') : errorMessage(e));
+      // The connection may drop after the server saved the return: read the list again and say so,
+      // so a second press does not send the same pieces back twice
+      const dropped = e instanceof ApiError && (e.code === 'network_error' || e.status >= 500);
+      if (dropped) load();
+      setError(
+        reasons.length > 0
+          ? reasons.join(' · ')
+          : dropped
+            ? `${errorMessage(e)} قد يكون المرتجع حُفظ: تحقّق من القائمة أسفل الصفحة قبل الإعادة.`
+            : errorMessage(e),
+      );
       setFields(named);
     } finally {
       setSaving(false);
@@ -266,6 +276,7 @@ export function SupplierReturnsPage() {
                   onChange={(e) => setSupplierId(e.target.value)}
                   error={fields.supplierId}
                 >
+                  {supplierId ? null : <option value="">اختر المورد</option>}
                   {active.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}

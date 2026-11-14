@@ -96,7 +96,7 @@ describe('«سحب دفعة»', () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: owner() }),
-      'GET /v1/inventory/expiry?days=730': () => ({
+      'GET /v1/inventory/expiry?days=3650': () => ({
         status: 200,
         body: {
           today: '2026-11-14',
@@ -129,7 +129,14 @@ describe('«سحب دفعة»', () => {
     const { user } = renderApp('/recall');
     const list = await screen.findByRole('list', { name: 'دفعات مقترحة' });
     expect(within(list).getByRole('button', { name: /C-09/ })).toHaveTextContent('موقوفة');
-    await user.click(within(list).getByRole('button', { name: /C-09/ }));
+    // The pre-filters: 107 days left is not «قريباً»; the stopped one shows under «الموقوفة»
+    await user.click(screen.getByRole('radio', { name: 'تنتهي قريباً' }));
+    expect(screen.queryByRole('list', { name: 'دفعات مقترحة' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'الموقوفة' }));
+    expect(await screen.findByRole('list', { name: 'دفعات مقترحة' })).toBeInTheDocument();
+    await user.click(
+      within(screen.getByRole('list', { name: 'دفعات مقترحة' })).getByRole('button', { name: /C-09/ }),
+    );
     await screen.findByRole('table', { name: 'الدفعة وأصلها' });
     expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
 
@@ -143,6 +150,7 @@ describe('«سحب دفعة»', () => {
     expect(screen.getByRole('table', { name: 'الدفعة وأصلها' })).toBeInTheDocument();
     expect(screen.getByLabelText('رقم الدفعة')).toHaveValue('C-09');
     // the suggestion chip no longer says «موقوفة» once the stop is lifted
+    await user.click(screen.getByRole('radio', { name: 'كل الدفعات' }));
     await waitFor(() =>
       expect(
         within(screen.getByRole('list', { name: 'دفعات مقترحة' })).getByRole('button', { name: /C-09/ }),

@@ -8,9 +8,10 @@ describe('packs on a sale line', () => {
     expect(packLineText({ qty: 2000, packQty: 100_000, packName: 'علبة' }, fmt)).toBe('2 علبة (200 قطعة)');
   });
 
-  it('calls a pack with no name «عبوة»', () => {
-    expect(packLineText({ qty: 1000, packQty: 12_000, packName: null }, fmt)).toBe('1 عبوة (12 قطعة)');
-    expect(packLineText({ qty: 1000, packQty: 12_000 }, fmt)).toBe('1 عبوة (12 قطعة)');
+  it('calls a pack with no name «علبة»', () => {
+    expect(packLineText({ qty: 1000, packQty: 12_000, packName: null }, fmt)).toBe('1 علبة (12 قطعة)');
+    expect(packLineText({ qty: 1000, packQty: 12_000 }, fmt)).toBe('1 علبة (12 قطعة)');
+    expect(packLineText({ qty: 1000, packQty: 100_000, packName: 'عبوة' }, fmt)).toBe('1 علبة (100 قطعة)');
   });
 
   it('has nothing to say of single units, weights or an old line without a pack size', () => {

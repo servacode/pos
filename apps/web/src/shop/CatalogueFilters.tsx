@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import type { ShopProductCard } from '@serva/core';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { Button, Checkbox, cn, CONTROL_HEIGHT, Select, TextField, ToggleChip, useDensity } from '@serva/ui';
+import { isColourOption, swatchOf } from '../pos/sale/swatch';
 import {
   filterCount,
   NO_FILTERS,
@@ -46,6 +47,15 @@ function OptionChips({
                 <ToggleChip
                   key={value}
                   label={value}
+                  leading={
+                    isColourOption(choice.name) && swatchOf(value) ? (
+                      <span
+                        aria-hidden="true"
+                        className="inline-block size-3.5 shrink-0 rounded-full border border-line-control"
+                        style={{ backgroundColor: swatchOf(value) ?? undefined }}
+                      />
+                    ) : undefined
+                  }
                   checked={picked.includes(value)}
                   onChange={(e) => onToggle(value, e.target.checked)}
                 />
@@ -145,7 +155,7 @@ export function CatalogueFilters({
           label="الترتيب"
           value={sort}
           onChange={(e) => onSort(e.target.value as ShopSort)}
-          className="w-44"
+          className="w-44 sm:ms-auto"
         >
           <option value="newest">الأحدث</option>
           {showPrices ? <option value="price-asc">السعر: الأقل أولاً</option> : null}

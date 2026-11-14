@@ -298,7 +298,7 @@ function Import() {
         <PageHeader
           icon={<PackageOpenIcon />}
           title="استيراد البيانات"
-          description="انقل المنتجات والزبائن والموردين من ملف Excel أو CSV. يُفحص الملف كله قبل أن يتغيّر شيء."
+          description="انقل المنتجات والزبائن والموردين من ملف إكسل أو CSV. يُفحص الملف كله قبل أن يتغيّر شيء."
         />
         <ol className="flex flex-wrap gap-2" aria-label="خطوات الاستيراد">
           {STEPS.map((s) => (
@@ -341,7 +341,7 @@ function Import() {
                 ))}
             </ul>
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-control/60 px-6 py-10 text-center hover:bg-surface-muted">
-              <span className="font-semibold text-ink">اختر ملف Excel (xlsx) أو CSV</span>
+              <span className="font-semibold text-ink">اختر ملف إكسل (xlsx) أو CSV</span>
               <span className="text-sm text-ink-muted">حتى 15 ميغابايت و20 ألف صف</span>
               <input
                 type="file"

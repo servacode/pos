@@ -103,6 +103,12 @@ export interface CustomerListItem {
   kind: CustomerKind | null;
   contactName: string | null;
   contactPhone: string | null;
+  /** The list only: the day of the latest sale to this customer; null for none yet */
+  lastPurchaseDate?: string | null;
+  /** The list only: what they bought in all, net of returns, in the invoices' own money (as on their page) */
+  spentMinor?: number;
+  /** The list only: the size they bought most (colours are not sizes); null when none */
+  favouriteSize?: string | null;
 }
 
 export interface CustomerListResponse {

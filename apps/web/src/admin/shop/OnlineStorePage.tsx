@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import type {
   DeliveryArea,
+  InventoryResponse,
   OnlineOrder,
   OnlineOrderStatus,
   OnlineStoreInput,
@@ -53,6 +54,7 @@ const listOrders = (status: OnlineOrderStatus | 'all') =>
   apiFetch<{ items: OnlineOrder[] }>(`/v1/online-orders${status === 'all' ? '' : `?status=${status}`}`, {
     auth: true,
   });
+const getStock = () => apiFetch<InventoryResponse>('/v1/inventory', { auth: true });
 const setStatus = (order: OnlineOrder, status: 'accepted' | 'rejected' | 'done') =>
   apiFetch<OnlineOrder>(`/v1/online-orders/${order.id}/status`, {
     method: 'POST',
@@ -83,6 +85,11 @@ const STATUS_TONE: Record<OnlineOrderStatus, BadgeTone> = {
 export function OnlineStorePage() {
   const me = useMe();
   const permissions = new Set<string>(me.user.permissions);
+  const canSettings = permissions.has('settings.manage');
+  const canOrders = permissions.has('customers.view');
+  const both = canSettings && canOrders;
+  // The orders wait here every day, the settings once: orders come first, settings behind a tab
+  const [tab, setTab] = useState<'orders' | 'settings'>('orders');
   return (
     <AppShell>
       <title>المتجر الإلكتروني · SERFA</title>
@@ -91,8 +98,19 @@ export function OnlineStorePage() {
           title="المتجر الإلكتروني"
           description="بضاعتك بصورها وأسعارها على رابط خاص بمحلك، والطلبات تصلك هنا."
         />
-        {permissions.has('settings.manage') ? <SettingsCard /> : null}
-        {permissions.has('customers.view') ? <OrdersCard /> : null}
+        {both ? (
+          <SegmentedControl
+            label="القسم"
+            value={tab}
+            onValueChange={setTab}
+            options={[
+              { value: 'orders', label: 'الطلبات' },
+              { value: 'settings', label: 'إعدادات المتجر' },
+            ]}
+          />
+        ) : null}
+        {canSettings && (!both || tab === 'settings') ? <SettingsCard /> : null}
+        {canOrders && (!both || tab === 'orders') ? <OrdersCard /> : null}
       </div>
     </AppShell>
   );
@@ -633,10 +651,34 @@ function OrdersCard() {
   // The orders being decided: their buttons are off until the answer, so a double click is one request
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
+  // Orders whose pieces the shelf does not hold: told once, accepted on the second press
+  const [short, setShort] = useState<Readonly<Record<string, string[]>>>({});
+
+  /** The lines of an order the stock cannot cover; empty when it can, or when stock is not readable here */
+  async function shortLines(order: OnlineOrder): Promise<string[]> {
+    try {
+      const stock = await getStock();
+      const held = new Map<string, number>();
+      for (const row of stock.items) held.set(row.variantId, (held.get(row.variantId) ?? 0) + row.qty);
+      return order.lines
+        .filter((l) => held.has(l.variantId) && (held.get(l.variantId) ?? 0) < l.qty * 1000)
+        .map((l) => `${l.name}${l.label ? ` (${l.label})` : ''}`);
+    } catch {
+      return [];
+    }
+  }
+
   async function move(order: OnlineOrder, next: 'accepted' | 'rejected' | 'done') {
     if (busy.has(order.id)) return;
     setBusy((b) => new Set(b).add(order.id));
     try {
+      if (next === 'accepted' && order.status === 'pending' && !short[order.id]) {
+        const lacking = await shortLines(order);
+        if (lacking.length > 0) {
+          setShort((m) => ({ ...m, [order.id]: lacking }));
+          return;
+        }
+      }
       await setStatus(order, next);
     } catch (e) {
       setError(errorMessage(e));
@@ -649,6 +691,8 @@ function OrdersCard() {
     }
     load();
     setChanges((n) => n + 1);
+    // The sidebar badge counts what still waits
+    window.dispatchEvent(new Event('serva:orders-changed'));
   }
 
   return (
@@ -756,6 +800,12 @@ function OrdersCard() {
                   {o.note}
                 </p>
               ) : null}
+              {short[o.id] ? (
+                <Alert tone="warning">
+                  لا يكفي المخزون لهذه القطع: {short[o.id]!.join('، ')}. اقبل الطلب رغم ذلك إن كانت البضاعة في
+                  الطريق، أو ارفضه.
+                </Alert>
+              ) : null}
               {o.fulfilment === 'delivery' && (o.status === 'accepted' || o.status === 'done') ? (
                 <DeliveryActions
                   order={o}
@@ -800,7 +850,7 @@ function OrdersCard() {
                         disabled={busy.has(o.id)}
                         onClick={() => void move(o, 'accepted')}
                       >
-                        اقبل
+                        {short[o.id] ? 'اقبل رغم النقص' : 'اقبل'}
                       </Button>
                       <Button
                         size="sm"

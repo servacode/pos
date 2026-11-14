@@ -109,7 +109,12 @@ export function DebtAgeingPage() {
         {error ? <Alert tone="error">{error}</Alert> : null}
         <section aria-label="الذمم" className="flex flex-col gap-3">
           <SectionHead title="الزبائن المدينون">
-            <DateField label="حتى تاريخ (فارغ: اليوم)" value={asOf} onChange={setAsOf} />
+            <DateField
+              label="حتى تاريخ"
+              hint="إن تركته فارغاً فالمقصود اليوم"
+              value={asOf}
+              onChange={setAsOf}
+            />
             <Button
               variant="secondary"
               disabled={!report || report.items.length === 0}
@@ -119,7 +124,7 @@ export function DebtAgeingPage() {
                 downloadCsv(`أعمار-الديون-${report.asOf}`, csv.headers, csv.rows);
               }}
             >
-              صدّر CSV
+              صدّر إلى إكسل
             </Button>
           </SectionHead>
           <DataTable

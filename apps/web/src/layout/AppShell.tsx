@@ -62,6 +62,9 @@ const pendingSeen = new WeakMap<MeResponse, { at: number; items: OnlineOrder[] }
  * mounts its own shell, so an answer under 30 seconds old is reused instead of asked again, except
  * after the online store's page, where orders are accepted and refused.
  */
+/** Dispatch on `window` after an order is accepted or refused so the sidebar badge refreshes at once */
+export const ORDERS_CHANGED = 'serva:orders-changed';
+
 function usePendingOrders(me: MeResponse, allowed: boolean, pathname: string): OnlineOrder[] {
   const [items, setItems] = useState<OnlineOrder[]>(() => pendingSeen.get(me)?.items ?? []);
   const deciding = pathname === '/online-store' || pathname.startsWith('/online-store/');
@@ -73,21 +76,33 @@ function usePendingOrders(me: MeResponse, allowed: boolean, pathname: string): O
   }, [me, deciding]);
   useEffect(() => {
     if (!allowed) return;
-    const seen = pendingSeen.get(me);
-    if (seen && Date.now() - seen.at < PENDING_FRESH_MS) return;
     let current = true;
-    getPendingOrders().then(
-      ({ items: fresh }) => {
-        pendingSeen.set(me, { at: Date.now(), items: fresh });
-        if (current) setItems(fresh);
-      },
-      // The bell keeps what it had; the page's own requests say when the connection is down.
-      () => undefined,
-    );
+    const ask = () =>
+      getPendingOrders().then(
+        ({ items: fresh }) => {
+          pendingSeen.set(me, { at: Date.now(), items: fresh });
+          if (current) setItems(fresh);
+        },
+        // The bell keeps what it had; the page's own requests say when the connection is down.
+        () => undefined,
+      );
+    const seen = pendingSeen.get(me);
+    if (!seen || Date.now() - seen.at >= PENDING_FRESH_MS) void ask();
+    // On the online store's page orders are accepted and refused: the badge follows (an event after
+    // each action, and a short poll as a safety net)
+    if (!deciding) {
+      return () => {
+        current = false;
+      };
+    }
+    const timer = window.setInterval(() => void ask(), 8000);
+    window.addEventListener(ORDERS_CHANGED, ask);
     return () => {
       current = false;
+      window.clearInterval(timer);
+      window.removeEventListener(ORDERS_CHANGED, ask);
     };
-  }, [me, allowed]);
+  }, [me, allowed, deciding]);
   return allowed ? items : [];
 }
 

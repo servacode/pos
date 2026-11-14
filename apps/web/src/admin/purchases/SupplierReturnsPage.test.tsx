@@ -129,7 +129,7 @@ describe('«مرتجع إلى المورد»', () => {
           variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [], barcodes: [] }],
         },
       },
-      'GET /v1/inventory/expiry?days=730&variantId=v-1&branchId=branch-1': {
+      'GET /v1/inventory/expiry?days=3650&variantId=v-1&branchId=branch-1': {
         status: 200,
         body: {
           today: '2026-10-30',

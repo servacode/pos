@@ -128,9 +128,7 @@ function PinDialog({ member, onClose }: { member: StaffMember | null; onClose: (
       ) : (
         <TextField
           label="رمز الدخول الجديد"
-          hint={
-            member?.pinLength === 6 || member?.roleKey === 'manager' ? '6 أرقام لهذا الدور.' : '4 أو 6 أرقام.'
-          }
+          hint={`${member?.pinLength === 6 || member?.roleKey === 'manager' ? 6 : 4} أرقام لهذا الدور.`}
           inputMode="numeric"
           dir="ltr"
           autoComplete="off"
@@ -220,6 +218,18 @@ export function StaffPage() {
       header: 'الفروع',
       className: 'hidden md:table-cell',
       cell: (m) => <span className="text-ink-muted">{branchesText(m)}</span>,
+    },
+    {
+      key: 'commission',
+      header: 'عمولة البيع',
+      numeric: true,
+      className: 'hidden md:table-cell',
+      cell: (m) =>
+        m.commissionBp === null || m.commissionBp === undefined ? (
+          <span className="text-ink-muted">—</span>
+        ) : (
+          <bdi className="num">{`${m.commissionBp / 100}٪`}</bdi>
+        ),
     },
     {
       key: 'access',

@@ -118,6 +118,8 @@ describe('a purchase', () => {
         qty: 10 * PIECE,
         valueMinor: 200_000,
         unitCostMinor: 20_000,
+        productName: 'حليب',
+        attributes: [],
       }),
     ]);
     expect(await integrity(store)).toEqual([]);

@@ -109,6 +109,58 @@ describe('«المشتريات»', () => {
   });
 });
 
+describe('«تفاصيل» of a purchase invoice', () => {
+  it('opens its lines with quantity, cost, batch and expiry, read only', async () => {
+    const row = {
+      id: 'pu-7',
+      number: 'PUR-2026-000007',
+      date: '2026-11-02',
+      supplierId: 's-1',
+      supplierName: 'معمل الأمل',
+      payment: 'credit',
+      reference: null,
+      totalMinor: 1_200_000,
+    };
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/suppliers': {
+        status: 200,
+        body: { items: [], totalOwedMinor: 0, baseCurrency: 'SYP' } satisfies SupplierListResponse,
+      },
+      'GET /v1/purchases': { status: 200, body: { items: [row], baseCurrency: 'SYP' } },
+      'GET /v1/purchases/pu-7': {
+        status: 200,
+        body: {
+          ...row,
+          branchId: 'b-1',
+          notes: null,
+          baseCurrency: 'SYP',
+          lines: [
+            {
+              lineNo: 1,
+              variantId: 'v-1',
+              productId: 'p-1',
+              name: 'قفازات طبية',
+              qty: 100_000,
+              costMinor: 1_200_000,
+              batchNo: 'G-77',
+              expiryDate: '2028-05-01',
+              serials: [],
+            },
+          ],
+        },
+      },
+    });
+    const { user } = renderApp('/purchases');
+    await user.click(await screen.findByRole('button', { name: 'تفاصيل PUR-2026-000007' }));
+    const lines = await screen.findByRole('list', { name: 'أصناف الفاتورة' });
+    expect(within(lines).getByText('قفازات طبية')).toBeInTheDocument();
+    expect(within(lines).getByText('G-77')).toBeInTheDocument();
+    expect(within(lines).getByText('2028-05-01')).toBeInTheDocument();
+  });
+});
+
 describe('typed amounts', () => {
   it('reads quantities in thousandths and pounds in qirsh, Arabic digits too', () => {
     expect(qtyOf('12')).toBe(12_000);

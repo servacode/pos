@@ -34,7 +34,9 @@ import {
   type SegmentOption,
   type ThemePreference,
 } from '@serva/ui';
+import { useMe } from '../auth/useAuth';
 import { useOnline } from '../pos/useOnline';
+import { useRecordSearch } from './recordSearch';
 import { pageOwns, type NavSection } from './nav';
 
 /** One line of the bell's list: something that waits for the user, and where to deal with it. */
@@ -512,6 +514,7 @@ function PageSearch({
   sections: NavSection[];
 }) {
   const navigate = useNavigate();
+  const me = useMe();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -535,6 +538,10 @@ function PageSearch({
     );
   }, [sections, query]);
 
+  const { hits, searching } = useRecordSearch(me, query, open);
+  // The keyboard walks the pages first, then the records found
+  const total = results.length + hits.length;
+
   function go(to: string) {
     onOpenChange(false);
     void navigate(to);
@@ -543,18 +550,18 @@ function PageSearch({
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setActive((i) => Math.min(i + 1, results.length - 1));
+      setActive((i) => Math.min(i + 1, total - 1));
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       setActive((i) => Math.max(i - 1, 0));
-    } else if (event.key === 'Enter' && results[active]) {
+    } else if (event.key === 'Enter' && (results[active] || hits[active - results.length])) {
       event.preventDefault();
-      go(results[active].page.to);
+      go((results[active]?.page ?? hits[active - results.length]!).to);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="انتقل إلى صفحة">
+    <Dialog open={open} onOpenChange={onOpenChange} title="ابحث في المتجر">
       <TextField
         ref={input}
         label="اسم الصفحة"
@@ -566,7 +573,7 @@ function PageSearch({
         }}
         onKeyDown={onKeyDown}
         autoComplete="off"
-        placeholder="مثلاً: الورديات، تغيير الأسعار…"
+        placeholder="صفحة، منتج، زبون، مورد، فاتورة، رقم تسلسلي…"
         startAdornment={<SearchIcon size={20} className="ms-3" />}
       />
       {results.length ? (
@@ -598,9 +605,43 @@ function PageSearch({
             );
           })}
         </ul>
-      ) : (
-        <p className="py-6 text-center text-ink-muted">لا صفحة بهذا الاسم.</p>
-      )}
+      ) : hits.length === 0 ? (
+        <p className="py-6 text-center text-ink-muted">
+          {searching ? 'جارٍ البحث…' : 'لا صفحة ولا سجل بهذا الاسم.'}
+        </p>
+      ) : null}
+      {hits.length > 0 || (searching && results.length > 0) ? (
+        <ul aria-label="السجلات" className="-mx-2 flex max-h-72 flex-col gap-0.5 overflow-y-auto px-0.5">
+          {hits.map((hit, n) => {
+            const i = results.length + n;
+            const chosen = i === active;
+            return (
+              <li key={hit.key}>
+                {n === 0 || hits[n - 1]!.group !== hit.group ? (
+                  <p className="px-2.5 pt-2 pb-1 text-xs font-semibold text-ink-subtle">{hit.group}</p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => go(hit.to)}
+                  onMouseEnter={() => setActive(i)}
+                  className={cn(
+                    CONTROL_HEIGHT.comfortable,
+                    'flex w-full items-center gap-3 rounded-small px-2.5 text-start text-[0.9375rem] transition-colors duration-120 ease-standard',
+                    chosen ? 'bg-brand-soft text-brand-ink' : 'text-ink hover:bg-surface-muted',
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate font-semibold">{hit.label}</span>
+                  {hit.detail ? (
+                    <span className={cn('shrink-0 text-sm', chosen ? 'text-brand-ink' : 'text-ink-muted')}>
+                      {hit.detail}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
       <p className="hidden items-center gap-4 border-t border-line pt-4 text-xs text-ink-subtle pointer-fine:flex">
         <span className="flex items-center gap-1.5">
           <Key>↑</Key>

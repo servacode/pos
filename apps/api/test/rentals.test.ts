@@ -337,6 +337,24 @@ describe('a maintenance contract', () => {
     expect(made.json<MaintenanceContract>().customerId).not.toBeNull();
   });
 
+  it('shows an old contract typed with a name and phone as tied to the one customer that matches', async () => {
+    const { store, customerId } = await storeWithSoldPieces();
+    const made = await post(store, '/v1/maintenance', {
+      ...CONTRACT,
+      customerId,
+      devices: [{ serial: 'WC002' }],
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    // An old row kept the typed name only
+    await ownerDb()`update maintenance_contracts set customer_id = null`;
+    const listed = await app.inject({ method: 'GET', url: '/v1/maintenance?view=all', headers: as(store) });
+    expect(listed.json<{ items: MaintenanceContract[] }>().items[0]!.customerId).toBe(customerId);
+    // Two customers of that name: no guess
+    await post(store, '/v1/customers', { name: 'عيادة النور', phone: '0944000111' });
+    const again = await app.inject({ method: 'GET', url: '/v1/maintenance?view=all', headers: as(store) });
+    expect(again.json<{ items: MaintenanceContract[] }>().items[0]!.customerId).toBeNull();
+  });
+
   it('names the devices it knows, schedules the visits and logs them', async () => {
     const { store, customerId } = await storeWithSoldPieces();
     const made = await post(store, '/v1/maintenance', {

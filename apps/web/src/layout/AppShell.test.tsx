@@ -140,7 +140,7 @@ describe('AppShell', () => {
   it('puts the menu in titled groups', async () => {
     signedIn(['catalog.manage', 'customers.view', 'devices.view', 'report.view']);
     const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
-    for (const title of ['البيع والزبائن', 'البضاعة', 'الإدارة']) {
+    for (const title of ['البيع والزبائن', 'المنتجات والمخزون', 'التقارير والإعدادات']) {
       expect(within(nav).getByText(title)).toBeInTheDocument();
     }
   });

@@ -27,7 +27,7 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { getProduct, listProducts, updateProduct } from '../catalog/api';
-import { getPurchase } from '../purchases/api';
+import { getPurchase, listPurchases } from '../purchases/api';
 import { takeLabelQueue } from '../products/priceList';
 import { Label, LABEL_LAYOUTS, PrintableLabels, type LabelItem, type LabelLayout } from './Label';
 
@@ -169,6 +169,41 @@ export function LabelsPage() {
     setPrinting(false);
   }, [printing]);
 
+  /** Every piece that came in on the purchases of the last two weeks, one label each piece that arrived */
+  const [fetching, setFetching] = useState(false);
+  async function addNewArrivals() {
+    setError(null);
+    setFetching(true);
+    try {
+      const since = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      const recent = (await listPurchases()).items.filter((x) => x.date >= since).slice(0, 20);
+      if (recent.length === 0) {
+        setError('لا فواتير شراء في آخر أسبوعين.');
+        return;
+      }
+      const pieces = new Map<string, number>();
+      const products = new Set<string>();
+      for (const row of recent) {
+        const detail = await getPurchase(row.id);
+        for (const l of detail.lines) {
+          pieces.set(l.variantId, (pieces.get(l.variantId) ?? 0) + Math.max(1, Math.round(l.qty / 1000)));
+          if (l.productId) products.add(l.productId);
+        }
+      }
+      for (const productId of products) {
+        const detail = await getProduct(productId);
+        addProduct(
+          { ...detail, variants: detail.variants.filter((v) => pieces.has(v.id)) },
+          (id) => pieces.get(id) ?? 1,
+        );
+      }
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setFetching(false);
+    }
+  }
+
   /** Internal barcodes (prefix 29) for every piece of the product that has none. */
   async function giveCodes(p: ProductDetail) {
     setError(null);
@@ -220,6 +255,17 @@ export function LabelsPage() {
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
                 <SearchField label="أضف منتجاً بكل قطعه" value={q} onValueChange={setQ} />
+                <div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<AddIcon />}
+                    loading={fetching}
+                    onClick={() => void addNewArrivals()}
+                  >
+                    أضف كل الوارد الجديد (آخر أسبوعين)
+                  </Button>
+                </div>
                 {found.length > 0 ? (
                   <ul
                     aria-label="نتائج البحث"

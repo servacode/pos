@@ -97,6 +97,21 @@ describe('/products list', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
+  it('says how many products of the whole store sell at 0 and have no photo', async () => {
+    openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem({ hasImage: true })],
+          nextCursor: null,
+          attention: { zeroPrice: 7, noPhoto: 40 },
+        },
+      },
+    });
+    expect(await screen.findByText(/بسعر صفر: تُباع مجاناً/)).toHaveTextContent('7');
+    expect(screen.getByText(/بلا صورة:/)).toHaveTextContent('40');
+  });
+
   it('shows the loading rows first', async () => {
     // The answer exists before anything renders. Capturing `resolve` inside the handler raced the
     // page: when the busy table showed before the list was requested, `answer` was still the no-op,

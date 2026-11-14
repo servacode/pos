@@ -24,6 +24,7 @@ import {
   Money,
   ProgressBar,
   SalesIcon,
+  ProductsIcon,
   ShirtIcon,
   Skeleton,
   SkeletonText,
@@ -41,6 +42,8 @@ import { archiveDuplicate, getCustomer, getPurchases, listCustomers, updateCusto
 import { CustomerForm } from './CustomerForm';
 import { CustomerMoneyDialog } from './CustomerMoneyDialog';
 import { WarrantyDevices } from '../warranty/WarrantyDevices';
+import { statementWhat } from '../ledger/csv';
+import { pieces } from '../../lib/plural';
 
 const SOURCE_TEXT: Record<string, string> = {
   sale: 'فاتورة آجل',
@@ -181,11 +184,11 @@ function SizesCard({ purchases, currency }: { purchases: CustomerPurchases; curr
     <section aria-label="مشترياته">
       <Card>
         <CardHeader
-          icon={<ShirtIcon />}
+          icon={storeSells(me.tenant.sectors, ['clothing']) ? <ShirtIcon /> : <ProductsIcon />}
           title="مشترياته"
           description={
             <>
-              <bdi className="num">{purchases.pieces / 1000}</bdi> قطعة بـ{' '}
+              <bdi className="num">{purchases.pieces / 1000}</bdi> {pieces(purchases.pieces / 1000)} بـ{' '}
               <Money minor={purchases.spentMinor} currency={currency} /> بعد المرتجعات.
             </>
           }
@@ -333,7 +336,7 @@ export function CustomerPage() {
       key: 'date',
       header: 'التاريخ',
       className: 'hidden sm:table-cell',
-      cell: (l) => <bdi className="num whitespace-nowrap text-ink-muted">{l.date}</bdi>,
+      cell: (l) => <bdi className="num whitespace-nowrap text-ink-muted">{dayText(l.date, digits)}</bdi>,
     },
     {
       key: 'what',
@@ -341,7 +344,11 @@ export function CustomerPage() {
       cell: (l) => (
         <div className="flex flex-col gap-0.5 py-2">
           <span className="font-semibold">
-            {l.sourceType === 'manual' ? l.memo : (SOURCE_TEXT[l.sourceType] ?? l.memo)}
+            {l.sourceType === 'manual'
+              ? l.memo
+              : l.sourceType === 'cheque'
+                ? statementWhat(l)
+                : (SOURCE_TEXT[l.sourceType] ?? l.memo)}
           </span>
           {l.number ? (
             <span className="text-xs text-ink-muted">
@@ -349,7 +356,7 @@ export function CustomerPage() {
             </span>
           ) : null}
           <span className="text-xs text-ink-muted sm:hidden">
-            <bdi className="num">{l.date}</bdi>
+            <bdi className="num">{dayText(l.date, digits)}</bdi>
           </span>
         </div>
       ),
@@ -524,7 +531,7 @@ export function CustomerPage() {
                                 <DocNumber value={r.number} />
                               </span>
                               <span className="text-xs text-ink-muted">
-                                <bdi className="num">{r.date}</bdi>
+                                <bdi className="num">{dayText(r.date, digits)}</bdi>
                               </span>
                               <div className="mt-1.5 sm:hidden">
                                 <InvoiceLines lines={r.lines} />

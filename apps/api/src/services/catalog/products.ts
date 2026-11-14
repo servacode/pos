@@ -201,6 +201,7 @@ interface ListRow extends Record<string, unknown> {
   max_price: string | null;
   barcode: string | null;
   stock_qty: string;
+  has_image: boolean;
 }
 
 const encodeCursor = (name: string, id: string) =>
@@ -269,7 +270,9 @@ export async function listProducts(
               order by v.sort_order, v.id, b.created_at, b.id limit 1) as barcode,
              (select coalesce(sum(s.qty), 0)::text from variants v
               join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id ${branchFilter}
-              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as stock_qty
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as stock_qty,
+             exists (select 1 from product_images pi
+                     where pi.tenant_id = p.tenant_id and pi.product_id = p.id) as has_image
       from products p
       left join categories c on c.tenant_id = p.tenant_id and c.id = p.category_id
       cross join lateral (
@@ -305,10 +308,30 @@ export async function listProducts(
           : null,
       barcode: r.barcode,
       stockQty: Number(r.stock_qty),
+      hasImage: r.has_image,
       version: r.version,
     }));
     const last = page.at(-1);
-    return { items, nextCursor: rows.length > limit && last ? encodeCursor(last.name_ar, last.id) : null };
+    // What needs doing across the whole store (asked once, with the first page)
+    let attention: { zeroPrice: number; noPhoto: number } | undefined;
+    if (!query.cursor && query.status === 'active') {
+      const [counts] = await tx.execute<{ zero_price: number; no_photo: number }>(sql`
+        select count(*) filter (where exists (
+                 select 1 from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
+                 where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
+                   and x.price_minor = 0))::int as zero_price,
+               count(*) filter (where not exists (
+                 select 1 from product_images pi
+                 where pi.tenant_id = p.tenant_id and pi.product_id = p.id))::int as no_photo
+        from products p
+        where p.tenant_id = ${ctx.auth.tenantId} and p.archived_at is null and p.status = 'active'`);
+      attention = { zeroPrice: counts?.zero_price ?? 0, noPhoto: counts?.no_photo ?? 0 };
+    }
+    return {
+      items,
+      nextCursor: rows.length > limit && last ? encodeCursor(last.name_ar, last.id) : null,
+      ...(attention ? { attention } : {}),
+    };
   });
 }
 

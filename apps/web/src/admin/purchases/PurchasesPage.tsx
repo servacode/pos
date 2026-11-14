@@ -56,6 +56,7 @@ import {
 } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead } from './parts';
 import { PackQty } from './PackQty';
+import { PurchaseDetailDialog } from './PurchaseDetailDialog';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRules';
@@ -102,6 +103,7 @@ export function PurchasesPage() {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'list' | 'buy' | 'pay' | 'supplier'>('list');
   const [query, setQuery] = useState('');
+  const [opened, setOpened] = useState<PurchaseRow | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -180,10 +182,15 @@ export function PurchasesPage() {
       header: '',
       className: 'w-px whitespace-nowrap',
       cell: (p) => (
-        <TextLink as={Link} to={`/labels?purchase=${p.id}`} className="inline-flex items-center gap-1.5">
-          <PrintIcon size={16} />
-          الملصقات
-        </TextLink>
+        <span className="flex items-center gap-4">
+          <Button variant="ghost" size="xs" aria-label={`تفاصيل ${p.number}`} onClick={() => setOpened(p)}>
+            التفاصيل
+          </Button>
+          <TextLink as={Link} to={`/labels?purchase=${p.id}`} className="inline-flex items-center gap-1.5">
+            <PrintIcon size={16} />
+            الملصقات
+          </TextLink>
+        </span>
       ),
     },
   ];
@@ -289,7 +296,7 @@ export function PurchasesPage() {
                   disabled={shownPurchases.length === 0}
                   onClick={() => exportPurchases(shownPurchases)}
                 >
-                  صدّر CSV
+                  صدّر إلى إكسل
                 </Button>
               </SectionHead>
               <DataTable
@@ -316,6 +323,7 @@ export function PurchasesPage() {
               />
             </section>
             <Suppliers suppliers={suppliers} failed={Boolean(error)} base={base} />
+            {opened ? <PurchaseDetailDialog purchase={opened} onClose={() => setOpened(null)} /> : null}
           </>
         )}
         {mode === 'supplier' ? (
@@ -384,7 +392,7 @@ function Suppliers({
           disabled={!suppliers?.items.length}
           onClick={() => exportSuppliers(suppliers?.items ?? [])}
         >
-          صدّر CSV
+          صدّر إلى إكسل
         </Button>
       </SectionHead>
       {!suppliers ? (
@@ -579,11 +587,15 @@ function PurchaseForm({
   // a clothing shop sees no expiry dates or IMEI).
   const [allFields, setAllFields] = useState(false);
   const s = useSaving();
+  // A batch dated in the past is saved only after the buyer says the date is right
+  const [pastOk, setPastOk] = useState(false);
+  const pastLines = lines.filter((l) => l.expiry && l.expiry < today());
   const parsed = lines.map((l) => ({ qty: baseQtyOf(l), cost: moneyOf(l.cost) }));
   const ready =
     lines.length > 0 &&
     parsed.every((p) => p.qty && p.qty > 0 && p.cost !== null) &&
-    lines.every((l) => !l.requiresExpiry || Boolean(l.expiry));
+    lines.every((l) => !l.requiresExpiry || Boolean(l.expiry)) &&
+    (pastLines.length === 0 || pastOk);
   const total = parsed.reduce((sum, p) => sum + (p.cost ?? 0), 0);
   /** Why «سجّل الفاتورة» waits, in words: the buttons never go grey without a reason */
   const missingExpiry = lines.filter((l) => l.requiresExpiry && !l.expiry);
@@ -592,7 +604,9 @@ function PurchaseForm({
       ? null
       : parsed.some((p) => !(p.qty && p.qty > 0) || p.cost === null)
         ? 'اكتب الكمية والكلفة لكل صنف ليُسجَّل.'
-        : `اكتب تاريخ الانتهاء لـ ${missingExpiry.map((l) => l.name).join('، ')} ليُسجَّل.`;
+        : missingExpiry.length > 0
+          ? `اكتب تاريخ الانتهاء لـ ${missingExpiry.map((l) => l.name).join('، ')} ليُسجَّل.`
+          : 'أكّد أن تاريخ الانتهاء الماضي صحيح ليُسجَّل.';
 
   const withDates = storeSells(me.tenant.sectors, EXPIRY_SECTORS);
   const supplier = suppliers.find((x) => x.id === supplierId);
@@ -886,7 +900,11 @@ function PurchaseForm({
               <EmptyState
                 icon={PackageOpenIcon}
                 title="الفاتورة فارغة."
-                description="ابحث عن صنف بالأعلى؛ الموديل بمقاساته وألوانه يفتح جدولاً تكتب فيه الكميات دفعة واحدة."
+                description={
+                  storeSells(me.tenant.sectors, ['clothing'])
+                    ? 'ابحث عن صنف بالأعلى؛ الموديل بمقاساته وألوانه يفتح جدولاً تكتب فيه الكميات دفعة واحدة.'
+                    : 'ابحث عن صنف بالأعلى لتضيفه إلى الفاتورة، ثم اكتب الكمية والكلفة.'
+                }
               />
             )}
           </div>
@@ -934,6 +952,14 @@ function PurchaseForm({
               إلغاء
             </Button>
           </div>
+          {pastLines.length > 0 ? (
+            <Switch
+              label="تاريخ الانتهاء الماضي صحيح، سجّله"
+              description={`${pastLines.map((l) => l.name).join('، ')}: دفعة منتهية الصلاحية.`}
+              checked={pastOk}
+              onCheckedChange={setPastOk}
+            />
+          ) : null}
           {notReadyWhy ? (
             <p id="purchase-not-ready" aria-live="polite" className="text-sm font-semibold text-warning-ink">
               {notReadyWhy}

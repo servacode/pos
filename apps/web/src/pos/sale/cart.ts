@@ -119,6 +119,10 @@ export interface Cart {
   contractPriced?: boolean;
   /** An exchange (03 › الملابس): the voucher of the return just saved, offered first at payment */
   voucher?: string;
+  /** A cash exchange: what was just handed back in cash for the returned piece (a notice only) */
+  exchangeCashBackMinor?: number;
+  /** The name a held cart was put aside under, shown once it is brought back */
+  resumedName?: string;
   /** An online shop order opened at the till (26 › حياة الطلب): the sale closes it */
   onlineOrder?: {
     id: string;

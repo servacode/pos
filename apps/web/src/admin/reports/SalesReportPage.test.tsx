@@ -125,4 +125,32 @@ describe('تقرير المبيعات', () => {
     expect(await screen.findByText('عمولات البائعين')).toBeInTheDocument();
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
+
+  it('fills the option picker from another grouping and groups by the first option, hiding empty history', async () => {
+    const m = TODAY.slice(0, 8);
+    const noHistory = { ...report('option'), option: 'المقاس', previousTotalMinor: 0 };
+    noHistory.rows = [{ ...noHistory.rows[0]!, name: 'M', previousTotalMinor: 0, previousQty: 0 }];
+    const { requests } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': {
+        status: 200,
+        body: (() => {
+          const me = makeMe();
+          return { ...me, user: { ...me.user, permissions: [...me.user.permissions, 'report.view'] } };
+        })(),
+      },
+      [`GET /v1/reports/sales-breakdown?from=${m}01&to=${TODAY}&by=product`]: { status: 200, body: report() },
+      [`GET /v1/reports/sales-breakdown?from=${m}01&to=${TODAY}&by=option&option=${encodeURIComponent('المقاس')}`]:
+        { status: 200, body: noHistory },
+    });
+    const { user } = renderApp('/reports/sales');
+    await screen.findByText('قميص قطني');
+    await user.click(screen.getByRole('radio', { name: /^الخيار/ }));
+    expect(await screen.findByRole('option', { name: 'اللون' })).toBeInTheDocument();
+    expect(await screen.findByText('M')).toBeInTheDocument();
+    // Never asked by option without a name (the server refuses that)
+    expect(requests.some((r) => r.path.endsWith('by=option'))).toBe(false);
+    expect(screen.queryByText('جديد')).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'الفترة السابقة' })).not.toBeInTheDocument();
+  });
 });

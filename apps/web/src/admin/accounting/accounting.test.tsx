@@ -319,7 +319,7 @@ describe('«ميزان المراجعة»', () => {
     });
 
     await screen.findByText('متوازن');
-    fireEvent.click(screen.getByRole('button', { name: 'صدّر CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'صدّر إلى إكسل' }));
 
     expect(click).toHaveBeenCalledTimes(1);
     const link = click.mock.contexts[0] as HTMLAnchorElement;
@@ -345,6 +345,6 @@ describe('«ميزان المراجعة»', () => {
     });
 
     expect(await screen.findByText('لا حركة على الحسابات في هذه الفترة.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'صدّر CSV' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'صدّر إلى إكسل' })).toBeDisabled();
   });
 });

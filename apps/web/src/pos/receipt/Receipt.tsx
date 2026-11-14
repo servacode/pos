@@ -17,6 +17,7 @@ import { clockText, dateText } from '../format';
 import { Bars } from '../../lib/Bars';
 import { dayText } from '../../lib/dates';
 import { discountLabel, VOUCHER_NOTE } from '../print/lines';
+import { DEPOSIT_BACK_NAME } from '../rentals/api';
 import { ORDER_TYPE_TEXT } from './KitchenTicket';
 import { serialText, warrantyText } from './warranty';
 
@@ -328,7 +329,10 @@ export function Receipt({
   const foreignRate = sale.exchangeRates[0];
   const foreign = foreignRate ? (foreignRate.unit === base ? foreignRate.quote : foreignRate.unit) : null;
   const t = sale.totals;
-  const pieces = sale.lines.reduce((n, l) => n + (l.unitName ? 1 : Math.round(l.baseQty / 1000)), 0);
+  // The deposit handed back on a rental is money, not a piece sold
+  const pieces = sale.lines
+    .filter((l) => !l.name.startsWith(DEPOSIT_BACK_NAME))
+    .reduce((n, l) => n + (l.unitName ? 1 : Math.round(l.baseQty / 1000)), 0);
   const amount = (minor: number, currency: CurrencyCode = base) => (
     <Money minor={minor} currency={currency} symbol={currency !== base} />
   );

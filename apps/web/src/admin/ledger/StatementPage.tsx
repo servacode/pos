@@ -267,7 +267,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
                 )
               }
             >
-              صدّر CSV
+              صدّر إلى إكسل
             </Button>
             <Button variant="secondary" icon={<PrintIcon />} disabled={!data} onClick={() => print('A4')}>
               اطبع

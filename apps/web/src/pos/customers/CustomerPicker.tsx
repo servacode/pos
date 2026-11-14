@@ -123,7 +123,7 @@ export function CustomerPicker({
         </IconChip>
         <h3 className="flex-1 text-lg font-semibold text-ink">{adding ? 'زبون جديد' : 'الزبون'}</h3>
         <Button variant="ghost" onClick={onCancel}>
-          إلغاء
+          اختر زبوناً لاحقاً
         </Button>
       </div>
       {adding ? (
@@ -159,7 +159,7 @@ export function CustomerPicker({
             onChange={(e) => setSearch(e.target.value.slice(0, 60))}
             startAdornment={<SearchIcon className="ms-4 shrink-0" />}
           />
-          <ul aria-label="الزبائن" className="-mx-1 flex max-h-64 flex-col gap-1 overflow-y-auto px-1">
+          <ul aria-label="الزبائن" className="-mx-1 flex max-h-[40vh] flex-col gap-1 overflow-y-auto px-1">
             {found.map((c) => (
               <li key={c.id}>
                 <button

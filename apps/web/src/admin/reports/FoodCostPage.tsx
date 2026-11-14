@@ -132,7 +132,7 @@ export function FoodCostPage() {
               data && downloadText(`كلفة-الوجبات-${data.from}-${data.to}.csv`, foodCostCsv(data))
             }
           >
-            صدّر CSV
+            صدّر إلى إكسل
           </Button>
         }
       />

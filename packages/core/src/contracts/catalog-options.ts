@@ -30,7 +30,7 @@ export const DEFAULT_SIZE_RUNS: SizeRun[] = [
   { name: 'طقم 1-1-1-1', counts: [1, 1, 1, 1] },
 ];
 
-export const DEFAULT_CATALOG_OPTIONS: CatalogOptions = { autoBarcode: false, sizeRuns: DEFAULT_SIZE_RUNS };
+export const DEFAULT_CATALOG_OPTIONS: CatalogOptions = { autoBarcode: true, sizeRuns: DEFAULT_SIZE_RUNS };
 
 /** The store's options, the defaults where it never chose */
 export const catalogOptionsOf = (o: Partial<CatalogOptions> | null | undefined): CatalogOptions => ({

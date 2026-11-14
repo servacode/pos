@@ -47,7 +47,7 @@ describe('sale screen', () => {
     await user.keyboard('9');
     await user.click(within(pay).getByRole('button', { name: 'أضف الجزء' }));
     shows(within(pay).getByRole('list', { name: 'الأجزاء المدفوعة' }), '9.00 $');
-    expect(within(pay).getByRole('status')).toHaveTextContent('ناقص من الزبون');
+    expect(within(pay).getByRole('status')).toHaveTextContent('المتبقي');
     shows(within(pay).getByRole('status'), '120 ل.س');
 
     await user.click(within(pay).getByRole('button', { name: 'نقد بالليرة' }));

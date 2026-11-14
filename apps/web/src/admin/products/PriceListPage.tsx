@@ -327,7 +327,7 @@ function PriceList() {
         {step === 'file' ? (
           <Card className="flex flex-col gap-4">
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-control/60 px-6 py-10 text-center hover:bg-surface-muted">
-              <span className="font-semibold text-ink">اختر ملف Excel (xlsx) أو CSV</span>
+              <span className="font-semibold text-ink">اختر ملف إكسل (xlsx) أو CSV</span>
               <span className="text-sm text-ink-muted">
                 عمود للسعر، وعمود للباركود أو لاسم الصنف (أو لاسمه العلمي)
               </span>

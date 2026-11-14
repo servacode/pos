@@ -288,7 +288,7 @@ export function ChequesPage() {
           description="كل شيك قبضه الكاشير من بيع أو من دفعة زبون، حتى يُحصَّل في البنك أو يرتجع."
         />
         {error && items ? <Alert tone="error">{error}</Alert> : null}
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 [&>:first-child]:max-sm:col-span-2">
           <StatTile
             label="تحت التحصيل"
             icon={<ClockIcon />}

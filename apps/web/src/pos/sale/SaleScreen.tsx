@@ -308,13 +308,15 @@ export function SaleScreen(props: SaleScreenProps) {
   const [seller, setSeller] = useState<string>(session.userId);
   useEffect(() => {
     let alive = true;
-    void pos.local.get<string>(SELLER_KEY).then((id) => {
-      if (alive && id && staff.some((m) => m.id === id)) setSeller(id);
+    // Kept only for the sale in progress of the same cashier: never carried to the next sale or shift
+    void pos.local.get<string | { by: string; id: string }>(SELLER_KEY).then((saved) => {
+      if (!alive || !saved || typeof saved === 'string') return;
+      if (saved.by === session.userId && staff.some((m) => m.id === saved.id)) setSeller(saved.id);
     });
     return () => {
       alive = false;
     };
-  }, [pos.local, staff]);
+  }, [pos.local, staff, session.userId]);
   // Online orders this till sold, until the next pull says they are done
   const [soldOnline, setSoldOnline] = useState<string[]>([]);
   useEffect(() => {
@@ -655,7 +657,10 @@ export function SaleScreen(props: SaleScreenProps) {
   }, [catalog.byBarcode]);
   const handlers = useRef({ add, scan, showPrice, packsByVariant });
   handlers.current = { add, scan, showPrice, packsByVariant };
+  // A second tap on «أضف» lands on the tile that appears under the closed picker: swallowed for a moment
+  const pickerAddedAt = useRef(0);
   const pickItem = useCallback((item: CatalogItem, hit?: BarcodeHit | null) => {
+    if (Date.now() - pickerAddedAt.current < 350) return;
     if (checkingRef.current) handlers.current.showPrice(item, hit);
     else if (!hit && handlers.current.packsByVariant.has(item.variantId))
       // Picked with no barcode: the piece or which box?
@@ -664,6 +669,7 @@ export function SaleScreen(props: SaleScreenProps) {
   }, []);
   const pickModel = useCallback(
     (productId: string) => {
+      if (Date.now() - pickerAddedAt.current < 350) return;
       if (checkingRef.current) {
         const model = pieces.get(productId);
         if (model)
@@ -927,7 +933,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 value={seller}
                 onChange={(e) => {
                   setSeller(e.target.value);
-                  void pos.local.set(SELLER_KEY, e.target.value);
+                  void pos.local.set(SELLER_KEY, { by: session.userId, id: e.target.value });
                 }}
                 className="w-36"
               >
@@ -966,6 +972,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 size="md"
                 icon={<CalendarIcon size={20} />}
                 onClick={() => setMode({ kind: 'hold' })}
+                title="احجز القطع للزبون بعربون ليستلمها لاحقاً"
               >
                 احجز
               </Button>
@@ -1117,6 +1124,36 @@ export function SaleScreen(props: SaleScreenProps) {
           </Button>
         </div>
       ) : null}
+      {cart.resumedName ? (
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-line bg-surface-muted px-4 py-1.5 text-sm text-ink-muted"
+        >
+          <ClockIcon size={20} className="shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            فاتورة معلّقة: <span className="font-semibold text-ink">{cart.resumedName}</span>
+          </span>
+        </div>
+      ) : null}
+      {cart.exchangeCashBackMinor ? (
+        <div
+          role="status"
+          className="flex shrink-0 items-center gap-3 border-b border-line bg-brand-soft py-2 ps-4 pe-2 text-sm text-brand-ink"
+        >
+          <UndoIcon size={20} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            استبدال نقدي: رُدَّ للزبون <Money minor={cart.exchangeCashBackMinor} currency={ctx.currency} />{' '}
+            نقداً، والبديل يُدفع كاملاً.
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setCart((c) => ({ ...c, exchangeCashBackMinor: undefined }))}
+          >
+            أخفِ
+          </Button>
+        </div>
+      ) : null}
       <div className="min-h-32 flex-1 overflow-y-auto">
         {lineCount === 0 ? (
           <div className="h-full p-4">
@@ -1140,6 +1177,15 @@ export function SaleScreen(props: SaleScreenProps) {
                 packLineText(line, (q) => formatQuantity(q, digits)) ??
                   (line.packName ? line.packName : null),
                 adj?.kind === 'price' ? 'سعر معدّل' : null,
+                // A batch line says which lots it takes and their dates
+                ...(batchPlan.allocations.get(line.lineNo) ?? [])
+                  .filter((b) => b.batchNo)
+                  .map((b) => (
+                    <span key={`lot-${b.batchNo}`} className="whitespace-nowrap">
+                      دفعة <bdi dir="ltr">{b.batchNo}</bdi>
+                      {b.expiry ? ` · تنتهي ${dayText(b.expiry, digits)}` : ''}
+                    </span>
+                  )),
                 // A discount on the line: the price before it struck through, then what was taken off
                 discounted && p ? (
                   <span key="was" className="whitespace-nowrap text-ink-subtle">
@@ -1379,6 +1425,7 @@ export function SaleScreen(props: SaleScreenProps) {
         notice={
           invoiceNeeds ||
           guard.blocks.length + guard.stockBlocks.length + guard.stockWarns.length > 0 ||
+          unnumbered.length > 0 ||
           batchWaits ? (
             // Capped and scrolling by itself: two warnings must not push the open line's buttons out of the panel
             <div className="flex max-h-[26dvh] flex-col gap-2 overflow-y-auto overscroll-contain">
@@ -1390,6 +1437,17 @@ export function SaleScreen(props: SaleScreenProps) {
                 fmt={(q) => formatQuantity(q, digits)}
                 onApprove={() => setMode({ kind: 'batchApprove' })}
               />
+              {unnumbered.length > 0 ? (
+                <div
+                  role="status"
+                  className="flex items-center gap-3 rounded-card border border-warning/20 bg-warning-soft px-3 py-2 text-sm font-semibold text-warning-ink"
+                >
+                  <WarningIcon size={20} className="shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    لا يمكن الدفع قبل إدخال الرقم التسلسلي لـ {unnumbered.map((l) => l.name).join('، ')}.
+                  </span>
+                </div>
+              ) : null}
               {invoiceNeeds ? (
                 <div
                   role="alert"
@@ -1417,6 +1475,7 @@ export function SaleScreen(props: SaleScreenProps) {
               size="md"
               icon={lineCount === 0 && props.heldCount > 0 ? <UndoIcon size={20} /> : <ClockIcon size={20} />}
               aria-keyshortcuts="F4"
+              title="ضع هذه الفاتورة جانباً وأكمل غيرها، ثم استرجعها"
               onClick={() => {
                 if (lineCount > 0) setMode({ kind: 'holdName' });
                 else if (props.heldCount === 1) props.onResume(0);
@@ -1489,6 +1548,9 @@ export function SaleScreen(props: SaleScreenProps) {
               }}
               onBack={() => setMode({ kind: 'items' })}
               onCompleted={(entry) => {
+                // The seller picked is for this sale only
+                setSeller(session.userId);
+                void pos.local.remove(SELLER_KEY);
                 setMode({ kind: 'items' });
                 setSelected(null);
                 const order = cart.onlineOrder;
@@ -1669,6 +1731,7 @@ export function SaleScreen(props: SaleScreenProps) {
           pieces={pieces.get(effectiveMode.productId)!}
           inCart={inCartQty}
           onAdd={(piece) => {
+            pickerAddedAt.current = Date.now();
             setMode({ kind: 'items' });
             add(piece);
           }}

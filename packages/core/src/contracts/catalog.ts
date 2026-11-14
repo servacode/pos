@@ -482,10 +482,15 @@ export interface ProductListItem {
   barcode: string | null;
   /** Sum over live variants (and branches, unless branchId was given), thousandths */
   stockQty: number;
+  /** At least one picture on the product (the list's «بلا صورة» count); absent from older servers */
+  hasImage?: boolean;
   version: number;
 }
 
-export type ProductListResponse = ListResponse<ProductListItem>;
+export type ProductListResponse = ListResponse<ProductListItem> & {
+  /** Over every active product of the store, not the page: how many sell at 0 and how many have no picture (first page only) */
+  attention?: { zeroPrice: number; noPhoto: number };
+};
 
 /**
  * GET /v1/products/options (catalog reader): every option the store's pieces use (المقاس، اللون،

@@ -4,6 +4,7 @@ import type { CatalogItem } from '../catalog';
 import { Kbd } from './Kbd';
 import { canChoose, lowestPrice, optionsOf, pieceFor, piecesText, stockFor } from './models';
 import { SalePanel } from './SalePanel';
+import { isColourOption, swatchOf } from './swatch';
 
 /**
  * «اختر المقاس واللون» (هوية 2; هوية 4): a model's pieces, picked beside the cart. Each option is a
@@ -142,7 +143,15 @@ export function VariantPicker({
                   )}
                 >
                   <span aria-hidden="true" className="flex flex-col items-center leading-tight">
-                    {value}
+                    <span className="flex items-center gap-2">
+                      {isColourOption(option.name) && swatchOf(value) ? (
+                        <span
+                          className="size-4 shrink-0 rounded-full border border-line-control/60"
+                          style={{ backgroundColor: swatchOf(value)! }}
+                        />
+                      ) : null}
+                      {value}
+                    </span>
                     {left !== null && possible ? (
                       <span
                         className={cn(

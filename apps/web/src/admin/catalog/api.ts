@@ -4,12 +4,11 @@ import type {
   CreateCategoryInput,
   CreateProductInput,
   CreateUnitInput,
-  ListResponse,
+  ProductListResponse,
   ProductDetail,
   ProductImage,
   ProductImageInput,
   ProductImagesResponse,
-  ProductListItem,
   ProductListQuery,
   TaxRateList,
   Unit,
@@ -39,7 +38,7 @@ export function productsPath(query: ProductListQuery): string {
 }
 
 export function listProducts(query: ProductListQuery) {
-  return apiFetch<ListResponse<ProductListItem>>(productsPath(query), { auth: true });
+  return apiFetch<ProductListResponse>(productsPath(query), { auth: true });
 }
 
 export function getProduct(productId: string) {

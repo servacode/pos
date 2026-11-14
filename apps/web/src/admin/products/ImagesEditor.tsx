@@ -13,7 +13,7 @@ import {
   cn,
 } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
-import { resizeImage } from '../../lib/images';
+import { resizeImage, type ResizedImage } from '../../lib/images';
 import {
   addProductImage,
   deleteProductImage,
@@ -32,12 +32,17 @@ export const ImagesEditor = memo(function ImagesEditor({
   productId,
   optionValues,
   disabled = false,
+  pending = [],
+  onPendingChange,
 }: {
   /** Null for a product not saved yet: pictures come after the first save */
   productId: string | null;
   /** The values of the pieces' options a picture can belong to («أحمر», «أزرق») */
   optionValues: readonly string[];
   disabled?: boolean;
+  /** A new product: the pictures picked so far, kept by the page and sent right after the first save */
+  pending?: readonly ResizedImage[];
+  onPendingChange?: (next: ResizedImage[]) => void;
 }) {
   const [items, setItems] = useState<ProductImage[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,13 +58,94 @@ export const ImagesEditor = memo(function ImagesEditor({
   }, [productId]);
   useEffect(load, [load]);
 
+  async function pick(files: FileList | null) {
+    if (!files || !onPendingChange) return;
+    setBusy(true);
+    setError(null);
+    const next = [...pending];
+    for (const file of [...files]) {
+      if (next.length >= MAX_PRODUCT_IMAGES) {
+        setError(`للمنتج ${MAX_PRODUCT_IMAGES} صورة على الأكثر.`);
+        break;
+      }
+      try {
+        next.push(await resizeImage(file));
+      } catch {
+        setError(`«${file.name}» ليس صورة يمكن قراءتها. اختر صورة JPG أو PNG.`);
+      }
+    }
+    onPendingChange(next);
+    setBusy(false);
+    if (input.current) input.current.value = '';
+  }
+
   if (!productId) {
+    const room = pending.length < MAX_PRODUCT_IMAGES;
     return (
-      <div className="flex items-center gap-3 rounded-card border border-dashed border-line-control/50 p-4">
-        <IconChip tone="neutral">
-          <CameraIcon />
-        </IconChip>
-        <p className="text-sm text-ink-muted">احفظ المنتج أولاً، ثم أضف صوره هنا.</p>
+      <div className="flex flex-col gap-4">
+        {error ? <Alert tone="error">{error}</Alert> : null}
+        {pending.length > 0 ? (
+          <ul aria-label="صور المنتج" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {pending.map((picture, index) => {
+              const name = index === 0 ? 'الصورة الرئيسية' : `الصورة ${index + 1}`;
+              return (
+                <li
+                  key={picture.thumb.slice(-24) + String(index)}
+                  className="flex min-w-0 flex-col gap-2 rounded-card border border-line bg-surface p-2 shadow-e1"
+                >
+                  <div className="relative">
+                    <img
+                      src={`data:image/jpeg;base64,${picture.thumb}`}
+                      alt={index === 0 ? 'الصورة الرئيسية' : `صورة ${index + 1}`}
+                      className="aspect-square w-full rounded-small bg-surface-muted object-cover"
+                    />
+                    {index === 0 ? (
+                      <Badge tone="brand" className="absolute start-2 top-2">
+                        الرئيسية
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <div className="flex justify-end">
+                    <IconButton
+                      size="sm"
+                      label={`احذف ${name}`}
+                      icon={<DeleteIcon />}
+                      disabled={disabled}
+                      onClick={() => onPendingChange?.(pending.filter((_, i) => i !== index))}
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        {room && !disabled ? (
+          <div className="relative">
+            <input
+              ref={input}
+              type="file"
+              accept="image/*"
+              multiple
+              aria-label="اختر صوراً"
+              className="sr-only"
+              onChange={(e) => void pick(e.target.files)}
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => input.current?.click()}
+              className="flex w-full items-center gap-3 rounded-card border border-dashed border-line-control/50 p-4 text-start transition-[background-color,border-color] duration-120 ease-standard enabled:hover:border-brand/50 enabled:hover:bg-brand-soft/40 disabled:cursor-wait"
+            >
+              <IconChip tone="neutral">{busy ? <Spinner size={20} /> : <CameraIcon />}</IconChip>
+              <span className="flex flex-col">
+                <span className="font-semibold text-ink">أضف صوراً</span>
+                <span className="text-sm text-ink-muted">
+                  تُرفع مع المنتج عند الحفظ. من الجوال تفتح الكاميرا أو المعرض.
+                </span>
+              </span>
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }

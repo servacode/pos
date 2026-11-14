@@ -22,6 +22,7 @@ import {
   ProgressBar,
   ReportsIcon,
   SearchField,
+  SegmentedControl,
   Select,
   Skeleton,
   StatTile,
@@ -37,6 +38,7 @@ import { errorMessage } from '../../lib/api';
 import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 import { SectionHead } from './parts';
+import { InventoryGrid } from './InventoryGrid';
 import { downloadCsv } from '../exportCsv';
 import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
 
@@ -65,6 +67,9 @@ export function InventoryPage() {
   // «سجّل هدراً» (03 › الخضار والمخابز: تسجيل الهدر): what spoiled, out of stock at its cost
   const [wasteKey, setWasteKey] = useState('');
   const [wasteQty, setWasteQty] = useState('');
+  // The picker narrows by typing (a store has hundreds of pieces); the write-off is confirmed first
+  const [wasteQuery, setWasteQuery] = useState('');
+  const [wasteAsk, setWasteAsk] = useState(false);
   // Counting by scanning (03 › الألبسة: الجرد بالمسح): each scan adds one piece (or its pack)
   const [scan, setScan] = useState('');
   const [scanned, setScanned] = useState<{ variantId: string; name: string } | null>(null);
@@ -72,6 +77,8 @@ export function InventoryPage() {
   // What the table shows: a search by name and, with branches, one branch
   const [query, setQuery] = useState('');
   const [branchShown, setBranchShown] = useState('');
+  // The list, or the models with sizes and colours laid out as grids
+  const [view, setView] = useState<'list' | 'grid'>('list');
 
   const load = useCallback(() => {
     setError(null);
@@ -257,9 +264,26 @@ export function InventoryPage() {
     }
   }
 
-  async function saveWaste() {
-    const row = stock?.items.find((r) => `${r.branchId}:${r.variantId}` === wasteKey);
+  const wasteRow = stock?.items.find((r) => `${r.branchId}:${r.variantId}` === wasteKey);
+  const wasteOptions = (stock?.items ?? []).filter((r) => {
+    const typed = wasteQuery.trim().toLowerCase();
+    return !typed || `${r.branchId}:${r.variantId}` === wasteKey || r.name.toLowerCase().includes(typed);
+  });
+
+  function askWaste() {
     const qty = qtyOf(wasteQty);
+    if (!wasteRow || !qty || qty <= 0) {
+      setError('اختر الصنف واكتب كمية الهدر.');
+      return;
+    }
+    setError(null);
+    setWasteAsk(true);
+  }
+
+  async function saveWaste() {
+    const row = wasteRow;
+    const qty = qtyOf(wasteQty);
+    setWasteAsk(false);
     if (!row || !qty || qty <= 0) {
       setError('اختر الصنف واكتب كمية الهدر.');
       return;
@@ -277,6 +301,7 @@ export function InventoryPage() {
       );
       setWasteKey('');
       setWasteQty('');
+      setWasteQuery('');
       load();
     } catch (e) {
       setError(errorMessage(e));
@@ -536,12 +561,27 @@ export function InventoryPage() {
                   className="flex flex-col gap-4"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    void saveWaste();
+                    askWaste();
                   }}
                 >
-                  <Select label="الصنف التالف" value={wasteKey} onChange={(e) => setWasteKey(e.target.value)}>
+                  <SearchField
+                    label="ابحث عن الصنف التالف"
+                    value={wasteQuery}
+                    onValueChange={(v) => {
+                      setWasteQuery(v);
+                      setWasteAsk(false);
+                    }}
+                  />
+                  <Select
+                    label="الصنف التالف"
+                    value={wasteKey}
+                    onChange={(e) => {
+                      setWasteKey(e.target.value);
+                      setWasteAsk(false);
+                    }}
+                  >
                     <option value="">اختر الصنف</option>
-                    {(stock?.items ?? []).map((r) => (
+                    {wasteOptions.map((r) => (
                       <option key={`${r.branchId}:${r.variantId}`} value={`${r.branchId}:${r.variantId}`}>
                         {manyBranches ? `${r.name} · ${branchName(r.branchId)}` : r.name}
                       </option>
@@ -553,7 +593,10 @@ export function InventoryPage() {
                       inputMode="decimal"
                       dir="ltr"
                       value={wasteQty}
-                      onChange={(e) => setWasteQty(e.target.value)}
+                      onChange={(e) => {
+                        setWasteQty(e.target.value);
+                        setWasteAsk(false);
+                      }}
                       className="min-w-0 flex-1"
                       inputClassName="num"
                     />
@@ -561,6 +604,24 @@ export function InventoryPage() {
                       سجّل الهدر
                     </Button>
                   </div>
+                  {wasteAsk && wasteRow ? (
+                    <Alert tone="warning">
+                      <div className="flex flex-col gap-3">
+                        <span>
+                          سيخرج <bdi className="num font-semibold">{wasteQty}</bdi> من «{wasteRow.name}» من
+                          المخزون بكلفته. هذا لا يُسترجع من هنا.
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" loading={saving} onClick={() => void saveWaste()}>
+                            أكّد الهدر
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setWasteAsk(false)}>
+                            رجوع
+                          </Button>
+                        </div>
+                      </div>
+                    </Alert>
+                  ) : null}
                 </form>
               </Card>
             ) : null}
@@ -577,8 +638,17 @@ export function InventoryPage() {
               onValueChange={setQuery}
               className="w-full sm:w-64"
             />
+            <SegmentedControl
+              label="طريقة العرض"
+              value={view}
+              onValueChange={setView}
+              options={[
+                { value: 'list', label: 'قائمة' },
+                { value: 'grid', label: 'شبكة المقاس واللون' },
+              ]}
+            />
             <Button variant="secondary" disabled={shown.length === 0} onClick={exportStock}>
-              صدّر CSV
+              صدّر إلى إكسل
             </Button>
             {manyBranches ? (
               <Select
@@ -597,28 +667,32 @@ export function InventoryPage() {
               </Select>
             ) : null}
           </SectionHead>
-          <DataTable
-            caption="المخزون"
-            columns={columns}
-            rows={shown}
-            rowKey={(r) => `${r.branchId}:${r.variantId}`}
-            loading={!stock && !error}
-            empty={
-              items.length > 0 ? (
-                <EmptyState
-                  icon={StockIcon}
-                  title="لا صنف يطابق البحث."
-                  description="جرّب اسماً آخر أو فرعاً آخر."
-                />
-              ) : (
-                <EmptyState
-                  icon={StockIcon}
-                  title="لا مخزون بعد."
-                  description="سجّل فاتورة شراء فيدخل المخزون بكلفته."
-                />
-              )
-            }
-          />
+          {view === 'grid' && stock ? (
+            <InventoryGrid rows={shown} numberFormat={digits} />
+          ) : (
+            <DataTable
+              caption="المخزون"
+              columns={columns}
+              rows={shown}
+              rowKey={(r) => `${r.branchId}:${r.variantId}`}
+              loading={!stock && !error}
+              empty={
+                items.length > 0 ? (
+                  <EmptyState
+                    icon={StockIcon}
+                    title="لا صنف يطابق البحث."
+                    description="جرّب اسماً آخر أو فرعاً آخر."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={StockIcon}
+                    title="لا مخزون بعد."
+                    description="سجّل فاتورة شراء فيدخل المخزون بكلفته."
+                  />
+                )
+              }
+            />
+          )}
         </section>
       </div>
     </AppShell>

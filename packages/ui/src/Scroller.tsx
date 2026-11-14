@@ -184,7 +184,7 @@ export function SnapRow({
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div className="flex flex-col gap-1">
-      <div ref={ref} className={className}>
+      <div ref={ref} className={cn('relative', className)}>
         {children}
       </div>
       <SnapDots scrollerRef={ref} label={label} />

@@ -71,14 +71,15 @@ export interface NavEntry {
   sectors?: readonly SectorKey[];
 }
 
-export type NavGroupKey = 'home' | 'selling' | 'stock' | 'admin';
+export type NavGroupKey = 'home' | 'selling' | 'stock' | 'buying' | 'admin';
 
 /** The menu's groups, in order; the home page stands alone at the top. */
 export const NAV_GROUPS: readonly { key: NavGroupKey; label?: string }[] = [
   { key: 'home' },
   { key: 'selling', label: 'البيع والزبائن' },
-  { key: 'stock', label: 'البضاعة' },
-  { key: 'admin', label: 'الإدارة' },
+  { key: 'stock', label: 'المنتجات والمخزون' },
+  { key: 'buying', label: 'الشراء والموردون' },
+  { key: 'admin', label: 'التقارير والإعدادات' },
 ];
 
 export type NavSectionKey =
@@ -105,7 +106,7 @@ export const NAV_SECTIONS: readonly { key: NavSectionKey; group: NavGroupKey; la
     { key: 'online', group: 'selling', label: 'المتجر الإلكتروني', icon: StoreIcon },
     { key: 'products', group: 'stock', label: 'المنتجات', icon: ProductsIcon },
     { key: 'promotions', group: 'stock', label: 'العروض', icon: OfferIcon },
-    { key: 'purchases', group: 'stock', label: 'المشتريات', icon: CartIcon },
+    { key: 'purchases', group: 'buying', label: 'المشتريات', icon: CartIcon },
     { key: 'inventory', group: 'stock', label: 'المخزون', icon: StockIcon },
     { key: 'reports', group: 'admin', label: 'التقارير', icon: ReportsIcon },
     { key: 'settings', group: 'admin', label: 'الإعدادات', icon: SettingsIcon },
@@ -257,6 +258,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'purchases',
+    to: '/suppliers',
+    label: 'الموردون',
+    icon: UserIcon,
+    permission: ['purchases.manage'],
+  },
+  {
+    section: 'purchases',
     to: '/supplier-returns',
     label: 'مرتجع إلى المورد',
     icon: UndoIcon,
@@ -322,6 +330,14 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     icon: SerialIcon,
     permission: ['catalog.manage'],
     sectors: SERIAL_SECTORS,
+  },
+  {
+    section: 'reports',
+    to: '/reports',
+    label: 'كل التقارير',
+    icon: ReportsIcon,
+    end: true,
+    permission: ['report.view', 'reports.financial', 'accounting.view', 'devices.view'],
   },
   {
     section: 'reports',

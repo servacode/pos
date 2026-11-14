@@ -172,7 +172,7 @@ export function ExpiryPage() {
       className: 'whitespace-nowrap',
       header: 'الحالة',
       cell: (r) => (
-        <span className="flex flex-wrap items-center gap-1.5">
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
           {r.daysLeft === null ? (
             <Badge tone="neutral">بلا تاريخ</Badge>
           ) : r.daysLeft < 0 ? (

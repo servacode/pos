@@ -252,7 +252,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       const legacy = await pos.local.get<Cart>(cartKey(session.userId));
       if (legacy) void pos.local.remove(cartKey(session.userId));
       let mine = saved && saved.userId === session.userId ? saved.cart : null;
-      if (mine && mine.lines.length > 0) {
+      if (mine && (mine.lines.length > 0 || mine.voucher)) {
         const pending = await pos.store.listPending().catch(() => []);
         const sold = [...pending.map((e) => e.doc), ...(last ? [last.doc] : [])];
         if (cartAlreadySold(mine, saved?.savedAt, sold)) {
@@ -261,7 +261,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         }
       }
       if (!alive) return;
-      if (mine && mine.lines.length > 0) {
+      if (mine && (mine.lines.length > 0 || mine.voucher)) {
         setCartState(mine);
       } else if (legacy && legacy.lines.length > 0) {
         setCartState(legacy);
@@ -324,7 +324,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   // The cart in progress is kept on the device on every change and dropped once it is empty (sold, held, cleared)
   useEffect(() => {
     if (!cartRestored) return;
-    if (cart.lines.length > 0) {
+    // An exchange voucher waits on the device even before the other piece is scanned
+    if (cart.lines.length > 0 || cart.voucher) {
       writeCart(() => pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart, savedAt: Date.now() }));
     } else {
       writeCart(() => pos.local.remove(CURRENT_CART_KEY));
@@ -385,7 +386,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const lock = useCallback(() => {
     const current = cartRef.current;
     writeCart(() =>
-      current.lines.length > 0
+      current.lines.length > 0 || current.voucher
         ? pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart: current, savedAt: Date.now() })
         : Promise.resolve(),
     );
@@ -554,6 +555,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     if (!picked) return;
     const back: Cart = { ...picked };
     delete back.held;
+    if (picked.held?.name.trim()) back.resumedName = picked.held.name.trim();
     const rest = held.filter((_, i) => i !== index);
     const next =
       cart.lines.length > 0
@@ -1120,9 +1122,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                     copy: false,
                   })
                 }
-                onExchange={(code) => {
+                onExchange={(code, handedBack) => {
                   // A cash exchange has no voucher: the return went out in cash, the other piece is paid in cash
                   if (code) setCart((c) => ({ ...c, voucher: code }));
+                  else if (handedBack) setCart((c) => ({ ...c, exchangeCashBackMinor: handedBack }));
                   setDone(null);
                   setView('sale');
                 }}

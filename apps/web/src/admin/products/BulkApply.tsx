@@ -104,7 +104,11 @@ export function BulkApply({
           ولّد باركود للكل
         </Button>
         <span className="text-sm text-ink-muted">
-          {missing === 0 ? 'لكل متغيّر باركود.' : `${String(missing)} بلا باركود. يُولَّد عند الحفظ.`}
+          {missing === 0
+            ? 'لكل متغيّر باركود.'
+            : autoBarcode
+              ? `${String(missing)} بلا باركود. يُولَّد عند الحفظ.`
+              : `${String(missing)} بلا باركود. فعّل الخيار المجاور ليُولَّد عند الحفظ.`}
         </span>
         <Switch
           label="ولّد باركود لكل متغيّر جديد عند الحفظ"

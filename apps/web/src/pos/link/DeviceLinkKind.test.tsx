@@ -1,4 +1,4 @@
-import 'fake-indexeddb/auto';
+﻿import 'fake-indexeddb/auto';
 import { DirectionProvider } from '@radix-ui/react-direction';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -26,7 +26,12 @@ describe('linking a kitchen screen or a waiter’s phone', () => {
       <DirectionProvider dir="rtl">
         <DensityProvider density="touch">
           <MemoryRouter initialEntries={['/kitchen']}>
-            <DeviceLink onLinked={vi.fn()} helpers={fakeLinkHelpers()} kind="kitchen_screen" />
+            <DeviceLink
+              onLinked={vi.fn()}
+              helpers={fakeLinkHelpers()}
+              kind="kitchen_screen"
+              defaultMethod="code"
+            />
           </MemoryRouter>
         </DensityProvider>
       </DirectionProvider>,

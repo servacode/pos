@@ -709,8 +709,9 @@ describe('the price-change history', () => {
     expect(mine.items.map((i) => i.source)).toEqual(['product_edit']);
     // A day in the past has nothing, today has all
     expect((await history(store, '?to=2020-01-01')).items).toEqual([]);
-    const today = new Date().toISOString().slice(0, 10);
-    expect((await history(store, `?from=${today}&to=${today}`)).items.length).toBe(3);
+    // The store's day can differ from UTC's around midnight: a day either side covers it
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    expect((await history(store, `?from=${day(-1)}&to=${day(1)}`)).items.length).toBe(3);
     expect((await history(store, '?limit=1')).items).toHaveLength(1);
     expect((await history(store, '?from=junk')).status).toBe(400);
   });

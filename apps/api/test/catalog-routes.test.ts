@@ -374,6 +374,8 @@ describe('GET /v1/products and GET /v1/barcodes/{code}', () => {
   it('summarises price, variant count, first barcode and stock per row', async () => {
     const detail = await create();
     const [row] = (await list()).items;
+    // Counts over the whole store come with the first page: one product, priced, no picture
+    expect((await list()).attention).toEqual({ zeroPrice: 0, noPhoto: 1 });
     expect(row).toEqual({
       id: detail.id,
       nameAr: 'شاي الربيع ٤٥٠ غ',
@@ -389,6 +391,7 @@ describe('GET /v1/products and GET /v1/barcodes/{code}', () => {
       price: { currency: 'SYP', minMinor: 4_500_000, maxMinor: 4_500_000 },
       barcode: '6281234500012',
       stockQty: 0,
+      hasImage: false,
       version: 1,
     });
     const mixed = await create({

@@ -33,5 +33,8 @@ export function packLineText(
   fmt: (thousandths: number) => string,
 ): string | null {
   const note = packPiecesNote(line, fmt);
-  return note === null ? null : `${fmt(line.qty)} ${line.packName?.trim() || 'عبوة'} ${note}`;
+  if (note === null) return null;
+  // One word for a pack everywhere: a quotation's default «عبوة» reads the same as the till's «علبة»
+  const name = line.packName?.trim();
+  return `${fmt(line.qty)} ${!name || name === 'عبوة' ? 'علبة' : name} ${note}`;
 }

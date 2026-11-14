@@ -7,6 +7,7 @@ import {
   type CustomerKind,
   type CustomerListItem,
   type CustomerListResponse,
+  type SectorKey,
 } from '@serva/core';
 import {
   AddIcon,
@@ -36,13 +37,25 @@ import {
   Tooltip,
   UserIcon,
   WarningIcon,
+  useDigits,
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { storeSells } from '../../lib/sectors';
+import { dayText, isoDay } from '../../lib/dates';
+
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { listCustomers } from './api';
 import { CustomerForm } from './CustomerForm';
+
+const KIND_SECTORS: readonly SectorKey[] = [
+  'medical_supplies',
+  'pharmacy',
+  'wholesale',
+  'building_materials',
+  'general',
+];
 
 /** Owes more than the limit set for them: the till still sells, with a warning. */
 const overLimit = (c: CustomerListItem) => c.creditLimitMinor !== null && c.balanceMinor > c.creditLimitMinor;
@@ -131,12 +144,14 @@ function RowMenu({ customer }: { customer: CustomerListItem }) {
  */
 export function CustomersPage() {
   const me = useMe();
+  const digits = useDigits();
   const navigate = useNavigate();
   const canManage = me.user.permissions.includes('customers.manage');
   const [list, setList] = useState<CustomerListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [owing, setOwing] = useState(false);
+  const [away, setAway] = useState(false);
   const [kind, setKind] = useState<CustomerKind | ''>('');
   const [adding, setAdding] = useState(false);
   // Every customer, whatever the search says, for the duplicate warning of the new-customer form
@@ -160,7 +175,12 @@ export function CustomersPage() {
   }, [load]);
 
   const base = list?.baseCurrency ?? 'SYP';
-  const items = list?.items ?? [];
+  const today = isoDay(Date.now(), me.tenant.timezone);
+  const cutoff = new Date(Date.parse(`${today}T00:00:00Z`) - 90 * 86_400_000).toISOString().slice(0, 10);
+  // «لم يزر منذ 90 يوماً»: bought before, but not in the last 90 days
+  const items = (list?.items ?? []).filter(
+    (c) => !away || (!!c.lastPurchaseDate && c.lastPurchaseDate < cutoff),
+  );
   const owingCount = items.filter((c) => c.balanceMinor > 0).length;
   const overCount = items.filter(overLimit).length;
   // A number of the tiles: a placeholder while the list loads, a dash when it could not.
@@ -209,6 +229,40 @@ export function CustomersPage() {
           <span className="text-ink-subtle">—</span>
         ),
     },
+    {
+      key: 'last',
+      header: 'آخر شراء',
+      className: 'hidden lg:table-cell',
+      cell: (c) =>
+        c.lastPurchaseDate ? (
+          <bdi className="num whitespace-nowrap text-ink-muted">{dayText(c.lastPurchaseDate, digits)}</bdi>
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        ),
+    },
+    {
+      key: 'spent',
+      header: 'مجموع المشتريات',
+      numeric: true,
+      className: 'hidden lg:table-cell',
+      cell: (c) =>
+        c.spentMinor ? (
+          <Money minor={c.spentMinor} currency={base} className="text-ink-muted" />
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        ),
+    },
+    ...(storeSells(me.tenant.sectors, ['clothing'])
+      ? [
+          {
+            key: 'size',
+            header: 'المقاس المفضّل',
+            className: 'hidden xl:table-cell',
+            cell: (c: CustomerListItem) =>
+              c.favouriteSize ? <Badge>{c.favouriteSize}</Badge> : <span className="text-ink-subtle">—</span>,
+          } satisfies DataColumn<CustomerListItem>,
+        ]
+      : []),
     {
       key: 'limit',
       header: 'حد الدين',
@@ -314,23 +368,31 @@ export function CustomersPage() {
               onValueChange={setSearch}
               className="min-w-0 flex-1 basis-64 sm:max-w-md"
             />
-            <Select
-              label="نوع الزبون"
-              hideLabel
-              value={kind}
-              onChange={(e) => setKind(e.target.value as CustomerKind | '')}
-            >
-              <option value="">كل الأنواع</option>
-              {CUSTOMER_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {CUSTOMER_KIND_LABELS[k]}
-                </option>
-              ))}
-            </Select>
+            {/* Clinics, hospitals and offices: only for shops that sell to them */}
+            {storeSells(me.tenant.sectors, KIND_SECTORS) ? (
+              <Select
+                label="نوع الزبون"
+                hideLabel
+                value={kind}
+                onChange={(e) => setKind(e.target.value as CustomerKind | '')}
+              >
+                <option value="">كل الأنواع</option>
+                {CUSTOMER_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {CUSTOMER_KIND_LABELS[k]}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
             <ToggleChip
               label="من عليه دين فقط"
               checked={owing}
               onChange={(e) => setOwing(e.target.checked)}
+            />
+            <ToggleChip
+              label="لم يزر منذ 90 يوماً"
+              checked={away}
+              onChange={(e) => setAway(e.target.checked)}
             />
           </div>
           <DataTable

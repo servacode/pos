@@ -5,7 +5,7 @@ import { validateDocumentPayload } from '@serva/core/contracts/documents';
 import { memoryLocal } from '../../offline/local';
 import { ids, PINS, PRODUCTS, staffServer } from '../../test/pos';
 import { openShift, renderPos, scan, SHIFT_ID } from '../../test/renderPos';
-import { matchesNumber, returnableSales } from './returns';
+import { matchesInvoice, matchesNumber, returnableSales } from './returns';
 
 beforeEach(() => {
   vi.spyOn(window, 'print').mockImplementation(() => undefined);
@@ -392,5 +392,25 @@ describe('the invoices a till can return from', () => {
     expect(matchesNumber('INV-001-002-0000154', '154')).toBe(true);
     expect(matchesNumber('INV-001-002-0000154', '١٥٤')).toBe(true);
     expect(matchesNumber('INV-001-002-0000154', '155')).toBe(false);
+  });
+});
+
+describe('one search box for the invoices of this till', () => {
+  const sale = {
+    id: 's1',
+    number: 'INV-001-002-0000154',
+    deviceTime: '2026-10-31T10:00:00Z',
+    sale: { customerId: 'c1', customerName: null },
+    returned: [],
+  } as never;
+  const customers = [{ id: 'c1', name: 'ريم الأحمد', phone: '0944 123 456' }];
+
+  it('finds by the end of the number, the customer name or the phone', () => {
+    expect(matchesInvoice(sale, '154', customers)).toBe(true);
+    expect(matchesInvoice(sale, 'ريم', customers)).toBe(true);
+    expect(matchesInvoice(sale, '944123', customers)).toBe(true);
+    expect(matchesInvoice(sale, 'نور', customers)).toBe(false);
+    expect(matchesInvoice(sale, '999', customers)).toBe(false);
+    expect(matchesInvoice(sale, '', customers)).toBe(true);
   });
 });
