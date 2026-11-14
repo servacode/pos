@@ -3,10 +3,11 @@ import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { toLatinDigits } from '@serva/core/text';
 import { AddIcon, Button, CashIcon, cn, IconChip, Money, RemoveIcon, TextField } from '@serva/ui';
 import { parseAmount, amountText } from '../pay/payment';
-import { countTotal, DENOMINATIONS, type DrawerCount } from './shift';
+import type { TillSettings } from '@serva/core/contracts/till';
+import { countTotal, notesFor, type DrawerCount } from './shift';
 
-export function emptyCount(currency: CurrencyCode): DrawerCount {
-  const notes = DENOMINATIONS[currency];
+export function emptyCount(currency: CurrencyCode, till?: TillSettings | null): DrawerCount {
+  const notes = notesFor(till, currency);
   return notes
     ? { currency, notes: Object.fromEntries(notes.map((v) => [v, 0])), totalMinor: 0 }
     : { currency, notes: null, totalMinor: 0 };
@@ -25,8 +26,8 @@ const noteLabel = (value: number, currency: CurrencyCode) =>
 /** Where the keypad types: a note's count (its value in minor units), or the drawer's total. */
 export type CountKey = number | 'total';
 
-const firstKey = (count: DrawerCount): CountKey =>
-  count.notes ? (DENOMINATIONS[count.currency]?.[0] ?? 'total') : 'total';
+const firstKey = (count: DrawerCount, till?: TillSettings | null): CountKey =>
+  count.notes ? (notesFor(till, count.currency)?.[0] ?? 'total') : 'total';
 
 /** A digit typed on the keypad into a note's count (as the field allows: up to 99,999) or the total. */
 function typeDigits(count: DrawerCount, key: CountKey, digits: string): DrawerCount {
@@ -62,9 +63,10 @@ function eraseDigit(count: DrawerCount, key: CountKey): DrawerCount {
 export function useCountKeypad(
   counts: readonly DrawerCount[],
   setCounts: (update: (list: DrawerCount[]) => DrawerCount[]) => void,
+  till?: TillSettings | null,
 ) {
   const [target, setTarget] = useState<{ currency: CurrencyCode; key: CountKey } | null>(() =>
-    counts[0] ? { currency: counts[0].currency, key: firstKey(counts[0]) } : null,
+    counts[0] ? { currency: counts[0].currency, key: firstKey(counts[0], till) } : null,
   );
 
   const edit = useCallback(
@@ -129,8 +131,11 @@ export function DrawerCounter({
   onChange,
   active = null,
   onActivate,
+  till,
 }: {
   count: DrawerCount;
+  /** The store's till settings: its own banknote values (else the built-in ones) */
+  till?: TillSettings | null;
   onChange: (next: DrawerCount) => void;
   /** The row the keypad types into, when it is in this drawer */
   active?: CountKey | null;
@@ -139,6 +144,7 @@ export function DrawerCounter({
   const { currency } = count;
   const byNote = count.notes !== null;
   const total = countTotal(count);
+  const offered = notesFor(till, currency);
   return (
     <section
       aria-label={drawerName(currency)}
@@ -153,7 +159,7 @@ export function DrawerCounter({
       </div>
       {byNote ? (
         <ul className="flex flex-col gap-1">
-          {DENOMINATIONS[currency]!.map((value) => {
+          {(offered ?? []).map((value) => {
             const n = count.notes![value] ?? 0;
             const set = (next: number) =>
               onChange({
@@ -252,16 +258,16 @@ export function DrawerCounter({
           />
         </div>
       )}
-      {DENOMINATIONS[currency] ? (
+      {offered ? (
         <Button
           variant="ghost"
           className="self-start"
           onClick={() => {
             const next = byNote
               ? { currency, notes: null, totalMinor: countTotal(count) }
-              : emptyCount(currency);
+              : emptyCount(currency, till);
             onChange(next);
-            onActivate?.(firstKey(next));
+            onActivate?.(firstKey(next, till));
           }}
         >
           {byNote ? 'تخطَّ العدّ واكتب المجموع' : 'عُدّ بالفئات'}

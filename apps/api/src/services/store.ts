@@ -334,6 +334,12 @@ export function updateTill(
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'settings.manage');
     const before = await read(tx, auth.tenantId);
+    // Note values only for the store's own currencies
+    const own = new Set<string>([before.baseCurrency, ...before.enabledCurrencies]);
+    const stray = Object.keys(input.cashNotes ?? {}).find((c) => !own.has(c));
+    if (stray) {
+      throw new AppError(400, 'validation_failed', 'فئات النقد لعملة غير مفعّلة في المتجر.');
+    }
     await tx.update(tenantSettings).set({ till: input });
     const after = await read(tx, auth.tenantId);
     await audit(

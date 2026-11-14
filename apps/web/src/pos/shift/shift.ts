@@ -1,6 +1,7 @@
 import { convert } from '@serva/core/money';
 import type { CurrencyCode as Code } from '@serva/core/currencies';
 import type { TradeRate } from '@serva/core/contracts/common';
+import { cashNotesOf, DEFAULT_CASH_NOTES, type TillSettings } from '@serva/core/contracts/till';
 import type {
   Approval,
   CashCount,
@@ -52,9 +53,19 @@ export function readShift(local: LocalStore, mode: ShiftMode, userId: string): P
 
 /** Banknotes offered by the counter (the boards' denominations), in minor units. */
 export const DENOMINATIONS: Partial<Record<Code, number[]>> = {
-  SYP: [500, 200, 100, 50, 25, 10].map((v) => v * 100),
-  USD: [100, 50, 20, 10, 5, 1].map((v) => v * 100),
+  SYP: DEFAULT_CASH_NOTES.SYP!.map((v) => v * 100),
+  USD: DEFAULT_CASH_NOTES.USD!.map((v) => v * 100),
 };
+
+/**
+ * The notes the counter offers for a currency, in minor units, high to low: the store's own list
+ * («الصندوق › فئات النقد») when it set one, else the built-in one (also when the till has not pulled
+ * the settings). null: a currency counted by total only.
+ */
+export function notesFor(till: TillSettings | null | undefined, currency: Code): number[] | null {
+  const own = cashNotesOf(till, currency);
+  return own ? own.map((v) => v * 100) : (DENOMINATIONS[currency] ?? null);
+}
 
 /** A count typed by note (counts per denomination) or as a total. */
 export interface DrawerCount {

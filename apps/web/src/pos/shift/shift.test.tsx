@@ -8,9 +8,9 @@ import type {
 import { validateDocumentPayload } from '@serva/core/contracts/documents';
 import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
-import { ids, PINS, PRODUCTS } from '../../test/pos';
+import { ids, PINS, posSets, PRODUCTS } from '../../test/pos';
 import { openShift, renderPos, scan, SHIFT_ID } from '../../test/renderPos';
-import { closeDrawer, netMethodRows, shiftActivity } from './shift';
+import { closeDrawer, netMethodRows, notesFor, shiftActivity } from './shift';
 
 beforeEach(() => {
   vi.spyOn(window, 'print').mockImplementation(() => undefined);
@@ -283,5 +283,52 @@ describe('the close summary rows', () => {
     ]);
     expect(netMethodRows(only)).toEqual([{ method: 'cash', currency: 'SYP', count: 0, amountMinor: -5_000 }]);
     expect(netMethodRows(null)).toEqual([]);
+  });
+});
+
+describe('the banknotes the counter offers', () => {
+  const withTill = (till: unknown) => {
+    const base = posSets();
+    return { ...base, settings: [{ ...base.settings[0]!, till }] } as ReturnType<typeof posSets>;
+  };
+
+  it('falls back to the built-in notes when the store set none', () => {
+    expect(notesFor(null, 'SYP')).toEqual([50_000, 20_000, 10_000, 5_000, 2_500, 1_000]);
+    expect(notesFor({ returnWindowDays: null, cardApprovalRequired: false }, 'USD')).toEqual([
+      10_000, 5_000, 2_000, 1_000, 500, 100,
+    ]);
+    // Only the pound was set: the dollar keeps its own list
+    const till = { returnWindowDays: null, cardApprovalRequired: false, cashNotes: { SYP: [10, 2000] } };
+    expect(notesFor(till, 'SYP')).toEqual([200_000, 1_000]);
+    expect(notesFor(till, 'USD')).toEqual([10_000, 5_000, 2_000, 1_000, 500, 100]);
+  });
+
+  it('counts the store’s own notes when the shift opens and saves them as before', async () => {
+    const till = { returnWindowDays: null, cardApprovalRequired: false, cashNotes: { SYP: [2000, 500, 10] } };
+    const { user, outbox } = renderPos({ sets: withTill(till) });
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    expect(screen.getByLabelText('عدد أوراق 2000 ل.س')).toBeInTheDocument();
+    expect(screen.queryByLabelText('عدد أوراق 200 ل.س')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('عدد أوراق 25 ل.س')).not.toBeInTheDocument();
+    // The dollar keeps the built-in list
+    expect(screen.getByLabelText('عدد أوراق 20 $')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('عدد أوراق 2000 ل.س'), '1');
+    await user.click(screen.getByRole('button', { name: 'افتح الوردية' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    const [open] = docsOf<ShiftOpenPayload>(outbox, 'shift_open');
+    expect(validateDocumentPayload('shift_open', open!.payload)).toEqual({ ok: true, checked: true });
+    expect(open!.payload.opening[0]).toEqual({
+      currency: 'SYP',
+      amountMinor: 200_000,
+      denominations: [{ valueMinor: 200_000, count: 1 }],
+    });
+  });
+
+  it('offers the built-in notes when no setting was pulled', async () => {
+    const { user } = renderPos({ sets: withTill(null) });
+    await signIn(user, 'سامر');
+    await screen.findByRole('heading', { name: 'افتح الوردية' });
+    expect(screen.getByLabelText('عدد أوراق 200 ل.س')).toBeInTheDocument();
   });
 });

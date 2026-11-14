@@ -1,6 +1,6 @@
 import type { SalePayload } from '@serva/core/contracts/documents';
 import { Button, CartIcon, CheckIcon, cn, Money, OfflineIcon, PrintIcon } from '@serva/ui';
-import { DENOMINATIONS } from '../shift/shift';
+import { notesFor } from '../shift/shift';
 import { changeNotes } from '../pay/payment';
 import { methodLabel, Receipt, type PaperWidth, type ReceiptData } from './Receipt';
 
@@ -32,7 +32,9 @@ export function SaleDone({
 }) {
   const sale = data.doc.payload as unknown as SalePayload;
   const change = sale.change;
-  const notes = change ? changeNotes(change.amountMinor, DENOMINATIONS[change.currency] ?? []) : [];
+  const notes = change
+    ? changeNotes(change.amountMinor, notesFor(data.settings.till, change.currency) ?? [])
+    : [];
   // A sale on account or by cheque has no change: it says what stays with the customer instead
   const onAccount = (['credit', 'cheque'] as const).flatMap((method) => {
     const parts = sale.payments.filter((p) => p.method === method);

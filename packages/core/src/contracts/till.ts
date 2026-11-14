@@ -1,5 +1,15 @@
 import { z } from 'zod';
+import { CURRENCY_CODES } from '../currencies';
 import type { SectorKey } from '../sectors';
+
+/** One currency's note values: whole units from 1 to 1,000,000, at most 20, none twice. */
+export const CASH_NOTE_MAX = 1_000_000;
+export const CASH_NOTES_PER_CURRENCY = 20;
+const cashNoteList = z
+  .array(z.number().int().min(1).max(CASH_NOTE_MAX))
+  .min(1)
+  .max(CASH_NOTES_PER_CURRENCY)
+  .refine((list) => new Set(list).size === list.length, 'الفئة مكررة');
 
 /**
  * «الصندوق»: the store's rules at the till (03 › الملابس: المرتجع والاستبدال، 08 › مرتجع مبيعات).
@@ -27,8 +37,29 @@ export const tillSettingsSchema = z.object({
   warrantyAskCustomer: z.boolean().nullable().optional(),
   /** The terms printed on the warranty certificate */
   warrantyTerms: z.string().trim().max(600).nullable().optional(),
+  /**
+   * «فئات النقد»: the banknote values the till's cash count offers, per currency, in whole units
+   * (500 = 500 pounds), in any order. A currency left out (or the whole field) keeps the till's
+   * built-in list. Additive and optional: an older till ignores it.
+   */
+  cashNotes: z.partialRecord(z.enum(CURRENCY_CODES), cashNoteList).optional(),
 });
 export type TillSettings = z.output<typeof tillSettingsSchema>;
+
+/** The till's built-in note values (whole units, high to low) for the currencies it counts by note. */
+export const DEFAULT_CASH_NOTES: Readonly<Record<string, readonly number[]>> = {
+  SYP: [500, 200, 100, 50, 25, 10],
+  USD: [100, 50, 20, 10, 5, 1],
+};
+
+/** The banknote values the till counts, sorted high to low; null for a currency the store did not set. */
+export function cashNotesOf(
+  till: Pick<TillSettings, 'cashNotes'> | null | undefined,
+  currency: string,
+): number[] | null {
+  const list = (till?.cashNotes as Record<string, number[] | undefined> | undefined)?.[currency];
+  return list && list.length > 0 ? [...list].sort((a, b) => b - a) : null;
+}
 
 export const DEFAULT_TILL_SETTINGS: TillSettings = { returnWindowDays: null, cardApprovalRequired: false };
 

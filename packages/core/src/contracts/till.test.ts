@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cashNotesOf,
   CLOTHING_RETURN_DAYS,
   DEFAULT_RETURN_DAYS,
   DEFAULT_TILL_SETTINGS,
@@ -17,6 +18,32 @@ describe('returnWindowDays', () => {
     expect(returnWindowDays(undefined, ['supermarket'])).toBe(DEFAULT_RETURN_DAYS);
     expect(returnWindowDays(null, undefined)).toBe(7);
     expect(returnWindowDays(null, ['medical_supplies'])).toBe(30);
+  });
+});
+
+describe('cash notes', () => {
+  const base = { returnWindowDays: null, cardApprovalRequired: false };
+  const parse = (cashNotes: unknown) => tillSettingsSchema.safeParse({ ...base, cashNotes }).success;
+  it('accepts positive whole values per currency and refuses the rest', () => {
+    expect(parse({ SYP: [1000, 500, 10], USD: [1] })).toBe(true);
+    expect(parse({})).toBe(true);
+    expect(parse({ SYP: [] })).toBe(false);
+    expect(parse({ SYP: [0] })).toBe(false);
+    expect(parse({ SYP: [-5] })).toBe(false);
+    expect(parse({ SYP: [2.5] })).toBe(false);
+    expect(parse({ SYP: [500, 500] })).toBe(false);
+    expect(parse({ SYP: [1_000_001] })).toBe(false);
+    expect(parse({ SYP: Array.from({ length: 21 }, (_, i) => i + 1) })).toBe(false);
+    expect(parse({ EUR: [5] })).toBe(false);
+    expect(tillSettingsSchema.safeParse(base).success).toBe(true);
+  });
+  it('reads a currency list sorted high to low, null when unset', () => {
+    expect(cashNotesOf({ cashNotes: { SYP: [10, 500, 100] } }, 'SYP')).toEqual([500, 100, 10]);
+    expect(cashNotesOf({ cashNotes: { SYP: [10] } }, 'USD')).toBeNull();
+    expect(cashNotesOf({ cashNotes: { SYP: [] } }, 'SYP')).toBeNull();
+    expect(cashNotesOf(null, 'SYP')).toBeNull();
+    expect(cashNotesOf(undefined, 'SYP')).toBeNull();
+    expect(cashNotesOf({}, 'SYP')).toBeNull();
   });
 });
 

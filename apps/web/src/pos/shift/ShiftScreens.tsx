@@ -27,6 +27,7 @@ import {
   WarningIcon,
   type DataColumn,
 } from '@serva/ui';
+import type { TillSettings } from '@serva/core/contracts/till';
 import type { Catalog } from '../catalog';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { clockText, counted, INVOICES } from '../format';
@@ -89,17 +90,20 @@ function useBusinessDate(catalog: Catalog) {
 function CountLayout({
   counts,
   setCounts,
+  till,
   intro,
   children,
 }: {
   counts: DrawerCount[];
+  /** The store's till settings (its own banknote values) */
+  till?: TillSettings | null;
   setCounts: (update: (list: DrawerCount[]) => DrawerCount[]) => void;
   /** What sits above the drawers, e.g. the blind-count note */
   intro?: ReactNode;
   /** The panel's end: errors and the button */
   children: ReactNode;
 }) {
-  const keypad = useCountKeypad(counts, setCounts);
+  const keypad = useCountKeypad(counts, setCounts, till);
   return (
     <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
       <div className="flex flex-col gap-4">
@@ -109,6 +113,7 @@ function CountLayout({
             <DrawerCounter
               key={count.currency}
               count={count}
+              till={till}
               onChange={(next) => setCounts((list) => list.map((c, j) => (j === i ? next : c)))}
               active={keypad.activeIn(count.currency)}
               onActivate={(key) => keypad.activate(count.currency, key)}
@@ -159,7 +164,9 @@ export function ShiftOpenScreen({
   const pos = usePos();
   const mode = catalog.settings!.shiftMode;
   const businessDate = useBusinessDate(catalog);
-  const [counts, setCounts] = useState<DrawerCount[]>(() => drawerCurrencies(catalog).map(emptyCount));
+  const [counts, setCounts] = useState<DrawerCount[]>(() =>
+    drawerCurrencies(catalog).map((c) => emptyCount(c, catalog.settings?.till)),
+  );
   const [saving, setSaving] = useState(false);
   const [warn, setWarn] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -238,7 +245,7 @@ export function ShiftOpenScreen({
         title="افتح الوردية"
         description={`${MODE_TEXT[mode]} · عدّ النقد في الدرج قبل أول بيع. يُحفظ العدّ على الجهاز ويُرسل وحده.`}
       />
-      <CountLayout counts={counts} setCounts={setCounts}>
+      <CountLayout counts={counts} setCounts={setCounts} till={catalog.settings?.till}>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {warn ? (
           <Alert tone="warning">
@@ -292,7 +299,9 @@ export function ShiftCloseScreen({
   const [confirming, setConfirming] = useState(false);
   const [closedAt, setClosedAt] = useState(0);
   const { paper, print } = usePrint();
-  const [counts, setCounts] = useState<DrawerCount[]>(() => drawerCurrencies(catalog).map(emptyCount));
+  const [counts, setCounts] = useState<DrawerCount[]>(() =>
+    drawerCurrencies(catalog).map((c) => emptyCount(c, catalog.settings?.till)),
+  );
   const [activity, setActivity] = useState<ShiftActivity | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -422,6 +431,7 @@ export function ShiftCloseScreen({
         <CountLayout
           counts={counts}
           setCounts={setCounts}
+          till={settings.till}
           intro={<Alert tone="info">عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.</Alert>}
         >
           <Button size="lg" fullWidth onClick={() => setStep('summary')} disabled={!activity}>

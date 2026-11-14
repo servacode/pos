@@ -59,7 +59,7 @@ export const SETTINGS_SECTIONS = {
   till: {
     id: 'store-till',
     title: 'الصندوق',
-    description: 'مدة قبول المرتجع، ورقم الموافقة عند الدفع بالبطاقة.',
+    description: 'مدة قبول المرتجع، ورقم الموافقة عند الدفع بالبطاقة، وفئات النقد في عدّ الدرج.',
     icon: CashIcon,
   },
   pharmacy: {

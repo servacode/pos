@@ -62,6 +62,32 @@ describe('till settings', () => {
     expect((await pullSettings(store)).till).toEqual({ returnWindowDays: 14, cardApprovalRequired: true });
   });
 
+  it('keeps the cash notes per currency, pulled by the till, and refuses bad or foreign ones', async () => {
+    const store = await openStore(app);
+    const put = (cashNotes: unknown) =>
+      app.inject({
+        method: 'PUT',
+        url: '/v1/store/till',
+        headers: as(store),
+        payload: { returnWindowDays: null, cardApprovalRequired: false, cashNotes },
+      });
+    const ok = await put({ SYP: [2000, 500, 100, 10] });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json<StoreResponse>().till?.cashNotes).toEqual({ SYP: [2000, 500, 100, 10] });
+    expect((await pullSettings(store)).till?.cashNotes).toEqual({ SYP: [2000, 500, 100, 10] });
+    expect((await put({ SYP: [100, 100] })).statusCode).toBe(400);
+    expect((await put({ SYP: [] })).statusCode).toBe(400);
+    expect((await put({ SYP: [0] })).statusCode).toBe(400);
+    expect((await put({ SYP: [2_000_000] })).statusCode).toBe(400);
+    // The store enables only the pound: a dollar list is refused
+    await ownerDb()`update tenant_settings set enabled_currencies = array['SYP'] where tenant_id = ${store.tenantId}`;
+    expect((await put({ USD: [100, 50] })).statusCode).toBe(400);
+    // Cleared: back to the till's built-in lists
+    const cleared = await put(undefined);
+    expect(cleared.statusCode, cleared.body).toBe(200);
+    expect(cleared.json<StoreResponse>().till?.cashNotes).toBeUndefined();
+  });
+
   it('refuses a wrong window and a cashier', async () => {
     const store = await openStore(app);
     const bad = await app.inject({

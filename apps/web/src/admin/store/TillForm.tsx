@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { returnWindowDays, warrantyAsksCustomer, type StoreResponse } from '@serva/core';
+import type { CurrencyCode } from '@serva/core/currencies';
 import { Button, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { saveTill } from './api';
+import { CashNotesField, defaultNotes, noteCurrencies, sameNotes } from './CashNotesField';
 import { FailedNote, SavedNote, SETTINGS_SECTIONS, SettingsCard } from './parts';
 
 /**
@@ -18,13 +20,21 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   const [belowCost, setBelowCost] = useState(store.till?.belowCostApproval === true);
   const [askCustomer, setAskCustomer] = useState(warrantyAsksCustomer(store.till, store.sectors));
   const [terms, setTerms] = useState(store.till?.warrantyTerms ?? '');
+  const currencies = noteCurrencies(store);
+  const [notes, setNotes] = useState<Record<string, number[]>>(() =>
+    Object.fromEntries(
+      currencies.map((c) => [c, store.till?.cashNotes?.[c as CurrencyCode] ?? defaultNotes(c)]),
+    ),
+  );
+  const emptyNotes = currencies.some((c) => notes[c]!.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const fallback = returnWindowDays(null, store.sectors);
   // Typed as it is: «3.5» and «-5» are refused with the message, never silently turned into 35 or 5
   const typed = days.trim() === '' ? null : Number(days);
-  const bad = typed !== null && (!/^\d+$/.test(days.trim()) || typed < 1 || typed > 365);
+  const daysBad = typed !== null && (!/^\d+$/.test(days.trim()) || typed < 1 || typed > 365);
+  const bad = daysBad || emptyNotes;
 
   async function save() {
     if (bad) return;
@@ -32,9 +42,18 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
     setError(null);
     setSaved(false);
     try {
+      // Only a list that differs from the built-in one is stored: the rest follows the till's default
+      const custom = Object.fromEntries(
+        currencies.filter((c) => !sameNotes(notes[c]!, defaultNotes(c))).map((c) => [c, notes[c]!]),
+      );
+      const { cashNotes: _old, ...rest } = store.till ?? {
+        returnWindowDays: null,
+        cardApprovalRequired: false,
+      };
       onSaved(
         await saveTill({
-          ...store.till,
+          ...rest,
+          ...(Object.keys(custom).length > 0 ? { cashNotes: custom } : {}),
           returnWindowDays: typed,
           cardApprovalRequired: cardRequired,
           ...(blockNegative || store.till?.blockNegativeStock !== undefined
@@ -78,7 +97,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
         dir="ltr"
         value={days}
         onChange={(e) => setDays(e.target.value.slice(0, 6))}
-        error={bad ? 'اكتب عدداً من 1 إلى 365' : undefined}
+        error={daysBad ? 'اكتب عدداً من 1 إلى 365' : undefined}
         inputClassName="num"
       />
       <Switch
@@ -117,6 +136,24 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
         value={terms}
         onChange={(e) => setTerms(e.target.value.slice(0, 600))}
       />
+      {currencies.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-ink">فئات النقد</h3>
+            <p className="text-sm text-ink-muted">
+              الأوراق التي يعدّها الكاشير عند فتح الوردية وإغلاقها. أضف فئة جديدة أو احذف فئة لم تعد تُتداول.
+            </p>
+          </div>
+          {currencies.map((c) => (
+            <CashNotesField
+              key={c}
+              currency={c as CurrencyCode}
+              notes={notes[c]!}
+              onChange={(next) => setNotes((all) => ({ ...all, [c]: next }))}
+            />
+          ))}
+        </div>
+      ) : null}
     </SettingsCard>
   );
 }
