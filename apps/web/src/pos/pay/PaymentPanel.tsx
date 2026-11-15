@@ -366,6 +366,26 @@ export function PaymentPanel({
     !(needsCustomer && !customer) &&
     tenders.length > 0;
 
+  // Why «أتمّ الدفع» waits, said beside it: one short line for whatever holds it
+  const waitingFor: string | null =
+    canComplete || saving
+      ? null
+      : needsCustomer && !customer
+        ? 'اختر الزبون أولاً: الجهاز المباع بكفالة يُسجَّل باسمه.'
+        : blockedOver
+          ? 'المبلغ يتجاوز حدّ دين هذا الزبون.'
+          : voucherProblem
+            ? 'تحقّق من القسيمة أو النقاط المكتوبة.'
+            : needsReference
+              ? 'اكتب رقم الموافقة أو المرجع لهذه الدفعة.'
+              : tenders.length === 0
+                ? 'اختر طريقة الدفع وأدخل المبلغ.'
+                : 'error' in settlement
+                  ? 'تحقّق من المبلغ المكتوب.'
+                  : !settlement.covered
+                    ? 'المبلغ لا يغطي الفاتورة كلها بعد.'
+                    : null;
+
   // Cash in the sale's own currency is due rounded to the cash step: the same figure the footer shows
   const dueHere =
     option.method === 'cash' && option.currency === base
@@ -985,9 +1005,19 @@ export function PaymentPanel({
             </div>
           </div>
         ) : null}
+        {waitingFor ? (
+          <p
+            id="pay-waiting"
+            className="flex max-w-xs items-start gap-2 text-sm font-semibold text-warning-ink"
+          >
+            <AlertCircleIcon size={20} className="shrink-0" />
+            {waitingFor}
+          </p>
+        ) : null}
         <Button
           size="lg"
           icon={option.method === 'cash' ? <CashIcon size={20} /> : <CheckIcon size={20} />}
+          aria-describedby={waitingFor ? 'pay-waiting' : undefined}
           aria-keyshortcuts="Enter"
           onClick={() => void complete()}
           disabled={!canComplete}

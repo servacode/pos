@@ -205,7 +205,7 @@ export function ContractPricesPage() {
                 <DateField label="من" value={validFrom} onChange={setValidFrom} />
                 <DateField label="إلى (اختياري)" value={validTo} onChange={setValidTo} />
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <Button
                   type="submit"
                   icon={<AddIcon />}
@@ -219,16 +219,17 @@ export function ContractPricesPage() {
                     إلغاء التعديل
                   </Button>
                 ) : null}
+
+                {!variant || !target || !price.trim() ? (
+                  <p className="text-sm text-ink-muted">
+                    {!variant
+                      ? 'اختر الصنف أولاً.'
+                      : !target
+                        ? 'اختر الزبون أو نوع الزبون.'
+                        : 'اكتب السعر للوحدة ليُحفظ.'}
+                  </p>
+                ) : null}
               </div>
-              {!variant || !target || !price.trim() ? (
-                <p className="text-sm text-ink-muted">
-                  {!variant
-                    ? 'اختر الصنف أولاً.'
-                    : !target
-                      ? 'اختر الزبون أو نوع الزبون.'
-                      : 'اكتب السعر للوحدة ليُحفظ.'}
-                </p>
-              ) : null}
             </form>
           </Card>
         </section>

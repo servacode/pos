@@ -135,6 +135,36 @@ const HERO_UNIT =
   '[&_[data-money-unit]]:text-base [&_[data-money-unit]]:font-semibold [&_[data-money-unit]]:text-ink-subtle';
 
 /**
+ * The row of figure tiles at the top of a page: two to a row on a phone (a last odd tile takes the
+ * whole row), three or four across from 640 px. One pattern for every page, so no page stacks its
+ * tiles in a tall column or scrolls them sideways.
+ */
+export function KpiStrip({
+  columns = 3,
+  className,
+  children,
+  ...rest
+}: {
+  /** Tiles across from 640 px */
+  columns?: 2 | 3 | 4;
+  className?: string;
+  children: ReactNode;
+} & Omit<ComponentProps<'div'>, 'children' | 'className'>) {
+  return (
+    <div
+      {...rest}
+      className={cn(
+        'grid grid-cols-2 gap-3 sm:gap-4 [&>:last-child:nth-child(odd)]:max-sm:col-span-2',
+        columns === 2 ? 'sm:grid-cols-2' : columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
  * A KPI on the owner's dashboard (هوية 4 › StatTile): the label with the change in a pill at its
  * end, then the number in equal-width digits with its unit smaller and softer. The change has an
  * arrow, a colour and words, never colour alone, and what it is measured against sits just under

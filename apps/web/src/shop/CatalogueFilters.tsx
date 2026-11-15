@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import type { ShopProductCard } from '@serva/core';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { Button, Checkbox, cn, CONTROL_HEIGHT, Select, TextField, ToggleChip, useDensity } from '@serva/ui';
@@ -93,6 +93,7 @@ export function CatalogueFilters({
   onFilters,
   sort,
   onSort,
+  search,
 }: {
   products: readonly ShopProductCard[];
   currency: CurrencyCode;
@@ -101,6 +102,8 @@ export function CatalogueFilters({
   onFilters: (next: ShopFilters) => void;
   sort: ShopSort;
   onSort: (next: ShopSort) => void;
+  /** The search box, drawn first so search, filter and sort sit in one row */
+  search?: ReactNode;
 }) {
   const density = useDensity();
   const panelId = useId();
@@ -129,6 +132,7 @@ export function CatalogueFilters({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
+        {search ? <div className="min-w-0 basis-full sm:basis-64 sm:flex-1">{search}</div> : null}
         {hasAnything ? (
           <button
             type="button"
@@ -153,9 +157,10 @@ export function CatalogueFilters({
         ) : null}
         <Select
           label="الترتيب"
+          hideLabel
           value={sort}
           onChange={(e) => onSort(e.target.value as ShopSort)}
-          className="w-44 sm:ms-auto"
+          className="min-w-0 flex-1 sm:w-44 sm:flex-none"
         >
           <option value="newest">الأحدث</option>
           {showPrices ? <option value="price-asc">السعر: الأقل أولاً</option> : null}
@@ -176,50 +181,66 @@ export function CatalogueFilters({
         ) : null}
       </div>
       {open && hasAnything ? (
-        <section
-          id={panelId}
-          aria-label="التصفية"
-          className="flex flex-col gap-5 rounded-card border border-line bg-surface p-4 shadow-e1 sm:p-5"
-        >
-          {choices.map((choice) => (
-            <OptionChips
-              key={choice.name}
-              choice={choice}
-              picked={filters.options[choice.name] ?? []}
-              onToggle={(value, on) => toggle(choice.name, value, on)}
-            />
-          ))}
-          {showPrices ? (
-            <div role="group" aria-label="السعر" className="flex flex-col gap-2">
-              <p className="text-sm font-semibold text-ink">السعر ({CURRENCIES[currency].symbolAr})</p>
-              <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
-                <TextField
-                  label="من"
-                  dir="ltr"
-                  inputMode="decimal"
-                  value={priceText.min}
-                  onChange={(e) => setPrice('min', e.target.value)}
-                  inputClassName="num"
-                />
-                <TextField
-                  label="إلى"
-                  dir="ltr"
-                  inputMode="decimal"
-                  value={priceText.max}
-                  onChange={(e) => setPrice('max', e.target.value)}
-                  inputClassName="num"
-                />
-              </div>
+        <>
+          {/* On a phone the choices open as a sheet from the bottom, over a dimmed page */}
+          <button
+            type="button"
+            aria-label="أغلق التصفية"
+            tabIndex={-1}
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 bg-overlay sm:hidden"
+          />
+          <section
+            id={panelId}
+            aria-label="التصفية"
+            className="fixed inset-x-0 bottom-0 z-40 flex max-h-[80dvh] flex-col gap-5 overflow-y-auto rounded-t-card border border-line bg-surface p-4 shadow-e3 sm:static sm:max-h-none sm:rounded-card sm:p-5 sm:shadow-e1"
+          >
+            <div className="flex items-center justify-between sm:hidden">
+              <p className="text-base font-bold text-ink">تصفية</p>
+              <Button variant="secondary" size="sm" onClick={() => setOpen(false)}>
+                تم
+              </Button>
             </div>
-          ) : null}
-          {mixedStock ? (
-            <Checkbox
-              label="المتوفر فقط"
-              checked={filters.inStockOnly}
-              onChange={(e) => onFilters({ ...filters, inStockOnly: e.target.checked })}
-            />
-          ) : null}
-        </section>
+            {choices.map((choice) => (
+              <OptionChips
+                key={choice.name}
+                choice={choice}
+                picked={filters.options[choice.name] ?? []}
+                onToggle={(value, on) => toggle(choice.name, value, on)}
+              />
+            ))}
+            {showPrices ? (
+              <div role="group" aria-label="السعر" className="flex flex-col gap-2">
+                <p className="text-sm font-semibold text-ink">السعر ({CURRENCIES[currency].symbolAr})</p>
+                <div className="grid grid-cols-2 gap-3 sm:max-w-sm">
+                  <TextField
+                    label="من"
+                    dir="ltr"
+                    inputMode="decimal"
+                    value={priceText.min}
+                    onChange={(e) => setPrice('min', e.target.value)}
+                    inputClassName="num"
+                  />
+                  <TextField
+                    label="إلى"
+                    dir="ltr"
+                    inputMode="decimal"
+                    value={priceText.max}
+                    onChange={(e) => setPrice('max', e.target.value)}
+                    inputClassName="num"
+                  />
+                </div>
+              </div>
+            ) : null}
+            {mixedStock ? (
+              <Checkbox
+                label="المتوفر فقط"
+                checked={filters.inStockOnly}
+                onChange={(e) => onFilters({ ...filters, inStockOnly: e.target.checked })}
+              />
+            ) : null}
+          </section>
+        </>
       ) : null}
     </div>
   );

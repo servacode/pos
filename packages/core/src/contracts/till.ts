@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CURRENCY_CODES } from '../currencies';
+import { CURRENCY_CODES, type CurrencyCode } from '../currencies';
 import type { SectorKey } from '../sectors';
 
 /** One currency's note values: whole units from 1 to 1,000,000, at most 20, none twice. */
@@ -48,7 +48,7 @@ export type TillSettings = z.output<typeof tillSettingsSchema>;
 
 /** The till's built-in note values (whole units, high to low) for the currencies it counts by note. */
 export const DEFAULT_CASH_NOTES: Readonly<Record<string, readonly number[]>> = {
-  SYP: [500, 200, 100, 50, 25, 10],
+  SYP: [5000, 2000, 1000, 500, 200, 100, 50, 25, 10],
   USD: [100, 50, 20, 10, 5, 1],
 };
 
@@ -97,6 +97,29 @@ export function returnWindowDays(
  * digits of the number when only one invoice ends with them.
  */
 export const invoiceLookupQuery = z.object({ q: z.string().trim().min(1).max(64) });
+
+/**
+ * The till searches the store's recent invoices (any till, any branch) by what the customer remembers:
+ *
+ *   GET /v1/device/invoices/search?q=…&days=…   invoiceSearchQuery → { invoices: InvoiceHit[] }
+ *
+ * `q` is part of the customer's name, their phone in any common form (0933…, +963 933…, 933…) or the
+ * last digits of the invoice number; newest first, at most 20. `days` (default 30) is how far back.
+ */
+export const invoiceSearchQuery = z.object({
+  q: z.string().trim().min(2).max(64),
+  days: z.coerce.number().int().min(1).max(3650).default(30),
+});
+
+export interface InvoiceHit {
+  id: string;
+  number: string;
+  deviceTime: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  totalMinor: number;
+  currency: CurrencyCode;
+}
 
 export interface InvoiceLookup {
   id: string;

@@ -1,17 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import {
+  formatMoney,
+  getCurrency,
   SALES_GROUP_LABEL,
   SALES_GROUPS,
   type SalesBreakdown,
   type SalesBreakdownRow,
+  type SalesCross,
   type SalesGroup,
 } from '@serva/core';
 import {
   Badge,
+  BarChart,
   Button,
   Card,
   DataTable,
+  compactNumber,
   formatQuantity,
   Money,
   PageHeader,
@@ -24,6 +29,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay, monthStart } from '../../lib/dates';
+import { formatNumber } from '../../lib/format';
 import { storeSells } from '../../lib/sectors';
 import { csvField, downloadText, minorToDecimal } from '../accounting/csv';
 import { apiFetch } from '../../lib/api';
@@ -42,6 +48,42 @@ export const getSalesBreakdown = (q: { from: string; to: string; by: SalesGroup;
 export function changePercent(now: number, before: number): number | null {
   if (before <= 0) return null;
   return Math.round(((now - before) / before) * 100);
+}
+
+/**
+ * How a change reads without shouting: a doubling or more is «أكثر من الضعف» rather than «+340%», and
+ * a fall to nothing is «لا مبيع» rather than «−100%»; the rest is the plain percent.
+ */
+export function softChange(change: number): { text: string; tone: 'success' | 'neutral' | 'warning' } {
+  if (change > 100) return { text: 'أكثر من الضعف', tone: 'success' };
+  if (change <= -100) return { text: 'لا مبيع', tone: 'neutral' };
+  const text = `${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)}٪`;
+  return { text, tone: change >= 0 ? 'success' : change <= -50 ? 'warning' : 'neutral' };
+}
+
+/**
+ * Every day of the period for the bars, a day with no sale as zero, so a quiet day is a short gap and
+ * not missing. A very long period keeps only the days that sold (a bar per day would be unreadable).
+ */
+export function everyDay(
+  from: string,
+  to: string,
+  daily: readonly { date: string; totalMinor: number }[],
+): { date: string; totalMinor: number }[] {
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const days = Math.round((Date.parse(`${to}T00:00:00Z`) - start) / 86_400_000) + 1;
+  if (!(days > 0) || days > 62) return [...daily];
+  const by = new Map(daily.map((d) => [d.date, d.totalMinor]));
+  return Array.from({ length: days }, (_, i) => {
+    const date = new Date(start + i * 86_400_000).toISOString().slice(0, 10);
+    return { date, totalMinor: by.get(date) ?? 0 };
+  });
+}
+
+/** A season's sell-through: sold as a share of what was received; null when nothing was received */
+export function sellThrough(sold: number, received: number | null | undefined): number | null {
+  if (!received || received <= 0) return null;
+  return Math.max(0, Math.round((sold / received) * 100));
 }
 
 /**
@@ -83,6 +125,74 @@ export function salesBreakdownCsv(s: SalesBreakdown, commission: string): string
   return `\uFEFF${[head, ...lines].map((cells) => cells.join(',')).join('\r\n')}\r\n`;
 }
 
+/** Pieces sold across two options (size down, colour across), with row and column totals */
+export function CrossTable({ cross }: { cross: SalesCross }) {
+  const rows = [...new Set(cross.cells.map((c) => c.row))];
+  const cols = [...new Set(cross.cells.map((c) => c.col))];
+  const at = (row: string, col: string) => cross.cells.find((c) => c.row === row && c.col === col)?.qty ?? 0;
+  const rowTotal = (row: string) => cols.reduce((n, col) => n + at(row, col), 0);
+  const colTotal = (col: string) => rows.reduce((n, row) => n + at(row, col), 0);
+  const cell = (qty: number) => (qty === 0 ? '·' : formatQuantity(qty));
+  if (rows.length === 0)
+    return (
+      <Card>
+        <p className="text-ink-muted">لا مبيعات بخيارين في هذه المدة.</p>
+      </Card>
+    );
+  return (
+    <Card className="overflow-x-auto !p-0">
+      <table className="w-full min-w-max text-sm">
+        <caption className="sr-only">{`القطع المباعة بحسب ${cross.rowOption} و${cross.colOption}`}</caption>
+        <thead>
+          <tr className="border-b border-line bg-surface-muted text-ink-muted">
+            <th scope="col" className="px-3 py-2 text-start font-semibold">
+              {`${cross.rowOption} / ${cross.colOption}`}
+            </th>
+            {cols.map((col) => (
+              <th key={col} scope="col" className="px-3 py-2 text-center font-semibold">
+                {col}
+              </th>
+            ))}
+            <th scope="col" className="px-3 py-2 text-center font-bold text-ink">
+              المجموع
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row} className="border-b border-line last:border-0">
+              <th scope="row" className="px-3 py-2 text-start font-semibold">
+                {row}
+              </th>
+              {cols.map((col) => (
+                <td key={col} className="num px-3 py-2 text-center">
+                  {cell(at(row, col))}
+                </td>
+              ))}
+              <td className="num px-3 py-2 text-center font-bold">{cell(rowTotal(row))}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-line bg-surface-muted font-bold">
+            <th scope="row" className="px-3 py-2 text-start">
+              المجموع
+            </th>
+            {cols.map((col) => (
+              <td key={col} className="num px-3 py-2 text-center">
+                {cell(colTotal(col))}
+              </td>
+            ))}
+            <td className="num px-3 py-2 text-center">
+              {cell(cols.reduce((n, col) => n + colTotal(col), 0))}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </Card>
+  );
+}
+
 /**
  * «تقرير المبيعات»: what sold in a period by product, category, option (size, colour) or seller,
  * net of returns, against the period of the same length before, with the seller's commission at a
@@ -100,6 +210,7 @@ export function SalesReportPage() {
   );
   const [option, setOption] = useState('');
   const [commission, setCommission] = useState('');
+  const [view, setView] = useState<'list' | 'cross'>('list');
   const { data, error, loading, retry } = useReport(
     by === 'option' && !option ? null : `${from}|${to}|${by}|${option}`,
     () => getSalesBreakdown({ from, to, by, option }),
@@ -124,7 +235,10 @@ export function SalesReportPage() {
   }, [by, from, to, optionNames.length]);
   const base = data?.baseCurrency ?? me.settings.baseCurrency;
   const needsOption = by === 'option' && !option;
+  const days = data ? everyDay(data.from, data.to, data.daily ?? []) : [];
   // A shop of clothes names sizes and colours; any other shop just picks one of its options
+  // Seasons are a clothing idea: other shops do not see the tab
+  const sellsSeasons = storeSells(me.tenant.sectors, ['clothing']);
   const groupLabel = (g: SalesGroup): string =>
     g === 'option' && !storeSells(me.tenant.sectors, ['clothing'])
       ? 'الخيار (النوع، الحجم…)'
@@ -147,12 +261,37 @@ export function SalesReportPage() {
       cell: (r) => {
         const change = changePercent(r.totalMinor, r.previousTotalMinor);
         if (change === null) return r.totalMinor > 0 ? <Badge tone="info">جديد</Badge> : '—';
+        const soft = softChange(change);
         return (
-          <Badge tone={change >= 0 ? 'success' : 'warning'}>
-            <bdi
-              dir="ltr"
-              className="num"
-            >{`${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)}٪`}</bdi>
+          <Badge tone={soft.tone}>
+            <bdi dir="ltr" className="num">
+              {soft.text}
+            </bdi>
+          </Badge>
+        );
+      },
+    },
+  ];
+  // A season's sell-through: what sold, out of what was received, once the shop has bought for it
+  const seasonColumns: DataColumn<SalesBreakdownRow>[] = [
+    {
+      key: 'received',
+      header: 'المستلم',
+      numeric: true,
+      className: 'hidden sm:table-cell',
+      cell: (r) => (r.receivedQty ? formatQuantity(r.receivedQty) : '—'),
+    },
+    {
+      key: 'through',
+      header: 'نسبة البيع',
+      numeric: true,
+      cell: (r) => {
+        const through = sellThrough(r.qty, r.receivedQty);
+        return through === null ? (
+          '—'
+        ) : (
+          <Badge tone={through >= 70 ? 'success' : through >= 35 ? 'info' : 'neutral'}>
+            <bdi dir="ltr" className="num">{`${formatNumber(through)}٪`}</bdi>
           </Badge>
         );
       },
@@ -183,6 +322,7 @@ export function SalesReportPage() {
       numeric: true,
       cell: (r) => <Money minor={r.totalMinor} currency={base} className="font-semibold" />,
     },
+    ...(by === 'season' ? seasonColumns : []),
     ...(hasHistory ? historyColumns : []),
     ...(by === 'seller' ? sellerColumns : []),
   ];
@@ -244,7 +384,9 @@ export function SalesReportPage() {
         <div className="max-w-full min-w-0 overflow-x-auto">
           <SegmentedControl
             label="التجميع"
-            options={SALES_GROUPS.map((g) => ({ value: g, label: groupLabel(g) }))}
+            options={SALES_GROUPS.filter((g) => g !== 'season' || sellsSeasons || by === 'season').map(
+              (g) => ({ value: g, label: groupLabel(g) }),
+            )}
             value={by}
             onValueChange={setBy}
           />
@@ -262,7 +404,7 @@ export function SalesReportPage() {
         {by === 'seller' ? (
           <TextField
             label="نسبة العمولة ٪"
-            hint="احتياطية لمن لا نسبة له في صفحة الموظفين. تُحسب على المبيع بعد المرتجع"
+            hint="تُستعمل لمن لم تحدّد له نسبة في صفحة الموظفين، وتُحسب على المبيع بعد المرتجع"
             inputMode="decimal"
             dir="ltr"
             value={commission}
@@ -287,7 +429,11 @@ export function SalesReportPage() {
       {data ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <StatTile label="مبيع المدة" value={<Money minor={data.totalMinor} currency={base} />} />
+            <StatTile
+              label="مبيع المدة"
+              value={<Money minor={data.totalMinor} currency={base} />}
+              footnote="بعد المرتجع، مع الضريبة"
+            />
             {hasHistory ? (
               <StatTile
                 label="المدة السابقة"
@@ -308,14 +454,55 @@ export function SalesReportPage() {
               />
             ) : null}
           </div>
-          <DataTable
-            caption="المبيعات"
-            columns={columns}
-            rows={data.rows}
-            rowKey={(r) => r.key}
-            loading={loading}
-            empty={<p className="p-4 text-ink-muted">لا مبيعات في هذه المدة.</p>}
-          />
+          {(data.daily?.length ?? 0) >= 3 ? (
+            <Card className="flex flex-col gap-2">
+              <h2 className="text-base font-semibold text-ink">المبيع كل يوم</h2>
+              <BarChart
+                label="المبيع كل يوم بعد المرتجع"
+                labels={days.map((d) => dayText(d.date, me.settings.numberFormat))}
+                axisLabels={days.map((d) => d.date.slice(8).replace(/^0/, ''))}
+                series={[
+                  {
+                    key: 'sales',
+                    label: 'المبيع',
+                    values: days.map((d) => d.totalMinor / 10 ** getCurrency(base).decimals),
+                  },
+                ]}
+                valueLabels={false}
+                height={120}
+                formatValue={(value) =>
+                  formatMoney(Math.round(value * 10 ** getCurrency(base).decimals), base, {
+                    digits: me.settings.numberFormat,
+                  })
+                }
+                formatTick={(value) => compactNumber(value, me.settings.numberFormat)}
+                labelHeader="اليوم"
+              />
+            </Card>
+          ) : null}
+          {by === 'option' && data.cross ? (
+            <SegmentedControl
+              label="طريقة العرض"
+              value={view}
+              onValueChange={setView}
+              options={[
+                { value: 'list', label: 'قائمة' },
+                { value: 'cross', label: `${data.cross.rowOption} × ${data.cross.colOption}` },
+              ]}
+            />
+          ) : null}
+          {by === 'option' && data.cross && view === 'cross' ? (
+            <CrossTable cross={data.cross} />
+          ) : (
+            <DataTable
+              caption="المبيعات"
+              columns={columns}
+              rows={data.rows}
+              rowKey={(r) => r.key}
+              loading={loading}
+              empty={<p className="p-4 text-ink-muted">لا مبيعات في هذه المدة.</p>}
+            />
+          )}
         </>
       ) : null}
     </ReportScreen>

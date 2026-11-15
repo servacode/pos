@@ -132,6 +132,9 @@ describe('«سحب دفعة»', () => {
     // The pre-filters: 107 days left is not «قريباً»; the stopped one shows under «الموقوفة»
     await user.click(screen.getByRole('radio', { name: 'تنتهي قريباً' }));
     expect(screen.queryByRole('list', { name: 'دفعات مقترحة' })).not.toBeInTheDocument();
+    // …nor already past its date
+    await user.click(screen.getByRole('radio', { name: 'منتهية' }));
+    expect(screen.queryByRole('list', { name: 'دفعات مقترحة' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'الموقوفة' }));
     expect(await screen.findByRole('list', { name: 'دفعات مقترحة' })).toBeInTheDocument();
     await user.click(
@@ -174,7 +177,7 @@ describe('«سحب دفعة»', () => {
     await screen.findByRole('table', { name: 'فواتير الدفعة' });
     await user.click(screen.getByRole('button', { name: 'اطبع' }));
     expect(print).toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'حمّل CSV' }));
+    await user.click(screen.getByRole('button', { name: 'حمّل الجدول' }));
     expect(create).toHaveBeenCalled();
     expect(click).toHaveBeenCalled();
     print.mockRestore();

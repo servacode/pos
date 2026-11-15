@@ -175,6 +175,10 @@ export interface ShiftActivity {
   returns: { count: number; byMethod: { method: string; currency: Code; amountMinor: number }[] };
   /** Gift vouchers sold in this shift, per currency */
   vouchers: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** What the shift's invoices came to and the discounts given on them, per invoice currency */
+  salesTotals: { currency: Code; totalMinor: number; discountMinor: number }[];
+  /** Per seller (the chosen seller, else the cashier) and invoice currency: invoices and what they came to */
+  bySeller: { sellerId: string; currency: Code; count: number; totalMinor: number }[];
   /** Drawer movements of this shift in the order they were made */
   movements: { kind: CashMovementKind; currency: Code; amountMinor: number; reason: string }[];
 }
@@ -195,6 +199,8 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     { method: PaymentMethod; currency: Code; count: number; amountMinor: number }
   >();
   let saleCount = 0;
+  const salesTotals = new Map<Code, { currency: Code; totalMinor: number; discountMinor: number }>();
+  const bySeller = new Map<string, { sellerId: string; currency: Code; count: number; totalMinor: number }>();
   const refunds = new Map<string, { method: string; currency: Code; amountMinor: number }>();
   let returnCount = 0;
   const gifts = new Map<Code, number>();
@@ -206,6 +212,25 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     if (doc.type === 'sale') {
       const sale = payload as unknown as SalePayload;
       saleCount += 1;
+      const totals = salesTotals.get(sale.currency) ?? {
+        currency: sale.currency,
+        totalMinor: 0,
+        discountMinor: 0,
+      };
+      totals.totalMinor += sale.totals?.totalMinor ?? 0;
+      totals.discountMinor += sale.totals?.discountMinor ?? 0;
+      salesTotals.set(sale.currency, totals);
+      const sellerId = sale.salespersonId ?? sale.cashierId;
+      const sellerKey = `${sellerId}:${sale.currency}`;
+      const seller = bySeller.get(sellerKey) ?? {
+        sellerId,
+        currency: sale.currency,
+        count: 0,
+        totalMinor: 0,
+      };
+      seller.count += 1;
+      seller.totalMinor += sale.totals?.totalMinor ?? 0;
+      bySeller.set(sellerKey, seller);
       for (const p of sale.payments) {
         if (p.method === 'cash') termsOf(p.currency).cashInMinor += p.amountMinor;
         const key = `${p.method}:${p.currency}`;
@@ -269,6 +294,8 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       count: giftCount,
       byCurrency: [...gifts].map(([currency, amountMinor]) => ({ currency, amountMinor })),
     },
+    salesTotals: [...salesTotals.values()],
+    bySeller: [...bySeller.values()],
     movements,
   };
 }

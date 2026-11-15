@@ -21,7 +21,9 @@ import {
   useDigits,
   type DataColumn,
 } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
+import { storeSells } from '../../lib/sectors';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { recallAnswer, rememberAnswer } from './useReport';
 import { listCategories } from '../catalog/api';
@@ -118,6 +120,9 @@ export function shareOf(
 }
 
 export function MerchandisePage() {
+  const me = useMe();
+  // Sizes, colours and models are a clothing shop's words; the others sell «أصناف» with options
+  const clothing = storeSells(me.tenant.sectors, ['clothing']);
   const [period, setPeriod] = useState<keyof typeof PERIODS>('30');
   const [departments, setDepartments] = useState<Category[]>([]);
   const [department, setDepartment] = useState('');
@@ -238,7 +243,11 @@ export function MerchandisePage() {
           className="print:hidden"
           icon={<ReportsIcon />}
           title="حركة الأصناف"
-          description="ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف."
+          description={
+            clothing
+              ? 'ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف.'
+              : 'ما يُباع من كل صنف وخياراته وما يرجع منه، والأصناف الراكدة على الرف.'
+          }
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
         <Card className="flex flex-wrap items-end gap-x-4 gap-y-3 !p-4 print:hidden">
@@ -339,7 +348,7 @@ export function MerchandisePage() {
                   key: 'sold',
                   header: 'القطع',
                   numeric: true,
-                  cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+                  cell: (r) => <span className="num">{formatQuantity(r.soldQty)}</span>,
                 },
                 {
                   key: 'total',
@@ -370,7 +379,9 @@ export function MerchandisePage() {
 
         {data && data.byOption.length === 0 ? (
           <Alert tone="info">
-            لا مبيعات لقطع لها مقاس أو لون في هذه المدة. أضف «المقاسات والألوان» في بطاقة المنتج.
+            {clothing
+              ? 'لا مبيعات لقطع لها مقاس أو لون في هذه المدة. أضف «المقاسات والألوان» في بطاقة المنتج.'
+              : 'لا مبيعات لأصناف لها خيارات (مثل الحجم أو النوع) في هذه المدة.'}
           </Alert>
         ) : null}
         {data && data.byOption.length > 0 ? (
@@ -392,7 +403,11 @@ export function MerchandisePage() {
         ) : null}
 
         {data && data.models.length > 0 ? (
-          <Fold title="الموديلات الأكثر مبيعاً" open={isOpen('models')} onToggle={() => toggle('models')}>
+          <Fold
+            title={clothing ? 'الموديلات الأكثر مبيعاً' : 'الأصناف الأكثر مبيعاً'}
+            open={isOpen('models')}
+            onToggle={() => toggle('models')}
+          >
             {data.models.map((m) => (
               <DataTable
                 key={m.productId}
@@ -415,7 +430,7 @@ export function MerchandisePage() {
               <span className="flex-1" />
               <TextField
                 label="نسبة العمولة ٪"
-                hint="احتياطية: لمن لا نسبة له في صفحة الموظفين"
+                hint="تُستعمل لمن لم تحدّد له نسبة في صفحة الموظفين"
                 dir="ltr"
                 inputMode="decimal"
                 value={commission}
@@ -496,7 +511,7 @@ export function MerchandisePage() {
                   numeric: true,
                   cell: (r) => (
                     <span className={r.stockQty <= 0 ? 'num font-bold text-danger-ink' : 'num font-bold'}>
-                      {r.stockQty <= 0 ? 'نفد' : r.stockQty / 1000}
+                      {r.stockQty <= 0 ? 'نفد' : formatQuantity(r.stockQty)}
                     </span>
                   ),
                 },
@@ -504,14 +519,16 @@ export function MerchandisePage() {
                   key: 'sold',
                   header: 'بيع في المدة',
                   numeric: true,
-                  cell: (r) => <span className="num">{r.soldQty / 1000}</span>,
+                  cell: (r) => <span className="num">{formatQuantity(r.soldQty)}</span>,
                 },
                 {
                   key: 'min',
                   header: 'الحد الأدنى',
                   numeric: true,
                   cell: (r) => (
-                    <span className="num">{r.minStockQty === null ? '—' : r.minStockQty / 1000}</span>
+                    <span className="num">
+                      {r.minStockQty === null ? '—' : formatQuantity(r.minStockQty)}
+                    </span>
                   ),
                 },
               ]}

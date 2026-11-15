@@ -23,6 +23,8 @@ describe('«الموردون»', () => {
               notes: null,
               balanceMinor: 500_000,
               archived: false,
+              lastPurchaseOn: '2026-11-03',
+              purchasesTotalMinor: 1_200_000,
             },
             { id: 's-2', name: 'شركة الأمل', phone: null, notes: null, balanceMinor: 0, archived: false },
           ],
@@ -32,6 +34,10 @@ describe('«الموردون»', () => {
     const { user } = renderApp('/suppliers');
     const link = (await screen.findAllByRole('link', { name: 'مستودع النور' }))[0]!;
     expect(link).toHaveAttribute('href', '/suppliers/s-1/statement');
+    // The last purchase in words, the purchases total, and a button to add a supplier here
+    expect(screen.getAllByText(/تشرين الثاني/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('columnheader', { name: 'مشترياتنا منه' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'مورد جديد' })).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: 'من له مبلغ فقط' }));
     expect(screen.queryByText('شركة الأمل')).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'صفحات المشتريات' })).toBeInTheDocument();

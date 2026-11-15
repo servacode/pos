@@ -716,7 +716,7 @@ describe('the price-change history', () => {
     expect((await history(store, '?from=junk')).status).toBe(400);
   });
 
-  it('shows a bulk change as one row, and a markdown ending as such', async () => {
+  it('shows a bulk change per piece, and a markdown ending as such', async () => {
     const store = await openStore(app);
     await item(store, 'قميص', 1);
     const cat = (
@@ -747,9 +747,9 @@ describe('the price-change history', () => {
     const rows = (await history(store)).items;
     expect(rows.map((r) => r.source)).toEqual(['bulk', 'bulk']);
     const notes = rows.map((r) => r.note).join('|');
-    expect(notes).toContain('إنهاء التخفيض على 1 قطعة');
-    expect(notes).toContain('تعديل جماعي -30٪ على 1 قطعة');
-    // A product filter leaves the summaries out
+    expect(notes).toContain('إنهاء التخفيض');
+    expect(notes).toContain('تعديل جماعي -30٪');
+    // A product filter leaves the bulk rows out
     expect((await history(store, `?productId=${p.id}`)).items).toEqual([]);
   });
 

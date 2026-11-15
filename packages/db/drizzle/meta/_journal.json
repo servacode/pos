@@ -449,6 +449,20 @@
       "when": 1794686054958,
       "tag": "0063_invoice_commission_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1794696051248,
+      "tag": "0064_no_batch_row_in_till_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794696473041,
+      "tag": "0065_resend_variant_pictures",
+      "breakpoints": true
     }
   ]
 }

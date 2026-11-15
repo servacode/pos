@@ -23,8 +23,21 @@ export function canonicalNumber(raw: string, decimals: number, allowNegative = f
   return `${negative ? '-' : ''}${text}`;
 }
 
-/** Shows a canonical number with thousands separators in the store's digits: "1250.5" → «1,250.5». */
-export function displayNumber(canonical: string, digits: Digits): string {
+const LRI = '\u2066';
+const PDI = '\u2069';
+
+/**
+ * A negative number kept as one left-to-right unit: alone in an Arabic line a leading minus jumps to
+ * the far side («1-», «5-»). Wraps the true minus «−» and its digits in a bidi isolate. Text that does
+ * not start with a minus is returned as is. The one place every screen gets a negative from.
+ */
+export function isolateNegative(text: string): string {
+  if (!text.startsWith('-') && !text.startsWith('−')) return text;
+  return `${LRI}−${text.slice(1)}${PDI}`;
+}
+
+/** The text of a canonical number as typed: grouped, in the store's digits, minus kept bare for the caret. */
+function groupedNumber(canonical: string, digits: Digits): string {
   const [int = '', fraction] = canonical.split('.');
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const text = fraction === undefined ? grouped : `${grouped}.${fraction}`;
@@ -32,6 +45,16 @@ export function displayNumber(canonical: string, digits: Digits): string {
   return text.replace(/[\d,.-]/g, (ch) =>
     ch === ',' ? '٬' : ch === '.' ? '٫' : ch === '-' ? '−' : ARABIC_DIGITS.charAt(Number(ch)),
   );
+}
+
+/**
+ * Shows a canonical number with thousands separators in the store's digits: "1250.5" → «1,250.5».
+ * A negative gets a true minus inside a bidi isolate («−1,250»), so it reads right in an Arabic line.
+ */
+export function displayNumber(canonical: string, digits: Digits): string {
+  return canonical.startsWith('-')
+    ? isolateNegative(`-${groupedNumber(canonical.slice(1), digits)}`)
+    : groupedNumber(canonical, digits);
 }
 
 /** How many digits, separators-free, sit before `position`: what the caret keeps across reformatting. */
@@ -87,7 +110,7 @@ export function NumberField({
   const density = useDensity();
   const inputRef = useRef<HTMLInputElement>(null);
   const caret = useRef<number | null>(null);
-  const shown = displayNumber(value, digits);
+  const shown = groupedNumber(value, digits);
 
   useLayoutEffect(() => {
     const input = inputRef.current;

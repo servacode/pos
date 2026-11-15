@@ -210,6 +210,13 @@ function VisitDialog({
  * contract ends and a renewal into the next period. The price is sold at the till as a «عقد صيانة»
  * line; the contract posts nothing.
  */
+/** «زيارة كل شهر», «كل شهرين», «كل 3 أشهر», «كل 11 شهراً» */
+export function everyMonths(n: number, digits: 'latn' | 'arab' = 'latn'): string {
+  const shown = digits === 'arab' ? String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)]!) : String(n);
+  const noun = n === 1 ? 'شهر' : n === 2 ? 'شهرين' : n <= 10 ? `${shown} أشهر` : `${shown} شهراً`;
+  return `زيارة كل ${noun}`;
+}
+
 export function MaintenancePage() {
   const digits = useDigits();
   const [view, setView] = useState<'upcoming' | 'all'>('upcoming');
@@ -297,8 +304,8 @@ export function MaintenancePage() {
                       <Money minor={c.priceMinor} currency={c.currency} className="font-semibold" />
                     </div>
                     <p className="text-sm text-ink-muted">
-                      من {dayText(c.startDate, digits)} إلى {dayText(c.endDate, digits)} · زيارة كل{' '}
-                      <span className="num">{c.visitEveryMonths}</span> أشهر
+                      من {dayText(c.startDate, digits)} إلى {dayText(c.endDate, digits)} ·{' '}
+                      {everyMonths(c.visitEveryMonths, digits)}
                       {c.nextVisit ? ` · القادمة ${dayText(c.nextVisit, digits)}` : ' · لا زيارات متبقية'}
                       {c.billedOn ? ` · حُصّل ${dayText(c.billedOn, digits)}` : ' · لم يُحصَّل بعد'}
                     </p>

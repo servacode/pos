@@ -47,6 +47,10 @@ export interface SupplierRow {
   /** What the store owes the supplier, base currency */
   balanceMinor: number;
   archived: boolean;
+  /** The date of the latest purchase invoice (yyyy-mm-dd), null with none; absent from older servers */
+  lastPurchaseOn?: string | null;
+  /** All the supplier's purchase invoices together, base currency; absent from older servers */
+  purchasesTotalMinor?: number;
 }
 
 export interface SupplierListResponse {

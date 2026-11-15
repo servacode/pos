@@ -127,6 +127,8 @@ export function bulkPrices(
             percentBp: input.percentBp,
             roundToMinor: input.roundToMinor,
             pieces: changed.length,
+            // One line per piece, for «سجل تغيير الأسعار» (the first thousand)
+            moves: changed.slice(0, 1000).map((i) => ({ id: i.variantId, old: i.oldMinor, new: i.newMinor })),
           },
         },
         ctx.meta,

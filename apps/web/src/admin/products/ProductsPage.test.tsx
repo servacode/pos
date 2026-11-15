@@ -63,9 +63,9 @@ describe('/products list on a phone and the export', () => {
     }
   });
 
-  it('offers «صدّر Excel/CSV» for the whole search', async () => {
+  it('offers «صدّر الجدول» for the whole search', async () => {
     openProducts();
-    expect(await screen.findByRole('button', { name: 'صدّر Excel/CSV' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'صدّر الجدول' })).toBeInTheDocument();
   });
 });
 
@@ -90,7 +90,7 @@ describe('/products list', () => {
     expect(shownText(rows[2])).toContain('300 ل.س – 350 ل.س');
     expect(rows[2]).toHaveTextContent('بلا تصنيف');
     expect(within(rows[2]!).queryByRole('button', { name: /عدّل سعر/ })).not.toBeInTheDocument();
-    expect(within(rows[2]!).getByText('-2.500')).toHaveClass('text-danger-ink');
+    expect(within(rows[2]!).getByText(/2\.500/)).toHaveClass('text-danger-ink');
 
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: 'المنتجات' })).toHaveAttribute('aria-current', 'page');
@@ -346,5 +346,70 @@ describe('editing a price in place', () => {
 
     expect(screen.getByText('اكتب السعر')).toBeInTheDocument();
     expect(requestsTo('PATCH', `/v1/products/${ids.milk}`)).toHaveLength(0);
+  });
+});
+
+describe('/products list: photos, expiry and stock', () => {
+  it('shows each product’s first picture, and an «أضف صورة» link on one without', async () => {
+    openProducts({
+      [list()]: page([
+        listItem({ hasImage: true, thumbUrl: '/v1/images/t/u1?size=thumb' }),
+        listItem({ id: ids.other, nameAr: 'شاي', hasImage: false, thumbUrl: null }),
+      ]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(table.querySelector('img[src^="/v1/images"]')).toHaveAttribute(
+      'src',
+      '/v1/images/t/u1?size=thumb',
+    );
+    expect(within(table).getByRole('link', { name: 'أضف صورة لـ«شاي»' })).toHaveAttribute(
+      'href',
+      `/products/${ids.other}#images`,
+    );
+  });
+
+  it('adds up only positive stock and says how many are below zero', async () => {
+    openProducts();
+    await screen.findByText('القطع في المخزون');
+    // 94 on the shelf; the −2.5 of the other product is not netted off, it is counted apart
+    expect(await screen.findByText(/منها ناقص/)).toHaveTextContent('1');
+  });
+
+  it('shows the nearest expiry, a «ينتهي خلال 30 يوماً» tile and the filter', async () => {
+    const { requestsTo, user } = openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [
+            listItem({ nearestExpiry: '2020-01-05' }),
+            listItem({ id: ids.other, nearestExpiry: null }),
+          ],
+          nextCursor: null,
+          attention: { zeroPrice: 0, noPhoto: 0, expiringSoon: 4 },
+        },
+      },
+      [list({ expiry: 'soon' })]: page([listItem()]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await within(table).findByRole('columnheader', { name: 'ينتهي' })).toBeInTheDocument();
+    expect(within(table).getAllByText('منتهية').length).toBeGreaterThan(0);
+    expect(screen.getByText('ينتهي خلال 30 يوماً')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('الصلاحية'), 'soon');
+    await vi.waitFor(() =>
+      expect(requestsTo('GET', productsPath({ status: 'active', limit: 50, expiry: 'soon' }))).toHaveLength(
+        1,
+      ),
+    );
+  });
+});
+
+describe('/products list: photos in bulk', () => {
+  it('opens the bulk-photo window, which says how files are matched', async () => {
+    const { user } = openProducts();
+    await user.click(await screen.findByRole('button', { name: 'أضف صوراً دفعة واحدة' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/سمِّ كل ملف باسم المنتج أو باركوده/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('ملفات الصور')).toHaveAttribute('multiple');
+    expect(within(dialog).getByRole('button', { name: 'ارفع الصور' })).toBeDisabled();
   });
 });

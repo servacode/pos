@@ -7,6 +7,7 @@ import {
   BarcodeIcon,
   Button,
   Card,
+  Dialog,
   CardHeader,
   CheckCircleIcon,
   cn,
@@ -24,6 +25,7 @@ import {
   SearchField,
   SegmentedControl,
   Select,
+  KpiStrip,
   Skeleton,
   StatTile,
   StockIcon,
@@ -78,7 +80,10 @@ export function InventoryPage() {
   const [query, setQuery] = useState('');
   const [branchShown, setBranchShown] = useState('');
   // The list, or the models with sizes and colours laid out as grids
-  const [view, setView] = useState<'list' | 'grid'>('list');
+  // A clothing store thinks in sizes and colours: its grids come first
+  const [view, setView] = useState<'list' | 'grid'>(me.tenant.sectors.includes('clothing') ? 'grid' : 'list');
+  // «سجّل هدراً» opens from a button, in a window of its own
+  const [wasteOpen, setWasteOpen] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
@@ -302,6 +307,7 @@ export function InventoryPage() {
       setWasteKey('');
       setWasteQty('');
       setWasteQuery('');
+      setWasteOpen(false);
       load();
     } catch (e) {
       setError(errorMessage(e));
@@ -327,6 +333,11 @@ export function InventoryPage() {
           }
           actions={
             <>
+              {showWaste ? (
+                <Button variant="secondary" icon={<DeleteIcon />} onClick={() => setWasteOpen(true)}>
+                  سجّل هدراً
+                </Button>
+              ) : null}
               {canCount && !counting ? (
                 <Button icon={<ListIcon />} onClick={() => setCounting(true)}>
                   جرد الرفوف
@@ -463,7 +474,7 @@ export function InventoryPage() {
             </p>
           </Card>
         ) : null}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <KpiStrip columns={3}>
           <StatTile
             label="قيمة المخزون بالكلفة"
             value={
@@ -493,20 +504,15 @@ export function InventoryPage() {
               stock ? (soldOut ? 'أصناف بلا قطع، معلَّمة في الجدول' : 'في كل صنف قطع على الرف') : undefined
             }
           />
-        </div>
-        {profit || showWaste ? (
-          <div
-            className={cn(
-              'grid grid-cols-1 gap-6',
-              profit && showWaste && 'lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]',
-            )}
-          >
+        </KpiStrip>
+        {profit ? (
+          <div className="grid grid-cols-1 gap-6">
             {profit ? (
               <Card>
                 <CardHeader
                   icon={<ReportsIcon />}
                   title="ربح هذا الشهر"
-                  description="من الدفاتر، من أول الشهر حتى اليوم."
+                  description="من الدفاتر، من أول الشهر حتى اليوم، بعد المرتجع وبدون الضريبة."
                 />
                 <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <Figure term="صافي المبيعات هذا الشهر">
@@ -547,82 +553,6 @@ export function InventoryPage() {
                     <Money minor={Math.abs(profit.stockLossMinor)} currency={base} />
                   </p>
                 ) : null}
-              </Card>
-            ) : null}
-            {showWaste ? (
-              <Card>
-                <CardHeader
-                  icon={<DeleteIcon />}
-                  title="سجّل هدراً"
-                  description="ما تلف يخرج من المخزون بكلفته، ويظهر في «تلف وفقد»."
-                />
-                <form
-                  aria-label="سجّل هدراً"
-                  className="flex flex-col gap-4"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    askWaste();
-                  }}
-                >
-                  <SearchField
-                    label="ابحث عن الصنف التالف"
-                    value={wasteQuery}
-                    onValueChange={(v) => {
-                      setWasteQuery(v);
-                      setWasteAsk(false);
-                    }}
-                  />
-                  <Select
-                    label="الصنف التالف"
-                    value={wasteKey}
-                    onChange={(e) => {
-                      setWasteKey(e.target.value);
-                      setWasteAsk(false);
-                    }}
-                  >
-                    <option value="">اختر الصنف</option>
-                    {wasteOptions.map((r) => (
-                      <option key={`${r.branchId}:${r.variantId}`} value={`${r.branchId}:${r.variantId}`}>
-                        {manyBranches ? `${r.name} · ${branchName(r.branchId)}` : r.name}
-                      </option>
-                    ))}
-                  </Select>
-                  <div className="flex items-end gap-3">
-                    <TextField
-                      label="كمية الهدر"
-                      inputMode="decimal"
-                      dir="ltr"
-                      value={wasteQty}
-                      onChange={(e) => {
-                        setWasteQty(e.target.value);
-                        setWasteAsk(false);
-                      }}
-                      className="min-w-0 flex-1"
-                      inputClassName="num"
-                    />
-                    <Button type="submit" variant="secondary" loading={saving}>
-                      سجّل الهدر
-                    </Button>
-                  </div>
-                  {wasteAsk && wasteRow ? (
-                    <Alert tone="warning">
-                      <div className="flex flex-col gap-3">
-                        <span>
-                          سيخرج <bdi className="num font-semibold">{wasteQty}</bdi> من «{wasteRow.name}» من
-                          المخزون بكلفته. هذا لا يُسترجع من هنا.
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          <Button size="sm" loading={saving} onClick={() => void saveWaste()}>
-                            أكّد الهدر
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setWasteAsk(false)}>
-                            رجوع
-                          </Button>
-                        </div>
-                      </div>
-                    </Alert>
-                  ) : null}
-                </form>
               </Card>
             ) : null}
           </div>
@@ -695,6 +625,83 @@ export function InventoryPage() {
           )}
         </section>
       </div>
+      {showWaste ? (
+        <Dialog
+          open={wasteOpen}
+          onOpenChange={(open) => !open && !saving && setWasteOpen(false)}
+          size="md"
+          title="سجّل هدراً"
+          description="ما تلف يخرج من المخزون بكلفته، ويظهر في «تلف وفقد»."
+        >
+          <form
+            aria-label="سجّل هدراً"
+            className="flex flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              askWaste();
+            }}
+          >
+            <SearchField
+              label="ابحث عن الصنف التالف"
+              value={wasteQuery}
+              onValueChange={(v) => {
+                setWasteQuery(v);
+                setWasteAsk(false);
+              }}
+            />
+            <Select
+              label="الصنف التالف"
+              value={wasteKey}
+              onChange={(e) => {
+                setWasteKey(e.target.value);
+                setWasteAsk(false);
+              }}
+            >
+              <option value="">اختر الصنف</option>
+              {wasteOptions.map((r) => (
+                <option key={`${r.branchId}:${r.variantId}`} value={`${r.branchId}:${r.variantId}`}>
+                  {manyBranches ? `${r.name} · ${branchName(r.branchId)}` : r.name}
+                </option>
+              ))}
+            </Select>
+            <div className="flex items-end gap-3">
+              <TextField
+                label="كمية الهدر"
+                inputMode="decimal"
+                dir="ltr"
+                value={wasteQty}
+                onChange={(e) => {
+                  setWasteQty(e.target.value);
+                  setWasteAsk(false);
+                }}
+                className="min-w-0 flex-1"
+                inputClassName="num"
+              />
+              <Button type="submit" variant="secondary" loading={saving}>
+                سجّل الهدر
+              </Button>
+            </div>
+            {wasteAsk && wasteRow ? (
+              <Alert tone="warning">
+                <div className="flex flex-col gap-3">
+                  <span>
+                    سيخرج <bdi className="num font-semibold">{wasteQty}</bdi> من «{wasteRow.name}» من المخزون
+                    بكلفته. هذا لا يُسترجع من هنا.
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" loading={saving} onClick={() => void saveWaste()}>
+                      أكّد الهدر
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setWasteAsk(false)}>
+                      رجوع
+                    </Button>
+                  </div>
+                </div>
+              </Alert>
+            ) : null}
+          </form>
+        </Dialog>
+      ) : null}
     </AppShell>
   );
 }

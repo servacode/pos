@@ -1,12 +1,13 @@
-import type { InvoiceLookup } from '@serva/core/contracts/till';
+import type { InvoiceHit, InvoiceLookup } from '@serva/core/contracts/till';
 import type { ReturnPayload, SalePayload } from '@serva/core/contracts/documents';
 import type { ReturnedLine } from '@serva/core/sale-return';
 import { returnWindowDays } from '@serva/core/contracts/till';
 import type { SettingsRow } from '@serva/core/contracts/catalog';
 import type { OutboxEntry } from '@serva/sync';
 import { APP_VERSION } from '../../offline/sync';
-import { normalizeArabic, toLatinDigits } from '@serva/core/text';
+import { normalizeArabic } from '@serva/core/text';
 import { EXPIRY_SECTORS, storeSells } from '../../lib/sectors';
+import { phoneKey } from '../phoneKey';
 
 /** The days the till looks back for an invoice to return from: the store's setting, else by business type */
 export const returnWindowOf = (settings: Pick<SettingsRow, 'till' | 'sectors'>): number =>
@@ -99,13 +100,8 @@ export function matchesInvoice(
   const known = customers.find((c) => c.id === sale.sale.customerId);
   const name = normalizeArabic(sale.sale.customerName ?? known?.name ?? '');
   if (name && name.includes(normalizeArabic(text))) return true;
-  const digits = toLatinDigits(text).replace(/\D/g, '');
-  return (
-    digits.length >= 3 &&
-    toLatinDigits(known?.phone ?? '')
-      .replace(/\D/g, '')
-      .includes(digits)
-  );
+  const key = phoneKey(text);
+  return key.length >= 3 && phoneKey(known?.phone ?? '').includes(key);
 }
 
 /** The reason of a box that is broken or past its date: it cannot be «sealed and untouched» */
@@ -156,5 +152,27 @@ export async function searchInvoice(
     return { found: (await res.json()) as InvoiceLookup };
   } catch {
     return { found: null, reason: 'offline' };
+  }
+}
+
+/**
+ * GET /v1/device/invoices/search (`Authorization: Device <token>`): the store's recent invoices of any
+ * till, found by the customer's name, phone in any form, or the end of the number. Null when offline.
+ */
+export async function searchInvoices(
+  q: string,
+  days: number,
+  token: string,
+  fetchFn: typeof fetch = (...args) => globalThis.fetch(...args),
+): Promise<InvoiceHit[] | null> {
+  try {
+    const res = await fetchFn(`/v1/device/invoices/search?q=${encodeURIComponent(q.trim())}&days=${days}`, {
+      headers: { Accept: 'application/json', Authorization: `Device ${token}`, 'X-App-Version': APP_VERSION },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { invoices: InvoiceHit[] }).invoices;
+  } catch {
+    return null;
   }
 }

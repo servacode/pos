@@ -196,7 +196,7 @@ describe('the contract prices page', () => {
     expect(within(sheet).getByText('سعر عقد')).toBeInTheDocument();
     expect(within(sheet).getByText('سعر الجملة')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'اطبع' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'حمّل CSV' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'حمّل الجدول' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'احذف سعر كرسي متحرك' }));
     const sure = await screen.findByRole('dialog');

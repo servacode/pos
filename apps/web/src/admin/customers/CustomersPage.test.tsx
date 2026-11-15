@@ -243,3 +243,51 @@ describe('«الزبائن»', () => {
     expect(await screen.findByText('يوجد زبون بالاسم أو الرقم نفسه')).toBeInTheDocument();
   });
 });
+
+describe('«الزبائن» by kind of store', () => {
+  const withSectors = (sectors: MeResponse['tenant']['sectors']): MeResponse => {
+    const me = owner();
+    return { ...me, tenant: { ...me.tenant, sectors } };
+  };
+  const list = (): CustomerListResponse => ({
+    items: [detail()],
+    totalOwedMinor: 0,
+    baseCurrency: 'SYP',
+  });
+
+  it('asks the kind of a new customer only where the shop sells to clinics and offices', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
+      'GET /v1/customers': () => ({ status: 200, body: list() }),
+    });
+    const { user } = renderApp('/customers');
+    await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
+    await screen.findByLabelText('اسم الزبون');
+    expect(screen.queryByLabelText('نوع الزبون')).not.toBeInTheDocument();
+  });
+
+  it('offers the kinds to a medical supplies centre', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['medical_supplies']) }),
+      'GET /v1/customers': () => ({ status: 200, body: list() }),
+    });
+    const { user } = renderApp('/customers');
+    await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
+    // The filter of the list and the field of the form
+    expect(await screen.findAllByLabelText('نوع الزبون')).toHaveLength(2);
+  });
+
+  it('says so, not «لا زبائن بعد», when nobody has been away for 90 days', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
+      'GET /v1/customers': () => ({ status: 200, body: { ...list(), items: [] } }),
+    });
+    const { user } = renderApp('/customers');
+    await user.click(await screen.findByRole('checkbox', { name: 'لم يزر منذ 90 يوماً' }));
+    expect(await screen.findByText('لا زبون غاب أكثر من 90 يوماً.')).toBeInTheDocument();
+    expect(screen.queryByText('لا زبائن بعد.')).not.toBeInTheDocument();
+  });
+});

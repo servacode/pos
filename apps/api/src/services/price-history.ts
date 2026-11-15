@@ -69,6 +69,7 @@ export function priceHistory(
         if (r.entity_id) productIds.add(r.entity_id);
         for (const v of variantsOf(r)) variantIds.add(v.id);
       }
+      if (r.action === 'prices.bulk_changed') for (const m of movesOf(r)) variantIds.add(m.id);
     }
     const names = new Map<string, string>();
     if (productIds.size > 0) {
@@ -162,6 +163,27 @@ export function priceHistory(
             `:${v.id}`,
           );
         }
+      } else if (!product && r.action === 'prices.bulk_changed' && movesOf(r).length > 0) {
+        // A bulk change written with its pieces: one row for each, as a price edit shows
+        for (const m of movesOf(r)) {
+          const piece = labels.get(m.id);
+          push(
+            r,
+            'bulk',
+            {
+              productId: piece?.productId ?? null,
+              variantLabel: piece?.label ?? null,
+              currency: piece?.currency ?? null,
+              oldMinor: m.old,
+              newMinor: m.new,
+              note:
+                r.data?.mode === 'restore'
+                  ? 'إنهاء التخفيض'
+                  : `تعديل جماعي ${Number(r.data?.percentBp ?? 0) / 100}٪`,
+            },
+            `:${m.id}`,
+          );
+        }
       } else if (!product) {
         const count = Number(r.data?.pieces ?? 0);
         const note =
@@ -179,6 +201,18 @@ export function priceHistory(
       }
     }
     return { items: items.slice(0, query.limit) };
+  });
+}
+
+/** The pieces a bulk change moved, with their old and new price; empty for older rows that kept only a count */
+function movesOf(row: AuditRow): { id: string; old: number; new: number }[] {
+  const list = row.data?.moves;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((v: unknown) => {
+    const x = v as { id?: unknown; old?: unknown; new?: unknown };
+    return typeof x.id === 'string' && typeof x.old === 'number' && typeof x.new === 'number'
+      ? [{ id: x.id, old: x.old, new: x.new }]
+      : [];
   });
 }
 

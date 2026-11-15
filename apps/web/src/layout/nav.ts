@@ -71,7 +71,7 @@ export interface NavEntry {
   sectors?: readonly SectorKey[];
 }
 
-export type NavGroupKey = 'home' | 'selling' | 'stock' | 'buying' | 'admin';
+export type NavGroupKey = 'home' | 'selling' | 'stock' | 'buying' | 'money' | 'admin';
 
 /** The menu's groups, in order; the home page stands alone at the top. */
 export const NAV_GROUPS: readonly { key: NavGroupKey; label?: string }[] = [
@@ -79,6 +79,7 @@ export const NAV_GROUPS: readonly { key: NavGroupKey; label?: string }[] = [
   { key: 'selling', label: 'البيع والزبائن' },
   { key: 'stock', label: 'المنتجات والمخزون' },
   { key: 'buying', label: 'الشراء والموردون' },
+  { key: 'money', label: 'المال والخدمات' },
   { key: 'admin', label: 'التقارير والإعدادات' },
 ];
 
@@ -90,6 +91,8 @@ export type NavSectionKey =
   | 'products'
   | 'promotions'
   | 'purchases'
+  | 'money'
+  | 'services'
   | 'inventory'
   | 'reports'
   | 'settings';
@@ -108,6 +111,8 @@ export const NAV_SECTIONS: readonly { key: NavSectionKey; group: NavGroupKey; la
     { key: 'promotions', group: 'stock', label: 'العروض', icon: OfferIcon },
     { key: 'purchases', group: 'buying', label: 'المشتريات', icon: CartIcon },
     { key: 'inventory', group: 'stock', label: 'المخزون', icon: StockIcon },
+    { key: 'money', group: 'money', label: 'المال', icon: ChequeIcon },
+    { key: 'services', group: 'money', label: 'الخدمات', icon: SerialIcon },
     { key: 'reports', group: 'admin', label: 'التقارير', icon: ReportsIcon },
     { key: 'settings', group: 'admin', label: 'الإعدادات', icon: SettingsIcon },
   ];
@@ -148,7 +153,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     permission: ['customers.view'],
   },
   {
-    section: 'customers',
+    section: 'money',
     to: '/cheques',
     label: 'الشيكات',
     icon: ChequeIcon,
@@ -156,7 +161,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     sectors: CHEQUE_SECTORS,
   },
   {
-    section: 'customers',
+    section: 'services',
     to: '/rentals',
     label: 'التأجير',
     icon: SerialIcon,
@@ -164,7 +169,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     sectors: RENTAL_SECTORS,
   },
   {
-    section: 'customers',
+    section: 'services',
     to: '/maintenance',
     label: 'عقود الصيانة',
     icon: ShieldCheckIcon,
@@ -271,7 +276,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     permission: ['purchases.manage'],
   },
   {
-    section: 'purchases',
+    section: 'money',
     to: '/expenses',
     label: 'المصاريف',
     icon: CardIcon,
@@ -316,7 +321,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     sectors: ['pharmacy'],
   },
   {
-    section: 'inventory',
+    section: 'services',
     to: '/warranty',
     label: 'الضمان والصيانة',
     icon: ShieldCheckIcon,
@@ -340,7 +345,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     permission: ['report.view', 'reports.financial', 'accounting.view', 'devices.view'],
   },
   {
-    section: 'reports',
+    section: 'money',
     to: '/reports/debt-ageing',
     label: 'أعمار الديون',
     icon: CustomersIcon,

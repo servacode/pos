@@ -166,6 +166,7 @@ describe('«عروض الأسعار»', () => {
       },
     });
     const { user } = renderApp('/quotations/new');
+    await user.click(await screen.findByRole('button', { name: /زبون غير مسجّل/ }));
     await user.type(await screen.findByLabelText('اسم الزبون أو الجهة'), 'مشفى الأمل');
     await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'حليب');
     await user.click(await screen.findByRole('button', { name: milk.nameAr }));

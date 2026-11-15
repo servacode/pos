@@ -177,3 +177,23 @@ describe('planBatches', () => {
     expect(guard.approvals.map((i) => i.lineNo)).toEqual([2]);
   });
 });
+
+describe('the stock warning counts only what can be sold', () => {
+  it('says «الصالح» when expired batches are left out, and leaves the batch line to say the rest', () => {
+    const plan = planBatches({
+      cart: cartOf(line(1, 'a', 120_000)),
+      catalog: catalogOf({
+        a: {
+          stockQty: 102_000,
+          stockBatches: [batch('OLD', '2026-01-01', 29_000), batch('NEW', '2027-06-30', 73_000)],
+        },
+      }),
+      today: TODAY,
+      pending: [],
+      pharmacy,
+    });
+    expect(plan.stock).toEqual([
+      { variantId: 'a', name: 'صنف a', onHand: 73_000, wanted: 120_000, validOnly: true },
+    ]);
+  });
+});

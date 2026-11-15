@@ -25,11 +25,13 @@ export function InventoryGrid({
     else model.pieces.set(r.variantId, { variantId: r.variantId, qty: r.qty, attributes: r.attributes });
     byProduct.set(r.productId, model);
   }
-  const models = [...byProduct.entries()].map(([id, m]) => ({
-    id,
-    name: m.name,
-    pieces: [...m.pieces.values()],
-  }));
+  const models = [...byProduct.entries()]
+    .map(([id, m]) => {
+      const pieces = [...m.pieces.values()];
+      return { id, name: m.name, pieces, lowest: Math.min(...pieces.map((p) => p.qty)) };
+    })
+    // The models with the thinnest size first: that is the one to restock
+    .sort((a, b) => a.lowest - b.lowest || a.name.localeCompare(b.name, 'ar'));
   if (models.length === 0) {
     return <p className="text-sm text-ink-muted">لا أصناف بمقاسات وألوان لتُعرض شبكة.</p>;
   }
@@ -39,6 +41,18 @@ export function InventoryGrid({
         const grid = gridOf(m.pieces as never);
         if (!grid.fits) return null;
         const qtyOf = (v: unknown) => (v as Piece).qty;
+        const rowTotal = (row: string) =>
+          grid.cols.reduce((n, col) => {
+            const v = grid.cell(row, col);
+            return v ? n + qtyOf(v) : n;
+          }, 0);
+        const colTotal = (col: string) =>
+          grid.rows.reduce((n, row) => {
+            const v = grid.cell(row, col);
+            return v ? n + qtyOf(v) : n;
+          }, 0);
+        const total = grid.rows.reduce((n, row) => n + rowTotal(row), 0);
+        const totalCell = 'num px-3 py-2.5 text-center text-sm font-bold text-ink-muted';
         return (
           <section key={m.id} aria-label={`شبكة ${m.name}`} className="flex flex-col gap-2">
             <h3 className="font-semibold text-ink">{m.name}</h3>
@@ -59,6 +73,11 @@ export function InventoryGrid({
                         {col || 'الكمية'}
                       </th>
                     ))}
+                    {grid.colName ? (
+                      <th scope="col" className="px-2 pb-1 text-center text-xs font-semibold text-ink-subtle">
+                        المجموع
+                      </th>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -92,8 +111,24 @@ export function InventoryGrid({
                           </td>
                         );
                       })}
+                      {grid.colName ? (
+                        <td className={totalCell}>{formatQuantity(rowTotal(row), numberFormat)}</td>
+                      ) : null}
                     </tr>
                   ))}
+                  {grid.colName ? (
+                    <tr>
+                      <th scope="row" className="pe-3 text-start text-xs font-semibold text-ink-subtle">
+                        المجموع
+                      </th>
+                      {grid.cols.map((col) => (
+                        <td key={col || '_'} className={totalCell}>
+                          {formatQuantity(colTotal(col), numberFormat)}
+                        </td>
+                      ))}
+                      <td className={cn(totalCell, 'text-ink')}>{formatQuantity(total, numberFormat)}</td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>

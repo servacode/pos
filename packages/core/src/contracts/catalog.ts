@@ -385,6 +385,8 @@ export const productListQuery = z.object({
   status: z.enum(PRODUCT_LIST_STATUSES).default('active'),
   /** Stock of this branch only */
   branchId: uuidSchema.optional(),
+  /** «ينتهي قريباً» (within 30 days, not yet expired) or «منتهية» (a batch past its date) */
+  expiry: z.enum(['soon', 'expired']).optional(),
   ...listPageQuery,
 });
 export type ProductListQuery = z.input<typeof productListQuery>;
@@ -484,12 +486,16 @@ export interface ProductListItem {
   stockQty: number;
   /** At least one picture on the product (the list's «بلا صورة» count); absent from older servers */
   hasImage?: boolean;
+  /** The first picture's thumbnail (for the list's small photo); absent from older servers */
+  thumbUrl?: string | null;
+  /** The earliest expiry over the live pieces that hold stock (yyyy-mm-dd); null when none is tracked */
+  nearestExpiry?: string | null;
   version: number;
 }
 
 export type ProductListResponse = ListResponse<ProductListItem> & {
   /** Over every active product of the store, not the page: how many sell at 0 and how many have no picture (first page only) */
-  attention?: { zeroPrice: number; noPhoto: number };
+  attention?: { zeroPrice: number; noPhoto: number; expiringSoon?: number };
 };
 
 /**

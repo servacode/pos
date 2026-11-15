@@ -178,3 +178,24 @@ describe('selling above the stock', () => {
     expect(screen.queryByRole('region', { name: 'الدفع' })).toBeNull();
   });
 });
+
+describe('the tile counts only what can be sold', () => {
+  it('shows the sellable stock with a muted «منها … منتهية» and no red while a valid batch sells', async () => {
+    await saleScreen({ sets: sets({ batches: [EXPIRED, NEW] }) });
+    const tile = within(screen.getByRole('list', { name: 'الأصناف' })).getByRole('button', {
+      name: /بانادول 500/,
+    });
+    expect(plain(tile)).toContain('المتوفر 5');
+    expect(plain(tile)).toMatch(/منها 9 منتهية/);
+    expect(plain(tile)).not.toContain('نفد');
+  });
+
+  it('says «منتهية» in red only when nothing is left to sell', async () => {
+    await saleScreen({ sets: sets({ batches: [EXPIRED] }) });
+    const tile = within(screen.getByRole('list', { name: 'الأصناف' })).getByRole('button', {
+      name: /بانادول 500/,
+    });
+    expect(plain(tile)).toContain('نفد');
+    expect(plain(tile)).toContain('منتهية');
+  });
+});

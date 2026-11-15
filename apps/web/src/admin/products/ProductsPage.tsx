@@ -7,11 +7,13 @@ import {
   Alert,
   Badge,
   Button,
+  CameraIcon,
   DataTable,
   EditIcon,
   EmptyState,
   IconButton,
   IconChip,
+  KpiStrip,
   Menu,
   MenuItem,
   Money,
@@ -25,7 +27,6 @@ import {
   SegmentedControl,
   Select,
   Skeleton,
-  SnapRow,
   StatTile,
   StatusChip,
   StockIcon,
@@ -36,6 +37,7 @@ import {
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
@@ -49,6 +51,7 @@ import {
 } from '../catalog/catalog';
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
 import { downloadCsv } from '../exportCsv';
+import { BulkPhotos } from './BulkPhotos';
 import { ButtonLink } from './parts';
 
 /** Typing pauses this long before the list is asked again. */
@@ -70,9 +73,11 @@ interface Filters {
   /** «الموسم/التشكيلة»; "" = all */
   season: string;
   status: ListStatus;
+  /** «ينتهي قريباً» (30 days) or «منتهية»; "" = all */
+  expiry: '' | 'soon' | 'expired';
 }
 
-const NO_FILTERS: Filters = { q: '', categoryId: '', season: '', status: 'active' };
+const NO_FILTERS: Filters = { q: '', categoryId: '', season: '', status: 'active', expiry: '' };
 
 /** A phone-width screen (under Tailwind's `sm`): the list becomes cards, as a table does not fit. */
 function useIsPhone(): boolean {
@@ -100,15 +105,14 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
-/** A tile's width in the phone's sideways row; the grid sizes them from 640 px. */
-const TILE = 'w-64 shrink-0 snap-start sm:w-auto';
-
 /** What the rows on screen add up to, for the tiles over the list. */
 interface ListSummary {
   products: number;
   variants: number;
-  /** Thousandths, over the stocked products */
+  /** Thousandths, over the stocked products with something in stock (a minus is not a piece) */
   pieces: number;
+  /** Stocked products below zero: counted apart, not netted off the pieces */
+  negative: number;
   /** Stocked products at zero or below */
   runOut: number;
   /** The stocked product with the least left */
@@ -122,7 +126,8 @@ function summaryOf(items: readonly ProductListItem[]): ListSummary {
   return {
     products: items.length,
     variants: items.reduce((sum, item) => sum + item.variantCount, 0),
-    pieces: stocked.reduce((sum, item) => sum + item.stockQty, 0),
+    pieces: stocked.reduce((sum, item) => sum + Math.max(0, item.stockQty), 0),
+    negative: stocked.filter((item) => item.stockQty < 0).length,
     runOut: stocked.filter((item) => item.stockQty <= 0).length,
     lowest,
   };
@@ -232,6 +237,71 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   );
 }
 
+/**
+ * The product's first picture, small; a product with none shows its letter (and, to a manager, a «+»
+ * that opens the card on its pictures), so the list shows at a glance which still need one.
+ */
+function Thumb({ item, canAdd }: { item: ProductListItem; canAdd: boolean }) {
+  const [broken, setBroken] = useState(false);
+  if (item.thumbUrl && !broken) {
+    return (
+      <img
+        src={item.thumbUrl}
+        alt=""
+        loading="lazy"
+        onError={() => setBroken(true)}
+        className="size-11 shrink-0 rounded-control border border-line bg-surface-muted object-cover max-sm:size-10"
+      />
+    );
+  }
+  const letter = Array.from(item.nameAr.trim())[0] ?? '';
+  if (canAdd && item.hasImage === false) {
+    return (
+      <Link
+        to={`/products/${item.id}#images`}
+        aria-label={`أضف صورة لـ«${item.nameAr}»`}
+        title="أضف صورة"
+        className="relative grid size-11 shrink-0 place-items-center rounded-control border border-dashed border-line-control bg-surface-muted text-base font-bold text-ink-subtle transition-colors duration-120 ease-standard hover:border-brand hover:text-brand-ink max-sm:size-10"
+      >
+        <span aria-hidden="true">{letter}</span>
+        <span
+          aria-hidden="true"
+          className="absolute -end-1 -bottom-1 grid size-4 place-items-center rounded-full bg-brand text-on-brand"
+        >
+          <AddIcon size={16} className="size-3" />
+        </span>
+      </Link>
+    );
+  }
+  return <IconChip className="size-11 text-base font-bold max-sm:size-10">{letter}</IconChip>;
+}
+
+/** «ينتهي قريباً» in amber, «منتهية» in red, under the date of the nearest expiry */
+function ExpiryCell({
+  item,
+  today,
+  digits,
+}: {
+  item: ProductListItem;
+  today: string;
+  digits: 'latn' | 'arab';
+}) {
+  const date = item.nearestExpiry;
+  if (!date) return <span className="text-ink-subtle">—</span>;
+  const days = Math.round((Date.parse(date) - Date.parse(today)) / 86_400_000);
+  const tone = days < 0 ? 'text-danger-ink' : days <= 30 ? 'text-warning-ink' : 'text-ink-muted';
+  return (
+    <span className="flex flex-col gap-0.5 whitespace-nowrap">
+      <span className={cn('text-sm font-semibold', tone)}>{dayText(date, digits)}</span>
+      {days < 0 ? (
+        <span className="text-xs text-danger-ink">منتهية</span>
+      ) : days <= 30 ? (
+        <span className="text-xs text-warning-ink">ينتهي قريباً</span>
+      ) : null}
+    </span>
+  );
+}
+
 /** The state of a row, as a word in its colour: archived, waiting for review, or on sale. */
 function StatusCell({ item }: { item: ProductListItem }) {
   return (
@@ -265,6 +335,7 @@ function ProductsList() {
   const digits = me.settings.numberFormat;
   const phone = useIsPhone();
   const [exporting, setExporting] = useState(false);
+  const [photosOpen, setPhotosOpen] = useState(false);
   const [params] = useSearchParams();
   // «التصنيفات» links here with ?category=
   const [filters, setFilters] = useState<Filters>(() => ({
@@ -275,7 +346,11 @@ function ProductsList() {
   const [items, setItems] = useState<ProductListItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   // Counts over the whole store, from the server (the first page carries them)
-  const [attention, setAttention] = useState<{ zeroPrice: number; noPhoto: number } | null>(null);
+  const [attention, setAttention] = useState<{
+    zeroPrice: number;
+    noPhoto: number;
+    expiringSoon?: number;
+  } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -290,6 +365,7 @@ function ProductsList() {
     categoryId: filters.categoryId || undefined,
     season: filters.season || undefined,
     status: filters.status,
+    expiry: filters.expiry || undefined,
   } satisfies ProductListQuery);
 
   const load = useCallback(async () => {
@@ -326,7 +402,7 @@ function ProductsList() {
     }
   }, [me.tenant.sectors]);
 
-  /** «صدّر Excel/CSV»: every page of the current search, not only what is on screen. */
+  /** «صدّر الجدول»: every page of the current search, not only what is on screen. */
   async function exportAll() {
     setExporting(true);
     try {
@@ -406,7 +482,8 @@ function ProductsList() {
     filters.q.trim() !== '' ||
     filters.categoryId !== '' ||
     filters.season !== '' ||
-    filters.status !== 'active';
+    filters.status !== 'active' ||
+    filters.expiry !== '';
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
   // What the shown list needs done: a price of 0 sells for nothing, and a missing picture shows as a letter
   const zeroPrice =
@@ -417,15 +494,19 @@ function ProductsList() {
   const more = nextCursor ? '+' : '';
   const showSummary = !loadError && (items === null || items.length > 0);
 
+  const today = isoDay(Date.now(), me.tenant.timezone);
+  // Expiry shows once any product carries a date: a clothing store never sees it
+  const showExpiry =
+    filters.expiry !== '' || (attention?.expiringSoon ?? 0) > 0 || (items ?? []).some((i) => i.nearestExpiry);
+  const expiringSoon = attention?.expiringSoon ?? 0;
+
   const columns: DataColumn<ProductListItem>[] = [
     {
       key: 'name',
       header: 'المنتج',
       cell: (item) => (
-        <div className="flex min-w-44 items-center gap-3 py-2.5 sm:min-w-60">
-          <IconChip className="text-base font-bold max-sm:hidden">
-            {Array.from(item.nameAr.trim())[0] ?? ''}
-          </IconChip>
+        <div className="flex min-w-0 items-center gap-3 py-2.5 sm:min-w-60">
+          <Thumb item={item} canAdd={canManage && !item.archivedAt} />
           <div className="flex min-w-0 flex-col gap-0.5">
             <Link
               to={`/products/${item.id}`}
@@ -503,6 +584,16 @@ function ProductsList() {
           </span>
         ),
     },
+    ...(showExpiry
+      ? [
+          {
+            key: 'expiry',
+            header: 'ينتهي',
+            className: 'max-md:hidden',
+            cell: (item: ProductListItem) => <ExpiryCell item={item} today={today} digits={digits} />,
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
     { key: 'status', header: 'الحالة', cell: (item) => <StatusCell item={item} /> },
     ...(canManage
       ? [
@@ -546,10 +637,13 @@ function ProductsList() {
   const addProduct = (
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="secondary" loading={exporting} onClick={() => void exportAll()}>
-        صدّر Excel/CSV
+        صدّر الجدول
+      </Button>
+      <Button variant="secondary" icon={<CameraIcon />} onClick={() => setPhotosOpen(true)}>
+        أضف صوراً دفعة واحدة
       </Button>
       <ButtonLink to="/import?type=products" icon={<PackageOpenIcon />}>
-        استيراد من Excel
+        استيراد من ملف
       </ButtonLink>
       <ButtonLink to="/products/new" variant="primary" icon={<AddIcon />}>
         أضف منتجاً
@@ -569,10 +663,8 @@ function ProductsList() {
         />
 
         {showSummary ? (
-          // On a phone the tiles slide sideways in one row instead of filling the screen.
-          <SnapRow className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:px-0 sm:pb-0">
+          <KpiStrip columns={showExpiry ? 4 : 3}>
             <StatTile
-              className={TILE}
               label="المنتجات"
               icon={<ProductsIcon />}
               value={
@@ -591,7 +683,6 @@ function ProductsList() {
               }
             />
             <StatTile
-              className={TILE}
               label="القطع في المخزون"
               icon={<StockIcon />}
               iconTone="neutral"
@@ -602,9 +693,15 @@ function ProductsList() {
                   <Skeleton className="my-1.5 h-6 w-20" />
                 )
               }
+              footnote={
+                summary && summary.negative > 0 ? (
+                  <>
+                    منها ناقص: <bdi className="num font-semibold text-ink">{summary.negative}</bdi>
+                  </>
+                ) : undefined
+              }
             />
             <StatTile
-              className={TILE}
               label="نفد مخزونها"
               icon={<WarningIcon />}
               iconTone={summary && summary.runOut > 0 ? 'warning' : 'neutral'}
@@ -626,7 +723,26 @@ function ProductsList() {
                 ) : undefined
               }
             />
-          </SnapRow>
+            {showExpiry ? (
+              <StatTile
+                label="ينتهي خلال 30 يوماً"
+                icon={<WarningIcon />}
+                iconTone={expiringSoon > 0 ? 'warning' : 'neutral'}
+                value={<bdi className="num">{expiringSoon}</bdi>}
+                footnote={
+                  expiringSoon > 0 && filters.expiry !== 'soon' ? (
+                    <button
+                      type="button"
+                      className={textLinkClass}
+                      onClick={() => setFilter('expiry', 'soon')}
+                    >
+                      اعرضها
+                    </button>
+                  ) : undefined
+                }
+              />
+            ) : null}
+          </KpiStrip>
         ) : null}
 
         <div className="flex flex-col gap-4">
@@ -673,6 +789,19 @@ function ProductsList() {
                     {s}
                   </option>
                 ))}
+              </Select>
+            ) : null}
+            {showExpiry ? (
+              <Select
+                label="الصلاحية"
+                hideLabel
+                value={filters.expiry}
+                onChange={(event) => setFilter('expiry', event.target.value as Filters['expiry'])}
+                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+              >
+                <option value="">كل الصلاحيات</option>
+                <option value="soon">ينتهي قريباً</option>
+                <option value="expired">منتهية</option>
               </Select>
             ) : null}
             <SegmentedControl
@@ -728,36 +857,26 @@ function ProductsList() {
           ) : null}
 
           {phone && items && items.length > 0 ? (
-            <ul aria-label="المنتجات" className="flex flex-col gap-3">
+            <ul
+              aria-label="المنتجات"
+              className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface shadow-e1"
+            >
               {items.map((item) => {
                 const cell = (key: string) => columns.find((c) => c.key === key)?.cell?.(item);
                 return (
-                  <li
-                    key={item.id}
-                    className="flex flex-col gap-3 rounded-card border border-line bg-surface p-3 shadow-e1"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">{cell('name')}</div>
-                      {cell('actions')}
+                  <li key={item.id} className="flex items-center gap-2 ps-3 pe-1">
+                    <div className="min-w-0 flex-1">{cell('name')}</div>
+                    <div className="flex shrink-0 flex-col items-end gap-0.5 text-sm">
+                      <span className="font-semibold whitespace-nowrap">{cell('price')}</span>
+                      <span className="flex items-center gap-1.5 text-xs text-ink-muted">
+                        {cell('stock')}
+                        {item.categoryName ? (
+                          <span className="max-w-28 truncate">· {item.categoryName}</span>
+                        ) : null}
+                        {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
+                      </span>
                     </div>
-                    <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                      <div className="flex flex-col gap-0.5">
-                        <dt className="text-xs text-ink-subtle">سعر البيع</dt>
-                        <dd className="font-semibold">{cell('price')}</dd>
-                      </div>
-                      <div className="flex flex-col gap-0.5">
-                        <dt className="text-xs text-ink-subtle">الكمية</dt>
-                        <dd>{cell('stock')}</dd>
-                      </div>
-                      <div className="flex flex-col gap-0.5">
-                        <dt className="text-xs text-ink-subtle">التصنيف</dt>
-                        <dd>{cell('category')}</dd>
-                      </div>
-                      <div className="flex flex-col gap-0.5">
-                        <dt className="text-xs text-ink-subtle">الحالة</dt>
-                        <dd>{cell('status')}</dd>
-                      </div>
-                    </dl>
+                    {cell('actions')}
                   </li>
                 );
               })}
@@ -804,6 +923,9 @@ function ProductsList() {
           ) : null}
         </div>
       </div>
+      {canManage ? (
+        <BulkPhotos open={photosOpen} onClose={() => setPhotosOpen(false)} onDone={() => void load()} />
+      ) : null}
     </>
   );
 }

@@ -800,7 +800,7 @@ function OrdersCard() {
                   {o.note}
                 </p>
               ) : null}
-              {short[o.id] ? (
+              {short[o.id] && o.status === 'pending' ? (
                 <Alert tone="warning">
                   لا يكفي المخزون لهذه القطع: {short[o.id]!.join('، ')}. اقبل الطلب رغم ذلك إن كانت البضاعة في
                   الطريق، أو ارفضه.

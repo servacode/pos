@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type { PurchasePayment, PurchaseRow, SupplierListResponse, SupplierRow } from '@serva/core';
 import {
@@ -40,10 +40,11 @@ import {
   type Icon,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { dayText } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { DateField } from '../../lib/DateField';
-import { EXPIRY_SECTORS, storeSells } from '../../lib/sectors';
+import { EXPIRY_SECTORS, serialWord, storeSells } from '../../lib/sectors';
 import {
   createPurchase,
   createSupplier,
@@ -97,12 +98,15 @@ interface Line extends PickedVariant {
  * purchase (goods into the stock at what they cost) and a payment to a supplier.
  */
 export function PurchasesPage() {
+  const me = useMe();
   const [notice, setNotice] = useState<string | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierListResponse | null>(null);
   const [purchases, setPurchases] = useState<PurchaseRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'list' | 'buy' | 'pay' | 'supplier'>('list');
-  const [query, setQuery] = useState('');
+  // «ابحث في المتجر» sends a purchase number here as ?q=PUR-…
+  const [params] = useSearchParams();
+  const [query, setQuery] = useState(params.get('q') ?? '');
   const [opened, setOpened] = useState<PurchaseRow | null>(null);
 
   const load = useCallback(() => {
@@ -164,7 +168,9 @@ export function PurchasesPage() {
       key: 'date',
       header: 'التاريخ',
       className: 'whitespace-nowrap',
-      cell: (p) => <span className="num text-ink-muted">{p.date}</span>,
+      cell: (p) => (
+        <span className="whitespace-nowrap text-ink-muted">{dayText(p.date, me.settings.numberFormat)}</span>
+      ),
     },
     {
       key: 'payment',
@@ -489,7 +495,8 @@ function useSaving() {
   return { saving, error, fields, run, setFields };
 }
 
-function SupplierForm({
+/** «مورد جديد»: the window to add a supplier (shared with «الموردون») */
+export function SupplierForm({
   suppliers,
   onSaved,
   onCancel,
@@ -869,7 +876,10 @@ function PurchaseForm({
                           {showSerials ? (
                             <label className="flex flex-col gap-1.5 sm:col-span-2">
                               <span className="text-xs font-semibold text-ink-subtle">
-                                الأرقام التسلسلية أو IMEI (رقم في كل سطر، للأجهزة)
+                                {serialWord(me.tenant.sectors) === 'الرقم التسلسلي'
+                                  ? 'الأرقام التسلسلية'
+                                  : 'الأرقام التسلسلية أو IMEI'}{' '}
+                                (رقم في كل سطر، للأجهزة)
                               </span>
                               <textarea
                                 aria-label={`أرقام ${l.name}`}

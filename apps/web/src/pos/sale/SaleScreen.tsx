@@ -25,6 +25,7 @@ import {
   CartIcon,
   CartLine,
   CashierShell,
+  Dialog,
   ClockIcon,
   CloseIcon,
   cn,
@@ -55,6 +56,7 @@ import { counted } from '../format';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
 import { BatchBanner } from './BatchBanner';
+import { QuoteDialog, type QuoteChoice } from './QuoteDialog';
 import { batchGuard, planBatches } from './batches';
 import { deviceDocuments } from '../shift/shift';
 import { AdjustPanel, NEED_TEXT, type AdjustMode, type AdjustValue } from './AdjustPanel';
@@ -270,8 +272,10 @@ export function SaleScreen(props: SaleScreenProps) {
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
   const [quote, setQuote] = useState<QuoteData | null>(null);
-  /** «عرض سعر»: saved as a numbered quotation when the server answers, then printed with its number */
-  async function printQuote(from: PricedCart) {
+  /** «عرض سعر»: asks a few optional details first, then saves a numbered quotation (and prints it if asked) */
+  const [quoteAsk, setQuoteAsk] = useState<PricedCart | null>(null);
+  const [quoteBusy, setQuoteBusy] = useState(false);
+  async function saveQuote(from: PricedCart, choice: QuoteChoice) {
     const slip: QuoteData = {
       settings,
       lines: from.lines,
@@ -281,19 +285,45 @@ export function SaleScreen(props: SaleScreenProps) {
       wholesale: cart.priceTier === 'wholesale',
     };
     const token = posServices.device.token;
-    if (token && posServices.online()) {
-      const saved = await saveQuotation(
-        quotationInputOf(from.lines, cart.invoiceDiscount, cart.customer ?? null, null),
-        token,
-        posServices.fetch,
-      );
-      if (saved.kind === 'ok') {
-        setQuote({ ...slip, number: saved.body.number, validUntil: saved.body.validUntil });
-        return;
+    setQuoteBusy(true);
+    try {
+      if (token && posServices.online()) {
+        const saved = await saveQuotation(
+          quotationInputOf(from.lines, cart.invoiceDiscount, cart.customer ?? null, choice.customerName, {
+            status: choice.print ? 'sent' : 'draft',
+            validUntil: businessDateOf(
+              Date.now() + choice.validDays * 86_400_000,
+              settings.timezone,
+              settings.businessDayCutoff,
+            ),
+            notes: choice.notes,
+          }),
+          token,
+          posServices.fetch,
+        );
+        if (saved.kind === 'ok') {
+          setQuoteAsk(null);
+          if (choice.print)
+            setQuote({ ...slip, number: saved.body.number, validUntil: saved.body.validUntil });
+          else
+            setNotice({
+              tone: 'info',
+              text: `حُفظ عرض السعر ${saved.body.number} كمسوّدة. تجده في «العروض».`,
+            });
+          return;
+        }
       }
+      setQuoteAsk(null);
+      // No server to number it: the slip still prints, marked as not saved
+      if (choice.print) setQuote({ ...slip, unsaved: true });
+      else
+        setNotice({
+          tone: 'warning',
+          text: 'لا إنترنت الآن، فلم يُحفظ عرض السعر. اطبعه أو أعد المحاولة لاحقاً.',
+        });
+    } finally {
+      setQuoteBusy(false);
     }
-    // No server to number it: the slip still prints, marked as not saved
-    setQuote({ ...slip, unsaved: true });
   }
   const [kitchen, setKitchen] = useState<KitchenData | null>(null);
   // «سعر صنف»: looks an item up (price per size and colour, stock) without adding it to the cart
@@ -317,6 +347,12 @@ export function SaleScreen(props: SaleScreenProps) {
       alive = false;
     };
   }, [pos.local, staff, session.userId]);
+  // The sale put on hold keeps its seller with it: the new empty cart starts with the cashier again
+  const holdSale = (name?: string) => {
+    setSeller(session.userId);
+    void pos.local.remove(SELLER_KEY);
+    props.onHold(name);
+  };
   // Online orders this till sold, until the next pull says they are done
   const [soldOnline, setSoldOnline] = useState<string[]>([]);
   useEffect(() => {
@@ -369,8 +405,24 @@ export function SaleScreen(props: SaleScreenProps) {
   const effectiveMode: SaleMode = showDone && mode.kind === 'items' ? { kind: 'done' } : mode;
 
   // ── Adding items ────────────────────────────────────────────────────────────────────────────
+  // An item priced at zero is confirmed before it goes into the cart: «السعر 0 — تأكيد؟»
+  const [zeroAsk, setZeroAsk] = useState<{
+    item: CatalogItem;
+    hit: BarcodeHit | null;
+    weighedQty: number | undefined;
+    choice: ItemChoice | undefined;
+  } | null>(null);
+  const zeroOk = useRef(false);
   const add = useCallback(
     (item: CatalogItem, hit?: BarcodeHit | null, weighedQty?: number, choice?: ItemChoice) => {
+      if (
+        item.price.priceMinor === 0 &&
+        !zeroOk.current &&
+        !cartRef.current.lines.some((l) => l.variantId === item.variantId)
+      ) {
+        setZeroAsk({ item, hit: hit ?? null, weighedQty, choice });
+        return;
+      }
       // An item with modifiers asks for its choices first (beside the cart, not over it)
       if (item.modifiers?.length && weighedQty === undefined && !choice) {
         setMode({ kind: 'choose', item, hit: hit ?? null });
@@ -834,7 +886,7 @@ export function SaleScreen(props: SaleScreenProps) {
       searchRef.current?.focus();
     } else if (event.key === 'F4' || (event.altKey && event.code === 'Digit3')) {
       event.preventDefault();
-      if (cart.lines.length > 0) props.onHold();
+      if (cart.lines.length > 0) holdSale();
       else if ((props.heldList?.length ?? props.heldCount) > 0) setMode({ kind: 'heldList' });
     } else if (event.key === 'F9') {
       event.preventDefault();
@@ -983,7 +1035,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   label="عرض سعر"
                   size="md"
                   icon={<PrintIcon />}
-                  onClick={() => void printQuote(priced)}
+                  onClick={() => setQuoteAsk(priced)}
                 />
               </Tooltip>
             ) : null}
@@ -1113,7 +1165,7 @@ export function SaleScreen(props: SaleScreenProps) {
         >
           <UndoIcon size={20} className="shrink-0" />
           <span className="min-w-0 flex-1">
-            استبدال: القسيمة{' '}
+            {cart.alteration ? 'عربون التقصير' : cart.rental ? 'عربون الإيجار' : 'استبدال'}: القسيمة{' '}
             <bdi dir="ltr" className="num font-semibold">
               {cart.voucher}
             </bdi>{' '}
@@ -1231,8 +1283,7 @@ export function SaleScreen(props: SaleScreenProps) {
                     meta.length > 0 ? (
                       <>
                         {meta.map((m, k) => (
-                          <span key={k}>
-                            {k > 0 ? ' · ' : ''}
+                          <span key={k} className="me-3 inline-block">
                             {m}
                           </span>
                         ))}
@@ -1514,6 +1565,46 @@ export function SaleScreen(props: SaleScreenProps) {
       onMobileView={setPhoneView}
       cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
     >
+      {quoteAsk ? (
+        <QuoteDialog
+          customerName={cart.customer?.name ?? null}
+          busy={quoteBusy}
+          onSave={(choice) => void saveQuote(quoteAsk, choice)}
+          onClose={() => setQuoteAsk(null)}
+        />
+      ) : null}
+      {zeroAsk ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setZeroAsk(null);
+          }}
+          size="sm"
+          title="السعر 0 — تأكيد؟"
+          description={`«${zeroAsk.item.name}» سعره صفر في الأصناف، فيدخل السلة بلا مقابل. أتبيعه هكذا؟`}
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setZeroAsk(null)}>
+                لا، لا تُضفه
+              </Button>
+              <Button
+                onClick={() => {
+                  const ask = zeroAsk;
+                  setZeroAsk(null);
+                  zeroOk.current = true;
+                  try {
+                    add(ask.item, ask.hit, ask.weighedQty, ask.choice);
+                  } finally {
+                    zeroOk.current = false;
+                  }
+                }}
+              >
+                نعم، أضفه بسعر 0
+              </Button>
+            </>
+          }
+        />
+      ) : null}
       {quote ? <PrintableQuote data={quote} width={80} /> : null}
       {kitchen ? <PrintableKitchenTicket data={kitchen} /> : null}
       {effectiveMode.kind === 'pay' && priced ? (
@@ -1777,7 +1868,7 @@ export function SaleScreen(props: SaleScreenProps) {
           onHold={(name) => {
             setMode({ kind: 'items' });
             setSelected(null);
-            props.onHold(name);
+            holdSale(name);
           }}
           onClose={() => setMode({ kind: 'items' })}
         />

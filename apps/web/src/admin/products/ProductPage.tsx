@@ -70,6 +70,7 @@ import {
   MODIFIER_SECTORS,
   RENTAL_SECTORS,
   SERIAL_SECTORS,
+  serialSwitchLabel,
   storeSells,
   WEIGHED_SECTORS,
 } from '../../lib/sectors';
@@ -80,6 +81,7 @@ import { RecipeSection } from './RecipeSection';
 import { ShopTextSection } from './ShopTextSection';
 import { BulkApply } from './BulkApply';
 import { OptionsEditor } from './OptionsEditor';
+import { matrixFits, PriceMatrix } from './PriceMatrix';
 import { ButtonLink, Fact, SectionCard } from './parts';
 import { StockGrid } from './StockGrid';
 import { UnitsDialog } from './UnitsDialog';
@@ -230,6 +232,8 @@ function ProductCard() {
   const [pendingImages, setPendingImages] = useState<ResizedImage[]>([]);
   // The variants grid shows name and price; the rest opens on request (see `advanced` below)
   const [moreFields, setMoreFields] = useState(false);
+  // A model with sizes and colours shows its prices as a grid first; the detailed list opens on request
+  const [detailList, setDetailList] = useState(false);
   const [conflict, setConflict] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState<'ask' | 'busy' | null>(null);
@@ -241,6 +245,13 @@ function ProductCard() {
     [enabledCurrencies, baseCurrency],
   );
   const initialBarcode = search.get('barcode');
+  const loaded = Boolean(draft);
+  // «أضف صورة» in the list opens the card at its pictures
+  useEffect(() => {
+    if (loaded && location.hash === '#images') {
+      document.getElementById('images')?.scrollIntoView({ block: 'start' });
+    }
+  }, [loaded, location.hash]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -323,6 +334,15 @@ function ProductCard() {
     [variants],
   );
   const optionValues = useMemo(() => [...new Set((axes ?? []).flatMap((a) => a.values))], [axes]);
+
+  // «احفظ» waits for a change: a card that was only opened shows no bar over its pictures
+  // (the draft as the card first showed it, for this product: the variants' keys are new each time)
+  const clean = useRef<{ product: ProductDetail | null; json: string | null }>({ product: null, json: null });
+  if (draft && product && clean.current.product !== product) {
+    clean.current = { product, json: JSON.stringify(draft) };
+  }
+  const draftJson = useMemo(() => (draft && product ? JSON.stringify(draft) : null), [draft, product]);
+  const edited = !product || draftJson !== clean.current.json || pendingImages.length > 0;
 
   function showErrors(next: FieldErrors) {
     setErrors(next);
@@ -509,7 +529,12 @@ function ProductCard() {
     Object.keys(errors).some((k) =>
       /^v.[^.]+.(minPriceMinor|wholesalePriceMinor|minStockQty|pending)$|^b./.test(k),
     );
-  const advanced = moreFields || moreNeeded;
+  const showMatrix = titled && matrixFits(draft.axes, draft.variants);
+  const errorsInList = Object.keys(errors).some((k) =>
+    /^v.[^.]+.(minPriceMinor|wholesalePriceMinor|minStockQty|pending)$|^b./.test(k),
+  );
+  const listShown = !showMatrix || detailList || errorsInList;
+  const advanced = moreFields || moreNeeded || detailList;
 
   const variantBlock = (variant: VariantDraft) => (
     <VariantBlock
@@ -665,7 +690,7 @@ function ProductCard() {
                   {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
                     <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
                       <Switch
-                        label="له رقم تسلسلي أو IMEI"
+                        label={serialSwitchLabel(me.tenant.sectors)}
                         description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
                         checked={draft.tracksSerial ?? false}
                         disabled={!canManage}
@@ -697,19 +722,21 @@ function ProductCard() {
                 </div>
               </SectionCard>
 
-              <SectionCard
-                title="الصور"
-                icon={<CameraIcon />}
-                description="تظهر على شاشة البيع وفي المتجر الإلكتروني؛ الأولى هي الرئيسية."
-              >
-                <ImagesEditor
-                  productId={product?.id ?? null}
-                  optionValues={optionValues}
-                  disabled={!canManage}
-                  pending={pendingImages}
-                  onPendingChange={setPendingImages}
-                />
-              </SectionCard>
+              <div id="images" className="scroll-mt-24 min-w-0">
+                <SectionCard
+                  title="الصور"
+                  icon={<CameraIcon />}
+                  description="تظهر على شاشة البيع وفي المتجر الإلكتروني؛ الأولى هي الرئيسية."
+                >
+                  <ImagesEditor
+                    productId={product?.id ?? null}
+                    optionValues={optionValues}
+                    disabled={!canManage}
+                    pending={pendingImages}
+                    onPendingChange={setPendingImages}
+                  />
+                </SectionCard>
+              </div>
 
               <SectionCard
                 title={fits(['clothing']) ? 'المقاسات والألوان' : 'الأنواع والخيارات'}
@@ -744,42 +771,75 @@ function ProductCard() {
               >
                 {titled ? (
                   <>
-                    {canManage ? (
-                      <BulkApply
-                        axes={draft.axes}
-                        variants={draft.variants}
-                        currency={liveVariants[0]?.currency ?? 'SYP'}
-                        autoBarcode={autoBarcode}
-                        onAutoBarcode={setAutoBarcode}
-                        onChange={(variants) => update({ variants })}
-                      />
+                    {showMatrix ? (
+                      <>
+                        {canManage ? (
+                          <PriceMatrix
+                            axes={draft.axes}
+                            variants={draft.variants}
+                            currency={liveVariants[0]?.currency ?? 'SYP'}
+                            autoBarcode={autoBarcode}
+                            onAutoBarcode={setAutoBarcode}
+                            onChange={(variants) => update({ variants })}
+                          />
+                        ) : null}
+                        {errorsInList ? null : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto! self-start py-2! text-start whitespace-normal!"
+                            aria-expanded={detailList}
+                            onClick={() => setDetailList((open) => !open)}
+                          >
+                            {detailList
+                              ? 'أخفِ التفاصيل المتقدمة'
+                              : 'تفاصيل متقدمة: الباركودات، الأدنى للمفاصلة، الجملة، الحد الأدنى'}
+                          </Button>
+                        )}
+                      </>
                     ) : null}
-                    <VariantGrid currencies={currencies} advanced={advanced}>
-                      {liveVariants.map(variantBlock)}
-                    </VariantGrid>
-                    {moreNeeded ? null : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="self-start"
-                        aria-expanded={moreFields}
-                        onClick={() => setMoreFields((open) => !open)}
-                      >
-                        {moreFields
-                          ? 'أخفِ الحقول الإضافية'
-                          : 'حقول إضافية: الأدنى للمفاصلة، الجملة، الحد الأدنى، الباركودات'}
-                      </Button>
-                    )}
-                    <ul className={cn('flex flex-col gap-1 text-sm text-ink-subtle', !advanced && 'hidden')}>
-                      <li>الأدنى للمفاصلة: الكاشير ينزل حتى هذا السعر دون رمز المدير.</li>
-                      <li>سعر الجملة: يُباع به عند اختيار «سعر الجملة» على الكاشير أو لزبون جملة.</li>
-                      <li>الحد الأدنى في الفرع: تحته يصلك تنبيه النقص.</li>
-                      {liveVariants.some((v) => v.currency !== 'SYP') ? (
-                        <li>
-                          السعر بالدولار يبقى بالدولار، ويحوّله الكاشير إلى الليرة بسعر الصرف عند البيع.
-                        </li>
-                      ) : null}
-                    </ul>
+                    {listShown ? (
+                      <>
+                        {canManage ? (
+                          <BulkApply
+                            axes={draft.axes}
+                            variants={draft.variants}
+                            currency={liveVariants[0]?.currency ?? 'SYP'}
+                            autoBarcode={autoBarcode}
+                            onAutoBarcode={setAutoBarcode}
+                            onChange={(variants) => update({ variants })}
+                          />
+                        ) : null}
+                        <VariantGrid currencies={currencies} advanced={advanced}>
+                          {liveVariants.map(variantBlock)}
+                        </VariantGrid>
+                        {moreNeeded || showMatrix ? null : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto! self-start py-2! text-start whitespace-normal!"
+                            aria-expanded={moreFields}
+                            onClick={() => setMoreFields((open) => !open)}
+                          >
+                            {moreFields
+                              ? 'أخفِ الحقول الإضافية'
+                              : 'حقول إضافية: الأدنى للمفاصلة، الجملة، الحد الأدنى، الباركودات'}
+                          </Button>
+                        )}
+                        <ul
+                          className={cn('flex flex-col gap-1 text-sm text-ink-subtle', !advanced && 'hidden')}
+                        >
+                          <li>الأدنى للمفاصلة: الكاشير ينزل حتى هذا السعر دون رمز المدير.</li>
+                          <li>سعر الجملة: يُباع به عند اختيار «سعر الجملة» على الكاشير أو لزبون جملة.</li>
+                          <li>الحد الأدنى في الفرع: تحته يصلك تنبيه النقص.</li>
+                          {liveVariants.some((v) => v.currency !== 'SYP') ? (
+                            <li>
+                              السعر بالدولار يبقى بالدولار، ويحوّله الكاشير إلى الليرة بسعر الصرف عند البيع.
+                            </li>
+                          ) : null}
+                        </ul>
+                      </>
+                    ) : null}
                   </>
                 ) : (
                   liveVariants.map(variantBlock)
@@ -973,7 +1033,7 @@ function ProductCard() {
           </div>
         </div>
 
-        {canManage || notice || conflict || formError ? (
+        {(canManage && edited) || notice || conflict || formError ? (
           // Saving happens here, so what it answers shows here too, whatever the scroll.
           <div className="sticky bottom-3 z-10 flex flex-col gap-2">
             {notice ? (
@@ -1003,7 +1063,7 @@ function ProductCard() {
                 ) : null}
               </Alert>
             ) : null}
-            {canManage ? (
+            {canManage && edited ? (
               <div className="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 shadow-e3">
                 <p className="ps-2 text-sm text-ink-muted max-sm:hidden">
                   {product ? (

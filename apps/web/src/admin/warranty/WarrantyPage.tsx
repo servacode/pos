@@ -26,6 +26,7 @@ import {
   type BadgeTone,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { serialWord } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { recallAnswer, rememberAnswer } from '../reports/useReport';
@@ -45,6 +46,17 @@ const STEP_LABELS: Record<Exclude<WarrantyStatus, 'received'>, string> = {
   sent: 'أُرسلت للمورد أو الصيانة',
   ready: 'صارت جاهزة',
   delivered: 'سُلّمت للزبون',
+};
+
+/**
+ * The steps the screen offers from each status: in order. The server lets a claim skip ahead (a
+ * repair done on the spot), but delivery waits for «جاهزة» so a claim is never handed over unfinished.
+ */
+const OFFERED_NEXT: Record<WarrantyStatus, readonly WarrantyStatus[]> = {
+  received: ['sent', 'ready'],
+  sent: ['ready'],
+  ready: ['delivered'],
+  delivered: [],
 };
 
 function fieldError(e: unknown): string {
@@ -354,11 +366,14 @@ export function WarrantyPage() {
         />
 
         <section aria-label="البحث بالرقم" className="flex flex-col gap-3">
-          <SectionHead title="القطعة" description="اكتب الرقم التسلسلي أو IMEI كما هو على الجهاز." />
+          <SectionHead
+            title="القطعة"
+            description={`اكتب ${serialWord(me.tenant.sectors)} كما هو على الجهاز.`}
+          />
           <Card>
             <form noValidate onSubmit={(e) => void search(e)} className="flex flex-wrap items-end gap-3">
               <TextField
-                label="الرقم التسلسلي أو IMEI"
+                label={serialWord(me.tenant.sectors)}
                 dir="ltr"
                 inputClassName="num"
                 value={serial}
@@ -532,6 +547,12 @@ export function WarrantyPage() {
                       <Button
                         key={next}
                         variant={at === 0 ? 'primary' : 'secondary'}
+                        disabled={!OFFERED_NEXT[claim.status].includes(next)}
+                        title={
+                          OFFERED_NEXT[claim.status].includes(next)
+                            ? undefined
+                            : 'لا تُسلَّم قبل أن تصير جاهزة'
+                        }
                         onClick={() =>
                           setStep({ claim, status: next as Exclude<WarrantyStatus, 'received'> })
                         }

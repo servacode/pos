@@ -181,7 +181,7 @@ export function DrawerCounter({
                   aria-pressed={picked}
                   onClick={() => onActivate?.(value)}
                   className={cn(
-                    'num min-h-12 w-24 shrink-0 rounded-small border px-2.5 text-start font-bold transition-colors duration-120 ease-standard',
+                    'num min-h-12 min-w-28 shrink-0 rounded-small border px-2.5 text-start font-bold whitespace-nowrap transition-colors duration-120 ease-standard',
                     picked
                       ? 'border-brand/40 bg-surface text-brand-ink'
                       : 'border-line bg-surface-muted text-ink hover:border-line-control',

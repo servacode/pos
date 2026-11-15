@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import type { MeResponse } from '@serva/core';
 import { listProducts } from '../admin/catalog/api';
 import { listCustomers } from '../admin/customers/api';
-import { findSerials, getRecall, listSuppliers } from '../admin/purchases/api';
+import { findSerials, getRecall, listPurchases, listSuppliers } from '../admin/purchases/api';
 import { holdsAny, type AccessRule } from '../admin/reports/access';
 import { listSales } from '../admin/sales/api';
 
-/** One record the search found: a product, a customer, a supplier, an invoice, a serial number or a batch. */
+/** One record the search found: a product, a customer, a supplier, an invoice, a purchase invoice, a serial number or a batch. */
 export interface RecordHit {
   key: string;
   group: string;
@@ -90,6 +90,28 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
               to: `/sales/invoices?q=${encodeURIComponent(s.number)}`,
             })),
           ),
+        )
+      : [],
+    // Purchase invoices (PUR-…): the list has no search of its own, so the number is matched here
+    can(['purchases.manage'])
+      ? quiet(
+          listPurchases().then((r) => {
+            const needle = q.toLowerCase();
+            return r.items
+              .filter(
+                (p) =>
+                  p.number.toLowerCase().includes(needle) ||
+                  (p.reference ?? '').toLowerCase().includes(needle),
+              )
+              .slice(0, FEW)
+              .map((p): RecordHit => ({
+                key: `u:${p.id}`,
+                group: 'فواتير الشراء',
+                label: p.number,
+                detail: p.supplierName,
+                to: `/purchases?q=${encodeURIComponent(p.number)}`,
+              }));
+          }),
         )
       : [],
     can(['catalog.manage']) && q.length >= 3

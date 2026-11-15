@@ -68,6 +68,21 @@ export function sizeRunQuantities(
   return out;
 }
 
+/** How many sizes the grid has: the axis called «المقاس», or the rows */
+export function sizeCountOf(variants: readonly Variant[]): number {
+  const grid = gridOf(variants);
+  const sizesAreCols = grid.colName === 'المقاس' && grid.rowName !== 'المقاس';
+  return (sizesAreCols ? grid.cols : grid.rows).length;
+}
+
+/** What to tell the owner when a size run does not have one count for each size of the grid; null when it fits */
+export function runMismatchNote(name: string, counts: number, sizes: number): string | null {
+  if (counts === sizes) return null;
+  return counts < sizes
+    ? `«${name}» له ${String(counts)} من ${String(sizes)} مقاسات: الباقي بلا كمية.`
+    : `«${name}» له ${String(counts)} أعداد والجدول ${String(sizes)} مقاسات فقط: الزائد يُهمَل.`;
+}
+
 /** «1-2-2-1» as [1, 2, 2, 1]; null when it is not a list of counts */
 export function parseRunCounts(text: string): number[] | null {
   const parts = text
@@ -82,7 +97,7 @@ export function parseRunCounts(text: string): number[] | null {
 }
 
 /** The size runs of the store and the editor of them, under the grid's title */
-function SizeRuns({ onFill }: { onFill: (counts: number[], sets: number) => void }) {
+function SizeRuns({ sizes, onFill }: { sizes: number; onFill: (counts: number[], sets: number) => void }) {
   const me = useMe();
   const [options, setOptions] = useState<CatalogOptions>(() => catalogOptionsOf(me.settings.catalogOptions));
   const [sets, setSets] = useState('1');
@@ -148,6 +163,14 @@ function SizeRuns({ onFill }: { onFill: (counts: number[], sets: number) => void
           </Button>
         ) : null}
       </div>
+      {options.sizeRuns.map((run) => {
+        const note = runMismatchNote(run.name, run.counts.length, sizes);
+        return note ? (
+          <p key={run.name} className="text-xs text-warning-ink">
+            {note}
+          </p>
+        ) : null;
+      })}
       {editing ? (
         <div className="flex flex-col gap-2 rounded-control border border-line bg-surface p-3">
           {draft.map((row, i) => (
@@ -246,6 +269,7 @@ export function SizeGrid({
         </div>
       </div>
       <SizeRuns
+        sizes={sizeCountOf(live)}
         onFill={(counts, sets) => setQty((all) => ({ ...all, ...sizeRunQuantities(live, counts, sets) }))}
       />
       <div className="w-fit max-w-full overflow-x-auto rounded-control border border-line bg-surface">

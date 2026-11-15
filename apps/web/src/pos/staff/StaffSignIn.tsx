@@ -36,9 +36,11 @@ export function statusOf(result: Exclude<CodeCheck, { ok: true }>): PinStatus {
 
 const MORNING = 'صباح الخير';
 
-function greeting(now: number): string {
+/** By the device's own clock: the small hours get a neutral welcome, never «مساء الخير» at 1 AM */
+export function greeting(now: number): string {
   const hour = new Date(now).getHours();
-  return hour >= 4 && hour < 12 ? MORNING : 'مساء الخير';
+  if (hour < 4) return 'أهلاً بك';
+  return hour < 12 ? MORNING : 'مساء الخير';
 }
 
 /** A person's initials in a 64 circle: soft, then the brand once picked (هوية 4 › Avatar). */

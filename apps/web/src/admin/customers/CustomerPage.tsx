@@ -21,6 +21,7 @@ import {
   DataTable,
   EditIcon,
   EmptyState,
+  formatQuantity,
   Money,
   ProgressBar,
   SalesIcon,
@@ -188,7 +189,8 @@ function SizesCard({ purchases, currency }: { purchases: CustomerPurchases; curr
           title="مشترياته"
           description={
             <>
-              <bdi className="num">{purchases.pieces / 1000}</bdi> {pieces(purchases.pieces / 1000)} بـ{' '}
+              اشترى <bdi className="num">{formatQuantity(purchases.pieces, digits)}</bdi>{' '}
+              {pieces(purchases.pieces / 1000)} بقيمة{' '}
               <Money minor={purchases.spentMinor} currency={currency} /> بعد المرتجعات.
             </>
           }

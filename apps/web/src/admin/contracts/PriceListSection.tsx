@@ -143,7 +143,7 @@ export function PriceListSection({ customers }: { customers: CustomerListItem[] 
                 اطبع
               </Button>
               <Button type="button" variant="secondary" onClick={exportCsv}>
-                حمّل CSV
+                حمّل الجدول
               </Button>
             </span>
           </div>

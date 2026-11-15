@@ -11,7 +11,7 @@ const TONES = {
 /**
  * A keyboard key beside the action it runs (هوية 4 › kbd: «F12», «Esc»). Decorative: the action
  * carries aria-keyshortcuts for screen readers, so the key never joins its name. Shown where the
- * pointer is a mouse; on a touch screen the hint would only crowd the button (`always` keeps it, for
+ * pointer is a mouse and the screen is wider than a phone; on a touch screen or a phone-width window the hint would only crowd the button (`always` keeps it, for
  * the shortcuts guide itself).
  */
 export function Kbd({
@@ -32,7 +32,7 @@ export function Kbd({
       className={cn(
         'min-w-6 shrink-0 rounded-small border px-1.5 text-center font-sans text-xs/5 font-semibold',
         TONES[tone],
-        always ? 'inline-block' : 'hidden pointer-fine:inline-block',
+        always ? 'inline-block' : 'hidden md:pointer-fine:inline-block',
         className,
       )}
     >

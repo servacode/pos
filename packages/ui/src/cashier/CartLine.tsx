@@ -86,7 +86,8 @@ export function CartLine({
               {formatQuantity(qtyThousandths, digits)}
               {unit ? ` ${unit}` : ''} × <Money minor={unitPriceMinor} currency={currency} symbol={false} />
             </bdi>
-            {meta ? <> · {meta}</> : null}
+            {/* On its own line, whole items wrapping: no separator dot left stranded at a line's end */}
+            {meta ? <span className="block">{meta}</span> : null}
           </span>
         </span>
         <Money minor={lineTotalMinor} currency={currency} className="text-base/7 font-bold text-ink" />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { dayText } from '../../lib/dates';
 import { Link } from 'react-router';
 import type { PurchaseDetail, PurchaseRow } from '@serva/core';
 import { Alert, Button, Dialog, formatQuantity, Money, SkeletonText, TextLink, useDigits } from '@serva/ui';
@@ -32,7 +33,7 @@ export function PurchaseDetailDialog({ purchase, onClose }: { purchase: Purchase
         if (!open) onClose();
       }}
       title={`الفاتورة ${purchase.number}`}
-      description={`${purchase.supplierName} · ${purchase.date}`}
+      description={`${purchase.supplierName} · ${dayText(purchase.date)}`}
       actions={
         <>
           <Button variant="secondary" onClick={onClose}>

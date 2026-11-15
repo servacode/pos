@@ -413,4 +413,18 @@ describe('one search box for the invoices of this till', () => {
     expect(matchesInvoice(sale, '999', customers)).toBe(false);
     expect(matchesInvoice(sale, '', customers)).toBe(true);
   });
+
+  it('reads a phone in any form: leading zero, spaces, +963, 00963', () => {
+    const stored = [{ id: 'c1', name: 'ريم', phone: '+963944123456' }];
+    for (const typed of [
+      '0944123456',
+      '0944 123 456',
+      '+963 944 123 456',
+      '00963944123456',
+      '944123456',
+      '٠٩٤٤١٢٣',
+    ])
+      expect(matchesInvoice(sale, typed, stored), typed).toBe(true);
+    expect(matchesInvoice(sale, '0955123456', stored)).toBe(false);
+  });
 });

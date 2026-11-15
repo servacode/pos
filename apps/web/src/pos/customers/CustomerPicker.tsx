@@ -4,7 +4,7 @@ import type { CustomerRow } from '@serva/core/contracts/customers';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { normalizePhone } from '@serva/core/phone';
 import { businessDateOf } from '@serva/core/sale';
-import { normalizeArabic, toLatinDigits } from '@serva/core/text';
+import { normalizeArabic } from '@serva/core/text';
 import {
   AddIcon,
   Alert,
@@ -19,6 +19,7 @@ import {
 } from '@serva/ui';
 import type { Catalog } from '../catalog';
 import { usePos } from '../services';
+import { phoneKey } from '../phoneKey';
 import { fetchPurchases } from './CustomerHistory';
 
 export interface PickedCustomer {
@@ -56,13 +57,13 @@ function CustomerBalance({ id, currency }: { id: string; currency: CurrencyCode 
 /** Customers whose name or phone matches what the cashier typed, at most eight */
 export function findCustomers(customers: readonly CustomerRow[], typed: string): CustomerRow[] {
   const q = normalizeArabic(typed);
-  const digits = toLatinDigits(typed).replace(/\D/g, '').replace(/^0/, '');
+  const digits = phoneKey(typed);
   if (!q && !digits) return customers.slice(0, 8);
   return customers
     .filter(
       (c) =>
         (q && normalizeArabic(c.name).includes(q)) ||
-        (digits.length >= 3 && (c.phone ?? '').replace(/\D/g, '').includes(digits)),
+        (digits.length >= 3 && phoneKey(c.phone ?? '').includes(digits)),
     )
     .slice(0, 8);
 }
@@ -159,7 +160,22 @@ export function CustomerPicker({
             onChange={(e) => setSearch(e.target.value.slice(0, 60))}
             startAdornment={<SearchIcon className="ms-4 shrink-0" />}
           />
-          <ul aria-label="الزبائن" className="-mx-1 flex max-h-[40vh] flex-col gap-1 overflow-y-auto px-1">
+          {/* Always in view, never below a long list or cut by the screen's edge */}
+          <Button
+            variant="secondary"
+            icon={<AddIcon />}
+            onClick={() => {
+              setAdding(true);
+              setName(/\d/.test(search) ? '' : search);
+              setPhone(/\d/.test(search) ? search : '');
+            }}
+          >
+            زبون جديد
+          </Button>
+          <ul
+            aria-label="الزبائن"
+            className="-mx-1 flex flex-col gap-1 px-1 pb-1 md:max-h-[min(32rem,60vh)] md:overflow-y-auto"
+          >
             {found.map((c) => (
               <li key={c.id}>
                 <button
@@ -201,17 +217,6 @@ export function CustomerPicker({
               <li className="py-4 text-center text-sm text-ink-muted">لا زبون بهذا الاسم أو الرقم.</li>
             ) : null}
           </ul>
-          <Button
-            variant="secondary"
-            icon={<AddIcon />}
-            onClick={() => {
-              setAdding(true);
-              setName(/\d/.test(search) ? '' : search);
-              setPhone(/\d/.test(search) ? search : '');
-            }}
-          >
-            زبون جديد
-          </Button>
         </>
       )}
     </section>

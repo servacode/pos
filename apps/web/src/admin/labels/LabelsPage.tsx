@@ -24,6 +24,7 @@ import {
   useDensity,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { storeSells } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { getProduct, listProducts, updateProduct } from '../catalog/api';
@@ -242,7 +243,7 @@ export function LabelsPage() {
       <div className="flex flex-col gap-6">
         <PageHeader
           title="طباعة الملصقات"
-          description="ملصق لكل قطعة: اسمها ومقاسها ولونها وسعرها وباركودها، على لفة طابعة الملصقات أو ورق A4."
+          description={`ملصق لكل قطعة: اسمها${storeSells(me.tenant.sectors, ['clothing']) ? ' ومقاسها ولونها' : ''} وسعرها وباركودها، على لفة طابعة الملصقات أو ورق A4.`}
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">

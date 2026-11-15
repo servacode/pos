@@ -229,10 +229,18 @@ function PriceOnRequest({ className }: { className?: string }) {
   return <span className={cn('font-semibold text-ink-muted', className)}>السعر عند الطلب</span>;
 }
 
-function NoPicture({ large = false }: { large?: boolean }) {
+function NoPicture({ name, large = false }: { name: string; large?: boolean }) {
+  // The piece's own first letter on a soft tint reads as a deliberate tile, not a missing image
+  const letter = Array.from(name.trim())[0] ?? '';
   return (
-    <span className="grid size-full place-items-center bg-brand-soft text-brand">
-      <ProductsIcon size={large ? 48 : 32} />
+    <span
+      aria-hidden="true"
+      className={cn(
+        'grid size-full place-items-center bg-linear-to-br from-brand-soft to-surface-muted font-bold text-brand-ink/70 select-none',
+        large ? 'text-7xl' : 'text-5xl',
+      )}
+    >
+      {letter}
     </span>
   );
 }
@@ -294,13 +302,6 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
               {home.store.pickup ? ' · استلام من المحل' : ''}
             </p>
           </div>
-          <SearchField
-            label="ابحث في المتجر"
-            placeholder="ابحث عن قطعة…"
-            value={query}
-            onValueChange={setQuery}
-            className="w-full sm:w-80 [&>div]:min-h-11!"
-          />
         </div>
         <CatalogueFilters
           products={inCategory}
@@ -310,6 +311,15 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
           onFilters={setFilters}
           sort={sort}
           onSort={setSort}
+          search={
+            <SearchField
+              label="ابحث في المتجر"
+              placeholder="ابحث عن قطعة…"
+              value={query}
+              onValueChange={setQuery}
+              className="w-full [&>div]:min-h-11!"
+            />
+          }
         />
         {tops.length > 0 ? (
           <ScrollStrip className="-mx-4 px-4 pb-1 sm:mx-0 sm:px-0">
@@ -374,7 +384,7 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                       )}
                     />
                   ) : (
-                    <NoPicture />
+                    <NoPicture name={p.name} />
                   )}
                   {p.offer ? (
                     <OfferTag className="absolute start-2 top-2 max-w-[calc(100%-1rem)] shadow-e1">
@@ -507,7 +517,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
             {main ? (
               <img src={main.url} alt={product.name} className="size-full object-contain" />
             ) : (
-              <NoPicture large />
+              <NoPicture name={product.name} large />
             )}
           </div>
           {images.length > 1 ? (

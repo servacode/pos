@@ -114,9 +114,9 @@ describe('«الصندوق» in the settings', () => {
       within(group)
         .getAllByRole('listitem')
         .map((li) => li.textContent);
-    expect(chips(syp)).toEqual(['500', '200', '100', '50', '25', '10']);
+    expect(chips(syp)).toEqual(['5000', '2000', '1000', '500', '200', '100', '50', '25', '10']);
 
-    await user.type(within(syp).getByLabelText('أضف فئة ليرة سورية'), '2000');
+    await user.type(within(syp).getByLabelText('أضف فئة ليرة سورية'), '20000');
     await user.click(within(syp).getByRole('button', { name: 'أضف' }));
     await user.type(within(syp).getByLabelText('أضف فئة ليرة سورية'), '100{Enter}');
     expect(within(syp).getByText('هذه الفئة موجودة')).toBeInTheDocument();
@@ -124,16 +124,16 @@ describe('«الصندوق» in the settings', () => {
     await user.type(within(syp).getByLabelText('أضف فئة ليرة سورية'), '0{Enter}');
     expect(within(syp).getByText('اكتب عدداً صحيحاً أكبر من صفر')).toBeInTheDocument();
     await user.click(within(syp).getByRole('button', { name: 'احذف فئة 25 ل.س' }));
-    expect(chips(syp)).toEqual(['2000', '500', '200', '100', '50', '10']);
+    expect(chips(syp)).toEqual(['20000', '5000', '2000', '1000', '500', '200', '100', '50', '10']);
 
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
     expect((requestsTo('PUT', '/v1/store/till').at(-1)?.body as { cashNotes: unknown }).cashNotes).toEqual({
-      SYP: [2000, 500, 200, 100, 50, 10],
+      SYP: [20000, 5000, 2000, 1000, 500, 200, 100, 50, 10],
     });
 
     await user.click(within(syp).getByRole('button', { name: 'أعد الافتراضي' }));
-    expect(chips(syp)).toEqual(['500', '200', '100', '50', '25', '10']);
+    expect(chips(syp)).toEqual(['5000', '2000', '1000', '500', '200', '100', '50', '25', '10']);
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     await within(form).findByText(/حُفظ/);
     expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).not.toHaveProperty('cashNotes');
@@ -149,7 +149,7 @@ describe('«الصندوق» in the settings', () => {
     });
     const { user } = renderApp('/settings');
     const form = await screen.findByRole('form', { name: 'الصندوق' });
-    for (const v of [500, 200, 100, 50, 25, 10]) {
+    for (const v of [5000, 2000, 1000, 500, 200, 100, 50, 25, 10]) {
       await user.click(within(form).getByRole('button', { name: `احذف فئة ${v} ل.س` }));
     }
     expect(within(form).getByText('أبقِ فئة واحدة على الأقل.')).toBeInTheDocument();

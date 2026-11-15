@@ -37,4 +37,13 @@ describe('the seller', () => {
     // The picked seller goes back to the cashier after each sale, so a later sale is never credited by mistake
     expect(sellers).toEqual([null, ids.maryam, null]);
   });
+
+  it('goes back to the cashier on the new empty cart after the sale is put on hold', async () => {
+    const { user } = await saleScreen();
+    await user.selectOptions(screen.getByLabelText('البائع'), ids.maryam);
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F4}');
+    await screen.findByRole('button', { name: 'افتح الفواتير المعلّقة' });
+    expect((screen.getByLabelText('البائع') as HTMLSelectElement).value).toBe(ids.samer);
+  });
 });

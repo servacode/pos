@@ -3,9 +3,12 @@ import type { CatalogItem } from '../catalog';
 
 /** What a tile says about its stock, beyond name and price (display only) */
 export interface TileInfo {
-  /** Stock on hand, thousandths; null when the till does not know it */
+  /** What can be sold, thousandths: expired and blocked batches left out; null when the till does not know the stock */
   stockQty: number | null;
-  /** The nearest date among the sellable batches, with the days left (negative: past) */
+  /** What sits in expired or blocked batches (counted in the stock, not sellable) */
+  expiredQty: number;
+  blockedQty: number;
+  /** The nearest date among the sellable batches, with the days left */
   expiry: { days: number; tone: 'danger' | 'warning' } | null;
   tracksSerial: boolean;
 }
@@ -24,19 +27,41 @@ export const EXPIRY_DANGER_DAYS = 30;
 
 export function tileInfo(pieces: readonly CatalogItem[], today: string): TileInfo {
   let stock: number | null = null;
-  for (const p of pieces) {
-    if (typeof p.stockQty === 'number') stock = (stock ?? 0) + p.stockQty;
-  }
+  let expiredQty = 0;
+  let blockedQty = 0;
   let nearest: string | null = null;
   for (const p of pieces) {
-    for (const b of p.stockBatches ?? []) {
-      if (!b.expiry || batchState(b, today) === 'empty' || batchState(b, today) === 'blocked') continue;
-      if (nearest === null || b.expiry < nearest) nearest = b.expiry;
+    const batches = Array.isArray(p.stockBatches) ? p.stockBatches : null;
+    let sellable: number | null = null;
+    if (batches) {
+      sellable = 0;
+      let left = false;
+      for (const b of batches) {
+        const state = batchState(b, today);
+        if (state === 'ok') {
+          sellable += b.qty;
+          if (b.expiry && (nearest === null || b.expiry < nearest)) nearest = b.expiry;
+        } else if (state === 'expired') {
+          expiredQty += b.qty;
+          left = true;
+        } else if (state === 'blocked') {
+          blockedQty += b.qty;
+          left = true;
+        }
+      }
+      // Nothing expired or blocked: the stock is the stock, whatever the batches add up to
+      if (!left) sellable = null;
+    }
+    if (typeof p.stockQty === 'number') {
+      // Never more than the stock itself says: the batch ledger can run a few pieces over it
+      stock = (stock ?? 0) + (sellable === null ? p.stockQty : Math.min(sellable, p.stockQty));
     }
   }
   const days = nearest ? daysUntil(nearest, today) : null;
   return {
     stockQty: stock,
+    expiredQty,
+    blockedQty,
     expiry:
       days !== null && days <= EXPIRY_CHIP_DAYS
         ? { days, tone: days <= EXPIRY_DANGER_DAYS ? 'danger' : 'warning' }

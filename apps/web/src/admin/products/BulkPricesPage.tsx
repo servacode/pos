@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { BulkPriceResult, Category } from '@serva/core';
+import { COUNT_NOUNS, countNoun } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
 import {
   Alert,
@@ -19,6 +20,7 @@ import {
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { storeSells } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { listCategories } from '../catalog/api';
@@ -182,7 +184,7 @@ function BulkPrices() {
         <PageHeader
           icon={<PercentIcon />}
           title="تغيير الأسعار"
-          description="تنزيلات آخر الموسم أو رفع الأسعار: كل قطع التصنيف وتصنيفاته الفرعية بنسبة واحدة، مقرّبة، وتُعرض قبل تطبيقها."
+          description={`${storeSells(me.tenant.sectors, ['clothing']) ? 'تنزيلات آخر الموسم' : 'التنزيلات'} أو رفع الأسعار: كل قطع التصنيف وتصنيفاته الفرعية بنسبة واحدة، مقرّبة، وتُعرض قبل تطبيقها.`}
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
 
@@ -293,7 +295,10 @@ function BulkPrices() {
             {result?.applied ? (
               <Alert tone="success">
                 <span className="flex flex-col items-start gap-3">
-                  <span>تغيّرت أسعار {changed.length} قطعة، وتصل إلى أجهزة الكاشير مع أول اتصال.</span>
+                  <span>
+                    تغيّرت أسعار {countNoun(changed.length, COUNT_NOUNS.piece)}، وتصل إلى أجهزة الكاشير مع أول
+                    اتصال.
+                  </span>
                   <ButtonLink to={labels} icon={<PrintIcon />}>
                     اطبع ملصقات الأسعار الجديدة
                   </ButtonLink>
@@ -338,11 +343,13 @@ function BulkPrices() {
               <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 ps-5 shadow-e3">
                 <p className="text-sm text-ink-muted">
                   سيتغيّر سعر <bdi className="num font-semibold text-ink">{changed.length}</bdi> من{' '}
-                  <bdi className="num font-semibold text-ink">{result.items.length}</bdi> قطعة
+                  <bdi className="num font-semibold text-ink">
+                    {countNoun(result.items.length, COUNT_NOUNS.piece)}
+                  </bdi>
                   {rule ? ` · ${rule}` : ''}
                 </p>
                 <Button loading={busy} onClick={() => void run(true)} className="max-sm:flex-1">
-                  طبّق على {changed.length} قطعة
+                  طبّق على {countNoun(changed.length, COUNT_NOUNS.piece, String(changed.length), true)}
                 </Button>
               </div>
             ) : null}

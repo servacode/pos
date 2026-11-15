@@ -50,6 +50,15 @@ export interface SalesBreakdownRow {
   commissionBp: number | null;
   /** `by=seller` with a rate: the net sales times the rate; null otherwise */
   commissionMinor: number | null;
+  /** `by=season`: pieces received (purchases) up to the end of the period, thousandths; null otherwise */
+  receivedQty: number | null;
+}
+
+/** `by=option`: the sales across the chosen option and a second one (size × colour), net of returns */
+export interface SalesCross {
+  rowOption: string;
+  colOption: string;
+  cells: { row: string; col: string; qty: number; totalMinor: number }[];
 }
 
 export interface SalesBreakdown {
@@ -62,6 +71,10 @@ export interface SalesBreakdown {
   branchId: string | null;
   baseCurrency: CurrencyCode;
   rows: SalesBreakdownRow[];
+  /** Net sales (after returns, tax included) of each day of the period that had any, oldest first */
+  daily: { date: string; totalMinor: number }[];
+  /** `by=option` with a second option on the pieces: the cross-table; null otherwise */
+  cross: SalesCross | null;
   totalMinor: number;
   previousTotalMinor: number;
   /** The option names the store's pieces have, for the picker of `by=option` */

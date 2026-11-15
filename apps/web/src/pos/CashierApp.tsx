@@ -204,6 +204,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   );
   const [shift, setShift] = useState<OpenShift | null | undefined>(undefined);
   const [view, setView] = useState<View>('sale');
+  // «تبديل» from the menu opens the return screen already set on an exchange
+  const [startExchange, setStartExchange] = useState(false);
   const [cart, setCartState] = useState<Cart>(EMPTY_CART);
   const cartRef = useRef(cart);
   cartRef.current = cart;
@@ -851,8 +853,26 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           trigger={<IconButton label="المزيد" size="md" icon={<MoreIcon />} />}
         >
           {shift ? (
-            <MenuItem icon={<UndoIcon />} shortcut="Alt+R" onSelect={() => setView('return')}>
+            <MenuItem
+              icon={<UndoIcon />}
+              shortcut="Alt+R"
+              onSelect={() => {
+                setStartExchange(false);
+                setView('return');
+              }}
+            >
               مرتجع
+            </MenuItem>
+          ) : null}
+          {shift && alters ? (
+            <MenuItem
+              icon={<TransferIcon />}
+              onSelect={() => {
+                setStartExchange(true);
+                setView('return');
+              }}
+            >
+              تبديل
             </MenuItem>
           ) : null}
           {shift && session.permissions.has('receipt.create') ? (
@@ -1111,6 +1131,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               />
             ) : view === 'return' ? (
               <ReturnScreen
+                startExchange={startExchange}
                 session={session}
                 catalog={catalog}
                 staff={staff}

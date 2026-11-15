@@ -19,8 +19,13 @@ export function quotationInputOf(
   customer: { id: string; name: string } | null,
   /** The name the cashier typed or the customer's, when no card is attached */
   customerName: string | null,
+  /** What the cashier chose in the cart's quote dialog: the starting status, the last valid day, a note */
+  extra: { status?: 'draft' | 'sent'; validUntil?: string; notes?: string | null } = {},
 ): QuotationInput {
   return {
+    ...(extra.status ? { status: extra.status } : {}),
+    ...(extra.validUntil ? { validUntil: extra.validUntil } : {}),
+    ...(extra.notes ? { notes: extra.notes } : {}),
     customerId: customer?.id ?? null,
     customerName: customer?.name ?? customerName,
     invoiceDiscount,

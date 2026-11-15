@@ -149,6 +149,35 @@ describe('bulk price change', () => {
     ]);
   });
 
+  it('writes each piece into the price history, with its old and new price', async () => {
+    const store = await openStore(app);
+    const summer = await category(store, 'صيفي');
+    const shirt = await product(store, 'قميص', summer.id, [4_500_000, 4_600_000]);
+    const applied = await bulk(store, {
+      categoryId: summer.id,
+      percentBp: -3000,
+      roundToMinor: 50_000,
+      apply: true,
+    });
+    expect(applied.statusCode, applied.body).toBe(200);
+    const history = await app.inject({ method: 'GET', url: '/v1/price-history', headers: as(store) });
+    const rows = history.json<{
+      items: {
+        source: string;
+        productName: string | null;
+        oldMinor: number | null;
+        newMinor: number | null;
+      }[];
+    }>().items;
+    const bulkRows = rows.filter((r) => r.source === 'bulk');
+    expect(bulkRows).toHaveLength(2);
+    expect(bulkRows.map((r) => [r.productName, r.oldMinor, r.newMinor]).sort()).toEqual([
+      ['قميص', 4_500_000, 3_150_000],
+      ['قميص', 4_600_000, 3_200_000],
+    ]);
+    expect(shirt.variants).toHaveLength(2);
+  });
+
   it('marks down without a struck price when asked', async () => {
     const store = await openStore(app);
     const summer = await category(store, 'صيفي');

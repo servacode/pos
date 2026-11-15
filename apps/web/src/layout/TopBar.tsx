@@ -185,7 +185,7 @@ export function TopBar({
       <button
         type="button"
         onClick={() => setSearchOpen(true)}
-        aria-label="ابحث عن صفحة"
+        aria-label="ابحث عن منتج أو زبون أو دفعة"
         aria-keyshortcuts="Control+K"
         className={cn(
           CONTROL_HEIGHT.comfortable,
@@ -193,7 +193,7 @@ export function TopBar({
         )}
       >
         <SearchIcon size={16} />
-        <span className="min-w-0 flex-1 truncate">ابحث عن صفحة…</span>
+        <span className="min-w-0 flex-1 truncate">ابحث عن منتج أو زبون أو دفعة…</span>
         <kbd
           dir="ltr"
           className="rounded-small border border-line bg-surface-muted px-1.5 font-sans text-xs/5 font-semibold text-ink-muted"
@@ -210,7 +210,7 @@ export function TopBar({
           </span>
         )}
         <IconButton
-          label="ابحث عن صفحة"
+          label="ابحث عن منتج أو زبون أو دفعة"
           icon={<SearchIcon />}
           className="@min-[59rem]:hidden"
           onClick={() => setSearchOpen(true)}
@@ -573,7 +573,7 @@ function PageSearch({
         }}
         onKeyDown={onKeyDown}
         autoComplete="off"
-        placeholder="صفحة، منتج، زبون، مورد، فاتورة، رقم تسلسلي…"
+        placeholder="صفحة، منتج، زبون، مورد، فاتورة، فاتورة شراء، رقم تسلسلي…"
         startAdornment={<SearchIcon size={20} className="ms-3" />}
       />
       {results.length ? (

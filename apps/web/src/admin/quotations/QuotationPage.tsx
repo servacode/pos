@@ -91,10 +91,16 @@ export function QuotationPage() {
   const [store, setStore] = useState<StoreResponse | null>(null);
 
   const [customerId, setCustomerId] = useState<string | null>(null);
+  // The free fields are for a customer who is not registered: they open on request, or by themselves once filled
+  const [freeOpen, setFreeOpen] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerTaxNumber, setCustomerTaxNumber] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
+  const anyFree = Boolean(customerName || customerPhone || customerTaxNumber || customerAddress);
+  useEffect(() => {
+    if (anyFree) setFreeOpen(true);
+  }, [anyFree]);
   const [validUntil, setValidUntil] = useState(() => inDays(15));
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('');
@@ -442,37 +448,54 @@ export function QuotationPage() {
                   </ul>
                 ) : null}
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <TextField
-                  label="اسم الزبون أو الجهة"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  error={fieldErrors.customerName}
+              {!freeOpen &&
+              !customerName &&
+              !customerPhone &&
+              !customerTaxNumber &&
+              !customerAddress &&
+              !fieldErrors.customerName ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="self-start"
                   disabled={locked}
-                />
-                <TextField
-                  label="هاتف الزبون"
-                  dir="ltr"
-                  inputClassName="num"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  disabled={locked}
-                />
-                <TextField
-                  label="الرقم الضريبي للزبون"
-                  dir="ltr"
-                  inputClassName="num"
-                  value={customerTaxNumber}
-                  onChange={(e) => setCustomerTaxNumber(e.target.value)}
-                  disabled={locked}
-                />
-                <TextField
-                  label="عنوان الزبون"
-                  value={customerAddress}
-                  onChange={(e) => setCustomerAddress(e.target.value)}
-                  disabled={locked}
-                />
-              </div>
+                  onClick={() => setFreeOpen(true)}
+                >
+                  زبون غير مسجّل: اكتب بياناته
+                </Button>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextField
+                    label="اسم الزبون أو الجهة"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    error={fieldErrors.customerName}
+                    disabled={locked}
+                  />
+                  <TextField
+                    label="هاتف الزبون"
+                    dir="ltr"
+                    inputClassName="num"
+                    value={customerPhone}
+                    onChange={(e) => setCustomerPhone(e.target.value)}
+                    disabled={locked}
+                  />
+                  <TextField
+                    label="الرقم الضريبي للزبون"
+                    dir="ltr"
+                    inputClassName="num"
+                    value={customerTaxNumber}
+                    onChange={(e) => setCustomerTaxNumber(e.target.value)}
+                    disabled={locked}
+                  />
+                  <TextField
+                    label="عنوان الزبون"
+                    value={customerAddress}
+                    onChange={(e) => setCustomerAddress(e.target.value)}
+                    disabled={locked}
+                  />
+                </div>
+              )}
             </Card>
 
             <Card className="flex flex-col gap-4">

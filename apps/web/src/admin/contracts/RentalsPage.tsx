@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { RENTAL_RATE_LABELS, type Rental } from '@serva/core';
 import {
   Alert,
   Badge,
   Button,
   Card,
+  ClockIcon,
   EmptyState,
+  KpiStrip,
   Money,
   PageHeader,
   PrintIcon,
   SegmentedControl,
   SerialIcon,
+  Skeleton,
+  StatTile,
+  WarningIcon,
   useDigits,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
@@ -49,6 +54,13 @@ export function RentalsPage() {
   }
 
   const late = (items ?? []).filter((r) => r.overdue).length;
+  const out = (items ?? []).filter((r) => r.status === 'out');
+  // The deposits held for the devices out, when they are all in one currency
+  const depositCurrency = out[0]?.currency;
+  const deposits = out.every((r) => r.currency === depositCurrency)
+    ? out.reduce((sum, r) => sum + r.depositMinor, 0)
+    : null;
+  const kpi = (value: ReactNode) => (items ? value : <Skeleton className="h-9 w-16" />);
 
   return (
     <AppShell>
@@ -58,6 +70,31 @@ export function RentalsPage() {
           title="التأجير"
           description="الأجهزة المؤجَّرة الآن والمتأخرة منها أولاً. التسليم والاستلام من الصندوق، وتُباع الأجرة ببند «إيجار»."
         />
+        <KpiStrip columns={3}>
+          <StatTile
+            label="خارج المحل الآن"
+            icon={<SerialIcon />}
+            value={kpi(<bdi className="num">{out.length}</bdi>)}
+          />
+          <StatTile
+            label="متأخرة عن موعدها"
+            icon={<WarningIcon />}
+            iconTone={late > 0 ? 'warning' : 'neutral'}
+            value={kpi(<bdi className="num">{late}</bdi>)}
+          />
+          <StatTile
+            label="عرابين محفوظة"
+            icon={<ClockIcon />}
+            iconTone="neutral"
+            value={kpi(
+              deposits !== null && depositCurrency ? (
+                <Money minor={deposits} currency={depositCurrency} />
+              ) : (
+                <span>{out.length > 0 ? 'بعدة عملات' : '—'}</span>
+              ),
+            )}
+          />
+        </KpiStrip>
         <section aria-label="التأجير" className="flex flex-col gap-3">
           <SectionHead
             title={status === 'out' ? 'الأجهزة عند الزبائن' : 'آخر 200 عقد'}

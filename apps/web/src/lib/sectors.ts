@@ -121,3 +121,16 @@ export const GIFT_SECTORS: readonly SectorKey[] = [
   'supermarket',
   'general',
 ];
+
+/**
+ * «الرقم التسلسلي», and «IMEI» beside it only for a store that sells phones and gadgets (a medical
+ * supplies store has serial numbers, not IMEIs). A store with no business type set sees both.
+ */
+export function serialWord(storeSectors: readonly SectorKey[] | undefined): string {
+  return storeSells(storeSectors, ['electronics']) ? 'الرقم التسلسلي أو IMEI' : 'الرقم التسلسلي';
+}
+
+/** «له رقم تسلسلي» with «أو IMEI» only for a store that sells phones and gadgets */
+export function serialSwitchLabel(storeSectors: readonly SectorKey[] | undefined): string {
+  return storeSells(storeSectors, ['electronics']) ? 'له رقم تسلسلي أو IMEI' : 'له رقم تسلسلي';
+}

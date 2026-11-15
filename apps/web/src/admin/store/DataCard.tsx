@@ -60,7 +60,7 @@ export function DataCard() {
           </div>
         </div>
         <div className="flex flex-col gap-1.5 border-t border-line pt-5">
-          <h3 className="font-semibold text-ink">استيراد من Excel</h3>
+          <h3 className="font-semibold text-ink">استيراد من ملف</h3>
           <p className="text-sm text-ink-muted">
             انقل منتجاتك وزبائنك وموردينك وكمياتك وأرصدتهم من ملف xlsx أو csv، بعد فحصه كاملاً.
           </p>

@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { withTenant, type Database } from '@serva/db';
-import type { InvoiceLookup } from '@serva/core';
+import type { InvoiceHit, InvoiceLookup } from '@serva/core';
 import type { DeviceClaims } from '../auth/device-guard';
 import { AppError } from '../errors';
 
@@ -60,6 +60,62 @@ export function lookupInvoice(db: Database, device: DeviceClaims, query: string)
         discountExTaxMinor: Number(l.discount),
         taxMinor: Number(l.tax),
         totalMinor: Number(l.total),
+      })),
+    };
+  });
+}
+
+/** A phone as digits without the country code or the leading zero: 0933 333 333, +963 933 333 333 and 933333333 agree */
+export function phoneKey(text: string): string {
+  const digits = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g, '');
+  return digits.replace(/^(00963|963|0)/, '');
+}
+
+/**
+ * Recent invoices of the whole store that match a customer's name, phone (in any form) or the end of
+ * the invoice number: «مرتجع» for a customer who comes without the receipt. Read-only.
+ */
+export function searchInvoices(
+  db: Database,
+  device: DeviceClaims,
+  query: string,
+  days: number,
+): Promise<{ invoices: InvoiceHit[] }> {
+  return withTenant(db, device.tenantId, async (tx) => {
+    const typed = query.trim();
+    const key = phoneKey(typed);
+    const digits = typed.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g, '');
+    const like = (s: string) => `%${s.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const byPhone =
+      key.length >= 3
+        ? sql`or regexp_replace(coalesce(c.phone, ''), '\D', '', 'g') like ${`%${key}%`}`
+        : sql``;
+    const byNumber =
+      digits.length >= 3 ? sql`or regexp_replace(i.number, '\D', '', 'g') like ${`%${digits}`}` : sql``;
+    const rows = await tx.execute<{
+      id: string;
+      number: string;
+      device_time: string;
+      customer_name: string | null;
+      customer_phone: string | null;
+      total_minor: string;
+      currency: string;
+    }>(sql`
+      select i.id, i.number, i.device_time, coalesce(c.name, i.customer_name) as customer_name,
+             c.phone as customer_phone, i.total_minor::text, i.currency
+      from invoices i left join customers c on c.tenant_id = i.tenant_id and c.id = i.customer_id
+      where i.device_time >= now() - (${days}::int * interval '1 day')
+        and (coalesce(c.name, i.customer_name, '') ilike ${like(typed)} ${byPhone} ${byNumber})
+      order by i.device_time desc limit 20`);
+    return {
+      invoices: rows.map((r) => ({
+        id: r.id,
+        number: r.number,
+        deviceTime: new Date(r.device_time).toISOString(),
+        customerName: r.customer_name,
+        customerPhone: r.customer_phone,
+        totalMinor: Number(r.total_minor),
+        currency: r.currency as InvoiceHit['currency'],
       })),
     };
   });

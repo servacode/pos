@@ -15,8 +15,10 @@ import {
   TextField,
   type DataColumn,
 } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
+import { zonedDateTime } from '../../lib/dates';
 import { DateField } from '../../lib/DateField';
 import { downloadCsv } from '../exportCsv';
 import { listProducts } from '../catalog/api';
@@ -88,6 +90,8 @@ export function PriceHistoryPage() {
 }
 
 function PriceHistory() {
+  const me = useMe();
+  const digits = me.settings.numberFormat;
   const [items, setItems] = useState<PriceChange[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [from, setFrom] = useState('');
@@ -123,7 +127,9 @@ function PriceHistory() {
       {
         key: 'at',
         header: 'التاريخ',
-        cell: (r) => <span className="num whitespace-nowrap">{whenText(r.at)}</span>,
+        cell: (r) => (
+          <span className="whitespace-nowrap">{zonedDateTime(r.at, me.tenant.timezone, digits)}</span>
+        ),
       },
       { key: 'who', header: 'من غيّر', cell: (r) => r.userName ?? '—' },
       {
@@ -167,7 +173,7 @@ function PriceHistory() {
         cell: (r) => <Badge tone={r.oldMinor === null ? 'neutral' : 'brand'}>{SOURCE_TEXT[r.source]}</Badge>,
       },
     ],
-    [],
+    [me.tenant.timezone, digits],
   );
 
   return (

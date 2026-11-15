@@ -682,6 +682,9 @@ describe('the batch ledger keeps adding up to the stock', () => {
     expect(await balances(d.store)).toEqual({ 'A-01': 10 * BOX });
     expect(await noBatch(d)).toBe(-5 * BOX);
     expect(await gaps(d)).toEqual([0]);
+    // The till gets that row too, below zero, so its rows add up to the stock it shows
+    const [level] = await pullStock(d.store);
+    expect(level!.batches).toContainEqual({ batchNo: null, expiry: null, qty: -5 * BOX, blocked: false });
     // The next line of the same kind sees that row and does not take from it
     await pushSale(d, saleOf(d, BOX));
     expect(await noBatch(d)).toBe(-6 * BOX);

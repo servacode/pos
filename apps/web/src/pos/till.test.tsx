@@ -200,6 +200,58 @@ describe('«مرتجع»: an invoice of another till, and the exchange', () => {
     expect(ret.doc.payload).toMatchObject({ saleId: remote.id, saleNumber: 'INV-001-009-0000042' });
   });
 
+  it('finds the invoices of the whole store by the customer’s phone, then opens the one picked', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    let remote: InvoiceLookup | null = null;
+    const staff = staffServer();
+    const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href.startsWith('/v1/device/invoices/lookup')) {
+        const q = new URL(href, 'http://x').searchParams.get('q');
+        return remote && q === remote.number
+          ? new Response(JSON.stringify(remote), { status: 200 })
+          : new Response(JSON.stringify({ error: { code: 'not_found', message: 'لا' } }), { status: 404 });
+      }
+      if (href.startsWith('/v1/device/invoices/search')) {
+        return new Response(
+          JSON.stringify({
+            invoices: [
+              {
+                id: remote!.id,
+                number: remote!.number,
+                deviceTime: remote!.deviceTime,
+                customerName: 'ريم',
+                customerPhone: '+963933333333',
+                totalMinor: 50_000,
+                currency: 'SYP',
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return staff(url, init);
+    }) as unknown as typeof fetch;
+    const { user, outbox } = renderPos({ local, fetch: fetchFn });
+    await signIn(user);
+    await sellTwoOils(user);
+    const mine = outbox.find((e) => e.type === 'sale')!;
+    remote = {
+      id: '0192a000-0000-7000-8000-0000000000bb',
+      number: 'INV-001-009-0000043',
+      deviceTime: new Date().toISOString(),
+      payload: mine.doc.payload,
+      returned: [],
+    };
+    await user.keyboard('{Alt>}r{/Alt}');
+    await screen.findByRole('heading', { name: 'مرتجع' });
+    await user.type(screen.getByLabelText('رقم الفاتورة'), '0933333333{Enter}');
+    const list = await screen.findByRole('list', { name: 'فواتير المحل' });
+    await user.click(within(list).getByRole('button', { name: /INV-001-009-0000043/ }));
+    expect(await screen.findByRole('heading', { name: /INV-001-009-0000043/ })).toBeInTheDocument();
+  });
+
   it('says so when the invoice is not in the store, and when the till is offline', async () => {
     const local = memoryLocal();
     await openShift(local);
@@ -348,11 +400,12 @@ describe('closing the shift', () => {
     await screen.findByText('عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.');
     // The first note is picked: the digits typed on the keyboard go into it
     await user.keyboard('3');
-    expect(screen.getByLabelText('عدد أوراق 500 ل.س')).toHaveValue('3');
+    const first = () => screen.getAllByLabelText(/^عدد أوراق/)[0]!;
+    expect(first()).toHaveValue('3');
     await user.keyboard('{Backspace}');
-    expect(screen.getByLabelText('عدد أوراق 500 ل.س')).toHaveValue('');
+    expect(first()).toHaveValue('');
     await user.keyboard('٤');
-    expect(screen.getByLabelText('عدد أوراق 500 ل.س')).toHaveValue('4');
+    expect(first()).toHaveValue('4');
     await user.click(screen.getByRole('button', { name: 'تابع للملخّص' }));
     await user.click(await screen.findByRole('button', { name: 'أغلق الوردية' }));
     await user.click(screen.getByRole('button', { name: 'لا، ارجع' }));
@@ -363,7 +416,7 @@ describe('closing the shift', () => {
     expect(z).toHaveTextContent('المتوقع');
     expect(z).toHaveTextContent('الفرق');
     const close = outbox.find((e) => e.type === 'shift_close')!.doc.payload as unknown as ShiftClosePayload;
-    expect(close.cash[0]).toMatchObject({ countedMinor: 200_000 });
+    expect(close.cash[0]).toMatchObject({ countedMinor: 2_000_000 });
   });
 
   it('sums returns, gift vouchers and drawer movements of the shift for the report', () => {

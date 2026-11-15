@@ -57,6 +57,7 @@ export function VariantPicker({
   return (
     <SalePanel
       label={`اختر من ${name}`}
+      className="mx-auto w-full max-w-3xl"
       title={name}
       subtitle={
         <>
@@ -68,12 +69,12 @@ export function VariantPicker({
           <img
             src={image}
             alt=""
-            className="size-14 shrink-0 rounded-control bg-surface-muted object-cover"
+            className="size-20 shrink-0 rounded-control bg-surface-muted object-cover"
           />
         ) : (
           <span
             aria-hidden="true"
-            className="grid size-14 shrink-0 place-items-center rounded-control bg-brand-soft text-2xl font-bold text-brand-ink"
+            className="grid size-20 shrink-0 place-items-center rounded-control bg-brand-soft text-3xl font-bold text-brand-ink"
           >
             {Array.from(name.trim())[0] ?? ''}
           </span>
@@ -110,70 +111,74 @@ export function VariantPicker({
         </Button>
       }
     >
-      {options.map((option) => (
-        <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-3">
-          <p className="flex items-center gap-2 text-sm font-semibold text-ink-muted">
-            {option.name}
-            {chosen[option.name] ? (
-              <span className="font-normal text-ink-subtle">· {chosen[option.name]}</span>
-            ) : null}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {option.values.map((value) => {
-              const on = chosen[option.name] === value;
-              const possible = canChoose(pieces, { ...chosen, [option.name]: value }, option.name, value);
-              const left = stockFor(pieces, chosen, option.name, value, inCart);
-              const stockId = `${idBase}-${option.name}-${value}`;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={on}
-                  aria-label={value}
-                  aria-describedby={left === null || !possible ? undefined : stockId}
-                  disabled={!possible}
-                  onClick={() => choose(option.name, value)}
-                  className={cn(
-                    'min-h-14 min-w-16 rounded-small border px-4 text-lg font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
-                    on
-                      ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
-                      : possible
-                        ? 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted'
-                        : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
-                  )}
-                >
-                  <span aria-hidden="true" className="flex flex-col items-center leading-tight">
-                    <span className="flex items-center gap-2">
-                      {isColourOption(option.name) && swatchOf(value) ? (
+      {options.map((option) => {
+        // The count shows once: under the sizes (or the only option), not again under every colour
+        const showStock = options.length === 1 || !isColourOption(option.name);
+        return (
+          <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-3">
+            <p className="flex items-center gap-2 text-sm font-semibold text-ink-muted">
+              {option.name}
+              {chosen[option.name] ? (
+                <span className="font-normal text-ink-subtle">· {chosen[option.name]}</span>
+              ) : null}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {option.values.map((value) => {
+                const on = chosen[option.name] === value;
+                const possible = canChoose(pieces, { ...chosen, [option.name]: value }, option.name, value);
+                const left = stockFor(pieces, chosen, option.name, value, inCart);
+                const stockId = `${idBase}-${option.name}-${value}`;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={on}
+                    aria-label={value}
+                    aria-describedby={left === null || !possible ? undefined : stockId}
+                    disabled={!possible}
+                    onClick={() => choose(option.name, value)}
+                    className={cn(
+                      'min-h-14 min-w-16 rounded-small border px-4 text-lg font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
+                      on
+                        ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
+                        : possible
+                          ? 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted'
+                          : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
+                    )}
+                  >
+                    <span aria-hidden="true" className="flex flex-col items-center leading-tight">
+                      <span className="flex items-center gap-2">
+                        {isColourOption(option.name) && swatchOf(value) ? (
+                          <span
+                            className="size-4 shrink-0 rounded-full border border-line-control/60"
+                            style={{ backgroundColor: swatchOf(value)! }}
+                          />
+                        ) : null}
+                        {value}
+                      </span>
+                      {left !== null && possible && showStock ? (
                         <span
-                          className="size-4 shrink-0 rounded-full border border-line-control/60"
-                          style={{ backgroundColor: swatchOf(value)! }}
-                        />
+                          className={cn(
+                            'num text-xs font-medium',
+                            left <= 0 ? 'text-danger-ink' : 'text-ink-subtle',
+                          )}
+                        >
+                          {left <= 0 ? 'نفد' : formatQuantity(left, digits)}
+                        </span>
                       ) : null}
-                      {value}
                     </span>
                     {left !== null && possible ? (
-                      <span
-                        className={cn(
-                          'num text-xs font-medium',
-                          left <= 0 ? 'text-danger-ink' : 'text-ink-subtle',
-                        )}
-                      >
-                        {left <= 0 ? 'نفد' : formatQuantity(left, digits)}
+                      <span id={stockId} className="sr-only">
+                        {left <= 0 ? 'نفد' : `المتوفر ${formatQuantity(left, digits)}`}
                       </span>
                     ) : null}
-                  </span>
-                  {left !== null && possible ? (
-                    <span id={stockId} className="sr-only">
-                      {left <= 0 ? 'نفد' : `المتوفر ${formatQuantity(left, digits)}`}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </SalePanel>
   );
 }

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Checkbox, Radio, RadioGroup } from './Checkbox';
 import { ChoiceCard } from './ChoiceCard';
 import { FieldGroup } from './FieldGroup';
-import { canonicalNumber, displayNumber, MoneyField, NumberField } from './NumberField';
+import { canonicalNumber, displayNumber, isolateNegative, MoneyField, NumberField } from './NumberField';
 import { PasswordField } from './PasswordField';
 import { SearchField } from './SearchField';
 import { Select } from './Select';
@@ -158,7 +158,7 @@ describe('canonicalNumber', () => {
 describe('displayNumber', () => {
   it('groups thousands in the store digits', () => {
     expect(displayNumber('1250000.5', 'latn')).toBe('1,250,000.5');
-    expect(displayNumber('-1250.5', 'arab')).toBe('−١٬٢٥٠٫٥');
+    expect(displayNumber('1250.5', 'arab')).toBe('١٬٢٥٠٫٥');
   });
 });
 
@@ -418,5 +418,17 @@ describe('ToggleChip', () => {
   it('is at least the density control height', () => {
     renderUi(<ToggleChip label="سفري" />, { density: 'touch' });
     expect(screen.getByText('سفري').closest('label')).toHaveClass('min-h-14');
+  });
+});
+
+describe('isolateNegative', () => {
+  it('wraps a minus and its digits in a left-to-right isolate with a true minus', () => {
+    expect(isolateNegative('-5')).toBe('⁦−5⁩');
+    expect(isolateNegative('−5')).toBe('⁦−5⁩');
+    expect(isolateNegative('5')).toBe('5');
+  });
+  it('makes displayNumber of a negative one isolated unit in both digit styles', () => {
+    expect(displayNumber('-1250.5', 'arab')).toBe('⁦−١٬٢٥٠٫٥⁩');
+    expect(displayNumber('-3', 'latn')).toBe('⁦−3⁩');
   });
 });

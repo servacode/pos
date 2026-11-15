@@ -26,13 +26,40 @@ describe('the search box finds records as well as pages', () => {
       },
     });
     const { user } = renderApp('/products');
-    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن صفحة' }))[0]!);
+    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
     const box = await screen.findByRole('textbox', { name: 'اسم الصفحة' });
     await user.type(box, 'ش');
     expect(requests.some((r) => r.path.startsWith('/v1/products?q='))).toBe(false);
     await user.type(box, 'اش');
     expect(await screen.findByRole('button', { name: /شاش طبي/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: /مشفى الشاش/ })).toBeInTheDocument());
+  });
+});
+
+describe('the search box finds purchase invoices', () => {
+  it('lists a PUR number with its supplier and opens the purchases list on it', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: meWith(['purchases.manage']) },
+      'GET /v1/suppliers': { status: 200, body: { items: [] } },
+      'GET /v1/purchases': {
+        status: 200,
+        body: {
+          items: [
+            { id: 'u-1', number: 'PUR-000012', supplierName: 'مورد الشفاء', reference: null },
+            { id: 'u-2', number: 'PUR-000013', supplierName: 'مورد آخر', reference: 'ABC' },
+          ],
+          baseCurrency: 'SYP',
+        },
+      },
+      'GET /v1/inventory/recall?batchNo=PUR-000012': { status: 200, body: { batches: [] } },
+    });
+    const { user } = renderApp('/products');
+    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
+    await user.type(await screen.findByRole('textbox', { name: 'اسم الصفحة' }), 'PUR-000012');
+    const hit = await screen.findByRole('button', { name: /PUR-000012/ });
+    expect(hit).toHaveTextContent('مورد الشفاء');
+    expect(screen.queryByRole('button', { name: /PUR-000013/ })).not.toBeInTheDocument();
   });
 });
 

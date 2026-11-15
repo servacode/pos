@@ -16,6 +16,7 @@ import {
   PageHeader,
   SegmentedControl,
   Skeleton,
+  KpiStrip,
   StatTile,
   TextField,
   useDigits,
@@ -23,6 +24,7 @@ import {
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { recallAnswer, rememberAnswer } from '../reports/useReport';
 import { createStocktake, createSupplierReturn, listExpiry, qtyOf, setBatchBlocked, today } from './api';
 import { SectionHead } from './parts';
 
@@ -58,7 +60,8 @@ const ACTION_TITLE: Record<Action['kind'], string> = {
 export function ExpiryPage() {
   const digits = useDigits();
   const [days, setDays] = useState<'30' | '90' | '180'>('90');
-  const [data, setData] = useState<ExpiryResponse | null>(null);
+  // The last answer stays on screen while the new one loads, so the page never opens blank
+  const [data, setData] = useState<ExpiryResponse | null>(() => recallAnswer<ExpiryResponse>('expiry|90'));
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [urgency, setUrgency] = useState<Urgency>('all');
@@ -71,8 +74,13 @@ export function ExpiryPage() {
 
   const load = useCallback(() => {
     setError(null);
+    const key = `expiry|${days}`;
+    setData((now) => recallAnswer<ExpiryResponse>(key) ?? now);
     listExpiry(Number(days))
-      .then(setData)
+      .then((answer) => {
+        rememberAnswer(key, answer);
+        setData(answer);
+      })
       .catch((e: unknown) => setError(errorMessage(e)));
   }, [days]);
   useEffect(load, [load]);
@@ -281,7 +289,7 @@ export function ExpiryPage() {
         />
         {error && !action ? <Alert tone="error">{error}</Alert> : null}
         {done ? <Alert tone="success">{done}</Alert> : null}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <KpiStrip columns={3}>
           <StatTile
             label="منتهية"
             value={count(expired.length)}
@@ -297,7 +305,7 @@ export function ExpiryPage() {
             value={count(month.length)}
             footnote={month[0] ? `أقربها: ${month[0].name}` : data ? 'لا شيء هذا الشهر' : undefined}
           />
-        </div>
+        </KpiStrip>
         <section aria-label="الدفعات" className="flex flex-col gap-3">
           <SectionHead
             title="الدفعات"

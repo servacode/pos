@@ -181,12 +181,14 @@ const PULL_SETS: Record<string, PullSet> = {
       nearestExpiry: variants.nearestExpiry,
       shelfBatches: variants.shelfBatches,
       // Its colour's picture (or any option value it has) first, else the product's main one
+      // The columns are written with their table: a single-table select prints them bare, and inside
+      // this subquery a bare product_id means the picture's own (so any product got the first picture)
       imageUrl: sql<string | null>`(
         select '/v1/images/' || i.tenant_id || '/' || i.upload_id || '?size=thumb'
         from product_images i
-        where i.tenant_id = ${variants.tenantId} and i.product_id = ${variants.productId}
+        where i.tenant_id = ${variants}."tenant_id" and i.product_id = ${variants}."product_id"
           and (i.option_value is null
-               or exists (select 1 from jsonb_array_elements(${variants.attributes}) a
+               or exists (select 1 from jsonb_array_elements(${variants}."attributes") a
                           where a ->> 'value' = i.option_value))
         order by (i.option_value is null), i.sort_order, i.created_at
         limit 1)`,

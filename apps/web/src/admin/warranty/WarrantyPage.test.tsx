@@ -106,6 +106,18 @@ describe('«الضمان والصيانة»', () => {
     expect(await screen.findByText('هذا الرقم التسلسلي غير موجود في المحل.')).toBeInTheDocument();
   });
 
+  it('offers only the steps that make sense: delivery waits until the claim is ready', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: manager() }),
+      'GET /v1/warranty/claims?status=open': () => ({ status: 200, body: { items: [claim()] } }),
+    });
+    renderApp('/warranty');
+    expect(await screen.findByRole('button', { name: 'صارت جاهزة' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'أُرسلت للمورد أو الصيانة' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'سُلّمت للزبون' })).toBeDisabled();
+  });
+
   it('moves a claim to the supplier with where it went, then prints its slip', async () => {
     const print = vi.spyOn(window, 'print').mockImplementation(() => {});
     const sent = claim({

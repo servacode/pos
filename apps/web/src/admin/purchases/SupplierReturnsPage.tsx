@@ -31,6 +31,7 @@ import {
   type Icon,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { dayText } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, ApiError, errorMessage } from '../../lib/api';
 import { listSuppliers, moneyOf, qtyOf, today } from './api';
@@ -196,7 +197,7 @@ export function SupplierReturnsPage() {
       key: 'date',
       className: 'whitespace-nowrap',
       header: 'التاريخ',
-      cell: (r) => <span className="num text-ink-muted">{r.date}</span>,
+      cell: (r) => <span className="whitespace-nowrap text-ink-muted">{dayText(r.date, digits)}</span>,
     },
     { key: 'supplier', className: 'whitespace-nowrap', header: 'المورد', cell: (r) => r.supplierName },
     {

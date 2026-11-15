@@ -1,5 +1,5 @@
 import type { Digits } from '../context';
-import { displayNumber } from '../NumberField';
+import { displayNumber, isolateNegative } from '../NumberField';
 
 /** Bidi controls (formatMoney wraps an amount in isolates): invisible, so never counted in a width. */
 const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
@@ -9,16 +9,8 @@ export function isValue(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-const LRI = '\u2066';
-const PDI = '\u2069';
-
-/**
- * A minus with its digits, kept left to right: alone in an Arabic line a leading «−» would jump to
- * the far side («300−»). formatMoney isolates its amounts the same way.
- */
-function negative(text: string): string {
-  return `${LRI}−${text}${PDI}`;
-}
+/** A minus with its digits, kept left to right («300−» otherwise): the shared isolate. */
+const negative = (text: string): string => isolateNegative(`-${text}`);
 
 /** A number in the store's digits, grouped, up to two decimals: «1,250», «2.5», «−300». */
 export function formatNumber(value: number, digits: Digits): string {

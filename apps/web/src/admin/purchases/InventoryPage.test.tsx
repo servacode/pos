@@ -48,6 +48,9 @@ describe('«سجّل هدراً» (03 › الخضار والمخابز)', () =>
       }),
     });
     const { user } = renderApp('/inventory');
+    // The form is in a window opened by its own button, not the first block of the page
+    expect(screen.queryByRole('form', { name: 'سجّل هدراً' })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'سجّل هدراً' }));
     const form = await screen.findByRole('form', { name: 'سجّل هدراً' });
     await user.selectOptions(within(form).getByLabelText('الصنف التالف'), 'b-1:v-1');
     await user.type(within(form).getByLabelText('كمية الهدر'), '2.5');
@@ -164,5 +167,56 @@ describe('شبكة المقاس واللون في المخزون', () => {
     expect(within(grid).getByRole('rowheader', { name: 'L' })).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'قائمة' }));
     expect(await screen.findByRole('table', { name: 'المخزون' })).toBeInTheDocument();
+  });
+});
+
+describe('a clothing shop’s inventory', () => {
+  it('opens on the size × colour grids, thinnest model first, with row and column totals', async () => {
+    const piece = (id: string, product: string, size: string, color: string, qty: number) => ({
+      variantId: id,
+      productId: product,
+      productName: product === 'p-1' ? 'قميص' : 'بنطال',
+      name: `${product} ${size} ${color}`,
+      attributes: [
+        { name: 'المقاس', value: size },
+        { name: 'اللون', value: color },
+      ],
+      branchId: 'b-1',
+      qty,
+      valueMinor: 0,
+      unitCostMinor: 0,
+    });
+    const base = owner();
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({
+        status: 200,
+        body: { ...base, tenant: { ...base.tenant, sectors: ['clothing'] } },
+      }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          ...stock,
+          items: [
+            piece('a', 'p-1', 'S', 'أحمر', 3000),
+            piece('b', 'p-1', 'M', 'أحمر', 4000),
+            piece('c', 'p-1', 'S', 'أزرق', 1000),
+            piece('d', 'p-1', 'M', 'أزرق', 2000),
+            piece('e', 'p-2', 'S', 'أسود', 0),
+            piece('f', 'p-2', 'M', 'أسود', 9000),
+          ],
+        } satisfies InventoryResponse,
+      }),
+    });
+    renderApp('/inventory');
+    const grids = await screen.findAllByRole('region', { name: /شبكة/ });
+    // «بنطال» has a size at zero: it comes first
+    expect(grids[0]).toHaveAccessibleName('شبكة بنطال');
+    const shirt = within(screen.getByRole('region', { name: 'شبكة قميص' }));
+    // Totals: the S row 3 + 1, the whole grid 10
+    expect(shirt.getAllByText('المجموع').length).toBeGreaterThan(0);
+    expect(shirt.getByText('10')).toBeInTheDocument();
+    // 4 is a cell (M red) and also the S row's total
+    expect(shirt.getAllByText('4')).toHaveLength(2);
   });
 });

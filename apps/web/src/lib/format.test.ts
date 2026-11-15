@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstName, formatDays } from './format';
+import { firstName, formatDays, formatNumber } from './format';
 
 describe('formatDays', () => {
   it.each([
@@ -31,5 +31,18 @@ describe('firstName', () => {
     expect(firstName('عبدالله العلي')).toBe('عبدالله');
     // Nothing after the prefix: the prefix alone is all there is
     expect(firstName('أبو')).toBe('أبو');
+  });
+});
+
+describe('formatNumber negatives', () => {
+  it('keeps a negative as one isolated unit with a true minus', () => {
+    const text = formatNumber(-1250);
+    expect(text.startsWith('⁦')).toBe(true);
+    expect(text.endsWith('⁩')).toBe(true);
+    expect(text).toContain('−');
+    expect(text.replace(/[⁦⁩]/g, '')).toMatch(/^−?.*1,250$/);
+  });
+  it('leaves a positive alone', () => {
+    expect(formatNumber(1250)).toBe('1,250');
   });
 });

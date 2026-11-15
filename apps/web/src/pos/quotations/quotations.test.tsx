@@ -144,12 +144,14 @@ describe('the quote button', () => {
     await signIn(user);
     await scan(user, sugar.barcode!.code);
     await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
+    await user.click(await screen.findByRole('button', { name: 'احفظ واطبع' }));
 
     await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
     expect(printed).toContain('QUO-2026-000009');
     expect(printed).toContain('صالح حتى');
     expect(printed).not.toContain('لم يُحفظ');
     expect(sent[0]).toMatchObject({ url: '/v1/device/quotations', method: 'POST' });
+    expect(sent[0]!.body).toMatchObject({ status: 'sent' });
     expect((sent[0]!.body as { lines: Record<string, unknown>[] }).lines[0]).toMatchObject({
       variantId: sugar.variant.id,
       qty: 1000,
@@ -166,9 +168,30 @@ describe('the quote button', () => {
     await signIn(user);
     await scan(user, sugar.barcode!.code);
     await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
+    await user.click(await screen.findByRole('button', { name: 'احفظ واطبع' }));
     await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
     expect(printed).toContain('لم يُحفظ في النظام');
     expect(printed).not.toContain('QUO-');
+  });
+
+  it('keeps a draft with the details typed, and prints nothing', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const { fetch, sent } = server([]);
+    const { user } = renderPos({ local, fetch });
+    await signIn(user);
+    await scan(user, sugar.barcode!.code);
+    await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
+    await user.type(await screen.findByLabelText('اسم الزبون (اختياري)'), 'مطعم الشام');
+    await user.type(screen.getByLabelText('ملاحظة (اختياري)'), 'يشمل التوصيل');
+    await user.click(screen.getByRole('button', { name: 'احفظ كمسوّدة' }));
+    await screen.findByText(/حُفظ عرض السعر QUO-2026-000009 كمسوّدة/);
+    expect(window.print).not.toHaveBeenCalled();
+    expect(sent[0]!.body).toMatchObject({
+      status: 'draft',
+      customerName: 'مطعم الشام',
+      notes: 'يشمل التوصيل',
+    });
   });
 });
 

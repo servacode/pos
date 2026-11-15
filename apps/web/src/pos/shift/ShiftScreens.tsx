@@ -375,6 +375,7 @@ export function ShiftCloseScreen({
     baseCurrency: settings.baseCurrency,
     storeName: settings.storeName || pos.device.storeName,
     showDifference: canSeeDifference,
+    sellerNames: new Map(catalog.staff.users.map((u) => [u.id, u.fullName])),
   });
 
   // Display only: «الصافي» is what stayed in the drawer from payments, the cash paid back for returns taken off
@@ -399,7 +400,7 @@ export function ShiftCloseScreen({
     { key: 'count', header: 'دفعات', numeric: true, cell: (row) => row.count },
     {
       key: 'amount',
-      header: 'الصافي',
+      header: 'الصافي بعد المرتجعات',
       numeric: true,
       cell: (row) => <Money minor={row.amountMinor} currency={row.currency} className="font-semibold" />,
     },
@@ -478,8 +479,20 @@ export function ShiftCloseScreen({
                 <EmptyState icon={SalesIcon} title="لا مبيعات في هذه الوردية." className="border-0 py-8" />
               }
             />
-            {activity && (activity.returns.count > 0 || activity.vouchers.count > 0) ? (
+            {activity &&
+            (activity.returns.count > 0 || activity.vouchers.count > 0 || activity.saleCount > 0) ? (
               <ul aria-label="مرتجعات وقسائم" className="flex flex-col gap-1 text-sm text-ink-muted">
+                {/* The same figures the closing slip opens with, so the two agree */}
+                {activity.salesTotals.map((t) => (
+                  <li key={t.currency} className="flex flex-wrap items-center gap-x-1">
+                    إجمالي المبيعات: <Money minor={t.totalMinor} currency={t.currency} className="text-ink" />
+                    {t.discountMinor > 0 ? (
+                      <>
+                        {' · '}منها خصومات <Money minor={t.discountMinor} currency={t.currency} />
+                      </>
+                    ) : null}
+                  </li>
+                ))}
                 {activity.returns.count > 0 ? (
                   <li>
                     المرتجعات:{' '}

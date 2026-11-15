@@ -4,6 +4,7 @@ import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
 import { daysAgo } from '../admin/reports/MerchandisePage';
+import { clearReportCache } from '../admin/reports/useReport';
 import { dayReport, meWith, OWNER_KEYS, TODAY, NOW } from '../test/reports';
 
 /** The first day of the week the home page asks the sales report for: six days before */
@@ -57,6 +58,8 @@ describe('HomePage', () => {
 
   describe('the dashboard', () => {
     beforeEach(() => {
+      // The last answers are kept per screen: one test must not open with another's numbers
+      clearReportCache();
       vi.useFakeTimers({ toFake: ['Date'] });
       vi.setSystemTime(NOW);
     });
@@ -231,6 +234,85 @@ describe('HomePage', () => {
       expect(await within(sales).findAllByText('لا بيانات قبل اليوم')).toHaveLength(1);
       expect(within(sales).queryByText('آخر 7 أيام')).not.toBeInTheDocument();
       expect(screen.queryByText('اتجاه المبيعات')).not.toBeInTheDocument();
+    });
+
+    it('says «لا مبيعات بعد» on a morning with no sale instead of a red fall of 100%', async () => {
+      const routes: Parameters<typeof mockFetch>[0] = {
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: {
+          status: 200,
+          body: dayReport({ totalMinor: 0, invoiceCount: 0, topProducts: [], byMethod: [] }),
+        },
+      };
+      for (const back of [1, 2, 3, 4, 5, 6])
+        routes[`GET /v1/reports/day?date=2026-10-${String(31 - back).padStart(2, '0')}`] = {
+          status: 200,
+          body: dayReport({ totalMinor: 1_000_000 }),
+        };
+      mockFetch(routes);
+      renderApp('/');
+
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      expect(await within(sales).findByText('لا مبيعات بعد')).toBeInTheDocument();
+      expect(within(sales).queryByText('100%', { exact: false })).not.toBeInTheDocument();
+      expect(within(sales).queryByText('عن أمس', { exact: false })).not.toBeInTheDocument();
+    });
+
+    it('draws no trend card or sparklines while fewer than three days have sold', async () => {
+      const routes: Parameters<typeof mockFetch>[0] = {
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({ totalMinor: 1_500_000 }) },
+        'GET /v1/reports/day?date=2026-10-30': { status: 200, body: dayReport({ totalMinor: 1_000_000 }) },
+      };
+      for (const back of [2, 3, 4, 5, 6])
+        routes[`GET /v1/reports/day?date=2026-10-${String(31 - back).padStart(2, '0')}`] = {
+          status: 200,
+          body: dayReport({ totalMinor: 0, invoiceCount: 0 }),
+        };
+      mockFetch(routes);
+      renderApp('/');
+
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      await within(sales).findByText('الفواتير');
+      await within(sales).findAllByText('عن أمس', { exact: false }, { timeout: 5000 });
+      expect(screen.queryByText('اتجاه المبيعات')).not.toBeInTheDocument();
+      expect(within(sales).queryByRole('img')).not.toBeInTheDocument();
+    });
+
+    it('names a short size once, with «ناقص» linking to the stock count', async () => {
+      const me = meWith([...OWNER_KEYS, 'catalog.manage']);
+      const low = {
+        variantId: 'v-1',
+        productId: 'p-1',
+        name: 'قميص كتان',
+        label: 'M · أبيض',
+        attributes: [
+          { name: 'المقاس', value: 'M' },
+          { name: 'اللون', value: 'أبيض' },
+        ],
+        stockQty: -11_000,
+        soldQty: 6000,
+        minStockQty: null,
+      };
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: { ...me, tenant: { ...me.tenant, sectors: ['clothing'] } } },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
+          status: 200,
+          body: { lowStock: [low] },
+        },
+      });
+      renderApp('/');
+
+      const row = await screen.findByRole('link', { name: /من قميص كتان/ });
+      expect(row).toHaveAttribute('href', '/inventory');
+      expect(row).toHaveTextContent('ناقص 11');
+      // It is not listed a second time under «يوشك على النفاد»
+      expect(screen.queryByText('يوشك على النفاد')).not.toBeInTheDocument();
+      expect(screen.getAllByText('ناقص 11')).toHaveLength(1);
     });
 
     it('greets «أبو» and «أم» names whole', async () => {

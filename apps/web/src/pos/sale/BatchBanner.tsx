@@ -16,6 +16,8 @@ export function BatchBanner(props: {
   onApprove: () => void;
 }) {
   const { fmt } = props;
+  // What can be sold, when expired or blocked batches are left out of the count
+  const have = (i: StockIssue) => (i.validOnly ? 'الموجود الصالح' : 'الموجود');
   const why = (i: BatchIssue) =>
     i.expiredQty > 0 || i.blockedQty > 0
       ? ` (${[i.expiredQty > 0 ? 'دفعات منتهية' : '', i.blockedQty > 0 ? 'دفعات موقوفة' : ''].filter(Boolean).join(' و')} لا تُباع)`
@@ -37,12 +39,12 @@ export function BatchBanner(props: {
     ...props.stockBlocks.map((i) => ({
       tone: 'danger' as const,
       key: `s${i.variantId}`,
-      text: `«${i.name}»: الموجود ${fmt(i.onHand)} فقط والمطلوب ${fmt(i.wanted)}. لا يُباع فوق المخزون.`,
+      text: `«${i.name}»: ${have(i)} ${fmt(i.onHand)} فقط والمطلوب ${fmt(i.wanted)}. لا يُباع فوق المخزون.`,
     })),
     ...props.stockWarns.map((i) => ({
       tone: 'warning' as const,
       key: `w${i.variantId}`,
-      text: `«${i.name}»: الموجود ${fmt(i.onHand)} فقط والمطلوب ${fmt(i.wanted)}.`,
+      text: `«${i.name}»: ${have(i)} ${fmt(i.onHand)} فقط والمطلوب ${fmt(i.wanted)}.`,
     })),
   ];
   if (rows.length === 0) return null;

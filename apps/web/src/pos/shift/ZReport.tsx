@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import type { CashMovementKind, ShiftCloseCash } from '@serva/core/contracts/documents';
 import { cn, Money, useDigits } from '@serva/ui';
 import { clockText, counted, dateText, INVOICES } from '../format';
-import type { OpenShift, ShiftActivity } from './shift';
+import { netMethodRows, type OpenShift, type ShiftActivity } from './shift';
 
 const METHOD_NAMES: Record<string, string> = {
   cash: 'نقد',
@@ -59,6 +59,7 @@ export function ZReport({
   baseCurrency,
   storeName,
   showDifference,
+  sellerNames,
 }: {
   shift: OpenShift;
   closedAt: number;
@@ -68,6 +69,8 @@ export function ZReport({
   baseCurrency: string;
   storeName: string;
   showDifference: boolean;
+  /** Who sold: user id → name, for the sellers section */
+  sellerNames?: ReadonlyMap<string, string>;
 }) {
   const digits = useDigits();
   const methodName = (method: string, currency: string) =>
@@ -100,6 +103,18 @@ export function ZReport({
         <Line label="عدد الفواتير" strong>
           {counted(activity.saleCount, INVOICES, digits)}
         </Line>
+        {activity.salesTotals.map((t) => (
+          <Fragment key={t.currency}>
+            <Line label="إجمالي المبيعات" strong>
+              <Money minor={t.totalMinor} currency={t.currency} />
+            </Line>
+            {t.discountMinor > 0 ? (
+              <Line label="منها خصومات">
+                <Money minor={t.discountMinor} currency={t.currency} />
+              </Line>
+            ) : null}
+          </Fragment>
+        ))}
         {activity.byMethod.map((row) => (
           <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
             <Money minor={row.amountMinor} currency={row.currency} />
@@ -114,6 +129,33 @@ export function ZReport({
           </Line>
         ))}
       </Section>
+      {activity.returns.count > 0 ? (
+        // The same figures as the closing summary: payments less the cash paid back for returns
+        <Section title="الصافي بعد المرتجعات">
+          {netMethodRows(activity).map((row) => (
+            <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
+              <Money minor={row.amountMinor} currency={row.currency} />
+            </Line>
+          ))}
+        </Section>
+      ) : null}
+      {activity.bySeller.length > 1 ||
+      activity.bySeller.some((r) => sellerNames?.get(r.sellerId) !== shift.openedByName) ? (
+        <Section title="البائعون">
+          {activity.bySeller.map((r) => (
+            <Line
+              key={`${r.sellerId}:${r.currency}`}
+              label={
+                <>
+                  <bdi>{sellerNames?.get(r.sellerId) ?? 'بائع'}</bdi> · {counted(r.count, INVOICES, digits)}
+                </>
+              }
+            >
+              <Money minor={r.totalMinor} currency={r.currency} />
+            </Line>
+          ))}
+        </Section>
+      ) : null}
       <Section title="قسائم الهدية المباعة وعربون التأجير">
         <Line label="العدد">{counted(activity.vouchers.count, VOUCHERS, digits)}</Line>
         {activity.vouchers.byCurrency.map((row) => (

@@ -5,6 +5,7 @@ import { mockFetch, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
+import { recallAnswer } from '../reports/useReport';
 
 function owner(): MeResponse {
   const base = makeMe();
@@ -64,6 +65,13 @@ async function chooseMore(user: ReturnType<typeof renderApp>['user'], table: HTM
 }
 
 describe('«الصلاحية»', () => {
+  it('keeps the last answer, so the next visit opens with it instead of a blank skeleton', async () => {
+    server();
+    renderApp('/expiry');
+    await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
+    expect(recallAnswer<ExpiryResponse>('expiry|90')?.items).toHaveLength(2);
+  });
+
   it('lists the batches by expiry with what is really left, and narrows the window', async () => {
     const { requestsTo } = server();
     const { user } = renderApp('/expiry');

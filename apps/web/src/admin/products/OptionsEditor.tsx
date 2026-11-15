@@ -112,7 +112,9 @@ export const OptionsEditor = memo(function OptionsEditor({
   fashion = true,
 }: OptionsEditorProps) {
   const on = axes.length > 0;
-  const storeValues = useStoreValues(on);
+  // Once the pieces exist the pickers fold into a summary: a saved model is edited far less than it is read
+  const [editing, setEditing] = useState(variantCount <= 1);
+  const storeValues = useStoreValues(on && editing);
   return (
     <div className="flex flex-col gap-4">
       <Switch
@@ -121,7 +123,34 @@ export const OptionsEditor = memo(function OptionsEditor({
         checked={on}
         onCheckedChange={(checked) => onChange(checked ? defaultAxes() : [])}
       />
-      {on ? (
+      {on && !editing ? (
+        <div className="flex flex-col gap-3 rounded-control border border-line bg-surface-muted p-3">
+          {axes.map((axis) => (
+            <div key={axis.key} className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-ink-muted">{axis.name.trim() || 'الخاصية'}:</span>
+              <ul className="flex flex-wrap gap-1.5" aria-label={`قيم ${axis.name.trim() || 'الخاصية'}`}>
+                {axis.values.map((v) => (
+                  <li
+                    key={v}
+                    className="rounded-small bg-brand-soft px-2.5 py-0.5 text-sm font-semibold text-brand-ink"
+                  >
+                    {v}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-ink-muted" role="status">
+              {countNoun(variantCount, COUNT_NOUNS.variant)}
+            </p>
+            <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+              {fashion ? 'عدّل المقاسات والألوان' : 'عدّل الأنواع والخيارات'}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {on && editing ? (
         <>
           <div className="flex flex-col gap-3">
             {axes.map((axis, index) => (

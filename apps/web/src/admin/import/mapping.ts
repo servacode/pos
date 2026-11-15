@@ -29,7 +29,11 @@ export function fieldsFor(type: ImportType, sectors?: readonly SectorKey[]): Fie
       if (f.key === 'colour')
         return { ...f, label: 'الخيار 2', hint: 'اختياري: خيار ثانٍ للصنف، مثل اللون أو النوع' };
       if (f.key === 'model')
-        return { ...f, hint: 'اختياري: الصفوف التي لها رمز الموديل نفسه تصير منتجاً واحداً بخيارات' };
+        return {
+          ...f,
+          label: 'رمز المنتج',
+          hint: 'اختياري: الصفوف التي لها رمز المنتج نفسه تصير منتجاً واحداً بخيارات',
+        };
       return f;
     });
 }

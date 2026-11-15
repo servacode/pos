@@ -453,15 +453,28 @@ const ModelTile = memo(function ModelTile({
 function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: string }) {
   const digits = useDigits();
   const info = tileInfo(pieces, today);
-  if (info.stockQty === null && !info.expiry && !info.tracksSerial) return null;
+  const unsellable = info.expiredQty + info.blockedQty;
+  if (info.stockQty === null && !info.expiry && !info.tracksSerial && unsellable === 0) return null;
+  const nothingSellable = (info.stockQty ?? 0) <= 0;
+  const why = info.blockedQty === 0 ? 'منتهية' : info.expiredQty === 0 ? 'موقوفة' : 'غير صالحة';
   return (
     <>
       {info.stockQty !== null ? (
         <span
-          className={cn('num text-xs font-medium', info.stockQty <= 0 ? 'text-danger-ink' : 'text-ink-muted')}
+          className={cn('num text-xs font-medium', nothingSellable ? 'text-danger-ink' : 'text-ink-muted')}
         >
-          {info.stockQty <= 0 ? 'نفد' : `المتوفر ${formatQuantity(info.stockQty, digits)}`}
+          {nothingSellable ? 'نفد' : `المتوفر ${formatQuantity(info.stockQty, digits)}`}
         </span>
+      ) : null}
+      {/* Red only when nothing can be sold; otherwise a muted note of what is left out of the count */}
+      {unsellable > 0 ? (
+        nothingSellable ? (
+          <Badge tone="danger">{why}</Badge>
+        ) : (
+          <Badge tone="neutral">
+            منها {formatQuantity(unsellable, digits)} {why}
+          </Badge>
+        )
       ) : null}
       {info.expiry ? (
         <Badge tone={info.expiry.tone}>

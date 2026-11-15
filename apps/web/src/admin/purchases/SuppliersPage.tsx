@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import type { SupplierListResponse, SupplierRow } from '@serva/core';
 import {
+  AddIcon,
+  Alert,
   Badge,
+  Button,
   DataTable,
   Money,
   PageHeader,
@@ -13,9 +16,11 @@ import {
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { dayText } from '../../lib/dates';
 import { errorMessage } from '../../lib/api';
 import { ReportScreen } from '../reports/parts';
 import { listSuppliers } from './api';
+import { SupplierForm } from './PurchasesPage';
 
 /**
  * «الموردون»: every supplier with what the store owes them, each linked to their statement. New
@@ -27,6 +32,9 @@ export function SuppliersPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [owed, setOwed] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const digits = me.settings.numberFormat;
 
   const load = useCallback(() => {
     setError(null);
@@ -79,6 +87,29 @@ export function SuppliersPage() {
         ),
     },
     {
+      key: 'last',
+      header: 'آخر شراء',
+      className: 'hidden md:table-cell',
+      cell: (s) =>
+        s.lastPurchaseOn ? (
+          <span className="whitespace-nowrap text-ink-muted">{dayText(s.lastPurchaseOn, digits)}</span>
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        ),
+    },
+    {
+      key: 'total',
+      header: 'مشترياتنا منه',
+      numeric: true,
+      className: 'hidden md:table-cell',
+      cell: (s) =>
+        s.purchasesTotalMinor ? (
+          <Money minor={s.purchasesTotalMinor} currency={base} className="text-ink-muted" />
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        ),
+    },
+    {
       key: 'balance',
       header: 'له عليك',
       numeric: true,
@@ -102,9 +133,15 @@ export function SuppliersPage() {
     <ReportScreen me={me} access={['purchases.manage']} title="الموردون">
       <PageHeader
         title="الموردون"
-        description="من تشتري منهم، وكم لهم عليك. لإضافة مورد أو تسجيل دفعة افتح «المشتريات»."
+        description="من تشتري منهم، وكم لهم عليك. لتسجيل دفعة افتح «المشتريات»."
         icon={<UserIcon />}
+        actions={
+          <Button icon={<AddIcon />} onClick={() => setAdding(true)}>
+            مورد جديد
+          </Button>
+        }
       />
+      {notice ? <Alert tone="success">{notice}</Alert> : null}
       <StatTile
         label="ما عليك للموردين"
         icon={<UserIcon />}
@@ -128,6 +165,17 @@ export function SuppliersPage() {
         {...(error ? { error, onRetry: load } : {})}
         empty={<p className="p-4 text-ink-muted">لا موردين بهذا البحث.</p>}
       />
+      {adding ? (
+        <SupplierForm
+          suppliers={list?.items ?? []}
+          onSaved={() => {
+            setAdding(false);
+            setNotice('أُضيف المورد.');
+            load();
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : null}
     </ReportScreen>
   );
 }

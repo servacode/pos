@@ -1,10 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { invoiceLookupQuery, saleListQuery, type SaleDetail, type SaleListPage } from '@serva/core';
+import {
+  invoiceLookupQuery,
+  invoiceSearchQuery,
+  saleListQuery,
+  type SaleDetail,
+  type SaleListPage,
+} from '@serva/core';
 import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
-import { lookupInvoice } from '../services/invoice-lookup';
+import { lookupInvoice, searchInvoices } from '../services/invoice-lookup';
 import { getSale, listSales } from '../services/sales';
 import { parseBody } from './validation';
 
@@ -24,6 +30,13 @@ export async function saleRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/device/invoices/lookup', { onRequest: requireDevice() }, async (request) => {
     if (!request.device) throw unauthorized();
     return lookupInvoice(db, request.device, parseBody(invoiceLookupQuery, request.query).q);
+  });
+
+  // …or finds recent ones by the customer's name, phone or the end of the number
+  app.get('/v1/device/invoices/search', { onRequest: requireDevice() }, async (request) => {
+    if (!request.device) throw unauthorized();
+    const { q, days } = parseBody(invoiceSearchQuery, request.query);
+    return searchInvoices(db, request.device, q, days);
   });
 
   app.get('/v1/sales/:id', signedIn, async (request): Promise<SaleDetail> => {

@@ -34,6 +34,7 @@ import {
   UndoIcon,
   useDigits,
 } from '@serva/ui';
+import type { InvoiceHit } from '@serva/core/contracts/till';
 import type { Catalog } from '../catalog';
 import { clockText, dateText } from '../format';
 import { fetchPurchases } from '../customers/CustomerHistory';
@@ -52,6 +53,7 @@ import {
   returnWindowOf,
   saleFromServer,
   searchInvoice,
+  searchInvoices,
   type ReturnableSale,
 } from './returns';
 
@@ -103,6 +105,7 @@ export function ReturnScreen({
   onBack,
   onPrint,
   onExchange,
+  startExchange = false,
 }: {
   session: StaffSession;
   catalog: Catalog;
@@ -112,6 +115,8 @@ export function ReturnScreen({
   onPrint: (saved: SavedReturn) => void;
   /** Back to the sale with the voucher just issued, to sell the other piece */
   onExchange?: (voucherCode: string | null, cashBackMinor?: number) => void;
+  /** Opened from «تبديل»: the exchange choice and its reason start picked */
+  startExchange?: boolean;
 }) {
   const pos = usePos();
   const digits = useDigits();
@@ -125,12 +130,20 @@ export function ReturnScreen({
   const [qty, setQty] = useState<Record<number, number>>({});
   // «العلبة مغلقة»: the sealed-box tick of a medicine line (03 › الصيدليات)
   const [sealed, setSealed] = useState<Record<number, boolean>>({});
-  const [reason, setReason] = useState<string>(REASONS[0]!);
+  const [reason, setReason] = useState<string>(
+    startExchange && REASONS.includes('تبديل') ? 'تبديل' : REASONS[0]!,
+  );
   // «استبدال»: the piece goes back on a voucher and the sale of the other piece follows at once
-  const [exchange, setExchange] = useState(false);
+  const [exchange, setExchange] = useState(startExchange);
   // «ردّ الفرق نقداً»: the piece's whole value leaves the drawer in cash and the other piece is paid in cash
   const [exchangeCash, setExchangeCash] = useState(false);
-  const [remote, setRemote] = useState<{ sale: ReturnableSale | null; note: string | null; busy: boolean }>({
+  const [remote, setRemote] = useState<{
+    sale: ReturnableSale | null;
+    note: string | null;
+    busy: boolean;
+    /** Invoices of the whole store that match the typed name, phone or number end */
+    hits?: readonly InvoiceHit[];
+  }>({
     sale: null,
     note: null,
     busy: false,
@@ -249,13 +262,27 @@ export function ReturnScreen({
     setRemote({ sale: null, busy: true, note: null });
     const result = await searchInvoice(typed, token, pos.fetch);
     if (result.found === null) {
+      if (result.reason === 'offline') {
+        setRemote({
+          sale: null,
+          busy: false,
+          note: 'تعذّر الوصول إلى المحل الآن: تظهر فواتير هذا الجهاز فقط.',
+        });
+        return;
+      }
+      // Not a whole number: look for the customer's name, phone or the end of the number across the store
+      const hits = await searchInvoices(typed, windowDays, token, pos.fetch);
+      if (hits && hits.length > 0) {
+        setRemote({ sale: null, busy: false, note: null, hits });
+        return;
+      }
       setRemote({
         sale: null,
         busy: false,
         note:
-          result.reason === 'missing'
-            ? 'لا فاتورة بهذا الرقم في المحل. اكتب الرقم كاملاً كما هو على الإيصال.'
-            : 'تعذّر الوصول إلى المحل الآن: تظهر فواتير هذا الجهاز فقط.',
+          hits === null
+            ? 'تعذّر الوصول إلى المحل الآن: تظهر فواتير هذا الجهاز فقط.'
+            : `لا فاتورة في المحل تطابق البحث في آخر ${daysText(windowDays)}.`,
       });
       return;
     }
@@ -266,6 +293,21 @@ export function ReturnScreen({
         busy: false,
         note: `الفاتورة أقدم من ${daysText(windowDays)}، فلا يُقبل مرتجعها.`,
       });
+      return;
+    }
+    setRemote({ sale, busy: false, note: null });
+    choose(sale);
+  }
+
+  /** One of the store's matching invoices: the full invoice is fetched by its number, then chosen */
+  async function pickHit(hit: InvoiceHit) {
+    const token = pos.device.token;
+    if (!token) return;
+    setRemote((r) => ({ ...r, busy: true }));
+    const result = await searchInvoice(hit.number, token, pos.fetch);
+    const sale = result.found ? saleFromServer(result.found, entries ?? [], pos.now(), windowDays) : null;
+    if (!sale) {
+      setRemote({ sale: null, busy: false, note: 'تعذّر فتح هذه الفاتورة الآن. حاول مرة أخرى.' });
       return;
     }
     setRemote({ sale, busy: false, note: null });
@@ -348,7 +390,7 @@ export function ReturnScreen({
             label="رقم الفاتورة"
             hint={
               online
-                ? 'اكتب آخر أرقام الفاتورة أو اسم الزبون أو جواله، أو امسح باركود الإيصال. فاتورة جهاز آخر تحتاج رقمها كاملاً.'
+                ? 'اكتب آخر أرقام الفاتورة أو اسم الزبون أو جواله، أو امسح باركود الإيصال. إن لم تظهر هنا فابحث في المحل كله.'
                 : 'اكتب آخر أرقام الفاتورة أو اسم الزبون أو جواله. بلا إنترنت: فواتير هذا الجهاز فقط'
             }
             dir="ltr"
@@ -380,6 +422,43 @@ export function ReturnScreen({
             </Button>
           ) : null}
           {remote.note ? <Alert tone="info">{remote.note}</Alert> : null}
+          {remote.hits && remote.hits.length > 0 ? (
+            <ul
+              aria-label="فواتير المحل"
+              className="-mx-1 flex max-h-[20rem] flex-col gap-1 overflow-y-auto px-1"
+            >
+              {remote.hits.map((h) => {
+                const at = Date.parse(h.deviceTime);
+                return (
+                  <li key={h.id}>
+                    <button
+                      type="button"
+                      disabled={remote.busy}
+                      onClick={() => void pickHit(h)}
+                      className="flex min-h-14 w-full items-center justify-between gap-3 rounded-control border border-transparent px-3 py-2 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
+                          {h.number}
+                        </bdi>
+                        <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+                          <span className="num">
+                            {dateText(at, digits)} ، {clockText(at, digits)}
+                          </span>
+                          {h.customerName ? <bdi>{h.customerName}</bdi> : null}
+                        </span>
+                      </span>
+                      <Money
+                        minor={h.totalMinor}
+                        currency={h.currency}
+                        className="shrink-0 font-bold text-ink"
+                      />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
           {entries === null ? (
             <div aria-hidden="true" className="flex flex-col gap-2 py-1">
               {[0, 1, 2].map((i) => (

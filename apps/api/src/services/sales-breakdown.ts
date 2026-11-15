@@ -172,6 +172,74 @@ export function salesBreakdown(
       select distinct a->>'name' as name from variants v cross join lateral jsonb_array_elements(v.attributes) a
       where coalesce(a->>'name', '') <> '' order by 1`);
 
+    // Per day of the period, net of returns (the small bars chart), and for seasons what was received
+    const dailySold = await tx.execute<{ d: string; total: string }>(sql`
+      select i.business_date::text as d, sum(l.total_minor)::text as total
+      from invoice_lines l join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+      where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`)}
+      group by 1`);
+    const dailyBack = await tx.execute<{ d: string; total: string }>(sql`
+      select r.business_date::text as d, sum(rl.total_minor)::text as total
+      from sale_return_lines rl join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+      where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
+      group by 1`);
+    const perDay = new Map<string, number>();
+    for (const r of dailySold) perDay.set(r.d, num(r.total));
+    for (const r of dailyBack) perDay.set(r.d, (perDay.get(r.d) ?? 0) - num(r.total));
+    const daily = [...perDay.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([date, totalMinor]) => ({ date, totalMinor }));
+    const received = new Map<string, number>();
+    if (query.by === 'season') {
+      const got = await tx.execute<{ key: string; qty: string }>(sql`
+        select coalesce(p.season, '') as key, sum(m.qty)::text as qty
+        from stock_movements m
+        join variants v on v.id = m.variant_id
+        join products p on p.id = v.product_id
+        where m.kind = 'purchase' and m.business_date <= ${query.to} and ${inBranches(sql`m.branch_id`)}
+        group by 1`);
+      for (const g of got) received.set(g.key, num(g.qty));
+    }
+
+    // `by=option`: the same sales across a second option too (size × colour), net of returns
+    let cross: SalesBreakdown['cross'] = null;
+    if (query.by === 'option' && query.option) {
+      const other =
+        names.map((n) => n.name).find((n) => n !== query.option && (n === 'اللون' || n === 'المقاس')) ??
+        names.map((n) => n.name).find((n) => n !== query.option);
+      if (other) {
+        const pick = (name: string): SQL =>
+          sql`(select a2.a->>'value' from jsonb_array_elements(v.attributes) a2(a) where a2.a->>'name' = ${name} limit 1)`;
+        const cellSql = sql`${pick(query.option)} as r, ${pick(other)} as c`;
+        const sold = await tx.execute<{ r: string | null; c: string | null; qty: string; total: string }>(sql`
+          select ${cellSql}, sum(l.base_qty)::text as qty, sum(l.total_minor)::text as total
+          from invoice_lines l join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+          join variants v on v.id = l.variant_id
+          where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`)}
+          group by 1, 2`);
+        const back = await tx.execute<{ r: string | null; c: string | null; qty: string; total: string }>(sql`
+          select ${cellSql}, sum(rl.base_qty)::text as qty, sum(rl.total_minor)::text as total
+          from sale_return_lines rl join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+          join variants v on v.id = rl.variant_id
+          where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`)}
+          group by 1, 2`);
+        const cells = new Map<string, { row: string; col: string; qty: number; totalMinor: number }>();
+        const add = (r: typeof sold, sign: 1 | -1) => {
+          for (const x of r) {
+            if (x.r === null || x.c === null) continue;
+            const key = JSON.stringify([x.r, x.c]);
+            const cell = cells.get(key) ?? { row: x.r, col: x.c, qty: 0, totalMinor: 0 };
+            cell.qty += sign * num(x.qty);
+            cell.totalMinor += sign * num(x.total);
+            cells.set(key, cell);
+          }
+        };
+        add(sold, 1);
+        add(back, -1);
+        cross = { rowOption: query.option, colOption: other, cells: [...cells.values()] };
+      }
+    }
+
     const rows: SalesBreakdownRow[] = [...now.values()]
       .map((r) => {
         // Commission follows the rate each sale carried; the shown rate is the effective one over the period
@@ -189,6 +257,7 @@ export function salesBreakdown(
           previousTotalMinor: num(before.get(r.key)?.total),
           commissionBp: bp,
           commissionMinor: hasRate ? Math.round(num(r.cnum) / 10_000) : null,
+          receivedQty: query.by === 'season' ? (received.get(r.key) ?? 0) : null,
         };
       })
       .sort((a, b) => b.totalMinor - a.totalMinor || a.name.localeCompare(b.name, 'ar'));
@@ -203,6 +272,8 @@ export function salesBreakdown(
       branchId: query.branchId ?? null,
       baseCurrency: (settings?.base ?? 'SYP') as CurrencyCode,
       rows,
+      daily,
+      cross,
       totalMinor: sum(now),
       previousTotalMinor: sum(before),
       optionNames: names.map((n) => n.name),

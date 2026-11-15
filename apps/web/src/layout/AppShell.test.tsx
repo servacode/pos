@@ -6,7 +6,7 @@ import { mockFetch, type MockReply } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
 import { initials, SIDEBAR_STORAGE_KEY } from './AppShell';
-import { navFor } from './nav';
+import { navFor, navSectionsFor } from './nav';
 
 function signedIn(
   permissions?: Permission[],
@@ -71,7 +71,7 @@ describe('AppShell', () => {
       screen.getByRole('link', { name: 'سيرفا، الرئيسية' }),
       screen.getByRole('button', { name: /خروج/ }),
       screen.getByRole('link', { name: 'رمز الدخول للكاشير' }),
-      screen.getAllByRole('button', { name: 'ابحث عن صفحة' })[0]!,
+      screen.getAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' })[0]!,
     ];
     for (const target of targets) expect(target.className).toMatch(TOUCH_TARGET);
   });
@@ -288,6 +288,35 @@ describe('AppShell', () => {
     signedIn(['purchases.manage'], ['pharmacy']);
     const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: 'المخزون' })).toHaveAttribute('href', '/expiry');
+  });
+
+  it('groups cheques, expenses and debt ageing under «المال», and rentals, maintenance and warranty under «الخدمات»', async () => {
+    const me = { ...makeMe(), tenant: { sectors: ['electronics'] as SectorKey[] } };
+    const user = {
+      ...me.user,
+      permissions: ['catalog.manage', 'customers.view', 'expenses.manage'] as Permission[],
+    };
+    const labelsIn = (section: string) =>
+      navSectionsFor({ ...me, user })
+        .find((s) => s.key === section)
+        ?.pages.map((page) => page.label);
+    expect(labelsIn('money')).toEqual(['الشيكات', 'المصاريف', 'أعمار الديون']);
+    expect(labelsIn('services')).toEqual(['التأجير', 'عقود الصيانة', 'الضمان والصيانة']);
+    // None of them is a tab of the customers any more, and the routes are unchanged
+    expect(labelsIn('customers')).not.toContain('الشيكات');
+    expect(navFor({ ...me, user }).find((page) => page.label === 'الشيكات')?.to).toBe('/cheques');
+    signedIn(['catalog.manage', 'customers.view', 'expenses.manage'], ['electronics']);
+    const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    expect(within(nav).getByRole('link', { name: 'المال' })).toHaveAttribute('href', '/cheques');
+    expect(within(nav).getByRole('link', { name: 'الخدمات' })).toHaveAttribute('href', '/rentals');
+  });
+
+  it('leaves «المال» and «الخدمات» out for a store that uses none of it', () => {
+    const me = { ...makeMe(), tenant: { sectors: ['clothing'] as SectorKey[] } };
+    const user = { ...me.user, permissions: ['catalog.manage'] as Permission[] };
+    const keys = navSectionsFor({ ...me, user }).map((s) => s.key);
+    expect(keys).not.toContain('services');
+    expect(keys).not.toContain('money');
   });
 
   it("shows the store name's initials, skipping words like «متجر»", () => {

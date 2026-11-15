@@ -300,10 +300,10 @@ describe('a new product', () => {
     await user.type(screen.getByRole('textbox', { name: 'قيمة جديدة لـاللون' }), 'أحمر{Enter}');
 
     expect(screen.getByText('متغيّران')).toHaveAttribute('role', 'status');
-    expect(screen.getByRole('group', { name: 'S · أحمر' })).toBeInTheDocument();
-    const second = screen.getByRole('group', { name: 'M · أحمر' });
-    // A new combination starts at the first variant's price.
-    expect(within(second).getByLabelText('سعر البيع لـ«M · أحمر»')).toHaveValue('500');
+    // The prices are one grid first: a cell for each combination, a new one starting at the first price.
+    expect(screen.getByRole('table', { name: 'أسعار المتغيّرات' })).toBeInTheDocument();
+    expect(screen.getByLabelText('سعر S · أحمر')).toHaveValue('500');
+    expect(screen.getByLabelText('سعر M · أحمر')).toHaveValue('500');
     await user.click(screen.getByRole('button', { name: 'احفظ' }));
 
     await vi.waitFor(() => expect(requestsTo('POST', '/v1/products')).toHaveLength(1));
@@ -405,11 +405,15 @@ describe('an existing product', () => {
     });
   });
 
-  it('says when there is nothing to save', async () => {
+  it('shows the save bar only after something is changed', async () => {
     const { user, requestsTo } = openCard(`/products/${ids.milk}`);
-    await screen.findByLabelText('اسم المنتج');
-    await user.click(screen.getByRole('button', { name: 'احفظ' }));
-    expect(screen.getByText('لا تغييرات لحفظها.')).toBeInTheDocument();
+    const name = await screen.findByLabelText('اسم المنتج');
+    expect(screen.queryByRole('button', { name: 'احفظ' })).not.toBeInTheDocument();
+    await user.type(name, 'x');
+    expect(screen.getByRole('button', { name: 'احفظ' })).toBeInTheDocument();
+    await user.clear(name);
+    await user.type(name, 'حليب المراعي 1 لتر');
+    expect(screen.queryByRole('button', { name: 'احفظ' })).not.toBeInTheDocument();
     expect(requestsTo('PATCH', productPath)).toHaveLength(0);
   });
 
@@ -476,8 +480,8 @@ describe('an existing product', () => {
     expect(screen.queryByText('مؤرشف')).not.toBeInTheDocument();
   });
 
-  it('shows a product with sizes as one block per variant', async () => {
-    openClothes(`/products/${ids.milk}`, {
+  it('shows a product with sizes as a price grid, and a block per variant on request', async () => {
+    const { user } = openClothes(`/products/${ids.milk}`, {
       [`GET ${productPath}`]: {
         status: 200,
         body: product({
@@ -489,13 +493,37 @@ describe('an existing product', () => {
       },
     });
 
-    expect(await screen.findByRole('group', { name: 'أبيض' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'أسود' })).toBeInTheDocument();
+    // The prices come as a grid; the options fold into a summary with a button to edit them
+    expect(await screen.findByLabelText('سعر أبيض')).toBeInTheDocument();
+    expect(screen.getByLabelText('سعر أسود')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'أبيض' })).not.toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'له مقاسات أو ألوان' })).toHaveAttribute(
       'aria-checked',
       'true',
     );
     expect(screen.getByRole('list', { name: 'قيم اللون' })).toHaveTextContent('أبيضأسود');
+    expect(screen.getByRole('button', { name: 'عدّل المقاسات والألوان' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /تفاصيل متقدمة/ }));
+    expect(await screen.findByRole('group', { name: 'أبيض' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'أسود' })).toBeInTheDocument();
+  });
+
+  it('fills one price into every variant from «السعر نفسه لكل المتغيّرات»', async () => {
+    const { user } = openClothes(`/products/${ids.milk}`, {
+      [`GET ${productPath}`]: {
+        status: 200,
+        body: product({
+          variants: [
+            variant({ id: ids.white, attributes: [{ name: 'اللون', value: 'أبيض' }] }),
+            variant({ id: ids.black, attributes: [{ name: 'اللون', value: 'أسود' }], barcodes: [] }),
+          ],
+        }),
+      },
+    });
+    await user.type(await screen.findByLabelText('السعر نفسه لكل المتغيّرات'), '777');
+    await user.click(screen.getByRole('button', { name: 'طبّق على الكل' }));
+    expect(screen.getByLabelText('سعر أبيض')).toHaveValue('777');
+    expect(screen.getByLabelText('سعر أسود')).toHaveValue('777');
   });
 
   it('keeps the price rows short: the floor, wholesale, minimum and barcodes open on request', async () => {
@@ -510,9 +538,9 @@ describe('an existing product', () => {
         }),
       },
     });
-    await screen.findByRole('group', { name: 'أبيض' });
+    await screen.findByLabelText('سعر أبيض');
     expect(screen.queryAllByLabelText('السعر الأدنى للمفاصلة')).toHaveLength(0);
-    await user.click(screen.getByRole('button', { name: /حقول إضافية/ }));
+    await user.click(screen.getByRole('button', { name: /تفاصيل متقدمة/ }));
     expect(screen.getAllByLabelText('السعر الأدنى للمفاصلة')).toHaveLength(2);
   });
 

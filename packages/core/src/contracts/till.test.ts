@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cashNotesOf,
   CLOTHING_RETURN_DAYS,
+  DEFAULT_CASH_NOTES,
   DEFAULT_RETURN_DAYS,
   DEFAULT_TILL_SETTINGS,
   returnWindowDays,
@@ -62,5 +63,12 @@ describe('tillSettingsSchema', () => {
     expect(
       tillSettingsSchema.safeParse({ returnWindowDays: null, cardApprovalRequired: false }).success,
     ).toBe(true);
+  });
+});
+
+describe('the built-in cash notes', () => {
+  it('start with the current high pound notes, high to low', () => {
+    expect(DEFAULT_CASH_NOTES.SYP).toEqual([5000, 2000, 1000, 500, 200, 100, 50, 25, 10]);
+    expect([...DEFAULT_CASH_NOTES.SYP!].sort((a, b) => b - a)).toEqual(DEFAULT_CASH_NOTES.SYP);
   });
 });

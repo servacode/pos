@@ -73,7 +73,7 @@ describe('«تغيير الأسعار»', () => {
     });
     // The old price, struck through on the labels
     expect(within(table).getAllByRole('row')[1]).toHaveTextContent('45,000');
-    await user.click(screen.getByRole('button', { name: 'طبّق على 2 قطعة' }));
+    await user.click(screen.getByRole('button', { name: 'طبّق على قطعتين' }));
     expect(await screen.findByRole('link', { name: 'اطبع ملصقات الأسعار الجديدة' })).toHaveAttribute(
       'href',
       '/labels?products=p-1',

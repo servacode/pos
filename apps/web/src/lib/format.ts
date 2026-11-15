@@ -1,7 +1,11 @@
+import { isolateNegative } from '@serva/ui';
+
 export type NumberFormat = 'latn' | 'arab';
 
 export function formatNumber(value: number, numberFormat: NumberFormat = 'latn'): string {
-  return new Intl.NumberFormat(`ar-u-nu-${numberFormat}`).format(value);
+  const text = new Intl.NumberFormat(`ar-u-nu-${numberFormat}`).format(Math.abs(value));
+  // A negative keeps its true minus and its digits together in Arabic lines («−5», never «5-»)
+  return value < 0 ? isolateNegative(`-${text}`) : text;
 }
 
 const dayRules = new Intl.PluralRules('ar');

@@ -48,6 +48,7 @@ import {
   staleVersion,
   type CatalogContext,
 } from './common';
+import { imageUrl } from './images';
 import { liveReference } from './reference';
 
 type BarcodeData = z.output<typeof barcodeInputSchema>;
@@ -202,6 +203,8 @@ interface ListRow extends Record<string, unknown> {
   barcode: string | null;
   stock_qty: string;
   has_image: boolean;
+  image_upload: string | null;
+  nearest_expiry: string | null;
 }
 
 const encodeCursor = (name: string, id: string) =>
@@ -255,6 +258,16 @@ export async function listProducts(
         name ? sql`(p.search_name like ${`%${escapeLike(name)}%`} escape '\\' or ${byBarcode})` : byBarcode,
       );
     }
+    if (query.expiry) {
+      // A piece's nearest expiry is the earliest date among the batches still holding stock
+      const window =
+        query.expiry === 'expired'
+          ? sql`v.nearest_expiry < current_date`
+          : sql`v.nearest_expiry >= current_date and v.nearest_expiry <= current_date + 30`;
+      filters.push(sql`exists (
+        select 1 from variants v
+        where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and ${window})`);
+    }
     if (query.cursor) {
       const [name, id] = decodeCursor(query.cursor);
       filters.push(sql`(p.name_ar, p.id) > (${name}, ${id}::uuid)`);
@@ -272,7 +285,12 @@ export async function listProducts(
               join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id ${branchFilter}
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as stock_qty,
              exists (select 1 from product_images pi
-                     where pi.tenant_id = p.tenant_id and pi.product_id = p.id) as has_image
+                     where pi.tenant_id = p.tenant_id and pi.product_id = p.id) as has_image,
+             (select pi.upload_id::text from product_images pi
+              where pi.tenant_id = p.tenant_id and pi.product_id = p.id
+              order by pi.sort_order, pi.created_at, pi.id limit 1) as image_upload,
+             (select min(v.nearest_expiry)::text from variants v
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as nearest_expiry
       from products p
       left join categories c on c.tenant_id = p.tenant_id and c.id = p.category_id
       cross join lateral (
@@ -309,23 +327,33 @@ export async function listProducts(
       barcode: r.barcode,
       stockQty: Number(r.stock_qty),
       hasImage: r.has_image,
+      thumbUrl: r.image_upload ? imageUrl(ctx.auth.tenantId, r.image_upload, true) : null,
+      nearestExpiry: r.nearest_expiry,
       version: r.version,
     }));
     const last = page.at(-1);
     // What needs doing across the whole store (asked once, with the first page)
-    let attention: { zeroPrice: number; noPhoto: number } | undefined;
+    let attention: { zeroPrice: number; noPhoto: number; expiringSoon: number } | undefined;
     if (!query.cursor && query.status === 'active') {
-      const [counts] = await tx.execute<{ zero_price: number; no_photo: number }>(sql`
+      const [counts] = await tx.execute<{ zero_price: number; no_photo: number; expiring_soon: number }>(sql`
         select count(*) filter (where exists (
                  select 1 from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
                  where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
                    and x.price_minor = 0))::int as zero_price,
                count(*) filter (where not exists (
                  select 1 from product_images pi
-                 where pi.tenant_id = p.tenant_id and pi.product_id = p.id))::int as no_photo
+                 where pi.tenant_id = p.tenant_id and pi.product_id = p.id))::int as no_photo,
+               count(*) filter (where exists (
+                 select 1 from variants v
+                 where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
+                   and v.nearest_expiry >= current_date and v.nearest_expiry <= current_date + 30))::int as expiring_soon
         from products p
         where p.tenant_id = ${ctx.auth.tenantId} and p.archived_at is null and p.status = 'active'`);
-      attention = { zeroPrice: counts?.zero_price ?? 0, noPhoto: counts?.no_photo ?? 0 };
+      attention = {
+        zeroPrice: counts?.zero_price ?? 0,
+        noPhoto: counts?.no_photo ?? 0,
+        expiringSoon: counts?.expiring_soon ?? 0,
+      };
     }
     return {
       items,

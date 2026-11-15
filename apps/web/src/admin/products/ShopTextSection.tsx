@@ -61,7 +61,9 @@ export function ShopTextSection({
   if (!productId) {
     return (
       <SectionCard title="وصف المتجر الإلكتروني" icon={<StoreIcon />}>
-        <p className="text-sm text-ink-muted">احفظ المنتج أولاً، ثم اكتب وصفه ودليل مقاساته هنا.</p>
+        <p className="text-sm text-ink-muted">
+          احفظ المنتج أولاً، ثم اكتب وصفه {fashion ? 'ودليل مقاساته ' : ''}هنا.
+        </p>
       </SectionCard>
     );
   }

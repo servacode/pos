@@ -82,6 +82,9 @@ describe('«التأجير»', () => {
     const { user } = renderApp('/rentals');
     expect(await screen.findByText('RNT-000001')).toBeInTheDocument();
     expect(screen.getAllByText('متأخر')).toHaveLength(1);
+    // The row of figures over the list: how many are out, how many late
+    expect(screen.getByText('خارج المحل الآن')).toBeInTheDocument();
+    expect(screen.getByText('متأخرة عن موعدها')).toBeInTheDocument();
     expect(screen.getAllByText('كرسي متحرك')).toHaveLength(2);
     const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
     await user.click(screen.getByRole('button', { name: 'اطبع عقد RNT-000001' }));
@@ -232,5 +235,15 @@ describe('«أعمار الديون»', () => {
       ['زبون أ', '0944111222', '300.00', '300.00', '0.00', '0.00', '600.00'],
       ['الإجمالي', '', '300.00', '300.00', '0.00', '0.00', '600.00'],
     ]);
+  });
+});
+
+describe('«زيارة كل …»', () => {
+  it('writes the months in plain Arabic', async () => {
+    const { everyMonths } = await import('./MaintenancePage');
+    expect(everyMonths(1)).toBe('زيارة كل شهر');
+    expect(everyMonths(2)).toBe('زيارة كل شهرين');
+    expect(everyMonths(3)).toBe('زيارة كل 3 أشهر');
+    expect(everyMonths(12)).toBe('زيارة كل 12 شهراً');
   });
 });

@@ -27,6 +27,31 @@ describe('what a tile says about its stock', () => {
     expect(info.tracksSerial).toBe(true);
   });
 
+  it('counts only what can be sold and keeps the expired quantity apart', () => {
+    const info = tileInfo(
+      [
+        piece({
+          stockQty: 102_000,
+          stockBatches: [
+            { batchNo: 'OLD', expiry: '2026-01-01', qty: 29_000 },
+            { batchNo: 'NEW', expiry: '2027-06-30', qty: 73_000 },
+          ],
+        }),
+      ],
+      '2026-11-14',
+    );
+    expect(info.stockQty).toBe(73_000);
+    expect(info.expiredQty).toBe(29_000);
+    // The expired batch never sets the chip: the next sellable date does
+    expect(info.expiry).toBeNull();
+    const none = tileInfo(
+      [piece({ stockQty: 5_000, stockBatches: [{ batchNo: 'OLD', expiry: '2026-01-01', qty: 5_000 }] })],
+      '2026-11-14',
+    );
+    expect(none.stockQty).toBe(0);
+    expect(none.expiredQty).toBe(5_000);
+  });
+
   it('shows amber from 31 days, nothing past 90, and no stock when unknown', () => {
     const at = (expiry: string) =>
       tileInfo(

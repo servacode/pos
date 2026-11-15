@@ -32,6 +32,9 @@ import { forbidden, inScope, permissionScope } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 
+/** The name a rental's deposit refund carries on the sale (the till writes «ردّ العربون · RNT-…»). */
+const DEPOSIT_BACK_NAME = 'ردّ العربون';
+
 /**
  * The report and accounting routes of packages/core › contracts/accounting.ts. Everything is read
  * from what the documents stored (invoices, payments, shifts, drawer movements) and from the
@@ -200,19 +203,32 @@ export async function dayReport(
       where ${where}
       group by t.root, rc.name
       order by sum(l.total_minor) desc, rc.name nulls last`);
+    const returnsWhere = sql`r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}`;
+    // The best sellers are net of the day's returns, and a rental's deposit refund (a line of the
+    // sale, not a product) is not a product that sold.
     const top = await tx.execute<{ id: string; name: string; qty: string; total: string }>(sql`
-      select l.product_id as id, min(coalesce(p.name_ar, l.name)) as name, sum(l.base_qty)::text as qty,
-             sum(l.total_minor)::text as total
-      from invoice_lines l
-      join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
-      left join products p on p.tenant_id = l.tenant_id and p.id = l.product_id
-      where ${where}
-      group by l.product_id
-      order by sum(l.total_minor) desc, l.product_id
+      with sold as (
+        select l.product_id as id, min(coalesce(p.name_ar, l.name)) as name, sum(l.base_qty) as qty,
+               sum(l.total_minor) as total
+        from invoice_lines l
+        join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+        left join products p on p.tenant_id = l.tenant_id and p.id = l.product_id
+        where ${where} and l.name not like ${`${DEPOSIT_BACK_NAME}%`}
+        group by l.product_id
+      ), back as (
+        select rl.product_id as id, sum(rl.base_qty) as qty, sum(rl.total_minor) as total
+        from sale_return_lines rl
+        join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+        where ${returnsWhere}
+        group by rl.product_id
+      )
+      select s.id, s.name, (s.qty - coalesce(b.qty, 0))::text as qty, (s.total - coalesce(b.total, 0))::text as total
+      from sold s left join back b on b.id = s.id
+      where s.qty - coalesce(b.qty, 0) > 0
+      order by s.total - coalesce(b.total, 0) desc, s.id
       limit 10`);
     const total = num(totals?.total);
     const tax = num(totals?.tax);
-    const returnsWhere = sql`r.business_date = ${query.date} and ${inBranches(sql`r.branch_id`, filter)}`;
     const [returned] = await tx.execute<{ n: string; total: string; tax: string }>(sql`
       select count(*)::text as n, coalesce(sum(r.total_minor), 0)::text as total,
              coalesce(sum(r.tax_minor), 0)::text as tax

@@ -15,12 +15,14 @@ import {
   PageHeader,
   SegmentedControl,
   Skeleton,
+  KpiStrip,
   StatTile,
   UndoIcon,
   type BadgeTone,
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { dayText } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { actOnCheque, listCheques } from './api';
@@ -81,6 +83,7 @@ export function dueSoon(items: readonly Cheque[], day: string, direction: 'in' |
  */
 export function ChequesPage() {
   const me = useMe();
+  const digits = me.settings.numberFormat;
   const canManage = me.user.permissions.includes('customers.manage');
   const [filter, setFilter] = useState<ChequeStatus | 'all'>('pending');
   const [order, setOrder] = useState<'recent' | 'due'>('recent');
@@ -144,7 +147,11 @@ export function ChequesPage() {
       <Badge tone={c.direction === 'out' ? 'neutral' : STATUS_TONE[c.status]}>
         {c.direction === 'out' ? 'صادر للمورد' : STATUS_TEXT[c.status]}
       </Badge>
-      {c.actionDate ? <bdi className="num ps-1 text-xs text-ink-subtle">{c.actionDate}</bdi> : null}
+      {c.actionDate ? (
+        <span className="ps-1 text-xs whitespace-nowrap text-ink-subtle">
+          {dayText(c.actionDate, digits)}
+        </span>
+      ) : null}
     </span>
   );
 
@@ -173,7 +180,7 @@ export function ChequesPage() {
           <span className="text-xs text-ink-muted sm:hidden">{c.customerName ?? '—'}</span>
           {dueDayOf(c) ? (
             <span className="text-xs text-ink-muted sm:hidden">
-              الاستحقاق <bdi className="num whitespace-nowrap">{dueDayOf(c)}</bdi>
+              الاستحقاق <span className="whitespace-nowrap">{dayText(dueDayOf(c)!, digits)}</span>
             </span>
           ) : null}
           <span className="sm:hidden">{status(c)}</span>
@@ -213,15 +220,15 @@ export function ChequesPage() {
       className: 'hidden sm:table-cell',
       cell: (c) =>
         dueDayOf(c) ? (
-          <bdi
-            className={`num whitespace-nowrap ${
+          <span
+            className={`whitespace-nowrap ${
               c.status === 'pending' && c.direction !== 'out' && dueDayOf(c)! <= today()
                 ? 'font-semibold text-danger-ink'
                 : 'text-ink'
             }`}
           >
-            {dueDayOf(c)}
-          </bdi>
+            {dayText(dueDayOf(c)!, digits)}
+          </span>
         ) : (
           <span className="text-ink-subtle">—</span>
         ),
@@ -230,7 +237,7 @@ export function ChequesPage() {
       key: 'date',
       header: 'التاريخ',
       className: 'hidden 2xl:table-cell',
-      cell: (c) => <bdi className="num whitespace-nowrap text-ink-muted">{c.date}</bdi>,
+      cell: (c) => <span className="whitespace-nowrap text-ink-muted">{dayText(c.date, digits)}</span>,
     },
     {
       key: 'amount',
@@ -288,7 +295,7 @@ export function ChequesPage() {
           description="كل شيك قبضه الكاشير من بيع أو من دفعة زبون، حتى يُحصَّل في البنك أو يرتجع."
         />
         {error && items ? <Alert tone="error">{error}</Alert> : null}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 [&>:first-child]:max-sm:col-span-2">
+        <KpiStrip columns={3}>
           <StatTile
             label="تحت التحصيل"
             icon={<ClockIcon />}
@@ -307,7 +314,7 @@ export function ChequesPage() {
             iconTone="neutral"
             value={kpi(<bdi className="num">{outgoingCount}</bdi>)}
           />
-        </div>
+        </KpiStrip>
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <SegmentedControl
@@ -390,8 +397,9 @@ export function ChequesPage() {
         <div className="flex flex-col gap-3">
           {asking?.action === 'cleared' && (dueDayOf(asking.cheque) ?? '') > today() ? (
             <Alert tone="warning">
-              تاريخ استحقاقه <bdi className="num">{dueDayOf(asking.cheque)}</bdi> لم يأتِ بعد. تأكّد أن البنك
-              صرفه فعلاً قبل أن تسجّله محصّلاً.
+              تاريخ استحقاقه{' '}
+              <span className="whitespace-nowrap">{dayText(dueDayOf(asking.cheque)!, digits)}</span> لم يأتِ
+              بعد. تأكّد أن البنك صرفه فعلاً قبل أن تسجّله محصّلاً.
             </Alert>
           ) : null}
           <p className="text-sm text-ink-muted">

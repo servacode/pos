@@ -128,7 +128,7 @@ export function SaleDone({
             </span>
           </p>
         ) : null}
-        <span className="flex-1" />
+        {/* The buttons follow the figures directly: no tall gap pushing them to the panel's floor */}
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <Button
             variant="secondary"

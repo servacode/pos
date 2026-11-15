@@ -358,3 +358,12 @@ describe('payments and duplicate suppliers', () => {
     expect(await screen.findByText('أُضيف المورد.')).toBeInTheDocument();
   });
 });
+
+describe('size runs that do not match the grid', () => {
+  it('says what a run with fewer or more counts than sizes will do', async () => {
+    const { runMismatchNote } = await import('./SizeGrid');
+    expect(runMismatchNote('طقم', 4, 4)).toBeNull();
+    expect(runMismatchNote('طقم 3', 3, 5)).toBe('«طقم 3» له 3 من 5 مقاسات: الباقي بلا كمية.');
+    expect(runMismatchNote('طقم 6', 6, 4)).toBe('«طقم 6» له 6 أعداد والجدول 4 مقاسات فقط: الزائد يُهمَل.');
+  });
+});

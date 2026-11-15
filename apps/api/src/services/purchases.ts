@@ -144,9 +144,16 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
     notes: string | null;
     archived_at: string | null;
     balance: string;
+    last_purchase: string | null;
+    purchases_total: string;
   }>(sql`
-    select s.id, s.name, s.phone, s.notes, s.archived_at, coalesce(b.balance, 0)::text as balance
+    select s.id, s.name, s.phone, s.notes, s.archived_at, coalesce(b.balance, 0)::text as balance,
+           pu.last_purchase::text as last_purchase, coalesce(pu.total, 0)::text as purchases_total
     from suppliers s left join (${supplierBalances}) b on b.supplier_id = s.id
+    left join (
+      select supplier_id, max(business_date) as last_purchase, sum(total_minor) as total
+      from purchases group by supplier_id
+    ) pu on pu.supplier_id = s.id
     ${id ? sql`where s.id = ${id}` : sql``}
     order by s.name, s.id`);
   return rows.map((r) => ({
@@ -156,6 +163,8 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
     notes: r.notes,
     balanceMinor: Number(r.balance),
     archived: r.archived_at !== null,
+    lastPurchaseOn: r.last_purchase,
+    purchasesTotalMinor: Number(r.purchases_total),
   }));
 }
 

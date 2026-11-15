@@ -263,9 +263,12 @@ function HeroTile({
   trend,
   week,
   noHistory = false,
+  zeroMorning = false,
 }: {
   /** No sales in the days before today: say it once here instead of on every tile */
   noHistory?: boolean;
+  /** Nothing sold yet today though earlier days did: «لا مبيعات بعد» instead of a fall of 100% */
+  zeroMorning?: boolean;
   data: DayReport | null;
   trend: StatTileProps['trend'];
   week: readonly number[] | null;
@@ -293,7 +296,9 @@ function HeroTile({
               <Money minor={netOfReturns(data)} currency={data.baseCurrency} />
             </p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-              {trend ? (
+              {zeroMorning ? (
+                <span className="opacity-85">لا مبيعات بعد</span>
+              ) : trend ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold">
                   <TrendIcon size={16} />
                   <span className="sr-only">{trend.direction === 'up' ? 'ارتفاع' : 'انخفاض'}</span>
@@ -387,6 +392,11 @@ function KpiBand({
   const weekReady = points.slice(0, -1).every((p) => p.total !== null);
   // Nothing sold in the days before today: the tiles say so rather than draw a climb from zero
   const noHistory = weekReady && points.slice(0, -1).every((p) => !p.total);
+  // Under three days with sales there is no line to draw: no sparklines or week bars until there is
+  const thin = !weekReady || points.filter((p) => (p.total ?? 0) > 0).length < 3;
+  // A zero morning says «لا مبيعات بعد» once, not a fall of 100% on every tile
+  const zeroMorning =
+    !!data && data.invoiceCount === 0 && points.slice(0, -1).some((p) => (p.total ?? 0) > 0);
   const average = data && data.invoiceCount > 0 ? Math.round(netOfReturns(data) / data.invoiceCount) : 0;
   const yesterdayAverage = yesterday?.count ? Math.round((yesterday.total ?? 0) / yesterday.count) : null;
 
@@ -395,8 +405,9 @@ function KpiBand({
       <HeroTile
         data={data}
         trend={data ? changeOf(netOfReturns(data), yesterday?.total, digits) : undefined}
-        week={weekReady && data && !noHistory ? totals : null}
+        week={weekReady && data && !noHistory && !thin ? totals : null}
         noHistory={noHistory}
+        zeroMorning={zeroMorning}
       />
       <SnapRow
         label="مؤشرات اليوم"
@@ -408,15 +419,15 @@ function KpiBand({
               className={TILE_CLASS}
               label="الفواتير"
               value={<span className="num">{formatNumber(data.invoiceCount, digits)}</span>}
-              trend={changeOf(data.invoiceCount, yesterday?.count, digits)}
-              sparkline={weekReady && !noHistory ? counts : undefined}
+              trend={zeroMorning ? undefined : changeOf(data.invoiceCount, yesterday?.count, digits)}
+              sparkline={!thin ? counts : undefined}
             />
             <StatTile
               className={TILE_CLASS}
               label="متوسط الفاتورة"
               value={<Money minor={average} currency={data.baseCurrency} />}
-              trend={changeOf(average, yesterdayAverage, digits)}
-              sparkline={weekReady && !noHistory ? averages : undefined}
+              trend={zeroMorning ? undefined : changeOf(average, yesterdayAverage, digits)}
+              sparkline={!thin ? averages : undefined}
             />
           </>
         ) : (
@@ -479,6 +490,8 @@ function SalesTrend({
     points.length > 1 && points.slice(0, -1).every((p) => p.total === 0) && !!points.at(-1)?.total;
   // A single point is not a trend: with nothing before today the card waits until there is a second day
   if (todayOnly && range === '7') return null;
+  // Under three days with sales a line says nothing: the card waits until it has a shape
+  if (loaded.length === points.length && points.filter((p) => (p.total ?? 0) > 0).length < 3) return null;
   return (
     <Card className="flex flex-col gap-1">
       <CardHeader
@@ -706,6 +719,17 @@ const sizeOf = (item: { attributes?: { name: string; value: string }[] }) =>
 /** How many pieces short of a size the home list names one by one; the rest stay in the count */
 const SIZED_ROWS = 4;
 
+/** The low pieces «ما ينتظرك» names one by one (clothing): «يوشك على النفاد» does not list them again */
+const sizedLow = <T extends { attributes?: { name: string; value: string }[]; variantId: string }>(
+  items: readonly T[],
+): Set<string> =>
+  new Set(
+    items
+      .filter((item) => sizeOf(item) !== null)
+      .slice(0, SIZED_ROWS)
+      .map((item) => item.variantId),
+  );
+
 type OrdersState = ReportState<{ items: OnlineOrder[] }>;
 type MerchState = ReportState<Awaited<ReturnType<typeof getMerchandise>>>;
 type ExpiryState = ReportState<Awaited<ReturnType<typeof listExpiry>>>;
@@ -776,7 +800,7 @@ function Waiting({
             return (
               <WaitingRow
                 key={item.variantId}
-                to={`/products/${item.productId}`}
+                to={item.stockQty < 0 ? '/inventory' : `/products/${item.productId}`}
                 count={stockChip(item.stockQty)}
                 tone="danger"
                 icon={<WarningIcon />}
@@ -826,8 +850,10 @@ function stockChip(qty: number): string {
   return formatQuantity(qty);
 }
 
-function RunningLow({ report }: { report: MerchState }) {
-  const low = report.data?.lowStock.slice(0, 5) ?? [];
+function RunningLow({ report, skip }: { report: MerchState; skip?: ReadonlySet<string> | undefined }) {
+  const low = (report.data?.lowStock ?? []).filter((item) => !skip?.has(item.variantId)).slice(0, 5);
+  // Every low piece is already named in «ما ينتظرك»: the list would only repeat it
+  if (low.length === 0 && (report.data?.lowStock.length ?? 0) > 0) return null;
   return (
     <Card className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
@@ -865,7 +891,13 @@ function RunningLow({ report }: { report: MerchState }) {
                   )}
                 >
                   {item.stockQty <= 1000 ? <WarningIcon size={16} /> : null}
-                  {stockChip(item.stockQty)}
+                  {item.stockQty < 0 ? (
+                    <Link to="/inventory" className="hover:underline">
+                      {stockChip(item.stockQty)}
+                    </Link>
+                  ) : (
+                    stockChip(item.stockQty)
+                  )}
                 </span>
               </li>
             ))}
@@ -970,21 +1002,25 @@ export function HomePage() {
       cache: 'home',
     },
   );
-  const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrders);
+  const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrders, { cache: 'home' });
   const merch = useReport(seesStock ? 'home:low' : null, () => getMerchandise(daysAgo(30), daysAgo(0), 60), {
     cache: 'home',
   });
   // «الأكثر مبيعاً» of the last seven days, from the sales report (it needs report.view)
-  const weekTop = useReport(seesStock ? `home:top:${today}` : null, () =>
-    getSalesBreakdown({ from: shiftDay(today, 6), to: today, by: 'product' }),
+  const weekTop = useReport(
+    seesStock ? `home:top:${today}` : null,
+    () => getSalesBreakdown({ from: shiftDay(today, 6), to: today, by: 'product' }),
+    { cache: 'home' },
   );
-  const expiry = useReport(seesExpiry ? 'home:expiry' : null, () => listExpiry(30));
+  const expiry = useReport(seesExpiry ? 'home:expiry' : null, () => listExpiry(30), { cache: 'home' });
   const canCatalogView = holdsAny(me, ['catalog.manage']);
   const catalog = useReport(canCatalogView ? 'home:photos' : null, () => listProducts({ limit: 100 }), {
     cache: 'home',
   });
   const noPhoto = (catalog.data?.items ?? []).filter((p) => p.hasImage === false).length;
-  const cheques = useReport(seesCheques ? 'home:cheques' : null, () => listCheques(undefined));
+  const cheques = useReport(seesCheques ? 'home:cheques' : null, () => listCheques(undefined), {
+    cache: 'home',
+  });
 
   // A new store starts in the wizard (04 › معالج البداية); the owner can leave it and come back.
   if (!me.onboarding.done && me.user.permissions.includes('settings.manage')) {
@@ -1078,7 +1114,6 @@ export function HomePage() {
           </div>
           <div className="contents xl:col-start-2 xl:row-start-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
             <div className="order-first flex min-w-0 flex-col gap-6 empty:hidden xl:order-none">
-              {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
               {showWaiting ? (
                 <Waiting
                   orders={orders}
@@ -1093,8 +1128,16 @@ export function HomePage() {
                   sizes={me.tenant.sectors.includes('clothing')}
                 />
               ) : null}
+              {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
             </div>
-            {seesStock ? <RunningLow report={merch} /> : null}
+            {seesStock ? (
+              <RunningLow
+                report={merch}
+                skip={
+                  me.tenant.sectors.includes('clothing') ? sizedLow(merch.data?.lowStock ?? []) : undefined
+                }
+              />
+            ) : null}
             {seesSales ? <StoreCard me={me} /> : null}
           </div>
         </div>

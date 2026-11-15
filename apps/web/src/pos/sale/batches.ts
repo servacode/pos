@@ -1,6 +1,13 @@
 import type { BatchAllocation, SalePayload } from '@serva/core/contracts/documents';
 import type { PharmacySettings, StockBatch } from '@serva/core/contracts/pharmacy';
-import { allocateFefo, overStock, sameBatch, uncoveredAction, usesAutoBatch } from '@serva/core/pharmacy';
+import {
+  allocateFefo,
+  batchState,
+  overStock,
+  sameBatch,
+  uncoveredAction,
+  usesAutoBatch,
+} from '@serva/core/pharmacy';
 import { lineBaseQty } from '@serva/core/sale';
 import type { OutboxEntry } from '@serva/sync';
 import type { Catalog } from '../catalog';
@@ -30,6 +37,8 @@ export interface StockIssue {
   /** What the branch holds (zero when it holds none or less), base units */
   onHand: number;
   wanted: number;
+  /** The shortfall counts only what can be sold: the expired and blocked batches are left out of `onHand` */
+  validOnly?: true;
 }
 
 export interface BatchPlan {
@@ -75,6 +84,18 @@ function poolOf(stock: readonly StockBatch[], taken: readonly BatchAllocation[])
   return pool;
 }
 
+/** What can be sold from the batches, or null when none is expired or blocked (then the stock is the stock) */
+function sellableOf(pool: readonly StockBatch[], today: string): number | null {
+  let ok = 0;
+  let left = false;
+  for (const b of pool) {
+    const state = batchState(b, today);
+    if (state === 'ok') ok += b.qty;
+    else if (state === 'expired' || state === 'blocked') left = true;
+  }
+  return left ? ok : null;
+}
+
 export function planBatches(input: {
   cart: Cart;
   catalog: Pick<Catalog, 'byVariant'>;
@@ -88,6 +109,7 @@ export function planBatches(input: {
   const wanted = new Map<string, number>();
   const allocations = new Map<number, BatchAllocation[]>();
   const uncovered: BatchIssue[] = [];
+  const uncoveredItems = new Set<string>();
   for (const line of cart.lines) {
     const item = catalog.byVariant.get(line.variantId);
     if (!item) continue;
@@ -102,6 +124,7 @@ export function planBatches(input: {
     pools.set(line.variantId, result.remaining);
     allocations.set(line.lineNo, result.allocations);
     if (result.uncovered > 0) {
+      uncoveredItems.add(line.variantId);
       uncovered.push({
         lineNo: line.lineNo,
         name: line.name,
@@ -115,9 +138,23 @@ export function planBatches(input: {
   for (const [variantId, want] of wanted) {
     const item = catalog.byVariant.get(variantId)!;
     if (item.stockQty === null || item.stockQty === undefined) continue;
-    const onHand = item.stockQty - (sold.total.get(variantId) ?? 0);
-    if (overStock(onHand, want))
-      stock.push({ variantId, name: item.name, onHand: Math.max(0, onHand), wanted: want });
+    const heldHere = item.stockQty - (sold.total.get(variantId) ?? 0);
+    // An item that keeps batches counts only the batches that can be sold, never past the stock itself
+    const valid =
+      usesAutoBatch(pharmacy) && Array.isArray(item.stockBatches)
+        ? sellableOf(poolOf(item.stockBatches, sold.batches.get(variantId) ?? []), today)
+        : null;
+    const onHand = valid === null ? heldHere : Math.min(heldHere, valid);
+    // A shortfall only in sellable stock is already said by the line no valid batch covers
+    const sayBatchOnly = !overStock(heldHere, want) && uncoveredItems.has(variantId);
+    if (overStock(onHand, want) && !sayBatchOnly)
+      stock.push({
+        variantId,
+        name: item.name,
+        onHand: Math.max(0, onHand),
+        wanted: want,
+        ...(onHand < heldHere ? { validOnly: true as const } : {}),
+      });
   }
   return {
     allocations,

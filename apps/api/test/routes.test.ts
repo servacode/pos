@@ -172,6 +172,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/store/till': 'signed-in',
   'PUT /v1/store/catalog-options': 'signed-in',
   'GET /v1/device/invoices/lookup': 'device',
+  'GET /v1/device/invoices/search': 'device',
   'GET /v1/pharmacy/controlled-register': 'signed-in',
   'GET /v1/transfers': 'signed-in',
   'GET /v1/supplier-returns': 'signed-in',
@@ -1676,6 +1677,52 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     const other = await registerStore(app, { phone: '0944444444' });
     const stranger = await createDevice(other.body.tenant.id as string);
     expect((await find(stranger.authorization)).statusCode).toBe(404);
+  },
+  // Recent invoices are found by the customer's phone in any form, never from another store
+  'GET /v1/device/invoices/search': async (app) => {
+    const owner = await openStore(app, '0933333344');
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+      payload: { name: 'ريم', phone: '0955123456' },
+    });
+    const customerId = made.json<{ id: string }>().id;
+    const doc = documents(owner.device);
+    const open = doc('shift_open', shiftOpen(owner.userId));
+    const sold = doc(
+      'sale',
+      sale({ userId: owner.userId }, open.id, {
+        customerId,
+        lines: [cartLine(1, 15_000, { qty: 1000 })],
+        payments: [{ method: 'cash', currency: 'SYP', amountMinor: 15_000 }],
+      }),
+    );
+    await push(app, owner.device, [open, sold]);
+    const search = (authorization: string, q: string) =>
+      app.inject({
+        method: 'GET',
+        url: `/v1/device/invoices/search?q=${encodeURIComponent(q)}`,
+        headers: { authorization },
+      });
+    // By the end of the number
+    const hit = await search(owner.device.authorization, sold.number!.slice(-4));
+    expect(hit.statusCode).toBe(200);
+    expect(hit.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
+      sold.number,
+    );
+    // By the customer's phone however it is typed, and by name
+    for (const typed of ['0955123456', '0955 123 456', '+963 955 123 456', '955123', 'ريم']) {
+      const found = await search(owner.device.authorization, typed);
+      expect(found.json<{ invoices: { number: string; customerPhone: string | null }[] }>().invoices).toEqual(
+        [expect.objectContaining({ number: sold.number, customerPhone: '+963955123456' })],
+      );
+    }
+    const other = await registerStore(app, { phone: '0944444455' });
+    const stranger = await createDevice(other.body.tenant.id as string);
+    expect(
+      (await search(stranger.authorization, sold.number!.slice(-4))).json<{ invoices: unknown[] }>().invoices,
+    ).toEqual([]);
   },
   // A till is told about its own store's subscription: A's lapse never reaches B's till
   'GET /v1/device/subscription': async (app, { a, b }) => {

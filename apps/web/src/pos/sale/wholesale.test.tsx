@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import { validateDocumentPayload } from '@serva/core/contracts/documents';
@@ -132,7 +132,8 @@ describe('the quote', () => {
     const { user, outbox } = await signedIn('مريم');
     await scan(user, PRODUCTS.sugar.barcode!.code);
     await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
-    expect(print).toHaveBeenCalledOnce();
+    await user.click(await screen.findByRole('button', { name: 'احفظ واطبع' }));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
     expect(outbox.filter((e) => e.type === 'sale')).toEqual([]);
     // The cart stays, ready to sell
     expect(plain(due())).toContain('790 ل.س');

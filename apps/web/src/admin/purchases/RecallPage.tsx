@@ -38,8 +38,8 @@ export function RecallPage() {
   const [confirming, setConfirming] = useState(false);
   const [lifting, setLifting] = useState(false);
   const [onShelf, setOnShelf] = useState<ExpiryRow[]>([]);
-  // Which batches the picker offers: all, the stopped ones, or those ending within three months
-  const [shelfFilter, setShelfFilter] = useState<'all' | 'blocked' | 'soon'>('all');
+  // Which batches the picker offers: all, the stopped ones, those ending within three months, or those already past their date
+  const [shelfFilter, setShelfFilter] = useState<'all' | 'blocked' | 'soon' | 'expired'>('all');
 
   // The batches the stores hold, to pick from instead of typing a number blind (the same report the
   // expiry page reads: every batch on the shelf, blocked ones included)
@@ -63,7 +63,9 @@ export function RecallPage() {
       const key = `${row.variantId}|${row.batchNo}`;
       if (seen.has(key)) continue;
       if (shelfFilter === 'blocked' && !row.blocked) continue;
-      if (shelfFilter === 'soon' && (row.daysLeft === null || row.daysLeft > 90)) continue;
+      if (shelfFilter === 'soon' && (row.daysLeft === null || row.daysLeft < 0 || row.daysLeft > 90))
+        continue;
+      if (shelfFilter === 'expired' && (row.daysLeft === null || row.daysLeft >= 0)) continue;
       if (typed && !row.batchNo.toLowerCase().includes(typed) && !row.name.toLowerCase().includes(typed))
         continue;
       seen.add(key);
@@ -252,6 +254,7 @@ export function RecallPage() {
                 options={[
                   { value: 'all', label: 'كل الدفعات' },
                   { value: 'soon', label: 'تنتهي قريباً' },
+                  { value: 'expired', label: 'منتهية' },
                   { value: 'blocked', label: 'الموقوفة' },
                 ]}
               />
@@ -320,7 +323,7 @@ export function RecallPage() {
                       اطبع
                     </Button>
                     <Button variant="secondary" onClick={exportCsv} disabled={found.sales.length === 0}>
-                      حمّل CSV
+                      حمّل الجدول
                     </Button>
                   </span>
                 </SectionHead>

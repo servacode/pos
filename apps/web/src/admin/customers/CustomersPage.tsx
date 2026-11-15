@@ -7,7 +7,6 @@ import {
   type CustomerKind,
   type CustomerListItem,
   type CustomerListResponse,
-  type SectorKey,
 } from '@serva/core';
 import {
   AddIcon,
@@ -15,6 +14,7 @@ import {
   Badge,
   BookIcon,
   Button,
+  CalendarIcon,
   CashIcon,
   CustomersIcon,
   DataTable,
@@ -32,6 +32,7 @@ import {
   Select,
   SendIcon,
   Skeleton,
+  KpiStrip,
   StatTile,
   ToggleChip,
   Tooltip,
@@ -47,15 +48,7 @@ import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { listCustomers } from './api';
-import { CustomerForm } from './CustomerForm';
-
-const KIND_SECTORS: readonly SectorKey[] = [
-  'medical_supplies',
-  'pharmacy',
-  'wholesale',
-  'building_materials',
-  'general',
-];
+import { CustomerForm, KIND_SECTORS } from './CustomerForm';
 
 /** Owes more than the limit set for them: the till still sells, with a warning. */
 const overLimit = (c: CustomerListItem) => c.creditLimitMinor !== null && c.balanceMinor > c.creditLimitMinor;
@@ -292,6 +285,12 @@ export function CustomersPage() {
   const typed = search.trim() !== '';
   const empty = owing ? (
     <EmptyState icon={CashIcon} title="لا أحد عليه دين." description="كل زبائنك سدّدوا ما عليهم." />
+  ) : away ? (
+    <EmptyState
+      icon={CalendarIcon}
+      title="لا زبون غاب أكثر من 90 يوماً."
+      description="كل من اشترى منك اشترى خلال آخر 90 يوماً."
+    />
   ) : typed ? (
     <EmptyState
       icon={SearchIcon}
@@ -335,7 +334,7 @@ export function CustomersPage() {
             onCancel={() => setAdding(false)}
           />
         ) : null}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiStrip columns={4}>
           <StatTile
             label="الديون على الزبائن"
             icon={<CashIcon />}
@@ -359,7 +358,7 @@ export function CustomersPage() {
             iconTone="neutral"
             value={kpi(<bdi className="num">{items.length}</bdi>)}
           />
-        </div>
+        </KpiStrip>
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <SearchField

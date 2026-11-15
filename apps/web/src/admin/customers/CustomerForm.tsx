@@ -8,10 +8,22 @@ import {
   type CustomerDetail,
   type CustomerKind,
   type CustomerListItem,
+  type SectorKey,
 } from '@serva/core';
 import { Alert, Button, Card, CardHeader, Select, Switch, TextField, UserIcon } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
+import { storeSells } from '../../lib/sectors';
 import { createCustomer, updateCustomer } from './api';
+
+/** The shops that sell to clinics, hospitals and offices: only they type a customer by kind */
+export const KIND_SECTORS: readonly SectorKey[] = [
+  'medical_supplies',
+  'pharmacy',
+  'wholesale',
+  'building_materials',
+  'general',
+];
 
 /** Pounds typed («50000» or «50,000») to minor units; '' is no limit */
 function limitOf(text: string): number | null | 'bad' {
@@ -75,6 +87,9 @@ export function CustomerForm({
   onSaved: (saved: CustomerDetail) => void;
   onCancel: () => void;
 }) {
+  const me = useMe();
+  // A clothing or grocery shop does not see «عيادة» or «مشفى»; a customer already typed keeps its kind
+  const asksKind = storeSells(me.tenant.sectors, KIND_SECTORS) || !!customer?.kind;
   const [name, setName] = useState(customer?.name ?? '');
   const [phone, setPhone] = useState(customer?.phone?.replace(/^\+963/, '0') ?? '');
   const [taxNumber, setTaxNumber] = useState(customer?.taxNumber ?? '');
@@ -195,19 +210,21 @@ export function CustomerForm({
                 onChange={(e) => setTaxNumber(e.target.value)}
                 error={fields.taxNumber}
               />
-              <Select
-                label="نوع الزبون"
-                value={kind}
-                onChange={(e) => setKind(e.target.value as CustomerKind | '')}
-                error={fields.kind}
-              >
-                <option value="">غير محدد</option>
-                {CUSTOMER_KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {CUSTOMER_KIND_LABELS[k]}
-                  </option>
-                ))}
-              </Select>
+              {asksKind ? (
+                <Select
+                  label="نوع الزبون"
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as CustomerKind | '')}
+                  error={fields.kind}
+                >
+                  <option value="">غير محدد</option>
+                  {CUSTOMER_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {CUSTOMER_KIND_LABELS[k]}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
               <TextField
                 label="المسؤول للتواصل"
                 value={contactName}
