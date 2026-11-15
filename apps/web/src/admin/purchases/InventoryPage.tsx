@@ -42,7 +42,7 @@ import { sortByOptions } from '../../lib/optionOrder';
 import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 import { SectionHead } from './parts';
-import { shortKinds, StockDefinitions } from '../stockWords';
+import { shortKinds, soldOutSentence, StockDefinitions } from '../stockWords';
 import { InventoryGrid } from './InventoryGrid';
 import { downloadCsv } from '../exportCsv';
 import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
@@ -129,10 +129,18 @@ export function InventoryPage() {
   const belowZero = totals.filter((q) => q < 0).length;
   const kinds = totals.length;
   const soldOut = totals.filter((q) => q <= 0).length;
+  // How many products those combinations belong to (a row without its product counts as its own)
+  const productOf = new Map<string, string>();
+  for (const r of items) productOf.set(r.variantId, r.productId ?? r.variantId);
+  const soldOutProducts = new Set(
+    [...perKind].filter(([, q]) => q <= 0).map(([variantId]) => productOf.get(variantId)),
+  ).size;
   const counted = Object.values(counts).filter((text) => qtyOf(text) !== null).length;
   const countProblems = Object.values(counts).some((text) => countProblem(text) !== null);
   const review = reviewing ? reviewCount(items, counts) : [];
   const reviewTotal = review.reduce((sum, l) => sum + l.diffValueMinor, 0);
+  const reviewShort = review.reduce((sum, l) => sum + Math.max(0, -l.diffValueMinor), 0);
+  const reviewOver = review.reduce((sum, l) => sum + Math.max(0, l.diffValueMinor), 0);
   const needle = query.trim();
   const shown = items.filter(
     (r) =>
@@ -540,11 +548,25 @@ export function InventoryPage() {
               rowKey={(l) => l.variantId}
               empty={<EmptyState icon={StockIcon} title="لم تعدّ أي صنف." />}
             />
-            <p className="mt-4 text-sm text-ink-muted">
-              {reviewTotal < 0 ? 'مجموع النقص: ' : reviewTotal > 0 ? 'مجموع الزيادة: ' : 'لا فرق في القيمة. '}
-              {reviewTotal !== 0 ? (
-                <Money minor={Math.abs(reviewTotal)} currency={base} className="font-bold" />
-              ) : null}
+            <p className="mt-4 flex flex-wrap gap-x-3 gap-y-1 text-sm text-ink-muted">
+              {reviewTotal === 0 && reviewShort === 0 ? (
+                'لا فرق في القيمة.'
+              ) : (
+                <>
+                  <span>
+                    نقص <Money minor={reviewShort} currency={base} className="font-bold" />
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    زيادة <Money minor={reviewOver} currency={base} className="font-bold" />
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    الصافي <Money minor={Math.abs(reviewTotal)} currency={base} className="font-bold" />
+                    {reviewTotal < 0 ? ' نقصاً' : reviewTotal > 0 ? ' زيادة' : ''}
+                  </span>
+                </>
+              )}
             </p>
           </Card>
         ) : null}
@@ -566,7 +588,8 @@ export function InventoryPage() {
             footnote={
               stock ? (
                 <>
-                  عدد الأصناف: <span className="num">{kinds}</span>
+                  {me.tenant.sectors.includes('clothing') ? 'المقاسات والألوان' : 'عدد الأصناف'}:{' '}
+                  <span className="num">{kinds}</span>
                   {belowZero > 0 ? <> · {shortKinds(belowZero)}</> : null}
                 </>
               ) : undefined
@@ -576,7 +599,11 @@ export function InventoryPage() {
             label="نفد من الرف"
             value={stock ? soldOut : <Skeleton className="h-9 w-12" />}
             footnote={
-              stock ? (soldOut ? 'أصناف بلا قطع، معلَّمة في الجدول' : 'في كل صنف قطع على الرف') : undefined
+              stock
+                ? soldOut
+                  ? `${soldOutSentence(soldOut, soldOutProducts, me.tenant.sectors.includes('clothing'))}، معلَّمة في الجدول`
+                  : 'في كل صنف قطع على الرف'
+                : undefined
             }
           />
         </KpiStrip>

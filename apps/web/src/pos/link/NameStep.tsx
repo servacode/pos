@@ -15,7 +15,6 @@ import {
   TextField,
 } from '@serva/ui';
 import { DEVICE_KIND_LABELS, DEVICE_PLATFORM_LABELS, formatPairingCode } from '../../lib/devices';
-import { APP_VERSION } from '../../offline/sync';
 import { SummaryRow } from '../FlowParts';
 import type { LinkCredentials } from './MethodStep';
 
@@ -185,10 +184,6 @@ export function NameStep({
                 ? (branches.find((b) => b.id === branchId)?.name ?? '')
                 : 'الذي اختاره المالك حين أنشأ الرمز'}
             </SummaryRow>
-            <SummaryRow label="النسخة">
-              <bdi className="num">{APP_VERSION}</bdi>
-            </SummaryRow>
-            <SummaryRow label="رمزه في الترقيم">يُعطى عند الموافقة</SummaryRow>
           </dl>
         </div>
       </div>

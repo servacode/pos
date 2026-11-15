@@ -245,9 +245,10 @@ async function storeTotals(tx: Transaction, tenantId: string): Promise<ProductLi
     pieces: string;
     negative: number;
     run_out: number;
+    run_out_products: number;
   }>(sql`
     with per_variant as (
-      select v.id, p.type, coalesce((select sum(s.qty) from stock_levels s
+      select v.id, p.id as pid, p.type, coalesce((select sum(s.qty) from stock_levels s
         where s.tenant_id = v.tenant_id and s.variant_id = v.id), 0) as q
       from products p join variants v on v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
       where p.tenant_id = ${tenantId} and p.archived_at is null and p.status = 'active')
@@ -256,7 +257,8 @@ async function storeTotals(tx: Transaction, tenantId: string): Promise<ProductLi
            (count(*) filter (where type = 'stock'))::int as variants,
            coalesce(sum(greatest(q, 0)) filter (where type = 'stock'), 0)::text as pieces,
            (count(*) filter (where type = 'stock' and q < 0))::int as negative,
-           (count(*) filter (where type = 'stock' and q <= 0))::int as run_out
+           (count(*) filter (where type = 'stock' and q <= 0))::int as run_out,
+           (count(distinct pid) filter (where type = 'stock' and q <= 0))::int as run_out_products
     from per_variant`);
   const [lowest] = await tx.execute<{ name_ar: string; q: string }>(sql`
     select p.name_ar, t.q::text as q from (
@@ -273,6 +275,7 @@ async function storeTotals(tx: Transaction, tenantId: string): Promise<ProductLi
     pieces: Number(row?.pieces ?? 0),
     negative: row?.negative ?? 0,
     runOut: row?.run_out ?? 0,
+    runOutProducts: row?.run_out_products ?? 0,
     lowest: lowest ? { nameAr: lowest.name_ar, qty: Number(lowest.q) } : null,
   };
 }

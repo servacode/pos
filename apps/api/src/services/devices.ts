@@ -514,7 +514,7 @@ async function summaries(tx: Transaction, now: Date, deviceId?: string): Promise
   const missing = await missingDocuments(tx, deviceId);
   const announced = new Set(missing.keys());
   return rows
-    .filter(({ device }) => deviceId !== undefined || isListed(device, now))
+    .filter(({ device }) => deviceId !== undefined || (isListed(device, now) && !device.hiddenAt))
     .map(({ device, branchName }) => ({
       id: device.id,
       name: device.name,
@@ -664,6 +664,37 @@ export async function rejectDevice(
       },
       meta,
     );
+    return summaryOf(tx, id, now);
+  });
+}
+
+/**
+ * POST /v1/devices/{id}/hide («احذف من القائمة»): a stopped device leaves the list. Only hidden: the
+ * row stays, so every document it made keeps its device.
+ */
+export async function hideDevice(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  { now, meta }: ManageContext,
+): Promise<DeviceSummary> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const device = await deviceToManage(tx, auth, id);
+    if (device.status !== 'revoked') throw wrongState('يُحذف من القائمة الجهاز الموقوف فقط.');
+    if (!device.hiddenAt) {
+      await tx.update(devices).set({ hiddenAt: now }).where(eq(devices.id, id));
+      await audit(
+        tx,
+        {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: 'device.hidden',
+          entity: 'device',
+          entityId: id,
+        },
+        meta,
+      );
+    }
     return summaryOf(tx, id, now);
   });
 }

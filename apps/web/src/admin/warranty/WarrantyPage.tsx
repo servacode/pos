@@ -139,7 +139,7 @@ function ClaimSlip({ claim }: { claim: WarrantyClaim }) {
       <ol className="mt-4 list-decimal ps-5 text-sm">
         {claim.events.map((event, i) => (
           <li key={i}>
-            {WARRANTY_STATUS_LABELS[event.status]} · <span className="num">{event.on}</span>
+            {WARRANTY_STATUS_LABELS[event.status]} · <span className="num">{dayText(event.on, digits)}</span>
             {event.note ? ` · ${event.note}` : ''}
           </li>
         ))}
@@ -543,7 +543,8 @@ export function WarrantyPage() {
                   <ol className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
                     {claim.events.map((event, i) => (
                       <li key={i}>
-                        {WARRANTY_STATUS_LABELS[event.status]} <span className="num">{event.on}</span>
+                        {WARRANTY_STATUS_LABELS[event.status]}{' '}
+                        <span className="num">{dayText(event.on, digits)}</span>
                         {event.note ? ` (${event.note})` : ''}
                       </li>
                     ))}

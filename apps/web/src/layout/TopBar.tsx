@@ -53,6 +53,9 @@ export interface Notice {
   attention: number;
 }
 
+/** A menu this short belongs to a cashier: no keyboard hint for the page search */
+const SHORTCUT_MIN_PAGES = 5;
+
 /**
  * The admin top bar (هوية 4): where you are (store › section › page) and the sidebar's fold at the
  * start, a quick jump to any page (Ctrl K) in the middle, and at the end the connection (only when
@@ -97,6 +100,9 @@ export function TopBar({
   const online = useOnline();
   const page = current?.pages.find((p) => pageOwns(p, pathname));
   const [searchOpen, setSearchOpen] = useState(false);
+  // The keyboard hint is for people who run the store from a desk; a cashier whose menu is a handful
+  // of pages never needs it
+  const showShortcut = sections.reduce((n, section) => n + section.pages.length, 0) > SHORTCUT_MIN_PAGES;
   const foldLabel = collapsed ? 'توسيع القائمة' : 'طيّ القائمة';
 
   // Ctrl K (or ⌘K) opens the page search from anywhere in the admin.
@@ -194,12 +200,14 @@ export function TopBar({
       >
         <SearchIcon size={16} />
         <span className="min-w-0 flex-1 truncate">ابحث في المتجر…</span>
-        <kbd
-          dir="ltr"
-          className="rounded-small border border-line bg-surface-muted px-1.5 font-sans text-xs/5 font-semibold text-ink-muted"
-        >
-          Ctrl K
-        </kbd>
+        {showShortcut ? (
+          <kbd
+            dir="ltr"
+            className="rounded-small border border-line bg-surface-muted px-1.5 font-sans pointer-coarse:hidden text-xs/5 font-semibold text-ink-muted"
+          >
+            Ctrl K
+          </kbd>
+        ) : null}
       </button>
 
       {/* The end: the connection, the notices, the theme, the till, the account */}

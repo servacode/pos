@@ -52,6 +52,7 @@ describe('the products tiles', () => {
       pieces: 10 * PIECE,
       negative: 1,
       runOut: 2,
+      runOutProducts: 2,
       lowest: { nameAr: 'شاي', qty: -2 * PIECE },
     });
     // A search narrows the rows, never the tiles

@@ -246,7 +246,7 @@ export function PurchasesPage() {
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
         {notice && mode === 'list' ? (
-          <div ref={noticeRef} className="scroll-mt-24">
+          <div ref={noticeRef} className="scroll-mt-36 sm:scroll-mt-28">
             <Alert tone="success">{notice}</Alert>
           </div>
         ) : null}

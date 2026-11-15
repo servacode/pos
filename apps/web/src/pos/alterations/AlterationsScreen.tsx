@@ -115,6 +115,23 @@ export function AlterationsScreen({
   const ready =
     name.trim() && phone.trim() && item.trim() && work.trim() && priceMinor !== null && !depositBad && due;
 
+  // Why the button waits, in the words of the first thing missing
+  const missing = !name.trim()
+    ? 'اكتب اسم الزبون'
+    : !phone.trim()
+      ? 'اكتب جوال الزبون'
+      : !item.trim()
+        ? 'اكتب القطعة'
+        : !work.trim()
+          ? 'اكتب المطلوب'
+          : priceMinor === null
+            ? 'اكتب الأجرة'
+            : depositBad
+              ? 'العربون أكبر من السعر أو غير صحيح'
+              : !due
+                ? 'اختر موعد التسليم'
+                : null;
+
   async function create() {
     if (!ready || !token) return;
     setSaving(true);
@@ -286,6 +303,11 @@ export function AlterationsScreen({
           >
             سجّل واطبع التذكرة
           </Button>
+          {missing ? (
+            <p role="status" className="text-center text-sm text-ink-muted">
+              {missing}
+            </p>
+          ) : null}
         </section>
         <section aria-label="التذاكر المفتوحة" className="flex flex-col gap-4">
           <div className="flex items-center gap-3">

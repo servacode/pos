@@ -28,7 +28,7 @@ const RULES: readonly Rule[] = [
   // Catheters and tubes first: «قسطرة فولي» holds the letters of «فول» (beans) and must not read as groceries
   { words: /قسطر|قثطر|فولي|كانيول|انبوب|خرطوم|مبوله|كيس بول/, category: 'مستهلكات', sectors: MEDICAL },
   {
-    words: /ضغط|سكر|حراره|ترمومتر|ميزان|سماعه|اوكسجين|نبض|بخار|قياس|جهاز|اجهزه/,
+    words: /ضغط|سكر|حرار|محرار|ترمومتر|ميزان|سماعه|اوكسجين|نبض|بخار|قياس|جهاز|اجهزه/,
     category: 'أجهزة قياس',
     sectors: MEDICAL,
   },

@@ -118,7 +118,7 @@ const poll = (activation: Pick<PendingActivation, 'activationId' | 'activationSe
     headers: { authorization: `Activation ${activation.activationSecret}` },
   });
 
-const act = (s: Store, id: string, action: 'approve' | 'reject' | 'revoke', token = s.accessToken) =>
+const act = (s: Store, id: string, action: 'approve' | 'reject' | 'revoke' | 'hide', token = s.accessToken) =>
   app.inject({ method: 'POST', url: `/v1/devices/${id}/${action}`, headers: bearer(token) });
 
 async function list(token: string): Promise<DeviceSummary[]> {
@@ -723,5 +723,32 @@ describe('POST /v1/devices/{id}/revoke', () => {
     const s = await store();
     const waiting = await pending(s);
     expect((await act(s, waiting.activationId, 'revoke')).statusCode).toBe(409);
+  });
+});
+
+describe('POST /v1/devices/{id}/hide', () => {
+  it('takes a stopped device off the list and keeps the row; an active one cannot be hidden', async () => {
+    const s = await store();
+    const device = await linkDevice(app, s.accessToken, s.branchId);
+    // a working device is stopped first
+    expect((await act(s, device.deviceId, 'hide')).statusCode).toBe(409);
+    expect((await act(s, device.deviceId, 'revoke')).statusCode).toBe(200);
+    const listed = () =>
+      app.inject({
+        method: 'GET',
+        url: '/v1/devices',
+        headers: { authorization: `Bearer ${s.accessToken}` },
+      });
+    expect((await listed()).json().devices.map((d: { id: string }) => d.id)).toContain(device.deviceId);
+
+    const hidden = await act(s, device.deviceId, 'hide');
+    expect(hidden.statusCode).toBe(200);
+    expect((await listed()).json().devices.map((d: { id: string }) => d.id)).not.toContain(device.deviceId);
+    // Hiding again is fine, and the row is still there for its documents
+    expect((await act(s, device.deviceId, 'hide')).statusCode).toBe(200);
+    const [row] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from devices where id = ${device.deviceId}`;
+    expect(row!.n).toBe(1);
   });
 });

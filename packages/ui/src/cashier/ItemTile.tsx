@@ -74,7 +74,9 @@ export function ItemTile({
   className,
 }: ItemTileProps) {
   const picture = Boolean(imageUrl) || pictureSlot;
-  const monogram = !picture && initial;
+  // No photo anywhere in the grid: the icon sits small beside the name (a ~110 high tile, not a grey box)
+  const inlineIcon = !picture && Boolean(placeholder);
+  const monogram = !picture && !inlineIcon && initial;
   return (
     <button
       type="button"
@@ -132,16 +134,34 @@ export function ItemTile({
       {/* Two lines of name are always reserved, so the price sits at the same height on every tile of a row */}
       <span
         className={cn(
-          'flex flex-col gap-0.5',
-          detail && !monogram ? 'min-h-[4rem]' : 'min-h-[2.75rem]',
+          'flex gap-0.5',
+          inlineIcon ? 'flex-row items-start gap-2.5' : 'flex-col',
+          !inlineIcon && (detail && !monogram ? 'min-h-[4rem]' : 'min-h-[2.75rem]'),
           picture && 'px-1.5',
         )}
       >
-        <span className="line-clamp-2 text-base/[22px] font-semibold">
+        {inlineIcon ? (
+          <span
+            aria-hidden="true"
+            className={cn(
+              'grid size-9 shrink-0 place-items-center rounded-small text-ink-subtle',
+              selected ? 'bg-surface' : 'bg-surface-muted',
+            )}
+          >
+            {placeholder}
+          </span>
+        ) : null}
+        <span
+          className={cn(
+            'line-clamp-2 min-w-0 text-base/[22px] font-semibold',
+            inlineIcon && 'min-h-[2.75rem] flex-1',
+          )}
+        >
           <bdi>{name}</bdi>
         </span>
-        {detail && !monogram ? <span className="text-sm text-ink-muted">{detail}</span> : null}
+        {detail && !monogram && !inlineIcon ? <span className="text-sm text-ink-muted">{detail}</span> : null}
       </span>
+      {detail && !monogram && inlineIcon ? <span className="text-sm text-ink-muted">{detail}</span> : null}
       <span className={cn('flex items-center justify-between gap-2', picture && 'px-1.5')}>
         {priceLabel ? (
           <span className="text-sm font-semibold text-ink-muted">{priceLabel}</span>

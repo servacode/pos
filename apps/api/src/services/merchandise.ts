@@ -277,6 +277,8 @@ export function merchandiseReport(
       stock: string;
       sold: string;
       min: string | null;
+      pieces: string;
+      in_stock: string;
     }>(sql`
       with ${moved},
       stock as (
@@ -284,7 +286,10 @@ export function merchandiseReport(
         where ${inBranches(sql`branch_id`)} group by variant_id
       )
       select v.id as variant_id, v.product_id, p.name_ar as name, v.label, v.attributes,
-             coalesce(k.qty, 0)::text as stock, coalesce(s.qty, 0)::text as sold, v.min_stock_qty::text as min
+             coalesce(k.qty, 0)::text as stock, coalesce(s.qty, 0)::text as sold, v.min_stock_qty::text as min,
+             (select count(*) from variants a where a.product_id = v.product_id and a.archived_at is null)::text as pieces,
+             (select count(*) from variants a left join stock ak on ak.variant_id = a.id
+                where a.product_id = v.product_id and a.archived_at is null and coalesce(ak.qty, 0) > 0)::text as in_stock
       from variants v
       join products p on p.id = v.product_id
       left join stock k on k.variant_id = v.id
@@ -377,6 +382,8 @@ export function merchandiseReport(
         stockQty: num(r.stock),
         soldQty: num(r.sold),
         minStockQty: r.min === null ? null : num(r.min),
+        productPieces: num(r.pieces),
+        productInStock: num(r.in_stock),
       })),
       byDepartment: departments.map((d) => ({
         categoryId: d.id,

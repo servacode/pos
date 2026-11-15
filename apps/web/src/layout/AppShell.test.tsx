@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MeResponse, Permission, SectorKey } from '@serva/core';
 import { THEME_STORAGE_KEY } from '@serva/ui';
@@ -23,6 +23,12 @@ function signedIn(
     ...routes,
   });
   return { ...mock, ...renderApp(path) };
+}
+
+/** The top bar once the session is restored (until then the shell's skeleton has a banner too) */
+async function signedInBar() {
+  await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' });
+  return screen.getByRole('banner');
 }
 
 /** A waiting order of the online shop: an order to accept, or a hold paid with a deposit. */
@@ -175,7 +181,7 @@ describe('AppShell', () => {
 
   it('opens the till from the top bar, away from the home page that has its own button', async () => {
     signedIn(['sale.create', 'catalog.manage'], undefined, '/prices');
-    const bar = await screen.findByRole('banner');
+    const bar = await signedInBar();
     expect(within(bar).getByRole('link', { name: /افتح الكاشير/ })).toHaveAttribute('href', '/pos');
   });
 
@@ -243,9 +249,27 @@ describe('AppShell', () => {
     expect(screen.queryByRole('dialog', { name: 'القائمة' })).not.toBeInTheDocument();
   });
 
+  it('shows the Ctrl K hint to an owner, not to a cashier with a handful of pages', async () => {
+    signedIn([
+      'catalog.manage',
+      'customers.view',
+      'devices.view',
+      'report.view',
+      'purchases.manage',
+      'sale.create',
+    ]);
+    const ownerBar = await signedInBar();
+    expect(within(ownerBar).getByText('Ctrl K')).toBeInTheDocument();
+    cleanup();
+
+    signedIn(['sale.create']);
+    const cashierBar = await signedInBar();
+    expect(within(cashierBar).queryByText('Ctrl K')).not.toBeInTheDocument();
+  });
+
   it('switches the theme from the top bar', async () => {
     const { user } = signedIn();
-    const bar = await screen.findByRole('banner');
+    const bar = await signedInBar();
 
     await user.click(within(bar).getByRole('button', { name: 'تبديل المظهر' }));
     await user.click(
@@ -260,7 +284,7 @@ describe('AppShell', () => {
     const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     try {
       signedIn();
-      const bar = await screen.findByRole('banner');
+      const bar = await signedInBar();
       expect(within(bar).getByText('دون إنترنت')).toBeInTheDocument();
       onLine.mockReturnValue(true);
       window.dispatchEvent(new Event('online'));

@@ -569,12 +569,13 @@ describe('the price checker', () => {
 });
 
 describe('the sale screen layout', () => {
-  it('the grid does not scroll sideways, and its tiles keep a picture or a letter', async () => {
+  it('the grid does not scroll sideways, and a tile with no photo keeps a small icon beside its name', async () => {
     await saleScreen();
     const grid = screen.getByRole('list', { name: 'الأصناف' });
     expect(grid.parentElement).toHaveClass('overflow-x-hidden');
-    // No photo in this catalog: every tile has the letter in the picture's place
-    expect(grid.querySelectorAll('[aria-hidden="true"].aspect-\\[4\\/3\\]').length).toBeGreaterThan(0);
+    // No photo in this catalog: a small icon sits beside the name, no big grey picture box
+    expect(grid.querySelectorAll('[aria-hidden="true"].size-9').length).toBeGreaterThan(0);
+    expect(grid.querySelectorAll('[aria-hidden="true"][class*="aspect-"]')).toHaveLength(0);
   });
 
   it('on a phone the cart and the items are two tabs, never side by side', async () => {

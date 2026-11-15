@@ -30,6 +30,11 @@ import {
   Syringe,
   ShoppingBasket,
   Stethoscope,
+  Bandage,
+  Hand,
+  Droplet,
+  Pipette,
+  Thermometer,
   UtensilsCrossed,
   ChartColumn,
   Check,
@@ -312,6 +317,12 @@ export const PerfumeIcon = defineIcon(SprayCan);
 export const SyringeIcon = defineIcon(Syringe);
 export const HeartPulseIcon = defineIcon(HeartPulse);
 export const WheelchairIcon = defineIcon(Accessibility);
+// Medical supplies by kind (the till's item tiles): gloves, dressings, drips, tubes, thermometers
+export const GloveIcon = defineIcon(Hand);
+export const BandageIcon = defineIcon(Bandage);
+export const DropIcon = defineIcon(Droplet);
+export const TubeIcon = defineIcon(Pipette);
+export const ThermometerIcon = defineIcon(Thermometer);
 export const BagIcon = defineIcon(Handbag);
 export const GlassesIcon = defineIcon(Glasses);
 export const WatchIcon = defineIcon(Watch);

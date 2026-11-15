@@ -239,6 +239,11 @@ describe('the clothing report', () => {
       [mWhite, 3 * PIECE, 2 * PIECE, null],
       [jacket.variants[0]!.id, 3 * PIECE, 0, 5 * PIECE],
     ]);
+    // Each low piece says how many pieces its product has and how many still have stock (red is for a wholly-out product)
+    const whiteRow = low.lowStock.find((x) => x.variantId === mWhite);
+    expect(whiteRow?.productPieces).toBeGreaterThanOrEqual(1);
+    expect(whiteRow?.productInStock).toBeGreaterThanOrEqual(1);
+    expect(low.lowStock.every((x) => (x.productInStock ?? 99) <= (x.productPieces ?? 0))).toBe(true);
     // At the default of 2 pieces, M white is not short yet
     expect(r.lowStock.map((x) => x.variantId)).not.toContain(mWhite);
 

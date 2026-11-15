@@ -19,6 +19,7 @@ import {
   DataTable,
   EditIcon,
   EmptyState,
+  ExpandIcon,
   IconButton,
   IconChip,
   InfoIcon,
@@ -35,6 +36,7 @@ import {
   SearchField,
   SegmentedControl,
   Select,
+  Sheet,
   Skeleton,
   StatTile,
   StockIcon,
@@ -63,7 +65,7 @@ import { downloadCsv } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
-import { shortKinds, shortPieces, StockDefinitions } from '../stockWords';
+import { lowestSentence, shortKinds, shortPieces, soldOutSentence, StockDefinitions } from '../stockWords';
 import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
 import { ButtonLink } from './parts';
 
@@ -355,8 +357,12 @@ function ProductsList() {
   const canManage = canManageCatalog(me);
   const digits = me.settings.numberFormat;
   const phone = useIsPhone();
+  const clothingStore = me.tenant.sectors.includes('clothing');
   const [exporting, setExporting] = useState(false);
   const [photosOpen, setPhotosOpen] = useState(false);
+  // A phone: the numbers and the filters fold away so the list starts high on the screen
+  const [kpiOpen, setKpiOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [params] = useSearchParams();
   // «التصنيفات» links here with ?category=
   const [filters, setFilters] = useState<Filters>(() => ({
@@ -509,6 +515,12 @@ function ProductsList() {
     filters.season !== '' ||
     filters.status !== 'active' ||
     filters.expiry !== '';
+  // What the «تصفية» sheet holds that is not at its default (the search box is on the page itself)
+  const activeFilters =
+    (filters.categoryId ? 1 : 0) +
+    (filters.season ? 1 : 0) +
+    (filters.expiry ? 1 : 0) +
+    (filters.status !== 'active' ? 1 : 0);
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
   // What the shown list needs done: a price of 0 sells for nothing, and a missing picture shows as a letter
   const zeroPrice =
@@ -683,6 +695,9 @@ function ProductsList() {
       cell: (item) =>
         item.categoryName ? (
           <span className="whitespace-nowrap text-ink-muted">{item.categoryName}</span>
+        ) : item.type === 'service' ? (
+          // A service is not shelved goods: «بلا تصنيف» would only be a chore it does not have
+          <span className="text-ink-subtle">—</span>
         ) : (
           <span className="whitespace-nowrap text-ink-subtle">بلا تصنيف</span>
         ),
@@ -736,13 +751,14 @@ function ProductsList() {
                 {item.sellableQty > item.stockQty ? (
                   <>
                     {' '}
-                    ·{' '}
+                    (قبل{' '}
                     <bdi className="text-danger-ink">
                       {shortPieces(
                         (item.sellableQty - item.stockQty) / 1000,
                         formatQuantity(item.sellableQty - item.stockQty, digits),
                       )}
                     </bdi>
+                    )
                   </>
                 ) : null}
               </span>
@@ -824,11 +840,41 @@ function ProductsList() {
         <PageHeader
           icon={<ProductsIcon />}
           title="المنتجات"
-          description="ابحث بالاسم، أو امسح باركوداً في أي وقت لتفتح منتجه."
+          description={phone ? undefined : 'ابحث بالاسم، أو امسح باركوداً في أي وقت لتفتح منتجه.'}
           actions={canManage ? addProduct : null}
         />
 
-        {showSummary ? (
+        {showSummary && phone ? (
+          <button
+            type="button"
+            aria-expanded={kpiOpen}
+            onClick={() => setKpiOpen((v) => !v)}
+            className="flex min-h-11 items-center gap-2 rounded-card border border-line bg-surface px-3 text-start text-sm text-ink-muted shadow-e1"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {summary ? (
+                <>
+                  <bdi className="num font-semibold text-ink">{`${summary.products}${more}`}</bdi> منتج ·{' '}
+                  <bdi className="num font-semibold text-ink">{formatQuantity(summary.pieces, digits)}</bdi>{' '}
+                  قطعة
+                  {summary.runOut > 0 ? (
+                    <>
+                      {' '}
+                      · <bdi className="num font-semibold text-warning-ink">{summary.runOut}</bdi> نفدت
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                'الأرقام'
+              )}
+            </span>
+            <span className="shrink-0 text-xs font-semibold text-brand-ink">
+              {kpiOpen ? 'أخفِ الأرقام' : 'الأرقام'}
+            </span>
+            <ExpandIcon size={16} className={cn('shrink-0 transition-transform', kpiOpen && 'rotate-180')} />
+          </button>
+        ) : null}
+        {showSummary && (!phone || kpiOpen) ? (
           <KpiStrip columns={showExpiry ? 4 : 3}>
             <StatTile
               label="المنتجات"
@@ -843,7 +889,8 @@ function ProductsList() {
               footnote={
                 summary && summary.variants > 0 && summary.variants !== summary.products ? (
                   <>
-                    عدد الأصناف: <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
+                    {clothingStore ? 'المقاسات والألوان' : 'عدد الأصناف'}:{' '}
+                    <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
                   </>
                 ) : undefined
               }
@@ -882,6 +929,11 @@ function ProductsList() {
                 summary?.lowest ? (
                   summary.lowest.qty < 0 ? (
                     <>
+                      {summary.runOut > 0 ? (
+                        <span className="mb-1 flex font-semibold text-ink">
+                          {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
+                        </span>
+                      ) : null}
                       <Badge tone="danger">سالب</Badge> {summary.lowest.nameAr}: بعتَ أكثر مما سجّلت، صحّح
                       الجرد.
                       {canManage ? (
@@ -893,12 +945,20 @@ function ProductsList() {
                       ) : null}
                     </>
                   ) : (
-                    <>
-                      أقلّها مخزوناً: {summary.lowest.nameAr} —{' '}
-                      <bdi className="num font-semibold text-ink">
-                        {formatQuantity(summary.lowest.qty, digits)}
-                      </bdi>
-                    </>
+                    <span className="flex flex-col gap-0.5">
+                      {summary.runOut > 0 ? (
+                        <span className="font-semibold text-ink">
+                          {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
+                        </span>
+                      ) : null}
+                      <span>
+                        {lowestSentence(
+                          summary.lowest.nameAr,
+                          formatQuantity(summary.lowest.qty, digits),
+                          summary.lowest.qty,
+                        )}
+                      </span>
+                    </span>
                   )
                 ) : undefined
               }
@@ -927,73 +987,184 @@ function ProductsList() {
         {showSummary && !phone ? <StockDefinitions /> : null}
 
         <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <SearchField
-              label="ابحث بالاسم أو الباركود"
-              placeholder="ابحث بالاسم أو امسح الباركود"
-              value={filters.q}
-              onValueChange={(value) => setFilter('q', value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
-                  event.preventDefault();
-                  void openBarcode(filters.q);
-                }
-              }}
-              slashShortcut
-              className="min-w-0 basis-full lg:min-w-64 lg:flex-1 lg:basis-0"
-            />
-            <Select
-              label="التصنيف"
-              hideLabel
-              value={filters.categoryId}
-              onChange={(event) => setFilter('categoryId', event.target.value)}
-              className="min-w-40 flex-1 lg:w-56 lg:flex-none"
-            >
-              <option value="">كل التصنيفات</option>
-              {tree.map((node) => (
-                <option key={node.category.id} value={node.category.id}>
-                  {categoryOptionLabel(node)}
-                </option>
-              ))}
-            </Select>
-            {seasons.length > 0 || filters.season ? (
-              <Select
-                label="الموسم"
-                hideLabel
-                value={filters.season}
-                onChange={(event) => setFilter('season', event.target.value)}
-                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+          {phone ? (
+            <div className="flex items-center gap-2">
+              <SearchField
+                label="ابحث بالاسم أو الباركود"
+                placeholder="ابحث بالاسم أو امسح الباركود"
+                value={filters.q}
+                onValueChange={(value) => setFilter('q', value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
+                    event.preventDefault();
+                    void openBarcode(filters.q);
+                  }
+                }}
+                slashShortcut
+                className="min-w-0 flex-1"
+              />
+              <Button
+                variant="secondary"
+                aria-haspopup="dialog"
+                onClick={() => setFiltersOpen(true)}
+                className="shrink-0"
               >
-                <option value="">كل المواسم</option>
-                {seasons.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
+                {activeFilters > 0 ? (
+                  <>
+                    تصفية <bdi className="num">({activeFilters})</bdi>
+                  </>
+                ) : (
+                  'تصفية'
+                )}
+              </Button>
+            </div>
+          ) : null}
+          {phone ? (
+            <Sheet
+              open={filtersOpen}
+              onOpenChange={setFiltersOpen}
+              side="bottom"
+              closeOnOutsideClick
+              title="تصفية المنتجات"
+              footer={
+                <div className="flex gap-2">
+                  <Button variant="primary" onClick={() => setFiltersOpen(false)} className="flex-1">
+                    اعرض النتائج
+                  </Button>
+                  {activeFilters > 0 ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => setFilters((f) => ({ ...NO_FILTERS, q: f.q }))}
+                    >
+                      امسح التصفية
+                    </Button>
+                  ) : null}
+                </div>
+              }
+            >
+              <div className="flex flex-col gap-3">
+                <Select
+                  label="التصنيف"
+
+                  value={filters.categoryId}
+                  onChange={(event) => setFilter('categoryId', event.target.value)}
+                  className="w-full"
+                >
+                  <option value="">كل التصنيفات</option>
+                  {tree.map((node) => (
+                    <option key={node.category.id} value={node.category.id}>
+                      {categoryOptionLabel(node)}
+                    </option>
+                  ))}
+                </Select>
+                {seasons.length > 0 || filters.season ? (
+                  <Select
+                    label="الموسم"
+
+                    value={filters.season}
+                    onChange={(event) => setFilter('season', event.target.value)}
+                    className="w-full"
+                  >
+                    <option value="">كل المواسم</option>
+                    {seasons.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </Select>
+                ) : null}
+                {showExpiry ? (
+                  <Select
+                    label="الصلاحية"
+
+                    value={filters.expiry}
+                    onChange={(event) => setFilter('expiry', event.target.value as Filters['expiry'])}
+                    className="w-full"
+                  >
+                    <option value="">كل الصلاحيات</option>
+                    <option value="soon">ينتهي قريباً</option>
+                    <option value="expired">منتهية</option>
+                  </Select>
+                ) : null}
+                <SegmentedControl
+                  label="حالة المنتج"
+                  options={STATUS_OPTIONS}
+                  value={filters.status}
+                  onValueChange={(value) => setFilter('status', value)}
+                  fullWidth
+                  className="max-sm:w-full"
+                />
+              </div>
+            </Sheet>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <SearchField
+                label="ابحث بالاسم أو الباركود"
+                placeholder="ابحث بالاسم أو امسح الباركود"
+                value={filters.q}
+                onValueChange={(value) => setFilter('q', value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && looksLikeBarcode(filters.q)) {
+                    event.preventDefault();
+                    void openBarcode(filters.q);
+                  }
+                }}
+                slashShortcut
+                className="min-w-0 basis-full lg:min-w-64 lg:flex-1 lg:basis-0"
+              />
+              <Select
+                label="التصنيف"
+                hideLabel
+                value={filters.categoryId}
+                onChange={(event) => setFilter('categoryId', event.target.value)}
+                className="min-w-40 flex-1 lg:w-56 lg:flex-none"
+              >
+                <option value="">كل التصنيفات</option>
+                {tree.map((node) => (
+                  <option key={node.category.id} value={node.category.id}>
+                    {categoryOptionLabel(node)}
                   </option>
                 ))}
               </Select>
-            ) : null}
-            {showExpiry ? (
-              <Select
-                label="الصلاحية"
-                hideLabel
-                value={filters.expiry}
-                onChange={(event) => setFilter('expiry', event.target.value as Filters['expiry'])}
-                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
-              >
-                <option value="">كل الصلاحيات</option>
-                <option value="soon">ينتهي قريباً</option>
-                <option value="expired">منتهية</option>
-              </Select>
-            ) : null}
-            <SegmentedControl
-              label="حالة المنتج"
-              options={STATUS_OPTIONS}
-              value={filters.status}
-              onValueChange={(value) => setFilter('status', value)}
-              fullWidth
-              className="max-sm:w-full"
-            />
-          </div>
+              {seasons.length > 0 || filters.season ? (
+                <Select
+                  label="الموسم"
+                  hideLabel
+                  value={filters.season}
+                  onChange={(event) => setFilter('season', event.target.value)}
+                  className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+                >
+                  <option value="">كل المواسم</option>
+                  {seasons.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+              {showExpiry ? (
+                <Select
+                  label="الصلاحية"
+                  hideLabel
+                  value={filters.expiry}
+                  onChange={(event) => setFilter('expiry', event.target.value as Filters['expiry'])}
+                  className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+                >
+                  <option value="">كل الصلاحيات</option>
+                  <option value="soon">ينتهي قريباً</option>
+                  <option value="expired">منتهية</option>
+                </Select>
+              ) : null}
+              <SegmentedControl
+                label="حالة المنتج"
+                options={STATUS_OPTIONS}
+                value={filters.status}
+                onValueChange={(value) => setFilter('status', value)}
+                fullWidth
+                className="max-sm:w-full"
+              />
+            </div>
+          )}
 
           {notice ? <Alert tone={notice.tone}>{notice.text}</Alert> : null}
 
@@ -1026,8 +1197,13 @@ function ProductsList() {
           ((canManage && uncategorised > 0) || zeroPrice > 0 || noPhoto > 0) ? (
             <Alert tone={zeroPrice > 0 ? 'warning' : 'info'}>
               <span className="flex flex-col gap-1.5" aria-label="تحتاج انتباهك">
-                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span>
+                <span
+                  className={cn(
+                    'flex items-center gap-x-3 gap-y-1',
+                    phone ? 'min-w-0 flex-nowrap' : 'flex-wrap',
+                  )}
+                >
+                  <span className={phone ? 'min-w-0 truncate' : undefined}>
                     {[
                       canManage && uncategorised > 0 ? `${String(uncategorised)} بلا تصنيف` : null,
                       zeroPrice > 0 ? `${String(zeroPrice)} بسعر صفر` : null,
@@ -1036,7 +1212,7 @@ function ProductsList() {
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
-                  {canManage && uncategorised > 0 ? (
+                  {canManage && uncategorised > 0 && !phone ? (
                     <button
                       type="button"
                       className={textLinkClass}
@@ -1065,6 +1241,16 @@ function ProductsList() {
                 </span>
                 {showWhy ? (
                   <span className="flex flex-col gap-1 text-sm">
+                    {phone && canManage && uncategorised > 0 ? (
+                      <button
+                        type="button"
+                        className={cn(textLinkClass, 'w-fit')}
+                        disabled={loadingAuto}
+                        onClick={() => void categorizeAuto()}
+                      >
+                        صنّفها تلقائياً
+                      </button>
+                    ) : null}
                     {canManage && uncategorised > 0 ? (
                       <span>التصنيفات تُسهّل البحث والتقارير، وتُرتّب المتجر الإلكتروني.</span>
                     ) : null}
@@ -1088,17 +1274,40 @@ function ProductsList() {
                 return (
                   <li key={item.id} className="flex items-center gap-2 ps-3 pe-1">
                     {canManage ? pickBox(item) : null}
-                    <div className="min-w-0 flex-1">{cell('name')}</div>
-                    <div className="flex shrink-0 flex-col items-end gap-0.5 text-sm">
-                      <span className="font-semibold whitespace-nowrap">{cell('price')}</span>
-                      <span className="flex items-center gap-1.5 text-xs text-ink-muted">
-                        {cell('stock')}
-                        {item.categoryName ? (
-                          <span className="max-w-28 truncate">· {item.categoryName}</span>
-                        ) : null}
-                        {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
-                      </span>
+                    <div className="flex min-w-0 flex-1 items-center gap-3 py-2.5">
+                      <Thumb item={item} canAdd={canManage && !item.archivedAt} sectors={me.tenant.sectors} />
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <Link
+                          to={`/products/${item.id}`}
+                          className="line-clamp-2 rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
+                        >
+                          {item.nameAr}
+                        </Link>
+                        <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
+                          {item.type === 'service' ? (
+                            <span>خدمة</span>
+                          ) : (
+                            <>
+                              {item.stockQty < 0 ? <Badge tone="danger">سالب</Badge> : null}
+                              <span
+                                className={cn(
+                                  'shrink-0 font-semibold',
+                                  item.stockQty < 0 && 'text-danger-ink',
+                                  item.stockQty === 0 && 'text-warning-ink',
+                                )}
+                              >
+                                {item.stockQty === 0 ? 'نفد' : formatQuantity(item.stockQty, digits)}
+                              </span>
+                            </>
+                          )}
+                          {item.categoryName && item.type !== 'service' ? (
+                            <span className="min-w-0 truncate text-ink-subtle">{item.categoryName}</span>
+                          ) : null}
+                          {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
+                        </span>
+                      </div>
                     </div>
+                    <span className="shrink-0 text-sm font-semibold whitespace-nowrap">{cell('price')}</span>
                     {canManage ? rowMenu(item) : null}
                   </li>
                 );

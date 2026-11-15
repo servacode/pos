@@ -351,7 +351,7 @@ function HeroTile({
 
 function TileSkeleton() {
   return (
-    <Card className="flex shrink-0 snap-start flex-col gap-3 max-sm:w-[calc((100%-0.5rem)/2.3)] max-sm:min-w-36 max-sm:gap-1 max-sm:p-2 sm:min-w-0">
+    <Card className="flex flex-col gap-3 max-sm:gap-1 max-sm:p-2 max-sm:last:odd:col-span-2 sm:min-w-0">
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-9 w-32 max-sm:h-6" />
       <Skeleton className="h-9 max-sm:hidden" />
@@ -359,8 +359,8 @@ function TileSkeleton() {
   );
 }
 
-/** On a phone the tiles scroll sideways, one snapping into place; from 640 px they share the row. */
-const TILE_CLASS = 'shrink-0 snap-start max-sm:w-[calc((100%-0.5rem)/2.3)] max-sm:min-w-36 sm:min-w-0';
+/** On a phone two tiles across (an odd last one takes the row, no tile cut at the edge); from 640 px they share the row. */
+const TILE_CLASS = 'max-sm:last:odd:col-span-2 sm:min-w-0';
 
 function KpiBand({
   me,
@@ -425,7 +425,7 @@ function KpiBand({
       />
       <SnapRow
         label="مؤشرات اليوم"
-        className="scrollbar-none relative flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 max-sm:-mx-4 max-sm:scroll-px-4 max-sm:px-4 sm:grid sm:auto-cols-fr sm:grid-flow-col sm:gap-4 sm:overflow-visible sm:pb-0"
+        className="relative grid grid-cols-2 gap-2 sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none sm:gap-4"
       >
         {data ? (
           <>
@@ -760,6 +760,9 @@ interface LowItem {
   productId: string;
   name: string;
   stockQty: number;
+  /** How many pieces the product has and how many still have stock (from the report; absent: only the low ones are known) */
+  productPieces?: number | undefined;
+  productInStock?: number | undefined;
 }
 
 /** A product with pieces that ran low: all its pieces in one group, one row on the home page */
@@ -768,6 +771,14 @@ interface LowGroup<T extends LowItem> {
   items: T[];
   /** Every piece is gone: the only case shown in red */
   allOut: boolean;
+}
+
+/** A product is wholly out only when none of ALL its pieces has stock (not just the low ones listed) */
+function wholeProductOut(list: readonly LowItem[]): boolean {
+  const [first] = list;
+  if (first?.productInStock !== undefined) return first.productInStock === 0;
+  if (first?.productPieces !== undefined) return list.length >= first.productPieces;
+  return true;
 }
 
 /**
@@ -786,7 +797,7 @@ function lowGroups<T extends LowItem>(items: readonly T[]): LowGroup<T>[] {
   return [...groups.entries()].map(([productId, list]) => ({
     productId,
     items: list,
-    allOut: list.every((item) => item.stockQty <= 0),
+    allOut: list.every((item) => item.stockQty <= 0) && wholeProductOut(list),
   }));
 }
 
@@ -895,8 +906,8 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   const rows: ReactNode[] = [];
   if (recalled > 0)
     rows.push(
-      <WaitingRow key="recalled" to="/recall" count={recalled} tone="danger" icon={<WarningIcon />}>
-        {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : 'دفعات موقوفة عن البيع (استدعاء)'}
+      <WaitingRow key="recalled" to="/recall" count={null} tone="danger" icon={<WarningIcon />}>
+        {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : `${recalled} دفعات موقوفة عن البيع (استدعاء)`}
       </WaitingRow>,
     );
   const rowOf = (group: (typeof stock)[number]) => {
@@ -905,25 +916,26 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
     const single = group.items.length === 1;
     const colour = item.attributes?.find((a) => a.name === 'اللون')?.value;
     const size = sizeOf(item);
-    const state = item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد';
+    const state = item.stockQty <= 0 ? 'نفد' : `يوشك على النفاد (باقي ${formatQuantity(item.stockQty)})`;
     return (
       <WaitingRow
         key={group.productId}
         to={`/products/${group.productId}`}
         // «نفد» is in the sentence: no second «نفد» beside it
-        count={single ? (item.stockQty <= 0 ? null : stockChip(item.stockQty)) : group.items.length}
+        // The sentence names the pieces and their state: no bare number beside it
+        count={null}
         tone={group.allOut ? 'danger' : 'warning'}
         icon={<WarningIcon />}
       >
         {single ? (
           size ? (
             <>
-              المقاس {size}
-              {colour ? ` (${colour})` : ''} من {item.name} {state}
+              {item.name}: المقاس {size}
+              {colour ? ` (${colour})` : ''} {state}
             </>
           ) : (
             <>
-              {item.name} {state}
+              {item.name}: {state}
             </>
           )
         ) : (
@@ -935,7 +947,7 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   for (const group of stock.filter((g) => g.allOut)) rows.push(rowOf(group));
   if (online > 0)
     rows.push(
-      <WaitingRow key="online" to="/online-store" count={online} tone="warning" icon={<StoreIcon />}>
+      <WaitingRow key="online" to="/online-store" count={online} tone="brand" icon={<StoreIcon />}>
         {online === 1 ? 'طلب جديد من المتجر الإلكتروني' : 'طلبات جديدة من المتجر الإلكتروني'}
       </WaitingRow>,
     );

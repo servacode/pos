@@ -6,6 +6,7 @@ import {
   Button,
   CheckCircleIcon,
   ClockIcon,
+  CloseIcon,
   cn,
   DeviceIcon,
   EditIcon,
@@ -67,6 +68,8 @@ interface DeviceRowProps {
   canManage: boolean;
   onRename: (device: DeviceSummary, name: string) => Promise<string | null>;
   onRevoke: (device: DeviceSummary) => void;
+  /** «احذف من القائمة» on a stopped device: it only leaves the list */
+  onHide?: (device: DeviceSummary) => void;
 }
 
 /**
@@ -74,7 +77,7 @@ interface DeviceRowProps {
  * what it is, its status, when it last made contact and what has not reached the server. The
  * owner's actions (rename, stop from afar) are in its menu; renaming opens in place.
  */
-export function DeviceRow({ device, now, canManage, onRename, onRevoke }: DeviceRowProps) {
+export function DeviceRow({ device, now, canManage, onRename, onRevoke, onHide }: DeviceRowProps) {
   const KindIcon = KIND_ICONS[device.kind];
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(device.name);
@@ -84,6 +87,7 @@ export function DeviceRow({ device, now, canManage, onRename, onRevoke }: Device
   const revoked = device.status === 'revoked';
   const SendingIcon = sending.icon;
   const actions = canManage && device.status === 'active';
+  const removable = canManage && revoked && onHide !== undefined;
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -164,7 +168,7 @@ export function DeviceRow({ device, now, canManage, onRename, onRevoke }: Device
                 </>
               ) : null}
               {deviceTypeLabel(device.kind, device.platform)}
-              {device.appVersion ? (
+              {device.appVersion && device.appVersion !== '0.0.0' ? (
                 <>
                   {' '}
                   · نسخة <bdi className="num">{device.appVersion}</bdi>
@@ -198,10 +202,35 @@ export function DeviceRow({ device, now, canManage, onRename, onRevoke }: Device
               tone="danger"
               onSelect={() => onRevoke(device)}
               render={(props) => (
-                <button type="button" {...props} aria-label={`أوقف عن بُعد: ${device.name}`} />
+                <button type="button" {...props} aria-label={`افصل هذا الجهاز: ${device.name}`} />
               )}
             >
-              أوقف عن بُعد
+              افصل هذا الجهاز
+            </MenuItem>
+          </Menu>
+        ) : null}
+
+        {removable && !editing ? (
+          <Menu
+            label={`إجراءات «${device.name}»`}
+            align="end"
+            trigger={
+              <IconButton
+                label={`إجراءات «${device.name}»`}
+                icon={<MoreIcon />}
+                size="sm"
+                className="-me-1.5 -mt-1"
+              />
+            }
+          >
+            <MenuItem
+              icon={<CloseIcon />}
+              render={(props) => (
+                <button type="button" {...props} aria-label={`احذف من القائمة: ${device.name}`} />
+              )}
+              onSelect={() => onHide?.(device)}
+            >
+              احذف من القائمة
             </MenuItem>
           </Menu>
         ) : null}

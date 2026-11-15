@@ -40,8 +40,10 @@ describe('the wholesale price', () => {
     await scan(user, PRODUCTS.oil.barcode!.code);
     // 790 + 250
     expect(plain(due())).toContain('1,040 ل.س');
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'سعر الجملة' }));
+    // On, it shows as a lit switch beside the tools
     const toggle = screen.getByRole('button', { name: 'سعر الجملة' });
-    await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
     // 700 + 250
     expect(plain(due())).toContain('950 ل.س');
@@ -143,7 +145,8 @@ describe('the quote', () => {
   it('prints the cart as a quote, with no sale and nothing sent', async () => {
     const { user, outbox } = await signedIn('مريم');
     await scan(user, PRODUCTS.sugar.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'عرض سعر' }));
     await user.click(await screen.findByRole('button', { name: 'احفظ واطبع' }));
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
     expect(outbox.filter((e) => e.type === 'sale')).toEqual([]);

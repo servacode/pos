@@ -341,7 +341,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const [openedNote, setOpenedNote] = useState<string | null>(null);
   useEffect(() => {
     if (!openedNote) return;
-    const timer = setTimeout(() => setOpenedNote(null), 8_000);
+    const timer = setTimeout(() => setOpenedNote(null), 3_500);
     return () => clearTimeout(timer);
   }, [openedNote]);
   const fromAddress = useRef<(q: Quotation) => void>(() => undefined);
@@ -1277,7 +1277,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       {openedNote ? (
         <p
           role="status"
-          className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-success-ink shadow-e2"
+          className="fixed inset-x-4 top-[4.5rem] z-50 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-success-ink shadow-e2"
         >
           <span className="min-w-0 flex-1">{openedNote}</span>
           <button

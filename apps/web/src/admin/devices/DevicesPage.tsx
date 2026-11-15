@@ -95,7 +95,10 @@ export function DevicesPage() {
     setBusyId(device.id);
     setActionError(null);
     try {
-      replace(await decideDevice(device.id, decision));
+      const answer = await decideDevice(device.id, decision);
+      // «احذف من القائمة»: the device leaves the list at once; its row and documents stay on the server
+      if (decision === 'hide') setDevices((current) => current?.filter((d) => d.id !== device.id) ?? current);
+      else replace(answer);
       return true;
     } catch (error) {
       setActionError(errorMessage(error));
@@ -213,7 +216,15 @@ export function DevicesPage() {
               <h2 id={`branch-${group.id}`} className="text-lg font-semibold text-ink">
                 {group.name}
               </h2>
-              <Badge dot={false}>{devicesCount(group.devices.length)}</Badge>
+              <Badge dot={false}>
+                {devicesCount(group.devices.filter((d) => d.status === 'active').length)}
+              </Badge>
+              {group.devices.some((d) => d.status === 'revoked') ? (
+                <span className="text-sm text-ink-muted">
+                  و<bdi className="num">{group.devices.filter((d) => d.status === 'revoked').length}</bdi>{' '}
+                  موقوف
+                </span>
+              ) : null}
             </div>
             <ul className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2 xl:grid-cols-3">
               {group.devices.map((device) => (
@@ -224,6 +235,7 @@ export function DevicesPage() {
                   canManage={isOwner}
                   onRename={rename}
                   onRevoke={setRevoking}
+                  onHide={(d) => void decide(d, 'hide')}
                 />
               ))}
             </ul>
@@ -263,12 +275,12 @@ export function DevicesPage() {
         open={revoking !== null}
         onOpenChange={(open) => !open && setRevoking(null)}
         size="sm"
-        title={revoking ? `أوقف «${revoking.name}» عن بُعد؟` : ''}
+        title={revoking ? `افصل «${revoking.name}» عن متجرك؟` : ''}
         description="يتوقف البيع عليه عند أول اتصال، ولا يعود إلا بربط جديد."
         actions={
           <>
             <Button variant="secondary" onClick={() => setRevoking(null)}>
-              تراجع
+              لا، أبقِه
             </Button>
             <Button
               variant="danger"
@@ -278,7 +290,7 @@ export function DevicesPage() {
                 if (revoking && (await decide(revoking, 'revoke'))) setRevoking(null);
               }}
             >
-              أوقف الجهاز
+              افصل الجهاز
             </Button>
           </>
         }

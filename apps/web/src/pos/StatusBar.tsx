@@ -3,6 +3,7 @@ import {
   Avatar,
   CashierStatusBar,
   CloseIcon,
+  cn,
   ConnectionPill,
   InfoIcon,
   Logo,
@@ -95,121 +96,131 @@ export function StatusBar({
 }: StatusBarProps) {
   const digits = useDigits();
   const [hintHidden, setHintHidden] = useState(installHintDismissed);
+  const showHint = persisted === false && !hintHidden;
   return (
-    <CashierStatusBar>
-      {/* The whole logo where the bar is wide; the mark alone where the store and the person need room */}
-      <span className="hidden shrink-0 xl:flex">
-        <Logo />
-      </span>
-      <LogoMark className="xl:hidden" />
-      {device ? (
-        <>
-          <span className="hidden sm:contents">
-            <Divider />
-          </span>
-          {/* A phone has no room for the whole block: the branch alone, so the cashier knows where this till is */}
-          <p className="min-w-0 max-w-24 shrink-[3] sm:hidden">
-            <span className="block truncate text-xs/tight font-semibold text-ink-muted">
-              {device.branchName}
-            </span>
-          </p>
-          <p className="hidden min-w-24 shrink-[2] flex-col sm:flex">
-            <span className="truncate text-sm/tight font-semibold text-ink">{device.storeName}</span>
-            <span className="truncate text-xs/tight text-ink-muted">
-              {device.branchName} · {device.deviceName}
-            </span>
-          </p>
-        </>
-      ) : null}
-      {user ? (
-        <>
-          <Divider />
-          <div className="flex min-w-28 shrink-[2] items-center gap-2.5">
-            <Avatar name={user.name} size="sm" />
-            <p className="flex min-w-0 flex-col">
-              <span className="truncate text-sm/tight font-semibold text-ink">{user.name}</span>
-              <span className="hidden truncate text-xs/tight text-ink-muted sm:block">{user.detail}</span>
-            </p>
-          </div>
-        </>
-      ) : null}
-      <span className="flex-1" />
-      {persisted === false && !hintHidden ? (
-        // Tab 15 › ما يراه الكاشير: the browser may wipe this device's data. Said quietly (a soft
-        // chip, not a warning colour) and once understood it stays away: the whole sentence on wide
-        // screens; the step to take, with the reason on hover, where the bar is short.
-        <span
-          role="alert"
-          title="هذا المتصفح قد يمسح البيانات، ثبّت التطبيق"
-          className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full bg-surface-muted ps-3 pe-1 text-sm font-medium text-ink-muted sm:min-w-0 sm:shrink"
-        >
-          <InfoIcon size={16} className="shrink-0" />
-          {/* The short words always show (a phone too): a readable chip, never a blank pill */}
-          <span className="truncate">
-            <span className="sr-only 2xl:not-sr-only">هذا المتصفح قد يمسح البيانات، </span>ثبّت التطبيق
-          </span>
-          <button
-            type="button"
-            aria-label="أخفِ تنبيه التثبيت"
-            onClick={() => {
-              setHintHidden(true);
-              try {
-                window.localStorage.setItem(INSTALL_HINT_KEY, '1');
-              } catch {
-                // The browser keeps nothing: it will say so again next time.
-              }
-            }}
-            className="grid size-8 shrink-0 place-items-center rounded-full transition-colors duration-120 ease-standard hover:bg-line"
-          >
-            <CloseIcon size={16} />
-          </button>
+    <div className="relative z-60">
+      <CashierStatusBar>
+        {/* The whole logo where the bar is wide; the mark alone where the store and the person need room */}
+        <span className="hidden shrink-0 xl:flex">
+          <Logo />
         </span>
-      ) : null}
-      {notice}
-      {lastInvoice}
-      <span className="flex shrink-0 items-center gap-2.5">
-        <ConnectionPill online={online}>
-          {/* The long sentence gives way (shortened with its full text on hover) so the store and the person keep their names */}
-          <span
-            title={connectionText(online, outbox?.pending ?? 0)}
-            className="sr-only min-[1280px]:not-sr-only min-[1280px]:block min-[1280px]:max-w-72 min-[1536px]:max-w-none"
-          >
-            {connectionText(online, outbox?.pending ?? 0)}
-          </span>
-          {/* Between a phone and a wide bar: the short words, whole, never cut mid-sentence */}
-          <span
-            aria-hidden="true"
-            title={connectionText(online, outbox?.pending ?? 0)}
-            className={
-              online
-                ? 'hidden whitespace-nowrap sm:max-[1279px]:block'
-                : 'text-xs font-semibold whitespace-nowrap max-[1279px]:block min-[1280px]:hidden'
-            }
-          >
-            {online ? 'متصل' : 'دون إنترنت'}
-            {(outbox?.pending ?? 0) > 0 ? ` · ${outbox!.pending}` : ''}
-          </span>
-          {/* On a phone the sentence is spoken only; what waits shows as a number, so it is never squeezed */}
-          {online && (outbox?.pending ?? 0) > 0 ? (
-            <span aria-hidden="true" className="num sm:hidden">
-              {outbox!.pending}
+        <LogoMark className="xl:hidden" />
+        {device ? (
+          <>
+            <span className="hidden sm:contents">
+              <Divider />
+            </span>
+            {/* A phone has no room for the whole block: the branch alone, so the cashier knows where this till is */}
+            <p className={cn('min-w-0 max-w-24 shrink-[3] sm:hidden', user && 'hidden')}>
+              <span className="block truncate text-xs/tight font-semibold text-ink-muted">
+                {device.branchName}
+              </span>
+            </p>
+            <p className="hidden min-w-24 shrink-[2] flex-col sm:flex">
+              <span className="truncate text-sm/tight font-semibold text-ink">{device.storeName}</span>
+              <span className="truncate text-xs/tight text-ink-muted">
+                {device.branchName} · {device.deviceName}
+              </span>
+            </p>
+          </>
+        ) : null}
+        {user ? (
+          <>
+            <Divider />
+            <div className="flex min-w-28 shrink-[2] items-center gap-2.5">
+              <Avatar name={user.name} size="sm" />
+              <p className="flex min-w-0 flex-col">
+                <span className="truncate text-sm/tight font-semibold text-ink">{user.name}</span>
+                <span className="truncate text-xs/tight text-ink-muted max-sm:hidden">{user.detail}</span>
+                {/* A phone has no room beside the name: the branch goes under it */}
+                {device ? (
+                  <span className="truncate text-xs/tight text-ink-muted sm:hidden">{device.branchName}</span>
+                ) : null}
+              </p>
+            </div>
+          </>
+        ) : null}
+        <span className="flex-1" />
+        {lastInvoice}
+        <span className="flex shrink-0 items-center gap-2.5">
+          <ConnectionPill online={online}>
+            {/* The long sentence gives way (shortened with its full text on hover) so the store and the person keep their names */}
+            <span
+              title={connectionText(online, outbox?.pending ?? 0)}
+              className="sr-only min-[1280px]:not-sr-only min-[1280px]:block min-[1280px]:max-w-72 min-[1536px]:max-w-none"
+            >
+              {connectionText(online, outbox?.pending ?? 0)}
+            </span>
+            {/* Between a phone and a wide bar: the short words, whole, never cut mid-sentence */}
+            <span
+              aria-hidden="true"
+              title={connectionText(online, outbox?.pending ?? 0)}
+              className={
+                online
+                  ? 'hidden whitespace-nowrap sm:max-[1279px]:block'
+                  : 'text-xs font-semibold whitespace-nowrap max-sm:hidden sm:max-[1279px]:block min-[1280px]:hidden'
+              }
+            >
+              {online ? 'متصل' : 'دون إنترنت'}
+              {(outbox?.pending ?? 0) > 0 ? ` · ${outbox!.pending}` : ''}
+            </span>
+            {/* On a phone the sentence is spoken only; what waits shows as a number, so it is never squeezed */}
+            {(outbox?.pending ?? 0) > 0 ? (
+              <span aria-hidden="true" className="num sm:hidden">
+                {outbox!.pending}
+              </span>
+            ) : null}
+          </ConnectionPill>
+          {outbox?.lastSentAt ? (
+            <span className="hidden shrink-0 text-xs whitespace-nowrap text-ink-muted xl:inline">
+              آخر إرسال {clockText(outbox.lastSentAt, digits)}
             </span>
           ) : null}
-        </ConnectionPill>
-        {outbox?.lastSentAt ? (
-          <span className="hidden shrink-0 text-xs whitespace-nowrap text-ink-muted xl:inline">
-            آخر إرسال {clockText(outbox.lastSentAt, digits)}
+        </span>
+        <span className="hidden sm:contents">
+          <Divider />
+          <Clock />
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          <ThemeToggle size="md" />
+          {menu}
+        </span>
+      </CashierStatusBar>
+      {/* Empty (no hint, and the subscription chip says nothing): the strip is not drawn at all */}
+      <div className="flex min-h-10 flex-wrap items-center justify-end gap-2 border-b border-line bg-surface px-4 py-1 empty:hidden">
+        {showHint ? (
+          // Tab 15 › ما يراه الكاشير: the browser may wipe this device's data. Said quietly (a soft
+          // chip, not a warning colour) and once understood it stays away: the whole sentence on wide
+          // screens; the step to take, with the reason on hover, where the bar is short.
+          <span
+            role="alert"
+            title="هذا المتصفح قد يمسح البيانات، ثبّت التطبيق"
+            className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full bg-surface-muted ps-3 pe-1 text-sm font-medium text-ink-muted sm:min-w-0 sm:shrink"
+          >
+            <InfoIcon size={16} className="shrink-0" />
+            {/* The short words always show (a phone too): a readable chip, never a blank pill */}
+            <span className="truncate">
+              <span className="sr-only 2xl:not-sr-only">هذا المتصفح قد يمسح البيانات، </span>ثبّت التطبيق
+            </span>
+            <button
+              type="button"
+              aria-label="أخفِ تنبيه التثبيت"
+              onClick={() => {
+                setHintHidden(true);
+                try {
+                  window.localStorage.setItem(INSTALL_HINT_KEY, '1');
+                } catch {
+                  // The browser keeps nothing: it will say so again next time.
+                }
+              }}
+              className="grid size-8 shrink-0 place-items-center rounded-full transition-colors duration-120 ease-standard hover:bg-line"
+            >
+              <CloseIcon size={16} />
+            </button>
           </span>
         ) : null}
-      </span>
-      <span className="hidden sm:contents">
-        <Divider />
-        <Clock />
-      </span>
-      <span className="flex shrink-0 items-center gap-1">
-        <ThemeToggle size="md" />
-        {menu}
-      </span>
-    </CashierStatusBar>
+        {notice}
+      </div>
+    </div>
   );
 }

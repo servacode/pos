@@ -2,7 +2,7 @@ import { QTY_SCALE, type CurrencyId } from '@serva/core';
 import type { ReactNode } from 'react';
 import { IconButton } from '../Button';
 import { cn } from '../cn';
-import { DeleteIcon } from '../icons';
+import { DeleteIcon, WarningIcon } from '../icons';
 import { useDigits } from '../context';
 import { Money } from '../Money';
 import { displayNumber } from '../NumberField';
@@ -28,6 +28,8 @@ export interface CartLineProps {
   currency: CurrencyId;
   /** The second line: options, discount, offer («سكر وسط · خصم 10%»). */
   meta?: ReactNode;
+  /** A ⚠ at the name: the line has a warning (listed in the cart's «N تنبيهات» row), red when it blocks the sale */
+  warning?: 'danger' | 'warning' | null;
   selected?: boolean;
   onSelect: () => void;
   /** A delete button always in view at the line's end (no need to open the line to remove it). */
@@ -52,6 +54,7 @@ export function CartLine({
   lineTotalMinor,
   currency,
   meta,
+  warning = null,
   selected = false,
   onSelect,
   onRemove,
@@ -84,6 +87,17 @@ export function CartLine({
           </span>
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="line-clamp-2 text-base/7 font-semibold text-ink">
+              {warning ? (
+                <span
+                  className={cn(
+                    'me-1.5 inline-block align-middle',
+                    warning === 'danger' ? 'text-danger-ink' : 'text-warning-ink',
+                  )}
+                >
+                  <WarningIcon size={16} />
+                  <span className="sr-only">عليه تنبيه</span>
+                </span>
+              ) : null}
               <bdi>{name}</bdi>
             </span>
             <span className="text-sm text-ink-muted">

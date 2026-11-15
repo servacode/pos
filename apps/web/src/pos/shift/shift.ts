@@ -181,6 +181,13 @@ export interface ShiftActivity {
   bySeller: { sellerId: string; currency: Code; count: number; totalMinor: number }[];
   /** Drawer movements of this shift in the order they were made */
   movements: { kind: CashMovementKind; currency: Code; amountMinor: number; reason: string }[];
+  /** Cash that came into the drawer outside a sale: customers' payments, and gift vouchers or deposits sold for cash */
+  cashIn?: {
+    receipts: { currency: Code; amountMinor: number }[];
+    vouchers: { currency: Code; amountMinor: number }[];
+  };
+  /** A foreign cash payment (20$) given back in another currency (800 ل.س): what was paid in, what came back */
+  changeBack?: { paid: Code; change: Code; paidMinor: number; changeMinor: number }[];
 }
 
 /** Sums the shift's sales and drawer movements (10 › مطابقة الصندوق) from its documents. */
@@ -206,6 +213,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   const gifts = new Map<Code, number>();
   let giftCount = 0;
   const movements: ShiftActivity['movements'] = [];
+  const receiptsCash = new Map<Code, number>();
+  const vouchersCash = new Map<Code, number>();
+  const changeBack = new Map<string, { paid: Code; change: Code; paidMinor: number; changeMinor: number }>();
   for (const { doc } of entries) {
     const payload = doc.payload as Record<string, unknown>;
     if (payload.shiftId !== shiftId) continue;
@@ -240,6 +250,22 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
         byMethod.set(key, row);
       }
       if (sale.change) {
+        // A payment in another currency whose change came back in this one: shown together at close
+        const foreign = sale.payments.find(
+          (p) => p.method === 'cash' && p.currency !== sale.change!.currency,
+        );
+        if (foreign) {
+          const key = `${foreign.currency}:${sale.change.currency}`;
+          const row = changeBack.get(key) ?? {
+            paid: foreign.currency,
+            change: sale.change.currency,
+            paidMinor: 0,
+            changeMinor: 0,
+          };
+          row.paidMinor += foreign.amountMinor;
+          row.changeMinor += sale.change.amountMinor;
+          changeBack.set(key, row);
+        }
         termsOf(sale.change.currency).changeOutMinor += sale.change.amountMinor;
         const key = `cash:${sale.change.currency}`;
         const row = byMethod.get(key) ?? {
@@ -264,11 +290,17 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     } else if (doc.type === 'receipt') {
       // A customer's payment in cash goes into this drawer
       const r = payload as unknown as ReceiptPayload;
-      if (r.method === 'cash') termsOf(r.currency).receiptsMinor += r.amountMinor;
+      if (r.method === 'cash') {
+        termsOf(r.currency).receiptsMinor += r.amountMinor;
+        receiptsCash.set(r.currency, (receiptsCash.get(r.currency) ?? 0) + r.amountMinor);
+      }
     } else if (doc.type === 'gift_voucher') {
       // A gift voucher sold for cash goes into this drawer, as money received
       const g = payload as unknown as GiftVoucherPayload;
-      if (g.method === 'cash') termsOf(g.currency).receiptsMinor += g.amountMinor;
+      if (g.method === 'cash') {
+        termsOf(g.currency).receiptsMinor += g.amountMinor;
+        vouchersCash.set(g.currency, (vouchersCash.get(g.currency) ?? 0) + g.amountMinor);
+      }
       giftCount += 1;
       gifts.set(g.currency, (gifts.get(g.currency) ?? 0) + g.amountMinor);
     } else if (doc.type === 'cash_movement') {
@@ -297,6 +329,11 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     salesTotals: [...salesTotals.values()],
     bySeller: [...bySeller.values()],
     movements,
+    cashIn: {
+      receipts: [...receiptsCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+      vouchers: [...vouchersCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+    },
+    changeBack: [...changeBack.values()],
   };
 }
 
@@ -308,6 +345,8 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
 export function netMethodRows(activity: ShiftActivity | null | undefined): ShiftActivity['byMethod'] {
   const rows = (activity?.byMethod ?? []).map((row) => ({ ...row }));
   for (const refund of activity?.returns.byMethod ?? []) {
+    // A refund voucher issued is not a payment taken back: it has its own line (refundVouchers), never a negative «قسيمة» row
+    if (refund.method === 'voucher') continue;
     // What went back on the customer's account reduces what was left on account (آجل)
     const method = (
       refund.method === 'account' ? 'credit' : refund.method
@@ -317,6 +356,16 @@ export function netMethodRows(activity: ShiftActivity | null | undefined): Shift
     else rows.push({ method, currency: refund.currency, count: 0, amountMinor: -refund.amountMinor });
   }
   return rows;
+}
+
+/** Refund vouchers issued for returns in this shift, per currency: shown on their own line, not netted against the vouchers paid with */
+export function refundVouchers(
+  activity: ShiftActivity | null | undefined,
+): { currency: Code; amountMinor: number }[] {
+  const out = new Map<Code, number>();
+  for (const r of activity?.returns.byMethod ?? [])
+    if (r.method === 'voucher') out.set(r.currency, (out.get(r.currency) ?? 0) + r.amountMinor);
+  return [...out].map(([currency, amountMinor]) => ({ currency, amountMinor }));
 }
 
 /** One drawer at close, with every term of the formula, the expected amount and the difference. */

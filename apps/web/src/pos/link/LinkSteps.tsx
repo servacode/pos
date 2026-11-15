@@ -45,7 +45,7 @@ export function LinkSteps({ current, ownerSignedIn }: { current: LinkStep; owner
                 )}
               >
                 {step.label}
-                {done ? <span className="sr-only"> (تمّت)</span> : null}
+                {done ? <span className="sr-only"> تمّ ✓</span> : null}
               </span>
             </span>
           </li>

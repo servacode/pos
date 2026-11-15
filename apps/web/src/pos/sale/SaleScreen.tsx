@@ -36,6 +36,9 @@ import {
   IconChip,
   InboxIcon,
   KeyIcon,
+  Menu,
+  MenuItem,
+  MoreIcon,
   Money,
   OfferIcon,
   PercentIcon,
@@ -43,7 +46,6 @@ import {
   RemoveIcon,
   Select,
   SendIcon,
-  Tooltip,
   TotalPanel,
   UndoIcon,
   useDigits,
@@ -54,6 +56,7 @@ import { barcodeKey, type BarcodeHit, type Catalog, type CatalogItem } from '../
 import { counted } from '../format';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
+import { CartWarnings } from './CartWarnings';
 import { BatchBanner } from './BatchBanner';
 import { QuoteDialog, type QuoteChoice } from './QuoteDialog';
 import { batchGuard, planBatches } from './batches';
@@ -141,7 +144,11 @@ export type SaleMode =
   | { kind: 'serial'; lineNo: number }
   | { kind: 'rx' }
   | { kind: 'pick'; productId: string }
-  | { kind: 'unit'; variantId: string };
+  | {
+      kind: 'unit';
+      variantId: string;
+      /** A line already in the cart whose unit is being changed */ replaceLine?: number;
+    };
 
 export interface SaleScreenProps {
   statusBar: ReactNode;
@@ -276,6 +283,13 @@ export function SaleScreen(props: SaleScreenProps) {
   const [notice, setNotice] = useState<{ tone: 'warning' | 'info'; text: string } | null>(null);
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
+  // «أُضيف ✓»: a picker closes the moment its last choice adds the piece, so the add is said out loud for a moment
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  useEffect(() => {
+    if (!justAdded) return;
+    const timer = setTimeout(() => setJustAdded(null), 1600);
+    return () => clearTimeout(timer);
+  }, [justAdded]);
   const [quote, setQuote] = useState<QuoteData | null>(null);
   /** «عرض سعر»: asks a few optional details first, then saves a numbered quotation (and prints it if asked) */
   const [quoteAsk, setQuoteAsk] = useState<PricedCart | null>(null);
@@ -445,6 +459,14 @@ export function SaleScreen(props: SaleScreenProps) {
     choice: ItemChoice | undefined;
   } | null>(null);
   const zeroOk = useRef(false);
+  // A simple item with nothing left is added after a confirm tap, like an out-of-stock size
+  const [outAsk, setOutAsk] = useState<{
+    item: CatalogItem;
+    hit: BarcodeHit | null;
+    weighedQty: number | undefined;
+    choice: ItemChoice | undefined;
+  } | null>(null);
+  const outOk = useRef(false);
   const add = useCallback(
     (
       item: CatalogItem,
@@ -465,6 +487,17 @@ export function SaleScreen(props: SaleScreenProps) {
         !cartRef.current.lines.some((l) => l.variantId === item.variantId)
       ) {
         setZeroAsk({ item, hit: hit ?? null, weighedQty, choice });
+        return;
+      }
+      if (
+        !item.isService &&
+        feeMinor === undefined &&
+        typeof item.stockQty === 'number' &&
+        item.stockQty <= 0 &&
+        !outOk.current &&
+        !cartRef.current.lines.some((l) => l.variantId === item.variantId)
+      ) {
+        setOutAsk({ item, hit: hit ?? null, weighedQty, choice });
         return;
       }
       // An item with modifiers asks for its choices first (beside the cart, not over it)
@@ -776,8 +809,8 @@ export function SaleScreen(props: SaleScreenProps) {
     }
     return map;
   }, [catalog.byBarcode]);
-  const handlers = useRef({ add, scan, showPrice, packsByVariant });
-  handlers.current = { add, scan, showPrice, packsByVariant };
+  const handlers = useRef({ add, scan, showPrice, packsByVariant, lastUnits });
+  handlers.current = { add, scan, showPrice, packsByVariant, lastUnits };
   // A second tap on «أضف» lands on the tile that appears under the closed picker: swallowed for a moment
   const pickerAddedAt = useRef(0);
   // Leaving a dialog or panel (hold, price, size...) back to the grid: its last click must not reach a tile
@@ -789,10 +822,16 @@ export function SaleScreen(props: SaleScreenProps) {
   const pickItem = useCallback((item: CatalogItem, hit?: BarcodeHit | null) => {
     if (Date.now() - pickerAddedAt.current < 350) return;
     if (checkingRef.current) handlers.current.showPrice(item, hit);
-    else if (!hit && handlers.current.packsByVariant.has(item.variantId))
-      // Picked with no barcode: the piece or which box?
-      setMode({ kind: 'unit', variantId: item.variantId });
-    else handlers.current.add(item, hit);
+    else if (!hit && handlers.current.packsByVariant.has(item.variantId)) {
+      // Picked with no barcode: the unit used last time goes in with one tap; with none remembered, the piece or which box?
+      const last = handlers.current.lastUnits[item.variantId];
+      const pack =
+        last && last !== 'piece'
+          ? handlers.current.packsByVariant.get(item.variantId)!.find((h) => h.barcode.id === last)
+          : undefined;
+      if (last === 'piece' || pack) handlers.current.add(item, pack ?? null);
+      else setMode({ kind: 'unit', variantId: item.variantId });
+    } else handlers.current.add(item, hit);
   }, []);
   const pickModel = useCallback(
     (productId: string) => {
@@ -1022,6 +1061,37 @@ export function SaleScreen(props: SaleScreenProps) {
     </Button>
   );
 
+  // The cart's warnings in one row: how many, and which lines carry one (a ⚠ at the line)
+  const warnRows =
+    guard.blocks.length +
+    (batchWaits ? guard.approvals.length : 0) +
+    guard.stockBlocks.length +
+    guard.stockWarns.length +
+    (unnumbered.length > 0 ? 1 : 0) +
+    (invoiceNeeds ? 1 : 0);
+  const warnDanger = guard.blocks.length + guard.stockBlocks.length > 0;
+  const lineWarn = (line: Line): 'danger' | 'warning' | null => {
+    if (
+      guard.blocks.some((i) => i.lineNo === line.lineNo) ||
+      guard.stockBlocks.some((i) => i.variantId === line.variantId)
+    )
+      return 'danger';
+    if (
+      (batchWaits && guard.approvals.some((i) => i.lineNo === line.lineNo)) ||
+      guard.stockWarns.some((i) => i.variantId === line.variantId) ||
+      unnumbered.some((l) => l.lineNo === line.lineNo) ||
+      needs.has(line.lineNo)
+    )
+      return 'warning';
+    return null;
+  };
+  // «قطعتان · خدمة»: a service is work, not a piece
+  const serviceCount = cart.lines.filter((l) => catalog.byVariant.get(l.variantId)?.isService).length;
+  const pieceTotal = pieceCount({
+    ...cart,
+    lines: cart.lines.filter((l) => !catalog.byVariant.get(l.variantId)?.isService),
+  });
+
   const cartPanel = (
     <>
       {/* The ticket's head: what it is, who sells, and the actions on the whole ticket */}
@@ -1050,7 +1120,13 @@ export function SaleScreen(props: SaleScreenProps) {
                     {counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)} ·
                   </span>
                   <span className="whitespace-nowrap">
-                    {counted(pieceCount(cart), ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)}
+                    {pieceTotal > 0
+                      ? counted(pieceTotal, ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)
+                      : null}
+                    {pieceTotal > 0 && serviceCount > 0 ? ' + ' : null}
+                    {serviceCount > 0
+                      ? counted(serviceCount, ['خدمة', 'خدمتان', 'خدمات', 'خدمة'], digits)
+                      : null}
                   </span>
                 </>
               )}
@@ -1103,39 +1179,45 @@ export function SaleScreen(props: SaleScreenProps) {
                 </span>
               </Button>
             ) : null}
-            {canHoldForCustomer ? (
-              <Button
-                variant="ghost"
-                size="md"
-                icon={<CalendarIcon size={20} />}
-                onClick={() => setMode({ kind: 'hold' })}
-                title="احجز القطع للزبون بعربون ليستلمها لاحقاً"
+            {/* The rest of the ticket's tools in one «⋯»: hold for a customer, a quotation, the wholesale price */}
+            {canHoldForCustomer || priced || showWholesale ? (
+              <Menu
+                label="أدوات الفاتورة"
+                align="start"
+                className="w-60"
+                trigger={<IconButton label="أدوات الفاتورة" size="md" icon={<MoreIcon />} />}
               >
-                احجز
-              </Button>
+                {canHoldForCustomer ? (
+                  <MenuItem icon={<CalendarIcon />} onSelect={() => setMode({ kind: 'hold' })}>
+                    احجز
+                  </MenuItem>
+                ) : null}
+                {priced ? (
+                  <MenuItem icon={<PrintIcon />} onSelect={() => setQuoteAsk(priced)}>
+                    عرض سعر
+                  </MenuItem>
+                ) : null}
+                {showWholesale ? (
+                  <MenuItem
+                    icon={<OfferIcon />}
+                    onSelect={() =>
+                      setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
+                    }
+                  >
+                    {wholesaleOn ? 'ارجع إلى سعر المفرق' : cart.contractPriced ? 'سعر العقد' : 'سعر الجملة'}
+                  </MenuItem>
+                ) : null}
+              </Menu>
             ) : null}
-            {priced ? (
-              <Tooltip content="اطبع عرض سعر للزبون">
-                <IconButton
-                  label="عرض سعر"
-                  size="md"
-                  icon={<PrintIcon />}
-                  onClick={() => setQuoteAsk(priced)}
-                />
-              </Tooltip>
-            ) : null}
-            {showWholesale ? (
+            {/* On, the wholesale price shows beside the tools as a lit switch: one tap turns it off */}
+            {showWholesale && wholesaleOn ? (
               <Button
-                // A switch, not a status: lit with a tick when on, an outlined dashed button when off
-                variant={wholesaleOn ? 'primary' : 'secondary'}
+                variant="primary"
                 size="md"
-                aria-pressed={wholesaleOn}
-                icon={wholesaleOn ? <CheckIcon size={16} /> : undefined}
-                className={wholesaleOn ? undefined : 'border-dashed'}
-                title={wholesaleOn ? 'اضغط للرجوع إلى سعر المفرق' : 'اضغط لتسعير السلة بسعر الجملة'}
-                onClick={() =>
-                  setCart((c) => setPriceTier(c, c.priceTier === 'wholesale' ? 'retail' : 'wholesale'))
-                }
+                aria-pressed
+                icon={<CheckIcon size={16} />}
+                title="اضغط للرجوع إلى سعر المفرق"
+                onClick={() => setCart((c) => setPriceTier(c, 'retail'))}
               >
                 {cart.contractPriced ? 'سعر العقد' : 'سعر الجملة'}
               </Button>
@@ -1375,23 +1457,41 @@ export function SaleScreen(props: SaleScreenProps) {
                     ) : undefined
                   }
                   extra={
-                    line.tracksSerial ? (
-                      <button
-                        type="button"
-                        className={cn(
-                          'min-h-11 rounded-small underline-offset-4 hover:underline',
-                          (line.serials?.length ?? 0) > 0
-                            ? 'text-ink-muted'
-                            : 'font-semibold text-danger-ink',
-                        )}
-                        onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
-                      >
-                        {line.serials?.length
-                          ? `${serialLabel(settings.sectors)} ${line.serials.join('، ')}`
-                          : 'اكتب الرقم التسلسلي'}
-                      </button>
+                    packsByVariant.has(line.variantId) || line.tracksSerial ? (
+                      <span className="flex flex-wrap items-center gap-2">
+                        {packsByVariant.has(line.variantId) ? (
+                          // The unit sold (piece or a box): one tap to change it, at the same quantity
+                          <button
+                            type="button"
+                            aria-label="غيّر الوحدة"
+                            className="min-h-11 rounded-small border border-line-control/50 bg-surface px-3 text-sm font-semibold text-ink"
+                            onClick={() =>
+                              setMode({ kind: 'unit', variantId: line.variantId, replaceLine: line.lineNo })
+                            }
+                          >
+                            {line.packName ?? (line.packQty === 1000 ? 'قطعة' : 'علبة')} ▾
+                          </button>
+                        ) : null}
+                        {line.tracksSerial ? (
+                          <button
+                            type="button"
+                            className={cn(
+                              'min-h-11 rounded-small underline-offset-4 hover:underline',
+                              (line.serials?.length ?? 0) > 0
+                                ? 'text-ink-muted'
+                                : 'font-semibold text-danger-ink',
+                            )}
+                            onClick={() => setMode({ kind: 'serial', lineNo: line.lineNo })}
+                          >
+                            {line.serials?.length
+                              ? `${serialLabel(settings.sectors)} ${line.serials.join('، ')}`
+                              : 'اكتب الرقم التسلسلي'}
+                          </button>
+                        ) : null}
+                      </span>
                     ) : undefined
                   }
+                  warning={lineWarn(line)}
                   selected={selected === line.lineNo}
                   onSelect={() => setSelected((s) => (s === line.lineNo ? null : line.lineNo))}
                   onRemove={() => remove(line.lineNo)}
@@ -1555,8 +1655,12 @@ export function SaleScreen(props: SaleScreenProps) {
           guard.blocks.length + guard.stockBlocks.length + guard.stockWarns.length > 0 ||
           unnumbered.length > 0 ||
           batchWaits ? (
-            // Capped and scrolling by itself: two warnings must not push the open line's buttons out of the panel
-            <div className="flex max-h-[26dvh] flex-col gap-2 overflow-y-auto overscroll-contain">
+            // One collapsible row: two warnings must not push the cart's lines out of the panel
+            <CartWarnings
+              title={counted(warnRows, ['تنبيه واحد', 'تنبيهان', 'تنبيهات', 'تنبيهاً'], digits)}
+              danger={warnDanger}
+              forceOpen={Boolean(batchWaits || invoiceNeeds)}
+            >
               <BatchBanner
                 blocks={guard.blocks}
                 approvals={batchWaits ? guard.approvals : []}
@@ -1593,7 +1697,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   </Button>
                 </div>
               ) : null}
-            </div>
+            </CartWarnings>
           ) : undefined
         }
         actions={
@@ -1634,6 +1738,43 @@ export function SaleScreen(props: SaleScreenProps) {
     </>
   );
 
+  const itemsArea = (
+    <ItemsArea
+      catalog={catalog}
+      pieces={pieces}
+      searchRef={searchRef}
+      inCart={inCart}
+      pickingProduct={effectiveMode.kind === 'pick' ? effectiveMode.productId : null}
+      multiplier={multiplier}
+      notice={notice}
+      onDismissNotice={dismissNotice}
+      hasLastLines={props.lastLines.length > 0}
+      onRepeatLast={repeatLast}
+      onPickItem={pickItem}
+      onPickModel={pickModel}
+      onScanCode={scanCode}
+      onMultiplier={setMultiplier}
+      checking={checking}
+      check={check}
+      onStopChecking={stopChecking}
+      onStartChecking={startChecking}
+    />
+  );
+  /** A picker over the grid it was opened from: the grid stays in view behind a scrim, the panel centred on the screen */
+  const overPanel = (panel: ReactNode) => (
+    <>
+      {itemsArea}
+      <div
+        className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-ink/45 p-4"
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) setMode({ kind: 'items' });
+        }}
+      >
+        {panel}
+      </div>
+    </>
+  );
+
   return (
     <CashierShell
       statusBar={props.statusBar}
@@ -1642,12 +1783,55 @@ export function SaleScreen(props: SaleScreenProps) {
       onMobileView={setPhoneView}
       cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
     >
+      {justAdded ? (
+        <p
+          role="status"
+          className="pointer-events-none fixed inset-x-4 top-[4.5rem] z-50 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
+        >
+          <CheckIcon size={16} className="shrink-0" />
+          <span className="truncate">
+            أُضيف ✓ <bdi>{justAdded}</bdi>
+          </span>
+        </p>
+      ) : null}
       {quoteAsk ? (
         <QuoteDialog
           customerName={cart.customer?.name ?? null}
           busy={quoteBusy}
           onSave={(choice) => void saveQuote(quoteAsk, choice)}
           onClose={() => setQuoteAsk(null)}
+        />
+      ) : null}
+      {outAsk ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setOutAsk(null);
+          }}
+          size="sm"
+          title="لا يوجد مخزون"
+          description={`«${outAsk.item.name}» غير متوفر في المخزون. بيع على كل حال؟`}
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setOutAsk(null)}>
+                لا، لا تُضفه
+              </Button>
+              <Button
+                onClick={() => {
+                  const ask = outAsk;
+                  setOutAsk(null);
+                  outOk.current = true;
+                  try {
+                    add(ask.item, ask.hit, ask.weighedQty, ask.choice);
+                  } finally {
+                    outOk.current = false;
+                  }
+                }}
+              >
+                نعم، بِع على كل حال
+              </Button>
+            </>
+          }
         />
       ) : null}
       {zeroAsk ? (
@@ -1917,44 +2101,62 @@ export function SaleScreen(props: SaleScreenProps) {
           onCancel={() => setMode({ kind: 'items' })}
         />
       ) : effectiveMode.kind === 'unit' && catalog.byVariant.has(effectiveMode.variantId) ? (
-        <UnitPanel
-          key={effectiveMode.variantId}
-          item={catalog.byVariant.get(effectiveMode.variantId)!}
-          packs={packsByVariant.get(effectiveMode.variantId) ?? []}
-          lastUnit={lastUnits[effectiveMode.variantId]}
-          onPick={(hit) => {
-            const item = catalog.byVariant.get(effectiveMode.variantId)!;
-            const next = { ...lastUnits, [effectiveMode.variantId]: hit ? hit.barcode.id : 'piece' };
-            setLastUnits(next);
-            void pos.local.set(LAST_UNIT_KEY, next);
-            setMode({ kind: 'items' });
-            add(item, hit);
-          }}
-          onCancel={() => setMode({ kind: 'items' })}
-        />
+        overPanel(
+          <UnitPanel
+            key={effectiveMode.variantId}
+            item={catalog.byVariant.get(effectiveMode.variantId)!}
+            packs={packsByVariant.get(effectiveMode.variantId) ?? []}
+            lastUnit={lastUnits[effectiveMode.variantId]}
+            onPick={(hit) => {
+              const item = catalog.byVariant.get(effectiveMode.variantId)!;
+              const next = { ...lastUnits, [effectiveMode.variantId]: hit ? hit.barcode.id : 'piece' };
+              setLastUnits(next);
+              void pos.local.set(LAST_UNIT_KEY, next);
+              setMode({ kind: 'items' });
+              const old = effectiveMode.replaceLine
+                ? cart.lines.find((l) => l.lineNo === effectiveMode.replaceLine)
+                : undefined;
+              if (old) {
+                // The same quantity in the other unit: the line is replaced, not added to
+                setCart((c) => addItem(removeLine(c, old.lineNo), item, hit, old.qty));
+                setSelected(null);
+              } else add(item, hit);
+            }}
+            onCancel={() => setMode({ kind: 'items' })}
+          />,
+        )
       ) : effectiveMode.kind === 'pick' && pieces.get(effectiveMode.productId) ? (
-        <VariantPicker
-          key={effectiveMode.productId}
-          name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
-          pieces={pieces.get(effectiveMode.productId)!}
-          inCart={inCartQty}
-          priceNote={(minor, currency) =>
-            catalog.settings
-              ? dollarNote(minor, currency, { base: catalog.settings.baseCurrency, rates: catalog.rates })
-              : null
-          }
-          Kind={placeholderIconFor({
-            categoryName: null,
-            name: pieces.get(effectiveMode.productId)![0]!.productName ?? '',
-            sectors: catalog.settings?.sectors ?? [],
-          })}
-          onAdd={(piece, qty) => {
-            pickerAddedAt.current = Date.now();
-            setMode({ kind: 'items' });
-            add(piece, null, qty > 1 ? qty * 1000 : undefined);
-          }}
-          onCancel={() => setMode({ kind: 'items' })}
-        />
+        overPanel(
+          <VariantPicker
+            key={effectiveMode.productId}
+            name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
+            pieces={pieces.get(effectiveMode.productId)!}
+            inCart={inCartQty}
+            priceNote={(minor, currency) =>
+              catalog.settings
+                ? dollarNote(minor, currency, { base: catalog.settings.baseCurrency, rates: catalog.rates })
+                : null
+            }
+            Kind={placeholderIconFor({
+              categoryName: null,
+              name: pieces.get(effectiveMode.productId)![0]!.productName ?? '',
+              sectors: catalog.settings?.sectors ?? [],
+            })}
+            onAdd={(piece, qty) => {
+              pickerAddedAt.current = Date.now();
+              setMode({ kind: 'items' });
+              setJustAdded(piece.name);
+              // The picker has already asked about a size with nothing left: no second question
+              outOk.current = true;
+              try {
+                add(piece, null, qty > 1 ? qty * 1000 : undefined);
+              } finally {
+                outOk.current = false;
+              }
+            }}
+            onCancel={() => setMode({ kind: 'items' })}
+          />,
+        )
       ) : effectiveMode.kind === 'choose' ? (
         <ModifierPanel
           key={effectiveMode.item.variantId}
@@ -2136,26 +2338,7 @@ export function SaleScreen(props: SaleScreenProps) {
           </ul>
         </SalePanel>
       ) : (
-        <ItemsArea
-          catalog={catalog}
-          pieces={pieces}
-          searchRef={searchRef}
-          inCart={inCart}
-          pickingProduct={effectiveMode.kind === 'pick' ? effectiveMode.productId : null}
-          multiplier={multiplier}
-          notice={notice}
-          onDismissNotice={dismissNotice}
-          hasLastLines={props.lastLines.length > 0}
-          onRepeatLast={repeatLast}
-          onPickItem={pickItem}
-          onPickModel={pickModel}
-          onScanCode={scanCode}
-          onMultiplier={setMultiplier}
-          checking={checking}
-          check={check}
-          onStopChecking={stopChecking}
-          onStartChecking={startChecking}
-        />
+        itemsArea
       )}
     </CashierShell>
   );

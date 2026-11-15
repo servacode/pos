@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import { dmy, type SerialRow } from '@serva/core';
-import { Badge, Button, PrintIcon } from '@serva/ui';
+import type { SerialRow } from '@serva/core';
+import { Badge, Button, PrintIcon, useDigits } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { WarrantyCertificate, type WarrantyCertificateData } from '../../lib/WarrantyCertificate';
+import { dayText } from '../../lib/dates';
 import { serialsOf } from './api';
 
 /**
@@ -27,6 +28,7 @@ export function WarrantyDevices({
   heading?: string;
 }) {
   const me = useMe();
+  const digits = useDigits();
   const [rows, setRows] = useState<SerialRow[]>([]);
   const [certificate, setCertificate] = useState<WarrantyCertificateData | null>(null);
 
@@ -74,7 +76,7 @@ export function WarrantyDevices({
               </bdi>
               {r.warrantyUntil ? (
                 <span className="block text-sm text-ink-muted">
-                  الكفالة حتى <span className="num">{dmy(r.warrantyUntil)}</span>
+                  الكفالة حتى <span className="num">{dayText(r.warrantyUntil, digits)}</span>
                 </span>
               ) : (
                 <Badge tone="neutral">بلا كفالة</Badge>

@@ -139,7 +139,8 @@ describe('«احجز» at the till (03 › الألبسة: الحجز بعربو
     await signIn(user);
     await scan(user, PRODUCTS.oil.barcode!.code);
     await scan(user, PRODUCTS.oil.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'احجز' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'احجز' }));
     const panel = await screen.findByRole('region', { name: 'احجز للزبون' });
     await user.type(within(panel).getByLabelText('اسم الزبون'), 'سلمى');
     await user.type(within(panel).getByLabelText('جوال الزبون'), '0933111222');
@@ -178,7 +179,8 @@ describe('«احجز» at the till (03 › الألبسة: الحجز بعربو
     const { user, outbox } = renderPos({ local, fetch });
     await signIn(user);
     await scan(user, PRODUCTS.oil.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'احجز' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'احجز' }));
     const panel = await screen.findByRole('region', { name: 'احجز للزبون' });
     await user.type(within(panel).getByLabelText('اسم الزبون'), 'سلمى');
     await user.type(within(panel).getByLabelText('جوال الزبون'), '0933111222');

@@ -506,6 +506,8 @@ export interface ProductListTotals {
   negative: number;
   /** Stocked combinations at zero or below («نفد») */
   runOut: number;
+  /** How many products those combinations belong to («12 مقاساً نفد من 4 منتجات») */
+  runOutProducts?: number;
   /** The stocked product with the least left */
   lowest: { nameAr: string; qty: number } | null;
 }

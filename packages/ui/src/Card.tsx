@@ -1,7 +1,6 @@
-import { useId, useRef, type ComponentProps, type ReactNode } from 'react';
+import { useId, type ComponentProps, type ReactNode } from 'react';
 import { cn } from './cn';
 import { TrendDownIcon, TrendUpIcon } from './icons';
-import { SnapDots } from './Scroller';
 
 export interface CardProps extends ComponentProps<'div'> {
   /** Hover lift for a card that opens something (kit .card.is-click). */
@@ -144,9 +143,9 @@ const HERO_UNIT =
   '[&_[data-money-unit]]:text-base [&_[data-money-unit]]:font-semibold [&_[data-money-unit]]:text-ink-subtle';
 
 /**
- * The row of figure tiles at the top of a page: on a phone one compact strip of small tiles that
- * scrolls sideways and snaps (the same as the home page's), three or four across from 640 px. One
- * pattern for every page, so no page stacks its tiles in a tall column or in a 2 + 1 grid.
+ * The row of figure tiles at the top of a page: on a phone two compact tiles across (an odd last one
+ * takes the row), three or four across from 640 px. The home page's tiles follow the same rule. One
+ * pattern for every page, whole tiles with their text never cut off at the edge.
  */
 export function KpiStrip({
   columns = 3,
@@ -159,23 +158,20 @@ export function KpiStrip({
   className?: string;
   children: ReactNode;
 } & Omit<ComponentProps<'div'>, 'children' | 'className'>) {
-  const ref = useRef<HTMLDivElement>(null);
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <div
         {...rest}
-        ref={ref}
         className={cn(
-          // Two whole tiles and a clear peek of the next on a phone (never a tile cut in the middle
-          // of its figure); a dot under the row for every tile
-          'scrollbar-none flex max-w-full min-w-0 snap-x snap-mandatory gap-2 overflow-x-auto pb-1 max-sm:-mx-4 max-sm:scroll-px-4 max-sm:px-4 max-sm:*:w-[calc((100%-0.5rem)/2.3)] max-sm:*:min-w-36 max-sm:*:shrink-0 max-sm:*:snap-start sm:grid sm:gap-4 sm:overflow-visible sm:pb-0',
+          // Two tiles across on a phone, whole (a tile is never cut in the middle of its figure, so no
+          // sideways strip); an odd last tile takes the full row. Three or four across from 640 px.
+          'grid max-w-full min-w-0 grid-cols-2 gap-2 max-sm:*:last:odd:col-span-2 sm:gap-4',
           columns === 2 ? 'sm:grid-cols-2' : columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4',
           className,
         )}
       >
         {children}
       </div>
-      <SnapDots scrollerRef={ref} label="المؤشرات" className="sm:hidden" />
     </div>
   );
 }
@@ -195,7 +191,7 @@ export function StatTile({
   value,
   trend,
   footnote,
-  wrapFootnote = false,
+  wrapFootnote: _wrapFootnote = false,
   hero = false,
   icon,
   iconTone = 'brand',
@@ -214,7 +210,7 @@ export function StatTile({
     >
       <p
         className={cn(
-          'min-w-0 text-sm text-ink-muted max-sm:truncate max-sm:text-xs',
+          'min-w-0 text-sm text-ink-muted max-sm:text-xs max-sm:leading-4',
           icon ? 'flex items-center gap-2.5 max-sm:gap-1.5' : null,
         )}
       >
@@ -235,14 +231,7 @@ export function StatTile({
       </p>
       {sparkline && sparkline.length > 1 ? <Sparkline values={sparkline} /> : null}
       {footnote ? (
-        <p
-          className={cn(
-            'col-span-full text-sm text-ink-muted max-sm:text-xs',
-            !wrapFootnote && 'max-sm:truncate',
-          )}
-        >
-          {footnote}
-        </p>
+        <p className="col-span-full text-sm text-ink-muted max-sm:text-xs max-sm:leading-4">{footnote}</p>
       ) : null}
       {trend ? (
         <span

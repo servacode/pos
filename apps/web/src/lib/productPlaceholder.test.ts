@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   AccessoryIcon,
   BagIcon,
+  BandageIcon,
+  DropIcon,
+  GloveIcon,
+  MedicalSuppliesIcon,
+  ThermometerIcon,
+  TubeIcon,
   KidsIcon,
   SleepIcon,
   WinterIcon,
@@ -81,6 +87,17 @@ describe('placeholderIconFor', () => {
       ShirtIcon,
     );
     expect(placeholderIconFor({ name: 'طقم مواليد', sectors: clothing })).toBe(KidsIcon);
+  });
+
+  it('tells medical supplies apart by kind (the till tiles), the stethoscope only as the generic fallback', () => {
+    const medical = ['medical_supplies'];
+    expect(placeholderIconFor({ name: 'قفازات طبية', sectors: medical })).toBe(GloveIcon);
+    expect(placeholderIconFor({ name: 'شاش معقم', sectors: medical })).toBe(BandageIcon);
+    expect(placeholderIconFor({ name: 'ضماد لاصق', sectors: medical })).toBe(BandageIcon);
+    expect(placeholderIconFor({ name: 'سيروم ملحي 500', sectors: medical })).toBe(DropIcon);
+    expect(placeholderIconFor({ name: 'قسطرة بولية', sectors: medical })).toBe(TubeIcon);
+    expect(placeholderIconFor({ name: 'محرار رقمي', sectors: medical })).toBe(ThermometerIcon);
+    expect(placeholderIconFor({ name: 'كمامة', sectors: medical })).toBe(MedicalSuppliesIcon);
   });
 
   it('keeps cotton wool and the medical words for a medical store', () => {

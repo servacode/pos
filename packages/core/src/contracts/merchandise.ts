@@ -80,6 +80,9 @@ export interface MerchandiseReport {
     stockQty: number;
     soldQty: number;
     minStockQty: number | null;
+    /** How many pieces (sizes/colours) the product has, and how many of them still have stock: red is for a product wholly out */
+    productPieces?: number;
+    productInStock?: number;
   }[];
   /**
    * Each seller's sales in the period (03 › عمولة البائع): the salesperson named on the sale, else

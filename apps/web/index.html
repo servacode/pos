@@ -32,10 +32,40 @@
     </script>
     <meta name="description" content="SERFA سيرفا — كاشير سحابي بسيط لمحلك" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/boot.css" />
     <title>SERFA</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!--
+        The store admin's frame (sidebar, top bar, a few grey blocks) painted by the HTML alone, so a
+        reload shows the page's shape while the code and the session load; React replaces it on its
+        first render. A device's own app, a public page and sign-in get none (the script below).
+      -->
+      <div id="boot" aria-hidden="true">
+        <aside>
+          <div><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </aside>
+        <section>
+          <header><i style="width: 10rem; height: 1.5rem"></i></header>
+          <i style="width: 12rem; height: 2rem"></i>
+          <i style="height: 6rem"></i>
+          <i style="height: 16rem"></i>
+        </section>
+      </div>
+    </div>
+    <script>
+      (function () {
+        if (
+          /^\/(pos|kitchen|waiter|link|platform|shop|terms|privacy|dev|login|register|forgot-password)(\/|$)/.test(
+            location.pathname,
+          )
+        ) {
+          var boot = document.getElementById('boot');
+          if (boot) boot.remove();
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

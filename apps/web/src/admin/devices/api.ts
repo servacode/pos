@@ -21,7 +21,7 @@ export function createPairingCode(input: CreatePairingCodeInput) {
   });
 }
 
-export type DeviceDecision = 'approve' | 'reject' | 'revoke';
+export type DeviceDecision = 'approve' | 'reject' | 'revoke' | 'hide';
 
 export function decideDevice(id: string, decision: DeviceDecision) {
   return apiFetch<DeviceSummary>(`/v1/devices/${encodeURIComponent(id)}/${decision}`, {

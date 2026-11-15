@@ -64,6 +64,12 @@ function sets(options: {
   return s;
 }
 
+/** The cart's warnings sit in one collapsed «N تنبيهات» row: open it to read them */
+async function openWarnings(user: Pos['user']) {
+  const row = await screen.findByRole('button', { name: /^(تنبيه واحد|تنبيهان|d+ تنبيهات)$/ });
+  if (row.getAttribute('aria-expanded') !== 'true') await user.click(row);
+}
+
 async function payExact(user: Pos['user']) {
   await user.keyboard('{F12}');
   const pay = await screen.findByRole('region', { name: 'الدفع' });
@@ -123,6 +129,7 @@ describe('what no valid batch covers', () => {
       sets: sets({ batches: [EXPIRED], pharmacy: { prescription: 'optional', blockNoBatch: true } }),
     });
     await scan(user, PRODUCTS.tea.barcode!.code);
+    await openWarnings(user);
     expect(
       await screen.findByText(/لا دفعة صالحة تكفي «بانادول 500».*دفعات منتهية.*لا يُباع بلا دفعة صالحة/),
     ).toBeInTheDocument();
@@ -157,6 +164,7 @@ describe('selling above the stock', () => {
     });
     await scan(user, PRODUCTS.tea.barcode!.code);
     await scan(user, PRODUCTS.tea.barcode!.code);
+    await openWarnings(user);
     expect(await screen.findByText(/«بانادول 500».*الموجود/)).toBeInTheDocument();
     await payExact(user);
     expect(soldPayload(outbox).lines[0]!.qty).toBe(2000);
@@ -173,6 +181,7 @@ describe('selling above the stock', () => {
     });
     await scan(user, PRODUCTS.tea.barcode!.code);
     await scan(user, PRODUCTS.tea.barcode!.code);
+    await openWarnings(user);
     expect(await screen.findByText(/الموجود.*فقط.*لا يُباع فوق المخزون/)).toBeInTheDocument();
     await user.keyboard('{F12}');
     expect(screen.queryByRole('region', { name: 'الدفع' })).toBeNull();

@@ -181,12 +181,13 @@ function DayReportBody({ report }: { report: DayReport }) {
       <div
         className={cn(
           'grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2',
-          report.taxMinor !== 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-3',
+          // Two equal cards without tax; with tax the sales card is as wide as the other two together
+          report.taxMinor !== 0 && 'xl:grid-cols-4',
         )}
       >
         <StatTile
           hero
-          className="sm:col-span-2"
+          className={report.taxMinor !== 0 ? 'sm:col-span-2' : undefined}
           wrapFootnote
           label={report.returns.count > 0 ? 'المبيعات بعد المرتجعات' : 'المبيعات'}
           value={<Money minor={net} currency={base} />}
@@ -204,11 +205,7 @@ function DayReportBody({ report }: { report: DayReport }) {
             </>
           }
         />
-        <StatTile
-          className={report.taxMinor === 0 ? 'sm:col-span-2 xl:col-span-1' : undefined}
-          label="الحسم"
-          value={<Money minor={report.discountMinor} currency={base} />}
-        />
+        <StatTile label="الحسم" value={<Money minor={report.discountMinor} currency={base} />} />
         {/* A store with no tax has nothing to show here: the card would only say 0 */}
         {report.taxMinor !== 0 ? (
           <StatTile label="الضريبة" value={<Money minor={report.taxMinor} currency={base} />} />

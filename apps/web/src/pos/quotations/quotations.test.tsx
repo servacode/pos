@@ -143,7 +143,8 @@ describe('the quote button', () => {
     const { user, outbox } = renderPos({ local, fetch });
     await signIn(user);
     await scan(user, sugar.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'عرض سعر' }));
     await user.click(await screen.findByRole('button', { name: 'احفظ واطبع' }));
 
     await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
@@ -167,7 +168,8 @@ describe('the quote button', () => {
     const { user } = renderPos({ local });
     await signIn(user);
     await scan(user, sugar.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'عرض سعر' }));
     await user.click(await screen.findByRole('button', { name: 'احفظ واطبع' }));
     await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
     expect(printed).toContain('لم يُحفظ في النظام');
@@ -181,7 +183,8 @@ describe('the quote button', () => {
     const { user } = renderPos({ local, fetch });
     await signIn(user);
     await scan(user, sugar.barcode!.code);
-    await user.click(screen.getByRole('button', { name: 'عرض سعر' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات الفاتورة' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'عرض سعر' }));
     await user.type(await screen.findByLabelText('اسم الزبون (اختياري)'), 'مطعم الشام');
     await user.type(screen.getByLabelText('ملاحظة (اختياري)'), 'يشمل التوصيل');
     await user.click(screen.getByRole('button', { name: 'احفظ كمسوّدة' }));

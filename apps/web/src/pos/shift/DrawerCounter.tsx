@@ -13,6 +13,11 @@ export function emptyCount(currency: CurrencyCode, till?: TillSettings | null): 
     : { currency, notes: null, totalMinor: 0 };
 }
 
+/** A drawer typed as one amount (the way a shift opens): note by note stays one tap away, «عدّ تفصيلي» */
+export function totalCount(currency: CurrencyCode): DrawerCount {
+  return { currency, notes: null, totalMinor: 0 };
+}
+
 export const drawerName = (currency: CurrencyCode) =>
   currency === 'SYP'
     ? 'درج الليرة'
@@ -270,7 +275,7 @@ export function DrawerCounter({
             onActivate?.(firstKey(next, till));
           }}
         >
-          {byNote ? 'تخطَّ العدّ واكتب المجموع' : 'عُدّ بالفئات'}
+          {byNote ? 'تخطَّ العدّ واكتب المجموع' : 'عدّ تفصيلي'}
         </Button>
       ) : null}
     </section>

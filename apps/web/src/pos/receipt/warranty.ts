@@ -1,4 +1,5 @@
-import { addMonthsIso, serialLabel, warrantyUntilText } from '@serva/core/contracts/warranty';
+import { addMonthsIso, serialLabel } from '@serva/core/contracts/warranty';
+import { dayText } from '../../lib/dates';
 import type { WarrantyCertificateData } from '../../lib/WarrantyCertificate';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import type { SettingsRow } from '@serva/core/contracts/catalog';
@@ -22,14 +23,14 @@ export function serialText(
   return line.serials?.length ? `${serialLabel(settings.sectors)} ${line.serials.join('، ')}` : null;
 }
 
-/** «الكفالة حتى 30/10/2027» for a line sold with a warranty, else null */
+/** «الكفالة حتى 30 تشرين الأول 2027» for a line sold with a warranty, else null */
 export function warrantyText(
   line: Pick<SaleLine, 'serials' | 'warrantyMonths'>,
   deviceTime: string,
   settings: Pick<SettingsRow, 'timezone' | 'businessDayCutoff'>,
 ): string | null {
   if (!line.serials?.length || !line.warrantyMonths) return null;
-  return warrantyUntilText(addMonthsIso(soldOnOf(deviceTime, settings), line.warrantyMonths));
+  return `الكفالة حتى ${dayText(addMonthsIso(soldOnOf(deviceTime, settings), line.warrantyMonths))}`;
 }
 
 /** The certificate of a sale's warranty devices: one row per serial; null when none was sold with a warranty */

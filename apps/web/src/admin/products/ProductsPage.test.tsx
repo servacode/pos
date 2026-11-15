@@ -67,6 +67,41 @@ describe('/products list on a phone and the export', () => {
     }
   });
 
+  it('folds the numbers and the filters away on a phone: one search row, a «تصفية» sheet, a one-line banner', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      openProducts({
+        [list()]: {
+          status: 200,
+          body: {
+            items: [listItem(), tea],
+            nextCursor: null,
+            totals: { products: 12, variants: 30, pieces: 1_160_000, negative: 0, runOut: 2, lowest: null },
+            attention: { zeroPrice: 0, noPhoto: 5, uncategorised: 3 },
+          },
+        },
+      });
+      await screen.findByRole('list', { name: 'المنتجات' });
+      // the tiles wait behind one line
+      expect(screen.queryByText('نفد من الرف')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /الأرقام/ }));
+      expect(await screen.findByText('نفد من الرف')).toBeInTheDocument();
+      // the selects are not on the page until «تصفية» opens
+      expect(screen.queryByRole('combobox', { name: 'التصنيف' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'تصفية' }));
+      expect(await screen.findByRole('combobox', { name: 'التصنيف' })).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).toHaveTextContent('تصفية المنتجات');
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
   it('offers «صدّر الجدول» for the whole search', async () => {
     openProducts();
     expect(await screen.findByRole('button', { name: 'صدّر الجدول' })).toBeInTheDocument();
@@ -466,7 +501,7 @@ describe('/products list: photos, expiry and stock', () => {
       [list()]: page([listItem({ stockQty: 14_000, sellableQty: 16_000, hasImage: false, thumbUrl: null })]),
     });
     const table = await screen.findByRole('table', { name: 'المنتجات' });
-    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 16 · ناقص قطعتان');
+    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 16 (قبل ناقص قطعتان)');
     // no letter box: the picture's place holds an icon
     expect(table.querySelector('a[href$="#images"] svg')).not.toBeNull();
   });

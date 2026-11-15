@@ -137,6 +137,9 @@ describe('«الضمان والصيانة»', () => {
     });
     const { user } = renderApp('/warranty');
     await user.click(await screen.findByRole('button', { name: 'أُرسلت للمورد أو الصيانة' }));
+    // the day of each step is written out, never «2026-11-02»
+    expect(screen.getByText('2 تشرين الثاني 2026')).toBeInTheDocument();
+    expect(screen.queryByText('2026-11-02')).not.toBeInTheDocument();
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText('المورد أو الورشة'), 'وكيل سامسونج');
     await user.click(within(dialog).getByRole('button', { name: 'سجّل' }));

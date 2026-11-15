@@ -103,9 +103,12 @@ describe('/devices list', () => {
     expect(first[1]).toHaveTextContent('كاشير قديم');
     expect(first[1]).toHaveTextContent('موقوف');
     expect(first[1]).toHaveTextContent('أُوقف قبل ساعة');
-    expect(within(first[1]!).queryByRole('button', { name: /أوقف عن بُعد/ })).not.toBeInTheDocument();
-    // A stopped device has nothing left to do: no menu.
-    expect(within(first[1]!).queryByRole('button', { name: /إجراءات/ })).not.toBeInTheDocument();
+    expect(within(first[1]!).queryByRole('button', { name: /افصل هذا الجهاز/ })).not.toBeInTheDocument();
+    // A stopped device only offers to leave the list: no rename, no second stop.
+    expect(within(first[1]!).getByRole('button', { name: /إجراءات/ })).toBeInTheDocument();
+    // the branch counts the working devices; the stopped one is said apart
+    expect(main).toHaveTextContent('جهاز واحد');
+    expect(main).toHaveTextContent('و1 موقوف');
 
     const [till] = within(naim).getAllByRole('listitem');
     expect(till).toHaveTextContent('كاشير أندرويد بطابعة · أندرويد');
@@ -418,8 +421,8 @@ describe('renaming and stopping a device', () => {
     });
 
     await user.click(await screen.findByRole('button', { name: 'إجراءات «كاشير النعيم»' }));
-    await user.click(screen.getByRole('menuitem', { name: 'أوقف عن بُعد: كاشير النعيم' }));
-    let dialog = await screen.findByRole('dialog', { name: 'أوقف «كاشير النعيم» عن بُعد؟' });
+    await user.click(screen.getByRole('menuitem', { name: 'افصل هذا الجهاز: كاشير النعيم' }));
+    let dialog = await screen.findByRole('dialog', { name: 'افصل «كاشير النعيم» عن متجرك؟' });
     expect(dialog).toHaveTextContent('يتوقف البيع عليه عند أول اتصال');
     expect(dialog).toHaveTextContent('بانتظار الإرسال على الجهاز: 12 مستنداً');
     expect(dialog).toHaveTextContent('أعلن عنها الجهاز ولم تصل: 3 مستندات');
@@ -429,20 +432,32 @@ describe('renaming and stopping a device', () => {
       within(dialog)
         .getAllByRole('button')
         .map((b) => b.textContent),
-    ).toEqual(['', 'تراجع', 'أوقف الجهاز']);
-    await user.click(within(dialog).getByRole('button', { name: 'تراجع' }));
+    ).toEqual(['', 'لا، أبقِه', 'افصل الجهاز']);
+    await user.click(within(dialog).getByRole('button', { name: 'لا، أبقِه' }));
     expect(requestsTo('POST', '/v1/devices/dev-2/revoke')).toHaveLength(0);
 
     await user.click(screen.getByRole('button', { name: 'إجراءات «كاشير النعيم»' }));
-    await user.click(screen.getByRole('menuitem', { name: 'أوقف عن بُعد: كاشير النعيم' }));
+    await user.click(screen.getByRole('menuitem', { name: 'افصل هذا الجهاز: كاشير النعيم' }));
     dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'أوقف الجهاز' }));
+    await user.click(within(dialog).getByRole('button', { name: 'افصل الجهاز' }));
 
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(requestsTo('POST', '/v1/devices/dev-2/revoke')).toHaveLength(1);
     const row = within(screen.getByRole('region', { name: 'دوار النعيم' })).getByRole('listitem');
     expect(row).toHaveTextContent('موقوف');
-    expect(within(row).queryByRole('button', { name: /أوقف عن بُعد/ })).not.toBeInTheDocument();
-    expect(within(row).queryByRole('button', { name: /إجراءات/ })).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /افصل هذا الجهاز/ })).not.toBeInTheDocument();
+    expect(within(row).queryByRole('menuitem', { name: /غيّر اسم/ })).not.toBeInTheDocument();
+  });
+
+  it('takes a stopped device off the list with «احذف من القائمة»', async () => {
+    const { user, requestsTo } = openDevices([cashier1, stolen], {
+      'POST /v1/devices/dev-3/hide': { status: 200, body: stolen },
+    });
+    expect(await screen.findByText('كاشير قديم')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'إجراءات «كاشير قديم»' }));
+    await user.click(screen.getByRole('menuitem', { name: 'احذف من القائمة: كاشير قديم' }));
+    await vi.waitFor(() => expect(screen.queryByText('كاشير قديم')).not.toBeInTheDocument());
+    expect(requestsTo('POST', '/v1/devices/dev-3/hide')).toHaveLength(1);
+    expect(screen.getByText('كاشير 1')).toBeInTheDocument();
   });
 });

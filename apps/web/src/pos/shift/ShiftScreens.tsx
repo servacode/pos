@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
-import type { CashMovementKind, CashMovementPayload, ShiftMode } from '@serva/core/contracts/documents';
+import type { CashMovementKind, CashMovementPayload } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
 import type { OutboxEntry } from '@serva/sync';
@@ -36,7 +36,7 @@ import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
-import { DrawerCounter, drawerName, emptyCount, useCountKeypad } from './DrawerCounter';
+import { DrawerCounter, drawerName, emptyCount, totalCount, useCountKeypad } from './DrawerCounter';
 import { ZReport } from './ZReport';
 import {
   cashMovementPayload,
@@ -45,6 +45,7 @@ import {
   deviceDocuments,
   LAST_CLOSED_KEY,
   netMethodRows,
+  refundVouchers,
   shiftActivity,
   shiftClosePayload,
   shiftKey,
@@ -70,12 +71,6 @@ export function drawerCurrencies(catalog: Catalog): CurrencyCode[] {
   );
   return [base, ...foreign];
 }
-
-const MODE_TEXT: Record<ShiftMode, string> = {
-  per_cashier: 'درج لكل كاشير',
-  shared: 'جهاز واحد وعدة أشخاص',
-  handover: 'تسليم بعدّ',
-};
 
 function useBusinessDate(catalog: Catalog) {
   const pos = usePos();
@@ -121,7 +116,8 @@ function CountLayout({
           ))}
         </div>
       </div>
-      <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 lg:sticky lg:top-0">
+      {/* A phone: the panel's parts join the page itself, so its button can stay in view (sticky) at the screen's end */}
+      <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 max-lg:contents lg:sticky lg:top-0">
         <div className="flex flex-col gap-1 rounded-control bg-surface-total px-4 py-3">
           <span className="text-sm font-semibold text-ink-muted">المجموع الحي</span>
           {counts.map((c) => (
@@ -134,15 +130,18 @@ function CountLayout({
             />
           ))}
         </div>
-        <div className="flex flex-col gap-2">
-          {keypad.targetText ? (
+        {/* The phone's own keyboard types the amount; the pad is for a till with a mouse or a wide screen */}
+        <div className="flex flex-col gap-2 max-lg:hidden">
+          {keypad.targetText && counts.some((c) => c.notes) ? (
             <p className="truncate text-sm text-ink-muted">
-              تكتب الأرقام في: <span className="font-semibold text-ink">{keypad.targetText}</span>
+              الفئة المختارة: <span className="font-semibold text-ink">{keypad.targetText}</span>
             </p>
           ) : null}
           <Keypad label="لوحة العدّ" {...keypad.keypad} />
         </div>
-        {children}
+        <div className="flex flex-col gap-4 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-surface max-lg:p-3">
+          {children}
+        </div>
       </aside>
     </div>
   );
@@ -164,9 +163,8 @@ export function ShiftOpenScreen({
   const pos = usePos();
   const mode = catalog.settings!.shiftMode;
   const businessDate = useBusinessDate(catalog);
-  const [counts, setCounts] = useState<DrawerCount[]>(() =>
-    drawerCurrencies(catalog).map((c) => emptyCount(c, catalog.settings?.till)),
-  );
+  // One amount per drawer to begin with; counting note by note is one tap away («عدّ تفصيلي»)
+  const [counts, setCounts] = useState<DrawerCount[]>(() => drawerCurrencies(catalog).map(totalCount));
   const [saving, setSaving] = useState(false);
   const [warn, setWarn] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -243,7 +241,7 @@ export function ShiftOpenScreen({
       <FlowHeader
         icon={<CashIcon size={24} />}
         title="افتح الوردية"
-        description={`${MODE_TEXT[mode]} · عدّ النقد في الدرج قبل أول بيع. يُحفظ العدّ على الجهاز ويُرسل وحده.`}
+        description="اكتب كم نقداً في الدرج الآن، قبل أول بيع. يُحفظ على الجهاز ويُرسل وحده."
       />
       <CountLayout counts={counts} setCounts={setCounts} till={catalog.settings?.till}>
         {error ? <Alert tone="error">{error}</Alert> : null}
@@ -463,12 +461,17 @@ export function ShiftCloseScreen({
           </Button>
         </CountLayout>
       ) : step === 'done' && activity ? (
-        <section aria-label="تقرير الإغلاق" className="flex flex-col items-start gap-4">
-          <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع تقرير الإغلاق ثم اخرج.</Alert>
-          <div className="rounded-card border border-line bg-surface p-3 shadow-e1">
+        <section
+          aria-label="تقرير الإغلاق"
+          className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-x-8"
+        >
+          <div className="rounded-card border border-line bg-surface p-3 shadow-e1 max-lg:order-3 lg:row-span-2">
             <ZReport {...zProps(activity)} />
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="max-lg:order-1">
+            <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع تقرير الإغلاق ثم اخرج.</Alert>
+          </div>
+          <div className="flex flex-wrap gap-3 max-lg:order-2 lg:self-start">
             <Button size="lg" icon={<ReportsIcon />} onClick={() => print('80mm')}>
               اطبع تقرير الإغلاق
             </Button>
@@ -508,7 +511,8 @@ export function ShiftCloseScreen({
                 {/* The same figures the closing slip opens with, so the two agree */}
                 {activity.salesTotals.map((t) => (
                   <li key={t.currency} className="flex flex-wrap items-center gap-x-1">
-                    إجمالي المبيعات: <Money minor={t.totalMinor} currency={t.currency} className="text-ink" />
+                    {activity.returns.count > 0 ? 'إجمالي المبيعات قبل المرتجعات' : 'إجمالي المبيعات'}:{' '}
+                    <Money minor={t.totalMinor} currency={t.currency} className="text-ink" />
                     {t.discountMinor > 0 ? (
                       <>
                         {' · '}منها خصومات <Money minor={t.discountMinor} currency={t.currency} />
@@ -543,6 +547,12 @@ export function ShiftCloseScreen({
                     ))}
                   </li>
                 ) : null}
+                {refundVouchers(activity).map((v) => (
+                  <li key={v.currency} className="flex flex-wrap items-center gap-x-1">
+                    قسائم مرتجع صادرة:{' '}
+                    <Money minor={v.amountMinor} currency={v.currency} className="text-ink" />
+                  </li>
+                ))}
                 {activity.vouchers.count > 0 ? (
                   <li className="flex flex-wrap items-center gap-x-1">
                     قسائم الهدية المباعة وعربون التأجير:{' '}

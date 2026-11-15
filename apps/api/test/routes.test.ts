@@ -163,6 +163,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/devices/:id/approve': 'signed-in',
   'POST /v1/devices/:id/reject': 'signed-in',
   'POST /v1/devices/:id/revoke': 'signed-in',
+  'POST /v1/devices/:id/hide': 'signed-in',
   'GET /v1/products': 'signed-in',
   'POST /v1/products': 'signed-in',
   'GET /v1/products/:id': 'signed-in',
@@ -1328,6 +1329,7 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
   'POST /v1/devices/:id/approve': deviceIdor((id) => `/v1/devices/${id}/approve`, 'POST'),
   'POST /v1/devices/:id/reject': deviceIdor((id) => `/v1/devices/${id}/reject`, 'POST'),
   'POST /v1/devices/:id/revoke': deviceIdor((id) => `/v1/devices/${id}/revoke`, 'POST'),
+  'POST /v1/devices/:id/hide': deviceIdor((id) => `/v1/devices/${id}/hide`, 'POST'),
   // The poll secret of a device of store B never reads store A's waiting device.
   'GET /v1/devices/activations/:id': async (app, { a, b }) => {
     const deviceA = await pendingDevice(app, a);

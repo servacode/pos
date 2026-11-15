@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { dmy } from '@serva/core/contracts/warranty';
+import { dayText } from './dates';
 
 /** What a warranty certificate says (03 › الإلكترونيات والأدوات الطبية): who sold what to whom, until when */
 export interface WarrantyCertificateData {
@@ -80,8 +80,8 @@ export function WarrantyCertificate({ data }: { data: WarrantyCertificateData })
                   {item.serial}
                 </bdi>
               </td>
-              <td className="num p-2">{dmy(item.soldOn)}</td>
-              <td className="num p-2 font-semibold">{item.until ? dmy(item.until) : '—'}</td>
+              <td className="num p-2">{dayText(item.soldOn)}</td>
+              <td className="num p-2 font-semibold">{item.until ? dayText(item.until) : '—'}</td>
             </tr>
           ))}
         </tbody>

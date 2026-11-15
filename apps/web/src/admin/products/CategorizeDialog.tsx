@@ -72,6 +72,8 @@ export function CategorizeDialog({
     ),
   ];
   const picked = products.filter((p) => (choice[p.id] ?? KEEP) !== KEEP);
+  // A name the dictionary does not know stays as it is: the rest are applied all the same
+  const unproposed = products.length - picked.length;
 
   async function apply() {
     setBusy(true);
@@ -128,6 +130,12 @@ export function CategorizeDialog({
         {newNames.length > 0 ? (
           <p className="text-sm text-ink-muted">
             سنُنشئ هذه التصنيفات: <span className="font-semibold text-ink">{newNames.join('، ')}</span>
+          </p>
+        ) : null}
+        {picked.length > 0 && unproposed > 0 ? (
+          <p className="text-sm text-ink-muted">
+            {unproposed === 1 ? 'منتج واحد' : `${String(unproposed)} منتجات`} بلا اقتراح: يبقى كما هو، أو اختر
+            له تصنيفاً بنفسك. «طبّق» يُصنّف الباقي.
           </p>
         ) : null}
         {products.length === 0 ? <p className="text-ink-muted">لا منتجات للتصنيف.</p> : null}

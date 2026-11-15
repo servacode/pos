@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import type { CashMovementKind, ShiftCloseCash } from '@serva/core/contracts/documents';
 import { cn, Money, useDigits } from '@serva/ui';
 import { clockText, counted, dateText, INVOICES } from '../format';
-import { netMethodRows, type OpenShift, type ShiftActivity } from './shift';
+import { netMethodRows, refundVouchers, type OpenShift, type ShiftActivity } from './shift';
 
 const METHOD_NAMES: Record<string, string> = {
   cash: 'نقد',
@@ -75,6 +75,14 @@ export function ZReport({
   const digits = useDigits();
   const methodName = (method: string, currency: string) =>
     `${METHOD_NAMES[method] ?? method}${method === 'cash' && currency !== baseCurrency ? ' بالدولار' : ''}`;
+  const hasReturns = activity.returns.count > 0;
+  // What the returns paid back, per currency: the sales' net is the gross less it (display only)
+  const returnedIn = (currency: string) =>
+    activity.returns.byMethod.reduce((n, r) => (r.currency === currency ? n + r.amountMinor : n), 0);
+  const refundedVouchers = refundVouchers(activity);
+  const cashIn = activity.cashIn;
+  const hasDrawerLines =
+    activity.movements.length > 0 || (cashIn?.receipts.length ?? 0) > 0 || (cashIn?.vouchers.length ?? 0) > 0;
   return (
     <div
       dir="rtl"
@@ -105,7 +113,7 @@ export function ZReport({
         </Line>
         {activity.salesTotals.map((t) => (
           <Fragment key={t.currency}>
-            <Line label="إجمالي المبيعات" strong>
+            <Line label={hasReturns ? 'إجمالي المبيعات قبل المرتجعات' : 'إجمالي المبيعات'} strong>
               <Money minor={t.totalMinor} currency={t.currency} />
             </Line>
             {t.discountMinor > 0 ? (
@@ -113,18 +121,49 @@ export function ZReport({
                 <Money minor={t.discountMinor} currency={t.currency} />
               </Line>
             ) : null}
+            {hasReturns && returnedIn(t.currency) > 0 ? (
+              <Line label="صافي المبيعات بعد المرتجعات" strong>
+                <Money minor={t.totalMinor - returnedIn(t.currency)} currency={t.currency} />
+              </Line>
+            ) : null}
           </Fragment>
         ))}
-        {activity.byMethod.map((row) => (
-          <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
-            <Money minor={row.amountMinor} currency={row.currency} />
-          </Line>
-        ))}
+        {activity.byMethod.map((row) => {
+          // 20$ taken and 800 ل.س given back: said on the dollar row itself
+          const back =
+            row.method === 'cash' && row.currency !== baseCurrency
+              ? (activity.changeBack ?? []).filter((c) => c.paid === row.currency)
+              : [];
+          return (
+            <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
+              {back.length > 0 ? (
+                <>
+                  <Money minor={back.reduce((n, c) => n + c.paidMinor, 0)} currency={row.currency} /> مستلمة
+                  {back.map((c) => (
+                    <span key={c.change}>
+                      {' '}
+                      − باقي <Money minor={c.changeMinor} currency={c.change} />
+                    </span>
+                  ))}
+                </>
+              ) : (
+                <Money minor={row.amountMinor} currency={row.currency} />
+              )}
+            </Line>
+          );
+        })}
       </Section>
       <Section title="المرتجعات">
         <Line label="العدد">{counted(activity.returns.count, RETURNS, digits)}</Line>
-        {activity.returns.byMethod.map((row) => (
-          <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
+        {activity.returns.byMethod
+          .filter((row) => row.method !== 'voucher')
+          .map((row) => (
+            <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
+              <Money minor={row.amountMinor} currency={row.currency} />
+            </Line>
+          ))}
+        {refundedVouchers.map((row) => (
+          <Line key={`rv:${row.currency}`} label="قسائم مرتجع صادرة">
             <Money minor={row.amountMinor} currency={row.currency} />
           </Line>
         ))}
@@ -164,7 +203,17 @@ export function ZReport({
         ))}
       </Section>
       <Section title="حركات الدرج">
-        {activity.movements.length === 0 ? <span>لا حركات.</span> : null}
+        {!hasDrawerLines ? <span>لا حركات.</span> : null}
+        {(cashIn?.receipts ?? []).map((r) => (
+          <Line key={`rc:${r.currency}`} label="دفعات زبائن نقداً">
+            <Money minor={r.amountMinor} currency={r.currency} />
+          </Line>
+        ))}
+        {(cashIn?.vouchers ?? []).map((r) => (
+          <Line key={`gv:${r.currency}`} label="قسائم وعربون بيعت نقداً">
+            <Money minor={r.amountMinor} currency={r.currency} />
+          </Line>
+        ))}
         {activity.movements.map((m, i) => (
           <Line key={i} label={`${MOVEMENT_NAMES[m.kind]} · ${m.reason}`}>
             <Money minor={m.amountMinor} currency={m.currency} />

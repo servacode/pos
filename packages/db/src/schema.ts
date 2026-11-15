@@ -483,6 +483,8 @@ export const devices = pgTable(
     appVersion: text('app_version'),
     /** Device clock minus server clock at the last sync */
     clockOffsetMs: integer('clock_offset_ms'),
+    /** The owner took a stopped device off the list («احذف من القائمة»): hidden only, its documents stay */
+    hiddenAt: timestamp('hidden_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

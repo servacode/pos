@@ -137,7 +137,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
     }
   }, [photosOff]);
   // The picture's place (photo or letter) stays unless the cashier chose the compact grid, offered where photos exist
-  const photos = !(anyPhoto && photosOff);
+  const photos = anyPhoto && !photosOff;
   // A dollar-priced tile says what it comes to in the till's currency
   // An item with no photo draws what it is (shoes, a key for a rental…): the same helper as the lists and the shop
   const iconOf = useMemo(() => {
@@ -153,6 +153,11 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
         isService: item.isService ?? false,
       });
   }, [catalog.categories, catalog.rootOf, catalog.settings?.sectors]);
+  // Stock levels reach this till: an item with none yet says «لا مخزون» (a new product)
+  const stockTracked = useMemo(
+    () => catalog.items.some((i) => typeof i.stockQty === 'number'),
+    [catalog.items],
+  );
   const fx = useMemo<TileFx | null>(
     () => (catalog.settings ? { base: catalog.settings.baseCurrency, rates: catalog.rates } : null),
     [catalog.settings, catalog.rates],
@@ -182,7 +187,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
 
   return (
     <>
-      <div className="flex shrink-0 flex-wrap gap-3 sm:flex-nowrap">
+      <div className="flex shrink-0 gap-2 sm:gap-3">
         <TextField
           ref={searchRef}
           type="search"
@@ -194,7 +199,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           placeholder="ابحث باسم الصنف أو امسح الباركود"
           autoComplete="off"
           aria-keyshortcuts="F2"
-          className="min-w-0 flex-1 basis-full sm:basis-0"
+          className="min-w-0 flex-1"
           inputClassName="[&::-webkit-search-cancel-button]:appearance-none"
           startAdornment={<SearchIcon size={20} className="ms-4" />}
           endAdornment={
@@ -230,13 +235,20 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           aria-pressed={checking}
           aria-keyshortcuts="F9"
           onClick={checking ? props.onStopChecking : props.onStartChecking}
+          className="max-sm:px-3.5"
         >
-          سعر صنف
-          <Kbd>F9</Kbd>
+          {/* A phone: the barcode glyph alone beside the search, the words stay for screen readers */}
+          <span className="max-sm:sr-only">سعر صنف</span>
+          <Kbd className="max-sm:hidden">F9</Kbd>
         </Button>
         {props.hasLastLines ? (
-          <Button variant="secondary" icon={<RetryIcon size={20} />} onClick={props.onRepeatLast}>
-            كرّر آخر طلب
+          <Button
+            variant="secondary"
+            icon={<RetryIcon size={20} />}
+            onClick={props.onRepeatLast}
+            className="max-sm:px-3.5"
+          >
+            <span className="max-sm:sr-only">كرّر آخر طلب</span>
           </Button>
         ) : null}
       </div>
@@ -275,27 +287,30 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
         </section>
       ) : null}
       {props.notice ? (
-        <div
-          role="alert"
-          className={cn(
-            'flex shrink-0 items-center gap-3 rounded-card border py-1 ps-4 pe-1 text-sm motion-safe:animate-rise',
-            props.notice.tone === 'warning'
-              ? 'border-warning/20 bg-warning-soft text-warning-ink'
-              : 'border-info/20 bg-info-soft text-info-ink',
-          )}
-        >
-          {props.notice.tone === 'warning' ? (
-            <WarningIcon size={20} className="shrink-0" />
-          ) : (
-            <InfoIcon size={20} className="shrink-0" />
-          )}
-          <span className="min-w-0 flex-1 py-2 font-semibold">{props.notice.text}</span>
-          <IconButton
-            label="أخفِ التنبيه"
-            size="md"
-            icon={<CloseIcon size={20} />}
-            onClick={props.onDismissNotice}
-          />
+        // A zero-height slot: the notice floats over the top of the grid, so nothing below it jumps
+        <div className="relative z-20 -mb-4 h-0 shrink-0">
+          <div
+            role="alert"
+            className={cn(
+              'absolute inset-x-0 top-0 flex items-center gap-3 rounded-card border py-1 ps-4 pe-1 text-sm shadow-e2 motion-safe:animate-rise',
+              props.notice.tone === 'warning'
+                ? 'border-warning/20 bg-warning-soft text-warning-ink'
+                : 'border-info/20 bg-info-soft text-info-ink',
+            )}
+          >
+            {props.notice.tone === 'warning' ? (
+              <WarningIcon size={20} className="shrink-0" />
+            ) : (
+              <InfoIcon size={20} className="shrink-0" />
+            )}
+            <span className="min-w-0 flex-1 py-2 font-semibold">{props.notice.text}</span>
+            <IconButton
+              label="أخفِ التنبيه"
+              size="md"
+              icon={<CloseIcon size={20} />}
+              onClick={props.onDismissNotice}
+            />
+          </div>
         </div>
       ) : null}
       {catalog.categories.length > 0 ? (
@@ -317,7 +332,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
                 }}
                 className={cn(
                   CONTROL_HEIGHT.touch,
-                  'shrink-0 rounded-small border px-5 text-base font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard',
+                  'shrink-0 rounded-small border px-5 text-base font-semibold whitespace-nowrap max-sm:min-h-11 max-sm:px-4 transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard',
                   on
                     ? 'border-brand/30 bg-brand-soft text-brand-ink'
                     : 'border-line-control/50 bg-surface text-ink-muted shadow-e1 hover:bg-surface-muted hover:text-ink',
@@ -327,13 +342,17 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
               </button>
             );
           })}
-        </div>
-      ) : null}
-      {anyPhoto && results.length > 0 ? (
-        <div className="-mt-1 flex shrink-0 justify-end">
-          <Button variant="ghost" size="md" aria-pressed={photos} onClick={() => setPhotosOff(photos)}>
-            {photos ? 'أخفِ الصور' : 'أظهر الصور'}
-          </Button>
+          {anyPhoto && results.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="md"
+              className="shrink-0 max-sm:min-h-11"
+              aria-pressed={photos}
+              onClick={() => setPhotosOff(photos)}
+            >
+              {photos ? 'أخفِ الصور' : 'أظهر الصور'}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {results.length === 0 ? (
@@ -353,6 +372,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           pickingProduct={pickingProduct}
           today={today}
           photos={photos}
+          stockTracked={stockTracked}
           fx={fx}
           iconOf={iconOf}
           // Taps on tiles only: right after a dialog closes, its second click must not pick a tile
@@ -375,12 +395,14 @@ const Grid = memo(function Grid({
   pickingProduct,
   today,
   photos,
+  stockTracked,
   fx,
   iconOf,
   onPickItem,
   onPickModel,
 }: {
   photos: boolean;
+  stockTracked: boolean;
   fx: TileFx | null;
   iconOf: (item: CatalogItem) => Icon;
   entries: readonly GridEntry[];
@@ -406,6 +428,7 @@ const Grid = memo(function Grid({
                 inCart={entry.pieces.some((p) => inCart.has(p.variantId))}
                 today={today}
                 photos={photos}
+                stockTracked={stockTracked}
                 fx={fx}
                 Kind={iconOf(entry.lead)}
                 onPick={onPickModel}
@@ -418,6 +441,7 @@ const Grid = memo(function Grid({
                 inCart={inCart.has(entry.item.variantId)}
                 today={today}
                 photos={photos}
+                stockTracked={stockTracked}
                 fx={fx}
                 Kind={iconOf(entry.item)}
                 onPick={onPickItem}
@@ -435,6 +459,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
   inCart,
   today,
   photos,
+  stockTracked,
   fx,
   Kind,
   onPick,
@@ -443,6 +468,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
   inCart: boolean;
   today: string;
   photos: boolean;
+  stockTracked: boolean;
   fx: TileFx | null;
   Kind: Icon;
   onPick: ItemsAreaProps['onPickItem'];
@@ -458,10 +484,9 @@ const ItemTileMemo = memo(function ItemTileMemo({
       placeholder={<Kind size={24} />}
       weighed={item.unit?.allowsFraction ?? false}
       {...(photos && item.imageUrl ? { imageUrl: item.imageUrl } : {})}
-      pictureSlot={photos}
       selected={inCart}
       soldOut={isSoldOut([item], today)}
-      extra={<TileMarks pieces={[item]} today={today} />}
+      extra={<TileMarks pieces={[item]} today={today} none={stockTracked} />}
       onSelect={() => onPick(item)}
       className="h-full w-full"
     />
@@ -474,6 +499,7 @@ const ModelTile = memo(function ModelTile({
   inCart,
   today,
   photos,
+  stockTracked,
   fx,
   Kind,
   onPick,
@@ -483,6 +509,7 @@ const ModelTile = memo(function ModelTile({
   inCart: boolean;
   today: string;
   photos: boolean;
+  stockTracked: boolean;
   fx: TileFx | null;
   Kind: Icon;
   onPick: (productId: string) => void;
@@ -499,11 +526,9 @@ const ModelTile = memo(function ModelTile({
       soldOut={isSoldOut(entry.pieces, today)}
       {...(note ? { priceNote: note } : {})}
       placeholder={<Kind size={24} />}
-      pictureSlot={photos}
-      initial={!photos}
       {...(photos && entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
       selected={picking || inCart}
-      extra={<TileMarks pieces={entry.pieces} today={today} />}
+      extra={<TileMarks pieces={entry.pieces} today={today} none={stockTracked} />}
       onSelect={() => onPick(entry.productId)}
       className="h-full w-full"
     />
@@ -519,12 +544,9 @@ function isSoldOut(pieces: readonly CatalogItem[], today: string): boolean {
 /** «S M L»: the sizes in stock of a model, a sold-out size struck through */
 function SizeChips({ sizes }: { sizes: readonly { value: string; inStock: boolean }[] }) {
   return (
-    <span className="flex flex-wrap gap-x-1.5 gap-y-0.5 text-xs font-semibold">
+    <span className="flex flex-wrap gap-x-2 gap-y-0.5 text-[0.8125rem] font-semibold">
       {sizes.map((s) => (
-        <bdi
-          key={s.value}
-          className={s.inStock ? 'text-ink-muted' : 'text-ink-subtle line-through decoration-1'}
-        >
+        <bdi key={s.value} className={s.inStock ? 'text-ink' : 'text-ink-muted line-through decoration-2'}>
           {s.value}
           {s.inStock ? null : <span className="sr-only"> نفد</span>}
         </bdi>
@@ -555,10 +577,22 @@ export function dollarNote(priceMinor: number, currency: CurrencyCode, fx: TileF
 }
 
 /** Under a tile's price: what is left, the nearest expiry (amber, then red) and «برقم تسلسلي» */
-function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: string }) {
+function TileMarks({
+  pieces,
+  today,
+  none = false,
+}: {
+  pieces: readonly CatalogItem[];
+  today: string;
+  /** Stock levels reach this till, so an item with no level yet has nothing on the shelf */
+  none?: boolean;
+}) {
   const digits = useDigits();
   const info = tileInfo(pieces, today);
   const unsellable = info.expiredQty + info.blockedQty;
+  if (none && info.stockQty === null && !pieces.every((p) => p.isService)) {
+    return <span className="num text-xs font-medium text-ink-muted">لا مخزون</span>;
+  }
   if (
     info.stockQty === null &&
     !info.expiry &&

@@ -25,6 +25,8 @@ describe('suggestCategoryName', () => {
     expect(suggestCategoryName('قسطرة فولي', med)).toBe('مستهلكات');
     expect(suggestCategoryName('ميزان حرارة رقمي', med)).toBe('أجهزة قياس');
     expect(suggestCategoryName('ترمومتر', med)).toBe('أجهزة قياس');
+    expect(suggestCategoryName('محرار زئبقي', med)).toBe('أجهزة قياس');
+    expect(suggestCategoryName('محرار رقمي للأطفال', med)).toBe('أجهزة قياس');
     expect(suggestCategoryName('حليب أطفال', med)).not.toBe('ألبان وأجبان');
     expect(suggestCategoryName('معلب فول', ['pharmacy'])).toBeNull();
     // A grocery store keeps them
