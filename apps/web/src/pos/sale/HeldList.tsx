@@ -90,6 +90,7 @@ export function HeldList({
   currency,
   totalOf,
   currentHasLines,
+  sellerOf,
   onPick,
   onDiscard,
   onClose,
@@ -99,6 +100,8 @@ export function HeldList({
   totalOf: (cart: Cart) => number;
   /** The cart being taken has lines: picking a held one holds it first */
   currentHasLines: boolean;
+  /** Who sold it (the seller picked for the sale), when known */
+  sellerOf?: (cart: Cart) => string | null;
   onPick: (index: number) => void;
   onDiscard: (index: number) => void;
   onClose: () => void;
@@ -133,6 +136,7 @@ export function HeldList({
         {carts.map((cart, index) => {
           const customer = cart.customer?.name ?? cart.onlineOrder?.customerName ?? null;
           const title = heldTitle(cart);
+          const seller = sellerOf?.(cart) ?? null;
           return (
             <li
               key={`${cart.held?.at ?? 0}-${index}`}
@@ -149,6 +153,7 @@ export function HeldList({
                   <span className="truncate text-sm text-ink-muted">
                     {customer && customer !== title ? `${customer} · ` : ''}
                     {counted(pieceCount(cart), ['قطعة واحدة', 'قطعتان', 'قطع', 'قطعة'], digits)}
+                    {seller ? ` · البائع ${seller}` : ''}
                     {cart.held ? ` · ${clockText(cart.held.at, digits)}` : ''}
                   </span>
                 </span>

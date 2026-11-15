@@ -10,6 +10,7 @@ import {
 import { AddIcon, Alert, Button, GridIcon, IconChip, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { errorMessage } from '../../lib/api';
+import { orderValues } from '../../lib/optionOrder';
 import { canManageCatalog } from '../catalog/catalog';
 import { saveCatalogOptions } from '../store/api';
 import { moneyOf, qtyOf } from './api';
@@ -36,7 +37,8 @@ export function gridOf(variants: readonly Variant[]) {
       const value = v.attributes.find((a) => a.name === name)?.value;
       if (value !== undefined && !out.includes(value)) out.push(value);
     }
-    return out;
+    // The way a shop reads them: S M L XL, 36 38 40, 2 4 6 سنوات, not the order they were typed in
+    return orderValues(name, out).map((o) => o.value);
   };
   const rows = valuesOf(rowName);
   const cols = colName ? valuesOf(colName) : [''];

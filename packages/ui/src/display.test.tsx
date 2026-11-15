@@ -321,7 +321,7 @@ describe('Card and StatTile', () => {
     expect(footnote.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const comparison = pill.nextElementSibling!;
     expect(comparison).toHaveTextContent('عن الخميس الماضي');
-    expect(comparison).toHaveClass('text-ink-subtle', 'text-end');
+    expect(comparison).toHaveClass('text-ink-muted', 'text-end');
     // …and the grid draws the pill beside the label, the comparison just under the pill.
     expect(pill).toHaveClass('col-start-2', 'row-start-1');
     expect(comparison).toHaveClass('row-start-2', 'col-span-full');
@@ -431,7 +431,7 @@ describe('DataTable', () => {
       'overflow-hidden',
     );
     const head = screen.getByRole('columnheader', { name: 'الزبون' });
-    expect(head).toHaveClass('text-xs', 'font-semibold', 'text-ink-subtle');
+    expect(head).toHaveClass('text-xs', 'font-semibold', 'text-ink-muted');
     expect(head.closest('tr')).toHaveClass('bg-surface-muted/60');
     const row = screen.getByText('أم محمد').closest('tr')!;
     expect(row).toHaveClass('h-12', 'border-b', 'border-line', 'hover:bg-surface-muted/60');

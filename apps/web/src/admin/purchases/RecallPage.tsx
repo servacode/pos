@@ -48,7 +48,7 @@ export function RecallPage() {
   const [lifting, setLifting] = useState(false);
   const [onShelf, setOnShelf] = useState<ExpiryRow[]>([]);
   // Which batches the picker offers: all, the stopped ones, those ending within three months, or those already past their date
-  const [shelfFilter, setShelfFilter] = useState<'all' | 'blocked' | 'soon' | 'expired'>('all');
+  const [shelfFilter, setShelfFilter] = useState<'urgent' | 'all' | 'blocked' | 'soon' | 'expired'>('urgent');
 
   // The batches the stores hold, to pick from instead of typing a number blind (the same report the
   // expiry page reads: every batch on the shelf, blocked ones included)
@@ -78,6 +78,14 @@ export function RecallPage() {
       if (!row.batchNo) continue;
       const key = `${row.variantId}|${row.batchNo}`;
       if (seen.has(key)) continue;
+      // What needs a look first: stopped, past its date, or ending within the month (typing searches all)
+      if (
+        shelfFilter === 'urgent' &&
+        !typed &&
+        !row.blocked &&
+        !(row.daysLeft !== null && row.daysLeft <= 30)
+      )
+        continue;
       if (shelfFilter === 'blocked' && !row.blocked) continue;
       if (shelfFilter === 'soon' && (row.daysLeft === null || row.daysLeft < 0 || row.daysLeft > 90))
         continue;
@@ -93,7 +101,10 @@ export function RecallPage() {
   /** `keepView`: the page the person is on stays as it is while the numbers are read again */
   async function search(next?: string, keepView = false) {
     const q = (next ?? batchNo).trim();
-    if (!q) return;
+    if (!q) {
+      setError('اكتب رقم الدفعة أو اضغط إحدى الدفعات المقترحة.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -264,7 +275,7 @@ export function RecallPage() {
                 onChange={(e) => setBatchNo(e.target.value.slice(0, 60))}
               />
             </div>
-            <Button type="submit" loading={loading} disabled={!batchNo.trim()}>
+            <Button type="submit" loading={loading}>
               ابحث
             </Button>
           </form>
@@ -272,9 +283,11 @@ export function RecallPage() {
             <div className="mt-4">
               <SegmentedControl
                 label="الدفعات المعروضة"
+                className="max-w-full overflow-x-auto"
                 value={shelfFilter}
                 onValueChange={setShelfFilter}
                 options={[
+                  { value: 'urgent', label: 'تحتاج انتباهك' },
                   { value: 'all', label: 'كل الدفعات' },
                   { value: 'soon', label: 'تنتهي قريباً' },
                   { value: 'expired', label: 'منتهية' },
@@ -286,18 +299,22 @@ export function RecallPage() {
           {suggestions.length > 0 ? (
             <div className="mt-4 flex flex-col gap-2">
               <p className="text-sm font-semibold text-ink-muted">
-                {batchNo.trim() ? 'دفعات تطابق ما كتبت' : 'دفعات في المخزون، اضغط واحدة'}
+                {batchNo.trim()
+                  ? 'دفعات تطابق ما كتبت'
+                  : shelfFilter === 'urgent'
+                    ? 'دفعات تحتاج انتباهك أولاً، اضغط واحدة'
+                    : 'دفعات في المخزون، اضغط واحدة'}
               </p>
               <ul aria-label="دفعات مقترحة" className="flex flex-wrap gap-2">
                 {suggestions.map((row) => (
-                  <li key={`${row.variantId}|${row.batchNo}`}>
+                  <li key={`${row.variantId}|${row.batchNo}`} className="max-w-full">
                     <button
                       type="button"
                       onClick={() => {
                         setBatchNo(row.batchNo!);
                         void search(row.batchNo!);
                       }}
-                      className="flex min-h-11 flex-col items-start rounded-control border border-line-control bg-surface px-3 py-1.5 text-start text-sm text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                      className="flex min-h-11 max-w-full flex-col items-start rounded-control border border-line-control bg-surface px-3 py-1.5 text-start text-sm text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
                     >
                       <span className="font-semibold">
                         <bdi dir="ltr" className="num">

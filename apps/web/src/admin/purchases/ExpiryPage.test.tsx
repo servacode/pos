@@ -53,14 +53,14 @@ const server = (extra: Record<string, (r: MockRequest) => { status: number; body
   mockFetch({
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
-    'GET /v1/inventory/expiry?days=90': () => ({ status: 200, body: report(90) }),
+    'GET /v1/inventory/expiry?days=3650': () => ({ status: 200, body: report(90) }),
     'GET /v1/inventory/expiry?days=30': () => ({ status: 200, body: report(30) }),
     ...extra,
   });
 
-/** The batch's «المزيد» menu, opened on its first row, and one of its items chosen */
+/** The batch's actions menu, opened on its first row, and one of its items chosen */
 async function chooseMore(user: ReturnType<typeof renderApp>['user'], table: HTMLElement, item: string) {
-  await user.click((await within(table).findAllByRole('button', { name: /المزيد/ }))[0]!);
+  await user.click((await within(table).findAllByRole('button', { name: /إجراءات دفعة/ }))[0]!);
   await user.click(await screen.findByRole('menuitem', { name: item }));
 }
 
@@ -69,7 +69,7 @@ describe('«الصلاحية»', () => {
     server();
     renderApp('/expiry');
     await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
-    expect(recallAnswer<ExpiryResponse>('expiry|90')?.items).toHaveLength(2);
+    expect(recallAnswer<ExpiryResponse>('expiry|3650')?.items).toHaveLength(2);
   });
 
   it('lists the batches by expiry with what is really left, and narrows the window', async () => {
@@ -85,6 +85,7 @@ describe('«الصلاحية»', () => {
     expect(table).toHaveTextContent('مستودع الشفاء');
     expect(table).toHaveTextContent('الفرع الرئيسي');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
+    expect(requestsTo('GET', '/v1/inventory/expiry?days=3650')).toHaveLength(1);
     await user.click(screen.getByRole('radio', { name: '30 يوماً' }));
     expect(await screen.findByText(/لا شيء ينتهي في هذه المدة/)).toBeInTheDocument();
     expect(requestsTo('GET', '/v1/inventory/expiry?days=30')).toHaveLength(1);
@@ -96,7 +97,7 @@ describe('«الصلاحية»', () => {
     });
     const { user } = renderApp('/expiry');
     const table = await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
-    await user.click((await within(table).findAllByRole('button', { name: 'أتلف الدفعة' }))[0]!);
+    await chooseMore(user, table, 'أتلف الدفعة');
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'أتلف الدفعة' }));
     expect(await screen.findByText(/أُتلفت الدفعة A-01/)).toBeInTheDocument();
@@ -158,7 +159,7 @@ describe('«الصلاحية»', () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: owner() }),
-      'GET /v1/inventory/expiry?days=90': () => ({
+      'GET /v1/inventory/expiry?days=3650': () => ({
         status: 200,
         body: {
           today: '2026-10-30',

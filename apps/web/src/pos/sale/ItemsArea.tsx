@@ -21,16 +21,17 @@ import {
   Money,
   ProductsIcon,
   RetryIcon,
-  ScissorsIcon,
   SearchIcon,
   TextField,
   useDigits,
   WarningIcon,
+  type Icon,
 } from '@serva/ui';
 import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
 import { Kbd } from './Kbd';
 import { gridEntries, lowestPrice, piecesText, type GridEntry } from './models';
 import { stockInPacks } from './packStock';
+import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { expiryText, sellableQty, tileInfo } from './tileInfo';
 import { pieceWord } from './packText';
 
@@ -132,6 +133,20 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
     catalog.settings?.businessDayCutoff ?? '00:00',
   );
   // A dollar-priced tile says what it comes to in the till's currency
+  // An item with no photo draws what it is (shoes, a key for a rental…): the same helper as the lists and the shop
+  const iconOf = useMemo(() => {
+    const names = new Map(catalog.categories.map((c) => [c.id, c.name]));
+    const sectors = catalog.settings?.sectors ?? [];
+    return (item: CatalogItem): Icon =>
+      placeholderIconFor({
+        categoryName: item.categoryId
+          ? names.get(catalog.rootOf.get(item.categoryId) ?? item.categoryId)
+          : null,
+        name: item.productName ?? item.name,
+        sectors,
+        isService: item.isService ?? false,
+      });
+  }, [catalog.categories, catalog.rootOf, catalog.settings?.sectors]);
   const fx = useMemo<TileFx | null>(
     () => (catalog.settings ? { base: catalog.settings.baseCurrency, rates: catalog.rates } : null),
     [catalog.settings, catalog.rates],
@@ -333,6 +348,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           today={today}
           photos={photos}
           fx={fx}
+          iconOf={iconOf}
           onPickItem={onPickItem}
           onPickModel={props.onPickModel}
         />
@@ -349,11 +365,13 @@ const Grid = memo(function Grid({
   today,
   photos,
   fx,
+  iconOf,
   onPickItem,
   onPickModel,
 }: {
   photos: boolean;
   fx: TileFx | null;
+  iconOf: (item: CatalogItem) => Icon;
   entries: readonly GridEntry[];
   inCart: ReadonlySet<string>;
   pickingProduct: string | null;
@@ -378,6 +396,7 @@ const Grid = memo(function Grid({
                 today={today}
                 photos={photos}
                 fx={fx}
+                Kind={iconOf(entry.lead)}
                 onPick={onPickModel}
               />
             </li>
@@ -389,6 +408,7 @@ const Grid = memo(function Grid({
                 today={today}
                 photos={photos}
                 fx={fx}
+                Kind={iconOf(entry.item)}
                 onPick={onPickItem}
               />
             </li>
@@ -405,6 +425,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
   today,
   photos,
   fx,
+  Kind,
   onPick,
 }: {
   item: CatalogItem;
@@ -412,6 +433,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
   today: string;
   photos: boolean;
   fx: TileFx | null;
+  Kind: Icon;
   onPick: ItemsAreaProps['onPickItem'];
 }) {
   const note = fx ? dollarNote(item.price.priceMinor, item.price.currency, fx) : null;
@@ -422,7 +444,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
       currency={item.price.currency}
       {...(item.isService && item.price.priceMinor === 0 ? { priceLabel: 'السعر عند البيع' } : {})}
       {...(note ? { priceNote: note } : {})}
-      placeholder={item.isService ? <ScissorsIcon size={24} /> : <ProductsIcon size={24} />}
+      placeholder={<Kind size={24} />}
       weighed={item.unit?.allowsFraction ?? false}
       {...(photos && item.imageUrl ? { imageUrl: item.imageUrl } : {})}
       pictureSlot={photos}
@@ -441,6 +463,7 @@ const ModelTile = memo(function ModelTile({
   today,
   photos,
   fx,
+  Kind,
   onPick,
 }: {
   entry: Extract<GridEntry, { kind: 'model' }>;
@@ -449,6 +472,7 @@ const ModelTile = memo(function ModelTile({
   today: string;
   photos: boolean;
   fx: TileFx | null;
+  Kind: Icon;
   onPick: (productId: string) => void;
 }) {
   const price = lowestPrice(entry.pieces);
@@ -460,7 +484,7 @@ const ModelTile = memo(function ModelTile({
       currency={price.currency}
       detail={piecesText(entry.pieces.length)}
       {...(note ? { priceNote: note } : {})}
-      placeholder={<ProductsIcon size={24} />}
+      placeholder={<Kind size={24} />}
       pictureSlot={photos}
       initial={!photos}
       {...(photos && entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
@@ -473,13 +497,13 @@ const ModelTile = memo(function ModelTile({
 });
 
 /** What the till needs to say a foreign price in its own currency */
-interface TileFx {
+export interface TileFx {
   base: CurrencyCode;
   rates: Catalog['rates'];
 }
 
 /** «≈ 5,850 ل.س» under a price that is not in the till's currency; null when the rate is not known */
-function dollarNote(priceMinor: number, currency: CurrencyCode, fx: TileFx): ReactNode {
+export function dollarNote(priceMinor: number, currency: CurrencyCode, fx: TileFx): ReactNode {
   if (currency === fx.base || priceMinor === 0) return null;
   try {
     const minor = convert(priceMinor, currency, fx.base, rateFor(fx.rates, currency, fx.base));

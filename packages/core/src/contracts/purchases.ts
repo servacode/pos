@@ -183,6 +183,8 @@ export interface InventoryRow {
   attributes?: { name: string; value: string }[];
   productId?: string;
   productName?: string;
+  /** The unit takes fractions (a weighed item); false for pieces. Absent from older servers */
+  allowsFraction?: boolean;
   branchId: string;
   /** Base units, thousandths */
   qty: number;

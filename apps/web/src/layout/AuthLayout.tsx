@@ -132,7 +132,7 @@ function StorePreview() {
               <TrendUpIcon size={16} />
               <bdi className="num">11%</bdi>
             </span>
-            <span className="text-xs text-ink-subtle">عن أمس</span>
+            <span className="text-xs text-ink-muted">عن أمس</span>
           </div>
         </div>
         <AreaChart

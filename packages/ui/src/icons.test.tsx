@@ -2,21 +2,27 @@ import type { ReactElement } from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import {
+  AccessoryIcon,
   ArchiveIcon,
   BakeryIcon,
   BuildingMaterialsIcon,
   CafeIcon,
   CategoriesIcon,
   CheckIcon,
+  HeartPulseIcon,
   HomeIcon,
   LogoutIcon,
   MedicalSuppliesIcon,
+  PerfumeIcon,
   PharmacyIcon,
   ProduceIcon,
   QrCodeIcon,
   RestaurantIcon,
   SendIcon,
+  ShoeIcon,
   SupermarketIcon,
+  SyringeIcon,
+  WheelchairIcon,
   WholesaleIcon,
 } from './icons';
 
@@ -72,6 +78,12 @@ describe('icons', () => {
       [MedicalSuppliesIcon, 'stethoscope'],
       [ProduceIcon, 'carrot'],
       [WholesaleIcon, 'boxes'],
+      [ShoeIcon, 'footprints'],
+      [AccessoryIcon, 'gem'],
+      [PerfumeIcon, 'spray-can'],
+      [SyringeIcon, 'syringe'],
+      [HeartPulseIcon, 'heart-pulse'],
+      [WheelchairIcon, 'accessibility'],
     ] as const;
     for (const [Glyph, name] of glyphs) {
       const svg = svgOf(<Glyph />);

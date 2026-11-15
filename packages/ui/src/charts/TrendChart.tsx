@@ -393,7 +393,7 @@ function TrendChart({
           {model.grid.map((line) => (
             <span
               key={line.value}
-              className="absolute num text-xs leading-none whitespace-nowrap text-ink-subtle"
+              className="absolute num text-xs leading-none whitespace-nowrap text-ink-muted"
               style={{ left: model.tickX, top: line.y, transform: 'translate(-100%, -50%)' }}
             >
               {line.text}
@@ -403,7 +403,7 @@ function TrendChart({
             <span
               key={item.index}
               data-index={item.index}
-              className="absolute num text-xs leading-none whitespace-nowrap text-ink-subtle"
+              className="absolute num text-xs leading-none whitespace-nowrap text-ink-muted"
               style={{ left: item.x, top: plotHeight + 10, transform: item.shift }}
             >
               {item.text}

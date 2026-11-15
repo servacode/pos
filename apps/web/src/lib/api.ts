@@ -145,7 +145,22 @@ export function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
-export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+// The same signed-in read asked twice at once (a page and the shell, or React's double mount in
+// development) shares one request; each asker gets the answer once it lands. Writes never share.
+const readsInFlight = new Map<string, Promise<unknown>>();
+
+export function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, auth = false, authorization } = options;
+  if (method !== 'GET' || body !== undefined || !auth || authorization) return apiFetchOnce<T>(path, options);
+  const key = `${accessToken ?? ''}|${path}`;
+  const running = readsInFlight.get(key) as Promise<T> | undefined;
+  if (running) return running;
+  const request = apiFetchOnce<T>(path, options).finally(() => readsInFlight.delete(key));
+  readsInFlight.set(key, request);
+  return request;
+}
+
+async function apiFetchOnce<T>(path: string, options: ApiRequestOptions): Promise<T> {
   const { method = 'GET', body, auth = false, authorization } = options;
   if (!auth) return parse<T>(await send(path, method, body, null, authorization));
 

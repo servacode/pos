@@ -14,6 +14,26 @@ const shiftWeek = (day: string) => {
   return d.toISOString().slice(0, 10);
 };
 
+const dayBack = (back: number) => {
+  const d = new Date(`${TODAY}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - back);
+  return d.toISOString().slice(0, 10);
+};
+
+/** The one request that brings the six days before today: its route and the days that sold */
+const WEEK = `GET /v1/reports/days?from=${dayBack(6)}&to=${dayBack(1)}`;
+const weekOf = (sold: Record<string, number>) => ({
+  status: 200,
+  body: {
+    items: Object.entries(sold).map(([date, totalMinor]) => ({
+      date,
+      invoiceCount: 1,
+      totalMinor,
+      returnsMinor: 0,
+    })),
+  },
+});
+
 describe('HomePage', () => {
   it('shows the trial days left, the store and its sectors', async () => {
     mockFetch({
@@ -97,14 +117,19 @@ describe('HomePage', () => {
           },
         },
       });
-      renderApp('/');
+      const { user } = renderApp('/');
 
       const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
       expect(await within(sales).findByText('الفواتير')).toBeInTheDocument();
       expect(requestsTo('GET', `/v1/reports/day?date=${TODAY}`)).toHaveLength(1);
+      // The pending orders are asked once, though the shell and the page both want them
+      expect(requestsTo('GET', '/v1/online-orders?status=pending')).toHaveLength(1);
       expect(await screen.findByText('×2')).toBeInTheDocument();
       expect(await screen.findByText('طلبات جديدة من المتجر الإلكتروني')).toBeInTheDocument();
       expect(screen.getByText('قطعة محجوزة بعربون')).toBeInTheDocument();
+      // «تحتاج انتباهك» is one card: what waits first, the stock under its second tab
+      expect(screen.getByRole('heading', { name: 'تحتاج انتباهك' })).toBeInTheDocument();
+      await user.click(screen.getByRole('tab', { name: /المخزون/ }));
       expect(await screen.findByText('· M · أبيض', { exact: false })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'منتج جديد' })).toHaveAttribute('href', '/products/new');
       expect(screen.getByRole('link', { name: 'افتح الكاشير' })).toHaveAttribute('href', '/pos');
@@ -218,12 +243,11 @@ describe('HomePage', () => {
     });
 
     it('compares today with yesterday, shows the payment mix and the expiring batches', async () => {
-      const days = [6, 5, 4, 3, 2].map((back) => `2026-10-${String(31 - back).padStart(2, '0')}`);
       const routes: Parameters<typeof mockFetch>[0] = {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'purchases.manage']) },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({ totalMinor: 1_500_000 }) },
-        'GET /v1/reports/day?date=2026-10-30': { status: 200, body: dayReport({ totalMinor: 1_000_000 }) },
+        [WEEK]: weekOf(Object.fromEntries([1, 2, 3, 4, 5, 6].map((back) => [dayBack(back), 1_000_000]))),
         'GET /v1/inventory/expiry?days=30': {
           status: 200,
           body: {
@@ -243,8 +267,6 @@ describe('HomePage', () => {
           },
         },
       };
-      for (const date of days)
-        routes[`GET /v1/reports/day?date=${date}`] = { status: 200, body: dayReport() };
       mockFetch(routes);
       renderApp('/');
 
@@ -259,18 +281,12 @@ describe('HomePage', () => {
     });
 
     it('says there is no history instead of drawing a climb from zero when only today has sold', async () => {
-      const earlier = [6, 5, 4, 3, 2].map((back) => `2026-10-${String(31 - back).padStart(2, '0')}`);
-      earlier.push('2026-10-30');
       const routes: Parameters<typeof mockFetch>[0] = {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({ totalMinor: 1_500_000 }) },
+        [WEEK]: weekOf({}),
       };
-      for (const date of earlier)
-        routes[`GET /v1/reports/day?date=${date}`] = {
-          status: 200,
-          body: dayReport({ totalMinor: 0, invoiceCount: 0 }),
-        };
       mockFetch(routes);
       renderApp('/');
 
@@ -290,11 +306,7 @@ describe('HomePage', () => {
           body: dayReport({ totalMinor: 0, invoiceCount: 0, topProducts: [], byMethod: [] }),
         },
       };
-      for (const back of [1, 2, 3, 4, 5, 6])
-        routes[`GET /v1/reports/day?date=2026-10-${String(31 - back).padStart(2, '0')}`] = {
-          status: 200,
-          body: dayReport({ totalMinor: 1_000_000 }),
-        };
+      routes[WEEK] = weekOf(Object.fromEntries([1, 2, 3, 4, 5, 6].map((back) => [dayBack(back), 1_000_000])));
       mockFetch(routes);
       renderApp('/');
 
@@ -309,13 +321,8 @@ describe('HomePage', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({ totalMinor: 1_500_000 }) },
-        'GET /v1/reports/day?date=2026-10-30': { status: 200, body: dayReport({ totalMinor: 1_000_000 }) },
+        [WEEK]: weekOf({ '2026-10-30': 1_000_000 }),
       };
-      for (const back of [2, 3, 4, 5, 6])
-        routes[`GET /v1/reports/day?date=2026-10-${String(31 - back).padStart(2, '0')}`] = {
-          status: 200,
-          body: dayReport({ totalMinor: 0, invoiceCount: 0 }),
-        };
       mockFetch(routes);
       renderApp('/');
 

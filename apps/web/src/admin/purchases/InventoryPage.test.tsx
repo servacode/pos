@@ -67,6 +67,34 @@ describe('«سجّل هدراً» (03 › الخضار والمخابز)', () =>
   });
 });
 
+describe('«سجّل هدراً» for a piece item', () => {
+  it('takes whole pieces only, and tells a shelf below zero apart as «سالب»', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          ...stock,
+          items: [
+            { ...stock.items[0]!, allowsFraction: false, qty: 10_000 },
+            { ...stock.items[0]!, variantId: 'v-2', name: 'كمامة', allowsFraction: false, qty: -2000 },
+          ],
+        },
+      }),
+    });
+    const { user } = renderApp('/inventory');
+    expect(await screen.findByText('سالب')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'سجّل هدراً' }));
+    const form = await screen.findByRole('form', { name: 'سجّل هدراً' });
+    await user.selectOptions(within(form).getByLabelText('الصنف التالف'), 'b-1:v-1');
+    await user.type(within(form).getByLabelText('كمية الهدر'), '2.5');
+    await user.click(within(form).getByRole('button', { name: 'سجّل الهدر' }));
+    expect(await within(form).findByText('هذا الصنف يُعدّ بالقطعة: اكتب عدداً صحيحاً.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
+  });
+});
+
 describe('counting the shelf by scanning (03 › الألبسة)', () => {
   it('adds a piece for each scan and a whole pack for a pack code, then saves what was counted', async () => {
     const { requestsTo } = mockFetch({

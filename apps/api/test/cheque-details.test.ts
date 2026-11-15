@@ -71,8 +71,14 @@ describe('cheque details', () => {
       bank: 'بنك سورية',
       dueDate: '2026-12-01',
       drawer: 'أحمد',
+      number: '000123',
     });
-    expect(by('CHQ-7781 2026-11-30')).toMatchObject({ direction: 'in', bank: null, dueDate: null });
+    expect(by('CHQ-7781 2026-11-30')).toMatchObject({
+      direction: 'in',
+      bank: null,
+      dueDate: null,
+      number: null,
+    });
   });
 
   it('lists a payment to a supplier by cheque as an outgoing cheque paid from the bank', async () => {

@@ -40,7 +40,9 @@ import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
-import { listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
+import { createCategory, listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
+import { categoryExamples } from '../../lib/sectors';
+import { LiraCaption } from '../../lib/LiraCaption';
 import {
   barcodeOf,
   canManageCatalog,
@@ -137,10 +139,24 @@ function summaryOf(items: readonly ProductListItem[]): ListSummary {
 function PriceCell({ item }: { item: ProductListItem }) {
   if (!item.price) return <span className="text-ink-muted">بعدة عملات</span>;
   const { currency, minMinor, maxMinor } = item.price;
-  if (minMinor === maxMinor) return <Money minor={minMinor} currency={currency} />;
+  // A service has no shelf price: the fee is typed at the till
+  if (item.type === 'service' && minMinor === 0 && maxMinor === 0) {
+    return <Badge tone="info">خدمة · السعر عند البيع</Badge>;
+  }
+  const amount =
+    minMinor === maxMinor ? (
+      <Money minor={minMinor} currency={currency} />
+    ) : (
+      <span>
+        <Money minor={minMinor} currency={currency} /> – <Money minor={maxMinor} currency={currency} />
+      </span>
+    );
+  // A dollar price carries its pound equivalent at today's rate
+  if (currency !== 'USD') return amount;
   return (
-    <span>
-      <Money minor={minMinor} currency={currency} /> – <Money minor={maxMinor} currency={currency} />
+    <span className="inline-flex flex-col items-end gap-0.5">
+      {amount}
+      <LiraCaption minor={minMinor} currency={currency} />
     </span>
   );
 }
@@ -163,7 +179,9 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   const price = item.price;
   const variantId = item.singleVariantId;
 
-  if (!price || !variantId) return <PriceCell item={item} />;
+  if (!price || !variantId || (item.type === 'service' && price.minMinor === 0 && price.maxMinor === 0)) {
+    return <PriceCell item={item} />;
+  }
 
   if (!editing) {
     return (
@@ -503,6 +521,31 @@ function ProductsList() {
     attention?.zeroPrice ??
     (items ?? []).filter((i) => i.type !== 'service' && i.price !== null && i.price.minMinor === 0).length;
   const noPhoto = attention?.noPhoto ?? (items ?? []).filter((i) => i.hasImage === false).length;
+  // Every product is «بلا تصنيف»: offer the sector's usual categories in one press
+  const allUncategorised = Boolean(
+    items && canManage && !filtered && items.length >= 3 && items.every((i) => !i.categoryId),
+  );
+  const [suggesting, setSuggesting] = useState(false);
+  async function suggestCategories() {
+    setSuggesting(true);
+    try {
+      const have = new Set(categories.map((c) => c.name));
+      const names = categoryExamples(me.tenant.sectors).filter((n) => !have.has(n));
+      for (const [i, name] of names.entries()) await createCategory({ name, sortOrder: i });
+      setCategories((await listCategories()).items);
+      setNotice({
+        tone: 'success',
+        text:
+          names.length > 0
+            ? `أضفنا ${String(names.length)} من التصنيفات. اختر التصنيف من صفحة كل منتج.`
+            : 'تصنيفاتك المقترحة موجودة سابقاً.',
+      });
+    } catch (e) {
+      setNotice({ tone: 'error', text: errorMessage(e) });
+    } finally {
+      setSuggesting(false);
+    }
+  }
   const summary = items ? summaryOf(items) : null;
   // More pages wait behind «اعرض المزيد»: the tiles count what is on screen, «+» says there is more.
   const more = nextCursor ? '+' : '';
@@ -588,14 +631,17 @@ function ProductsList() {
           <span className="text-ink-subtle">—</span>
         ) : (
           <span className="flex flex-col items-end">
-            <span
-              className={cn(
-                'font-semibold',
-                item.stockQty < 0 && 'text-danger-ink',
-                item.stockQty === 0 && 'text-warning-ink',
-              )}
-            >
-              {formatQuantity(item.stockQty, digits)}
+            <span className="inline-flex items-center gap-1.5">
+              {item.stockQty < 0 ? <Badge tone="danger">سالب</Badge> : null}
+              <span
+                className={cn(
+                  'font-semibold',
+                  item.stockQty < 0 && 'text-danger-ink',
+                  item.stockQty === 0 && 'text-warning-ink',
+                )}
+              >
+                {formatQuantity(item.stockQty, digits)}
+              </span>
             </span>
             {item.sellableQty !== undefined && item.sellableQty > item.stockQty ? (
               <span className="text-xs whitespace-nowrap text-ink-muted">
@@ -749,6 +795,16 @@ function ProductsList() {
                     <bdi className="num font-semibold text-ink">
                       {formatQuantity(summary.lowest.stockQty, digits)}
                     </bdi>
+                    {summary.negative > 0 && canManage ? (
+                      <span className="mt-1 flex flex-wrap gap-x-3">
+                        <Link to="/inventory" className={textLinkClass}>
+                          اجرد المخزون
+                        </Link>
+                        <Link to="/purchases" className={textLinkClass}>
+                          سجّل استلاماً
+                        </Link>
+                      </span>
+                    ) : null}
                   </>
                 ) : undefined
               }
@@ -867,28 +923,33 @@ function ProductsList() {
             </Alert>
           ) : null}
 
-          {/* Every product is «بلا تصنيف»: say how to find them faster */}
-          {items && canManage && !filtered && items.length >= 3 && items.every((i) => !i.categoryId) ? (
-            <Alert tone="info">
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span>كل منتجاتك بلا تصنيف. التصنيفات (مثل «رجالي» و«أحذية») تُسهّل البحث والتقارير.</span>
-                <Link to="/categories" className={textLinkClass}>
-                  أضف تصنيفات
-                </Link>
-              </span>
-            </Alert>
-          ) : null}
-
-          {items && filters.status === 'active' && (noPhoto > 0 || zeroPrice > 0) ? (
+          {/* One attention line: no categories, price zero, no photo */}
+          {items && (allUncategorised || (filters.status === 'active' && (noPhoto > 0 || zeroPrice > 0))) ? (
             <Alert tone="warning">
               <span className="flex flex-col gap-1" aria-label="تحتاج انتباهك">
-                {zeroPrice > 0 ? (
+                {allUncategorised ? (
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>كل منتجاتك بلا تصنيف. التصنيفات تُسهّل البحث والتقارير.</span>
+                    <button
+                      type="button"
+                      className={textLinkClass}
+                      disabled={suggesting}
+                      onClick={() => void suggestCategories()}
+                    >
+                      اقترح تصنيفات
+                    </button>
+                    <Link to="/categories" className={textLinkClass}>
+                      أضف تصنيفات
+                    </Link>
+                  </span>
+                ) : null}
+                {filters.status === 'active' && zeroPrice > 0 ? (
                   <span>
                     <bdi className="num font-semibold">{zeroPrice}</bdi> بسعر صفر: تُباع مجاناً ولا تظهر في
                     المتجر الإلكتروني.
                   </span>
                 ) : null}
-                {noPhoto > 0 ? (
+                {filters.status === 'active' && noPhoto > 0 ? (
                   <span>
                     <bdi className="num font-semibold">{noPhoto}</bdi> بلا صورة: الصورة تُظهرها على شاشة البيع
                     وفي المتجر.

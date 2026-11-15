@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   dayReportQuery,
+  isoDateSchema,
   merchandiseQuery,
   salesBreakdownQuery,
   type SalesBreakdown,
@@ -23,6 +24,7 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
 import {
   dayReport,
+  dayTotals,
   journal,
   listAccounts,
   listShifts,
@@ -41,6 +43,17 @@ const authOf = (request: FastifyRequest): AccessClaims => {
 
 const uuid = z.uuid();
 
+// A range of at most 62 days, for the home page's chart (isoDateSchema is the core's day format).
+const daysQuery = z
+  .object({
+    branchId: uuid.optional(),
+    from: isoDateSchema,
+    to: isoDateSchema,
+  })
+  .refine((q) => q.from <= q.to && Date.parse(q.to) - Date.parse(q.from) <= 62 * 86_400_000, {
+    message: 'المدة المطلوبة غير صحيحة.',
+  });
+
 /**
  * The accounting and report routes of phase 1, exactly as packages/core › contracts/accounting.ts
  * lists them. Read-only; every one needs a signed-in user with the route's permission.
@@ -55,6 +68,10 @@ export async function reportRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/v1/reports/day', signedIn, async (request): Promise<DayReport> =>
     dayReport(db, authOf(request), parseBody(dayReportQuery, request.query)),
+  );
+
+  app.get('/v1/reports/days', signedIn, async (request) =>
+    dayTotals(db, authOf(request), parseBody(daysQuery, request.query)),
   );
 
   app.get('/v1/reports/merchandise', signedIn, async (request): Promise<MerchandiseReport> =>

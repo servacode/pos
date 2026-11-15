@@ -1,6 +1,5 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { stripBidiControls } from '@serva/core/text';
 import type { CatalogItem } from '../catalog';
 import { posSets, product } from '../../test/pos';
 import { saleScreen } from '../../test/renderPos';
@@ -96,10 +95,8 @@ describe('the till grid for a clothing model', () => {
     await user.click(within(picker).getByRole('button', { name: 'M' }));
     expect(within(picker).getByRole('button', { name: 'أزرق' })).toBeDisabled();
     await user.click(within(picker).getByRole('button', { name: 'L' }));
+    // The last choice adds the piece at once
     await user.click(within(picker).getByRole('button', { name: 'أزرق' }));
-    await user.click(
-      within(picker).getByRole('button', { name: (n) => stripBidiControls(n).startsWith('أضف L أزرق') }),
-    );
 
     expect(screen.queryByRole('region', { name: 'اختر من قميص كتان' })).not.toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'أسطر الفاتورة' })).toHaveTextContent('قميص كتان L أزرق');

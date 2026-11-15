@@ -41,10 +41,12 @@ import {
   Skeleton,
   StatTile,
   StoreIcon,
+  Tabs,
   TrendDownIcon,
   TrendUpIcon,
   WarningIcon,
   type StatTileProps,
+  type TabItem,
 } from '@serva/ui';
 import { ButtonLink } from '../admin/products/parts';
 import { getProfit, listExpiry } from '../admin/purchases/api';
@@ -53,7 +55,7 @@ import { listProducts } from '../admin/catalog/api';
 import { dueSoon } from '../admin/cheques/ChequesPage';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { ContractAttention, seesContractAttention } from './ContractAttention';
-import { getDayReport } from '../admin/reports/api';
+import { getDayReport, getDayTotals } from '../admin/reports/api';
 import { getSalesBreakdown } from '../admin/reports/SalesReportPage';
 import { daysAgo, getMerchandise } from '../admin/reports/MerchandisePage';
 import type { DayReport } from '../admin/reports/contracts';
@@ -153,14 +155,23 @@ interface DayPoint {
   count: number | null;
 }
 
-const loadDays = (dates: readonly string[]) =>
-  Promise.all(
-    dates.map((date): Promise<DayPoint> =>
-      getDayReport({ branchId: null, date }).then(
-        (report) => ({ date, total: netOfReturns(report), count: report.invoiceCount }),
-        () => ({ date, total: null, count: null }),
-      ),
-    ),
+/** The days from `from` to `to` in one request; a day without sales is a day of zero. A failure is a gap. */
+const loadDays = (from: string, to: string): Promise<DayPoint[]> =>
+  getDayTotals({ from, to }).then(
+    ({ items }) => {
+      const byDate = new Map(items.map((d) => [d.date, d]));
+      const points: DayPoint[] = [];
+      for (let date = from; date <= to; date = shiftDay(date, -1)) {
+        const day = byDate.get(date);
+        points.push({
+          date,
+          total: day ? day.totalMinor - day.returnsMinor : 0,
+          count: day?.invoiceCount ?? 0,
+        });
+      }
+      return points;
+    },
+    () => [],
   );
 
 /** The change of `current` against `previous` as a tile's pill; none when it cannot be told. */
@@ -170,6 +181,8 @@ function changeOf(
   digits: NumberFormat,
 ): StatTileProps['trend'] {
   if (previous === null || previous === undefined || previous <= 0) return undefined;
+  // A base under a tenth of the figure says «+900%»: a jump from almost nothing, not a trend
+  if (previous < current / 10) return undefined;
   const percent = Math.round(((current - previous) / previous) * 100);
   if (percent === 0) return undefined;
   return {
@@ -525,9 +538,10 @@ function SalesTrend({
       <AreaChart
         label={range === '7' ? 'المبيعات آخر 7 أيام' : 'المبيعات آخر 30 يوماً'}
         labels={points.map((p) => `${weekdayOf(p.date)} ${dayText(p.date, digits)}`)}
-        axisLabels={points.map((p) => {
+        axisLabels={points.map((p, i) => {
           const [, month, date] = p.date.split('-').map(Number);
-          return `${formatNumber(date ?? 0, digits)}/${formatNumber(month ?? 0, digits)}`;
+          const text = `${formatNumber(date ?? 0, digits)}/${formatNumber(month ?? 0, digits)}`;
+          return i === points.length - 1 ? `اليوم ${text}` : text;
         })}
         series={[
           {
@@ -549,6 +563,12 @@ function SalesTrend({
           </p>
         }
       />
+      {points.at(-1)?.total !== null && points.at(-1)?.total !== undefined && !loading ? (
+        <p className="text-sm text-ink-muted">
+          آخر نقطة هي اليوم، وما بيع حتى الآن:{' '}
+          <Money minor={points.at(-1)!.total!} currency={base} className="font-semibold text-ink" />
+        </p>
+      ) : null}
     </Card>
   );
 }
@@ -654,6 +674,8 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
       value: m.baseAmountMinor / factor,
     }))
     .sort((a, b) => b.value - a.value);
+  // The methods are what customers paid: the day's returns are not taken off them
+  const returnedMinor = data?.returns?.totalMinor ?? 0;
   // Vouchers are not money taken today: they pay for what an earlier voucher was bought with
   const voucherMinor = (data?.byMethod ?? [])
     .filter((m) => m.method === 'voucher')
@@ -661,6 +683,12 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
   return (
     <Card className="flex flex-col gap-4">
       <SectionTitle icon={<SalesIcon size={20} />}>طرق الدفع اليوم</SectionTitle>
+      {returnedMinor > 0 ? (
+        <p className="text-sm text-ink-muted">
+          المبالغ قبل المرتجعات؛ المرتجعات اليوم{' '}
+          <Money minor={returnedMinor} currency={base} className="font-semibold" />
+        </p>
+      ) : null}
       <ShareBar
         label="حصة كل طريقة دفع من مبيعات اليوم"
         parts={parts}
@@ -747,7 +775,21 @@ type MerchState = ReportState<Awaited<ReturnType<typeof getMerchandise>>>;
 type ExpiryState = ReportState<Awaited<ReturnType<typeof listExpiry>>>;
 type ChequesState = ReportState<Awaited<ReturnType<typeof listCheques>>>;
 
-function Waiting({
+interface WaitingArgs {
+  orders: OrdersState;
+  merch: MerchState;
+  expiry: ExpiryState;
+  seesOrders: boolean;
+  seesStock: boolean;
+  seesExpiry: boolean;
+  sizes: boolean;
+  cheques?: ChequesState | null;
+  today?: string;
+  noPhoto?: number;
+}
+
+/** What «ما ينتظرك» counts, shared by its list and by the tab that carries its total */
+function waitingFigures({
   orders,
   merch,
   expiry,
@@ -758,20 +800,7 @@ function Waiting({
   cheques,
   today,
   noPhoto = 0,
-}: {
-  /** Products with no picture (the first page of the list); 0 hides the line */
-  noPhoto?: number;
-  sizes: boolean;
-  /** Cheques falling due within a week (customers.view); omitted where the store takes none */
-  cheques?: ChequesState | null;
-  today?: string;
-  orders: OrdersState;
-  merch: MerchState;
-  expiry: ExpiryState;
-  seesOrders: boolean;
-  seesStock: boolean;
-  seesExpiry: boolean;
-}) {
+}: WaitingArgs) {
   const count = orders.data?.items.length ?? 0;
   const holds = orders.data?.items.filter((order) => order.source === 'hold').length ?? 0;
   const online = count - holds;
@@ -787,78 +816,99 @@ function Waiting({
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
   const chequesDue = cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
   const chequesOut = cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
-  const empty =
-    online + holds + low + sized.length + expiring + recalled + chequesDue + chequesOut + noPhoto === 0;
+  const total = online + holds + low + sized.length + expiring + recalled + chequesDue + chequesOut + noPhoto;
+  return {
+    holds,
+    online,
+    sized,
+    low,
+    expiring,
+    recalled,
+    loading,
+    chequesDue,
+    chequesOut,
+    noPhoto,
+    total,
+    empty: total === 0,
+  };
+}
+
+function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
+  const { holds, online, sized, low, expiring, recalled, loading, chequesDue, chequesOut, noPhoto, empty } =
+    waitingFigures(args);
+  const body =
+    loading && empty ? (
+      <Skeleton className="h-14" />
+    ) : empty ? (
+      <p className="text-ink-muted">لا شيء ينتظرك الآن.</p>
+    ) : (
+      <ul className="flex flex-col gap-2">
+        {online > 0 ? (
+          <WaitingRow to="/online-store" count={online} tone="warning" icon={<StoreIcon />}>
+            {online === 1 ? 'طلب جديد من المتجر الإلكتروني' : 'طلبات جديدة من المتجر الإلكتروني'}
+          </WaitingRow>
+        ) : null}
+        {holds > 0 ? (
+          <WaitingRow to="/online-store" count={holds} tone="brand" icon={<GiftIcon />}>
+            {holds === 1 ? 'قطعة محجوزة بعربون' : 'قطع محجوزة بعربون'}
+          </WaitingRow>
+        ) : null}
+        {sized.map((item) => {
+          const colour = item.attributes?.find((a) => a.name === 'اللون')?.value;
+          return (
+            <WaitingRow
+              key={item.variantId}
+              to={`/products/${item.productId}`}
+              count={stockChip(item.stockQty)}
+              tone="danger"
+              icon={<WarningIcon />}
+            >
+              المقاس {sizeOf(item)}
+              {colour ? ` (${colour})` : ''} من {item.name} {item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد'}
+            </WaitingRow>
+          );
+        })}
+        {low > 0 ? (
+          <WaitingRow to="/reports/merchandise" count={low} tone="danger" icon={<WarningIcon />}>
+            {low === 1 ? 'صنف يوشك مخزونه على النفاد' : 'أصناف يوشك مخزونها على النفاد'}
+          </WaitingRow>
+        ) : null}
+        {chequesDue > 0 ? (
+          <WaitingRow to="/cheques" count={chequesDue} tone="warning" icon={<CalendarIcon />}>
+            {chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
+          </WaitingRow>
+        ) : null}
+        {chequesOut > 0 ? (
+          <WaitingRow to="/cheques" count={chequesOut} tone="warning" icon={<CalendarIcon />}>
+            {chequesOut === 1
+              ? 'شيك صادر للمورد يستحق خلال 7 أيام'
+              : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
+          </WaitingRow>
+        ) : null}
+        {noPhoto > 0 ? (
+          <WaitingRow to="/products" count={noPhoto} tone="brand" icon={<ProductsIcon />}>
+            {noPhoto === 1 ? 'منتج بلا صورة' : `${products(noPhoto)} بلا صورة`}
+          </WaitingRow>
+        ) : null}
+        {recalled > 0 ? (
+          <WaitingRow to="/recall" count={recalled} tone="danger" icon={<WarningIcon />}>
+            {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : 'دفعات موقوفة عن البيع (استدعاء)'}
+          </WaitingRow>
+        ) : null}
+        {expiring > 0 ? (
+          <WaitingRow to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
+            {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
+          </WaitingRow>
+        ) : null}
+      </ul>
+    );
+  if (bare) return body;
   return (
     <Card className="flex flex-col gap-3">
       <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
         ما ينتظرك
       </SectionTitle>
-      {loading && empty ? (
-        <Skeleton className="h-14" />
-      ) : empty ? (
-        <p className="text-ink-muted">لا شيء ينتظرك الآن.</p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {online > 0 ? (
-            <WaitingRow to="/online-store" count={online} tone="warning" icon={<StoreIcon />}>
-              {online === 1 ? 'طلب جديد من المتجر الإلكتروني' : 'طلبات جديدة من المتجر الإلكتروني'}
-            </WaitingRow>
-          ) : null}
-          {holds > 0 ? (
-            <WaitingRow to="/online-store" count={holds} tone="brand" icon={<GiftIcon />}>
-              {holds === 1 ? 'قطعة محجوزة بعربون' : 'قطع محجوزة بعربون'}
-            </WaitingRow>
-          ) : null}
-          {sized.map((item) => {
-            const colour = item.attributes?.find((a) => a.name === 'اللون')?.value;
-            return (
-              <WaitingRow
-                key={item.variantId}
-                to={`/products/${item.productId}`}
-                count={stockChip(item.stockQty)}
-                tone="danger"
-                icon={<WarningIcon />}
-              >
-                المقاس {sizeOf(item)}
-                {colour ? ` (${colour})` : ''} من {item.name} {item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد'}
-              </WaitingRow>
-            );
-          })}
-          {low > 0 ? (
-            <WaitingRow to="/reports/merchandise" count={low} tone="danger" icon={<WarningIcon />}>
-              {low === 1 ? 'صنف يوشك مخزونه على النفاد' : 'أصناف يوشك مخزونها على النفاد'}
-            </WaitingRow>
-          ) : null}
-          {chequesDue > 0 ? (
-            <WaitingRow to="/cheques" count={chequesDue} tone="warning" icon={<CalendarIcon />}>
-              {chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
-            </WaitingRow>
-          ) : null}
-          {chequesOut > 0 ? (
-            <WaitingRow to="/cheques" count={chequesOut} tone="warning" icon={<CalendarIcon />}>
-              {chequesOut === 1
-                ? 'شيك صادر للمورد يستحق خلال 7 أيام'
-                : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
-            </WaitingRow>
-          ) : null}
-          {noPhoto > 0 ? (
-            <WaitingRow to="/products" count={noPhoto} tone="brand" icon={<ProductsIcon />}>
-              {noPhoto === 1 ? 'منتج بلا صورة' : `${products(noPhoto)} بلا صورة`}
-            </WaitingRow>
-          ) : null}
-          {recalled > 0 ? (
-            <WaitingRow to="/recall" count={recalled} tone="danger" icon={<WarningIcon />}>
-              {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : 'دفعات موقوفة عن البيع (استدعاء)'}
-            </WaitingRow>
-          ) : null}
-          {expiring > 0 ? (
-            <WaitingRow to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
-              {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
-            </WaitingRow>
-          ) : null}
-        </ul>
-      )}
+      {body}
     </Card>
   );
 }
@@ -870,24 +920,44 @@ function stockChip(qty: number): string {
   return formatQuantity(qty);
 }
 
-function RunningLow({ report, skip }: { report: MerchState; skip?: ReadonlySet<string> | undefined }) {
-  const low = (report.data?.lowStock ?? []).filter((item) => !skip?.has(item.variantId)).slice(0, 5);
+/** The low pieces «يوشك على النفاد» lists: not the ones «ما ينتظرك» already names one by one */
+const lowRows = (report: MerchState, skip?: ReadonlySet<string> | undefined) =>
+  (report.data?.lowStock ?? []).filter((item) => !skip?.has(item.variantId)).slice(0, 5);
+
+function RunningLow({
+  report,
+  skip,
+  bare = false,
+}: {
+  report: MerchState;
+  skip?: ReadonlySet<string> | undefined;
+  bare?: boolean;
+}) {
+  const low = lowRows(report, skip);
   // Every piece below zero, shown or not: one link opens the count with all of them
   const negativeIds = (report.data?.lowStock ?? [])
     .filter((item) => item.stockQty < 0)
     .map((i) => i.variantId);
   // Every low piece is already named in «ما ينتظرك»: the list would only repeat it
   if (low.length === 0 && (report.data?.lowStock.length ?? 0) > 0) return null;
+  const allLink = (
+    <Link to="/reports/merchandise" className="text-sm font-semibold text-brand-ink hover:underline">
+      كل القائمة
+    </Link>
+  );
+  const Wrap = bare ? 'div' : Card;
   return (
-    <Card className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <SectionTitle icon={<WarningIcon size={20} />} tone="danger">
-          يوشك على النفاد
-        </SectionTitle>
-        <Link to="/reports/merchandise" className="text-sm font-semibold text-brand-ink hover:underline">
-          كل القائمة
-        </Link>
-      </div>
+    <Wrap className="flex flex-col gap-3">
+      {bare ? (
+        <div className="flex justify-end">{allLink}</div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <SectionTitle icon={<WarningIcon size={20} />} tone="danger">
+            يوشك على النفاد
+          </SectionTitle>
+          {allLink}
+        </div>
+      )}
       {report.loading && !report.data ? (
         <Skeleton className="h-20" />
       ) : report.error ? (
@@ -943,6 +1013,60 @@ function RunningLow({ report, skip }: { report: MerchState; skip?: ReadonlySet<s
             </p>
           ) : null}
         </>
+      )}
+    </Wrap>
+  );
+}
+
+/**
+ * «تحتاج انتباهك»: what waits and what runs low in one card with two tabs, so the home page has one
+ * place for «what do I do now», not two look-alike cards. It opens on «المطلوب الآن», or on the
+ * stock when nothing else waits.
+ */
+function AttentionPanel({
+  waiting,
+  merch,
+  skip,
+  showStock,
+}: {
+  waiting: WaitingArgs;
+  merch: MerchState;
+  skip?: ReadonlySet<string> | undefined;
+  showStock: boolean;
+}) {
+  const [picked, setPicked] = useState<'now' | 'stock' | null>(null);
+  const figures = waitingFigures(waiting);
+  const stockRows = showStock ? lowRows(merch, skip).length : 0;
+  const stockTab = showStock && (stockRows > 0 || merch.loading || merch.error !== null);
+  const tab = picked ?? (figures.empty && stockRows > 0 ? 'stock' : 'now');
+  const active = tab === 'stock' && stockTab ? 'stock' : 'now';
+  const items: TabItem<'now' | 'stock'>[] = [
+    {
+      value: 'now',
+      label: 'المطلوب الآن',
+      ...(figures.total > 0 ? { count: figures.total } : {}),
+      content: <Waiting bare {...waiting} />,
+    },
+    ...(stockTab
+      ? [
+          {
+            value: 'stock' as const,
+            label: 'المخزون',
+            ...(stockRows > 0 ? { count: stockRows } : {}),
+            content: <RunningLow bare report={merch} skip={skip} />,
+          },
+        ]
+      : []),
+  ];
+  return (
+    <Card className="flex flex-col gap-3">
+      <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
+        تحتاج انتباهك
+      </SectionTitle>
+      {items.length > 1 ? (
+        <Tabs label="تحتاج انتباهك" variant="pill" items={items} value={active} onValueChange={setPicked} />
+      ) : (
+        items[0]?.content
       )}
     </Card>
   );
@@ -1020,11 +1144,11 @@ export function HomePage() {
   // 23 before them, only once asked for. A day that fails to load is a gap, never an error.
   const week = useReport(
     seesSales ? `week:${today}` : null,
-    () => loadDays([6, 5, 4, 3, 2, 1].map((back) => shiftDay(today, back))),
+    () => loadDays(shiftDay(today, 6), shiftDay(today, 1)),
     { cache: 'home' },
   );
   const month = useReport(seesSales && range === '30' ? `month:${today}` : null, () =>
-    loadDays(Array.from({ length: 23 }, (_, i) => shiftDay(today, 29 - i))),
+    loadDays(shiftDay(today, 29), shiftDay(today, 7)),
   );
   const profit = useReport(
     seesSales && seesProfit ? `profit:${today}` : null,
@@ -1094,6 +1218,11 @@ export function HomePage() {
             className="h-0.5 w-full animate-pulse overflow-hidden rounded-full bg-brand/40"
           />
         ) : null}
+        {day.late && !day.slow && !day.data ? (
+          <p role="status" className="text-sm text-ink-muted">
+            جارٍ التحميل…
+          </p>
+        ) : null}
         {day.slow ? (
           <Alert tone="warning">
             الأرقام تأخّرت أكثر من المعتاد.{' '}
@@ -1154,29 +1283,28 @@ export function HomePage() {
           <div className="contents xl:col-start-2 xl:row-start-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
             <div className="order-first flex min-w-0 flex-col gap-6 empty:hidden xl:order-none">
               {showWaiting ? (
-                <Waiting
-                  orders={orders}
+                <AttentionPanel
+                  waiting={{
+                    orders,
+                    merch,
+                    expiry,
+                    seesOrders,
+                    seesStock,
+                    seesExpiry,
+                    cheques,
+                    noPhoto,
+                    today,
+                    sizes: me.tenant.sectors.includes('clothing'),
+                  }}
                   merch={merch}
-                  expiry={expiry}
-                  seesOrders={seesOrders}
-                  seesStock={seesStock}
-                  seesExpiry={seesExpiry}
-                  cheques={cheques}
-                  noPhoto={noPhoto}
-                  today={today}
-                  sizes={me.tenant.sectors.includes('clothing')}
+                  showStock={seesStock}
+                  skip={
+                    me.tenant.sectors.includes('clothing') ? sizedLow(merch.data?.lowStock ?? []) : undefined
+                  }
                 />
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
             </div>
-            {seesStock ? (
-              <RunningLow
-                report={merch}
-                skip={
-                  me.tenant.sectors.includes('clothing') ? sizedLow(merch.data?.lowStock ?? []) : undefined
-                }
-              />
-            ) : null}
             {seesSales ? <StoreCard me={me} /> : null}
           </div>
         </div>

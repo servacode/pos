@@ -472,7 +472,7 @@ function AccountMenu({
           <div className="sm:hidden">
             <MenuSeparator />
             <div className="flex flex-col gap-2 px-2.5 pt-2 pb-2.5">
-              <p aria-hidden="true" className="text-xs font-semibold text-ink-subtle">
+              <p aria-hidden="true" className="text-xs font-semibold text-ink-muted">
                 المظهر
               </p>
               <SegmentedControl
@@ -618,7 +618,7 @@ function PageSearch({
             return (
               <li key={hit.key}>
                 {n === 0 || hits[n - 1]!.group !== hit.group ? (
-                  <p className="px-2.5 pt-2 pb-1 text-xs font-semibold text-ink-subtle">{hit.group}</p>
+                  <p className="px-2.5 pt-2 pb-1 text-xs font-semibold text-ink-muted">{hit.group}</p>
                 ) : null}
                 <button
                   type="button"
@@ -642,7 +642,7 @@ function PageSearch({
           })}
         </ul>
       ) : null}
-      <p className="hidden items-center gap-4 border-t border-line pt-4 text-xs text-ink-subtle pointer-fine:flex">
+      <p className="hidden items-center gap-4 border-t border-line pt-4 text-xs text-ink-muted pointer-fine:flex">
         <span className="flex items-center gap-1.5">
           <Key>↑</Key>
           <Key>↓</Key>

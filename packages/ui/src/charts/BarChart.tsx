@@ -488,7 +488,7 @@ export function BarChart({
           {model.grid.map((line) => (
             <span
               key={line.value}
-              className="absolute num text-xs leading-none whitespace-nowrap text-ink-subtle"
+              className="absolute num text-xs leading-none whitespace-nowrap text-ink-muted"
               style={{ left: model.tickX, top: line.y, transform: 'translate(-100%, -50%)' }}
             >
               {line.text}
@@ -516,7 +516,7 @@ export function BarChart({
             <span
               key={item.index}
               data-index={item.index}
-              className="absolute num truncate text-center text-xs leading-none text-ink-subtle"
+              className="absolute num truncate text-center text-xs leading-none text-ink-muted"
               style={{
                 left: item.x,
                 top: plotHeight + 10,

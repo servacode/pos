@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import type { CurrencyCode } from '@serva/core';
 import { Button, MoneyField, Switch } from '@serva/ui';
+import { LiraCaption } from '../../lib/LiraCaption';
 import { applyToVariants, variantsWithoutBarcode, type Axis, type VariantDraft } from './form';
 
 /** The cell of a row value and a column value, or null (a combination never made) */
@@ -72,6 +73,7 @@ export const PriceMatrix = memo(function PriceMatrix({
           onValueChange={setSame}
           className="w-52"
         />
+        <LiraCaption minor={same} currency={currency} />
         <Button
           variant="secondary"
           disabled={same === null}
@@ -125,6 +127,11 @@ export const PriceMatrix = memo(function PriceMatrix({
                         currency={v.currency}
                         valueMinor={v.priceMinor}
                         onValueChange={(value) => setPrice(v.key, value)}
+                      />
+                      <LiraCaption
+                        minor={v.priceMinor}
+                        currency={v.currency}
+                        className="block text-center text-xs text-ink-muted"
                       />
                     </td>
                   );

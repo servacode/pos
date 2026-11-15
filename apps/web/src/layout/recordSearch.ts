@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { MeResponse, OnlineOrder } from '@serva/core';
+import type { MeResponse, OnlineOrder, SupplierReturnRow } from '@serva/core';
 import { listProducts } from '../admin/catalog/api';
 import { listCustomers } from '../admin/customers/api';
 import { findSerials, getRecall, listPurchases, listSuppliers } from '../admin/purchases/api';
@@ -9,6 +9,8 @@ import { holdsAny, type AccessRule } from '../admin/reports/access';
 import { apiFetch } from '../lib/api';
 import { dayText } from '../lib/dates';
 import { listSales } from '../admin/sales/api';
+import { listQuotations } from '../admin/quotations/api';
+import { listClaims } from '../admin/warranty/api';
 
 /** One record the search found: a product, a customer, a supplier, an invoice, a purchase invoice, a serial number or a batch. */
 export interface RecordHit {
@@ -179,6 +181,58 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
                 detail: c.customerName ?? undefined,
                 to: '/cheques',
               })),
+          ),
+        )
+      : [],
+    // Warranty claims (WC-…), supplier returns (PRT-…) and quotations (QUO-…): matched by number,
+    // and by the name or serial next to it
+    can(['catalog.manage'])
+      ? quiet(
+          listClaims('all').then((r) =>
+            r.items
+              .filter(
+                (c) =>
+                  c.number.toLowerCase().includes(q.toLowerCase()) ||
+                  c.serial.toLowerCase().includes(q.toLowerCase()) ||
+                  (c.customerName ?? '').includes(q),
+              )
+              .slice(0, FEW)
+              .map((c): RecordHit => ({
+                key: `w:${c.id}`,
+                group: 'مطالبات الضمان',
+                label: c.number,
+                detail: `${c.item}${c.customerName ? ` · ${c.customerName}` : ''}`,
+                to: '/warranty',
+              })),
+          ),
+        )
+      : [],
+    can(['purchases.manage'])
+      ? quiet(
+          apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true }).then((r) =>
+            r.items
+              .filter((x) => x.number.toLowerCase().includes(q.toLowerCase()) || x.supplierName.includes(q))
+              .slice(0, FEW)
+              .map((x): RecordHit => ({
+                key: `t:${x.id}`,
+                group: 'مرتجعات الموردين',
+                label: x.number,
+                detail: x.supplierName,
+                to: '/supplier-returns',
+              })),
+          ),
+        )
+      : [],
+    can(['sale.create'])
+      ? quiet(
+          listQuotations('all', q).then((r) =>
+            r.items.slice(0, FEW).map((x): RecordHit => ({
+              key: `z:${x.id}`,
+              group: 'عروض الأسعار',
+              label: x.number,
+              detail: x.customerName ?? undefined,
+              to: `/quotations/${x.id}`,
+            })),
           ),
         )
       : [],

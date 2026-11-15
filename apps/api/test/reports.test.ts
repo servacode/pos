@@ -264,6 +264,22 @@ describe('GET /v1/reports/day', () => {
     expect((await get(store.accessToken, '/v1/reports/day?date=30-10-2026')).statusCode).toBe(400);
   });
 
+  it('gives the totals of a range in one read, the same sums as the day report', async () => {
+    const store = await openStore(app);
+    await aDay(store);
+    const res = await get(store.accessToken, '/v1/reports/days?from=2026-10-28&to=2026-10-31');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toEqual({
+      items: [{ date: '2026-10-30', invoiceCount: 2, totalMinor: 129_000 + 234_750, returnsMinor: 0 }],
+    });
+    expect((await get(store.accessToken, '/v1/reports/days?from=2026-10-31&to=2026-10-28')).statusCode).toBe(
+      400,
+    );
+    expect((await get(store.accessToken, '/v1/reports/days?from=2026-01-01&to=2026-10-28')).statusCode).toBe(
+      400,
+    );
+  });
+
   it('limits a person whose role is for one branch to that branch', async () => {
     const store = await openStore(app);
     await aDay(store);

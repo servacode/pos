@@ -38,6 +38,7 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { sortByOptions } from '../../lib/optionOrder';
 import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 import { SectionHead } from './parts';
@@ -118,7 +119,9 @@ export function InventoryPage() {
   const manyBranches = me.branches.length > 1;
   const branchName = (id: string) => me.branches.find((b) => b.id === id)?.name ?? '';
   const items = stock?.items ?? [];
-  const onShelf = items.reduce((sum, r) => sum + r.qty, 0);
+  // Same count as the products page: a shelf below zero is not a piece, it is told apart as «سالب»
+  const onShelf = items.reduce((sum, r) => sum + Math.max(0, r.qty), 0);
+  const belowZero = items.filter((r) => r.qty < 0).length;
   const kinds = new Set(items.map((r) => r.variantId)).size;
   const soldOut = items.filter((r) => r.qty <= 0).length;
   const counted = Object.values(counts).filter((text) => qtyOf(text) !== null).length;
@@ -152,7 +155,11 @@ export function InventoryPage() {
       // A shelf sold below nothing reads «−1», not «1-»
       cell: (r) => (
         <span className="inline-flex items-center gap-2">
-          {r.qty <= 0 ? <Badge tone="danger">نفد</Badge> : null}
+          {r.qty < 0 ? (
+            <Badge tone="danger">سالب</Badge>
+          ) : r.qty === 0 ? (
+            <Badge tone="danger">نفد</Badge>
+          ) : null}
           <bdi dir="ltr" className="num">
             {formatQuantity(r.qty, digits)}
           </bdi>
@@ -290,7 +297,7 @@ export function InventoryPage() {
   }
 
   const wasteRow = stock?.items.find((r) => `${r.branchId}:${r.variantId}` === wasteKey);
-  const wasteOptions = (stock?.items ?? []).filter((r) => {
+  const wasteOptions = sortByOptions(stock?.items ?? []).filter((r) => {
     const typed = wasteQuery.trim().toLowerCase();
     return !typed || `${r.branchId}:${r.variantId}` === wasteKey || r.name.toLowerCase().includes(typed);
   });
@@ -300,6 +307,10 @@ export function InventoryPage() {
     const qty = qtyOf(wasteQty);
     if (!wasteRow || !qty || qty <= 0) return 'اختر الصنف واكتب كمية الهدر.';
     if (wasteRow.qty <= 0) return 'لا مخزون لهذا الصنف ليخرج منه هدر.';
+    // A piece item is counted in whole pieces; only a weighed one takes a fraction
+    if (wasteRow.allowsFraction === false && qty % 1000 !== 0) {
+      return 'هذا الصنف يُعدّ بالقطعة: اكتب عدداً صحيحاً.';
+    }
     if (qty > wasteRow.qty) {
       return `الموجود من هذا الصنف ${formatQuantity(wasteRow.qty, digits)} فقط. اكتب كمية أقل.`;
     }
@@ -527,12 +538,18 @@ export function InventoryPage() {
             footnote="بمتوسط كلفة كل صنف"
           />
           <StatTile
-            label="الكمية على الرفوف"
+            label="القطع في المخزون"
             value={stock ? formatQuantity(onShelf, digits) : <Skeleton className="h-9 w-20" />}
             footnote={
               stock ? (
                 <>
                   عدد الأصناف: <span className="num">{kinds}</span>
+                  {belowZero > 0 ? (
+                    <>
+                      {' '}
+                      · منها سالب: <span className="num">{belowZero}</span>
+                    </>
+                  ) : null}
                 </>
               ) : undefined
             }

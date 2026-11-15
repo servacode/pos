@@ -386,6 +386,28 @@ describe('/products list: photos, expiry and stock', () => {
     expect(await screen.findByText(/منها ناقص/)).toHaveTextContent('1');
   });
 
+  it('tells a negative stock apart with «سالب» and offers the count and the receiving', async () => {
+    openProducts();
+    expect(await screen.findByText('سالب')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'اجرد المخزون' })).toHaveAttribute('href', '/inventory');
+    expect(screen.getByRole('link', { name: 'سجّل استلاماً' })).toHaveAttribute('href', '/purchases');
+  });
+
+  it('says a service has no shelf price, instead of 0', async () => {
+    openProducts({
+      [list()]: page([
+        listItem({
+          id: ids.other,
+          nameAr: 'تقصير',
+          type: 'service',
+          price: { currency: 'SYP', minMinor: 0, maxMinor: 0 },
+          stockQty: 0,
+        }),
+      ]),
+    });
+    expect(await screen.findByText('خدمة · السعر عند البيع')).toBeInTheDocument();
+  });
+
   it('shows the nearest expiry, a «ينتهي خلال 30 يوماً» tile and the filter', async () => {
     const { requestsTo, user } = openProducts({
       [list()]: {

@@ -113,7 +113,7 @@ const PRODUCT_FIELDS: readonly ImportFieldDef[] = [
   },
   {
     key: 'sku',
-    label: 'رمز الصنف (SKU)',
+    label: 'رمز الصنف',
     aliases: ['sku', 'رمز الصنف', 'رمز داخلي', 'الرمز', 'ref', 'reference'],
     hint: 'اختياري',
     example: 'SH-001',

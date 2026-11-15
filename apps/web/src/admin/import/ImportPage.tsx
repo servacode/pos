@@ -268,7 +268,12 @@ function Import() {
     .sort((a, b) => a.line - b.line)
     .slice(0, SHOWN_ROWS);
   const columns: DataColumn<ImportRowResult>[] = [
-    { key: 'line', header: 'السطر', numeric: true, cell: (r) => <bdi className="num">{r.line}</bdi> },
+    {
+      key: 'line',
+      header: 'السطر في الملف',
+      numeric: true,
+      cell: (r) => <bdi className="num">{r.line}</bdi>,
+    },
     { key: 'name', header: 'الاسم', cell: (r) => <bdi>{nameOf(r.line)}</bdi> },
     {
       key: 'status',
@@ -611,6 +616,10 @@ function Import() {
                   rowKey={(r) => r.line}
                   empty={<EmptyState icon={PackageOpenIcon} title="لا صفوف" />}
                 />
+                <p className="text-sm text-ink-muted">
+                  رقم السطر هو رقمه في الملف كما يظهر في برنامج الجداول. السطر 1 هو صف العناوين، فأول صنف في
+                  السطر 2.
+                </p>
                 {results.size > SHOWN_ROWS ? (
                   <p className="text-sm text-ink-muted">
                     نعرض أول {SHOWN_ROWS} صفاً. الباقي في ملف الأخطاء إن وُجدت أخطاء.

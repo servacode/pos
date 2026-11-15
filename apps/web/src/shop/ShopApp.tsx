@@ -29,7 +29,6 @@ import {
   LogoMark,
   Money,
   OfferIcon,
-  ProductsIcon,
   RemoveIcon,
   ScrollStrip,
   SearchField,
@@ -783,6 +782,19 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [code, setCode] = useState('');
   const [coupon, setCoupon] = useState<{ code: string; coupon: ShopCoupon } | null>(null);
   const byCode = store.orderMode === 'shop';
+  // A mobile number: 9 to 15 digits, with an optional + and spaces or dashes between them
+  const phoneDigits = phone.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[\s-]/g, '');
+  const phoneBad = phone.trim() !== '' && !/^\+?\d{9,15}$/.test(phoneDigits);
+  // Why the order button waits, in words
+  const waitingFor = !name.trim()
+    ? 'اكتب اسمك لنتابع.'
+    : !phone.trim()
+      ? 'اكتب رقم جوالك لنتابع.'
+      : phoneBad
+        ? 'رقم الجوال غير صحيح.'
+        : byCode && challenge && code.length < 6
+          ? 'اكتب الرمز المكوّن من 6 أرقام.'
+          : null;
 
   if (placed) {
     return (
@@ -954,9 +966,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
                 {line.imageUrl ? (
                   <img src={line.imageUrl} alt="" className="size-full object-cover" />
                 ) : (
-                  <span className="grid size-full place-items-center bg-brand-soft text-brand">
-                    <ProductsIcon size={20} />
-                  </span>
+                  <NoPicture name={line.name} />
                 )}
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-1">
@@ -1069,7 +1079,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               // A code belongs to its number: a new number asks again
               setChallenge(null);
             }}
-            error={fields.phone}
+            error={fields.phone ?? (phoneBad ? 'رقم الجوال غير صحيح، مثال: 0944555666' : undefined)}
             hint="مثال: 0944555666"
           />
         </div>
@@ -1162,7 +1172,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               size="lg"
               fullWidth
               loading={sending}
-              disabled={!name.trim() || !phone.trim()}
+              disabled={Boolean(waitingFor)}
               onClick={() => void askCode()}
             >
               أرسل رمز التأكيد
@@ -1173,12 +1183,13 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               fullWidth
               icon={!byCode && store.whatsapp ? <SendIcon /> : undefined}
               loading={sending}
-              disabled={!name.trim() || !phone.trim() || (byCode && code.length < 6)}
+              disabled={Boolean(waitingFor)}
               onClick={() => void send()}
             >
               {byCode ? 'أكّد الطلب' : store.whatsapp ? 'اطلب عبر واتساب' : 'أرسل الطلب'}
             </Button>
           )}
+          {waitingFor ? <p className="text-center text-sm text-ink-muted">{waitingFor}</p> : null}
           {byCode && challenge ? (
             <Button variant="ghost" fullWidth disabled={sending} onClick={() => void askCode()}>
               لم يصلك؟ أرسل رمزاً جديداً

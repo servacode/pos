@@ -276,6 +276,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         ];
         void pos.local.set(HELD_KEY, nextHeld);
         void pos.local.remove(CURRENT_CART_KEY);
+        // Said once, so nobody wonders where the other cashier's sale went
+        setQuotationNote(
+          `علّقنا البيعة الجارية${who ? ` لدى ${who}` : ''} وأبقيناها في «المعلّقة». يجدها صاحبها هناك.`,
+        );
       }
       setHeld(nextHeld);
       setCartRestored(true);

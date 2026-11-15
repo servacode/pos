@@ -154,7 +154,7 @@ export function KpiStrip({
     <div
       {...rest}
       className={cn(
-        'scrollbar-none flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 max-sm:*:min-w-44 max-sm:*:shrink-0 max-sm:*:snap-start sm:grid sm:gap-4 sm:overflow-visible sm:pb-0',
+        'scrollbar-none flex max-w-full min-w-0 snap-x snap-mandatory gap-2 overflow-x-auto pb-1 max-sm:-mx-4 max-sm:scroll-px-4 max-sm:px-4 max-sm:*:w-[42%] max-sm:*:min-w-36 max-sm:*:shrink-0 max-sm:*:snap-start sm:grid sm:gap-4 sm:overflow-visible sm:pb-0',
         columns === 2 ? 'sm:grid-cols-2' : columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4',
         className,
       )}
@@ -190,12 +190,17 @@ export function StatTile({
     <Card
       className={cn(
         // On a phone every figure tile is the same compact block: less padding, a smaller number
-        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-1.5 max-sm:p-4',
+        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-0.5 max-sm:p-3',
         trend ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-1',
         className,
       )}
     >
-      <p className={cn('min-w-0 text-sm text-ink-muted', icon ? 'flex items-center gap-2.5' : null)}>
+      <p
+        className={cn(
+          'min-w-0 text-sm text-ink-muted max-sm:truncate max-sm:text-xs',
+          icon ? 'flex items-center gap-2.5 max-sm:gap-1.5' : null,
+        )}
+      >
         {icon ? (
           <IconChip tone={iconTone} size="sm">
             {icon}
@@ -206,13 +211,13 @@ export function StatTile({
       <p
         className={cn(
           'col-span-full num font-bold tracking-tight text-ink',
-          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-2xl', VALUE_UNIT),
+          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-xl', VALUE_UNIT),
         )}
       >
         {value}
       </p>
       {sparkline && sparkline.length > 1 ? <Sparkline values={sparkline} /> : null}
-      {footnote ? <p className="col-span-full text-sm text-ink-muted">{footnote}</p> : null}
+      {footnote ? <p className="col-span-full text-sm text-ink-muted max-sm:text-xs">{footnote}</p> : null}
       {trend ? (
         <span
           className={cn(
@@ -228,7 +233,7 @@ export function StatTile({
       {trend?.comparison ? (
         // Its own row across the tile, so a long comparison never squeezes the label; pulled up
         // to 4 under the pill and aligned to its edge, so it reads as the pill's.
-        <p className="col-span-full row-start-2 -mt-2 text-end text-xs text-ink-subtle">{trend.comparison}</p>
+        <p className="col-span-full row-start-2 -mt-2 text-end text-xs text-ink-muted">{trend.comparison}</p>
       ) : null}
     </Card>
   );

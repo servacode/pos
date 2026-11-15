@@ -20,6 +20,7 @@ import {
   useDensity,
 } from '@serva/ui';
 import { ApiError } from '../../lib/api';
+import { LiraCaption } from '../../lib/LiraCaption';
 import { probeBarcode } from '../catalog/api';
 import { barcodeOf } from '../catalog/catalog';
 import { newBarcode, variantLabel, type BarcodeDraft, type FieldErrors, type VariantDraft } from './form';
@@ -180,6 +181,11 @@ export const VariantBlock = memo(function VariantBlock({
       valueMinor={variant.priceMinor}
       onValueChange={(priceMinor) => set({ priceMinor })}
       error={errors[k('price')]}
+      hint={
+        variant.currency === 'USD' ? (
+          <LiraCaption minor={variant.priceMinor} currency={variant.currency} className="text-ink-muted" />
+        ) : undefined
+      }
       className="min-w-0 flex-1"
     />
   );

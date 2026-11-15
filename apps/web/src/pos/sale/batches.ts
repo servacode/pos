@@ -1,15 +1,9 @@
 import type { BatchAllocation, SalePayload } from '@serva/core/contracts/documents';
 import type { PharmacySettings, StockBatch } from '@serva/core/contracts/pharmacy';
-import {
-  allocateFefo,
-  batchState,
-  overStock,
-  sameBatch,
-  uncoveredAction,
-  usesAutoBatch,
-} from '@serva/core/pharmacy';
+import { allocateFefo, overStock, sameBatch, uncoveredAction, usesAutoBatch } from '@serva/core/pharmacy';
 import { lineBaseQty } from '@serva/core/sale';
 import type { OutboxEntry } from '@serva/sync';
+import { sellableSplit } from '../../lib/sellable';
 import type { Catalog } from '../catalog';
 import type { Cart } from './cart';
 
@@ -86,15 +80,8 @@ function poolOf(stock: readonly StockBatch[], taken: readonly BatchAllocation[])
 
 /** What can be sold from the batches, or null when none is expired or blocked (then the stock is the stock) */
 function sellableOf(pool: readonly StockBatch[], today: string): number | null {
-  let ok = 0;
-  let left = false;
-  for (const b of pool) {
-    const state = batchState(b, today);
-    if (state === 'ok') ok += b.qty;
-    else if (state === 'empty' && b.qty < 0 && !b.batchNo) ok += b.qty;
-    else if (state === 'expired' || state === 'blocked') left = true;
-  }
-  return left ? ok : null;
+  const { sellable, expired, blocked } = sellableSplit(pool, today);
+  return expired > 0 || blocked > 0 ? sellable : null;
 }
 
 export function planBatches(input: {

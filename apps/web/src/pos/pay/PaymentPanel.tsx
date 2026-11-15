@@ -377,7 +377,9 @@ export function PaymentPanel({
           : voucherProblem
             ? 'تحقّق من القسيمة أو النقاط المكتوبة.'
             : needsReference
-              ? 'اكتب رقم الموافقة أو المرجع لهذه الدفعة.'
+              ? option.method === 'cheque'
+                ? 'اكتب البنك ورقم الشيك وتاريخ الاستحقاق.'
+                : 'اكتب رقم الموافقة أو المرجع لهذه الدفعة.'
               : tenders.length === 0
                 ? 'اختر طريقة الدفع وأدخل المبلغ.'
                 : 'error' in settlement
@@ -847,6 +849,12 @@ export function PaymentPanel({
                     autoComplete="off"
                   />
                 </div>
+                {chequeDue &&
+                chequeDue < businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff) ? (
+                  <p role="alert" className="text-sm font-semibold text-warning-ink">
+                    تاريخ الاستحقاق مضى — تأكّد.
+                  </p>
+                ) : null}
                 {!canCredit ? (
                   <p className="text-sm text-ink-muted">قبول الشيك يحتاج رمز مدير عند الإتمام.</p>
                 ) : null}

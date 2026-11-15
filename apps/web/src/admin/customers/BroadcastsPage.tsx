@@ -81,10 +81,10 @@ function MessagePreview({ store, text }: { store: string; text: string }) {
             {typed || PLACEHOLDER}
           </p>
           <p className="text-ink-muted">{BROADCAST_FOOTER}</p>
-          <span className="self-end text-xs text-ink-subtle">الآن</span>
+          <span className="self-end text-xs text-ink-muted">الآن</span>
         </div>
       </div>
-      <p className="text-xs text-ink-subtle">يُضاف اسم المحل في أولها، وسطر الإيقاف في آخرها.</p>
+      <p className="text-xs text-ink-muted">يُضاف اسم المحل في أولها، وسطر الإيقاف في آخرها.</p>
     </Card>
   );
 }

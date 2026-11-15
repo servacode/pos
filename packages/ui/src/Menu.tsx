@@ -386,7 +386,7 @@ export function MenuItem({
         <span className="min-w-0 flex-1 truncate">{children}</span>
         {trailing}
         {shortcut ? (
-          <kbd dir="ltr" className="shrink-0 font-sans text-xs text-ink-subtle">
+          <kbd dir="ltr" className="shrink-0 font-sans text-xs text-ink-muted">
             {shortcut}
           </kbd>
         ) : null}
@@ -430,7 +430,7 @@ export function MenuLabel({
   id?: string;
 }) {
   return (
-    <div id={id} className={cn('px-2.5 pt-2 pb-1 text-xs font-semibold text-ink-subtle', className)}>
+    <div id={id} className={cn('px-2.5 pt-2 pb-1 text-xs font-semibold text-ink-muted', className)}>
       {children}
     </div>
   );

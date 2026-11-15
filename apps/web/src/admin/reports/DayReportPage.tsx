@@ -154,6 +154,9 @@ function DayReportBody({ report }: { report: DayReport }) {
   const digits = useDigits();
   const base = report.baseCurrency;
   const average = report.invoiceCount > 0 ? Math.round(report.totalMinor / report.invoiceCount) : 0;
+  // The headline is net of the day's returns, the same figure as the home page; the invoices' total
+  // and the returns sit under it
+  const net = report.totalMinor - (report.returns?.totalMinor ?? 0);
   const methodsBase = report.byMethod.reduce((sum, row) => sum + row.baseAmountMinor, 0);
   const cashierInvoices = report.byCashier.reduce((sum, row) => sum + row.invoiceCount, 0);
   const cashierTotal = report.byCashier.reduce((sum, row) => sum + row.totalMinor, 0);
@@ -175,12 +178,19 @@ function DayReportBody({ report }: { report: DayReport }) {
         <StatTile
           hero
           className="sm:col-span-2"
-          label="المبيعات"
-          value={<Money minor={report.totalMinor} currency={base} />}
+          label={report.returns.count > 0 ? 'المبيعات بعد المرتجعات' : 'المبيعات'}
+          value={<Money minor={net} currency={base} />}
           footnote={
             <>
               <bdi className="num">{displayNumber(String(report.invoiceCount), digits)}</bdi> فاتورة · متوسطها{' '}
               <Money minor={average} currency={base} />
+              {report.returns.count > 0 ? (
+                <>
+                  {' '}
+                  · قبل المرتجعات <Money minor={report.totalMinor} currency={base} /> · المرتجعات{' '}
+                  <Money minor={report.returns.totalMinor} currency={base} />
+                </>
+              ) : null}
             </>
           }
         />
@@ -245,7 +255,8 @@ function DayReportBody({ report }: { report: DayReport }) {
         </Section>
       ) : null}
 
-      {(report.byCategory ?? []).length > 0 ? (
+      {/* Nothing is filed under a department: one «بلا تصنيف» row says nothing, so it is left out */}
+      {(report.byCategory ?? []).some((row) => row.categoryId !== null) ? (
         <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-2">
           <Section title="حسب القسم">
             <DataTable

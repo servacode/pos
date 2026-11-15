@@ -406,13 +406,13 @@ export function ReturnScreen({
       <FlowHeader
         onBack={onBack}
         icon={<UndoIcon size={24} />}
-        title="مرتجع"
-        description={`اختر فاتورة من آخر ${daysText(windowDays)}، من أي جهاز في المحل، ثم ما يرجع منها. المبلغ من الفاتورة نفسها.`}
+        title={startExchange ? 'تبديل صنف' : 'مرتجع'}
+        description={`${startExchange ? 'أرجِع ما لا يناسب الزبون ثم بِعه غيره. ' : ''}اختر فاتورة من آخر ${daysText(windowDays)}، من أي جهاز في المحل، ثم ما يرجع منها. المبلغ من الفاتورة نفسها.`}
       />
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <section
           aria-label="الفواتير"
-          className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4 shadow-e1 lg:sticky lg:top-0"
+          className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4 shadow-e1 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto"
         >
           <TextField
             label="رقم الفاتورة"
@@ -457,7 +457,7 @@ export function ReturnScreen({
               ) : null}
               <ul
                 aria-label="فواتير المحل"
-                className="-mx-1 flex max-h-[20rem] flex-col gap-1 overflow-y-auto px-1 pb-2"
+                className="-mx-1 flex max-h-[20rem] flex-col gap-1 overflow-y-auto px-1 pb-4"
               >
                 {storeList.map((h) => {
                   const at = Date.parse(h.deviceTime);
@@ -503,10 +503,11 @@ export function ReturnScreen({
           shown.length === 0 &&
           !remote.note &&
           !remote.busy &&
+          storeList.length === 0 &&
           !(remote.hits && remote.hits.length > 0) ? (
             <p className="py-6 text-center text-sm text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
           ) : null}
-          <ul className="-mx-1 flex max-h-[28rem] flex-col gap-1 overflow-y-auto px-1 pb-2 pt-0.5">
+          <ul className="-mx-1 flex max-h-[28rem] flex-col gap-1 overflow-y-auto px-1 pb-4 pt-0.5">
             {shown.map((s) => {
               const at = Date.parse(s.deviceTime);
               const selected = current?.id === s.id;

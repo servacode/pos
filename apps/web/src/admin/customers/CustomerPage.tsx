@@ -101,7 +101,7 @@ function InvoiceLines({ lines }: { lines: CustomerPurchases['invoices'][number][
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <dt className="text-xs font-semibold text-ink-subtle">{label}</dt>
+      <dt className="text-xs font-semibold text-ink-muted">{label}</dt>
       <dd className="truncate text-sm text-ink">{children}</dd>
     </div>
   );
@@ -155,7 +155,7 @@ function BalanceCard({ customer, currency }: { customer: CustomerDetail; currenc
               max={limit}
               tone={over ? 'danger' : owed >= limit * 0.8 ? 'warning' : 'brand'}
             />
-            <p className="text-xs text-ink-subtle">
+            <p className="text-xs text-ink-muted">
               {over ? (
                 <>
                   تجاوز الحد بـ <Money minor={balance - limit} currency={currency} />
@@ -203,7 +203,7 @@ function SizesCard({ purchases, currency }: { purchases: CustomerPurchases; curr
           <div className="flex flex-col gap-4">
             {purchases.sizes.map((s) => (
               <div key={s.name} className="flex flex-col gap-2">
-                <p className="text-xs font-semibold text-ink-subtle">{s.name}</p>
+                <p className="text-xs font-semibold text-ink-muted">{s.name}</p>
                 <ul className="flex flex-wrap gap-1.5">
                   {s.values.map((v, index) => (
                     <li

@@ -45,7 +45,7 @@ export function CashNotesField({
   }
 
   return (
-    <fieldset className="flex flex-col gap-3 rounded-control border border-line p-3">
+    <fieldset className="flex min-w-0 flex-col gap-3 rounded-control border border-line p-3">
       <legend className="px-1 text-sm font-semibold text-ink">{`فئات ${info.nameAr}`}</legend>
       <ul className="flex flex-wrap gap-2" aria-label={`فئات ${info.nameAr} الحالية`}>
         {high(notes).map((value) => (

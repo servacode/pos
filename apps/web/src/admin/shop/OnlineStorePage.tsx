@@ -44,6 +44,7 @@ import {
 import { AppShell } from '../../layout/AppShell';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
+import { zonedDateTime } from '../../lib/dates';
 import { CodCard, DeliveryActions } from './DeliveryPanel';
 import { ShopLook } from './ShopLook';
 
@@ -769,6 +770,12 @@ function OrdersCard() {
                     >
                       {o.phone}
                     </a>
+                  </p>
+                  <p className="text-xs text-ink-muted">
+                    وصل في{' '}
+                    <span className="whitespace-nowrap">
+                      {zonedDateTime(o.createdAt, me.tenant.timezone, me.settings.numberFormat)}
+                    </span>
                   </p>
                 </div>
                 <Money minor={o.totalMinor} currency={o.currency} className="text-lg font-bold text-ink" />

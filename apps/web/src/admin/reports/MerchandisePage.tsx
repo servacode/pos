@@ -240,11 +240,16 @@ export function MerchandisePage() {
   return (
     <AppShell>
       <title>حركة الأصناف · SERFA</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <div className="flex flex-col gap-6">
         <PageHeader
           className="print:hidden"
           icon={<ReportsIcon />}
           title="حركة الأصناف"
+          actions={
+            <Button variant="ghost" size="sm" onClick={() => setOpened(allOpen ? new Set() : new Set(FOLDS))}>
+              {allOpen ? 'اطوِ كل الأقسام' : 'افتح كل الأقسام'}
+            </Button>
+          }
           description={
             clothing
               ? 'ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف.'
@@ -301,12 +306,6 @@ export function MerchandisePage() {
               footnote="بكلفة الشراء"
             />
           ) : null}
-        </div>
-
-        <div className="flex justify-end print:hidden">
-          <Button variant="ghost" size="sm" onClick={() => setOpened(allOpen ? new Set() : new Set(FOLDS))}>
-            {allOpen ? 'اطوِ كل الأقسام' : 'افتح كل الأقسام'}
-          </Button>
         </div>
 
         {data && data.byDepartment.length > 0 && (departments.length > 0 || department) ? (
@@ -371,7 +370,8 @@ export function MerchandisePage() {
           </Fold>
         ) : null}
 
-        {data && data.byOption.length === 0 ? (
+        {/* Only a shop of sizes and colours is told what an option is: the others have no such line */}
+        {data && data.byOption.length === 0 && clothing ? (
           <Alert tone="info">
             {clothing
               ? 'لا مبيعات لقطع لها مقاس أو لون في هذه المدة. أضف «المقاسات والألوان» في بطاقة المنتج.'

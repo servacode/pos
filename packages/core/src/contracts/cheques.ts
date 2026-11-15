@@ -73,6 +73,8 @@ export interface Cheque {
   bank?: string | null;
   dueDate?: string | null;
   drawer?: string | null;
+  /** The cheque's own number, from its structured details; null on a cheque typed as free text */
+  number?: string | null;
   /** The supplier an outgoing cheque was given to */
   supplierName?: string | null;
 }

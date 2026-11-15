@@ -94,6 +94,18 @@ describe('cheques at the till', () => {
     return { ...pos, pay };
   }
 
+  it('asks for the cheque details in its own words, and warns (not blocks) on a past due date', async () => {
+    const { user, pay } = await toCheque('مريم', 'شيك');
+    expect(within(pay).queryByText('تاريخ الاستحقاق مضى — تأكّد.')).not.toBeInTheDocument();
+    const due = within(pay).getByLabelText('تاريخ الاستحقاق');
+    await user.clear(due);
+    await user.type(due, '01/01/2020');
+    expect(within(pay).getByText('تاريخ الاستحقاق مضى — تأكّد.')).toBeInTheDocument();
+    expect(within(pay).getByRole('button', { name: 'أتمّ الدفع' })).toBeEnabled();
+    await user.clear(due);
+    expect(within(pay).getByText('اكتب البنك ورقم الشيك وتاريخ الاستحقاق.')).toBeInTheDocument();
+  });
+
   it('takes a cheque with its bank, number and due date for a named customer, and only then', async () => {
     const { user, outbox, pay } = await toCheque('مريم', 'شيك');
     expect(within(pay).getByRole('button', { name: 'أتمّ الدفع' })).toBeEnabled();

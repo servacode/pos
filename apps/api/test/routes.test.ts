@@ -224,6 +224,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/tax-rates/default': 'signed-in',
   'GET /v1/accounts': 'signed-in',
   'GET /v1/reports/day': 'signed-in',
+  'GET /v1/reports/days': 'signed-in',
   'GET /v1/reports/merchandise': 'signed-in',
   'GET /v1/reports/sales-breakdown': 'signed-in',
   'GET /v1/shifts': 'signed-in',

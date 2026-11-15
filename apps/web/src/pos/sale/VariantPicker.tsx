@@ -1,5 +1,16 @@
-import { useId, useState } from 'react';
-import { AddIcon, Button, CloseIcon, cn, formatQuantity, Money, useDigits } from '@serva/ui';
+import { useId, useState, type ReactNode } from 'react';
+import {
+  AddIcon,
+  Button,
+  CloseIcon,
+  cn,
+  formatQuantity,
+  IconButton,
+  Money,
+  RemoveIcon,
+  useDigits,
+  type Icon,
+} from '@serva/ui';
 import type { CatalogItem } from '../catalog';
 import { Kbd } from './Kbd';
 import { canChoose, lowestPrice, optionsOf, pieceFor, piecesText, stockFor } from './models';
@@ -9,13 +20,15 @@ import { isColourOption, swatchOf } from './swatch';
 /**
  * «اختر المقاس واللون» (هوية 2; هوية 4): a model's pieces, picked beside the cart. Each option is a
  * row of large chips; a value no piece has with the other choices is struck through and cannot be
- * pressed. A model with one option (sizes only) adds on the first tap; with two, «أضف» names the
- * piece and its price.
+ * pressed. The last choice adds the piece (once, at the quantity set above; «أضف» stays for whoever
+ * prefers it), unless that combination is out of stock: that one is shown as «نفد» and cannot be added.
  */
 export function VariantPicker({
   name,
   pieces,
   inCart,
+  priceNote,
+  Kind,
   onAdd,
   onCancel,
 }: {
@@ -23,7 +36,11 @@ export function VariantPicker({
   pieces: readonly CatalogItem[];
   /** What the open cart already holds of each piece (thousandths), taken off the stock shown */
   inCart?: ReadonlyMap<string, number>;
-  onAdd: (piece: CatalogItem) => void;
+  /** «≈ 5,850 ل.س» for a foreign price; null when none is needed */
+  priceNote?: (minor: number, currency: CatalogItem['price']['currency']) => ReactNode;
+  /** What the product is, drawn when it has no photo */
+  Kind?: Icon;
+  onAdd: (piece: CatalogItem, qty: number) => void;
   onCancel: () => void;
 }) {
   const digits = useDigits();
@@ -36,6 +53,16 @@ export function VariantPicker({
   const piece = pieceFor(pieces, chosen, options.length);
   const image = (piece ?? pieces.find((p) => p.imageUrl))?.imageUrl ?? null;
   const from = lowestPrice(pieces);
+  const [qty, setQty] = useState(1);
+  const [qtyTouched, setQtyTouched] = useState(false);
+  const stepQty = (delta: number) => {
+    setQtyTouched(true);
+    setQty((q) => Math.min(999, Math.max(1, q + delta)));
+  };
+  // A combination with nothing left is not added by the last choice: «أضفه رغم ذلك» asks for it (the stock known at this till, less the cart)
+  const leftOf = (p: CatalogItem | null) =>
+    p && typeof p.stockQty === 'number' ? p.stockQty - (inCart?.get(p.variantId) ?? 0) : null;
+  const outOfStock = piece ? (leftOf(piece) ?? 1) <= 0 : false;
 
   function choose(option: string, value: string) {
     const next = { ...chosen, [option]: value };
@@ -51,17 +78,22 @@ export function VariantPicker({
     }
     setChosen(next);
     const exact = pieceFor(pieces, next, options.length);
-    if (exact && options.filter((o) => o.values.length > 1).length === 1) onAdd(exact);
+    // The last choice adds (unless the quantity was set by hand, or nothing is left of the piece)
+    const done = Object.keys(next).length >= options.length;
+    if (exact && done && !qtyTouched && (leftOf(exact) ?? 1) > 0) onAdd(exact, qty);
   }
 
   return (
     <SalePanel
       label={`اختر من ${name}`}
-      className="mx-auto w-full max-w-2xl"
+      className="mx-auto w-full max-w-lg"
       title={name}
       subtitle={
         <>
           {piecesText(pieces.length)} · من <Money minor={from.priceMinor} currency={from.currency} />
+          {priceNote?.(from.priceMinor, from.currency) ? (
+            <> {priceNote(from.priceMinor, from.currency)}</>
+          ) : null}
         </>
       }
       media={
@@ -69,14 +101,14 @@ export function VariantPicker({
           <img
             src={image}
             alt=""
-            className="size-16 shrink-0 rounded-control bg-surface-muted object-cover"
+            className="size-12 shrink-0 rounded-control bg-surface-muted object-cover"
           />
         ) : (
           <span
             aria-hidden="true"
-            className="grid size-16 shrink-0 place-items-center rounded-control bg-brand-soft text-2xl font-bold text-brand-ink"
+            className="grid size-12 shrink-0 place-items-center rounded-control bg-brand-soft text-2xl font-bold text-brand-ink"
           >
-            {Array.from(name.trim())[0] ?? ''}
+            {Kind ? <Kind size={24} /> : (Array.from(name.trim())[0] ?? '')}
           </span>
         )
       }
@@ -98,13 +130,17 @@ export function VariantPicker({
           fullWidth
           icon={<AddIcon size={20} />}
           disabled={!piece}
-          onClick={() => piece && onAdd(piece)}
+          onClick={() => piece && onAdd(piece, qty)}
         >
           {piece ? (
-            <>
-              أضف {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
-              <Money minor={piece.price.priceMinor} currency={piece.price.currency} />
-            </>
+            outOfStock ? (
+              'نفد — أضفه رغم ذلك'
+            ) : (
+              <>
+                أضف {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
+                <Money minor={piece.price.priceMinor * qty} currency={piece.price.currency} />
+              </>
+            )
           ) : (
             'اختر لتضيف'
           )}
@@ -183,6 +219,41 @@ export function VariantPicker({
           </div>
         );
       })}
+      <div
+        aria-label="الاختيار والكمية"
+        role="group"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-surface-muted/60 px-4 py-3"
+      >
+        <p className="flex min-w-0 flex-col text-sm text-ink-muted">
+          {piece ? (
+            <>
+              <span className="flex flex-wrap items-baseline gap-2">
+                <Money
+                  minor={piece.price.priceMinor}
+                  currency={piece.price.currency}
+                  className="text-lg font-bold text-ink"
+                />
+                {priceNote?.(piece.price.priceMinor, piece.price.currency)}
+              </span>
+              {outOfStock ? <span className="font-semibold text-danger-ink">نفد هذا الاختيار</span> : null}
+            </>
+          ) : (
+            <span>اختر كل الخيارات لترى السعر</span>
+          )}
+        </p>
+        <div className="flex items-center gap-1" role="group" aria-label="الكمية">
+          <IconButton
+            label="أنقص الكمية"
+            icon={<RemoveIcon size={20} />}
+            disabled={qty <= 1}
+            onClick={() => stepQty(-1)}
+          />
+          <output aria-label="عدد القطع" className="num min-w-8 text-center text-lg font-bold text-ink">
+            {formatQuantity(qty * 1000, digits)}
+          </output>
+          <IconButton label="زد الكمية" icon={<AddIcon size={20} />} onClick={() => stepQty(1)} />
+        </div>
+      </div>
     </SalePanel>
   );
 }

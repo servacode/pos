@@ -155,6 +155,50 @@ async function paymentsByMethod(tx: Transaction, where: SQL) {
   }));
 }
 
+/** One day of the range: what the day's invoices came to, and what its returns took back. */
+export interface DayTotal {
+  date: string;
+  invoiceCount: number;
+  totalMinor: number;
+  returnsMinor: number;
+}
+
+/**
+ * The day totals of a range in one read (the home page's sparklines and chart), the same sums as
+ * `dayReport` for each day, so the home page asks once instead of once per day. Days without
+ * sales are not listed.
+ */
+export async function dayTotals(
+  db: Database,
+  auth: AccessClaims,
+  query: { branchId?: string | undefined; from: string; to: string },
+): Promise<{ items: DayTotal[] }> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const filter = await branchFilter(tx, auth, 'report.view', query.branchId);
+    const sold = await tx.execute<{ day: string; n: string; total: string }>(sql`
+      select i.business_date::text as day, count(*)::text as n, coalesce(sum(i.total_minor), 0)::text as total
+      from invoices i
+      where i.business_date between ${query.from} and ${query.to} and ${inBranches(sql`i.branch_id`, filter)}
+      group by i.business_date`);
+    const back = await tx.execute<{ day: string; total: string }>(sql`
+      select r.business_date::text as day, coalesce(sum(r.total_minor), 0)::text as total
+      from sale_returns r
+      where r.business_date between ${query.from} and ${query.to} and ${inBranches(sql`r.branch_id`, filter)}
+      group by r.business_date`);
+    const returned = new Map(back.map((row) => [row.day, num(row.total)]));
+    const days = new Set([...sold.map((row) => row.day), ...returned.keys()]);
+    const soldBy = new Map(sold.map((row) => [row.day, row]));
+    return {
+      items: [...days].sort().map((date) => ({
+        date,
+        invoiceCount: num(soldBy.get(date)?.n),
+        totalMinor: num(soldBy.get(date)?.total),
+        returnsMinor: returned.get(date) ?? 0,
+      })),
+    };
+  });
+}
+
 export async function dayReport(
   db: Database,
   auth: AccessClaims,

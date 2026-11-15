@@ -53,4 +53,36 @@ describe('a service priced at zero', () => {
     expect(screen.queryByRole('dialog', { name: 'السعر 0 — تأكيد؟' })).not.toBeInTheDocument();
     expect(await screen.findByText('حدّد الأجرة')).toBeInTheDocument();
   });
+
+  const serviceSets = () => {
+    const s = posSets();
+    return {
+      ...s,
+      products: [...s.products, { ...service.product, type: 'service' as const }],
+      variants: [...s.variants, service.variant],
+      prices: [...s.prices, service.price],
+      barcodes: [...s.barcodes, service.barcode!],
+    };
+  };
+
+  it('takes a fee above the shelf price, and the line is worth that fee', async () => {
+    const { user } = await saleScreen({ sets: serviceSets() });
+    await scan(user, '6291009999992');
+    const panel = await screen.findByRole('region', { name: 'حدّد الأجرة' });
+    expect(within(panel).getByText('خدمة: الأجرة تُحدَّد عند البيع')).toBeInTheDocument();
+    expect(within(panel).queryByText(/سعر الرف للواحدة/)).not.toBeInTheDocument();
+    await user.keyboard('1500');
+    await user.click(within(panel).getByRole('button', { name: 'طبّق' }));
+    await screen.findByRole('list', { name: 'الأصناف' });
+    expect(screen.getByRole('list', { name: 'أسطر الفاتورة' })).toHaveTextContent('1,500');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('leaves no line behind when the fee is cancelled', async () => {
+    const { user } = await saleScreen({ sets: serviceSets() });
+    await scan(user, '6291009999992');
+    const panel = await screen.findByRole('region', { name: 'حدّد الأجرة' });
+    await user.click(within(panel).getByRole('button', { name: /ارجع للأصناف/ }));
+    expect(screen.queryByRole('list', { name: 'أسطر الفاتورة' })).not.toBeInTheDocument();
+  });
 });

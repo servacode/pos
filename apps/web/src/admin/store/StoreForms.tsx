@@ -123,7 +123,7 @@ export function SectorPicker({
 
   if (variant === 'cards') {
     return (
-      <fieldset className="flex flex-col gap-3">
+      <fieldset className="flex min-w-0 flex-col gap-3">
         <legend className="sr-only">اختر نشاطاً واحداً أو أكثر</legend>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           {SECTORS.map((s) => (
@@ -186,7 +186,7 @@ const profileValues = (store: StoreResponse): ProfileValues => ({
 export function ReceiptPreview({ values }: { values: ProfileValues }) {
   return (
     <div className="flex flex-col gap-3 rounded-card bg-surface-muted p-4 sm:p-5">
-      <p className="text-xs font-semibold text-ink-subtle">معاينة الإيصال</p>
+      <p className="text-xs font-semibold text-ink-muted">معاينة الإيصال</p>
       <div
         aria-label="معاينة رأس الإيصال"
         className="mx-auto w-full max-w-[17rem] rounded-small border border-line bg-surface px-5 py-6 text-center text-sm leading-relaxed text-ink shadow-e2"
@@ -201,7 +201,7 @@ export function ReceiptPreview({ values }: { values: ProfileValues }) {
         ) : null}
         {values.taxNumber ? <p className="text-xs">الرقم الضريبي: {values.taxNumber}</p> : null}
         <p className="my-3 border-t border-dashed border-line-control/50" />
-        <p className="text-xs text-ink-subtle">… أسطر الفاتورة …</p>
+        <p className="text-xs text-ink-muted">… أسطر الفاتورة …</p>
         <p className="my-3 border-t border-dashed border-line-control/50" />
         <p className="text-xs">{values.receiptFooter || 'شكراً لزيارتكم'}</p>
       </div>

@@ -15,6 +15,12 @@ import {
   Croissant,
   Hammer,
   Pill,
+  Accessibility,
+  Footprints,
+  Gem,
+  HeartPulse,
+  SprayCan,
+  Syringe,
   ShoppingBasket,
   Stethoscope,
   UtensilsCrossed,
@@ -236,6 +242,14 @@ export const BuildingMaterialsIcon = defineIcon(Hammer);
 export const MedicalSuppliesIcon = defineIcon(Stethoscope);
 export const ProduceIcon = defineIcon(Carrot);
 export const WholesaleIcon = defineIcon(Boxes);
+
+// What an item is (the placeholder of an item with no photo): shoes, jewellery, perfume, syringes, devices.
+export const ShoeIcon = defineIcon(Footprints);
+export const AccessoryIcon = defineIcon(Gem);
+export const PerfumeIcon = defineIcon(SprayCan);
+export const SyringeIcon = defineIcon(Syringe);
+export const HeartPulseIcon = defineIcon(HeartPulse);
+export const WheelchairIcon = defineIcon(Accessibility);
 
 // The theme switch (هوية 4 › الوضع الداكن): light, dark, and «حسب الجهاز» (follow the device).
 export const SunIcon = defineIcon(Sun);

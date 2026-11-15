@@ -275,6 +275,18 @@ describe('a cheque typed as one line', () => {
       bank: 'بنك الشرق',
       due: '2026-12-01',
     });
+    // The line the till writes («بنك · رقم · يوم») with the bank also structured: the number is still found
+    expect(
+      chequeParts({
+        reference: 'بنك سورية · CH-9100 · 2026-12-01',
+        bank: 'بنك سورية',
+        dueDate: '2026-12-01',
+      }),
+    ).toEqual({ number: 'CH-9100', bank: 'بنك سورية', due: '2026-12-01' });
+    // The structured number is read first, whatever the line says
+    expect(
+      chequeParts({ reference: 'بنك سورية', bank: 'بنك سورية', dueDate: null, number: '000123' }).number,
+    ).toBe('000123');
     expect(chequeParts({ reference: null, bank: null, dueDate: null })).toEqual({
       number: null,
       bank: null,

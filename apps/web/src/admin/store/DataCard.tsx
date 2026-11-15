@@ -62,7 +62,7 @@ export function DataCard() {
         <div className="flex flex-col gap-1.5 border-t border-line pt-5">
           <h3 className="font-semibold text-ink">استيراد من ملف</h3>
           <p className="text-sm text-ink-muted">
-            انقل منتجاتك وزبائنك وموردينك وكمياتك وأرصدتهم من ملف xlsx أو csv، بعد فحصه كاملاً.
+            انقل منتجاتك وزبائنك وموردينك وكمياتك وأرصدتهم من ملف إكسل أو من جدول بسيط، بعد فحصه كاملاً.
           </p>
           <div>
             <Link
@@ -77,8 +77,8 @@ export function DataCard() {
           <h3 className="font-semibold text-ink">تصدير كل بيانات المتجر</h3>
           <p className="text-sm text-ink-muted">
             ملف مضغوط فيه كل شيء: المنتجات والمخزون والزبائن والموردون والفواتير والمشتريات والمرتجعات
-            والورديات والقيود والإعدادات، بصيغتي Excel وJSON. بياناتك ملكك وتأخذها متى شئت، حتى لو انتهى
-            اشتراكك. قد يطول التحضير دقيقة لمتجر كبير.
+            والورديات والقيود والإعدادات، بصيغة إكسل وبصيغة خام تقرؤها البرامج. بياناتك ملكك وتأخذها متى شئت،
+            حتى لو انتهى اشتراكك. قد يطول التحضير دقيقة لمتجر كبير.
           </p>
           {error ? <Alert tone="error">{error}</Alert> : null}
           {done ? <Alert tone="success">نزل الملف. احفظه في مكان آمن.</Alert> : null}

@@ -651,13 +651,15 @@ export async function inventory(
       attributes: { name: string; value: string }[] | null;
       product_id: string;
       product_name: string;
+      allows_fraction: boolean | null;
     }>(sql`
       select l.variant_id, l.branch_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
-             v.attributes, p.id as product_id, p.name_ar as product_name,
+             v.attributes, p.id as product_id, p.name_ar as product_name, un.allows_fraction,
              l.qty::text, coalesce(sv.value_minor, 0)::text as value_minor
       from stock_levels l
       join variants v on v.tenant_id = l.tenant_id and v.id = l.variant_id
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
+      left join units un on un.tenant_id = p.tenant_id and un.id = p.unit_id
       left join stock_values sv on sv.tenant_id = l.tenant_id and sv.branch_id = l.branch_id and sv.variant_id = l.variant_id
       ${query.branchId ? sql`where l.branch_id = ${query.branchId}` : sql``}
       order by name, l.variant_id`);
@@ -671,6 +673,7 @@ export async function inventory(
         attributes: r.attributes ?? [],
         productId: r.product_id,
         productName: r.product_name,
+        allowsFraction: r.allows_fraction ?? false,
         qty,
         valueMinor: value,
         unitCostMinor: qty > 0 ? Math.round((value * 1000 * 10_000) / qty) / 10_000 : null,

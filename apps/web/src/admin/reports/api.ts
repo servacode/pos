@@ -26,6 +26,19 @@ export function getDayReport(query: { branchId: string | null; date: string }) {
   return apiFetch<DayReport>(withQuery('/v1/reports/day', query), { auth: true });
 }
 
+/** One day of a range: its invoices' total and what its returns took back (days without sales are absent). */
+export interface DayTotal {
+  date: string;
+  invoiceCount: number;
+  totalMinor: number;
+  returnsMinor: number;
+}
+
+/** The totals of every day from `from` to `to` in one request (the home page's chart). */
+export function getDayTotals(query: { from: string; to: string }) {
+  return apiFetch<{ items: DayTotal[] }>(withQuery('/v1/reports/days', query), { auth: true });
+}
+
 export function listShifts(query: { branchId: string | null; date: string }) {
   return apiFetch<ShiftListResponse>(withQuery('/v1/shifts', query), { auth: true });
 }

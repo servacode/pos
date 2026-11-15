@@ -1138,6 +1138,11 @@ function PaymentForm({
               required
               className="sm:col-span-2"
             />
+            {dueDate !== '' && dueDate < today() ? (
+              <Alert tone="warning" className="sm:col-span-2">
+                تاريخ الاستحقاق مضى. تأكّد من التاريخ قبل أن تسجّل الدفعة.
+              </Alert>
+            ) : null}
           </div>
         ) : null}
         <div className="flex flex-wrap items-center justify-end gap-3 pt-1">

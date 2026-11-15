@@ -152,7 +152,7 @@ export function DataTable<Row>({
                 <th
                   key={column.key}
                   scope="col"
-                  className={cn(cellClass(column), 'text-xs font-semibold whitespace-nowrap text-ink-subtle')}
+                  className={cn(cellClass(column), 'text-xs font-semibold whitespace-nowrap text-ink-muted')}
                 >
                   {column.header}
                 </th>

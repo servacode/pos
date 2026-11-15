@@ -82,6 +82,7 @@ const view = (r: Row): Cheque => ({
   bank: r.cheque?.bank ?? null,
   dueDate: r.cheque?.dueDate ?? null,
   drawer: r.cheque?.drawer ?? null,
+  number: r.cheque?.number ?? null,
   supplierName: r.supplier_name,
 });
 

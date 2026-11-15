@@ -66,7 +66,7 @@ export function dueDayOf(c: Pick<Cheque, 'dueDate' | 'reference'>): string | nul
  * A cheque's number, bank and due day apart: the structured fields first, and for a cheque typed as
  * one line («بنك · CH-8001 · 2026-11-20») the pieces of that line, so none is shown twice.
  */
-export function chequeParts(c: Pick<Cheque, 'reference' | 'bank' | 'dueDate'>): {
+export function chequeParts(c: Pick<Cheque, 'reference' | 'bank' | 'dueDate'> & { number?: string | null }): {
   number: string | null;
   bank: string | null;
   due: string | null;
@@ -77,7 +77,7 @@ export function chequeParts(c: Pick<Cheque, 'reference' | 'bank' | 'dueDate'>): 
     .filter(Boolean);
   let due = c.dueDate ?? null;
   let bank = c.bank ?? null;
-  let number: string | null = null;
+  let number: string | null = c.number?.trim() || null;
   const rest: string[] = [];
   for (const part of parts) {
     const day = /\d{4}-\d{2}-\d{2}/.exec(part)?.[0];
@@ -89,6 +89,7 @@ export function chequeParts(c: Pick<Cheque, 'reference' | 'bank' | 'dueDate'>): 
   }
   for (const part of rest) {
     if (number === null && /\d/.test(part) && !/\s/.test(part)) number = part;
+    else if (part === number || part === bank) continue;
     else if (bank === null && !/^\d/.test(part)) bank = part;
     else number ??= part;
   }
@@ -206,13 +207,23 @@ export function ChequesPage() {
                 {number}
               </bdi>
             ) : (
-              <span className="text-ink-subtle">بلا رقم</span>
+              // No number typed: the customer (or supplier) and the invoice stand for the cheque
+              <span className="flex flex-col items-start">
+                <span className="line-clamp-2 font-semibold">
+                  {(c.direction === 'out' ? c.supplierName : c.customerName) ?? 'شيك'}
+                </span>
+                <bdi dir="ltr" className="num text-xs whitespace-nowrap text-ink-muted">
+                  {c.documentNumber}
+                </bdi>
+              </span>
             )}
             {/* On a phone the one cell carries what the other columns show from 640 px */}
             {bank ? <span className="text-xs text-ink-muted sm:hidden">{bank}</span> : null}
-            <span className="text-xs text-ink-muted sm:hidden">
-              {c.direction === 'out' ? (c.supplierName ?? '—') : (c.customerName ?? '—')}
-            </span>
+            {number ? (
+              <span className="text-xs text-ink-muted sm:hidden">
+                {c.direction === 'out' ? (c.supplierName ?? '—') : (c.customerName ?? '—')}
+              </span>
+            ) : null}
             {due ? (
               <span
                 className={`text-xs sm:hidden ${late ? 'font-semibold text-danger-ink' : 'text-ink-muted'}`}
@@ -393,17 +404,19 @@ export function ChequesPage() {
               ]}
             />
           </div>
-          {soon.length > 0 ? (
+          {soon.length + soonOut.length > 0 ? (
             <Alert tone="warning">
-              <bdi className="num">{soon.length}</bdi> {soon.length === 1 ? 'شيك يستحق' : 'شيكات تستحق'} خلال{' '}
-              {CHEQUE_DUE_SOON_DAYS} أيام أو فات موعدها.
-            </Alert>
-          ) : null}
-          {soonOut.length > 0 ? (
-            <Alert tone="warning">
-              <bdi className="num">{soonOut.length}</bdi>{' '}
-              {soonOut.length === 1 ? 'شيك صادر للمورد يستحق' : 'شيكات صادرة للموردين تستحق'} خلال{' '}
-              {CHEQUE_DUE_SOON_DAYS} أيام: جهّز الرصيد في البنك.
+              {[
+                soon.length > 0
+                  ? `${soon.length} ${soon.length === 1 ? 'شيك زبون يستحق' : 'شيكات زبائن تستحق'} أو فات موعدها`
+                  : null,
+                soonOut.length > 0
+                  ? `${soonOut.length} ${soonOut.length === 1 ? 'شيك صادر للمورد يستحق' : 'شيكات صادرة للموردين تستحق'}: جهّز الرصيد في البنك`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}{' '}
+              (خلال {CHEQUE_DUE_SOON_DAYS} أيام).
             </Alert>
           ) : null}
           <Alert tone="info">

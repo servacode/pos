@@ -10,6 +10,7 @@ import {
   Dialog,
   EmptyState,
   formatQuantity,
+  IconButton,
   Menu,
   MenuItem,
   MoreIcon,
@@ -59,9 +60,9 @@ const ACTION_TITLE: Record<Action['kind'], string> = {
  */
 export function ExpiryPage() {
   const digits = useDigits();
-  const [days, setDays] = useState<'30' | '90' | '180'>('90');
+  const [days, setDays] = useState<'30' | '90' | '180' | '3650'>('3650');
   // The last answer stays on screen while the new one loads, so the page never opens blank
-  const [data, setData] = useState<ExpiryResponse | null>(() => recallAnswer<ExpiryResponse>('expiry|90'));
+  const [data, setData] = useState<ExpiryResponse | null>(() => recallAnswer<ExpiryResponse>('expiry|3650'));
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [urgency, setUrgency] = useState<Urgency>('all');
@@ -174,7 +175,24 @@ export function ExpiryPage() {
   }
 
   const columns: DataColumn<ExpiryRow>[] = [
-    { key: 'name', className: 'whitespace-nowrap', header: 'الصنف', cell: (r) => r.name },
+    {
+      key: 'name',
+      header: 'الصنف',
+      cell: (r) => (
+        <span className="flex min-w-28 flex-col items-start">
+          <span className="font-semibold">{r.name}</span>
+          {/* On a phone the batch, its day and its branch ride under the name */}
+          <span className="text-xs text-ink-muted sm:hidden">
+            {r.batchNo ? (
+              <bdi dir="ltr" className="num">
+                {r.batchNo}
+              </bdi>
+            ) : null}
+            {r.expiryDate ? <bdi className="num"> · {r.expiryDate}</bdi> : null}
+          </span>
+        </span>
+      ),
+    },
     {
       key: 'left',
       className: 'whitespace-nowrap',
@@ -202,14 +220,14 @@ export function ExpiryPage() {
     },
     {
       key: 'expiry',
-      className: 'whitespace-nowrap',
+      className: 'hidden whitespace-nowrap sm:table-cell',
       header: 'تاريخ الانتهاء',
       cell: (r) =>
         r.expiryDate ? <bdi className="num">{r.expiryDate}</bdi> : <span className="text-ink-subtle">—</span>,
     },
     {
       key: 'batch',
-      className: 'whitespace-nowrap',
+      className: 'hidden whitespace-nowrap sm:table-cell',
       header: 'الدفعة',
       cell: (r) =>
         r.batchNo ? (
@@ -220,7 +238,12 @@ export function ExpiryPage() {
           <span className="text-ink-subtle">—</span>
         ),
     },
-    { key: 'branch', className: 'whitespace-nowrap', header: 'الفرع', cell: (r) => r.branchName },
+    {
+      key: 'branch',
+      className: 'hidden whitespace-nowrap md:table-cell',
+      header: 'الفرع',
+      cell: (r) => r.branchName,
+    },
     {
       key: 'qty',
       header: 'المتبقي',
@@ -229,7 +252,7 @@ export function ExpiryPage() {
     },
     {
       key: 'purchase',
-      className: 'whitespace-nowrap',
+      className: 'hidden whitespace-nowrap xl:table-cell',
       header: 'الاستلام',
       cell: (r) =>
         r.purchaseNumber ? (
@@ -259,18 +282,14 @@ export function ExpiryPage() {
               استدعاء
             </Link>
           ) : null}
-          <Button size="sm" variant="secondary" onClick={() => open('writeoff', r)}>
-            أتلف الدفعة
-          </Button>
           <Menu
-            label={`المزيد لدفعة «${r.name}»`}
+            label={`إجراءات دفعة «${r.name}»`}
             align="end"
-            trigger={
-              <Button size="sm" variant="ghost" icon={<MoreIcon size={16} />}>
-                المزيد
-              </Button>
-            }
+            trigger={<IconButton size="sm" label={`إجراءات دفعة «${r.name}»`} icon={<MoreIcon />} />}
           >
+            <MenuItem tone="danger" onSelect={() => open('writeoff', r)}>
+              أتلف الدفعة
+            </MenuItem>
             <MenuItem onSelect={() => open('count', r)}>عدّ</MenuItem>
             <MenuItem onSelect={() => open('return', r)}>أرجع للمورد</MenuItem>
             {r.batchNo ? (
@@ -328,8 +347,13 @@ export function ExpiryPage() {
           >
             <SegmentedControl
               label="اعرض"
+              className="max-w-full overflow-x-auto"
               value={urgency}
-              onValueChange={setUrgency}
+              onValueChange={(u) => {
+                setUrgency(u);
+                // «كل الدفعات» means all of them, whatever the window was narrowed to
+                if (u === 'all') setDays('3650');
+              }}
               options={[
                 { value: 'all', label: 'كل الدفعات' },
                 { value: 'expired', label: <UrgencyLabel text="منتهية" n={data ? expired.length : null} /> },
@@ -337,18 +361,20 @@ export function ExpiryPage() {
                 { value: 'month', label: <UrgencyLabel text="هذا الشهر" n={data ? month.length : null} /> },
               ]}
             />
-            <span className="flex items-center gap-2">
+            <span className="flex max-w-full items-center gap-2">
               <span aria-hidden="true" className="text-sm text-ink-muted">
                 خلال
               </span>
               <SegmentedControl
                 label="خلال"
+                className="max-w-full overflow-x-auto"
                 value={days}
                 onValueChange={setDays}
                 options={[
                   { value: '30', label: '30 يوماً' },
                   { value: '90', label: '3 أشهر' },
                   { value: '180', label: '6 أشهر' },
+                  { value: '3650', label: 'الكل' },
                 ]}
               />
             </span>

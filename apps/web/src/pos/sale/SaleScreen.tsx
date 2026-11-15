@@ -103,7 +103,8 @@ import type { HallTools } from '../hall/tools';
 import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
 import { HoldPanel } from './HoldPanel';
 import { HeldList, HoldNamePanel } from './HeldList';
-import { ItemsArea, type PriceCheck } from './ItemsArea';
+import { dollarNote, ItemsArea, type PriceCheck } from './ItemsArea';
+import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
@@ -813,6 +814,10 @@ export function SaleScreen(props: SaleScreenProps) {
         ctx,
       );
       const index = cart.lines.findIndex((l) => l.lineNo === line.lineNo);
+      // A service's fee is the price itself: it may be above the shelf price (goods can only go lower)
+      if (value.mode === 'price' && catalog.byVariant.get(line.variantId)?.isService) {
+        return value.minor > 0 ? { need: null } : { error: 'اكتب الأجرة بالأرقام.' };
+      }
       if (value.mode === 'price' && value.minor > unitPriceOf(line, ctx)) {
         return { error: 'السعر الجديد أعلى من سعر الصنف. السعر في السلة يُخفَّض فقط.' };
       }
@@ -836,7 +841,11 @@ export function SaleScreen(props: SaleScreenProps) {
   }
 
   function applyLine(line: Line, value: AdjustValue, approval: Approval | null) {
-    const patch = linePatch(line, value);
+    // The fee of a service becomes the line's price (no discount is made of it, so it can be above the shelf price)
+    const patch: Partial<Line> =
+      value.mode === 'price' && catalog.byVariant.get(line.variantId)?.isService
+        ? { priceMinor: value.minor, priceCurrency: ctx.currency, adjustment: null }
+        : linePatch(line, value);
     setCart((c) => updateLine(c, line.lineNo, value.mode === 'qty' ? patch : { ...patch, approval }));
     setMode({ kind: 'items' });
   }
@@ -1709,21 +1718,33 @@ export function SaleScreen(props: SaleScreenProps) {
                     }
                   : undefined
               }
-              onClose={() => setMode({ kind: 'items' })}
+              onClose={() => {
+                // A service whose fee was never entered leaves no line behind (cancel = nothing added)
+                const item = catalog.byVariant.get(line.variantId);
+                if (item?.isService && item.price.priceMinor === 0 && line.priceMinor === 0)
+                  removeNow(line.lineNo, cart.lines.indexOf(line), false);
+                else setMode({ kind: 'items' });
+              }}
               preview={() => (
                 <span>
-                  سعر الرف للواحدة{' '}
-                  <Money
-                    minor={unitPriceOf(line, ctx)}
-                    currency={ctx.currency}
-                    className="font-semibold text-ink"
-                  />
-                  {' · '}السطر{' '}
-                  <Money
-                    minor={lineGross(unitPriceOf(line, ctx), line.qty)}
-                    currency={ctx.currency}
-                    className="font-semibold text-ink"
-                  />
+                  {catalog.byVariant.get(line.variantId)?.isService ? (
+                    'خدمة: الأجرة تُحدَّد عند البيع'
+                  ) : (
+                    <>
+                      سعر الرف للواحدة{' '}
+                      <Money
+                        minor={unitPriceOf(line, ctx)}
+                        currency={ctx.currency}
+                        className="font-semibold text-ink"
+                      />
+                      {' · '}السطر{' '}
+                      <Money
+                        minor={lineGross(unitPriceOf(line, ctx), line.qty)}
+                        currency={ctx.currency}
+                        className="font-semibold text-ink"
+                      />
+                    </>
+                  )}
                 </span>
               )}
             />
@@ -1840,10 +1861,20 @@ export function SaleScreen(props: SaleScreenProps) {
           name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
           pieces={pieces.get(effectiveMode.productId)!}
           inCart={inCartQty}
-          onAdd={(piece) => {
+          priceNote={(minor, currency) =>
+            catalog.settings
+              ? dollarNote(minor, currency, { base: catalog.settings.baseCurrency, rates: catalog.rates })
+              : null
+          }
+          Kind={placeholderIconFor({
+            categoryName: null,
+            name: pieces.get(effectiveMode.productId)![0]!.productName ?? '',
+            sectors: catalog.settings?.sectors ?? [],
+          })}
+          onAdd={(piece, qty) => {
             pickerAddedAt.current = Date.now();
             setMode({ kind: 'items' });
-            add(piece);
+            add(piece, null, qty > 1 ? qty * 1000 : undefined);
           }}
           onCancel={() => setMode({ kind: 'items' })}
         />
@@ -1903,6 +1934,7 @@ export function SaleScreen(props: SaleScreenProps) {
             }
           }}
           currentHasLines={cart.lines.length > 0}
+          sellerOf={(c) => (c.sellerId ? (staff.find((m) => m.id === c.sellerId)?.fullName ?? null) : null)}
           onPick={(index) => {
             setMode({ kind: 'items' });
             setSelected(null);

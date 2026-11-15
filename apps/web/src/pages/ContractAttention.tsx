@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { daysBetween, type MeResponse } from '@serva/core';
-import { Card, CalendarIcon, cn, NextIcon, SerialIcon, WarningIcon } from '@serva/ui';
+import { Card, CalendarIcon, cn, KeyIcon, NextIcon, WarningIcon } from '@serva/ui';
 import { listContracts, listRentals } from '../admin/contracts/api';
 import { holdsAny } from '../admin/reports/access';
 import { useReport } from '../admin/reports/useReport';
@@ -65,7 +65,7 @@ export function ContractAttention({ me, today }: { me: MeResponse; today: string
   return (
     <Card className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
-        <SerialIcon size={20} />
+        <KeyIcon size={20} />
         التأجير والعقود
       </h2>
       <ul className="flex flex-col gap-2">

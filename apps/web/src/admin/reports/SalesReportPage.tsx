@@ -34,7 +34,7 @@ import { storeSells } from '../../lib/sectors';
 import { csvField, downloadText, minorToDecimal } from '../accounting/csv';
 import { apiFetch } from '../../lib/api';
 import { commissionOf } from './MerchandisePage';
-import { orderValues } from './optionOrder';
+import { orderValues } from '../../lib/optionOrder';
 import { DayField, ReportFilters, ReportScreen } from './parts';
 import { useReport } from './useReport';
 
@@ -58,7 +58,7 @@ export function changePercent(now: number, before: number): number | null {
 export function softChange(change: number): { text: string; tone: 'success' | 'neutral' | 'warning' } {
   if (change > 100) return { text: 'أكثر من الضعف', tone: 'success' };
   if (change <= -100) return { text: 'لا مبيع', tone: 'neutral' };
-  if (change <= -90) return { text: 'انخفاض كبير', tone: 'warning' };
+  if (change <= -75) return { text: 'انخفاض كبير', tone: 'warning' };
   const text = `${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)}٪`;
   return { text, tone: change >= 0 ? 'success' : change <= -50 ? 'warning' : 'neutral' };
 }
@@ -163,7 +163,7 @@ export function CrossTable({ cross }: { cross: SalesCross }) {
         <caption className="sr-only">{`القطع المباعة بحسب ${cross.rowOption} و${cross.colOption}`}</caption>
         <thead>
           {grouped ? (
-            <tr className="bg-surface-muted text-xs text-ink-subtle">
+            <tr className="bg-surface-muted text-xs text-ink-muted">
               <td />
               {colGroups.map((g, i) => (
                 <th key={i} colSpan={g.span} scope="colgroup" className="px-3 pt-2 text-center font-semibold">
@@ -266,6 +266,12 @@ export function SalesReportPage() {
   const needsOption = by === 'option' && !option;
   const noOptions = data !== null && data.optionNames.length === 0;
   const days = data ? everyDay(data.from, data.to, data.daily ?? []) : [];
+  // Grouped by an option, the rows hold only the lines that have it; the headline stays the whole
+  // period's sales (the days add up to it) and says how much of it carries the option
+  const headline =
+    data && data.by === 'option' && (data.daily?.length ?? 0) > 0
+      ? (data.daily ?? []).reduce((n, d) => n + d.totalMinor, 0)
+      : (data?.totalMinor ?? 0);
   // A shop of clothes names sizes and colours; any other shop just picks one of its options
   // Seasons are a clothing idea: other shops do not see the tab
   const sellsSeasons = storeSells(me.tenant.sectors, ['clothing']);
@@ -291,8 +297,8 @@ export function SalesReportPage() {
       cell: (r) => {
         const change = changePercent(r.totalMinor, r.previousTotalMinor);
         if (change === null) return r.totalMinor > 0 ? <Badge tone="info">جديد</Badge> : '—';
-        // A base too small to compare with (under 3% of the whole previous period) says nothing
-        if (data && r.previousTotalMinor * 33 < data.previousTotalMinor) return '—';
+        // A base too small to compare with (under a tenth of the whole previous period) says nothing
+        if (data && r.previousTotalMinor * 10 < data.previousTotalMinor) return '—';
         const soft = softChange(change);
         return (
           <Badge tone={soft.tone}>
@@ -475,7 +481,14 @@ export function SalesReportPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <StatTile
               label="إجمالي المبيعات (بعد المرتجع، مع الضريبة)"
-              value={<Money minor={data.totalMinor} currency={base} />}
+              value={<Money minor={headline} currency={base} />}
+              footnote={
+                headline !== data.totalMinor ? (
+                  <>
+                    منها بخيارات <Money minor={data.totalMinor} currency={base} />
+                  </>
+                ) : undefined
+              }
             />
             {hasHistory ? (
               <StatTile

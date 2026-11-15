@@ -5,7 +5,6 @@ import {
   CalendarIcon,
   Card,
   ClockIcon,
-  cn,
   CustomersIcon,
   IconChip,
   ListIcon,
@@ -35,6 +34,8 @@ interface Question {
   page: string;
   /** Only the shops of these business types ask it (seasons are a clothing idea) */
   sectors?: readonly SectorKey[];
+  /** One of the questions asked most: shown first, in «الأكثر استخداماً», and not repeated below */
+  top?: true;
 }
 
 const GROUPS: { title: string; questions: Question[] }[] = [
@@ -47,6 +48,7 @@ const GROUPS: { title: string; questions: Question[] }[] = [
         icon: SalesIcon,
         to: '/sales/today',
         page: '/sales/today',
+        top: true,
       },
       {
         ask: 'ماذا بعت في فترة، ومقارنةً بما قبلها؟',
@@ -54,6 +56,7 @@ const GROUPS: { title: string; questions: Question[] }[] = [
         icon: ReportsIcon,
         to: '/reports/sales',
         page: '/reports/sales',
+        top: true,
       },
       {
         ask: 'من باع أكثر، وكم عمولته؟',
@@ -95,6 +98,7 @@ const GROUPS: { title: string; questions: Question[] }[] = [
         icon: StockIcon,
         to: '/reports/merchandise',
         page: '/reports/merchandise',
+        top: true,
       },
       {
         ask: 'كم تكلّف الوجبة؟',
@@ -149,12 +153,17 @@ const GROUPS: { title: string; questions: Question[] }[] = [
 export function ReportsHomePage() {
   const me = useMe();
   const open = new Set(navFor(me).map((p) => p.to));
-  const groups = GROUPS.map((g) => ({
+  const shown = GROUPS.map((g) => ({
     ...g,
     questions: g.questions.filter(
       (q) => open.has(q.page) && (!q.sectors || storeSells(me.tenant.sectors, q.sectors)),
     ),
-  })).filter((g) => g.questions.length > 0);
+  }));
+  const top = shown.flatMap((g) => g.questions.filter((q) => q.top));
+  const groups = [
+    ...(top.length > 0 ? [{ title: 'الأكثر استخداماً', questions: top }] : []),
+    ...shown.map((g) => ({ ...g, questions: g.questions.filter((q) => !q.top) })),
+  ].filter((g) => g.questions.length > 0);
   return (
     <ReportScreen
       me={me}
@@ -165,15 +174,7 @@ export function ReportsHomePage() {
       {groups.map((group) => (
         <section key={group.title} aria-label={group.title} className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold text-ink">{group.title}</h2>
-          {/* Cards fill whole rows: a lone last card on a phone-wide row stretches, and the desktop columns follow the count */}
-          <ul
-            className={cn(
-              'grid gap-3 sm:grid-cols-2 sm:[&>li:last-child:nth-child(odd)]:col-span-2',
-              group.questions.length % 3 === 0 || group.questions.length === 5
-                ? 'xl:grid-cols-3 xl:[&>li:last-child:nth-child(odd)]:col-span-1'
-                : 'xl:[&>li:last-child:nth-child(odd)]:col-span-2',
-            )}
-          >
+          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {group.questions.map((q) => (
               <li key={q.to}>
                 <Link to={q.to} className="block">
