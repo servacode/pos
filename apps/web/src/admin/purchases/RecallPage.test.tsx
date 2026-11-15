@@ -1,10 +1,11 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { MeResponse, RecallResponse } from '@serva/core';
+import type { MeResponse, RecallResponse, RecallSale } from '@serva/core';
 import { mockFetch } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
+import { buyerList } from './RecallPage';
 
 function owner(): MeResponse {
   const base = makeMe();
@@ -54,6 +55,20 @@ const found = (blocked: boolean): RecallResponse => ({
   ],
 });
 
+describe('buyerList', () => {
+  const sale = (invoiceId: string, qty: number, name: string | null, phone: string | null) =>
+    ({ invoiceId, qty, customerName: name, customerPhone: phone }) as RecallSale;
+  it('groups known buyers by phone and counts what went to nobody', () => {
+    const { people, anonymous } = buyerList([
+      sale('a', 2000, 'مستشفى الأمل', '0955'),
+      sale('b', 3000, 'مستشفى الأمل', '0955'),
+      sale('c', 5000, null, null),
+    ]);
+    expect(people).toEqual([{ name: 'مستشفى الأمل', phone: '0955', invoices: 2, qty: 5000 }]);
+    expect(anonymous).toEqual({ invoices: 1, qty: 5000 });
+  });
+});
+
 describe('«استدعاء دفعة»', () => {
   it('finds a batch by its number: its product, supplier, what is left and who bought it', async () => {
     let blocked = false;
@@ -82,6 +97,9 @@ describe('«استدعاء دفعة»', () => {
     expect(screen.getByTestId('recall-buyers-summary')).toHaveTextContent(
       'زبون واحد مسجَّل في الفواتير · فاتورة واحدة بلا زبون',
     );
+    // an invoice with no customer is a risk line, and the buyers can be exported
+    expect(screen.getByTestId('recall-anonymous')).toHaveTextContent('لا يمكن الوصول إلى مشتريها');
+    expect(screen.getByRole('button', { name: 'صدّر الزبائن' })).toBeInTheDocument();
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
 
     await user.click(screen.getByRole('button', { name: 'أوقف بيعها في كل الفروع' }));

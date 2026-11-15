@@ -2,6 +2,7 @@ import type { CurrencyId } from '@serva/core';
 import { useState, type ReactNode } from 'react';
 import { Button } from '../Button';
 import { cn } from '../cn';
+import { WarningIcon } from '../icons';
 import { Money } from '../Money';
 
 /** A breakdown line's colour: the plain ones are muted, a saving reads in its tone. */
@@ -31,6 +32,10 @@ export interface TotalPanelProps {
   onPay: () => void;
   payLabel?: string;
   payDisabled?: boolean;
+  /** Why «ادفع» is greyed, in words, shown right at the button */
+  blockedReason?: ReactNode;
+  /** Tapping the reason (or the greyed button) goes to what needs doing */
+  onBlockedTap?: () => void;
   /** The pay key («F12»): shown on the button and announced with aria-keyshortcuts. */
   payShortcut?: string;
   className?: string;
@@ -55,12 +60,16 @@ export function TotalPanel({
   onPay,
   payLabel = 'ادفع',
   payDisabled = false,
+  blockedReason,
+  onBlockedTap,
   payShortcut,
   className,
 }: TotalPanelProps) {
   const [showRate, setShowRate] = useState(false);
   return (
-    <div className={cn('flex shrink-0 flex-col gap-3 border-t border-line bg-surface-total p-4', className)}>
+    <div
+      className={cn('flex shrink-0 flex-col gap-1.5 border-t border-line bg-surface-total p-3', className)}
+    >
       {breakdown.length > 0 ? (
         <dl className="flex flex-col gap-1 border-b border-line pb-3 text-sm">
           {breakdown.map((line, index) => (
@@ -111,22 +120,53 @@ export function TotalPanel({
           </div>
         ) : null}
       </div>
-      {actions ? <div className="grid auto-cols-fr grid-flow-col gap-2">{actions}</div> : null}
-      <Button size="pay" onClick={onPay} disabled={payDisabled} aria-keyshortcuts={payShortcut}>
-        <span className="flex items-center gap-3">
-          {payLabel}
-          {payShortcut ? (
-            <kbd
+      {payDisabled && blockedReason ? (
+        <button
+          type="button"
+          onClick={onBlockedTap}
+          className="flex min-h-11 w-full items-center gap-2 rounded-card border border-warning/20 bg-warning-soft px-3 text-start text-sm font-semibold text-warning-ink"
+        >
+          <WarningIcon size={20} className="shrink-0" />
+          <span className="min-w-0 flex-1">{blockedReason}</span>
+        </button>
+      ) : null}
+      {/* The quiet actions and the pay button share one row: the cart's lines keep the room */}
+      <div className="flex items-stretch gap-2">
+        {actions ? <div className="flex shrink-0 items-stretch gap-2">{actions}</div> : null}
+        <div className="relative min-w-0 flex-1">
+          <Button
+            size="pay"
+            onClick={onPay}
+            disabled={payDisabled}
+            aria-keyshortcuts={payShortcut}
+            className="w-full"
+          >
+            <span className="flex items-center gap-3">
+              {payLabel}
+              {payShortcut ? (
+                <kbd
+                  aria-hidden="true"
+                  dir="ltr"
+                  className="hidden rounded-small bg-on-brand/15 px-1.5 font-sans text-xs/5 font-semibold text-on-brand xl:pointer-fine:inline-block"
+                >
+                  {payShortcut}
+                </kbd>
+              ) : null}
+            </span>
+            <Money minor={totalMinor} currency={currency} />
+          </Button>
+          {payDisabled && onBlockedTap ? (
+            // A greyed button takes no tap: this cover lets the tap say what is missing and go there
+            <button
+              type="button"
+              tabIndex={-1}
               aria-hidden="true"
-              dir="ltr"
-              className="hidden rounded-small bg-on-brand/15 px-1.5 font-sans text-xs/5 font-semibold text-on-brand md:pointer-fine:inline-block"
-            >
-              {payShortcut}
-            </kbd>
+              onClick={onBlockedTap}
+              className="absolute inset-0 rounded-card"
+            />
           ) : null}
-        </span>
-        <Money minor={totalMinor} currency={currency} />
-      </Button>
+        </div>
+      </div>
     </div>
   );
 }

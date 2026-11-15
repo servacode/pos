@@ -510,14 +510,16 @@ describe('/products list: photos, expiry and stock', () => {
     openProducts();
     await screen.findByText('القطع في المخزون');
     // 94 on the shelf; the −2.5 of the other product is not netted off, it is counted apart
-    expect(await screen.findByText('صنف واحد ناقص')).toBeInTheDocument();
+    // …and it is told once, inside the «نفد» tile, not as a second count beside the pieces
+    expect(await screen.findByText(/منها سالب 1/)).toBeInTheDocument();
+    expect(screen.queryByText('صنف واحد ناقص')).not.toBeInTheDocument();
   });
 
   it('tells a negative stock apart with «سالب» and offers the count and the receiving', async () => {
     openProducts();
     expect((await screen.findAllByText('سالب')).length).toBeGreaterThan(0);
-    // one plain sentence and one action on the «نفد من الرف» card
-    expect(screen.getByText(/بعتَ أكثر مما سجّلت، صحّح/)).toBeInTheDocument();
+    // «سالب N» once on the «نفد» tile, with one action
+    expect(await screen.findByText(/منها سالب 1/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'اجرد المخزون' })).toHaveAttribute('href', '/inventory');
     expect(screen.queryByRole('link', { name: 'سجّل استلاماً' })).not.toBeInTheDocument();
   });

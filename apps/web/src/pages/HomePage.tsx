@@ -21,6 +21,7 @@ import {
   CardHeader,
   CartIcon,
   CloseIcon,
+  CustomersIcon,
   cn,
   compactNumber,
   EmptyState,
@@ -45,12 +46,14 @@ import {
   Tabs,
   TrendDownIcon,
   TrendUpIcon,
+  TruckIcon,
   WarningIcon,
   type StatTileProps,
   type TabItem,
 } from '@serva/ui';
 import { ButtonLink } from '../admin/products/parts';
-import { getProfit, listExpiry } from '../admin/purchases/api';
+import { getProfit, listExpiry, listSuppliers } from '../admin/purchases/api';
+import { listCustomers } from '../admin/customers/api';
 import { listCheques } from '../admin/cheques/api';
 import { listProducts } from '../admin/catalog/api';
 import { dueSoon } from '../admin/cheques/ChequesPage';
@@ -185,12 +188,15 @@ function changeOf(
   const direction = percent > 0 ? 'up' : 'down';
   // A figure more than doubled says so in words, in grey: «+484%» in a loud green pill is a
   // jump from a small base, not good news to celebrate. The same on thin data (a few days of sales).
-  if (percent >= 100) return { direction, value: 'أكثر من الضعف', comparison: 'عن أمس', tone: 'neutral' };
+  if (percent >= 100)
+    return { direction, value: 'أكثر من الضعف', comparison: 'عن أمس كاملاً', tone: 'neutral' };
+  // Today is still running while yesterday is whole: a lower figure now is not a loss, so a fall is
+  // a plain grey note (never a red alarm, never green), and the words say what it is measured against.
   return {
     direction,
     value: `${formatNumber(Math.abs(percent), digits)}%`,
-    comparison: 'عن أمس',
-    ...(thin ? { tone: 'neutral' as const } : {}),
+    comparison: 'عن أمس كاملاً',
+    ...(thin || direction === 'down' ? { tone: 'neutral' as const } : {}),
   };
 }
 
@@ -1165,24 +1171,91 @@ function RunningLow({
  * place for «what do I do now», not two look-alike cards. It opens on «المطلوب الآن», or on the
  * stock when nothing else waits.
  */
+// ─── Money that waits ─────────────────────────────────────────────────────────
+
+type CustomerDebts = ReportState<Awaited<ReturnType<typeof listCustomers>>>;
+type SupplierDues = ReportState<Awaited<ReturnType<typeof listSuppliers>>>;
+
+interface MoneyArgs {
+  customers: CustomerDebts;
+  suppliers: SupplierDues;
+  seesCustomers: boolean;
+  seesSuppliers: boolean;
+}
+
+/** What the store is owed and owes, from the customers' and suppliers' own lists: the rows and how many */
+function moneyFigures({ customers, suppliers, seesCustomers, seesSuppliers }: MoneyArgs) {
+  const list = seesCustomers ? (customers.data?.items ?? []) : [];
+  const overLimit = list.filter(
+    (c) => !c.archived && c.creditLimitMinor !== null && c.balanceMinor > c.creditLimitMinor,
+  ).length;
+  const owedByCustomers = seesCustomers ? (customers.data?.totalOwedMinor ?? 0) : 0;
+  const owedToSuppliers = seesSuppliers ? (suppliers.data?.totalOwedMinor ?? 0) : 0;
+  const total = (overLimit > 0 ? 1 : 0) + (owedByCustomers > 0 ? 1 : 0) + (owedToSuppliers > 0 ? 1 : 0);
+  return {
+    overLimit,
+    owedByCustomers,
+    owedToSuppliers,
+    total,
+    loading:
+      (seesCustomers && customers.loading && !customers.data) ||
+      (seesSuppliers && suppliers.loading && !suppliers.data),
+    customersBase: customers.data?.baseCurrency,
+    suppliersBase: suppliers.data?.baseCurrency,
+  };
+}
+
+function MoneyRows(args: MoneyArgs) {
+  const f = moneyFigures(args);
+  if (f.loading && f.total === 0) return <Skeleton className="h-14" />;
+  if (f.total === 0) return <p className="text-ink-muted">لا ديون ولا مستحقات الآن.</p>;
+  return (
+    <ul className="flex flex-col gap-2">
+      {f.overLimit > 0 ? (
+        <WaitingRow to="/customers" count={f.overLimit} tone="danger" icon={<WarningIcon />}>
+          {f.overLimit === 1 ? 'زبون تجاوز حدّ الدين' : 'زبائن تجاوزوا حدّ الدين'}
+        </WaitingRow>
+      ) : null}
+      {f.owedByCustomers > 0 && f.customersBase ? (
+        <WaitingRow to="/customers" count={null} tone="warning" icon={<CustomersIcon />}>
+          ديون الزبائن عندنا{' '}
+          <Money minor={f.owedByCustomers} currency={f.customersBase} className="font-bold" />
+        </WaitingRow>
+      ) : null}
+      {f.owedToSuppliers > 0 && f.suppliersBase ? (
+        <WaitingRow to="/suppliers" count={null} tone="warning" icon={<TruckIcon />}>
+          مستحقات الموردين علينا{' '}
+          <Money minor={f.owedToSuppliers} currency={f.suppliersBase} className="font-bold" />
+        </WaitingRow>
+      ) : null}
+    </ul>
+  );
+}
+
 function AttentionPanel({
   waiting,
   merch,
   skip,
   showStock,
+  money,
 }: {
   waiting: WaitingArgs;
   merch: MerchState;
   skip?: ReadonlySet<string> | undefined;
   showStock: boolean;
+  money: MoneyArgs;
 }) {
-  const [picked, setPicked] = useState<'now' | 'stock' | null>(null);
+  const [picked, setPicked] = useState<'now' | 'stock' | 'money' | null>(null);
+  const moneyFigs = moneyFigures(money);
+  const moneyTab = (money.seesCustomers || money.seesSuppliers) && (moneyFigs.total > 0 || moneyFigs.loading);
   const figures = waitingFigures(waiting);
   const stockRows = showStock ? lowRows(merch, skip).length : 0;
   const stockTab = showStock && (stockRows > 0 || merch.loading || merch.error !== null);
-  const tab = picked ?? (figures.empty && stockRows > 0 ? 'stock' : 'now');
-  const active = tab === 'stock' && stockTab ? 'stock' : 'now';
-  const items: TabItem<'now' | 'stock'>[] = [
+  const tab =
+    picked ??
+    (figures.empty && stockRows > 0 ? 'stock' : figures.empty && moneyFigs.total > 0 ? 'money' : 'now');
+  const active = tab === 'stock' && stockTab ? 'stock' : tab === 'money' && moneyTab ? 'money' : 'now';
+  const items: TabItem<'now' | 'stock' | 'money'>[] = [
     {
       value: 'now',
       label: 'المطلوب الآن',
@@ -1196,6 +1269,16 @@ function AttentionPanel({
             label: 'المخزون',
             ...(stockRows > 0 ? { count: stockRows } : {}),
             content: <RunningLow bare report={merch} skip={skip} />,
+          },
+        ]
+      : []),
+    ...(moneyTab
+      ? [
+          {
+            value: 'money' as const,
+            label: 'المال',
+            ...(moneyFigs.total > 0 ? { count: moneyFigs.total } : {}),
+            content: <MoneyRows {...money} />,
           },
         ]
       : []),
@@ -1319,6 +1402,11 @@ export function HomePage() {
   const cheques = useReport(seesCheques ? 'home:cheques' : null, () => listCheques(undefined), {
     cache: 'home',
   });
+  // Money that waits: what customers owe (and who is over their limit) and what suppliers are owed
+  const customers = useReport(seesCheques ? 'home:debts' : null, () => listCustomers('', true), {
+    cache: 'home',
+  });
+  const suppliers = useReport(seesExpiry ? 'home:dues' : null, () => listSuppliers(), { cache: 'home' });
 
   // A new store starts in the wizard (04 › معالج البداية); the owner can leave it and come back.
   if (!me.onboarding.done && me.user.permissions.includes('settings.manage')) {
@@ -1349,6 +1437,12 @@ export function HomePage() {
 
   const canCatalog = holdsAny(me, ['catalog.manage']);
   const showWaiting = seesOrders || seesStock || seesExpiry || seesCheques || canCatalogView;
+  const money: MoneyArgs = {
+    customers,
+    suppliers,
+    seesCustomers: seesCheques,
+    seesSuppliers: seesExpiry,
+  };
 
   return (
     <AppShell>
@@ -1473,6 +1567,7 @@ export function HomePage() {
                   }}
                   merch={merch}
                   showStock={seesStock}
+                  money={money}
                   skip={groupedLow(merch.data?.lowStock ?? [])}
                 />
               ) : null}

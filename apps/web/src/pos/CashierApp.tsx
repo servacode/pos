@@ -30,6 +30,7 @@ import {
   WrenchIcon,
 } from '@serva/ui';
 import type { Catalog } from './catalog';
+import { useIsPhone } from '../lib/useIsPhone';
 import { armClickGuard } from './sale/clickGuard';
 import { withoutUnfedServices } from './sale/serviceFee';
 import { clockText } from './format';
@@ -193,6 +194,8 @@ export function CashierApp(props: CashierAppProps) {
 }
 
 function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut }: CashierAppProps) {
+  // A phone has no keyboard: the menu shows no key hints there
+  const phone = useIsPhone();
   const pos = usePos();
   const digits = useDigits();
   const tillSubscription = useTillSubscription(pos.device.token);
@@ -490,6 +493,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     deviceName: pos.device.deviceName,
     cashierName,
     sellerName: sellerOf(doc),
+    serviceVariantIds: [...catalog.byVariant.values()].filter((i) => i.isService).map((i) => i.variantId),
   });
 
   /** The salesperson of a sale, when it is named */
@@ -888,7 +892,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           {shift ? (
             <MenuItem
               icon={<UndoIcon />}
-              shortcut="Alt+R"
+              shortcut={phone ? undefined : 'Alt+R'}
               onSelect={() => {
                 setStartExchange(false);
                 setView('return');
@@ -940,7 +944,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           ) : null}
           <MenuSeparator />
           {shift ? (
-            <MenuItem icon={<TransferIcon />} shortcut="Alt+7" onSelect={() => setView('cash')}>
+            <MenuItem
+              icon={<TransferIcon />}
+              shortcut={phone ? undefined : 'Alt+7'}
+              onSelect={() => setView('cash')}
+            >
               حركات الدرج
             </MenuItem>
           ) : null}
@@ -954,7 +962,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           </MenuItem>
           <InstallHintMenuItem persisted={persisted} />
           <MenuSeparator />
-          <MenuItem icon={<LockIcon />} shortcut="Alt+L" onSelect={lock}>
+          <MenuItem icon={<LockIcon />} shortcut={phone ? undefined : 'Alt+L'} onSelect={lock}>
             اقفل الشاشة
           </MenuItem>
           {shift ? (
@@ -1278,7 +1286,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       {openedNote ? (
         <p
           role="status"
-          className="fixed inset-x-4 top-[calc(var(--till-chrome,4rem)+0.5rem)] z-70 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-success-ink shadow-e2"
+          className="fixed inset-x-4 bottom-24 z-70 md:bottom-4 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-success-ink shadow-e2"
         >
           <span className="min-w-0 flex-1">{openedNote}</span>
           <button

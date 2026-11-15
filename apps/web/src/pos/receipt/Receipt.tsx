@@ -60,6 +60,8 @@ export interface ReceiptData {
   sellerName?: string | null;
   /** What is left on each voucher a sale paid with, once the sale is counted */
   vouchersAfter?: { code: string; balanceMinor: number; currency: CurrencyCode }[];
+  /** The catalog's services: a fee is work, not a piece, so «عدد القطع» leaves it out */
+  serviceVariantIds?: readonly string[];
 }
 
 /** The store's own footer usually thanks the customer already: the fixed thanks only follows one that does not */
@@ -338,7 +340,7 @@ export function Receipt({
   const t = sale.totals;
   // The deposit handed back on a rental is money, not a piece sold
   const pieces = sale.lines
-    .filter((l) => !l.name.startsWith(DEPOSIT_BACK_NAME))
+    .filter((l) => !l.name.startsWith(DEPOSIT_BACK_NAME) && !data.serviceVariantIds?.includes(l.variantId))
     .reduce((n, l) => n + (l.unitName ? 1 : Math.round(l.baseQty / 1000)), 0);
   const amount = (minor: number, currency: CurrencyCode = base) => (
     <Money minor={minor} currency={currency} symbol={currency !== base} />

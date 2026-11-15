@@ -388,6 +388,13 @@ export function PaymentPanel({
                     ? 'المبلغ لا يغطي الفاتورة كلها بعد.'
                     : null;
 
+  const extrasRef = useRef<HTMLDivElement>(null);
+  const goToMissing = () => {
+    if (needsCustomer && !customer) setPicking(true);
+    else if (needsReference) referenceRef.current?.focus();
+    extrasRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  };
+
   // Cash in the sale's own currency is due rounded to the cash step: the same figure the footer shows
   const dueHere =
     option.method === 'cash' && option.currency === base
@@ -565,7 +572,7 @@ export function PaymentPanel({
       aria-label="الدفع"
       className="@container/pay relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e2 motion-safe:animate-sheet-in"
     >
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-5 py-2">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-5 py-2 @max-lg/pay:gap-x-3 @max-lg/pay:px-3">
         <Button
           variant="secondary"
           size="md"
@@ -585,7 +592,7 @@ export function PaymentPanel({
           <Money
             minor={totalMinor}
             currency={base}
-            className="text-kpi font-bold tracking-tight text-ink"
+            className="text-kpi font-bold tracking-tight text-ink @max-lg/pay:text-2xl"
             unitClassName="text-base font-semibold text-ink-muted"
           />
           {foreign ? (
@@ -599,7 +606,7 @@ export function PaymentPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-2 @3xl/pay:py-3">
-        <div className="grid gap-4 @lg/pay:grid-cols-2 @3xl/pay:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] @3xl/pay:gap-5">
+        <div className="grid gap-4 @lg/pay:grid-cols-2 @lg/pay:grid-rows-[auto_1fr] @3xl/pay:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] @3xl/pay:gap-5">
           {/* How the customer pays, who the customer is, and the parts paid so far */}
           <div className="@container flex min-w-0 flex-col gap-3">
             <span className="text-sm font-semibold text-ink-muted">
@@ -616,7 +623,7 @@ export function PaymentPanel({
                     aria-pressed={on}
                     onClick={() => pick(o)}
                     className={cn(
-                      'flex min-h-16 flex-col items-start gap-1.5 rounded-card border p-2.5 text-start transition-[background-color,border-color,box-shadow] duration-120 ease-standard select-none @xs:flex-row @xs:items-center @xs:gap-3 @xs:p-3',
+                      'flex min-h-16 flex-col items-start gap-1.5 rounded-card border p-2.5 @max-lg/pay:min-h-12 @max-lg/pay:p-2 text-start transition-[background-color,border-color,box-shadow] duration-120 ease-standard select-none @xs:flex-row @xs:items-center @xs:gap-3 @xs:p-3',
                       on
                         ? 'border-brand bg-brand-soft/40 ring-4 ring-brand/10'
                         : 'border-line bg-surface shadow-e1 hover:border-line-control',
@@ -651,124 +658,10 @@ export function PaymentPanel({
             {needsCustomer && !customer ? (
               <Alert tone="warning">جهاز بكفالة: اطلب اسم الزبون وجواله، فالكفالة تُسجَّل باسمه.</Alert>
             ) : null}
-            {picking ? (
-              <CustomerPicker
-                catalog={catalog}
-                createdBy={cashierId}
-                onPicked={(picked) => {
-                  setTotalAtPick(totalMinor);
-                  setCustomer(picked);
-                  onCustomer?.({ id: picked.id, name: picked.name });
-                  setPicking(false);
-                  if (picked.priceTier === 'wholesale' && cart.priceTier !== 'wholesale') {
-                    setParts([]);
-                    onWholesaleCustomer?.();
-                  }
-                  void onContractPrices?.(picked.id).then((applied) => applied && setParts([]));
-                }}
-                onCancel={() => setPicking(false)}
-              />
-            ) : customer ? (
-              <div className="flex flex-col gap-2 rounded-card border border-line bg-surface p-3 shadow-e1">
-                {/* On a phone the whole name shows: the buttons drop to the next line instead of cutting it */}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <Avatar name={customer.name} />
-                  <span className="flex min-w-40 flex-1 flex-col">
-                    <span className="text-xs text-ink-muted">الزبون</span>
-                    <span className="font-semibold break-words text-ink">{customer.name}</span>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="md"
-                    aria-pressed={history}
-                    onClick={() => setHistory((h) => !h)}
-                  >
-                    مشترياته
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="md"
-                    onClick={() => {
-                      setCustomer(null);
-                      onCustomer?.(null);
-                      setParts((list) => list.filter((p) => !onAccount(p.option.method)));
-                      if (onAccount(option.method)) pick(options[0]!);
-                    }}
-                  >
-                    أزله
-                  </Button>
-                </div>
-                {history ? <CustomerHistory customerId={customer.id} /> : null}
-              </div>
-            ) : (
-              <Button
-                variant="secondary"
-                size="md"
-                icon={<UserIcon size={20} />}
-                onClick={() => setPicking(true)}
-              >
-                {canCredit ? 'اختر الزبون (للبيع بالآجل)' : 'اختر الزبون'}
-              </Button>
-            )}
-            {/* One payment or several (هوية 4 › Segmented control), drawn as its track */}
-            <div
-              role="group"
-              aria-label="طريقة التقسيم"
-              className="grid grid-cols-2 gap-1 rounded-control bg-surface-muted p-1"
-            >
-              {[false, true].map((on) => (
-                <button
-                  key={String(on)}
-                  type="button"
-                  aria-pressed={split === on}
-                  onClick={() => {
-                    setSplit(on);
-                    if (!on) setParts([]);
-                  }}
-                  className={cn(
-                    'min-h-12 rounded-small px-3 text-base font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard',
-                    split === on
-                      ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
-                      : 'text-ink-muted hover:text-ink',
-                  )}
-                >
-                  {on ? 'قسّم الدفع' : 'دفعة واحدة'}
-                </button>
-              ))}
-            </div>
-            {parts.length > 0 ? (
-              <ul
-                aria-label="الأجزاء المدفوعة"
-                className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line"
-              >
-                {parts.map((part, index) => {
-                  const PartIcon = METHOD_ICON[part.option.method];
-                  return (
-                    <li key={index} className="flex items-center gap-3 bg-surface py-1 ps-3 pe-1">
-                      <PartIcon size={20} className="text-ink-subtle" />
-                      <span className="min-w-0 flex-1 truncate font-semibold text-ink">
-                        {part.option.label}
-                      </span>
-                      <Money
-                        minor={part.tender.amountMinor}
-                        currency={part.tender.currency}
-                        className="font-bold text-ink"
-                      />
-                      <IconButton
-                        label="احذف هذا الجزء"
-                        size="md"
-                        icon={<DeleteIcon size={20} />}
-                        onClick={() => setParts((list) => list.filter((_, i) => i !== index))}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
           </div>
 
           {/* What the customer hands over: the amount, the quick notes or the reference, the keys */}
-          <div className="@container flex min-w-0 flex-col gap-2 @3xl/pay:gap-3">
+          <div className="@container flex min-w-0 flex-col gap-2 @lg/pay:col-start-2 @lg/pay:row-span-2 @lg/pay:row-start-1 @3xl/pay:gap-3">
             <div className="flex flex-col gap-0.5 rounded-control border border-brand bg-surface px-4 py-2 ring-4 ring-brand/15 @3xl/pay:py-2.5">
               {/* On a narrow panel the chosen method card says it; the words stay for screen readers */}
               <span className="sr-only text-xs font-semibold text-ink-muted @3xl/pay:not-sr-only">
@@ -960,17 +853,138 @@ export function PaymentPanel({
               }
             />
           </div>
+
+          {/* Who the customer is, one payment or several, the parts paid: under the keys on a phone, so the amount and the notes stay in view; under the methods where the panel is wide */}
+          <div
+            ref={extrasRef}
+            className="@container flex min-w-0 flex-col gap-3 @lg/pay:col-start-1 @lg/pay:row-start-2"
+          >
+            {picking ? (
+              <CustomerPicker
+                catalog={catalog}
+                createdBy={cashierId}
+                onPicked={(picked) => {
+                  setTotalAtPick(totalMinor);
+                  setCustomer(picked);
+                  onCustomer?.({ id: picked.id, name: picked.name });
+                  setPicking(false);
+                  if (picked.priceTier === 'wholesale' && cart.priceTier !== 'wholesale') {
+                    setParts([]);
+                    onWholesaleCustomer?.();
+                  }
+                  void onContractPrices?.(picked.id).then((applied) => applied && setParts([]));
+                }}
+                onCancel={() => setPicking(false)}
+              />
+            ) : customer ? (
+              <div className="flex flex-col gap-2 rounded-card border border-line bg-surface p-3 shadow-e1">
+                {/* On a phone the whole name shows: the buttons drop to the next line instead of cutting it */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Avatar name={customer.name} />
+                  <span className="flex min-w-40 flex-1 flex-col">
+                    <span className="text-xs text-ink-muted">الزبون</span>
+                    <span className="font-semibold break-words text-ink">{customer.name}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    aria-pressed={history}
+                    onClick={() => setHistory((h) => !h)}
+                  >
+                    مشترياته
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    onClick={() => {
+                      setCustomer(null);
+                      onCustomer?.(null);
+                      setParts((list) => list.filter((p) => !onAccount(p.option.method)));
+                      if (onAccount(option.method)) pick(options[0]!);
+                    }}
+                  >
+                    أزله
+                  </Button>
+                </div>
+                {history ? <CustomerHistory customerId={customer.id} /> : null}
+              </div>
+            ) : (
+              <Button
+                variant="secondary"
+                size="md"
+                icon={<UserIcon size={20} />}
+                onClick={() => setPicking(true)}
+              >
+                {canCredit ? 'اختر الزبون (للبيع بالآجل)' : 'اختر الزبون'}
+              </Button>
+            )}
+            {/* One payment or several (هوية 4 › Segmented control), drawn as its track */}
+            <div
+              role="group"
+              aria-label="طريقة التقسيم"
+              className="grid grid-cols-2 gap-1 rounded-control bg-surface-muted p-1"
+            >
+              {[false, true].map((on) => (
+                <button
+                  key={String(on)}
+                  type="button"
+                  aria-pressed={split === on}
+                  onClick={() => {
+                    setSplit(on);
+                    if (!on) setParts([]);
+                  }}
+                  className={cn(
+                    'min-h-12 rounded-small px-3 text-base font-semibold whitespace-nowrap transition-[background-color,color,box-shadow] duration-120 ease-standard',
+                    split === on
+                      ? 'bg-surface text-ink shadow-e1 ring-1 ring-line'
+                      : 'text-ink-muted hover:text-ink',
+                  )}
+                >
+                  {on ? 'قسّم الدفع' : 'دفعة واحدة'}
+                </button>
+              ))}
+            </div>
+            {parts.length > 0 ? (
+              <ul
+                aria-label="الأجزاء المدفوعة"
+                className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line"
+              >
+                {parts.map((part, index) => {
+                  const PartIcon = METHOD_ICON[part.option.method];
+                  return (
+                    <li key={index} className="flex items-center gap-3 bg-surface py-1 ps-3 pe-1">
+                      <PartIcon size={20} className="text-ink-subtle" />
+                      <span className="min-w-0 flex-1 truncate font-semibold text-ink">
+                        {part.option.label}
+                      </span>
+                      <Money
+                        minor={part.tender.amountMinor}
+                        currency={part.tender.currency}
+                        className="font-bold text-ink"
+                      />
+                      <IconButton
+                        label="احذف هذا الجزء"
+                        size="md"
+                        icon={<DeleteIcon size={20} />}
+                        onClick={() => setParts((list) => list.filter((_, i) => i !== index))}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <footer className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-line bg-surface-total px-5 py-2 @3xl/pay:py-3">
+      <footer className="flex flex-wrap items-center gap-x-5 gap-y-3 @max-lg/pay:gap-y-1 border-t border-line bg-surface-total px-5 py-2 @3xl/pay:py-3">
         <div role="status" className="flex items-baseline gap-3">
-          <span className="text-base font-semibold text-ink-muted">
+          <span className="text-base font-semibold text-ink-muted @max-lg/pay:text-sm">
             {short ? 'المتبقي' : 'الباقي للزبون'}
           </span>
           <span
             className={cn(
-              'text-kpi font-bold tracking-tight @3xl/pay:text-total',
+              'text-kpi font-bold tracking-tight @max-lg/pay:text-2xl @3xl/pay:text-total',
               short ? 'text-warning-ink' : 'text-ink',
             )}
           >
@@ -987,7 +1001,7 @@ export function PaymentPanel({
             />
           </span>
         </div>
-        <span className="flex-1" />
+        <span className="flex-1 @max-lg/pay:hidden" />
         {error ? (
           <p role="alert" className="flex max-w-xs items-start gap-2 text-sm font-semibold text-danger-ink">
             <AlertCircleIcon size={20} className="shrink-0" />
@@ -1026,13 +1040,16 @@ export function PaymentPanel({
           </div>
         ) : null}
         {waitingFor ? (
-          <p
+          // Tapping the reason goes to what is missing: the customer list, or the reference field
+          <button
+            type="button"
             id="pay-waiting"
-            className="flex max-w-xs items-start gap-2 text-sm font-semibold text-warning-ink"
+            onClick={goToMissing}
+            className="flex min-h-11 max-w-xs items-start gap-2 text-start text-sm font-semibold text-warning-ink @max-lg/pay:min-h-9 @max-lg/pay:order-first @max-lg/pay:max-w-none @max-lg/pay:basis-full"
           >
             <AlertCircleIcon size={20} className="shrink-0" />
             {waitingFor}
-          </p>
+          </button>
         ) : null}
         <Button
           size="lg"
@@ -1042,6 +1059,7 @@ export function PaymentPanel({
           onClick={() => void complete()}
           disabled={!canComplete}
           loading={saving}
+          className="@max-lg/pay:flex-1"
         >
           أتمّ الدفع
           <Kbd tone="brand">Enter</Kbd>

@@ -20,8 +20,8 @@ import { isColourOption, swatchOf } from './swatch';
 /**
  * «اختر المقاس واللون» (هوية 2; هوية 4): a model's pieces, picked beside the cart. Each option is a
  * row of large chips; a value no piece has with the other choices is struck through and cannot be
- * pressed. The last choice adds the piece (once, at the quantity set above; «أضف» stays for whoever
- * prefers it), unless that combination is out of stock: that one is shown as «نفد» and cannot be added.
+ * pressed. The last choice of a one-option model adds the piece (once, at the quantity set above); with
+ * size and colour, «أضف إلى السلة» shows as soon as both are chosen and the cashier presses it, unless that combination is out of stock: that one is shown as «نفد» and cannot be added.
  */
 export function VariantPicker({
   name,
@@ -50,6 +50,8 @@ export function VariantPicker({
     // An option with a single value («أبيض» only) starts chosen.
     Object.fromEntries(options.filter((o) => o.values.length === 1).map((o) => [o.name, o.values[0]!])),
   );
+  // How many options really have a choice (a colour with one value starts chosen)
+  const choosable = options.filter((o) => o.values.length > 1).length;
   const piece = pieceFor(pieces, chosen, options.length);
   const image = (piece ?? pieces.find((p) => p.imageUrl))?.imageUrl ?? null;
   const from = lowestPrice(pieces);
@@ -86,9 +88,10 @@ export function VariantPicker({
     }
     setChosen(next);
     const exact = pieceFor(pieces, next, options.length);
-    // The last choice adds (unless the quantity was set by hand, or nothing is left of the piece)
+    // Only a model with ONE thing to choose (sizes alone, or a colour with a single size) adds on its last choice.
+    // With two (size and colour) the last choice shows «أضف إلى السلة» and waits: a wrong tap must never add a wrong line silently
     const done = Object.keys(next).length >= options.length;
-    if (exact && done && !qtyTouched && (leftOf(exact) ?? 1) > 0) onAdd(exact, qty);
+    if (choosable <= 1 && exact && done && !qtyTouched && (leftOf(exact) ?? 1) > 0) onAdd(exact, qty);
   }
 
   return (
@@ -136,14 +139,23 @@ export function VariantPicker({
       }
       footer={
         piece ? (
-          <Button size="lg" fullWidth icon={<AddIcon size={20} />} onClick={() => onAdd(piece, qty)}>
+          <Button
+            size="lg"
+            fullWidth
+            icon={<AddIcon size={20} />}
+            onClick={() => onAdd(piece, qty)}
+            className="h-auto py-2 whitespace-normal"
+          >
             {outOfStock ? (
               'نفد — أضفه رغم ذلك'
             ) : (
-              <>
-                أضف إلى السلة · {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
-                <Money minor={piece.price.priceMinor * qty} currency={piece.price.currency} />
-              </>
+              <span className="flex min-w-0 flex-wrap items-center justify-center gap-x-2">
+                <span>أضف إلى السلة</span>
+                <span className="whitespace-nowrap">
+                  {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
+                  <Money minor={piece.price.priceMinor * qty} currency={piece.price.currency} />
+                </span>
+              </span>
             )}
           </Button>
         ) : undefined

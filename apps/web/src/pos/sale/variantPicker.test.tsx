@@ -46,11 +46,23 @@ describe('the model picker', () => {
     expect(onAdd).toHaveBeenCalledWith(pieces[2], 3);
   });
 
-  it('adds by itself at the last choice when the quantity was left alone', async () => {
+  it('shows «أضف إلى السلة» once size and colour are chosen, and adds nothing by itself', async () => {
     const { onAdd, user, picker } = open();
     await user.click(within(picker).getByRole('button', { name: 'M' }));
     await user.click(within(picker).getByRole('button', { name: 'أبيض' }));
+    expect(onAdd).not.toHaveBeenCalled();
+    await user.click(within(picker).getByRole('button', { name: /^أضف إلى السلة/ }));
     expect(onAdd).toHaveBeenCalledWith(pieces[0], 1);
+  });
+
+  it('adds by itself at the last choice when there is only one thing to choose', async () => {
+    const onAdd = vi.fn();
+    const user = userEvent.setup();
+    const sizes = [piece('v1', 'M', 'أبيض', 5000), piece('v2', 'L', 'أبيض', 3000)];
+    render(<VariantPicker name="قميص" pieces={sizes} onAdd={onAdd} onCancel={() => undefined} />);
+    const picker = screen.getByRole('region', { name: 'اختر من قميص' });
+    await user.click(within(picker).getByRole('button', { name: 'L' }));
+    expect(onAdd).toHaveBeenCalledWith(sizes[1], 1);
   });
 
   it('does not add an out-of-stock combination by itself, only when asked', async () => {

@@ -46,9 +46,9 @@ describe('sizes on a model tile', () => {
   it('lists the sizes in natural order with the empty ones marked', () => {
     const sizes = sizeStock([p('L', 0), p('S', 2000), p('M', 1000), p('M', 0, 'أبيض')]);
     expect(sizes).toEqual([
-      { value: 'S', inStock: true },
-      { value: 'M', inStock: true },
-      { value: 'L', inStock: false },
+      { value: 'S', inStock: true, left: 2000 },
+      { value: 'M', inStock: true, left: 1000 },
+      { value: 'L', inStock: false, left: 0 },
     ]);
   });
   it('has nothing to say for a colour-only model', () => {

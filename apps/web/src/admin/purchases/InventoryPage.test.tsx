@@ -274,6 +274,10 @@ describe('stock numbers that explain themselves', () => {
       }),
     });
     const { user } = renderApp('/inventory');
+    // one definition: the one below zero is out («نفد 1») and says «منها سالب 1» once, not a second count
+    const tiles = within(await screen.findByRole('region', { name: 'أرقام المخزون' }));
+    expect(await tiles.findAllByText(/منها سالب 1/)).toHaveLength(1);
+    expect(tiles.queryByText(/ناقص/)).not.toBeInTheDocument();
     await user.click(await screen.findByRole('radio', { name: 'شبكة الخيارات' }));
     const grid = within(await screen.findByRole('region', { name: 'شبكة قميص' }));
     expect(grid.getByText('المتاح 5')).toBeInTheDocument();

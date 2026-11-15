@@ -145,7 +145,10 @@ describe('a return of a credit sale (08 › مرتجع مبيعات: تخفيض 
     await screen.findByRole('region', { name: 'تمت البيعة' });
 
     await user.keyboard('{Alt>}r{/Alt}');
-    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    const row = await screen.findByRole('button', { name: /INV-001-002-0000001/ });
+    // The list names the customer of an invoice made on this device
+    expect(row).toHaveTextContent('أبو خالد');
+    await user.click(row);
     // The cash option stays; the account is the default for a sale that was on credit
     expect(screen.getByRole('button', { name: 'نقداً من الدرج' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'إلى حساب الزبون' })).toHaveAttribute('aria-pressed', 'true');

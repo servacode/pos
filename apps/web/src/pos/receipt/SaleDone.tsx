@@ -56,12 +56,15 @@ export function SaleDone({
           </span>
           <div className="flex min-w-0 flex-col gap-1">
             <h2 className="text-3xl font-bold text-ink">تمت البيعة</h2>
-            <p className="text-ink-muted">
-              فاتورة رقم{' '}
-              <bdi dir="ltr" className="num font-semibold text-ink">
-                {data.doc.number}
-              </bdi>{' '}
-              · {methods.join(' + ')} ·{' '}
+            {/* Parts that wrap whole, never a separator dot left at a line's end */}
+            <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-ink-muted">
+              <span className="whitespace-nowrap">
+                فاتورة رقم{' '}
+                <bdi dir="ltr" className="num font-semibold text-ink">
+                  {data.doc.number}
+                </bdi>
+              </span>
+              <span className="whitespace-nowrap">{methods.join(' + ')}</span>
               <Money
                 minor={sale.totals.totalMinor}
                 currency={sale.currency}

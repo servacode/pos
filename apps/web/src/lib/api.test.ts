@@ -4,7 +4,9 @@ import {
   ApiError,
   NETWORK_ERROR_MESSAGE,
   apiFetch,
+  forgetSession,
   getAccessToken,
+  knownSignedOut,
   onSessionExpired,
   refreshAccessToken,
   setAccessToken,
@@ -199,5 +201,23 @@ describe('apiFetch', () => {
     await expect(apiFetch('/v1/me', { auth: true })).rejects.toMatchObject({ code: 'network_error' });
     expect(signOut).not.toHaveBeenCalled();
     unsubscribe();
+  });
+});
+
+describe('the session note', () => {
+  it('is empty on a new device, so the first load still asks once', () => {
+    expect(knownSignedOut()).toBe(false);
+  });
+
+  it('says «signed out» after the refresh is refused and after a sign-out, and «in» again on a token', async () => {
+    mockFetch({ 'POST /v1/auth/refresh': unauthorized });
+    expect(await refreshAccessToken()).toBeNull();
+    expect(knownSignedOut()).toBe(true);
+    setAccessToken('t');
+    expect(knownSignedOut()).toBe(false);
+    forgetSession();
+    expect(knownSignedOut()).toBe(true);
+    setAccessToken('t');
+    expect(knownSignedOut()).toBe(false);
   });
 });

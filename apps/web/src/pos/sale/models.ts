@@ -169,7 +169,9 @@ export function piecesText(count: number): string {
  * The sizes of a model with whether each still has stock, in natural order («S M L XL»), for its tile.
  * Null when the model has no size option to show (colour-only or several options at once).
  */
-export function sizeStock(pieces: readonly CatalogItem[]): { value: string; inStock: boolean }[] | null {
+export function sizeStock(
+  pieces: readonly CatalogItem[],
+): { value: string; inStock: boolean; left: number | null }[] | null {
   const options = optionsOf(pieces);
   const size =
     options.find((o) => /مقاس|size/i.test(o.name)) ?? (options.length === 1 ? options[0] : undefined);
@@ -180,7 +182,11 @@ export function sizeStock(pieces: readonly CatalogItem[]): { value: string; inSt
     );
     // Unknown stock counts as available: only a known empty size is struck
     const inStock = mine.some((p) => p.stockQty === null || p.stockQty === undefined || p.stockQty > 0);
-    return { value, inStock };
+    // What is left of the size, thousandths (negative stock counts as none); null when any piece's stock is unknown
+    const left = mine.every((p) => typeof p.stockQty === 'number')
+      ? mine.reduce((sum, p) => sum + Math.max(0, p.stockQty as number), 0)
+      : null;
+    return { value, inStock, left };
   });
 }
 

@@ -557,6 +557,13 @@ export function ReturnScreen({
                           <span className="num">
                             {dateText(at, digits)} ، {clockText(at, digits)}
                           </span>
+                          {(() => {
+                            // The customer of an invoice made on this device: the name it carries, or the one the till knows
+                            const name =
+                              s.sale.customerName ??
+                              catalog.customers.find((c) => c.id === s.sale.customerId)?.name;
+                            return name ? <bdi className="font-semibold text-ink">{name}</bdi> : null;
+                          })()}
                           {s.returned.length > 0 ? (
                             <span className="text-warning-ink">· رجع منها شيء</span>
                           ) : (

@@ -18,6 +18,7 @@ configure({ asyncUtilTimeout: 5000 });
 afterEach(() => {
   cleanup();
   globalThis.sessionStorage?.clear();
+  globalThis.localStorage?.removeItem('serva.session');
   vi.unstubAllGlobals();
   setAccessToken(null);
   setTestMode(false);

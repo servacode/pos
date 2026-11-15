@@ -51,11 +51,11 @@ describe('«مبيعات اليوم»', () => {
         netSalesMinor: 1_184_500,
       }),
     });
-    const sales = await screen.findByText(
-      (_, el) => el?.tagName === 'P' && /فاتورة · متوسطها/.test(el.textContent ?? ''),
-    );
+    const average = (await screen.findByText('متوسط الفاتورة')).closest('div');
     // (12,845 - 1,000) / 3 = 3,948, the same average the home page shows
-    expect(text(sales)).toContain('متوسطها 3,948 ل.س');
+    expect(text(average as HTMLElement)).toContain('3,948 ل.س');
+    const net = screen.getAllByText('صافي المبيعات بعد المرتجعات')[0]?.closest('div');
+    expect(text(net as HTMLElement)).toContain('قبل المرتجعات 12,845 ل.س');
     const methods = screen.getByRole('region', { name: 'حسب طريقة الدفع' });
     expect(text(methods)).toContain('المبالغ أعلاه قبل المرتجعات12,845 ل.س');
     expect(text(methods)).toContain('المرتجعات (1)−1,000 ل.س');

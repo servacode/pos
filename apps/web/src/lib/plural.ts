@@ -18,3 +18,16 @@ export const rows = (count: number): string => countWord(count, { one: 'صف', t
 /** «منتج / منتجان / منتجات» for a count of products. */
 export const products = (count: number): string =>
   countWord(count, { one: 'منتجاً', two: 'منتجين', few: 'منتجات' });
+
+/**
+ * «مسجَّل / مسجَّلان / مسجَّلون / مسجَّلاً»: the adjective that agrees with a counted person noun
+ * (pair it with `countNoun`: «زبونان مسجَّلان», «3 زبائن مسجَّلون», «زبون واحد مسجَّل»).
+ */
+export function registeredAdjective(count: number): string {
+  if (!Number.isInteger(count)) return 'مسجَّل';
+  const n = Math.abs(count);
+  if (n === 1) return 'مسجَّل';
+  if (n === 2) return 'مسجَّلان';
+  if (n >= 11) return 'مسجَّلاً';
+  return 'مسجَّلون';
+}

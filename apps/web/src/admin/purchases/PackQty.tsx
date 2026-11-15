@@ -26,6 +26,8 @@ export function PackQty({
       <TextField
         label={`كمية ${name}`}
         hideLabel
+        placeholder="الكمية"
+        data-qty-input
         inputMode="decimal"
         dir="ltr"
         value={qty}

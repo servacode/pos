@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { lazyChunk, TillBoundary } from '../chunks';
 import { dayText } from '../../lib/dates';
@@ -115,7 +116,7 @@ import { serialLabel } from '@serva/core/contracts/warranty';
 import { PrescriptionPanel } from './PrescriptionPanel';
 import { Kbd } from './Kbd';
 import { SalePanel } from './SalePanel';
-import { packLineText } from './packText';
+import { packLineText, pieceWord } from './packText';
 
 const PaymentPanel = lazyChunk(() =>
   import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })),
@@ -188,6 +189,16 @@ export interface SaleScreenProps {
 const SELLER_KEY = 'salesperson';
 /** The unit last used for each item (the piece or a box), so the unit sheet offers it first */
 const LAST_UNIT_KEY = 'serva.lastUnit';
+/** «علّق» and «خصم» beside the pay button: an icon over a small word, 72 high like the button */
+const CART_QUICK =
+  'flex min-h-18 w-16 flex-col items-center justify-center gap-1 rounded-card border border-line-control/50 bg-surface text-xs font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50';
+
+/** «قطعة» or «علبة (100 قطعة)»: the unit said on the added toast */
+function unitName(hit: BarcodeHit | null): string {
+  if (!hit) return 'قطعة';
+  const qty = hit.barcode.packQty / 1000;
+  return `${hit.barcode.packName ?? 'علبة'} (${qty} ${pieceWord(hit.barcode.packQty)})`;
+}
 
 const SHORTCUTS: [string, string][] = [
   ['ابحث أو امسح', 'F2 أو /'],
@@ -831,8 +842,14 @@ export function SaleScreen(props: SaleScreenProps) {
     }
     return map;
   }, [catalog.byBarcode]);
-  const handlers = useRef({ add, scan, showPrice, packsByVariant, lastUnits });
-  handlers.current = { add, scan, showPrice, packsByVariant, lastUnits };
+  // The unit chosen for an item IN THIS SALE: one tap adds it again. A new sale starts from the question
+  // (the piece or the box?), never from the unit remembered from an earlier day: a box by a mis-tap is costly
+  const saleUnits = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (cart.lines.length === 0) saleUnits.current = {};
+  }, [cart.lines.length]);
+  const handlers = useRef({ add, scan, showPrice, packsByVariant, saleUnits });
+  handlers.current = { add, scan, showPrice, packsByVariant, saleUnits };
   // A second tap on «أضف» lands on the tile that appears under the closed picker: swallowed for a moment
   const pickerAddedAt = useRef(0);
   // Leaving a dialog or panel (hold, price, size...) back to the grid: its last click must not reach a tile
@@ -845,14 +862,16 @@ export function SaleScreen(props: SaleScreenProps) {
     if (Date.now() - pickerAddedAt.current < 350) return;
     if (checkingRef.current) handlers.current.showPrice(item, hit);
     else if (!hit && handlers.current.packsByVariant.has(item.variantId)) {
-      // Picked with no barcode: the unit used last time goes in with one tap; with none remembered, the piece or which box?
-      const last = handlers.current.lastUnits[item.variantId];
+      // Picked with no barcode: the unit chosen earlier in THIS sale goes in with one tap; otherwise the piece or which box?
+      const last = handlers.current.saleUnits.current[item.variantId];
       const pack =
         last && last !== 'piece'
           ? handlers.current.packsByVariant.get(item.variantId)!.find((h) => h.barcode.id === last)
           : undefined;
-      if (last === 'piece' || pack) handlers.current.add(item, pack ?? null);
-      else setMode({ kind: 'unit', variantId: item.variantId });
+      if (last === 'piece' || pack) {
+        handlers.current.add(item, pack ?? null);
+        setJustAdded(`${item.name} · ${unitName(pack ?? null)}`);
+      } else setMode({ kind: 'unit', variantId: item.variantId });
     } else handlers.current.add(item, hit);
   }, []);
   const pickModel = useCallback(
@@ -1088,9 +1107,7 @@ export function SaleScreen(props: SaleScreenProps) {
     guard.blocks.length +
     (batchWaits ? guard.approvals.length : 0) +
     guard.stockBlocks.length +
-    guard.stockWarns.length +
-    (unnumbered.length > 0 ? 1 : 0) +
-    (invoiceNeeds ? 1 : 0);
+    guard.stockWarns.length;
   const warnDanger = guard.blocks.length + guard.stockBlocks.length > 0;
   const lineWarn = (line: Line): 'danger' | 'warning' | null => {
     if (
@@ -1107,6 +1124,50 @@ export function SaleScreen(props: SaleScreenProps) {
       return 'warning';
     return null;
   };
+  // Why «ادفع» is greyed, in words, and where to go to fix it: tapping the reason jumps to the line
+  const jumpToLine = (lineNo: number) => {
+    setPhoneView('cart');
+    setSelected(lineNo);
+    window.setTimeout(() => {
+      document.getElementById(`cart-line-${lineNo}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 30);
+  };
+  const payBlock: { text: string; go: () => void } | null = (() => {
+    if (canPay || lineCount === 0) return null;
+    const serial = unnumbered[0];
+    if (serial)
+      return {
+        text: `أدخل الرقم التسلسلي لـ ${serial.name}`,
+        go: () => {
+          jumpToLine(serial.lineNo);
+          setMode({ kind: 'serial', lineNo: serial.lineNo });
+        },
+      };
+    const unfed = cart.lines.find((l) => isUnfedService(l, catalog.byVariant));
+    if (unfed) return { text: `اكتب أجرة ${unfed.name}`, go: () => jumpToLine(unfed.lineNo) };
+    const [needLine] = [...needs.keys()];
+    if (needLine !== undefined) {
+      const l = cart.lines.find((x) => x.lineNo === needLine);
+      return { text: `يحتاج موافقة المدير: ${l?.name ?? ''}`.trim(), go: () => jumpToLine(needLine) };
+    }
+    if (invoiceNeeds)
+      return {
+        text: NEED_TEXT[invoiceNeeds],
+        go: () => setMode({ kind: 'approve', lineNo: null, need: invoiceNeeds }),
+      };
+    if (batchWaits)
+      return {
+        text: 'ينقص موافقة المدير على بيع بلا دفعة صالحة',
+        go: () => setMode({ kind: 'batchApprove' }),
+      };
+    const bad = guard.blocks[0] ?? null;
+    if (bad) return { text: 'راجع تنبيه الدفعة في السلة', go: () => jumpToLine(bad.lineNo) };
+    const out = guard.stockBlocks[0];
+    const outLine = out ? cart.lines.find((l) => l.variantId === out.variantId) : undefined;
+    if (outLine)
+      return { text: `الكمية أكبر من المتوفر: ${outLine.name}`, go: () => jumpToLine(outLine.lineNo) };
+    return null;
+  })();
   // «قطعتان · خدمة»: a service is work, not a piece
   const serviceCount = cart.lines.filter((l) => catalog.byVariant.get(l.variantId)?.isService).length;
   const pieceTotal = pieceCount({
@@ -1117,7 +1178,7 @@ export function SaleScreen(props: SaleScreenProps) {
   const cartPanel = (
     <>
       {/* The ticket's head: what it is, who sells, and the actions on the whole ticket */}
-      <header className="flex shrink-0 flex-col gap-3 border-b border-line p-4">
+      <header className="flex shrink-0 flex-col gap-1.5 border-b border-line px-4 py-2.5">
         <div className="flex items-center gap-3">
           <IconChip size="md">
             <CartIcon size={20} />
@@ -1404,7 +1465,7 @@ export function SaleScreen(props: SaleScreenProps) {
             </span>
           </p>
         ) : (
-          <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-0.5 p-2">
+          <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-0.5 p-1">
             {cart.lines.map((line, i) => {
               const p = priced?.lines[i];
               const need = needs.get(line.lineNo);
@@ -1460,6 +1521,7 @@ export function SaleScreen(props: SaleScreenProps) {
               return (
                 <CartLine
                   key={line.lineNo}
+                  id={`cart-line-${line.lineNo}`}
                   name={line.name}
                   qtyThousandths={line.qty}
                   unit={line.unitSymbol ?? undefined}
@@ -1603,7 +1665,8 @@ export function SaleScreen(props: SaleScreenProps) {
         <div
           role="status"
           aria-label="خصم الفاتورة"
-          className="mx-3 mb-2 flex shrink-0 items-center gap-3 rounded-card border border-info/20 bg-info-soft py-2 ps-3 pe-2 text-sm text-info-ink"
+          title="يشمل كل الأسطر، وما تضيفه بعد الآن."
+          className="mx-3 mb-1.5 flex shrink-0 items-center gap-3 rounded-card border border-info/20 bg-info-soft py-0.5 ps-3 pe-1 text-sm text-info-ink"
         >
           <PercentIcon size={20} className="shrink-0" />
           <span className="min-w-0 flex-1">
@@ -1614,7 +1677,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 : ''}{' '}
               <Money minor={totals.invoiceDiscountMinor} currency={ctx.currency} symbol={false} />
             </span>
-            <span className="block text-xs text-info-ink/80">يشمل كل الأسطر، وما تضيفه بعد الآن.</span>
+            <span className="sr-only">يشمل كل الأسطر، وما تضيفه بعد الآن.</span>
           </span>
           <Button
             variant="ghost"
@@ -1672,15 +1735,12 @@ export function SaleScreen(props: SaleScreenProps) {
           ) : undefined
         }
         notice={
-          invoiceNeeds ||
-          guard.blocks.length + guard.stockBlocks.length + guard.stockWarns.length > 0 ||
-          unnumbered.length > 0 ||
-          batchWaits ? (
+          guard.blocks.length + guard.stockBlocks.length + guard.stockWarns.length > 0 || batchWaits ? (
             // One collapsible row: two warnings must not push the cart's lines out of the panel
             <CartWarnings
               title={counted(warnRows, ['تنبيه واحد', 'تنبيهان', 'تنبيهات', 'تنبيهاً'], digits)}
               danger={warnDanger}
-              forceOpen={Boolean(batchWaits || invoiceNeeds)}
+              forceOpen={Boolean(batchWaits)}
             >
               <BatchBanner
                 blocks={guard.blocks}
@@ -1690,70 +1750,45 @@ export function SaleScreen(props: SaleScreenProps) {
                 fmt={(q) => formatQuantity(q, digits)}
                 onApprove={() => setMode({ kind: 'batchApprove' })}
               />
-              {unnumbered.length > 0 ? (
-                <div
-                  role="status"
-                  className="flex items-center gap-3 rounded-card border border-warning/20 bg-warning-soft px-3 py-2 text-sm font-semibold text-warning-ink"
-                >
-                  <WarningIcon size={20} className="shrink-0" />
-                  <span className="min-w-0 flex-1">
-                    لا يمكن الدفع قبل إدخال الرقم التسلسلي لـ {unnumbered.map((l) => l.name).join('، ')}.
-                  </span>
-                </div>
-              ) : null}
-              {invoiceNeeds ? (
-                <div
-                  role="alert"
-                  className="flex items-center gap-3 rounded-card border border-warning/20 bg-warning-soft py-2 ps-3 pe-2 text-sm font-semibold text-warning-ink"
-                >
-                  <WarningIcon size={20} className="shrink-0" />
-                  <span className="min-w-0 flex-1">{NEED_TEXT[invoiceNeeds]}</span>
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    icon={<KeyIcon size={20} />}
-                    onClick={() => setMode({ kind: 'approve', lineNo: null, need: invoiceNeeds })}
-                  >
-                    رمز المدير
-                  </Button>
-                </div>
-              ) : null}
             </CartWarnings>
           ) : undefined
         }
         actions={
           <>
-            <Button
-              variant="secondary"
-              size="md"
-              icon={lineCount === 0 && props.heldCount > 0 ? <UndoIcon size={20} /> : <ClockIcon size={20} />}
+            <button
+              type="button"
+              aria-label={lineCount === 0 && props.heldCount > 0 ? 'استرجع المعلّقة' : 'علّق'}
               aria-keyshortcuts="F4"
-              title="ضع هذه الفاتورة جانباً وأكمل غيرها، ثم استرجعها"
+              title="ضع هذه الفاتورة جانباً وأكمل غيرها، ثم استرجعها (F4)"
               onClick={() => {
                 if (lineCount > 0) setMode({ kind: 'holdName' });
                 else if (props.heldCount === 1) props.onResume(0);
                 else setMode({ kind: 'heldList' });
               }}
               disabled={lineCount === 0 && props.heldCount === 0}
+              className={CART_QUICK}
             >
-              {lineCount === 0 && props.heldCount > 0 ? 'استرجع المعلّقة' : 'علّق'}
-              <Kbd>F4</Kbd>
-            </Button>
-            <Button
-              variant="secondary"
-              size="md"
-              icon={<PercentIcon size={20} />}
+              {lineCount === 0 && props.heldCount > 0 ? <UndoIcon size={20} /> : <ClockIcon size={20} />}
+              <span>{lineCount === 0 && props.heldCount > 0 ? 'استرجع' : 'علّق'}</span>
+            </button>
+            <button
+              type="button"
+              aria-label="خصم"
               aria-keyshortcuts="Alt+1"
+              title="خصم على الفاتورة (Alt+1)"
               onClick={() => setMode({ kind: 'invoice' })}
               disabled={lineCount === 0}
+              className={CART_QUICK}
             >
-              خصم
-              <Kbd>Alt+1</Kbd>
-            </Button>
+              <PercentIcon size={20} />
+              <span>خصم</span>
+            </button>
           </>
         }
         onPay={startPay}
         payDisabled={!canPay}
+        blockedReason={payBlock?.text}
+        onBlockedTap={payBlock?.go}
         payShortcut="F12"
       />
     </>
@@ -1785,14 +1820,18 @@ export function SaleScreen(props: SaleScreenProps) {
   const overPanel = (panel: ReactNode) => (
     <>
       {itemsArea}
-      <div
-        className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-ink/45 p-4"
-        onPointerDown={(event) => {
-          if (event.target === event.currentTarget) setMode({ kind: 'items' });
-        }}
-      >
-        {panel}
-      </div>
+      {/* In the page body, not inside the items tab: on a phone that tab is hidden while the cart shows (a unit sheet opened from the cart) */}
+      {createPortal(
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-ink/45 p-4"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setMode({ kind: 'items' });
+          }}
+        >
+          {panel}
+        </div>,
+        document.body,
+      )}
     </>
   );
 
@@ -1801,6 +1840,7 @@ export function SaleScreen(props: SaleScreenProps) {
       statusBar={props.statusBar}
       cart={cartPanel}
       mobileView={phoneView}
+      {...(effectiveMode.kind === 'pay' ? { itemsLabel: 'الدفع' } : {})}
       onMobileView={setPhoneView}
       cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
       miniBar={
@@ -1827,7 +1867,7 @@ export function SaleScreen(props: SaleScreenProps) {
       {justAdded ? (
         <p
           role="status"
-          className="pointer-events-none fixed inset-x-4 top-[calc(var(--till-chrome,4rem)+0.5rem)] z-70 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
+          className="pointer-events-none fixed inset-x-4 bottom-24 z-70 md:bottom-4 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
         >
           <CheckIcon size={16} className="shrink-0" />
           <span className="truncate">
@@ -2153,6 +2193,7 @@ export function SaleScreen(props: SaleScreenProps) {
               const item = catalog.byVariant.get(effectiveMode.variantId)!;
               const next = { ...lastUnits, [effectiveMode.variantId]: hit ? hit.barcode.id : 'piece' };
               setLastUnits(next);
+              saleUnits.current[effectiveMode.variantId] = hit ? hit.barcode.id : 'piece';
               void pos.local.set(LAST_UNIT_KEY, next);
               setMode({ kind: 'items' });
               const old = effectiveMode.replaceLine
@@ -2172,7 +2213,10 @@ export function SaleScreen(props: SaleScreenProps) {
                   return { ...next, lines };
                 });
                 setSelected(null);
-              } else add(item, hit);
+              } else {
+                add(item, hit);
+                setJustAdded(`${item.name} · ${unitName(hit)}`);
+              }
             }}
             onCancel={() => setMode({ kind: 'items' })}
           />,

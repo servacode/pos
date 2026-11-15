@@ -58,7 +58,7 @@ const REFUND_CHOICE: Record<
   { title: string; hint: string; icon: Icon; tone: BadgeTone }
 > = {
   credit: { title: 'من رصيده عندي', hint: 'ينزل مما تدين له', icon: BookIcon, tone: 'neutral' },
-  cash: { title: 'نقداً', hint: 'تدخل المصاري الخزنة', icon: CashIcon, tone: 'success' },
+  cash: { title: 'نقداً', hint: 'تعود النقود إلى الخزنة', icon: CashIcon, tone: 'success' },
   bank: { title: 'تحويل بنكي', hint: 'تدخل حساب البنك', icon: ChequeIcon, tone: 'info' },
 };
 

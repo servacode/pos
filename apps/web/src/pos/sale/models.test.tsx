@@ -97,8 +97,9 @@ describe('the till grid for a clothing model', () => {
     await user.click(within(picker).getByRole('button', { name: 'M' }));
     expect(within(picker).getByRole('button', { name: 'أزرق' })).toBeDisabled();
     await user.click(within(picker).getByRole('button', { name: 'L' }));
-    // The last choice adds the piece at once
+    // Two things to choose: the last choice shows «أضف إلى السلة» and waits for it
     await user.click(within(picker).getByRole('button', { name: 'أزرق' }));
+    await user.click(within(picker).getByRole('button', { name: /^أضف إلى السلة/ }));
 
     expect(screen.queryByRole('region', { name: 'اختر من قميص كتان' })).not.toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'أسطر الفاتورة' })).toHaveTextContent('قميص كتان L أزرق');

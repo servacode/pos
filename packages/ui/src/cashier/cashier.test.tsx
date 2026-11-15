@@ -167,4 +167,23 @@ describe('TotalPanel', () => {
     await user.click(screen.getByRole('button', { name: /49\.73/ }));
     expect(screen.getByText('سعر الصرف 130')).toBeInTheDocument();
   });
+
+  it('says why pay is greyed, and a tap on the reason or on the greyed button goes to what is missing', async () => {
+    const onPay = vi.fn();
+    const onBlockedTap = vi.fn();
+    const { user } = renderUi(
+      <TotalPanel
+        totalMinor={9000000}
+        currency="SYP"
+        payDisabled
+        blockedReason="أدخل الرقم التسلسلي لـ جهاز قياس سكر"
+        onBlockedTap={onBlockedTap}
+        onPay={onPay}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /ادفع/ })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /أدخل الرقم التسلسلي/ }));
+    expect(onBlockedTap).toHaveBeenCalledOnce();
+    expect(onPay).not.toHaveBeenCalled();
+  });
 });

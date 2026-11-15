@@ -17,6 +17,7 @@ import {
   Keypad,
   LockIcon,
   Money,
+  PrintIcon,
   RemoveIcon,
   ReportsIcon,
   SalesIcon,
@@ -289,6 +290,11 @@ export function ShiftCloseScreen({
   const settings = catalog.settings!;
   const businessDate = useBusinessDate(catalog);
   const [step, setStep] = useState<'count' | 'summary' | 'done'>('count');
+  // Each step opens at its top: after closing on a phone the «أُغلقت الوردية» banner must not sit cut above the screen
+  const topRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    topRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [step]);
   const [confirming, setConfirming] = useState(false);
   const [closedAt, setClosedAt] = useState(0);
   const { paper, print } = usePrint();
@@ -408,7 +414,7 @@ export function ShiftCloseScreen({
   ];
 
   return (
-    <div className="flex w-full max-w-6xl flex-col gap-6">
+    <div ref={topRef} className="flex w-full max-w-6xl scroll-mt-4 flex-col gap-6">
       <FlowHeader
         // Once closed the only way out is «تمّ» beside the slip: one exit, never two
         onBack={step === 'count' ? onBack : step === 'done' ? undefined : () => setStep('count')}
@@ -418,7 +424,7 @@ export function ShiftCloseScreen({
         description={
           <>
             {shift.openedByName} · منذ {clockText(shift.openedAt, digits)} ·{' '}
-            <bdi dir="ltr" className="num">
+            <bdi dir="ltr" className="num whitespace-nowrap">
               {shift.number}
             </bdi>
             {activity ? ` · ${counted(activity.saleCount, INVOICES, digits)}` : ''}
@@ -435,7 +441,12 @@ export function ShiftCloseScreen({
           counts={counts}
           setCounts={setCounts}
           till={settings.till}
-          intro={<Alert tone="info">عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.</Alert>}
+          intro={
+            <Alert tone="info">
+              عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.
+              <span className="block">الدرج يشمل نقد الزبائن والأمانات.</span>
+            </Alert>
+          }
         >
           {emptied.length > 0 && askedEmpty ? (
             <Alert tone="warning">
@@ -471,7 +482,7 @@ export function ShiftCloseScreen({
             </div>
             {/* The actions stay in view: «اطبع» first, then «تمّ» (the one way out) */}
             <div className="flex flex-col gap-3 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:order-3 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-surface max-lg:p-3">
-              <Button size="lg" fullWidth icon={<ReportsIcon />} onClick={() => print('80mm')}>
+              <Button size="lg" fullWidth icon={<PrintIcon />} onClick={() => print('80mm')}>
                 اطبع
               </Button>
               <Button size="lg" fullWidth variant="secondary" onClick={onClosed}>

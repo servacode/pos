@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AuthResponse, LoginInput, MeResponse } from '@serva/core';
-import { apiFetch, getAccessToken, onSessionExpired, refreshAccessToken, setAccessToken } from '../lib/api';
+import {
+  apiFetch,
+  forgetSession,
+  getAccessToken,
+  knownSignedOut,
+  onSessionExpired,
+  refreshAccessToken,
+  setAccessToken,
+} from '../lib/api';
 import { AuthContext, type AuthContextValue, type AuthState } from './AuthContext';
 import { clearReportCache } from '../admin/reports/useReport';
 
@@ -42,7 +50,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // memory: nothing is asked again. Only a fresh page load (no token yet) asks for one.
   const [boot] = useState(() => {
     const held = getAccessToken();
-    return held ? Promise.resolve(held) : refreshAccessToken();
+    if (held) return Promise.resolve(held);
+    // This browser was already told «no session»: show the login page without asking again.
+    if (knownSignedOut()) return Promise.resolve(null);
+    return refreshAccessToken();
   });
 
   useEffect(() => {
@@ -107,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiFetch<void>('/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     clearReportCache();
     keepMe(null);
-    setAccessToken(null);
+    forgetSession();
     setState({ status: 'signedOut' });
   }, []);
 

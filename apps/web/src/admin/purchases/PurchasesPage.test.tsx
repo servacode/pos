@@ -94,6 +94,12 @@ describe('«المشتريات»', () => {
     await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
     await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'حليب');
     await user.click(await screen.findByRole('button', { name: 'حليب طازج' }));
+    // the cursor is already in the new line's quantity, and the item search comes before the payment choice
+    expect(await screen.findByLabelText('كمية حليب طازج')).toHaveFocus();
+    expect(screen.getByLabelText('كمية حليب طازج')).toHaveAttribute('placeholder', 'الكمية');
+    const search = screen.getByLabelText('أضف صنفاً بالاسم أو الباركود');
+    const payment = screen.getByRole('heading', { name: 'الدفع' });
+    expect(search.compareDocumentPosition(payment) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.type(await screen.findByLabelText('كمية حليب طازج'), '12');
     await user.type(screen.getByLabelText('كلفة حليب طازج'), '24000');
     await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));

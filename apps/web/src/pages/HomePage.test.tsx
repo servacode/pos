@@ -341,6 +341,48 @@ describe('HomePage', () => {
       expect(screen.getByText('طرق الدفع اليوم')).toBeInTheDocument();
     });
 
+    it('lists money that waits (customers over their limit, debts, supplier dues) under «المال»', async () => {
+      const customer = (id: string, balanceMinor: number, creditLimitMinor: number | null) => ({
+        id,
+        name: id,
+        phone: null,
+        creditLimitMinor,
+        balanceMinor,
+        priceTier: 'retail',
+        noMessages: false,
+        archived: false,
+        kind: null,
+        contactName: null,
+        contactPhone: null,
+      });
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': {
+          status: 200,
+          body: meWith([...OWNER_KEYS, 'customers.view', 'purchases.manage']),
+        },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        'GET /v1/customers?owing=true': {
+          status: 200,
+          body: {
+            items: [customer('a', 500_000, 300_000), customer('b', 100_000, null)],
+            totalOwedMinor: 600_000,
+            baseCurrency: 'SYP',
+          },
+        },
+        'GET /v1/suppliers': {
+          status: 200,
+          body: { items: [], totalOwedMinor: 2_500_000, baseCurrency: 'SYP' },
+        },
+      });
+      const { user } = renderApp('/');
+
+      await user.click(await screen.findByRole('tab', { name: /المال/ }));
+      expect(await screen.findByText('زبون تجاوز حدّ الدين')).toBeInTheDocument();
+      expect(screen.getByText(/ديون الزبائن عندنا/)).toBeInTheDocument();
+      expect(screen.getByText(/مستحقات الموردين علينا/)).toBeInTheDocument();
+    });
+
     it('softens a change of more than double into «أكثر من الضعف» instead of a loud +150%', async () => {
       mockFetch({
         'POST /v1/auth/refresh': signedInRefresh,

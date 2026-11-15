@@ -450,7 +450,7 @@ const Grid = memo(function Grid({
       <ul
         aria-label="الأصناف"
         className={cn(
-          'grid auto-rows-fr content-start gap-3',
+          'grid content-start items-start gap-3',
           compact
             ? 'grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-2'
             : 'grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]',
@@ -586,13 +586,23 @@ function isSoldOut(pieces: readonly CatalogItem[], today: string): boolean {
   return stock !== null && stock <= 0;
 }
 
-/** «S M L»: the sizes in stock of a model, a sold-out size struck through */
-function SizeChips({ sizes }: { sizes: readonly { value: string; inStock: boolean }[] }) {
+/** «S 3 · M 1 · L»: the sizes of a model with what is left of each, a sold-out size struck through */
+function SizeChips({
+  sizes,
+}: {
+  sizes: readonly { value: string; inStock: boolean; left: number | null }[];
+}) {
+  const digits = useDigits();
   return (
     <span className="flex flex-wrap gap-x-2 gap-y-0.5 text-[0.8125rem] font-semibold">
       {sizes.map((s) => (
         <bdi key={s.value} className={s.inStock ? 'text-ink' : 'text-ink-muted line-through decoration-2'}>
           {s.value}
+          {s.inStock && s.left !== null ? (
+            <span className="num ms-0.5 text-xs font-normal text-ink-muted">
+              {formatQuantity(s.left, digits)}
+            </span>
+          ) : null}
           {s.inStock ? null : <span className="sr-only"> نفد</span>}
         </bdi>
       ))}

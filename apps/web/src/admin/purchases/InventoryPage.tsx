@@ -26,9 +26,6 @@ import {
   SearchField,
   SegmentedControl,
   Select,
-  KpiStrip,
-  Skeleton,
-  StatTile,
   StockIcon,
   TextField,
   useDensity,
@@ -42,7 +39,9 @@ import { sortByOptions } from '../../lib/optionOrder';
 import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 import { SectionHead } from './parts';
-import { shortKinds, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
+import { soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
+import { SlimKpis } from '../SlimKpis';
+import { countStock, negativeNote } from '../../lib/stockCounts';
 import { InventoryGrid } from './InventoryGrid';
 import { downloadCsv } from '../exportCsv';
 import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
@@ -120,21 +119,9 @@ export function InventoryPage() {
   const manyBranches = me.branches.length > 1;
   const branchName = (id: string) => me.branches.find((b) => b.id === id)?.name ?? '';
   const items = stock?.items ?? [];
-  // The same count as the products page (one definition): per combination over all branches, a
-  // combination below zero is not a piece, it is counted apart as «ناقص»; «نفد» is zero or less
-  const perKind = new Map<string, number>();
-  for (const r of items) perKind.set(r.variantId, (perKind.get(r.variantId) ?? 0) + r.qty);
-  const totals = [...perKind.values()];
-  const onShelf = totals.reduce((sum, q) => sum + Math.max(0, q), 0);
-  const belowZero = totals.filter((q) => q < 0).length;
-  const kinds = totals.length;
-  const soldOut = totals.filter((q) => q <= 0).length;
-  // How many products those combinations belong to (a row without its product counts as its own)
-  const productOf = new Map<string, string>();
-  for (const r of items) productOf.set(r.variantId, r.productId ?? r.variantId);
-  const soldOutProducts = new Set(
-    [...perKind].filter(([, q]) => q <= 0).map(([variantId]) => productOf.get(variantId)),
-  ).size;
+  // The same count as the products and home pages (lib/stockCounts): «نفد» is zero or less, «سالب» is told once
+  const clothing = me.tenant.sectors.includes('clothing');
+  const { pieces: onShelf, negative: belowZero, kinds, soldOut, soldOutProducts } = countStock(items);
   const counted = Object.values(counts).filter((text) => qtyOf(text) !== null).length;
   const countProblems = Object.values(counts).some((text) => countProblem(text) !== null);
   const review = reviewing ? reviewCount(items, counts) : [];
@@ -570,45 +557,37 @@ export function InventoryPage() {
             </p>
           </Card>
         ) : null}
-        <KpiStrip columns={3}>
-          <StatTile
-            label="قيمة المخزون بالكلفة"
-            value={
-              stock ? (
-                <Money minor={stock.totalValueMinor} currency={base} />
-              ) : (
-                <Skeleton className="h-9 w-36" />
-              )
-            }
-            footnote="بمتوسط كلفة كل صنف"
-          />
-          <StatTile
-            label="القطع في المخزون"
-            value={stock ? formatQuantity(onShelf, digits) : <Skeleton className="h-9 w-20" />}
-            footnote={
-              stock ? (
+        <SlimKpis
+          label="أرقام المخزون"
+          items={[
+            {
+              key: 'value',
+              label: 'قيمة المخزون بالكلفة',
+              value: stock ? <Money minor={stock.totalValueMinor} currency={base} /> : '…',
+            },
+            {
+              key: 'pieces',
+              label: 'القطع في المخزون',
+              value: stock ? formatQuantity(onShelf, digits) : '…',
+              note: stock ? (
                 <>
-                  {me.tenant.sectors.includes('clothing') ? 'المقاسات والألوان' : 'عدد الأصناف'}:{' '}
-                  <span className="num">{kinds}</span>
-                  {belowZero > 0 ? (
-                    <> · {shortKinds(belowZero, me.tenant.sectors.includes('clothing'))}</>
-                  ) : null}
+                  {clothing ? 'المقاسات والألوان' : 'عدد الأصناف'}: <span className="num">{kinds}</span>
                 </>
-              ) : undefined
-            }
-          />
-          <StatTile
-            label={soldOutLabel(me.tenant.sectors.includes('clothing'))}
-            value={stock ? soldOut : <Skeleton className="h-9 w-12" />}
-            footnote={
-              stock
+              ) : undefined,
+            },
+            {
+              key: 'out',
+              label: soldOutLabel(clothing),
+              value: stock ? soldOut : '…',
+              tone: stock && soldOut > 0 ? 'warning' : undefined,
+              note: stock
                 ? soldOut
-                  ? `${soldOutSentence(soldOut, soldOutProducts, me.tenant.sectors.includes('clothing'))}، معلَّمة في الجدول`
+                  ? `${soldOutSentence(soldOut, soldOutProducts, clothing)}${belowZero > 0 ? ` · ${negativeNote(belowZero)}` : ''}`
                   : 'في كل صنف قطع على الرف'
-                : undefined
-            }
-          />
-        </KpiStrip>
+                : undefined,
+            },
+          ]}
+        />
         <StockDefinitions />
         {profit ? (
           <div className="grid grid-cols-1 gap-6">

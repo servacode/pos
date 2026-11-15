@@ -18,6 +18,8 @@ export function formatQuantity(qtyThousandths: number, digits: 'latn' | 'arab' =
 }
 
 export interface CartLineProps {
+  /** The line's element id, so the cart can scroll to it */
+  id?: string;
   name: string;
   /** Quantity in thousandths (1 piece = 1000, 1.250 kg = 1250). */
   qtyThousandths: number;
@@ -47,6 +49,7 @@ export interface CartLineProps {
  * and opens in place with its actions.
  */
 export function CartLine({
+  id,
   name,
   qtyThousandths,
   unit,
@@ -64,6 +67,7 @@ export function CartLine({
   const digits = useDigits();
   return (
     <li
+      id={id}
       className={cn(
         'rounded-card transition-[background-color,box-shadow] duration-120 ease-standard',
         selected ? 'bg-brand-soft ring-1 ring-brand/25' : 'hover:bg-surface-muted/70',
@@ -74,7 +78,7 @@ export function CartLine({
           type="button"
           onClick={onSelect}
           aria-expanded={selected}
-          className="flex min-h-16 min-w-0 flex-1 items-start gap-3 rounded-card px-3 py-3 text-start motion-safe:animate-rise"
+          className="flex min-h-16 min-w-0 flex-1 items-start gap-3 rounded-card px-3 py-2 text-start motion-safe:animate-rise"
         >
           <span
             aria-hidden="true"
@@ -123,7 +127,7 @@ export function CartLine({
           />
         ) : null}
       </div>
-      {extra ? <div className="px-3 pb-3 ps-[3.75rem] text-sm">{extra}</div> : null}
+      {extra ? <div className="px-3 pb-2 ps-[3.75rem] text-sm">{extra}</div> : null}
       {selected && children ? (
         <div className="flex flex-wrap items-center gap-2 px-3 pb-3">{children}</div>
       ) : null}

@@ -38,7 +38,6 @@ import {
   SearchField,
   Select,
   Skeleton,
-  StatTile,
   Switch,
   TextField,
   TruckIcon,
@@ -65,6 +64,7 @@ import {
   today,
 } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead } from './parts';
+import { SlimKpis } from '../SlimKpis';
 import { PackQty } from './PackQty';
 import { PurchaseDetailDialog } from './PurchaseDetailDialog';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
@@ -269,52 +269,41 @@ export function PurchasesPage() {
           />
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <StatTile
-                label="مشتريات هذا الشهر"
-                value={
-                  purchases ? <Money minor={monthTotal} currency={base} /> : <Skeleton className="h-9 w-36" />
-                }
-                footnote={
-                  purchases ? (
+            <SlimKpis
+              label="أرقام المشتريات"
+              items={[
+                {
+                  key: 'month',
+                  label: 'مشتريات هذا الشهر',
+                  value: purchases ? <Money minor={monthTotal} currency={base} /> : '…',
+                  note: purchases ? (
                     <>
-                      عدد الفواتير: <span className="num">{thisMonth.length}</span>
+                      <span className="num">{thisMonth.length}</span> فاتورة من{' '}
+                      <span className="num">{purchases.length}</span>
+                      {latest ? (
+                        <span className="max-sm:hidden">
+                          {' '}
+                          · آخرها{' '}
+                          <bdi dir="ltr" className="num">
+                            {latest.number}
+                          </bdi>
+                        </span>
+                      ) : null}
                     </>
-                  ) : undefined
-                }
-              />
-              <StatTile
-                label="المستحق للموردين"
-                value={
-                  suppliers ? (
-                    <Money minor={suppliers.totalOwedMinor} currency={base} />
-                  ) : (
-                    <Skeleton className="h-9 w-36" />
-                  )
-                }
-                footnote={
-                  topSupplier
-                    ? `أكبر رصيد: ${topSupplier.name}`
-                    : suppliers
-                      ? 'لا شيء عليك لأي مورد'
-                      : undefined
-                }
-              />
-              <StatTile
-                label="عدد الفواتير"
-                value={purchases ? purchases.length : <Skeleton className="h-9 w-16" />}
-                footnote={
-                  latest ? (
-                    <>
-                      آخرها{' '}
-                      <bdi dir="ltr" className="num">
-                        {latest.number}
-                      </bdi>
-                    </>
-                  ) : undefined
-                }
-              />
-            </div>
+                  ) : undefined,
+                },
+                {
+                  key: 'owed',
+                  label: 'المستحق للموردين',
+                  value: suppliers ? <Money minor={suppliers.totalOwedMinor} currency={base} /> : '…',
+                  note: topSupplier ? (
+                    <span className="block truncate">{`أكبر رصيد: ${topSupplier.name}`}</span>
+                  ) : suppliers ? (
+                    'لا شيء عليك لأي مورد'
+                  ) : undefined,
+                },
+              ]}
+            />
             <section aria-label="فواتير الشراء" className="flex flex-col gap-3">
               <SectionHead title="فواتير الشراء" description="الأحدث أولاً. الملصقات تُطبع بعدد ما وصل.">
                 <SearchField
@@ -629,6 +618,15 @@ function PurchaseForm({
   // a clothing shop sees no expiry dates or IMEI).
   const [allFields, setAllFields] = useState(false);
   const s = useSaving();
+  // After an item is picked, the cursor goes to its quantity (the keyboard does not hunt for the new line)
+  const formRef = useRef<HTMLFormElement>(null);
+  const focusNew = useRef(false);
+  useEffect(() => {
+    if (!focusNew.current) return;
+    focusNew.current = false;
+    const fields = formRef.current?.querySelectorAll<HTMLInputElement>('[data-qty-input]');
+    fields?.[fields.length - 1]?.focus();
+  }, [lines.length]);
   // A batch dated in the past is saved only after the buyer says the date is right
   const [pastOk, setPastOk] = useState(false);
   const pastLines = lines.filter((l) => l.expiry && l.expiry < today());
@@ -656,6 +654,7 @@ function PurchaseForm({
 
   return (
     <form
+      ref={formRef}
       aria-label="فاتورة شراء"
       className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]"
       onSubmit={(e) => {
@@ -716,28 +715,6 @@ function PurchaseForm({
           </div>
         </Card>
         <Card>
-          <CardHeader icon={<CashIcon />} title="الدفع" description="كيف دُفع ثمن البضاعة." />
-          <RadioGroup legend="الدفع" hideLegend>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              {(Object.keys(PAYMENT_TEXT) as PurchasePayment[]).map((p) => {
-                const PayIcon = PAYMENT_LOOK[p].icon;
-                return (
-                  <ChoiceCard
-                    key={p}
-                    name="purchase-payment"
-                    value={p}
-                    checked={payment === p}
-                    onChange={() => setPayment(p)}
-                    title={PAYMENT_TEXT[p]}
-                    description={PAYMENT_LOOK[p].hint}
-                    leading={<PayIcon />}
-                  />
-                );
-              })}
-            </div>
-          </RadioGroup>
-        </Card>
-        <Card>
           <CardHeader
             icon={<ProductsIcon />}
             title="الأصناف"
@@ -745,15 +722,21 @@ function PurchaseForm({
           />
           <div className="flex flex-col gap-4">
             <VariantPicker
-              onPick={(v) =>
+              onPick={(v) => {
+                // only a line that is really added gets the cursor
+                focusNew.current =
+                  !lines.some((l) => l.variantId === v.variantId) ||
+                  withDates ||
+                  allFields ||
+                  !!v.requiresExpiry;
                 setLines((list) =>
                   // The same item twice is allowed where batches are kept: each on its own line, with its batch
                   list.some((l) => l.variantId === v.variantId) &&
                   !(withDates || allFields || v.requiresExpiry)
                     ? list
                     : [...list, { ...v, qty: '', packQty: 1000, cost: '', batch: '', expiry: '' }],
-                )
-              }
+                );
+              }}
               onPickGrid={(picked) =>
                 setLines((list) => [
                   ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
@@ -833,6 +816,7 @@ function PurchaseForm({
                           <NumberField
                             label={`كلفة وحدة ${l.name}`}
                             hideLabel
+                            placeholder="كلفة الوحدة"
                             decimals={2}
                             value={l.unitCost ?? ''}
                             onValueChange={(unitCost) =>
@@ -847,6 +831,7 @@ function PurchaseForm({
                           <NumberField
                             label={`كلفة ${l.name}`}
                             hideLabel
+                            placeholder="مجموع الكلفة"
                             decimals={2}
                             value={l.cost}
                             onValueChange={(cost) =>
@@ -953,6 +938,28 @@ function PurchaseForm({
               />
             )}
           </div>
+        </Card>
+        <Card>
+          <CardHeader icon={<CashIcon />} title="الدفع" description="كيف دُفع ثمن البضاعة." />
+          <RadioGroup legend="الدفع" hideLegend>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {(Object.keys(PAYMENT_TEXT) as PurchasePayment[]).map((p) => {
+                const PayIcon = PAYMENT_LOOK[p].icon;
+                return (
+                  <ChoiceCard
+                    key={p}
+                    name="purchase-payment"
+                    value={p}
+                    checked={payment === p}
+                    onChange={() => setPayment(p)}
+                    title={PAYMENT_TEXT[p]}
+                    description={PAYMENT_LOOK[p].hint}
+                    leading={<PayIcon />}
+                  />
+                );
+              })}
+            </div>
+          </RadioGroup>
         </Card>
       </div>
       {/* The totals stay in view: beside the form on a wide screen, over the bottom edge on a phone. */}

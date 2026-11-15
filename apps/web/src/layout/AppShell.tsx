@@ -347,19 +347,19 @@ function SectionTabs({ section, pathname }: { section: NavSection; pathname: str
   return (
     // -mb-px: the open tab's line lies on the header's hairline.
     <nav aria-label={`صفحات ${section.label}`} className="-mb-px">
-      <ScrollStrip>
+      <ScrollStrip className="max-sm:snap-x max-sm:snap-proximity">
         <ul className="flex min-w-max gap-1">
           {section.pages.map((page) => {
             const active = pageOwns(page, pathname);
             return (
-              <li key={page.to}>
+              <li key={page.to} className="snap-start">
                 <Link
                   to={page.to}
                   aria-current={active ? 'page' : undefined}
                   className={cn(
                     CONTROL_HEIGHT.comfortable,
                     // The focus ring is drawn inside the tab, so the scrolling strip never clips it.
-                    'inline-flex items-center rounded-t-small border-b-2 px-3 text-[0.9375rem] font-semibold whitespace-nowrap transition-colors duration-120 ease-standard focus-visible:-outline-offset-2',
+                    'inline-flex items-center rounded-t-small border-b-2 px-3 text-[0.9375rem] font-semibold whitespace-nowrap max-sm:px-2.5 transition-colors duration-120 ease-standard focus-visible:-outline-offset-2',
                     active
                       ? 'border-brand text-ink'
                       : 'border-transparent text-ink-muted hover:border-line-control/50 hover:text-ink',

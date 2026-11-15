@@ -23,7 +23,6 @@ import {
   IconButton,
   IconChip,
   InfoIcon,
-  KpiStrip,
   Menu,
   MenuItem,
   Money,
@@ -37,10 +36,6 @@ import {
   SegmentedControl,
   Select,
   Sheet,
-  Skeleton,
-  StatTile,
-  StockIcon,
-  WarningIcon,
   cn,
   formatQuantity,
   textLinkClass,
@@ -65,7 +60,9 @@ import { downloadCsv } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
-import { shortKinds, shortPieces, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
+import { shortPieces, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
+import { SlimKpis } from '../SlimKpis';
+import { negativeNote } from '../../lib/stockCounts';
 import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
 import { ButtonLink } from './parts';
 
@@ -875,111 +872,74 @@ function ProductsList() {
           </button>
         ) : null}
         {showSummary && (!phone || kpiOpen) ? (
-          <KpiStrip columns={showExpiry ? 4 : 3}>
-            <StatTile
-              className="sm:gap-y-1 sm:p-4"
-              label="المنتجات"
-              icon={<ProductsIcon />}
-              value={
-                summary ? (
-                  <bdi className="num">{`${summary.products}${more}`}</bdi>
-                ) : (
-                  <Skeleton className="my-1.5 h-6 w-16" />
-                )
-              }
-              footnote={
-                summary && summary.variants > 0 && summary.variants !== summary.products ? (
-                  <>
-                    {clothingStore ? 'المقاسات والألوان' : 'عدد الأصناف'}:{' '}
-                    <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
-                  </>
-                ) : undefined
-              }
-            />
-            <StatTile
-              className="sm:gap-y-1 sm:p-4"
-              label="القطع في المخزون"
-              icon={<StockIcon />}
-              iconTone="neutral"
-              value={
-                summary ? (
+          <SlimKpis
+            label="أرقام المنتجات"
+            items={[
+              {
+                key: 'products',
+                label: 'المنتجات',
+                value: summary ? <bdi className="num">{`${summary.products}${more}`}</bdi> : '…',
+                note:
+                  summary && summary.variants > 0 && summary.variants !== summary.products ? (
+                    <>
+                      {clothingStore ? 'المقاسات والألوان' : 'عدد الأصناف'}:{' '}
+                      <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
+                    </>
+                  ) : undefined,
+              },
+              {
+                key: 'pieces',
+                label: 'القطع في المخزون',
+                value: summary ? (
                   <bdi className="num">{`${formatQuantity(summary.pieces, digits)}${more}`}</bdi>
                 ) : (
-                  <Skeleton className="my-1.5 h-6 w-20" />
-                )
-              }
-              footnote={
-                summary && summary.negative > 0 ? (
+                  '…'
+                ),
+              },
+              {
+                key: 'out',
+                label: soldOutLabel(clothingStore),
+                value: summary ? <bdi className="num">{`${summary.runOut}${more}`}</bdi> : '…',
+                tone: summary && summary.runOut > 0 ? 'warning' : undefined,
+                note: !summary?.lowest ? undefined : summary.runOut > 0 ? (
                   <>
-                    <bdi className="font-semibold text-ink">
-                      {shortKinds(summary.negative, clothingStore)}
-                    </bdi>
+                    {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
+                    {summary.negative > 0 ? <> · {negativeNote(summary.negative)}</> : null}
+                    {summary.negative > 0 && canManage ? (
+                      <>
+                        {' '}
+                        <Link to="/inventory" className={textLinkClass}>
+                          اجرد المخزون
+                        </Link>
+                      </>
+                    ) : null}
                   </>
-                ) : undefined
-              }
-            />
-            <StatTile
-              className="sm:gap-y-1 sm:p-4"
-              label={soldOutLabel(clothingStore)}
-              icon={<WarningIcon />}
-              iconTone={summary && summary.runOut > 0 ? 'warning' : 'neutral'}
-              value={
-                summary ? (
-                  <bdi className="num">{`${summary.runOut}${more}`}</bdi>
                 ) : (
-                  <Skeleton className="my-1.5 h-6 w-12" />
-                )
-              }
-              footnote={
-                summary?.lowest ? (
-                  summary.lowest.qty < 0 ? (
-                    <>
-                      {summary.runOut > 0 ? (
-                        <span className="mb-1 flex font-semibold text-ink">
-                          {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
-                        </span>
-                      ) : null}
-                      <Badge tone="danger">سالب</Badge> {summary.lowest.nameAr}: بعتَ أكثر مما سجّلت، صحّح
-                      الجرد.
-                      {canManage ? (
-                        <span className="mt-1 flex">
-                          <Link to="/inventory" className={textLinkClass}>
-                            اجرد المخزون
-                          </Link>
-                        </span>
-                      ) : null}
-                    </>
-                  ) : summary.runOut > 0 ? (
-                    <span className="font-semibold text-ink">
-                      {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
-                    </span>
-                  ) : (
-                    'في كل صنف قطع على الرف'
-                  )
-                ) : undefined
-              }
-            />
-            {showExpiry ? (
-              <StatTile
-                className="sm:gap-y-1 sm:p-4"
-                label="ينتهي خلال 30 يوماً"
-                icon={<WarningIcon />}
-                iconTone={expiringSoon > 0 ? 'warning' : 'neutral'}
-                value={<bdi className="num">{expiringSoon}</bdi>}
-                footnote={
-                  expiringSoon > 0 && filters.expiry !== 'soon' ? (
-                    <button
-                      type="button"
-                      className={textLinkClass}
-                      onClick={() => setFilter('expiry', 'soon')}
-                    >
-                      اعرضها
-                    </button>
-                  ) : undefined
-                }
-              />
-            ) : null}
-          </KpiStrip>
+                  'في كل صنف قطع على الرف'
+                ),
+              },
+              ...(showExpiry
+                ? [
+                    {
+                      key: 'expiry',
+                      label: 'ينتهي خلال 30 يوماً',
+                      value: <bdi className="num">{expiringSoon}</bdi>,
+                      tone: expiringSoon > 0 ? ('warning' as const) : undefined,
+                      note:
+                        expiringSoon > 0 && filters.expiry !== 'soon' ? (
+                          <button
+                            type="button"
+                            className={textLinkClass}
+                            onClick={() => setFilter('expiry', 'soon')}
+                          >
+                            اعرضها
+                          </button>
+                        ) : undefined,
+                    },
+                  ]
+                : []),
+            ]}
+          />
         ) : null}
         {showSummary && !phone ? <StockDefinitions /> : null}
 
@@ -1194,13 +1154,8 @@ function ProductsList() {
           ((canManage && uncategorised > 0) || zeroPrice > 0 || noPhoto > 0) ? (
             <Alert tone={zeroPrice > 0 ? 'warning' : 'info'} className="[&>div]:flex-1">
               <span className="flex flex-col gap-1.5" aria-label="تحتاج انتباهك">
-                <span
-                  className={cn(
-                    'flex items-center gap-x-3 gap-y-1',
-                    phone ? 'min-w-0 flex-nowrap' : 'flex-wrap',
-                  )}
-                >
-                  <span className={phone ? 'min-w-0 truncate' : undefined}>
+                <span className="flex items-start gap-x-3 gap-y-1">
+                  <span className="min-w-0 flex-1">
                     {[
                       canManage && uncategorised > 0 ? `${String(uncategorised)} بلا تصنيف` : null,
                       zeroPrice > 0 ? `${String(zeroPrice)} بسعر صفر` : null,
@@ -1209,17 +1164,7 @@ function ProductsList() {
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
-                  {canManage && uncategorised > 0 && !phone ? (
-                    <button
-                      type="button"
-                      className={textLinkClass}
-                      disabled={loadingAuto}
-                      onClick={() => void categorizeAuto()}
-                    >
-                      صنّفها تلقائياً
-                    </button>
-                  ) : null}
-                  <span className="ms-auto flex items-center gap-1">
+                  <span className="flex shrink-0 items-center gap-1">
                     <IconButton
                       size="xs"
                       label={showWhy ? 'أخفِ الشرح' : 'اشرح'}
@@ -1236,18 +1181,28 @@ function ProductsList() {
                     ) : null}
                   </span>
                 </span>
-                {showWhy ? (
-                  <span className="flex flex-col gap-1 text-sm">
-                    {phone && canManage && uncategorised > 0 ? (
+                {/* The action is a button with words, on a phone too */}
+                {(canManage && uncategorised > 0) || (canManage && noPhoto > 0) ? (
+                  <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {canManage && noPhoto > 0 ? (
+                      <button type="button" className={textLinkClass} onClick={() => setPhotosOpen(true)}>
+                        أضف الصور
+                      </button>
+                    ) : null}
+                    {canManage && uncategorised > 0 ? (
                       <button
                         type="button"
-                        className={cn(textLinkClass, 'w-fit')}
+                        className={textLinkClass}
                         disabled={loadingAuto}
                         onClick={() => void categorizeAuto()}
                       >
                         صنّفها تلقائياً
                       </button>
                     ) : null}
+                  </span>
+                ) : null}
+                {showWhy ? (
+                  <span className="flex flex-col gap-1 text-sm">
                     {canManage && uncategorised > 0 ? (
                       <span>التصنيفات تُسهّل البحث والتقارير، وتُرتّب المتجر الإلكتروني.</span>
                     ) : null}

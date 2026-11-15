@@ -178,30 +178,30 @@ function DayReportBody({ report }: { report: DayReport }) {
 
   return (
     <>
-      <div className="flex min-w-0 flex-col gap-4">
+      {/* Four equal tiles, one clear headline (the net of the returns); the other figures are named in words */}
+      <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
         <StatTile
-          hero
-          wrapFootnote
-          label={report.returns.count > 0 ? 'المبيعات بعد المرتجعات' : 'المبيعات'}
+          label={report.returns.count > 0 ? 'صافي المبيعات بعد المرتجعات' : 'المبيعات'}
           value={<Money minor={net} currency={base} />}
           footnote={
+            report.returns.count > 0 ? (
+              <>
+                مجموع الفواتير قبل المرتجعات <Money minor={report.totalMinor} currency={base} />
+              </>
+            ) : undefined
+          }
+        />
+        <StatTile
+          label="عدد الفواتير"
+          value={<span className="num">{displayNumber(String(report.invoiceCount), digits)}</span>}
+        />
+        <StatTile label="متوسط الفاتورة" value={<Money minor={average} currency={base} />} />
+        <StatTile
+          label="المرتجعات والحسم"
+          value={<Money minor={report.returns.totalMinor} currency={base} />}
+          footnote={
             <>
-              <bdi className="num">{displayNumber(String(report.invoiceCount), digits)}</bdi> فاتورة · متوسطها{' '}
-              <Money minor={average} currency={base} />
-              {report.returns.count > 0 ? (
-                <>
-                  {' '}
-                  · قبل المرتجعات <Money minor={report.totalMinor} currency={base} /> · المرتجعات{' '}
-                  <Money minor={report.returns.totalMinor} currency={base} />
-                </>
-              ) : null}
-              {/* Discount and tax are small figures: a line in the card, not two more tall cards */}
-              {report.discountMinor !== 0 ? (
-                <>
-                  {' '}
-                  · الحسم <Money minor={report.discountMinor} currency={base} />
-                </>
-              ) : null}
+              الحسم <Money minor={report.discountMinor} currency={base} />
               {report.taxMinor !== 0 ? (
                 <>
                   {' '}

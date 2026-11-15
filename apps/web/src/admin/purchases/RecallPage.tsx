@@ -28,6 +28,7 @@ import {
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
+import { registeredAdjective } from '../../lib/plural';
 import { downloadCsv } from '../exportCsv';
 import { getRecall, listExpiry, setBatchBlocked } from './api';
 import { SectionHead } from './parts';
@@ -39,9 +40,46 @@ export function buyersSummary(sales: RecallSale[]): string {
   );
   const anonymous = new Set(sales.filter((s) => !s.customerName && !s.customerPhone).map((s) => s.invoiceId))
     .size;
-  const parts = [`${countNoun(known.size, COUNT_NOUNS.customer)} مسجَّل في الفواتير`];
+  const parts = [
+    `${countNoun(known.size, COUNT_NOUNS.customer)} ${registeredAdjective(known.size)} في الفواتير`,
+  ];
   if (anonymous > 0) parts.push(`${countNoun(anonymous, COUNT_NOUNS.invoice)} بلا زبون`);
   return parts.join(' · ');
+}
+
+/** The known buyers one by one (by phone, else by name), and the invoices that name nobody */
+export function buyerList(sales: RecallSale[]): {
+  people: { name: string; phone: string; invoices: number; qty: number }[];
+  anonymous: { invoices: number; qty: number };
+} {
+  const people = new Map<string, { name: string; phone: string; ids: Set<string>; qty: number }>();
+  const nobody = { ids: new Set<string>(), qty: 0 };
+  for (const sale of sales) {
+    if (!sale.customerName && !sale.customerPhone) {
+      nobody.ids.add(sale.invoiceId);
+      nobody.qty += sale.qty;
+      continue;
+    }
+    const key = sale.customerPhone ?? sale.customerName ?? '';
+    const row = people.get(key) ?? {
+      name: sale.customerName ?? '',
+      phone: sale.customerPhone ?? '',
+      ids: new Set<string>(),
+      qty: 0,
+    };
+    row.ids.add(sale.invoiceId);
+    row.qty += sale.qty;
+    people.set(key, row);
+  }
+  return {
+    people: [...people.values()].map((x) => ({
+      name: x.name,
+      phone: x.phone,
+      invoices: x.ids.size,
+      qty: x.qty,
+    })),
+    anonymous: { invoices: nobody.ids.size, qty: nobody.qty },
+  };
 }
 
 /**
@@ -170,13 +208,28 @@ export function RecallPage() {
         s.branchName,
         s.name,
         s.qty / 1000,
-        s.customerName ?? '',
+        s.customerName ?? (s.customerPhone ? '' : 'بلا زبون'),
         s.customerPhone ?? '',
       ]),
     );
   }
 
+  /** The people to call: one row per known customer with the pieces they got, then what cannot be traced */
+  function exportBuyers() {
+    if (!found) return;
+    const { people, anonymous } = buyerList(found.sales);
+    downloadCsv(
+      `buyers-${found.batchNo}`,
+      ['الزبون', 'الهاتف', 'الفواتير', 'الكمية'],
+      [
+        ...people.map((x) => [x.name, x.phone, x.invoices, x.qty / 1000]),
+        ...(anonymous.invoices > 0 ? [['بلا زبون', '', anonymous.invoices, anonymous.qty / 1000]] : []),
+      ],
+    );
+  }
+
   const blocked = found?.batches.some((b) => b.blocked) ?? false;
+  const anonymousQty = found ? buyerList(found.sales).anonymous.qty : 0;
   const batchColumns: DataColumn<RecallBatch>[] = [
     { key: 'name', header: 'الصنف', cell: (b) => b.name },
     {
@@ -404,9 +457,26 @@ export function RecallPage() {
                     description="كل فاتورة بيعت منها، مع الزبون وهاتفه إن عُرف."
                   />
                   {found.sales.length > 0 ? (
-                    <p className="text-sm text-ink-muted" data-testid="recall-buyers-summary">
-                      {buyersSummary(found.sales)}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <p
+                        className="min-w-0 flex-1 text-sm text-ink-muted"
+                        data-testid="recall-buyers-summary"
+                      >
+                        {buyersSummary(found.sales)}
+                      </p>
+                      <Button variant="secondary" onClick={exportBuyers}>
+                        صدّر الزبائن
+                      </Button>
+                    </div>
+                  ) : null}
+                  {anonymousQty > 0 ? (
+                    <Alert tone="warning">
+                      <span data-testid="recall-anonymous">
+                        فواتير بلا زبون: خرج منها{' '}
+                        <bdi className="num font-semibold">{formatQuantity(anonymousQty, digits)}</bdi> قطعة
+                        من هذه الدفعة ولا يمكن الوصول إلى مشتريها، فاحسبها ضمن المخاطرة.
+                      </span>
+                    </Alert>
                   ) : null}
                   <DataTable
                     caption="فواتير الدفعة"

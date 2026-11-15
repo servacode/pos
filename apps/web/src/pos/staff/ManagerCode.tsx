@@ -34,9 +34,10 @@ export function ManagerCode({
   const [status, setStatus] = useState<PinStatus>({ kind: 'idle' });
   // The code pad opens in view, even when the panel it sits in is taller than the screen
   const root = useRef<HTMLElement>(null);
+  // …and again when a manager is picked: the keypad appears then, below the names, and must show whole
   useEffect(() => {
-    root.current?.scrollIntoView?.({ block: 'nearest' });
-  }, []);
+    root.current?.scrollIntoView?.({ block: picked ? 'end' : 'nearest' });
+  }, [picked]);
 
   async function submit(pin: string) {
     if (!picked) return;

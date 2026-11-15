@@ -46,6 +46,36 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  if (token) noteSession('in');
+}
+
+/** Signing out: this browser now knows it has no session. */
+export function forgetSession(): void {
+  accessToken = null;
+  noteSession('out');
+}
+
+// What this browser last learned about its session, kept only to spare a request: a device that was
+// told «no session» (or signed out) does not ask again on every page load, so a signed-out visit
+// to the login page leaves no red 401 line in the console. Never read as proof of a session: a
+// device that has not been told anything yet still asks once, and signing in always sets it back.
+const SESSION_NOTE_KEY = 'serva.session';
+
+function noteSession(state: 'in' | 'out'): void {
+  try {
+    globalThis.localStorage?.setItem(SESSION_NOTE_KEY, state);
+  } catch {
+    // Storage refused: the page simply asks as before.
+  }
+}
+
+/** True only when this browser was explicitly told, last time, that it has no session. */
+export function knownSignedOut(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(SESSION_NOTE_KEY) === 'out';
+  } catch {
+    return false;
+  }
 }
 
 export function onSessionExpired(listener: () => void): () => void {
@@ -57,6 +87,7 @@ export function onSessionExpired(listener: () => void): () => void {
 
 function expireSession(): void {
   accessToken = null;
+  noteSession('out');
   for (const listener of sessionExpiredListeners) listener();
 }
 
@@ -146,10 +177,14 @@ async function refreshOnce(): Promise<string | null> {
     // Only a real «no» (no cookie, expired or revoked session) ends the session. A busy server, a
     // rate limit or a race that outlasted its retries is a failed attempt: it throws, the caller
     // keeps the signed-in screen, and the next request asks again (this was the rare bounce).
-    if (res.status === 401 || res.status === 403) return null;
+    if (res.status === 401 || res.status === 403) {
+      noteSession('out');
+      return null;
+    }
     if (!res.ok) throw await toApiError(res);
     const data = (await readJson(res)) as RefreshResponse | undefined;
     accessToken = data?.accessToken ?? null;
+    if (accessToken) noteSession('in');
     return accessToken;
   }
 }
