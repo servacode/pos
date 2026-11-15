@@ -67,7 +67,8 @@ export default [
     name: 'Stylesheet: @serva/ui theme and component classes (gzip)',
     path: manifest['index.html'].css.map((file) => `dist/${file}`),
     gzip: true,
-    limit: '22 kB',
+    // 22.5: the KPI strip, attention panel and stock-wording classes added in the pilot rounds
+    limit: '22.5 kB',
   },
   {
     name: 'Cashier fonts (woff2: Arabic + Latin, 400/600/700)',
