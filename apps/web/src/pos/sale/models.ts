@@ -171,7 +171,7 @@ export function piecesText(count: number): string {
  */
 export function sizeStock(
   pieces: readonly CatalogItem[],
-): { value: string; inStock: boolean; left: number | null }[] | null {
+): { option: string; value: string; inStock: boolean; left: number | null }[] | null {
   const options = optionsOf(pieces);
   const size =
     options.find((o) => /مقاس|size/i.test(o.name)) ?? (options.length === 1 ? options[0] : undefined);
@@ -186,8 +186,28 @@ export function sizeStock(
     const left = mine.every((p) => typeof p.stockQty === 'number')
       ? mine.reduce((sum, p) => sum + Math.max(0, p.stockQty as number), 0)
       : null;
-    return { value, inStock, left };
+    return { option: size.name, value, inStock, left };
   });
+}
+
+/**
+ * A cart line's name split into the product and its variant («فستان صيفي» + «34 · أزرق»), so the
+ * variant can stay on one line. A name that does not start with the product's name stays whole.
+ */
+export function variantSplit(
+  name: string,
+  item: CatalogItem | undefined,
+): { name: string; variant: string | null } {
+  const product = item?.attributes?.length ? item.productName : undefined;
+  if (!product || !name.startsWith(product)) return { name, variant: null };
+  const variant = name.slice(product.length).trim();
+  return variant ? { name: product, variant } : { name, variant: null };
+}
+
+/** «غيّر المقاس واللون»: what a line's change button says, from the model's options */
+export function changeLabel(pieces: readonly CatalogItem[]): string {
+  const names = optionsOf(pieces).map((o) => o.name);
+  return `غيّر ${names.length > 0 ? names.join(' و') : 'الخيار'}`;
 }
 
 /** The lowest price among a model's pieces, for its tile («من 45,000»). */

@@ -132,7 +132,7 @@ export function PharmacyForm({
         />
         <Switch
           label="امنع البيع بلا دفعة صالحة"
-          description="مطفأ: إن لم تكفِ الدفعات الصالحة (منتهية أو موقوفة أو نفدت) طلب الكاشير رمز المدير. مشعل: لا يُباع."
+          description="مطفأ: إن لم تكفِ الدفعات الصالحة (منتهية أو موقوفة أو نفد) طلب الكاشير رمز المدير. مشعل: لا يُباع."
           checked={blockNoBatch}
           onCheckedChange={setBlockNoBatch}
         />

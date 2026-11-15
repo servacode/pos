@@ -282,7 +282,7 @@ export function InvoicesPage() {
       <ReportFilters>
         <SearchField
           label="ابحث برقم الفاتورة أو اسم الزبون"
-          placeholder="رقم الفاتورة أو الزبون أو رقم الدفعة"
+          placeholder="رقم الفاتورة أو الزبون أو الرقم التسلسلي أو الدفعة"
           value={typed}
           onValueChange={setTyped}
           className="min-w-56"

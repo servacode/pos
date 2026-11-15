@@ -62,6 +62,15 @@ describe('«مبيعات اليوم»', () => {
     expect(text(methods)).toContain('بعد المرتجعات11,845 ل.س');
   });
 
+  it('names the returns tile «المرتجعات» (the discount is under it), not both', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({ returns: { count: 1, totalMinor: 100_000, taxMinor: 0, byMethod: [] } }),
+    });
+    expect(await screen.findByText('المرتجعات')).toBeInTheDocument();
+    expect(screen.queryByText('المرتجعات والحسم')).not.toBeInTheDocument();
+  });
+
   it('explains a few liras between the payments and the invoices', async () => {
     openDay({
       status: 200,

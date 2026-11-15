@@ -29,6 +29,8 @@ export function VariantPicker({
   inCart,
   priceNote,
   Kind,
+  initial,
+  actionLabel = 'أضف إلى السلة',
   onAdd,
   onCancel,
 }: {
@@ -40,6 +42,10 @@ export function VariantPicker({
   priceNote?: (minor: number, currency: CatalogItem['price']['currency']) => ReactNode;
   /** What the product is, drawn when it has no photo */
   Kind?: Icon;
+  /** A choice made before the picker opened (the size chip tapped on the tile) */
+  initial?: Readonly<Record<string, string>>;
+  /** The add button's words: «بدّل في السلة» when a line's size or colour is being changed */
+  actionLabel?: string;
   onAdd: (piece: CatalogItem, qty: number) => void;
   onCancel: () => void;
 }) {
@@ -48,7 +54,10 @@ export function VariantPicker({
   const options = optionsOf(pieces);
   const [chosen, setChosen] = useState<Record<string, string>>(() =>
     // An option with a single value («أبيض» only) starts chosen.
-    Object.fromEntries(options.filter((o) => o.values.length === 1).map((o) => [o.name, o.values[0]!])),
+    ({
+      ...Object.fromEntries(options.filter((o) => o.values.length === 1).map((o) => [o.name, o.values[0]!])),
+      ...initial,
+    }),
   );
   // How many options really have a choice (a colour with one value starts chosen)
   const choosable = options.filter((o) => o.values.length > 1).length;
@@ -150,7 +159,7 @@ export function VariantPicker({
               'نفد — أضفه رغم ذلك'
             ) : (
               <span className="flex min-w-0 flex-wrap items-center justify-center gap-x-2">
-                <span>أضف إلى السلة</span>
+                <span>{actionLabel}</span>
                 <span className="whitespace-nowrap">
                   {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
                   <Money minor={piece.price.priceMinor * qty} currency={piece.price.currency} />

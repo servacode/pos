@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { formatMoney, type CurrencyCode, type MeResponse } from '@serva/core';
 import {
+  Alert,
   BarChart,
   Button,
   Card,
@@ -24,6 +25,7 @@ import { DAY_REPORT_ACCESS } from './access';
 import { getDayReport } from './api';
 import type { DayReport } from './contracts';
 import { methodLabel } from './labels';
+import { useOpenShiftFromYesterday } from './openShift';
 import {
   BranchSelect,
   DayField,
@@ -197,7 +199,7 @@ function DayReportBody({ report }: { report: DayReport }) {
         />
         <StatTile label="متوسط الفاتورة" value={<Money minor={average} currency={base} />} />
         <StatTile
-          label="المرتجعات والحسم"
+          label="المرتجعات"
           value={<Money minor={report.returns.totalMinor} currency={base} />}
           footnote={
             <>
@@ -421,6 +423,8 @@ export function DayReportPage() {
   const { paper, print } = usePrint();
   const title = `${branchName(me, branchId)} · ${dayText(date, digits)}`;
   const isToday = date === today;
+  // After midnight a shift opened yesterday may still be open: its invoices are yesterday's
+  const { note: openShift } = useOpenShiftFromYesterday(isToday, today, me.tenant.timezone);
 
   return (
     <ReportScreen me={me} access={DAY_REPORT_ACCESS} title="مبيعات اليوم">
@@ -439,6 +443,14 @@ export function DayReportPage() {
         <BranchSelect me={me} value={branchId} onChange={setBranchId} />
         <DayField label="اليوم" value={date} max={today} onChange={setDate} />
       </ReportFilters>
+
+      {openShift ? (
+        <Alert tone="info">
+          وردية مفتوحة منذ أمس: {displayNumber(String(openShift.count), digits)} فاتورة بمبلغ{' '}
+          <Money minor={openShift.netMinor} currency={me.settings.baseCurrency} className="font-semibold" />.
+          فواتيرها بتاريخ أمس، فلا تظهر في أرقام اليوم.
+        </Alert>
+      ) : null}
 
       {loading ? <ReportLoading label="نحمّل مبيعات اليوم…" /> : null}
       {error ? <ReportError message={error} onRetry={retry} /> : null}

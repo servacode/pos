@@ -27,11 +27,19 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
   const ref = useRef<HTMLDivElement>(null);
   // Which physical edges have more behind them
   const [hidden, setHidden] = useState({ left: false, right: false });
+  // Whether the end padding is on: it lets the last item scroll out from under the fade
+  const padded = useRef(false);
+  const [pad, setPad] = useState(false);
 
   const measure = useCallback(() => {
     const el = ref.current;
     if (!el) return;
-    const room = el.scrollWidth - el.clientWidth;
+    const room = el.scrollWidth - el.clientWidth - (padded.current ? FADE : 0);
+    const wantPad = room > 1;
+    if (padded.current !== wantPad) {
+      padded.current = wantPad;
+      setPad(wantPad);
+    }
     if (room <= 1) {
       setHidden((h) => (h.left || h.right ? { left: false, right: false } : h));
       return;
@@ -41,7 +49,8 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
     const rtl =
       getComputedStyle(el).direction === 'rtl' || el.closest('[dir]')?.getAttribute('dir') === 'rtl';
     const moreAtStart = travelled > 1;
-    const moreAtEnd = travelled < room - 1;
+    // With the padding on, the last item rests clear of the fade at the end of the travel
+    const moreAtEnd = travelled < el.scrollWidth - el.clientWidth - 1;
     const next = rtl ? { left: moreAtEnd, right: moreAtStart } : { left: moreAtStart, right: moreAtEnd };
     setHidden((h) => (h.left === next.left && h.right === next.right ? h : next));
   }, []);
@@ -54,6 +63,18 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
       block: 'nearest',
     });
     measure();
+    // The open item changes without the strip remounting (a pill tab): bring the new one in
+    let open = el.querySelector('[aria-current="page"], [aria-selected="true"]');
+    const follow = new MutationObserver(() => {
+      const now = el.querySelector('[aria-current="page"], [aria-selected="true"]');
+      if (now && now !== open) now.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+      open = now;
+    });
+    follow.observe(el, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['aria-selected', 'aria-current'],
+    });
     el.addEventListener('scroll', measure, { passive: true });
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     observer?.observe(el);
@@ -61,6 +82,7 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
     return () => {
       el.removeEventListener('scroll', measure);
       observer?.disconnect();
+      follow.disconnect();
     };
   }, [measure]);
 
@@ -78,7 +100,7 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
       ref={ref}
       data-fade-left={hidden.left || undefined}
       data-fade-right={hidden.right || undefined}
-      style={mask}
+      style={pad ? { ...mask, paddingInlineEnd: FADE } : mask}
       className={cn('scrollbar-none overflow-x-auto', className)}
     >
       {children}

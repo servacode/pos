@@ -18,6 +18,7 @@ import {
   LockIcon,
   Money,
   PrintIcon,
+  cn,
   RemoveIcon,
   ReportsIcon,
   SalesIcon,
@@ -119,7 +120,13 @@ function CountLayout({
       </div>
       {/* A phone: the panel's parts join the page itself, so its button can stay in view (sticky) at the screen's end */}
       <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 max-lg:contents lg:sticky lg:top-0">
-        <div className="flex flex-col gap-1 rounded-control bg-surface-total px-4 py-3">
+        <div
+          className={cn(
+            'flex flex-col gap-1 rounded-control bg-surface-total px-4 py-3',
+            // One drawer: its own total (the field or the header) already says it
+            counts.length === 1 && 'sr-only',
+          )}
+        >
           <span className="text-sm font-semibold text-ink-muted">المجموع الحي</span>
           {counts.map((c) => (
             <Money
@@ -278,12 +285,15 @@ export function ShiftCloseScreen({
   shift,
   onBack,
   onClosed,
+  onSaved,
 }: {
   session: StaffSession;
   catalog: Catalog;
   shift: OpenShift;
   onBack: () => void;
   onClosed: () => void;
+  /** The close is saved: the Z report is showing, the shift is no longer open (the header says so) */
+  onSaved?: () => void;
 }) {
   const pos = usePos();
   const digits = useDigits();
@@ -365,6 +375,7 @@ export function ShiftCloseScreen({
       setConfirming(false);
       setSaving(false);
       setStep('done');
+      onSaved?.();
     } catch {
       setSaving(false);
       setError('لم تُغلق الوردية. لم يُحفظ شيء، حاول مرة أخرى.');
@@ -423,7 +434,11 @@ export function ShiftCloseScreen({
         title={step === 'count' ? 'إغلاق الوردية' : step === 'done' ? 'أُغلقت الوردية' : 'ملخّص الوردية'}
         description={
           <>
-            {shift.openedByName} · منذ {clockText(shift.openedAt, digits)} ·{' '}
+            {shift.openedByName} ·{' '}
+            {step === 'done' && closedAt
+              ? `من ${clockText(shift.openedAt, digits)} إلى ${clockText(closedAt, digits)}`
+              : `منذ ${clockText(shift.openedAt, digits)}`}{' '}
+            ·{' '}
             <bdi dir="ltr" className="num whitespace-nowrap">
               {shift.number}
             </bdi>
@@ -444,7 +459,7 @@ export function ShiftCloseScreen({
           intro={
             <Alert tone="info">
               عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.
-              <span className="block">الدرج يشمل نقد الزبائن والأمانات.</span>
+              <span className="block">عُدّ كل النقد الذي في الدرج.</span>
             </Alert>
           }
         >
@@ -535,7 +550,7 @@ export function ShiftCloseScreen({
                           <Money minor={t.totalMinor} currency={t.currency} className="text-ink" />
                           {t.discountMinor > 0 ? (
                             <>
-                              {' · '}منها خصومات <Money minor={t.discountMinor} currency={t.currency} />
+                              {' · '}منها حسم <Money minor={t.discountMinor} currency={t.currency} />
                             </>
                           ) : null}
                         </li>
@@ -596,7 +611,7 @@ export function ShiftCloseScreen({
                 ))}
                 {activity.vouchers.count > 0 ? (
                   <li className="flex flex-wrap items-center gap-x-1">
-                    قسائم الهدية المباعة وعربون التأجير:{' '}
+                    قسائم الهدية المباعة والعربون:{' '}
                     {counted(activity.vouchers.count, ['قسيمة واحدة', 'قسيمتان', 'قسائم', 'قسيمة'], digits)} ·{' '}
                     {activity.vouchers.byCurrency.map((v) => (
                       <Money key={v.currency} minor={v.amountMinor} currency={v.currency} />

@@ -32,7 +32,6 @@ import {
   cn,
   displayNumber,
   formatQuantity,
-  IconButton,
   IconChip,
   InboxIcon,
   KeyIcon,
@@ -94,7 +93,7 @@ import { PrintableQuote, type QuoteData } from '../receipt/Quote';
 import { quotationInputOf, saveQuotation } from '../quotations/api';
 import { ORDER_TYPE_TEXT, PrintableKitchenTicket, type KitchenData } from '../receipt/KitchenTicket';
 import { ModifierPanel } from './ModifierPanel';
-import { modelPieces, orderPieces } from './models';
+import { changeLabel, modelPieces, optionsOf, orderPieces, pieceFor, variantSplit } from './models';
 import { UnitPanel } from './UnitPanel';
 import { VariantPicker } from './VariantPicker';
 import { TableBoard } from './TableBoard';
@@ -143,7 +142,14 @@ export type SaleMode =
   | { kind: 'check' }
   | { kind: 'serial'; lineNo: number }
   | { kind: 'rx' }
-  | { kind: 'pick'; productId: string }
+  | {
+      kind: 'pick';
+      productId: string;
+      /** A size chip was tapped (or a line is being changed): the picker opens with this chosen */
+      initial?: Record<string, string>;
+      /** A line already in the cart whose size or colour is being changed: the new piece takes its place */
+      replaceLine?: number;
+    }
   | {
       kind: 'unit';
       variantId: string;
@@ -477,6 +483,11 @@ export function SaleScreen(props: SaleScreenProps) {
     choice: ItemChoice | undefined;
   } | null>(null);
   const outOk = useRef(false);
+  // A question is open (no stock, price 0): «أُضيف ✓» must not sit behind it before the cashier has decided
+  const asking = outAsk !== null || zeroAsk !== null;
+  useEffect(() => {
+    if (asking) setJustAdded(null);
+  }, [asking]);
   const add = useCallback(
     (
       item: CatalogItem,
@@ -875,7 +886,7 @@ export function SaleScreen(props: SaleScreenProps) {
     } else handlers.current.add(item, hit);
   }, []);
   const pickModel = useCallback(
-    (productId: string) => {
+    (productId: string, size?: { option: string; value: string }) => {
       if (Date.now() - pickerAddedAt.current < 350) return;
       if (checkingRef.current) {
         const model = pieces.get(productId);
@@ -886,7 +897,19 @@ export function SaleScreen(props: SaleScreenProps) {
             focus: null,
             packs: boxesOf(model),
           });
-      } else setMode({ kind: 'pick', productId });
+      } else {
+        const model = pieces.get(productId);
+        // A size chip tapped on a model whose only choice is the size: that piece goes in at once
+        const only =
+          size && model && optionsOf(model).length === 1
+            ? pieceFor(model, { [size.option]: size.value }, 1)
+            : null;
+        if (only && (typeof only.stockQty !== 'number' || only.stockQty > 0)) {
+          handlers.current.add(only, null);
+          setJustAdded(only.name);
+        } else
+          setMode({ kind: 'pick', productId, ...(size ? { initial: { [size.option]: size.value } } : {}) });
+      }
     },
     [pieces, boxesOf],
   );
@@ -1129,7 +1152,9 @@ export function SaleScreen(props: SaleScreenProps) {
     setPhoneView('cart');
     setSelected(lineNo);
     window.setTimeout(() => {
-      document.getElementById(`cart-line-${lineNo}`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      document
+        .getElementById(`cart-line-${lineNo}`)
+        ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
     }, 30);
   };
   const payBlock: { text: string; go: () => void } | null = (() => {
@@ -1268,7 +1293,11 @@ export function SaleScreen(props: SaleScreenProps) {
                 label="أدوات الفاتورة"
                 align="start"
                 className="w-60"
-                trigger={<IconButton label="أدوات الفاتورة" size="md" icon={<MoreIcon />} />}
+                trigger={
+                  <Button variant="ghost" size="md" icon={<MoreIcon />} aria-label="أدوات الفاتورة">
+                    المزيد
+                  </Button>
+                }
               >
                 {canHoldForCustomer ? (
                   <MenuItem icon={<CalendarIcon />} onSelect={() => setMode({ kind: 'hold' })}>
@@ -1468,6 +1497,7 @@ export function SaleScreen(props: SaleScreenProps) {
           <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-0.5 p-1">
             {cart.lines.map((line, i) => {
               const p = priced?.lines[i];
+              const split = variantSplit(line.name, catalog.byVariant.get(line.variantId));
               const need = needs.get(line.lineNo);
               const adj = line.adjustment;
               const discounted = p !== undefined && p.priced.lineDiscountMinor > 0;
@@ -1522,7 +1552,8 @@ export function SaleScreen(props: SaleScreenProps) {
                 <CartLine
                   key={line.lineNo}
                   id={`cart-line-${line.lineNo}`}
-                  name={line.name}
+                  name={split.name}
+                  {...(split.variant ? { variant: split.variant } : {})}
                   qtyThousandths={line.qty}
                   unit={line.unitSymbol ?? undefined}
                   unitPriceMinor={p?.unitPriceMinor ?? 0}
@@ -1540,8 +1571,30 @@ export function SaleScreen(props: SaleScreenProps) {
                     ) : undefined
                   }
                   extra={
-                    packsByVariant.has(line.variantId) || line.tracksSerial ? (
+                    packsByVariant.has(line.variantId) || line.tracksSerial || pieces.has(line.productId) ? (
                       <span className="flex flex-wrap items-center gap-2">
+                        {pieces.has(line.productId) ? (
+                          // A wrong size at the fitting: the same line takes another size or colour in place
+                          <button
+                            type="button"
+                            className="min-h-11 rounded-small border border-line-control/50 bg-surface px-3 text-sm font-semibold text-ink"
+                            onClick={() =>
+                              setMode({
+                                kind: 'pick',
+                                productId: line.productId,
+                                replaceLine: line.lineNo,
+                                initial: Object.fromEntries(
+                                  (catalog.byVariant.get(line.variantId)?.attributes ?? []).map((a) => [
+                                    a.name,
+                                    a.value,
+                                  ]),
+                                ),
+                              })
+                            }
+                          >
+                            {changeLabel(pieces.get(line.productId)!)} ▾
+                          </button>
+                        ) : null}
                         {packsByVariant.has(line.variantId) ? (
                           // The unit sold (piece or a box): one tap to change it, at the same quantity
                           <button
@@ -1864,7 +1917,7 @@ export function SaleScreen(props: SaleScreenProps) {
         ) : undefined
       }
     >
-      {justAdded ? (
+      {justAdded && !asking ? (
         <p
           role="status"
           className="pointer-events-none fixed inset-x-4 bottom-24 z-70 md:bottom-4 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
@@ -1891,7 +1944,7 @@ export function SaleScreen(props: SaleScreenProps) {
           }}
           size="sm"
           title="لا يوجد مخزون"
-          description={`«${outAsk.item.name}» غير متوفر في المخزون. بيع على كل حال؟`}
+          description={`«${outAsk.item.name}» نفد من المخزون. بيع على كل حال؟`}
           actions={
             <>
               <Button variant="secondary" onClick={() => setOutAsk(null)}>
@@ -2225,6 +2278,8 @@ export function SaleScreen(props: SaleScreenProps) {
         overPanel(
           <VariantPicker
             key={effectiveMode.productId}
+            {...(effectiveMode.initial ? { initial: effectiveMode.initial } : {})}
+            {...(effectiveMode.replaceLine !== undefined ? { actionLabel: 'بدّل في السلة' } : {})}
             name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
             pieces={pieces.get(effectiveMode.productId)!}
             inCart={inCartQty}
@@ -2241,6 +2296,26 @@ export function SaleScreen(props: SaleScreenProps) {
             onAdd={(piece, qty) => {
               pickerAddedAt.current = Date.now();
               setMode({ kind: 'items' });
+              const old =
+                effectiveMode.replaceLine !== undefined
+                  ? cart.lines.find((l) => l.lineNo === effectiveMode.replaceLine)
+                  : undefined;
+              if (old) {
+                // Another size or colour for the same quantity: the line is replaced where it stands
+                setCart((c) => {
+                  const index = c.lines.findIndex((l) => l.lineNo === old.lineNo);
+                  const without = removeLine(c, old.lineNo);
+                  const next = addItem(without, piece, null, old.qty);
+                  const added = next.lines.length > without.lines.length ? next.lines.at(-1) : undefined;
+                  if (!added || index < 0) return next;
+                  const lines = next.lines.slice(0, -1);
+                  lines.splice(Math.min(index, lines.length), 0, added);
+                  return { ...next, lines };
+                });
+                setSelected(null);
+                setJustAdded(piece.name);
+                return;
+              }
               setJustAdded(piece.name);
               // The picker has already asked about a size with nothing left: no second question
               outOk.current = true;

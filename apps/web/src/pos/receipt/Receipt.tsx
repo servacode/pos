@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { convert } from '@serva/core/money';
@@ -64,6 +65,16 @@ export interface ReceiptData {
   serviceVariantIds?: readonly string[];
 }
 
+/** One whole piece at its own price (no unit, no pack): the line's amount is its price, so it is said once */
+export const single = (l: {
+  qty: number;
+  unitName: string | null;
+  packQty: number;
+  unitPriceMinor: number;
+  priced: { grossMinor: number };
+}): boolean =>
+  l.qty === 1000 && !l.unitName && l.packQty === 1000 && l.unitPriceMinor === l.priced.grossMinor;
+
 /** The store's own footer usually thanks the customer already: the fixed thanks only follows one that does not */
 export const needsThanks = (footer: string | null | undefined): boolean => !footer || !footer.includes('شكر');
 
@@ -126,6 +137,17 @@ function ReceiptHeader({ data, width, copy }: { data: ReceiptData; width: PaperW
   );
 }
 
+/** A receipt is paper: white with dark ink in dark mode too, so the preview looks like what prints */
+/* eslint-disable no-restricted-syntax -- paper is white with dark ink whatever the theme: these are the light theme's own values */
+const PAPER = {
+  '--color-surface': 'oklch(1 0 0)',
+  '--color-ink': 'oklch(0.2048 0.019 171.49)',
+  '--color-ink-muted': 'oklch(0.4644 0.0198 167.74)',
+  '--color-ink-subtle': 'oklch(0.5133 0.0204 169.44)',
+  '--color-line': 'oklch(0.9286 0.0076 164.93)',
+} as CSSProperties;
+/* eslint-enable no-restricted-syntax */
+
 const slipClass = (width: PaperWidth) =>
   cn(
     'flex flex-col gap-2 bg-surface px-1 py-3 font-semibold text-ink',
@@ -147,7 +169,7 @@ function PaymentVoucher({ data, width, copy }: { data: ReceiptData; width: Paper
   const r = data.doc.payload as unknown as ReceiptPayload;
   const at = Date.parse(data.doc.deviceTime);
   return (
-    <div dir="rtl" lang="ar" aria-label={`سند قبض ${width} مم`} className={slipClass(width)}>
+    <div dir="rtl" lang="ar" aria-label={`سند قبض ${width} مم`} className={slipClass(width)} style={PAPER}>
       <ReceiptHeader data={data} width={width} copy={copy} />
       <Rule />
       <div className="flex flex-col items-center">
@@ -194,7 +216,13 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
   const amount = (minor: number) => <Money minor={minor} currency={ret.currency} symbol={false} />;
   const voucher = ret.refunds.find((r) => r.method === 'voucher');
   return (
-    <div dir="rtl" lang="ar" aria-label={`إيصال مرتجع ${width} مم`} className={slipClass(width)}>
+    <div
+      dir="rtl"
+      lang="ar"
+      aria-label={`إيصال مرتجع ${width} مم`}
+      className={slipClass(width)}
+      style={PAPER}
+    >
       <ReceiptHeader data={data} width={width} copy={copy} />
       <Rule />
       <div className="flex flex-col items-center">
@@ -280,7 +308,7 @@ function GiftVoucherSlip({ data, width, copy }: { data: ReceiptData; width: Pape
   const g = data.doc.payload as unknown as GiftVoucherPayload;
   const at = Date.parse(data.doc.deviceTime);
   return (
-    <div dir="rtl" lang="ar" aria-label={`قسيمة هدية ${width} مم`} className={slipClass(width)}>
+    <div dir="rtl" lang="ar" aria-label={`قسيمة هدية ${width} مم`} className={slipClass(width)} style={PAPER}>
       <ReceiptHeader data={data} width={width} copy={copy} />
       <Rule />
       <section aria-label="قسيمة الهدية" className="flex flex-col items-center gap-1 text-center">
@@ -351,6 +379,7 @@ export function Receipt({
       dir="rtl"
       lang="ar"
       aria-label={`إيصال ${width} مم`}
+      style={PAPER}
       className={cn(
         'flex flex-col gap-2 bg-surface px-1 py-3 font-semibold text-ink',
         width === 80 ? 'w-[72mm] text-[13px]/[1.55]' : 'w-[48mm] text-[11px]/[1.5]',
@@ -391,25 +420,37 @@ export function Receipt({
       <ul className="flex flex-col gap-1.5">
         {sale.lines.map((line) => (
           <li key={line.lineNo} className="flex flex-col">
-            <span className="font-bold">{line.name}</span>
-            <div className="flex justify-between gap-2">
-              <bdi dir="rtl" className="num">
-                {formatQuantity(line.qty, digits)}
-                {line.unitName ? ` ${line.unitName}` : ''}
-                {packNote(line, digits)} ×{' '}
-                <Money minor={line.unitPriceMinor} currency={base} symbol={false} />
-              </bdi>
-              <span className="num">{amount(line.priced.grossMinor)}</span>
-            </div>
+            {single(line) ? (
+              // One piece: the name and its amount on one row, not «25,000 × 1» and then 25,000 again
+              <div className="flex justify-between gap-2">
+                <span className="font-bold">{line.name}</span>
+                <span className="num">{amount(line.priced.grossMinor)}</span>
+              </div>
+            ) : (
+              <>
+                <span className="font-bold">{line.name}</span>
+                <div className="flex justify-between gap-2">
+                  <bdi dir="rtl" className="num">
+                    {formatQuantity(line.qty, digits)}
+                    {line.unitName ? ` ${line.unitName}` : ''}
+                    {packNote(line, digits)} ×{' '}
+                    <Money minor={line.unitPriceMinor} currency={base} symbol={false} />
+                  </bdi>
+                  <span className="num">{amount(line.priced.grossMinor)}</span>
+                </div>
+              </>
+            )}
             {line.priced.lineDiscountMinor > 0 ? (
               <Row label={discountLabel(line.discount)}>
                 <bdi dir="ltr">−{amount(line.priced.lineDiscountMinor)}</bdi>
               </Row>
             ) : null}
             {line.serials?.length ? (
-              <bdi dir="ltr" className="num text-start">
-                {serialText(line, data.settings)}
-              </bdi>
+              <span className="text-start">
+                <bdi dir="ltr" className="num">
+                  {serialText(line, data.settings)}
+                </bdi>
+              </span>
             ) : null}
             {warrantyText(line, data.doc.deviceTime, data.settings) ? (
               <span className="text-xs">{warrantyText(line, data.doc.deviceTime, data.settings)}</span>

@@ -24,7 +24,7 @@ import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import type { OpenShift } from '../shift/shift';
 import type { StaffSession } from '../staff/staff';
-import { CustomerPicker, type PickedCustomer } from './CustomerPicker';
+import { CustomerBalance, CustomerPicker, useCustomerBalance, type PickedCustomer } from './CustomerPicker';
 
 const METHOD_TEXT: Record<ReceiptMethod, string> = {
   cash: 'نقداً',
@@ -66,6 +66,8 @@ export function ReceiptScreen({
   const settings = catalog.settings!;
   const base = settings.baseCurrency;
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  // What the customer owes, as the server says (online only)
+  const owed = useCustomerBalance(customer?.id ?? null);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<ReceiptMethod>('cash');
   const [reference, setReference] = useState('');
@@ -159,6 +161,22 @@ export function ReceiptScreen({
               className="font-bold"
             />
           </p>
+          {owed !== null && owed > 0 ? (
+            <p role="status" className="text-ink-muted">
+              {owed - (saved.payload as unknown as ReceiptPayload).amountMinor > 0 ? (
+                <>
+                  بقي عليه{' '}
+                  <Money
+                    minor={owed - (saved.payload as unknown as ReceiptPayload).amountMinor}
+                    currency={base}
+                    className="font-semibold text-ink"
+                  />
+                </>
+              ) : (
+                'سدّد كل ما عليه'
+              )}
+            </p>
+          ) : null}
         </DoneCard>
       ) : (
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
@@ -173,6 +191,7 @@ export function ReceiptScreen({
                   <span className="text-xs text-ink-muted">الزبون</span>
                   <span className="truncate font-semibold text-ink">{customer.name}</span>
                 </span>
+                <CustomerBalance id={customer.id} currency={base} />
                 <Button variant="ghost" onClick={() => setCustomer(null)}>
                   غيّره
                 </Button>

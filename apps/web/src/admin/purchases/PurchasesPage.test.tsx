@@ -113,6 +113,29 @@ describe('«المشتريات»', () => {
     });
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
+  it('asks before saving a total that looks like a pasted date, and saves when the owner says it is right', async () => {
+    const { user, requestsTo } = open();
+    await user.click(await screen.findByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'مؤسسة الفرات');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await screen.findByText('أُضيف المورد.');
+    await user.click(await screen.findByRole('button', { name: 'فاتورة شراء' }));
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'حليب');
+    await user.click(await screen.findByRole('button', { name: 'حليب طازج' }));
+    await user.type(await screen.findByLabelText('كمية حليب طازج'), '30');
+    await user.type(screen.getByLabelText('كلفة حليب طازج'), '30062027');
+    await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
+    expect(await screen.findByText(/يشبه تاريخاً أو رقم هاتف/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/purchases')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'أعد المراجعة' }));
+    expect(requestsTo('POST', '/v1/purchases')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
+    await user.click(await screen.findByRole('button', { name: 'الأرقام صحيحة، سجّل' }));
+    expect(
+      await screen.findByText('سُجّلت الفاتورة PUR-2026-000001 ودخلت البضاعة المخزون.'),
+    ).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/purchases')).toHaveLength(1);
+  });
 });
 
 describe('«تفاصيل» of a purchase invoice', () => {

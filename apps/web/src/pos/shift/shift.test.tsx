@@ -127,7 +127,7 @@ describe('shift', () => {
       await screen.findByText('عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.'),
     ).toBeInTheDocument();
     // A short neutral line: the drawer holds customers' cash and deposits too (the expected amount stays hidden)
-    expect(screen.getByText('الدرج يشمل نقد الزبائن والأمانات.')).toBeInTheDocument();
+    expect(screen.getByText('عُدّ كل النقد الذي في الدرج.')).toBeInTheDocument();
     // One total per drawer, note by note behind a button, and no jargon line about the chosen note
     await screen.findAllByRole('textbox', { name: 'المجموع' });
     expect(screen.getAllByRole('button', { name: 'عدّ تفصيلي' }).length).toBeGreaterThan(0);

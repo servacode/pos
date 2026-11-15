@@ -35,7 +35,7 @@ import { useMe } from '../../auth/useAuth';
 import { dayText } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, ApiError, errorMessage } from '../../lib/api';
-import { listSuppliers, moneyOf, qtyOf, today } from './api';
+import { getPurchase, listPurchases, listSuppliers, moneyOf, qtyOf, today } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } from './parts';
 import { PackQty } from './PackQty';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
@@ -121,6 +121,34 @@ export function SupplierReturnsPage() {
       })
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
+
+  // The batch each item came in on the latest purchases from this supplier: the box starts on it
+  const [lastBatch, setLastBatch] = useState<Map<string, BatchChoice>>(new Map());
+  useEffect(() => {
+    if (!supplierId) return;
+    let alive = true;
+    listPurchases()
+      .then(async (all) => {
+        const recent = all.items
+          .filter((p) => p.supplierId === supplierId)
+          .sort((a, b) => (a.date < b.date ? 1 : -1))
+          .slice(0, 3);
+        const found = new Map<string, BatchChoice>();
+        for (const p of recent) {
+          const detail = await getPurchase(p.id);
+          for (const l of detail.lines) {
+            if ((l.batchNo || l.expiryDate) && !found.has(l.variantId)) {
+              found.set(l.variantId, { batchNo: l.batchNo, expiryDate: l.expiryDate });
+            }
+          }
+        }
+        if (alive) setLastBatch(found);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [supplierId]);
 
   const parsed = lines.map((l) => ({
     qty: baseQtyOf(l),
@@ -414,6 +442,7 @@ export function SupplierReturnsPage() {
                             variantId={l.variantId}
                             branchId={branchId || undefined}
                             value={l.batch ?? null}
+                            suggest={lastBatch.get(l.variantId)}
                             onChange={(batch) =>
                               setLines((all) => all.map((x, j) => (j === i ? { ...x, batch } : x)))
                             }

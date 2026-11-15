@@ -50,6 +50,23 @@ describe('ScrollStrip', () => {
     expect(strip).toHaveAttribute('data-fade-right');
   });
 
+  it('leaves room after the last item so it can scroll out from under the fade', () => {
+    const { container } = renderUi(
+      <ScrollStrip>
+        <a href="/a">أ</a>
+      </ScrollStrip>,
+    );
+    const strip = container.firstElementChild!.firstElementChild as HTMLElement;
+    expect(strip.style.paddingInlineEnd).toBe('');
+    sized(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 0 });
+    fireEvent.scroll(strip);
+    expect(strip.style.paddingInlineEnd).toBe('28px');
+    // Everything fits again: no padding
+    sized(strip, { scrollWidth: 328, clientWidth: 300, scrollLeft: 0 });
+    fireEvent.scroll(strip);
+    expect(strip.style.paddingInlineEnd).toBe('');
+  });
+
   it('brings the open tab into view', () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;

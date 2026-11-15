@@ -723,7 +723,7 @@ function ProductsList() {
     },
     {
       key: 'stock',
-      header: 'الكمية',
+      header: me.branches.length > 1 ? 'الكمية (كل الفروع)' : 'الكمية',
       numeric: true,
       cell: (item) =>
         item.type === 'service' ? (
@@ -747,15 +747,13 @@ function ProductsList() {
                 متاح للبيع <bdi className="num">{formatQuantity(item.sellableQty, digits)}</bdi>
                 {item.sellableQty > item.stockQty ? (
                   <>
-                    {' '}
-                    (قبل{' '}
+                    {' · '}
                     <bdi className="text-danger-ink">
                       {shortPieces(
                         (item.sellableQty - item.stockQty) / 1000,
                         formatQuantity(item.sellableQty - item.stockQty, digits),
                       )}
                     </bdi>
-                    )
                   </>
                 ) : null}
               </span>
@@ -857,7 +855,7 @@ function ProductsList() {
                   {summary.runOut > 0 ? (
                     <>
                       {' '}
-                      · <bdi className="num font-semibold text-warning-ink">{summary.runOut}</bdi> نفدت
+                      · <bdi className="num font-semibold text-warning-ink">{summary.runOut}</bdi> نفد
                     </>
                   ) : null}
                 </>
@@ -1154,8 +1152,8 @@ function ProductsList() {
           ((canManage && uncategorised > 0) || zeroPrice > 0 || noPhoto > 0) ? (
             <Alert tone={zeroPrice > 0 ? 'warning' : 'info'} className="[&>div]:flex-1">
               <span className="flex flex-col gap-1.5" aria-label="تحتاج انتباهك">
-                <span className="flex items-start gap-x-3 gap-y-1">
-                  <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="min-w-0">
                     {[
                       canManage && uncategorised > 0 ? `${String(uncategorised)} بلا تصنيف` : null,
                       zeroPrice > 0 ? `${String(zeroPrice)} بسعر صفر` : null,
@@ -1164,7 +1162,27 @@ function ProductsList() {
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
-                  <span className="flex shrink-0 items-center gap-1">
+                  {/* The action is a button with words, on a phone too */}
+                  {(canManage && uncategorised > 0) || (canManage && noPhoto > 0) ? (
+                    <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      {canManage && noPhoto > 0 ? (
+                        <button type="button" className={textLinkClass} onClick={() => setPhotosOpen(true)}>
+                          أضف الصور
+                        </button>
+                      ) : null}
+                      {canManage && uncategorised > 0 ? (
+                        <button
+                          type="button"
+                          className={textLinkClass}
+                          disabled={loadingAuto}
+                          onClick={() => void categorizeAuto()}
+                        >
+                          صنّفها تلقائياً
+                        </button>
+                      ) : null}
+                    </span>
+                  ) : null}
+                  <span className="ms-auto flex shrink-0 items-center gap-1">
                     <IconButton
                       size="xs"
                       label={showWhy ? 'أخفِ الشرح' : 'اشرح'}
@@ -1181,26 +1199,6 @@ function ProductsList() {
                     ) : null}
                   </span>
                 </span>
-                {/* The action is a button with words, on a phone too */}
-                {(canManage && uncategorised > 0) || (canManage && noPhoto > 0) ? (
-                  <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    {canManage && noPhoto > 0 ? (
-                      <button type="button" className={textLinkClass} onClick={() => setPhotosOpen(true)}>
-                        أضف الصور
-                      </button>
-                    ) : null}
-                    {canManage && uncategorised > 0 ? (
-                      <button
-                        type="button"
-                        className={textLinkClass}
-                        disabled={loadingAuto}
-                        onClick={() => void categorizeAuto()}
-                      >
-                        صنّفها تلقائياً
-                      </button>
-                    ) : null}
-                  </span>
-                ) : null}
                 {showWhy ? (
                   <span className="flex flex-col gap-1 text-sm">
                     {canManage && uncategorised > 0 ? (

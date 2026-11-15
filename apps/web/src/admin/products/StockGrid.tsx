@@ -30,7 +30,7 @@ export const StockGrid = memo(function StockGrid({
     <SectionCard
       title="المخزون حسب المقاس واللون"
       icon={<GridIcon />}
-      description="ما بقي من كل قطعة. الخانة الفارغة قطعة لم تُصنع، والصفر قطعة نفدت."
+      description="ما بقي من كل قطعة. الخانة الفارغة قطعة لم تُصنع، والصفر قطعة نفد."
       action={
         branches.size > 1 ? (
           <Select

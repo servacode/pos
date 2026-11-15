@@ -117,7 +117,7 @@ export function ZReport({
               <Money minor={t.totalMinor} currency={t.currency} />
             </Line>
             {t.discountMinor > 0 ? (
-              <Line label="منها خصومات">
+              <Line label="منها حسم">
                 <Money minor={t.discountMinor} currency={t.currency} />
               </Line>
             ) : null}
@@ -197,7 +197,7 @@ export function ZReport({
         </Section>
       ) : null}
       {activity.vouchers.count > 0 ? (
-        <Section title="قسائم الهدية المباعة وعربون التأجير">
+        <Section title="قسائم الهدية المباعة والعربون">
           <Line label="العدد">{counted(activity.vouchers.count, VOUCHERS, digits)}</Line>
           {activity.vouchers.byCurrency.map((row) => (
             <Line key={row.currency} label="قيمتها">

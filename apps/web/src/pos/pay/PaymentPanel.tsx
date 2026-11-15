@@ -113,6 +113,13 @@ const METHOD_ICON: Record<PaymentMethod, Icon> = {
   points: SparklesIcon,
 };
 
+/** The amount as the till shows it everywhere (5,772.5 shows 5,773): display only, the tender keeps its exact minor units */
+function shownAmount(minor: number, currency: PayOption['currency']): number {
+  const { decimals, displayDecimals } = CURRENCIES[currency];
+  const unit = 10 ** (decimals - displayDecimals);
+  return Math.round(minor / unit) * unit;
+}
+
 /**
  * The payment panel (kit cashier/Payment), beside the cart: what is due in both currencies, the
  * method, the amount received with quick notes and the keypad, the change live, and a split over
@@ -290,7 +297,10 @@ export function PaymentPanel({
         ? Math.min(remainingBase, Math.max(0, pointsLeft))
         : nonCash
           ? remainingBase
-          : null);
+          : // Cash in the sale's currency starts at the exact due (to the cash step): typing replaces it; a split types its parts
+            !split && option.currency === base
+            ? roundCashDue(remainingBase, cashSteps[base] ?? 0).dueMinor
+            : null);
   const chequeDetails =
     option.method === 'cheque' && chequeBank.trim() && chequeNo.trim() && chequeDue
       ? {
@@ -672,7 +682,10 @@ export function PaymentPanel({
                   {text
                     ? displayNumber(text, digits)
                     : amount
-                      ? displayNumber(amountText(amount, option.currency), digits)
+                      ? displayNumber(
+                          amountText(shownAmount(amount, option.currency), option.currency),
+                          digits,
+                        )
                       : displayNumber('0', digits)}
                 </span>
                 <span className="shrink-0 text-lg font-semibold text-ink-subtle">

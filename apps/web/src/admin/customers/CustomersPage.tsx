@@ -202,6 +202,7 @@ export function CustomersPage() {
   // A number of the tiles: a placeholder while the list loads, a dash when it could not.
   const kpi = (value: ReactNode) => (list ? value : error ? '—' : <Skeleton className="h-9 w-24" />);
 
+  const clothing = storeSells(me.tenant.sectors, ['clothing']);
   const columns: DataColumn<CustomerListItem>[] = [
     {
       key: 'name',
@@ -226,6 +227,14 @@ export function CustomersPage() {
                 <bdi dir="ltr" className="num">
                   {c.phone}
                 </bdi>
+              </span>
+            ) : null}
+            {(clothing && c.favouriteSize) || c.lastPurchaseDate ? (
+              // The columns that are hidden on a phone, said under the name
+              <span className="text-xs text-ink-muted md:hidden">
+                {clothing && c.favouriteSize ? `المقاس المفضّل ${c.favouriteSize}` : null}
+                {clothing && c.favouriteSize && c.lastPurchaseDate ? ' · ' : null}
+                {c.lastPurchaseDate ? `آخر شراء ${dayText(c.lastPurchaseDate, digits)}` : null}
               </span>
             ) : null}
           </span>
@@ -268,7 +277,7 @@ export function CustomersPage() {
           <span className="text-ink-subtle">—</span>
         ),
     },
-    ...(storeSells(me.tenant.sectors, ['clothing'])
+    ...(clothing
       ? [
           {
             key: 'size',

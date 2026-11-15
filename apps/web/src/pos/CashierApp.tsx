@@ -9,6 +9,7 @@ import {
   Button,
   CashIcon,
   CashierShell,
+  Dialog,
   EmptyState,
   GiftIcon,
   displayNumber,
@@ -38,6 +39,7 @@ import { PrintableReceipt, type PaperWidth, type ReceiptData } from './receipt/R
 import { printJob as escposJob } from './print/escpos';
 import { WarrantyCertificate } from '../lib/WarrantyCertificate';
 import { certificateOf, customerPhoneOf } from './receipt/warranty';
+import { WhatsAppSend } from './receipt/WhatsAppSend';
 import { receiptLines } from './print/lines';
 import { DEFAULT_PRINTER, PRINTER_KEY, PrinterScreen, type PrinterSetting } from './print/PrinterScreen';
 import { renderLines } from './print/render';
@@ -245,6 +247,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     copy: boolean;
     certificate?: boolean;
   } | null>(null);
+  const [waJob, setWaJob] = useState<ReceiptData | null>(null);
+  // The close is saved and its Z report is showing: the header must not still say «وردية منذ…»
+  const [shiftClosed, setShiftClosed] = useState(false);
   const [printer, setPrinter] = useState<PrinterSetting>(DEFAULT_PRINTER);
   // The sale just finished, printed on A4 (an invoice, or its delivery note)
   const [a4Job, setA4Job] = useState<{ data: ReceiptData; kind: A4Kind } | null>(null);
@@ -864,7 +869,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       notice={notice}
       user={{
         name: session.fullName,
-        detail: shift ? `وردية منذ ${clockText(shift.openedAt, digits)}` : 'لا وردية مفتوحة',
+        detail: shiftClosed
+          ? 'وردية مغلقة'
+          : shift
+            ? `وردية منذ ${clockText(shift.openedAt, digits)}`
+            : 'لا وردية مفتوحة',
       }}
       lastInvoice={
         lastSale ? (
@@ -957,6 +966,14 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               إيصال آخر فاتورة
             </MenuItem>
           ) : null}
+          {lastSale ? (
+            <MenuItem
+              icon={<PrintIcon />}
+              onSelect={() => setWaJob(receiptData(lastSale.doc, lastSale.cashierName))}
+            >
+              أرسل آخر فاتورة عبر واتساب
+            </MenuItem>
+          ) : null}
           <MenuItem icon={<PrintIcon />} onSelect={() => setView('printer')}>
             الطابعة
           </MenuItem>
@@ -978,13 +995,37 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const certificate = printJob?.certificate
     ? certificateOf(printJob.data, customerPhoneOf(catalog, printJob.data))
     : null;
-  const printPortal = printJob ? (
+  const printNode = printJob ? (
     certificate ? (
       <WarrantyCertificate data={certificate} />
     ) : (
       <PrintableReceipt data={printJob.data} width={paper} copy={printJob.copy} />
     )
   ) : null;
+  // «أرسل آخر فاتورة عبر واتساب»: the reprint's other way out, a chat with the receipt as text
+  const printPortal = (
+    <>
+      {printNode}
+      {waJob ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setWaJob(null);
+          }}
+          size="md"
+          title="أرسل الفاتورة عبر واتساب"
+          description="يفتح محادثة الزبون ومعها نص الفاتورة."
+          actions={
+            <Button variant="ghost" onClick={() => setWaJob(null)}>
+              إغلاق
+            </Button>
+          }
+        >
+          <WhatsAppSend data={waJob} phone={customerPhoneOf(catalog, waJob)} />
+        </Dialog>
+      ) : null}
+    </>
+  );
   // A4 prints on its own sheet: the receipt's portal is dropped while it is mounted
   const a4Portal = a4Job ? (
     <A4Print
@@ -1033,6 +1074,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 session={session}
                 catalog={catalog}
                 onOpened={(opened) => {
+                  setShiftClosed(false);
                   setShift(opened);
                   // Said once on the sale screen: which shift, and the float it opened with
                   const float = opened.opening
@@ -1048,7 +1090,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 catalog={catalog}
                 shift={shift}
                 onBack={() => setView('sale')}
+                onSaved={() => setShiftClosed(true)}
                 onClosed={() => {
+                  setShiftClosed(false);
                   setShift(null);
                   setView('sale');
                   onSignOut();
@@ -1273,6 +1317,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                     : undefined
                 }
                 onNewSale={() => setDone(null)}
+                customerPhone={customerPhoneOf(catalog, done)}
               />
             </>
           ) : null

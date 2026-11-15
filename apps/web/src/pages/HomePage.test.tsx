@@ -378,9 +378,103 @@ describe('HomePage', () => {
       const { user } = renderApp('/');
 
       await user.click(await screen.findByRole('tab', { name: /المال/ }));
-      expect(await screen.findByText('زبون تجاوز حدّ الدين')).toBeInTheDocument();
+      // One customer over: named, with what they owe and their limit
+      expect(await screen.findByText(/a: فوق الحدّ/)).toBeInTheDocument();
       expect(screen.getByText(/ديون الزبائن عندنا/)).toBeInTheDocument();
       expect(screen.getByText(/مستحقات الموردين علينا/)).toBeInTheDocument();
+    });
+
+    it('puts the cheques due within a week under «المال», and the tab badge equals «عرض الكل»', async () => {
+      const piece = (n: number) => ({
+        variantId: `v-${n}`,
+        productId: `p-${n}`,
+        name: `صنف ${n}`,
+        label: null,
+        stockQty: 0,
+        soldQty: 6000,
+        minStockQty: null,
+      });
+      const cheque = (id: string, direction: 'in' | 'out') => ({
+        id,
+        direction,
+        status: 'pending',
+        dueDate: TODAY,
+        amountMinor: 100_000,
+        currency: 'SYP',
+        number: id,
+        partyName: 'س',
+      });
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': {
+          status: 200,
+          body: meWith([...OWNER_KEYS, 'customers.view', 'purchases.manage', 'catalog.manage']),
+        },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
+          status: 200,
+          body: { lowStock: [piece(1), piece(2), piece(3)] },
+        },
+        'GET /v1/products?limit=100': {
+          status: 200,
+          body: { items: [{ id: 'p-9', nameAr: 'قميص', hasImage: false }], nextCursor: null },
+        },
+        'GET /v1/cheques': { status: 200, body: { items: [cheque('c1', 'in'), cheque('c2', 'out')] } },
+        'GET /v1/customers?owing=true': {
+          status: 200,
+          body: { items: [], totalOwedMinor: 600_000, baseCurrency: 'SYP' },
+        },
+        'GET /v1/suppliers': { status: 200, body: { items: [], totalOwedMinor: 0, baseCurrency: 'SYP' } },
+      });
+      const { user } = renderApp('/');
+
+      // Three out-of-stock products and the photo suggestion: four rows, one number everywhere
+      const more = await screen.findByRole('button', { name: 'عرض الكل (4)' });
+      expect(more).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /الآن\s*4/ })).toBeInTheDocument();
+      await user.click(screen.getByRole('tab', { name: /المال/ }));
+      expect(await screen.findByText('شيك يستحق خلال 7 أيام')).toBeInTheDocument();
+      expect(screen.getByText('شيك صادر للمورد يستحق خلال 7 أيام')).toBeInTheDocument();
+    });
+
+    it('after midnight with last night’s shift open: says so, and compares nothing', async () => {
+      // 00:30 in Damascus: today is a few minutes old, yesterday's shift is still running
+      vi.setSystemTime(new Date('2026-10-31T21:30:00.000Z'));
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        'GET /v1/reports/day?date=2026-11-01': {
+          status: 200,
+          body: dayReport({ invoiceCount: 3, totalMinor: 40_000 }),
+        },
+        'GET /v1/reports/days?from=2026-10-26&to=2026-10-31': weekOf({ '2026-10-31': 3_000_000 }),
+        'GET /v1/shifts?date=2026-10-31': {
+          status: 200,
+          body: {
+            items: [
+              {
+                id: 's1',
+                number: 'SFT-1',
+                branchId: 'b',
+                deviceCode: 'D',
+                openedBy: null,
+                openedAt: null,
+                closedAt: null,
+                status: 'open',
+                salesCount: 6,
+                salesTotalMinor: 900_000,
+                returnsCount: 0,
+                returnsTotalMinor: 0,
+              },
+            ],
+          },
+        },
+      });
+      renderApp('/');
+
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      expect(await within(sales).findByText(/وردية مفتوحة منذ أمس/)).toBeInTheDocument();
+      expect(within(sales).queryByText('عن أمس كاملاً')).not.toBeInTheDocument();
     });
 
     it('softens a change of more than double into «أكثر من الضعف» instead of a loud +150%', async () => {

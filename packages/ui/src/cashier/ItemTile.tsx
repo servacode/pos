@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import type { CurrencyId } from '@serva/core';
 import { cn } from '../cn';
 import { OfferIcon, WeighedIcon } from '../icons';
@@ -12,7 +12,7 @@ export interface ItemTileProps {
   imageUrl?: string;
   selected?: boolean;
   outOfStock?: boolean;
-  /** Nothing to sell but still tappable (the till can sell below zero): the tile dims and says «غير متوفر» */
+  /** Nothing to sell but still tappable (the till can sell below zero): the tile dims and says «نفد» */
   soldOut?: boolean;
   /** Sold by weight: the price is per kilo. */
   weighed?: boolean;
@@ -40,7 +40,8 @@ export interface ItemTileProps {
   extra?: ReactNode;
   /** A tighter tile: a service with nothing to say but its name and fee, or the compact list density */
   compact?: boolean;
-  onSelect: () => void;
+  /** The tap: its event says whether a mark inside (a size chip with data-size) was the target */
+  onSelect: (event: MouseEvent<HTMLButtonElement>) => void;
   className?: string;
 }
 
@@ -83,7 +84,7 @@ export function ItemTile({
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={(event) => onSelect(event)}
       disabled={outOfStock}
       aria-pressed={selected}
       className={cn(
@@ -140,7 +141,9 @@ export function ItemTile({
         className={cn(
           'flex gap-0.5',
           inlineIcon ? 'flex-row items-start gap-2.5' : 'flex-col',
-          !inlineIcon && !compact && (detail && !monogram ? 'min-h-[4rem]' : 'min-h-[2.75rem]'),
+          !inlineIcon &&
+            !compact &&
+            (detail && !monogram ? 'min-h-[4rem]' : 'min-h-[2.75rem] max-sm:min-h-0'),
           picture && 'px-1.5',
         )}
       >
@@ -178,7 +181,7 @@ export function ItemTile({
           />
         )}
         {outOfStock ? (
-          <span className="text-xs font-semibold text-ink-muted">غير متوفر</span>
+          <span className="text-xs font-semibold text-ink-muted">نفد</span>
         ) : weighed || onOffer ? (
           <span className="flex items-center gap-1">
             {weighed ? (

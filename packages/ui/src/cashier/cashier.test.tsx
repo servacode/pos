@@ -68,7 +68,7 @@ describe('ItemTile', () => {
 
     const tile = screen.getByRole('button', { name: /حليب 1 لتر/ });
     expect(tile).toBeDisabled();
-    expect(tile).toHaveTextContent('غير متوفر');
+    expect(tile).toHaveTextContent('نفد');
   });
 });
 

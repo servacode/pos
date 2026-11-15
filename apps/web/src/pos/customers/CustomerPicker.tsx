@@ -33,18 +33,24 @@ export interface PickedCustomer {
  * What the customer owes now, as the server says (online only; nothing is shown offline or when
  * the server does not answer). A negative balance is what the store owes them.
  */
-function CustomerBalance({ id, currency }: { id: string; currency: CurrencyCode }) {
+export function useCustomerBalance(id: string | null): number | null {
   const pos = usePos();
   const [balance, setBalance] = useState<number | null>(null);
   useEffect(() => {
+    setBalance(null);
     const token = pos.device.token;
-    if (!token || !pos.online()) return;
+    if (!id || !token || !pos.online()) return;
     let alive = true;
     void fetchPurchases(id, token, pos.fetch).then((got) => alive && setBalance(got?.balanceMinor ?? null));
     return () => {
       alive = false;
     };
   }, [id, pos]);
+  return balance;
+}
+
+export function CustomerBalance({ id, currency }: { id: string; currency: CurrencyCode }) {
+  const balance = useCustomerBalance(id);
   if (!balance) return null;
   return (
     <span className="flex shrink-0 flex-col items-end text-xs text-ink-subtle">

@@ -153,7 +153,7 @@ describe('the settings’ save bar and the WhatsApp number', () => {
     open();
     const { user } = renderApp('/online-store');
     await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
-    const toggle = await screen.findByRole('switch', { name: /اعرض القطع التي نفدت/ });
+    const toggle = await screen.findByRole('switch', { name: /اعرض القطع التي نفد مخزونها/ });
     expect(screen.queryByRole('button', { name: 'احفظ' })).not.toBeInTheDocument();
     await user.click(toggle);
     expect(screen.getByRole('button', { name: 'احفظ' })).toBeInTheDocument();

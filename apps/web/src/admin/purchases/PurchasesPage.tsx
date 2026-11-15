@@ -56,6 +56,7 @@ import { EXPIRY_SECTORS, serialWord, storeSells } from '../../lib/sectors';
 import {
   createPurchase,
   createSupplier,
+  getInventory,
   listPurchases,
   listSuppliers,
   moneyOf,
@@ -68,6 +69,7 @@ import { SlimKpis } from '../SlimKpis';
 import { PackQty } from './PackQty';
 import { PurchaseDetailDialog } from './PurchaseDetailDialog';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
+import { averageCosts, purchaseWarnings } from './purchaseSanity';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRules';
 import { downloadCsv } from '../exportCsv';
@@ -163,10 +165,10 @@ export function PurchasesPage() {
     {
       key: 'number',
       header: 'الرقم',
-      className: 'whitespace-nowrap',
+      className: 'md:whitespace-nowrap',
       cell: (p) => (
         <span className="flex flex-col items-start">
-          <bdi dir="ltr" className="num font-semibold text-ink">
+          <bdi dir="ltr" className="num font-semibold whitespace-nowrap text-ink">
             {p.number}
           </bdi>
           {p.reference ? (
@@ -174,14 +176,26 @@ export function PurchasesPage() {
               رقمها عند المورد <bdi className="num">{p.reference}</bdi>
             </span>
           ) : null}
+          {/* On a phone the supplier, the day and the payment sit under the number: the amount and «التفاصيل» stay on screen */}
+          <span className="flex flex-col items-start gap-1 text-xs text-ink-muted md:hidden">
+            <span>{p.supplierName}</span>
+            <span>{dayText(p.date, me.settings.numberFormat)}</span>
+            <Badge tone={PAYMENT_LOOK[p.payment].tone}>{PAYMENT_TEXT[p.payment]}</Badge>
+            <Money minor={p.totalMinor} currency={base} className="text-sm font-semibold text-ink" />
+          </span>
         </span>
       ),
     },
-    { key: 'supplier', className: 'whitespace-nowrap', header: 'المورد', cell: (p) => p.supplierName },
+    {
+      key: 'supplier',
+      className: 'whitespace-nowrap max-md:hidden',
+      header: 'المورد',
+      cell: (p) => p.supplierName,
+    },
     {
       key: 'date',
       header: 'التاريخ',
-      className: 'whitespace-nowrap',
+      className: 'whitespace-nowrap max-md:hidden',
       cell: (p) => (
         <span className="whitespace-nowrap text-ink-muted">{dayText(p.date, me.settings.numberFormat)}</span>
       ),
@@ -189,12 +203,14 @@ export function PurchasesPage() {
     {
       key: 'payment',
       header: 'الدفع',
+      className: 'max-md:hidden',
       cell: (p) => <Badge tone={PAYMENT_LOOK[p.payment].tone}>{PAYMENT_TEXT[p.payment]}</Badge>,
     },
     {
       key: 'total',
       header: 'المبلغ',
       numeric: true,
+      className: 'max-md:hidden',
       cell: (p) => <Money minor={p.totalMinor} currency={base} className="font-semibold" />,
     },
     {
@@ -629,6 +645,18 @@ function PurchaseForm({
   }, [lines.length]);
   // A batch dated in the past is saved only after the buyer says the date is right
   const [pastOk, setPastOk] = useState(false);
+  // What the shelf cost so far, to ask «هل أنت متأكد؟» about a cost far above it; a failed read means no warning
+  const [averages, setAverages] = useState<Map<string, number>>(new Map());
+  const [warnings, setWarnings] = useState<string[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getInventory()
+      .then((r) => alive && setAverages(averageCosts(r.items)))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
   const pastLines = lines.filter((l) => l.expiry && l.expiry < today());
   const parsed = lines.map((l) => ({ qty: baseQtyOf(l), cost: moneyOf(l.cost) }));
   const ready =
@@ -652,6 +680,35 @@ function PurchaseForm({
   const supplier = suppliers.find((x) => x.id === supplierId);
   const pieces = parsed.reduce((sum, p) => sum + (p.qty ?? 0), 0);
 
+  function save() {
+    void s
+      .run(() =>
+        createPurchase({
+          supplierId,
+          date,
+          payment,
+          reference: reference || null,
+          notes: null,
+          lines: lines.map((l, i) => ({
+            variantId: l.variantId,
+            qty: parsed[i]!.qty!,
+            costMinor: parsed[i]!.cost!,
+            batchNo: l.batch?.trim() || null,
+            expiryDate: l.expiry || null,
+            ...(l.serials?.trim()
+              ? {
+                  serials: l.serials
+                    .split(/[\n,،]+/)
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+                }
+              : {}),
+          })),
+        }),
+      )
+      .then((r) => r && onSaved(r.number));
+  }
+
   return (
     <form
       ref={formRef}
@@ -660,34 +717,53 @@ function PurchaseForm({
       onSubmit={(e) => {
         e.preventDefault();
         if (!ready) return;
-        void s
-          .run(() =>
-            createPurchase({
-              supplierId,
-              date,
-              payment,
-              reference: reference || null,
-              notes: null,
-              lines: lines.map((l, i) => ({
-                variantId: l.variantId,
-                qty: parsed[i]!.qty!,
-                costMinor: parsed[i]!.cost!,
-                batchNo: l.batch?.trim() || null,
-                expiryDate: l.expiry || null,
-                ...(l.serials?.trim()
-                  ? {
-                      serials: l.serials
-                        .split(/[\n,،]+/)
-                        .map((x) => x.trim())
-                        .filter(Boolean),
-                    }
-                  : {}),
-              })),
-            }),
-          )
-          .then((r) => r && onSaved(r.number));
+        const doubts = purchaseWarnings(
+          lines.map((l, i) => ({
+            variantId: l.variantId,
+            name: l.name,
+            qty: parsed[i]!.qty,
+            costMinor: parsed[i]!.cost,
+          })),
+          averages,
+        );
+        if (doubts.length > 0) {
+          setWarnings(doubts);
+          return;
+        }
+        save();
       }}
     >
+      {warnings ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setWarnings(null);
+          }}
+          title="راجع الأرقام قبل التسجيل"
+          description="هذه الفاتورة تبدو غير معتادة. إن كانت صحيحة سجّلها."
+        >
+          <div className="flex flex-col gap-4">
+            <ul className="flex list-disc flex-col gap-1.5 ps-5 text-sm text-ink">
+              {warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                onClick={() => {
+                  setWarnings(null);
+                  save();
+                }}
+              >
+                الأرقام صحيحة، سجّل
+              </Button>
+              <Button variant="ghost" onClick={() => setWarnings(null)}>
+                أعد المراجعة
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      ) : null}
       <div className="flex min-w-0 flex-col gap-6">
         {s.error ? <Alert tone="error">{s.error}</Alert> : null}
         <Card>

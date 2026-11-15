@@ -583,7 +583,7 @@ function SettingsCard() {
             />
             <div className="border-t border-line pt-4">
               <Switch
-                label="اعرض القطع التي نفدت"
+                label="اعرض القطع التي نفد مخزونها"
                 description="تظهر بكلمة «نفد» ولا تُطلب. مطفأ: تختفي حتى تصل من جديد."
                 checked={form.showOutOfStock}
                 onCheckedChange={(showOutOfStock) => set({ showOutOfStock })}

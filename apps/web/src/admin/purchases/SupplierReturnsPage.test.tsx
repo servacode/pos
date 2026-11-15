@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { MeResponse, SupplierReturnDetail } from '@serva/core';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
@@ -168,6 +168,109 @@ describe('«مرتجع إلى المورد»', () => {
     await screen.findByText(/سُجّل المرتجع PRT-1/);
     expect(requestsTo('POST', '/v1/supplier-returns')[0]?.body).toMatchObject({
       lines: [{ variantId: 'v-1', qty: 5000, batchNo: 'SY-118', expiryDate: '2027-02-01' }],
+    });
+  });
+
+  it('starts the batch box on the batch of the latest purchase from this supplier', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/suppliers': {
+        status: 200,
+        body: {
+          items: [
+            { id: 's-1', name: 'معمل الأمل', phone: null, notes: null, balanceMinor: 0, archived: false },
+          ],
+          baseCurrency: 'SYP',
+        },
+      },
+      'GET /v1/supplier-returns': { status: 200, body: { items: [] } },
+      'GET /v1/purchases': {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: 'pu-1',
+              number: 'PUR-1',
+              date: '2026-10-01',
+              supplierId: 's-1',
+              supplierName: 'معمل الأمل',
+            },
+            {
+              id: 'pu-2',
+              number: 'PUR-2',
+              date: '2026-11-01',
+              supplierId: 's-1',
+              supplierName: 'معمل الأمل',
+            },
+          ],
+          baseCurrency: 'SYP',
+        },
+      },
+      'GET /v1/purchases/pu-2': {
+        status: 200,
+        body: {
+          id: 'pu-2',
+          lines: [{ variantId: 'v-1', batchNo: 'SY-118', expiryDate: '2027-02-01', qty: 5000 }],
+        },
+      },
+      'GET /v1/purchases/pu-1': {
+        status: 200,
+        body: {
+          id: 'pu-1',
+          lines: [{ variantId: 'v-1', batchNo: 'SY-117', expiryDate: '2027-01-01', qty: 5000 }],
+        },
+      },
+      [`GET ${productsPath({ q: 'مصل' })}`]: {
+        status: 200,
+        body: { items: [{ id: 'p-1', nameAr: 'مصل', type: 'stock' }], nextCursor: null },
+      },
+      'GET /v1/products/p-1': {
+        status: 200,
+        body: {
+          id: 'p-1',
+          nameAr: 'مصل',
+          variants: [{ id: 'v-1', label: null, archivedAt: null, attributes: [], barcodes: [] }],
+        },
+      },
+      'GET /v1/inventory/expiry?days=3650&variantId=v-1&branchId=branch-1': {
+        status: 200,
+        body: {
+          today: '2026-10-30',
+          items: ['SY-117', 'SY-118'].map((batchNo, i) => ({
+            variantId: 'v-1',
+            name: 'مصل',
+            branchId: 'branch-1',
+            branchName: 'الفرع الرئيسي',
+            batchNo,
+            expiryDate: `2027-0${i + 1}-01`,
+            purchaseNumber: 'PUR-1',
+            supplierId: 's-1',
+            supplierName: 'معمل الأمل',
+            receivedOn: '2026-10-01',
+            qty: 5000,
+            daysLeft: 100,
+            blocked: false,
+            blockReason: null,
+          })),
+        },
+      },
+      'POST /v1/supplier-returns': {
+        status: 201,
+        body: { id: 'r-1', number: 'PRT-1', amountMinor: 0, refund: 'credit' },
+      },
+    });
+    const { user } = renderApp('/supplier-returns');
+    await user.click(await screen.findByRole('button', { name: 'مرتجع جديد' }));
+    await screen.findByRole('option', { name: 'معمل الأمل' });
+    await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'مصل');
+    await user.click(await screen.findByRole('button', { name: 'مصل' }));
+    await user.type(await screen.findByLabelText('كمية مصل'), '5');
+    await waitFor(() => expect(screen.getByLabelText('الدفعة')).toHaveValue('SY-118|2027-02-01'));
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByText(/سُجّل المرتجع PRT-1/);
+    expect(requestsTo('POST', '/v1/supplier-returns')[0]?.body).toMatchObject({
+      lines: [{ variantId: 'v-1', batchNo: 'SY-118', expiryDate: '2027-02-01' }],
     });
   });
 

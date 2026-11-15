@@ -167,7 +167,7 @@ export function ShopTextSection({
                   {a.phone}
                 </bdi>
                 <span className="text-ink-muted">{a.variantLabel ?? 'القطعة'}</span>
-                {a.inStock ? <Badge tone="success">توفرت</Badge> : <Badge tone="neutral">نفدت</Badge>}
+                {a.inStock ? <Badge tone="success">توفرت</Badge> : <Badge tone="neutral">نفد</Badge>}
                 {a.notifiedAt ? <Badge tone="brand">أُبلغ</Badge> : null}
                 <span className="ms-auto flex items-center gap-2">
                   <a

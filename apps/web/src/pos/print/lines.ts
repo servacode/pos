@@ -10,7 +10,7 @@ import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { clockText, dateText } from '../format';
 import { dayText } from '../../lib/dates';
-import { methodLabel, needsThanks, type ReceiptData } from '../receipt/Receipt';
+import { methodLabel, needsThanks, single, type ReceiptData } from '../receipt/Receipt';
 import { serialText, warrantyText } from '../receipt/warranty';
 import { packPiecesNote } from '../sale/packText';
 
@@ -138,12 +138,16 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
   if (sale.customerName) lines.push({ kind: 'center', text: `الزبون: ${sale.customerName}` });
   lines.push(...serviceLines(sale));
   for (const l of sale.lines) {
-    lines.push({ kind: 'text', text: l.name, bold: true });
-    lines.push({
-      kind: 'pair',
-      start: `${formatQuantity(l.qty)}${l.unitName ? ` ${l.unitName}` : ''}${packNote(l)} × ${money(l.unitPriceMinor, base)}`,
-      end: money(l.priced.grossMinor, base),
-    });
+    if (single(l) && l.name.length <= 20) {
+      lines.push({ kind: 'pair', start: l.name, end: money(l.priced.grossMinor, base), bold: true });
+    } else {
+      lines.push({ kind: 'text', text: l.name, bold: true });
+      lines.push({
+        kind: 'pair',
+        start: `${formatQuantity(l.qty)}${l.unitName ? ` ${l.unitName}` : ''}${packNote(l)} × ${money(l.unitPriceMinor, base)}`,
+        end: money(l.priced.grossMinor, base),
+      });
+    }
     if (l.priced.lineDiscountMinor > 0) {
       lines.push({
         kind: 'pair',

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ExpiryRow } from '@serva/core';
 import { formatQuantity, Select, useDigits } from '@serva/ui';
 import { dayText } from '../../lib/dates';
@@ -23,12 +23,15 @@ export function BatchSelect({
   value,
   onChange,
   error,
+  suggest,
 }: {
   variantId: string;
   branchId: string | undefined;
   value: BatchChoice | null;
   onChange: (batch: BatchChoice | null) => void;
   error?: string | undefined;
+  /** The batch of the purchase being returned, when it is known: chosen once, if the branch still holds it */
+  suggest?: BatchChoice | null | undefined;
 }) {
   const digits = useDigits();
   const [rows, setRows] = useState<ExpiryRow[] | null>(null);
@@ -41,6 +44,13 @@ export function BatchSelect({
       alive = false;
     };
   }, [variantId, branchId]);
+  const suggested = useRef(false);
+  useEffect(() => {
+    if (suggested.current || !rows || !suggest || value) return;
+    const held = rows.find((r) => r.qty > 0 && keyOf(r) === keyOf(suggest));
+    suggested.current = true;
+    if (held) onChange({ batchNo: held.batchNo, expiryDate: held.expiryDate });
+  }, [rows, suggest, value, onChange]);
   if (!rows || rows.length === 0) return null;
   // The no-batch row below zero is shown so the batches add up to the stock, but nothing can be returned from it
   const isNegativeNoBatch = (r: ExpiryRow) => !r.batchNo && !r.expiryDate && r.qty <= 0;

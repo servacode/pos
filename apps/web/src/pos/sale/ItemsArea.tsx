@@ -74,7 +74,8 @@ export interface ItemsAreaProps {
   onRepeatLast: () => void;
   /** A tile, or the only result of the search */
   onPickItem: (item: CatalogItem, hit?: BarcodeHit | null) => void;
-  onPickModel: (productId: string) => void;
+  /** A model's tile was tapped; `size` is the size chip that was hit, when one was */
+  onPickModel: (productId: string, size?: { option: string; value: string }) => void;
   /** A long code typed into the search field, handled as a scan */
   onScanCode: (code: string) => void;
   onMultiplier: (count: number) => void;
@@ -335,7 +336,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
         <div
           role="group"
           aria-label="التصنيفات"
-          className="-m-1 flex shrink-0 gap-2 overflow-x-auto p-1 scrollbar-none"
+          className="-m-1 flex shrink-0 gap-2 overflow-x-auto p-1 scrollbar-none sm:flex-wrap sm:overflow-visible"
         >
           {[{ id: null, name: 'الكل' }, ...catalog.categories].map((c) => {
             const on = !query && category === c.id;
@@ -409,8 +410,8 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           onPickItem={(item, hit) => {
             if (!clicksSwallowed()) onPickItem(item, hit);
           }}
-          onPickModel={(productId) => {
-            if (!clicksSwallowed()) props.onPickModel(productId);
+          onPickModel={(productId, size) => {
+            if (!clicksSwallowed()) props.onPickModel(productId, size);
           }}
         />
       )}
@@ -442,7 +443,7 @@ const Grid = memo(function Grid({
   pickingProduct: string | null;
   today: string;
   onPickItem: ItemsAreaProps['onPickItem'];
-  onPickModel: (productId: string) => void;
+  onPickModel: ItemsAreaProps['onPickModel'];
 }) {
   return (
     // overflow-x hidden: the negative margin and the tiles' shadows must not make a sideways scrollbar
@@ -556,7 +557,7 @@ const ModelTile = memo(function ModelTile({
   stockTracked: boolean;
   fx: TileFx | null;
   Kind: Icon;
-  onPick: (productId: string) => void;
+  onPick: ItemsAreaProps['onPickModel'];
 }) {
   const price = lowestPrice(entry.pieces);
   const sizes = useMemo(() => sizeStock(entry.pieces), [entry.pieces]);
@@ -574,7 +575,13 @@ const ModelTile = memo(function ModelTile({
       selected={picking || inCart}
       extra={<TileMarks pieces={entry.pieces} today={today} none={stockTracked} />}
       {...(compact ? { compact: true } : {})}
-      onSelect={() => onPick(entry.productId)}
+      onSelect={(event) => {
+        // A tap on a size chip says which size; the tile itself stays one button (no button inside a button)
+        const chip = (event.target as HTMLElement).closest?.('[data-size]');
+        const value = chip?.getAttribute('data-size');
+        const option = sizes?.find((s) => s.value === value)?.option;
+        onPick(entry.productId, value && option ? { option, value } : undefined);
+      }}
       className="h-full w-full"
     />
   );
@@ -590,22 +597,33 @@ function isSoldOut(pieces: readonly CatalogItem[], today: string): boolean {
 function SizeChips({
   sizes,
 }: {
-  sizes: readonly { value: string; inStock: boolean; left: number | null }[];
+  sizes: readonly { option: string; value: string; inStock: boolean; left: number | null }[];
 }) {
   const digits = useDigits();
   return (
-    <span className="flex flex-wrap gap-x-2 gap-y-0.5 text-[0.8125rem] font-semibold">
-      {sizes.map((s) => (
-        <bdi key={s.value} className={s.inStock ? 'text-ink' : 'text-ink-muted line-through decoration-2'}>
-          {s.value}
-          {s.inStock && s.left !== null ? (
-            <span className="num ms-0.5 text-xs font-normal text-ink-muted">
-              {formatQuantity(s.left, digits)}
-            </span>
-          ) : null}
-          {s.inStock ? null : <span className="sr-only"> نفد</span>}
-        </bdi>
-      ))}
+    <span className="flex flex-wrap gap-x-2 gap-y-1 text-[0.8125rem] font-semibold">
+      {sizes.map((s) =>
+        s.inStock ? (
+          // The size is the chip you tap; what is left is a separate small count beside it
+          <bdi
+            key={s.value}
+            data-size={s.value}
+            className="rounded-small bg-surface-muted px-2 py-0.5 text-xs font-semibold whitespace-nowrap text-ink"
+          >
+            {s.value}
+            {s.left !== null ? (
+              <span className="num ms-1 text-xs font-normal text-ink-muted">
+                · {formatQuantity(s.left, digits)}
+              </span>
+            ) : null}
+          </bdi>
+        ) : (
+          <bdi key={s.value} className="px-2 py-0.5 text-ink-muted line-through decoration-2">
+            {s.value}
+            <span className="sr-only"> نفد</span>
+          </bdi>
+        ),
+      )}
     </span>
   );
 }
@@ -646,7 +664,7 @@ function TileMarks({
   const info = tileInfo(pieces, today);
   const unsellable = info.expiredQty + info.blockedQty;
   if (none && info.stockQty === null && !pieces.every((p) => p.isService)) {
-    return <span className="num text-xs font-medium text-ink-muted">غير متوفر</span>;
+    return <span className="num text-xs font-medium text-ink-muted">نفد</span>;
   }
   if (
     info.stockQty === null &&
@@ -664,7 +682,7 @@ function TileMarks({
     <>
       {onShelf !== null ? (
         <span className={cn('num text-xs font-medium', nothingSellable ? 'text-ink-muted' : 'text-ink')}>
-          {nothingSellable ? 'غير متوفر' : `متوفر ${formatQuantity(onShelf, digits)}`}
+          {nothingSellable ? 'نفد' : `متوفر ${formatQuantity(onShelf, digits)}`}
         </span>
       ) : null}
       {/* What is left out of the count (halted, expired): one small «⚠ 3 موقوفة» chip, never a second sentence */}

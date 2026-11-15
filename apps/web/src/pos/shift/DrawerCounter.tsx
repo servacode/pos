@@ -160,7 +160,8 @@ export function DrawerCounter({
           <CashIcon size={16} />
         </IconChip>
         <h2 className="flex-1 text-lg font-semibold text-ink">{drawerName(currency)}</h2>
-        <Money minor={total} currency={currency} className="text-xl font-bold text-ink" />
+        {/* Typed as one total, the field below is the total: it is not said a second time up here */}
+        {byNote ? <Money minor={total} currency={currency} className="text-xl font-bold text-ink" /> : null}
       </div>
       {byNote ? (
         <ul className="flex flex-col gap-1">

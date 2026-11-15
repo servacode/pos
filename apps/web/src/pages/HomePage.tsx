@@ -60,6 +60,12 @@ import { dueSoon } from '../admin/cheques/ChequesPage';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { ContractAttention, seesContractAttention } from './ContractAttention';
 import { getDayReport, getDayTotals } from '../admin/reports/api';
+import {
+  EARLY_HOUR,
+  hourIn,
+  useOpenShiftFromYesterday,
+  type OpenFromYesterday,
+} from '../admin/reports/openShift';
 import { getSalesBreakdown } from '../admin/reports/SalesReportPage';
 import { daysAgo, getMerchandise } from '../admin/reports/MerchandisePage';
 import type { DayReport } from '../admin/reports/contracts';
@@ -99,7 +105,7 @@ function TrialBanner({ me }: { me: MeResponse }) {
   return (
     <div
       // Said once: from 1024 px the sidebar's plan card carries these days, so this is for phones
-      className="flex items-center gap-4 rounded-card border border-brand/20 bg-brand-soft px-4 py-4 text-brand-ink shadow-e1 sm:px-5 lg:hidden"
+      className="flex items-center gap-4 rounded-card border border-brand/20 bg-brand-soft px-4 py-2 text-brand-ink shadow-e1 sm:px-5 sm:py-4 lg:hidden"
     >
       <span className="grid size-11 shrink-0 place-items-center rounded-full bg-surface/70">
         <GiftIcon />
@@ -108,7 +114,7 @@ function TrialBanner({ me }: { me: MeResponse }) {
         <p className="font-semibold">
           {daysLeft === null ? 'أنت على الباقة المجانية' : trialMessage(daysLeft, me.settings.numberFormat)}
         </p>
-        <p className="text-sm opacity-85">كل المزايا متاحة لك خلال التجربة.</p>
+        <p className="text-sm opacity-85 max-sm:hidden">كل المزايا متاحة لك خلال التجربة.</p>
       </div>
       <button
         type="button"
@@ -285,9 +291,14 @@ function HeroTile({
   week,
   noHistory = false,
   zeroMorning = false,
+  openShift = null,
+  digits,
 }: {
+  /** A shift opened yesterday and still open: its invoices are dated yesterday, said in words */
+  openShift?: OpenFromYesterday | null;
   /** No sales in the days before today: say it once here instead of on every tile */
   noHistory?: boolean;
+  digits: NumberFormat;
   /** Nothing sold yet today though earlier days did: «لا مبيعات بعد» instead of a fall of 100% */
   zeroMorning?: boolean;
   data: DayReport | null;
@@ -301,7 +312,9 @@ function HeroTile({
         <div className="flex items-center justify-between gap-3">
           <p className="flex items-center gap-2 text-sm font-semibold opacity-90">
             <SalesIcon size={20} />
-            مبيعات اليوم
+            <span>
+              مبيعات اليوم <span className="font-normal opacity-85">(صافي)</span>
+            </span>
           </p>
           <Link
             to="/sales/today"
@@ -320,7 +333,13 @@ function HeroTile({
               {zeroMorning ? (
                 <span className="opacity-85">لا مبيعات بعد</span>
               ) : trend ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold">
+                // A fall is amber (never green on the green hero), a rise stays the hero's own white
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
+                    trend.direction === 'down' ? 'bg-warning-soft text-warning-ink' : 'bg-on-brand/15',
+                  )}
+                >
                   <TrendIcon size={16} />
                   <span className="sr-only">{trend.direction === 'up' ? 'ارتفاع' : 'انخفاض'}</span>
                   <bdi className="num">{trend.value}</bdi>
@@ -338,6 +357,21 @@ function HeroTile({
                 </span>
               ) : null}
               {noHistory ? <span className="opacity-85">لا بيانات قبل اليوم</span> : null}
+              {openShift ? (
+                <span className="opacity-85">
+                  وردية مفتوحة منذ أمس: {formatNumber(openShift.count, digits)} فاتورة
+                  {openShift.count > 0 ? (
+                    <>
+                      {' '}
+                      <Money
+                        minor={openShift.netMinor}
+                        currency={data.baseCurrency}
+                        className="font-semibold"
+                      />
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
               <span className="opacity-85">
                 الخصومات{' '}
                 <Money minor={data.discountMinor} currency={data.baseCurrency} className="font-semibold" />
@@ -375,9 +409,12 @@ function KpiBand({
   points,
   profit,
   seesProfit,
+  openShift,
 }: {
   me: MeResponse;
   day: DayState;
+  /** What a shift opened yesterday and still open has sold */
+  openShift: OpenFromYesterday | null;
   /** The last seven days, oldest first, today last. */
   points: readonly DayPoint[];
   profit: ReportState<{
@@ -418,14 +455,18 @@ function KpiBand({
   // A zero morning says «لا مبيعات بعد» once, not a fall of 100% on every tile
   const zeroMorning =
     !!data && data.invoiceCount === 0 && points.slice(0, -1).some((p) => (p.total ?? 0) > 0);
+  // Early in the day, or with last night's shift still open, today is a few hours against a whole
+  // yesterday: no comparison at all (it would say «-98%» at 1 am)
+  const partialDay = openShift !== null || hourIn(me.tenant.timezone) < EARLY_HOUR;
   const average = data && data.invoiceCount > 0 ? Math.round(netOfReturns(data) / data.invoiceCount) : 0;
-  const yesterdayAverage = yesterday?.count ? Math.round((yesterday.total ?? 0) / yesterday.count) : null;
 
   return (
     <section aria-label="مبيعات اليوم" className="flex flex-col gap-4">
       <HeroTile
         data={data}
-        trend={data ? changeOf(netOfReturns(data), yesterday?.total, digits, thin) : undefined}
+        trend={data && !partialDay ? changeOf(netOfReturns(data), yesterday?.total, digits, thin) : undefined}
+        openShift={openShift}
+        digits={digits}
         week={weekReady && data && !noHistory && !thin ? totals : null}
         noHistory={noHistory}
         zeroMorning={zeroMorning}
@@ -440,14 +481,12 @@ function KpiBand({
               className={TILE_CLASS}
               label="الفواتير"
               value={<span className="num">{formatNumber(data.invoiceCount, digits)}</span>}
-              trend={zeroMorning ? undefined : changeOf(data.invoiceCount, yesterday?.count, digits, thin)}
               sparkline={!thin ? counts : undefined}
             />
             <StatTile
               className={TILE_CLASS}
               label="متوسط الفاتورة"
               value={<Money minor={average} currency={data.baseCurrency} />}
-              trend={zeroMorning ? undefined : changeOf(average, yesterdayAverage, digits, thin)}
               sparkline={!thin ? averages : undefined}
             />
           </>
@@ -867,8 +906,6 @@ function waitingFigures({
   seesOrders,
   seesStock,
   seesExpiry,
-  cheques,
-  today,
   noPhoto = 0,
 }: WaitingArgs) {
   const count = orders.data?.items.length ?? 0;
@@ -885,8 +922,6 @@ function waitingFigures({
   const recalled = expiry.data?.items.filter((row) => row.blocked).length ?? 0;
   const loading =
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
-  const chequesDue = cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
-  const chequesOut = cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
   // The tab counts rows, as the list shows them; «بلا صورة» is a suggestion, shown but not counted
   const total =
     (online > 0 ? 1 : 0) +
@@ -894,9 +929,7 @@ function waitingFigures({
     stock.length +
     (expiring > 0 ? 1 : 0) +
     (expired > 0 ? 1 : 0) +
-    (recalled > 0 ? 1 : 0) +
-    (chequesDue > 0 ? 1 : 0) +
-    (chequesOut > 0 ? 1 : 0);
+    (recalled > 0 ? 1 : 0);
   return {
     holds,
     online,
@@ -905,10 +938,10 @@ function waitingFigures({
     expired,
     recalled,
     loading,
-    chequesDue,
-    chequesOut,
     noPhoto,
     total,
+    // What the list shows, the grey «بلا صورة» row too: the tab's badge and «عرض الكل» say one number
+    listed: total + (noPhoto > 0 ? 1 : 0),
     empty: total === 0 && noPhoto === 0,
   };
 }
@@ -918,19 +951,7 @@ const WAITING_ROWS = 3;
 
 function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   const [all, setAll] = useState(false);
-  const {
-    holds,
-    online,
-    stock,
-    expiring,
-    expired,
-    recalled,
-    loading,
-    chequesDue,
-    chequesOut,
-    noPhoto,
-    empty,
-  } = waitingFigures(args);
+  const { holds, online, stock, expiring, expired, recalled, loading, noPhoto, empty } = waitingFigures(args);
   // Red only for what blocks (a recalled batch) or is wholly gone; everything else is amber or calm.
   // Most serious first, so the three rows shown are the three that matter.
   const rows: ReactNode[] = [];
@@ -994,18 +1015,6 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
       </WaitingRow>,
     );
   for (const group of stock.filter((g) => !g.allOut)) rows.push(rowOf(group));
-  if (chequesDue > 0)
-    rows.push(
-      <WaitingRow key="due" to="/cheques" count={chequesDue} tone="warning" icon={<CalendarIcon />}>
-        {chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
-      </WaitingRow>,
-    );
-  if (chequesOut > 0)
-    rows.push(
-      <WaitingRow key="out" to="/cheques" count={chequesOut} tone="warning" icon={<CalendarIcon />}>
-        {chequesOut === 1 ? 'شيك صادر للمورد يستحق خلال 7 أيام' : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
-      </WaitingRow>,
-    );
   if (expiring > 0)
     rows.push(
       <WaitingRow key="expiring" to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
@@ -1177,6 +1186,9 @@ type CustomerDebts = ReportState<Awaited<ReturnType<typeof listCustomers>>>;
 type SupplierDues = ReportState<Awaited<ReturnType<typeof listSuppliers>>>;
 
 interface MoneyArgs {
+  /** The cheques, to say which fall due within a week (in and out) */
+  cheques?: ChequesState | null;
+  today?: string;
   customers: CustomerDebts;
   suppliers: SupplierDues;
   seesCustomers: boolean;
@@ -1184,16 +1196,29 @@ interface MoneyArgs {
 }
 
 /** What the store is owed and owes, from the customers' and suppliers' own lists: the rows and how many */
-function moneyFigures({ customers, suppliers, seesCustomers, seesSuppliers }: MoneyArgs) {
+function moneyFigures({ customers, suppliers, seesCustomers, seesSuppliers, cheques, today }: MoneyArgs) {
+  const chequesDue = seesCustomers && cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
+  const chequesOut =
+    seesCustomers && cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
   const list = seesCustomers ? (customers.data?.items ?? []) : [];
-  const overLimit = list.filter(
+  const over = list.filter(
     (c) => !c.archived && c.creditLimitMinor !== null && c.balanceMinor > c.creditLimitMinor,
-  ).length;
+  );
+  const overLimit = over.length;
+  const overOne = over.length === 1 ? (over[0] ?? null) : null;
   const owedByCustomers = seesCustomers ? (customers.data?.totalOwedMinor ?? 0) : 0;
   const owedToSuppliers = seesSuppliers ? (suppliers.data?.totalOwedMinor ?? 0) : 0;
-  const total = (overLimit > 0 ? 1 : 0) + (owedByCustomers > 0 ? 1 : 0) + (owedToSuppliers > 0 ? 1 : 0);
+  const total =
+    (overLimit > 0 ? 1 : 0) +
+    (owedByCustomers > 0 ? 1 : 0) +
+    (owedToSuppliers > 0 ? 1 : 0) +
+    (chequesDue > 0 ? 1 : 0) +
+    (chequesOut > 0 ? 1 : 0);
   return {
+    chequesDue,
+    chequesOut,
     overLimit,
+    overOne,
     owedByCustomers,
     owedToSuppliers,
     total,
@@ -1213,7 +1238,29 @@ function MoneyRows(args: MoneyArgs) {
     <ul className="flex flex-col gap-2">
       {f.overLimit > 0 ? (
         <WaitingRow to="/customers" count={f.overLimit} tone="danger" icon={<WarningIcon />}>
-          {f.overLimit === 1 ? 'زبون تجاوز حدّ الدين' : 'زبائن تجاوزوا حدّ الدين'}
+          {f.overOne && f.overOne.creditLimitMinor !== null && f.customersBase ? (
+            <>
+              {f.overOne.name}: فوق الحدّ{' '}
+              <Money minor={f.overOne.balanceMinor} currency={f.customersBase} className="font-bold" /> (الحدّ{' '}
+              <Money minor={f.overOne.creditLimitMinor} currency={f.customersBase} />)
+            </>
+          ) : f.overLimit === 1 ? (
+            'زبون تجاوز حدّ الدين'
+          ) : (
+            'زبائن تجاوزوا حدّ الدين'
+          )}
+        </WaitingRow>
+      ) : null}
+      {f.chequesDue > 0 ? (
+        <WaitingRow to="/cheques" count={f.chequesDue} tone="warning" icon={<CalendarIcon />}>
+          {f.chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
+        </WaitingRow>
+      ) : null}
+      {f.chequesOut > 0 ? (
+        <WaitingRow to="/cheques" count={f.chequesOut} tone="warning" icon={<CalendarIcon />}>
+          {f.chequesOut === 1
+            ? 'شيك صادر للمورد يستحق خلال 7 أيام'
+            : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
         </WaitingRow>
       ) : null}
       {f.owedByCustomers > 0 && f.customersBase ? (
@@ -1258,8 +1305,8 @@ function AttentionPanel({
   const items: TabItem<'now' | 'stock' | 'money'>[] = [
     {
       value: 'now',
-      label: 'المطلوب الآن',
-      ...(figures.total > 0 ? { count: figures.total } : {}),
+      label: 'الآن',
+      ...(figures.listed > 0 ? { count: figures.listed } : {}),
       content: <Waiting bare {...waiting} />,
     },
     ...(stockTab
@@ -1360,6 +1407,8 @@ export function HomePage() {
   const seesExpiry = holdsAny(me, ['purchases.manage']);
   const seesCheques = holdsAny(me, ['customers.view']);
   const today = isoDay(Date.now(), me.tenant.timezone);
+  // After midnight a shift that opened yesterday may still be open: its sales are said in words
+  const openShift = useOpenShiftFromYesterday(seesSales, today, me.tenant.timezone, 'home');
 
   const day = useReport(
     seesSales ? `day:${today}` : null,
@@ -1442,6 +1491,8 @@ export function HomePage() {
     suppliers,
     seesCustomers: seesCheques,
     seesSuppliers: seesExpiry,
+    cheques,
+    today,
   };
 
   return (
@@ -1508,7 +1559,14 @@ export function HomePage() {
                   />
                 </button>
                 <div className={cn('min-w-0', !kpiOpen && 'max-md:hidden')}>
-                  <KpiBand me={me} day={day} points={weekPoints} profit={profit} seesProfit={seesProfit} />
+                  <KpiBand
+                    me={me}
+                    day={day}
+                    points={weekPoints}
+                    profit={profit}
+                    seesProfit={seesProfit}
+                    openShift={openShift.note}
+                  />
                 </div>
               </div>
             ) : null}
@@ -1561,9 +1619,7 @@ export function HomePage() {
                     seesOrders,
                     seesStock,
                     seesExpiry,
-                    cheques,
                     noPhoto,
-                    today,
                   }}
                   merch={merch}
                   showStock={seesStock}

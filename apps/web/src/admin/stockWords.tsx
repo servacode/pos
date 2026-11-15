@@ -27,12 +27,13 @@ const SIZE_COLOUR = {
 } as const;
 
 /**
- * One plain sentence for «نفد من الرف»: «12 مقاساً/لوناً نفد من 4 منتجات» in a clothing store, «3 أصناف نفدت»
+ * One plain sentence for «نفد من الرف»: «12 مقاساً/لوناً نفد من 4 منتجات» in a clothing store, «3 أصناف نفد»
  * elsewhere. `products` is how many products those combinations belong to (absent from an older server).
  */
 export function soldOutSentence(variants: number, products: number | undefined, clothing: boolean): string {
   if (variants <= 0) return '';
-  const verb = variants === 1 ? 'نفد' : variants === 2 ? 'نفدا' : variants <= 10 ? 'نفدت' : 'نفد';
+  // One word for «ran out» whatever the count: «نفد» (never «نفدت» or «نفدا»)
+  const verb = 'نفد';
   if (clothing) {
     const of =
       products !== undefined && products > 0
@@ -73,7 +74,9 @@ export function StockDefinitions() {
             الصنف (أو المقاس/اللون في الألبسة): كل مقاس ولون قطعة مستقلة، وعددها يُحسب مرة واحدة في كل
             الشاشات.
           </li>
-          <li>القطع: ما على الرفوف فعلاً، ولا يُحسب الناقص منها.</li>
+          <li>
+            القطع: ما على الرفوف فعلاً في كل الفروع (والكاشير يرى ما في فرعه فقط)، ولا يُحسب الناقص منها.
+          </li>
           <li>
             نفد: صنف كميته صفر أو أقل. وإذا كان أقل من صفر فهو «سالب» ويُحسب ضمن «نفد» مرة واحدة: بِعتَ أكثر
             مما سجّلت، فاجرد الصنف أو سجّل استلاماً.
@@ -86,4 +89,5 @@ export function StockDefinitions() {
 }
 
 /** The label of the «ran out» tile: it says what it counts, the same words on products, inventory and home */
-export const soldOutLabel = (clothing: boolean): string => (clothing ? 'مقاسات/ألوان نفدت' : 'أصناف نفدت');
+export const soldOutLabel = (clothing: boolean): string =>
+  clothing ? 'نفد من المقاسات/الألوان' : 'نفد من الأصناف';

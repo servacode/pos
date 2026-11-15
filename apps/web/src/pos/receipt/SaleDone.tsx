@@ -3,6 +3,7 @@ import { Button, CartIcon, CheckIcon, cn, Money, OfflineIcon, PrintIcon } from '
 import { notesFor } from '../shift/shift';
 import { changeNotes } from '../pay/payment';
 import { methodLabel, Receipt, type PaperWidth, type ReceiptData } from './Receipt';
+import { WhatsAppSend } from './WhatsAppSend';
 
 /**
  * «تمت البيعة» (kit cashier/PaymentDone): the change in large type with the notes to hand back,
@@ -18,6 +19,7 @@ export function SaleDone({
   onPrintWarranty,
   onPrintA4,
   onNewSale,
+  customerPhone = null,
 }: {
   data: ReceiptData;
   online: boolean;
@@ -29,6 +31,8 @@ export function SaleDone({
   /** «اطبع A4» and «إشعار تسليم»: the invoice (a tax invoice when the store has a tax number) or its delivery note on A4 */
   onPrintA4?: (kind: 'invoice' | 'delivery') => void;
   onNewSale: () => void;
+  /** The customer's phone when the sale named one; without it «أرسل عبر واتساب» asks for a number */
+  customerPhone?: string | null;
 }) {
   const sale = data.doc.payload as unknown as SalePayload;
   const change = sale.change;
@@ -157,6 +161,7 @@ export function SaleDone({
               اطبع شهادة الكفالة
             </Button>
           ) : null}
+          <WhatsAppSend data={data} phone={customerPhone} />
           <Button size="pay" onClick={onNewSale} className="min-w-60 flex-1 sm:basis-full">
             بيعة جديدة
             <CartIcon size={24} />

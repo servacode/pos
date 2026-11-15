@@ -84,6 +84,16 @@ const STEP =
 
 export type SavedReturn = Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
 
+/** Every piece of the invoice has come back (display only: the server counts what is left again) */
+const allBack = (s: Pick<ReturnableSale, 'sale' | 'returned'>): boolean =>
+  returnableLines(s.sale, s.returned).every((l) => l.remainingQty === 0);
+
+/** The invoice's piece names for its row in the list: the first two, then how many more */
+const pieceNames = (sale: ReturnableSale['sale']): string => {
+  const names = [...new Set(sale.lines.map((l) => l.name))];
+  return names.length > 2 ? `${names.slice(0, 2).join('، ')} و${names.length - 2} غيرها` : names.join('، ');
+};
+
 const savedRefund = (saved: SavedReturn): RefundMethod =>
   (saved.payload as unknown as ReturnPayload).refunds[0]?.method ?? 'cash';
 
@@ -405,6 +415,9 @@ export function ReturnScreen({
         payload: entry.doc.payload,
       };
       setSaved(doc);
+      // An invoice found on the server is not in this till's list: what it just gave back is added to what it shows
+      const added = draft.lines.map((l) => ({ saleLineNo: l.saleLineNo, qty: l.qty, ...l.refund }));
+      setPicked((p) => (p && p.id === current.id ? { ...p, returned: [...p.returned, ...added] } : p));
       setQty({});
       setTick((t) => t + 1);
       onPrint(doc);
@@ -565,10 +578,16 @@ export function ReturnScreen({
                             return name ? <bdi className="font-semibold text-ink">{name}</bdi> : null;
                           })()}
                           {s.returned.length > 0 ? (
-                            <span className="text-warning-ink">· رجع منها شيء</span>
+                            <span className="text-warning-ink">
+                              · {allBack(s) ? 'رجعت كلها' : 'رجع منها شيء'}
+                            </span>
                           ) : (
                             ''
                           )}
+                        </span>
+                        {/* The pieces, so «الفستان الأزرق» can be found without opening each invoice */}
+                        <span className="truncate text-xs text-ink-muted">
+                          <bdi>{pieceNames(s.sale)}</bdi>
                         </span>
                       </span>
                       <Money
@@ -606,7 +625,9 @@ export function ReturnScreen({
                   اطبع الإيصال مرة أخرى
                 </Button>
                 {/* Nothing left to take back from this invoice: no offer of another return */}
-                {lines.length > 0 ? (
+                {lines.some(
+                  (l) => l.remainingQty > 0 && medicineRules.get(l.saleLineNo)?.kind !== 'blocked',
+                ) ? (
                   <Button variant="secondary" onClick={() => setSaved(null)}>
                     مرتجع آخر من نفس الفاتورة
                   </Button>
@@ -651,6 +672,7 @@ export function ReturnScreen({
                     {current.number}
                   </bdi>
                 </h2>
+                {allBack(current) ? <Badge>رجعت كلها</Badge> : null}
                 <Money
                   minor={current.sale.totals.totalMinor}
                   currency={current.sale.currency}

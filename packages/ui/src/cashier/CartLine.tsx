@@ -21,6 +21,8 @@ export interface CartLineProps {
   /** The line's element id, so the cart can scroll to it */
   id?: string;
   name: string;
+  /** The variant («34 · أزرق») kept whole on one line after the name, never split by the wrap */
+  variant?: string;
   /** Quantity in thousandths (1 piece = 1000, 1.250 kg = 1250). */
   qtyThousandths: number;
   /** «كغ» for weighed lines; pieces show none. */
@@ -51,6 +53,7 @@ export interface CartLineProps {
 export function CartLine({
   id,
   name,
+  variant,
   qtyThousandths,
   unit,
   unitPriceMinor,
@@ -103,6 +106,12 @@ export function CartLine({
                 </span>
               ) : null}
               <bdi>{name}</bdi>
+              {variant ? (
+                <>
+                  {' '}
+                  <bdi className="whitespace-nowrap">{variant}</bdi>
+                </>
+              ) : null}
             </span>
             <span className="text-sm text-ink-muted">
               {/* One right-to-left isolate: «1.250 كغ × 300» reads quantity, unit, ×, price. */}
