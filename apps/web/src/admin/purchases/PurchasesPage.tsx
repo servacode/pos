@@ -69,7 +69,7 @@ import { SlimKpis } from '../SlimKpis';
 import { PackQty } from './PackQty';
 import { PurchaseDetailDialog } from './PurchaseDetailDialog';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
-import { averageCosts, purchaseWarnings } from './purchaseSanity';
+import { purchaseWarnings, referenceCosts, type CostReference } from './purchaseSanity';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRules';
 import { downloadCsv } from '../exportCsv';
@@ -646,12 +646,12 @@ function PurchaseForm({
   // A batch dated in the past is saved only after the buyer says the date is right
   const [pastOk, setPastOk] = useState(false);
   // What the shelf cost so far, to ask «هل أنت متأكد؟» about a cost far above it; a failed read means no warning
-  const [averages, setAverages] = useState<Map<string, number>>(new Map());
+  const [averages, setAverages] = useState<Map<string, CostReference>>(new Map());
   const [warnings, setWarnings] = useState<string[] | null>(null);
   useEffect(() => {
     let alive = true;
     getInventory()
-      .then((r) => alive && setAverages(averageCosts(r.items)))
+      .then((r) => alive && setAverages(referenceCosts(r.items)))
       .catch(() => undefined);
     return () => {
       alive = false;

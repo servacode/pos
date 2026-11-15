@@ -7,6 +7,7 @@ import {
   forgetSession,
   getAccessToken,
   knownSignedOut,
+  neverHadSession,
   onSessionExpired,
   refreshAccessToken,
   setAccessToken,
@@ -205,8 +206,14 @@ describe('apiFetch', () => {
 });
 
 describe('the session note', () => {
-  it('is empty on a new device, so the first load still asks once', () => {
+  it('is empty on a new device: not «signed out», but nothing to refresh either', () => {
+    globalThis.localStorage.removeItem('serva.session');
     expect(knownSignedOut()).toBe(false);
+    expect(neverHadSession()).toBe(true);
+    setAccessToken('t');
+    expect(neverHadSession()).toBe(false);
+    forgetSession();
+    expect(neverHadSession()).toBe(false);
   });
 
   it('says «signed out» after the refresh is refused and after a sign-out, and «in» again on a token', async () => {

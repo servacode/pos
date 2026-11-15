@@ -162,11 +162,13 @@ describe('AppShell', () => {
       'المنتجات',
       'التصنيفات',
       'تغيير الأسعار',
-      'تحديث الأسعار من ملف',
-      'سجل تغيير الأسعار',
-      'طباعة الملصقات',
-      'استيراد البيانات',
+      'تحديث الأسعار',
+      'سجل الأسعار',
+      'الملصقات',
+      'الاستيراد',
     ]);
+    // a shortened tab still carries the page's full name for a screen reader
+    expect(within(tabs).getByRole('link', { name: 'تحديث الأسعار من ملف' })).toBeInTheDocument();
     expect(within(tabs).getByRole('link', { name: 'تغيير الأسعار' })).toHaveAttribute('aria-current', 'page');
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: 'المنتجات' })).toHaveAttribute('aria-current', 'page');

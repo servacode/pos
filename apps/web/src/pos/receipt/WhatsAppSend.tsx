@@ -1,4 +1,4 @@
-import { Button, TextField } from '@serva/ui';
+import { Button, ChatIcon, TextField } from '@serva/ui';
 import { useState } from 'react';
 import type { ReceiptData } from './Receipt';
 import { whatsappLink } from './whatsapp';
@@ -19,10 +19,13 @@ export function WhatsAppSend({
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState('');
   const [error, setError] = useState('');
+  // After the link opened: «فُتح واتساب ✓» says it happened; the same button can open it again
+  const [sent, setSent] = useState(false);
   const open = (number: string | null): boolean => {
     const link = whatsappLink(number, data);
     if (!link) return false;
     window.open(link, '_blank', 'noopener,noreferrer');
+    setSent(true);
     return true;
   };
   if (typing) {
@@ -45,7 +48,8 @@ export function WhatsAppSend({
         <Button
           size="lg"
           onClick={() => {
-            if (!open(typed)) setError('رقم الجوال غير صحيح. مثال: 0912345678');
+            if (open(typed)) setTyping(false);
+            else setError('رقم الجوال غير صحيح. مثال: 0912345678');
           }}
         >
           أرسل
@@ -57,13 +61,14 @@ export function WhatsAppSend({
     <Button
       variant="secondary"
       size="lg"
+      icon={<ChatIcon className="text-success-ink" />}
       className={className}
       onClick={() => {
         if (phone && open(phone)) return;
         setTyping(true);
       }}
     >
-      أرسل عبر واتساب
+      {sent ? 'فُتح واتساب ✓' : 'أرسل عبر واتساب'}
     </Button>
   );
 }

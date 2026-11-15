@@ -106,14 +106,14 @@ export function CartLine({
                 </span>
               ) : null}
               <bdi>{name}</bdi>
-              {variant ? (
-                <>
-                  {' '}
-                  <bdi className="whitespace-nowrap">{variant}</bdi>
-                </>
-              ) : null}
             </span>
             <span className="text-sm text-ink-muted">
+              {/* The size and colour sit whole on the detail row, never wrapped under a long name */}
+              {variant ? (
+                <bdi className="me-2 rounded-small bg-surface-muted px-1.5 py-0.5 font-semibold whitespace-nowrap text-ink">
+                  {variant}
+                </bdi>
+              ) : null}
               {/* One right-to-left isolate: «1.250 كغ × 300» reads quantity, unit, ×, price. */}
               <bdi dir="rtl" className="num">
                 {formatQuantity(qtyThousandths, digits)}

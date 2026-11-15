@@ -166,7 +166,7 @@ export function InventoryPage() {
             </bdi>
             {r.sellableQty !== undefined && r.qty > 0 && r.sellableQty < r.qty ? (
               <span className="text-xs whitespace-nowrap text-ink-muted">
-                متاح للبيع <bdi className="num">{formatQuantity(r.sellableQty, digits)}</bdi>
+                متوفر <bdi className="num">{formatQuantity(r.sellableQty, digits)}</bdi>
               </span>
             ) : null}
           </span>
@@ -577,7 +577,7 @@ export function InventoryPage() {
             },
             {
               key: 'out',
-              label: soldOutLabel(clothing),
+              label: soldOutLabel(),
               value: stock ? soldOut : '…',
               tone: stock && soldOut > 0 ? 'warning' : undefined,
               note: stock

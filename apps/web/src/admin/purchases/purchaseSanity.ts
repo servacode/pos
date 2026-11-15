@@ -29,6 +29,30 @@ export function averageCosts(rows: readonly InventoryRow[]): Map<string, number>
   return out;
 }
 
+/** What one piece of an item cost before, three ways (minor units per piece); each may be unknown */
+export interface CostReference {
+  /** Over the shelf now */
+  average?: number | null;
+  /** On its latest purchase */
+  last?: number | null;
+  /** The middle of its latest five purchases (one wrong purchase cannot move it) */
+  typical?: number | null;
+}
+
+/** The three references of every item, from the inventory rows (the server sends the last and typical ones) */
+export function referenceCosts(rows: readonly InventoryRow[]): Map<string, CostReference> {
+  const out = new Map<string, CostReference>();
+  for (const [id, average] of averageCosts(rows)) out.set(id, { average });
+  for (const r of rows) {
+    if (r.lastCostMinor === undefined && r.typicalCostMinor === undefined) continue;
+    const seen = out.get(r.variantId) ?? {};
+    seen.last = r.lastCostMinor ?? seen.last ?? null;
+    seen.typical = r.typicalCostMinor ?? seen.typical ?? null;
+    out.set(r.variantId, seen);
+  }
+  return out;
+}
+
 /** A date or a phone number pasted in the cost box reads as a huge round-looking number of digits */
 export function looksLikeDateOrPhone(whole: number): boolean {
   if (!Number.isInteger(whole)) return false;
@@ -43,7 +67,7 @@ const group = (n: number): string => Math.round(n).toLocaleString('en-US');
 /** Plain-words warnings for a purchase that looks wrong; empty when it looks fine. Warns only, never blocks. */
 export function purchaseWarnings(
   lines: readonly SanityLine[],
-  averages: ReadonlyMap<string, number>,
+  references: ReadonlyMap<string, number | CostReference>,
 ): string[] {
   const out: string[] = [];
   for (const l of lines) {
@@ -55,12 +79,22 @@ export function purchaseWarnings(
       );
       continue;
     }
-    const avg = averages.get(l.variantId);
-    if (avg && l.qty && l.qty > 0) {
+    const known = references.get(l.variantId);
+    const ref: CostReference = typeof known === 'number' ? { average: known } : (known ?? {});
+    if (l.qty && l.qty > 0) {
       const perPiece = (l.costMinor * 1000) / l.qty;
-      if (perPiece > avg * COST_JUMP) {
+      // Either jump asks: against the shelf average, the last purchase, or the middle of the last five; the smallest one that is passed is told
+      const candidates: { value: number | null | undefined; words: string }[] = [
+        { value: ref.average, words: 'كلفتها المعتادة' },
+        { value: ref.typical, words: 'كلفتها المعتادة' },
+        { value: ref.last, words: 'كلفتها في آخر شراء' },
+      ];
+      const passed = candidates
+        .filter((x): x is { value: number; words: string } => !!x.value && perPiece > x.value * COST_JUMP)
+        .sort((a, b) => a.value - b.value)[0];
+      if (passed) {
         out.push(
-          `«${l.name}»: كلفة القطعة ${group(perPiece / 100)} أكثر من ${COST_JUMP} أضعاف كلفتها المعتادة ${group(avg / 100)}.`,
+          `«${l.name}»: كلفة القطعة ${group(perPiece / 100)} أكثر من ${COST_JUMP} أضعاف ${passed.words} ${group(passed.value / 100)}.`,
         );
       }
     }

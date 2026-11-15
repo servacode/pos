@@ -270,7 +270,8 @@ describe('the size picker', () => {
     await user.click(sizes[4]!);
     expect(screen.queryByRole('list', { name: 'أسطر الفاتورة' })).not.toBeInTheDocument();
     await user.click(within(picker).getByRole('button', { name: 'نفد — أضفه رغم ذلك' }));
-    expect(cartLines()).toHaveTextContent('قميص كتان 3XL أبيض');
+    expect(cartLines()).toHaveTextContent('قميص كتان');
+    expect(cartLines()).toHaveTextContent('3XL أبيض');
   });
 
   it('takes what the cart already holds off the stock shown', async () => {

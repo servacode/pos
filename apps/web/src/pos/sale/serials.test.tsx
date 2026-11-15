@@ -188,7 +188,8 @@ describe('serial numbers at the till', () => {
     expect(plain(cartLines())).toContain('IMEI IMEI351');
     await user.keyboard('{F12}');
     const pay = await screen.findByRole('region', { name: 'الدفع' });
-    expect(within(pay).getByText(/جهاز بكفالة: اطلب اسم الزبون وجواله/)).toBeInTheDocument();
+    expect(within(pay).getByText(/اختر الزبون أولاً: الجهاز المباع بكفالة/)).toBeInTheDocument();
+    expect(within(pay).queryByText(/اطلب اسم الزبون وجواله/)).not.toBeInTheDocument();
     expect(within(pay).getByRole('button', { name: /أتمّ الدفع/ })).toBeDisabled();
   });
 

@@ -9,6 +9,38 @@ export const FIELD_LABEL = 'text-sm font-semibold text-ink-muted';
 /** The hint under a field; an error takes its place. */
 export const FIELD_HINT = 'text-sm text-ink-subtle';
 
+/**
+ * «اختياري» is a word about the label, so it sits beside it, not under the box: the hint of a field
+ * that is exactly that word takes the label's row.
+ */
+export const OPTIONAL_HINT = 'اختياري';
+
+/** The label row: the label, and «اختياري» next to it when that is the hint. */
+export function FieldLabelRow({
+  htmlFor,
+  label,
+  hideLabel,
+  optionalId,
+}: {
+  htmlFor: string;
+  label: ReactNode;
+  hideLabel?: boolean;
+  optionalId?: string;
+}) {
+  return (
+    <div className={cn('flex items-baseline gap-2', hideLabel && 'sr-only')}>
+      <label htmlFor={htmlFor} className={FIELD_LABEL}>
+        {label}
+      </label>
+      {optionalId ? (
+        <span id={optionalId} className={FIELD_HINT}>
+          {OPTIONAL_HINT}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** Text inside a field: 15 with a mouse, 16 on a finger (no zoom on phones), 18 on touch screens. */
 export const FIELD_TEXT: Record<Density, string> = {
   touch: 'text-lg',
@@ -108,6 +140,7 @@ export function TextField({
   const density = useDensity();
   const autoId = useId();
   const inputId = id ?? autoId;
+  const beside = hint === OPTIONAL_HINT && !error;
   const showHint = Boolean(hint) && !error;
   const hintId = showHint ? `${inputId}-hint` : undefined;
   const errorId = error ? `${inputId}-error` : undefined;
@@ -116,9 +149,12 @@ export function TextField({
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      <label htmlFor={inputId} className={cn(FIELD_LABEL, hideLabel && 'sr-only')}>
-        {label}
-      </label>
+      <FieldLabelRow
+        htmlFor={inputId}
+        label={label}
+        hideLabel={hideLabel}
+        optionalId={beside ? hintId : undefined}
+      />
       <div
         className={cn(
           // Icons and units inside take the subtle ink; the text itself is ink.
@@ -154,7 +190,7 @@ export function TextField({
         {endAdornment}
       </div>
       {error ? <FieldError id={errorId}>{error}</FieldError> : null}
-      {showHint ? (
+      {showHint && !beside ? (
         <p id={hintId} className={FIELD_HINT}>
           {hint}
         </p>

@@ -196,6 +196,10 @@ export interface InventoryRow {
   refValueMinor?: number;
   /** For display: value of one base unit, four decimals of the minor unit at most */
   unitCostMinor: number | null;
+  /** What one piece cost on its latest purchase (minor units); null when never bought. Absent from older servers */
+  lastCostMinor?: number | null;
+  /** The middle cost of one piece over its latest five purchases; one wrong purchase cannot move it. Absent from older servers */
+  typicalCostMinor?: number | null;
 }
 
 export interface InventoryResponse {
@@ -323,6 +327,8 @@ export interface RecallBatch {
   branches: { branchId: string; branchName: string; qty: number }[];
   /** Sold in all, base units */
   soldQty: number;
+  /** Of those, taken back in a customer return, base units (absent from an older server) */
+  returnedQty?: number;
 }
 
 export interface RecallSale {

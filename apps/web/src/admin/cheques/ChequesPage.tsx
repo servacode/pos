@@ -123,7 +123,9 @@ export function ChequesPage() {
   const digits = me.settings.numberFormat;
   const canManage = me.user.permissions.includes('customers.manage');
   const [filter, setFilter] = useState<ChequeStatus | 'all'>('pending');
-  const [order, setOrder] = useState<'recent' | 'due'>('recent');
+  // Until the person picks one: the cheques waiting for the bank read by what falls due first, the rest by what is newest
+  const [picked, setOrder] = useState<'recent' | 'due' | null>(null);
+  const order = picked ?? (filter === 'pending' ? 'due' : 'recent');
   const [showWhy, setShowWhy] = useState(false);
   const [items, setItems] = useState<Cheque[] | null>(null);
   const [base, setBase] = useState<CurrencyCode>('SYP');

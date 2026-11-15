@@ -21,6 +21,21 @@ describe('LoginPage', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('asks nothing of the server on a first visit (no session note): no red 401 line', async () => {
+    globalThis.localStorage.removeItem('serva.session');
+    const { fetchMock } = mockFetch({});
+    renderApp('/login');
+    await screen.findByRole('heading', { name: 'أهلاً بعودتك' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still asks once when the browser has signed in before (the note says «in»)', async () => {
+    const { requestsTo } = mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
+    renderApp('/login');
+    await screen.findByRole('heading', { name: 'أهلاً بعودتك' });
+    expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(1);
+  });
+
   it('signs in with a normalized phone and opens the home page', async () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedOutRefresh,

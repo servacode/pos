@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AlterationTicket } from '@serva/core/contracts/alterations';
 import type { GiftVoucherPayload } from '@serva/core/contracts/documents';
@@ -81,6 +81,15 @@ export function AlterationsScreen({
   const [due, setDue] = useState(() => inDays(2, pos.now()));
   const [saving, setSaving] = useState(false);
   const [slip, setSlip] = useState<AlterationTicket | null>(null);
+  // «حُفظت التذكرة»: said after the save, and the new ticket stands out in the list until the next one is begun
+  const [justSaved, setJustSaved] = useState<AlterationTicket | null>(null);
+  const savedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (justSaved) savedRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [justSaved]);
+  useEffect(() => {
+    if (name) setJustSaved(null);
+  }, [name]);
 
   const token = pos.device.token;
   const load = useCallback(async () => {
@@ -185,6 +194,7 @@ export function AlterationsScreen({
       return;
     }
     setSlip({ ...answer.body });
+    setJustSaved({ ...answer.body });
     setName('');
     setPhone('');
     setItem('');
@@ -232,6 +242,17 @@ export function AlterationsScreen({
         description="تقصير وتضييق وتعديل: تذكرة بموعد التسليم، وتُباع الأجرة عند الاستلام."
       />
       {error ? <Alert tone="error">{error}</Alert> : null}
+      {justSaved ? (
+        <div ref={savedRef}>
+          <Alert tone="success">
+            حُفظت التذكرة{' '}
+            <bdi dir="ltr" className="num font-semibold">
+              {justSaved.number}
+            </bdi>{' '}
+            للزبون {justSaved.customerName}. التسليم {dayText(justSaved.dueDate, digits)}.
+          </Alert>
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
         <section
           aria-label="تذكرة جديدة"
@@ -264,7 +285,7 @@ export function AlterationsScreen({
             value={work}
             onChange={(e) => setWork(e.target.value.slice(0, 200))}
           />
-          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-3">
+          <div className="grid grid-cols-1 gap-3">
             <TextField
               label="الأجرة"
               dir="ltr"
@@ -356,6 +377,7 @@ export function AlterationsScreen({
                             className={cn(
                               'flex flex-col gap-3 rounded-card border bg-surface p-4 shadow-e1',
                               overdue ? 'border-danger/40 bg-danger-soft/40' : 'border-line',
+                              t.id === justSaved?.id && 'ring-2 ring-brand',
                             )}
                           >
                             <div className="flex items-start justify-between gap-3">

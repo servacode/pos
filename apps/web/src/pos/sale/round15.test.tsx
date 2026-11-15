@@ -82,10 +82,10 @@ describe('changing a line’s unit (round 15)', () => {
 describe('the tile density (round 15)', () => {
   it('turns compact on one tap and remembers it on this device', async () => {
     const { user } = await saleScreen();
-    await user.click(screen.getByRole('button', { name: 'بطاقات مضغوطة' }));
+    await user.click(screen.getByRole('button', { name: 'عرض مضغوط' }));
     expect(window.localStorage.getItem('tillCompactTiles')).toBe('1');
     expect(screen.getByRole('list', { name: 'الأصناف' }).className).toContain('7.5rem');
-    await user.click(screen.getByRole('button', { name: 'بطاقات عادية' }));
+    await user.click(screen.getByRole('button', { name: 'عرض عادي' }));
     expect(window.localStorage.getItem('tillCompactTiles')).toBeNull();
   });
 });

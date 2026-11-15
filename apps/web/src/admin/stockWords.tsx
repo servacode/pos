@@ -3,8 +3,9 @@ import { countNoun, COUNT_NOUNS } from '@serva/core';
 import { IconButton, InfoIcon } from '@serva/ui';
 
 /**
- * The shortage in the unit it is counted in: kinds (combinations of size and colour) are «أصناف ناقصة»,
- * pieces are «ناقص 9 قطع», so the same word never means two different things on two screens.
+ * THE STOCK WORDS, one each: «ناقص» only for below the minimum (kinds: «أصناف ناقصة»), «سالب» only for
+ * below zero («سالب 9 قطع»), «نفد» for zero or less, «متوفر» for what can be sold. So the same word never
+ * means two different things on two screens.
  */
 export function shortKinds(count: number, clothing = false): string {
   if (clothing) {
@@ -49,9 +50,9 @@ export function lowestSentence(name: string, qtyText: string, qty: number): stri
   return `أقلّها: ${name} — ${qty === 0 ? 'نفد' : `بقي ${qtyText}`}`;
 }
 
-/** «ناقص 9 قطع»: how far below zero, in pieces (`text` is the quantity already formatted) */
-export const shortPieces = (count: number, text: string): string =>
-  `ناقص ${countNoun(count, COUNT_NOUNS.piece, text)}`;
+/** «سالب 9 قطع»: how far below zero, in pieces (`text` is the quantity already formatted) */
+export const negativePieces = (count: number, text: string): string =>
+  `سالب ${countNoun(count, COUNT_NOUNS.piece, text)}`;
 
 /** The one definition of the stock numbers, behind an «i» next to the tiles on the products and inventory pages */
 export function StockDefinitions() {
@@ -75,19 +76,18 @@ export function StockDefinitions() {
             الشاشات.
           </li>
           <li>
-            القطع: ما على الرفوف فعلاً في كل الفروع (والكاشير يرى ما في فرعه فقط)، ولا يُحسب الناقص منها.
+            القطع: ما على الرفوف فعلاً في كل الفروع (والكاشير يرى ما في فرعه فقط)، ولا يُحسب السالب منها.
           </li>
           <li>
             نفد: صنف كميته صفر أو أقل. وإذا كان أقل من صفر فهو «سالب» ويُحسب ضمن «نفد» مرة واحدة: بِعتَ أكثر
             مما سجّلت، فاجرد الصنف أو سجّل استلاماً.
           </li>
-          <li>متاح للبيع: ما يبيعه الكاشير اليوم، من غير المنتهي والموقوف والناقص.</li>
+          <li>متوفر: ما يبيعه الكاشير اليوم، من غير المنتهي والموقوف والسالب.</li>
         </ul>
       ) : null}
     </div>
   );
 }
 
-/** The label of the «ran out» tile: it says what it counts, the same words on products, inventory and home */
-export const soldOutLabel = (clothing: boolean): string =>
-  clothing ? 'نفد من المقاسات/الألوان' : 'نفد من الأصناف';
+/** The label of the «ran out» tile: one word; the line under it says what it counts (see `soldOutSentence`) */
+export const soldOutLabel = (): string => 'نفد';

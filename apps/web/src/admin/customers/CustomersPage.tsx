@@ -222,7 +222,7 @@ export function CustomersPage() {
               {c.kind ? <Badge tone="info">{CUSTOMER_KIND_LABELS[c.kind]}</Badge> : null}
               {c.archived ? <Badge>مؤرشف</Badge> : null}
             </span>
-            {c.phone ? (
+            {c.phone && !((clothing && c.favouriteSize) || c.lastPurchaseDate) ? (
               <span className="text-xs text-ink-muted md:hidden">
                 <bdi dir="ltr" className="num">
                   {c.phone}
@@ -230,8 +230,9 @@ export function CustomersPage() {
               </span>
             ) : null}
             {(clothing && c.favouriteSize) || c.lastPurchaseDate ? (
-              // The columns that are hidden on a phone, said under the name
-              <span className="text-xs text-ink-muted md:hidden">
+              // The columns that are hidden on a phone, said on ONE line under the name (the phone is
+              // in the row's «⋯»: call or WhatsApp)
+              <span className="truncate text-xs text-ink-muted md:hidden">
                 {clothing && c.favouriteSize ? `المقاس المفضّل ${c.favouriteSize}` : null}
                 {clothing && c.favouriteSize && c.lastPurchaseDate ? ' · ' : null}
                 {c.lastPurchaseDate ? `آخر شراء ${dayText(c.lastPurchaseDate, digits)}` : null}
@@ -367,7 +368,8 @@ export function CustomersPage() {
           />
         ) : null}
         {away ? <p className="text-sm text-ink-muted">الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.</p> : null}
-        <KpiStrip columns={3}>
+        {/* On a phone the money tile takes the first row and the two counts sit side by side below it */}
+        <KpiStrip columns={3} className="max-sm:*:first:col-span-2 max-sm:*:last:odd:col-span-1!">
           <StatTile
             label="الديون على الزبائن"
             icon={<CashIcon />}

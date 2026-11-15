@@ -618,7 +618,12 @@ export function PaymentPanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-2 @3xl/pay:py-3">
         <div className="grid gap-4 @lg/pay:grid-cols-2 @lg/pay:grid-rows-[auto_1fr] @3xl/pay:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] @3xl/pay:gap-5">
           {/* How the customer pays, who the customer is, and the parts paid so far */}
-          <div className="@container flex min-w-0 flex-col gap-3">
+          <div
+            className={cn(
+              '@container flex min-w-0 flex-col gap-3',
+              needsCustomer && !customer && '@lg/pay:row-start-2',
+            )}
+          >
             <span className="text-sm font-semibold text-ink-muted">
               {split ? 'طريقة الجزء التالي' : 'طريقة الدفع'}
             </span>
@@ -665,9 +670,6 @@ export function PaymentPanel({
                 <Money minor={totalMinor} currency={base} />.
               </Alert>
             ) : null}
-            {needsCustomer && !customer ? (
-              <Alert tone="warning">جهاز بكفالة: اطلب اسم الزبون وجواله، فالكفالة تُسجَّل باسمه.</Alert>
-            ) : null}
           </div>
 
           {/* What the customer hands over: the amount, the quick notes or the reference, the keys */}
@@ -695,9 +697,8 @@ export function PaymentPanel({
             </div>
             {option.method === 'cash' && option.currency === base && dueHere !== remainingBase ? (
               <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
-                المستحق <Money minor={remainingBase} currency={base} className="font-semibold text-ink" />
-                {' · '}يُقرَّب نقداً إلى{' '}
-                <Money minor={dueHere} currency={base} className="font-semibold text-ink" />
+                قُرّب المبلغ إلى <Money minor={dueHere} currency={base} className="font-semibold text-ink" />{' '}
+                (فرق <Money minor={Math.abs(dueHere - remainingBase)} currency={base} symbol={false} />)
               </p>
             ) : null}
             {option.method === 'credit' ? (
@@ -870,7 +871,13 @@ export function PaymentPanel({
           {/* Who the customer is, one payment or several, the parts paid: under the keys on a phone, so the amount and the notes stay in view; under the methods where the panel is wide */}
           <div
             ref={extrasRef}
-            className="@container flex min-w-0 flex-col gap-3 @lg/pay:col-start-1 @lg/pay:row-start-2"
+            className={cn(
+              '@container flex min-w-0 flex-col gap-3 @lg/pay:col-start-1',
+              // A required customer comes first: the picker sits at the top, not under the methods and keys
+              needsCustomer && !customer
+                ? '@max-lg/pay:order-first @lg/pay:row-start-1'
+                : '@lg/pay:row-start-2',
+            )}
           >
             {picking ? (
               <CustomerPicker

@@ -5,6 +5,7 @@ import {
   forgetSession,
   getAccessToken,
   knownSignedOut,
+  neverHadSession,
   onSessionExpired,
   refreshAccessToken,
   setAccessToken,
@@ -53,6 +54,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (held) return Promise.resolve(held);
     // This browser was already told «no session»: show the login page without asking again.
     if (knownSignedOut()) return Promise.resolve(null);
+    // A first visit, with no session note and no kept «me»: there is nothing to refresh, so no
+    // request (and no red 401 line). Signed-in users always have the note or the kept «me».
+    if (neverHadSession() && !readKeptMe()) return Promise.resolve(null);
     return refreshAccessToken();
   });
 

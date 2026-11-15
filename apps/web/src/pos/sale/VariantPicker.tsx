@@ -31,6 +31,7 @@ export function VariantPicker({
   Kind,
   initial,
   actionLabel = 'أضف إلى السلة',
+  swap = false,
   onAdd,
   onCancel,
 }: {
@@ -46,15 +47,27 @@ export function VariantPicker({
   initial?: Readonly<Record<string, string>>;
   /** The add button's words: «بدّل في السلة» when a line's size or colour is being changed */
   actionLabel?: string;
+  /** A line's size or colour is being swapped: a combination with nothing left cannot be chosen at all */
+  swap?: boolean;
   onAdd: (piece: CatalogItem, qty: number) => void;
   onCancel: () => void;
 }) {
   const digits = useDigits();
   const idBase = useId();
   const options = optionsOf(pieces);
+  // An option with one value left (a colour the chosen size comes in alone) is chosen for the cashier
+  const settle = (picked: Record<string, string>): Record<string, string> => {
+    const next = { ...picked };
+    for (const other of options) {
+      if (next[other.name]) continue;
+      const open = other.values.filter((v) => canChoose(pieces, next, other.name, v));
+      if (open.length === 1) next[other.name] = open[0]!;
+    }
+    return next;
+  };
   const [chosen, setChosen] = useState<Record<string, string>>(() =>
     // An option with a single value («أبيض» only) starts chosen.
-    ({
+    settle({
       ...Object.fromEntries(options.filter((o) => o.values.length === 1).map((o) => [o.name, o.values[0]!])),
       ...initial,
     }),
@@ -95,6 +108,8 @@ export function VariantPicker({
         delete next[other.name];
       }
     }
+    const settled = settle(next);
+    Object.assign(next, settled);
     setChosen(next);
     const exact = pieceFor(pieces, next, options.length);
     // Only a model with ONE thing to choose (sizes alone, or a colour with a single size) adds on its last choice.
@@ -153,10 +168,15 @@ export function VariantPicker({
             fullWidth
             icon={<AddIcon size={20} />}
             onClick={() => onAdd(piece, qty)}
+            disabled={swap && outOfStock}
             className="h-auto py-2 whitespace-normal"
           >
             {outOfStock ? (
-              'نفد — أضفه رغم ذلك'
+              swap ? (
+                'نفد — اختر غيره'
+              ) : (
+                'نفد — أضفه رغم ذلك'
+              )
             ) : (
               <span className="flex min-w-0 flex-wrap items-center justify-center gap-x-2">
                 <span>{actionLabel}</span>
@@ -284,7 +304,8 @@ export function VariantPicker({
             <span>اختر كل الخيارات لترى السعر</span>
           )}
         </p>
-        <div className="flex items-center gap-1" role="group" aria-label="الكمية">
+        {/* − 1 + from the left, as on every keypad and number box, whatever the page's direction */}
+        <div dir="ltr" className="flex items-center gap-1" role="group" aria-label="الكمية">
           {/* Never dimmed: at one piece it simply stays at one */}
           <IconButton label="أنقص الكمية" icon={<RemoveIcon size={20} />} onClick={() => stepQty(-1)} />
           <output aria-label="عدد القطع" className="num min-w-8 text-center text-lg font-bold text-ink">

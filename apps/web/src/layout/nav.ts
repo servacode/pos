@@ -56,6 +56,8 @@ import {
 export interface NavEntry {
   to: string;
   label: string;
+  /** The shorter words the page's tab shows on a phone strip (the link keeps `label` as its name); defaults to `label` */
+  tab?: string;
   icon: Icon;
   /**
    * Shown only to whoever holds one of these keys in `me.user.permissions`; the server checks each
@@ -225,6 +227,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     section: 'products',
     to: '/price-list',
     label: 'تحديث الأسعار من ملف',
+    tab: 'تحديث الأسعار',
     icon: PercentIcon,
     permission: ['catalog.manage'],
   },
@@ -232,6 +235,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     section: 'products',
     to: '/price-history',
     label: 'سجل تغيير الأسعار',
+    tab: 'سجل الأسعار',
     icon: PercentIcon,
     permission: ['catalog.manage'],
   },
@@ -239,6 +243,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     section: 'products',
     to: '/labels',
     label: 'طباعة الملصقات',
+    tab: 'الملصقات',
     icon: PrintIcon,
     permission: ['catalog.manage'],
   },
@@ -246,6 +251,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     section: 'products',
     to: '/import',
     label: 'استيراد البيانات',
+    tab: 'الاستيراد',
     icon: PackageOpenIcon,
     permission: ['catalog.manage'],
   },

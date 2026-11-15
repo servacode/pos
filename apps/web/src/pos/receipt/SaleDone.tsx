@@ -126,6 +126,24 @@ export function SaleDone({
             )}
           </div>
         )}
+        {sale.cashRounding && sale.cashRounding.roundingMinor !== 0 ? (
+          // Display only: the cash due was rounded to the step, the difference is booked as before
+          <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
+            قُرّب المبلغ إلى{' '}
+            <Money
+              minor={sale.cashRounding.dueMinor}
+              currency={sale.cashRounding.currency}
+              className="font-semibold text-ink"
+            />{' '}
+            (فرق{' '}
+            <Money
+              minor={Math.abs(sale.cashRounding.roundingMinor)}
+              currency={sale.cashRounding.currency}
+              symbol={false}
+            />
+            )
+          </p>
+        ) : null}
         {!online ? (
           <p className="flex items-start gap-2.5 rounded-card border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning-ink">
             <OfflineIcon size={20} className="shrink-0" />
@@ -146,6 +164,8 @@ export function SaleDone({
           >
             اطبع
           </Button>
+          {/* WhatsApp follows print: a main way to hand over the receipt, not a fourth plain button */}
+          <WhatsAppSend data={data} phone={customerPhone} />
           {onPrintA4 ? (
             <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={() => onPrintA4('invoice')}>
               اطبع A4
@@ -161,8 +181,10 @@ export function SaleDone({
               اطبع شهادة الكفالة
             </Button>
           ) : null}
-          <WhatsAppSend data={data} phone={customerPhone} />
-          <Button size="pay" onClick={onNewSale} className="min-w-60 flex-1 sm:basis-full">
+        </div>
+        {/* «بيعة جديدة» stays in view while the phone box or the long list of buttons scrolls */}
+        <div className="sticky bottom-0 z-10 -mx-6 -mb-6 mt-auto border-t border-line bg-surface px-6 py-3 xl:-mx-8 xl:-mb-8 xl:px-8">
+          <Button size="pay" onClick={onNewSale} className="w-full min-w-60">
             بيعة جديدة
             <CartIcon size={24} />
           </Button>

@@ -238,6 +238,8 @@ describe('HomePage', () => {
       expect(sales).not.toHaveTextContent('بعد مرتجع');
       expect(await screen.findByText(/منها قسائم مستردّة/)).toBeInTheDocument();
       const recalled = await screen.findByRole('link', { name: /دفعة موقوفة عن البيع/ });
+      // The row says which batch it is
+      expect(recalled).toHaveTextContent('B7 · مضاد: دفعة موقوفة عن البيع');
       expect(recalled).toHaveAttribute('href', '/recall');
       expect(recalled.className).toContain('bg-danger-soft');
     });
@@ -266,9 +268,9 @@ describe('HomePage', () => {
       });
       renderApp('/');
 
-      const expired = await screen.findByRole('link', { name: 'دفعة منتهية الصلاحية' });
+      const expired = await screen.findByRole('link', { name: 'Ba · مضاد a: دفعة منتهية الصلاحية' });
       expect(expired.className).toContain('bg-danger-soft');
-      const near = await screen.findByRole('link', { name: /دفعة يقترب انتهاؤها/ });
+      const near = await screen.findByRole('link', { name: /Bb · مضاد b: دفعة يقترب انتهاؤها/ });
       expect(near.className).toContain('bg-warning-soft');
     });
 
@@ -336,7 +338,7 @@ describe('HomePage', () => {
         (await within(sales).findAllByText('عن أمس', { exact: false }, { timeout: 5000 })).length,
       ).toBeGreaterThan(0);
       expect(within(sales).getAllByText('50%', { exact: false }).length).toBeGreaterThan(0);
-      expect(await screen.findByText('دفعة يقترب انتهاؤها')).toBeInTheDocument();
+      expect(await screen.findByText(/دفعة يقترب انتهاؤها/)).toBeInTheDocument();
       expect(screen.getByRole('radiogroup', { name: 'الفترة' })).toBeInTheDocument();
       expect(screen.getByText('طرق الدفع اليوم')).toBeInTheDocument();
     });
@@ -648,7 +650,7 @@ describe('HomePage', () => {
       expect(within(sales).queryByRole('img')).not.toBeInTheDocument();
     });
 
-    it('names a negative piece once, in «يوشك على النفاد», with «ناقص» opening the count on it', async () => {
+    it('names a negative piece once, in «يوشك على النفاد», with «سالب» opening the count on it', async () => {
       const me = meWith([...OWNER_KEYS, 'catalog.manage']);
       const low = {
         variantId: 'v-1',
@@ -676,9 +678,9 @@ describe('HomePage', () => {
 
       const chip = await screen.findByRole('link', { name: 'اجرد قميص كتان' });
       expect(chip).toHaveAttribute('href', '/inventory?count=v-1');
-      expect(chip).toHaveTextContent('ناقص 11');
+      expect(chip).toHaveTextContent('سالب 11');
       // It is not named a second time under «ما ينتظرك»
-      expect(screen.getAllByText('ناقص 11')).toHaveLength(1);
+      expect(screen.getAllByText('سالب 11')).toHaveLength(1);
       expect(screen.queryByText(/من قميص كتان/)).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'اجرد المخزون' })).toHaveAttribute(
         'href',

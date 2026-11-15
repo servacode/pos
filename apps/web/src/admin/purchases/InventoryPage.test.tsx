@@ -250,7 +250,7 @@ describe('a clothing shop’s inventory', () => {
 });
 
 describe('stock numbers that explain themselves', () => {
-  it('keeps a minus out of the grid totals, says «ناقص» apart, and opens the count on it', async () => {
+  it('keeps a minus out of the grid totals, says «سالب» apart, and opens the count on it', async () => {
     const piece = (id: string, size: string, qty: number) => ({
       variantId: id,
       productId: 'p-1',
@@ -280,10 +280,10 @@ describe('stock numbers that explain themselves', () => {
     expect(tiles.queryByText(/ناقص/)).not.toBeInTheDocument();
     await user.click(await screen.findByRole('radio', { name: 'شبكة الخيارات' }));
     const grid = within(await screen.findByRole('region', { name: 'شبكة قميص' }));
-    expect(grid.getByText('المتاح 5')).toBeInTheDocument();
-    expect(grid.getByText('ناقص قطعتان')).toBeInTheDocument();
+    expect(grid.getByText('متوفر 5')).toBeInTheDocument();
+    expect(grid.getByText('سالب قطعتان')).toBeInTheDocument();
     // the cell below zero reads «سالب 2», not «-2»
-    expect(grid.getByText(/سالب/)).toHaveTextContent('سالب 2');
+    expect(grid.getAllByText(/سالب/).map((e) => e.textContent)).toContain('سالب 2');
     await user.click(grid.getByRole('button', { name: 'صحّح بالجرد' }));
     expect(await screen.findByText('تعرض الصفحة الأصناف الناقصة فقط.')).toBeInTheDocument();
   });

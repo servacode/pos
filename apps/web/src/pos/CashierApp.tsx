@@ -17,6 +17,7 @@ import {
   KeyIcon,
   ListIcon,
   LockIcon,
+  ChatIcon,
   LogoutIcon,
   Menu,
   MenuItem,
@@ -155,6 +156,8 @@ interface SavedCurrentCart {
 interface LastSale {
   doc: Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
   cashierName: string;
+  /** The items sold at the customer's contract price: the receipt's line says «سعر العقد» (display only) */
+  contractVariantIds?: string[];
 }
 
 type View =
@@ -489,7 +492,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     );
   }
 
-  const receiptData = (doc: LastSale['doc'], cashierName: string): ReceiptData => ({
+  const receiptData = (
+    doc: LastSale['doc'],
+    cashierName: string,
+    contractVariantIds?: readonly string[],
+  ): ReceiptData => ({
     doc,
     settings,
     branch: catalog.staff.branches.find((b) => b.code === pos.device.branchCode) ?? null,
@@ -499,6 +506,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     cashierName,
     sellerName: sellerOf(doc),
     serviceVariantIds: [...catalog.byVariant.values()].filter((i) => i.isService).map((i) => i.variantId),
+    ...(contractVariantIds?.length ? { contractVariantIds } : {}),
   });
 
   /** The salesperson of a sale, when it is named */
@@ -517,6 +525,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         payload: entry.doc.payload,
       },
       cashierName: session.fullName,
+      ...(cartRef.current.lines.some((l) => l.contractPriced)
+        ? {
+            contractVariantIds: cartRef.current.lines.filter((l) => l.contractPriced).map((l) => l.variantId),
+          }
+        : {}),
     };
     setLastSale(last);
     void pos.local.set(LAST_SALE_KEY, last);
@@ -537,7 +550,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     // The sale is in the outbox: the kept cart goes now, so a refresh cannot bring it back as a second sale
     writeCart(() => pos.local.remove(CURRENT_CART_KEY));
     setCartState(EMPTY_CART);
-    const data = receiptData(last.doc, session.fullName);
+    const data = receiptData(last.doc, session.fullName, last.contractVariantIds);
     // A sale paid with a voucher prints what is left on it, counted once the sale is in the outbox
     const paidByVoucher = (last.doc.payload as unknown as SalePayload).payments?.some(
       (p) => p.method === 'voucher',
@@ -837,7 +850,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
 
   function reprint() {
     if (!lastSale) return;
-    setPrintJob({ data: receiptData(lastSale.doc, lastSale.cashierName), copy: true });
+    setPrintJob({
+      data: receiptData(lastSale.doc, lastSale.cashierName, lastSale.contractVariantIds),
+      copy: true,
+    });
   }
 
   const extraShortcuts = (event: KeyboardEvent): boolean => {
@@ -968,8 +984,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           ) : null}
           {lastSale ? (
             <MenuItem
-              icon={<PrintIcon />}
-              onSelect={() => setWaJob(receiptData(lastSale.doc, lastSale.cashierName))}
+              icon={<ChatIcon />}
+              onSelect={() =>
+                setWaJob(receiptData(lastSale.doc, lastSale.cashierName, lastSale.contractVariantIds))
+              }
             >
               أرسل آخر فاتورة عبر واتساب
             </MenuItem>
@@ -1053,7 +1071,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             void pos.local.set(PAPER_KEY, w);
           }}
           onTest={() => {
-            if (lastSale) setPrintJob({ data: receiptData(lastSale.doc, lastSale.cashierName), copy: true });
+            if (lastSale)
+              setPrintJob({
+                data: receiptData(lastSale.doc, lastSale.cashierName, lastSale.contractVariantIds),
+                copy: true,
+              });
             else window.print();
           }}
           onBack={() => setView('sale')}

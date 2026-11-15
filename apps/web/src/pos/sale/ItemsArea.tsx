@@ -1,4 +1,13 @@
-import { memo, useEffect, useMemo, useState, type ReactNode, type RefObject } from 'react';
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { batchState } from '@serva/core/pharmacy';
 import { convert } from '@serva/core/money';
@@ -15,6 +24,7 @@ import {
   displayNumber,
   EmptyState,
   formatQuantity,
+  GridIcon,
   IconButton,
   InfoIcon,
   ItemTile,
@@ -123,7 +133,8 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
     return [...all.filter((e) => !out(e)), ...all.filter(out)];
   }, [results, pieces, today]);
   // Photos in the grid where the products have any; one tap turns them off for a compact grid (kept on this device)
-  const anyPhoto = useMemo(() => catalog.items.some((i) => Boolean(i.imageUrl)), [catalog.items]);
+  // …judged on what is in view: a category with no picture at all has nothing to hide
+  const anyPhoto = useMemo(() => results.some((i) => Boolean(i.imageUrl)), [results]);
   const [photosOff, setPhotosOff] = useState(() => {
     try {
       return localStorage.getItem(PHOTOS_OFF_KEY) === '1';
@@ -361,27 +372,29 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
               </button>
             );
           })}
+          {/* The two view switches sit apart at the row's end, drawn as buttons: not a last category that taps nothing */}
           {results.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="md"
-              className="shrink-0 max-sm:min-h-11"
-              aria-pressed={compact}
-              onClick={() => setCompact((v) => !v)}
-            >
-              {compact ? 'بطاقات عادية' : 'بطاقات مضغوطة'}
-            </Button>
-          ) : null}
-          {anyPhoto && results.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="md"
-              className="shrink-0 max-sm:min-h-11"
-              aria-pressed={photos}
-              onClick={() => setPhotosOff(photos)}
-            >
-              {photos ? 'أخفِ الصور' : 'أظهر الصور'}
-            </Button>
+            <span className="ms-auto flex shrink-0 gap-2">
+              <IconButton
+                variant="secondary"
+                size="md"
+                icon={<GridIcon size={20} />}
+                label={compact ? 'عرض عادي' : 'عرض مضغوط'}
+                aria-pressed={compact}
+                onClick={() => setCompact((v) => !v)}
+              />
+              {anyPhoto ? (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  className="max-sm:min-h-11"
+                  aria-pressed={photos}
+                  onClick={() => setPhotosOff(photos)}
+                >
+                  {photos ? 'أخفِ الصور' : 'أظهر الصور'}
+                </Button>
+              ) : null}
+            </span>
           ) : null}
         </div>
       ) : null}
@@ -396,28 +409,33 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           }
         />
       ) : (
-        <Grid
-          entries={entries}
-          inCart={inCart}
-          pickingProduct={pickingProduct}
-          today={today}
-          photos={photos}
-          compact={compact}
-          stockTracked={stockTracked}
-          fx={fx}
-          iconOf={iconOf}
-          // Taps on tiles only: right after a dialog closes, its second click must not pick a tile
-          onPickItem={(item, hit) => {
-            if (!clicksSwallowed()) onPickItem(item, hit);
-          }}
-          onPickModel={(productId, size) => {
-            if (!clicksSwallowed()) props.onPickModel(productId, size);
-          }}
-        />
+        <BranchStock.Provider value={(catalog.staff.branches?.length ?? 0) > 1}>
+          <Grid
+            entries={entries}
+            inCart={inCart}
+            pickingProduct={pickingProduct}
+            today={today}
+            photos={photos}
+            compact={compact}
+            stockTracked={stockTracked}
+            fx={fx}
+            iconOf={iconOf}
+            // Taps on tiles only: right after a dialog closes, its second click must not pick a tile
+            onPickItem={(item, hit) => {
+              if (!clicksSwallowed()) onPickItem(item, hit);
+            }}
+            onPickModel={(productId, size) => {
+              if (!clicksSwallowed()) props.onPickModel(productId, size);
+            }}
+          />
+        </BranchStock.Provider>
       )}
     </>
   );
 });
+
+/** More than one branch: a tile's «متوفر N» is this branch's stock, and says «هنا» */
+const BranchStock = createContext(false);
 
 /** The tiles. A tile is memoised on what it shows, so the grid re-renders only what changed. */
 const Grid = memo(function Grid({
@@ -451,7 +469,7 @@ const Grid = memo(function Grid({
       <ul
         aria-label="الأصناف"
         className={cn(
-          'grid content-start items-start gap-3',
+          'grid content-start items-stretch gap-3',
           compact
             ? 'grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-2'
             : 'grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]',
@@ -526,6 +544,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
       placeholder={<Kind size={24} />}
       weighed={item.unit?.allowsFraction ?? false}
       {...(photos && item.imageUrl ? { imageUrl: item.imageUrl } : {})}
+      {...(photos && !item.imageUrl && !item.isService ? { pictureSlot: true } : {})}
       selected={inCart}
       soldOut={isSoldOut([item], today)}
       extra={<TileMarks pieces={[item]} today={today} none={stockTracked} />}
@@ -567,21 +586,26 @@ const ModelTile = memo(function ModelTile({
       name={entry.name}
       priceMinor={price.priceMinor}
       currency={price.currency}
-      detail={sizes ? <SizeChips sizes={sizes} /> : piecesText(entry.pieces.length)}
+      {...(sizes ? {} : { detail: piecesText(entry.pieces.length) })}
+      {...(sizes
+        ? {
+            chips: (
+              <SizeChips
+                sizes={sizes}
+                onPick={(s) => onPick(entry.productId, { option: s.option, value: s.value })}
+              />
+            ),
+          }
+        : {})}
       soldOut={isSoldOut(entry.pieces, today)}
       {...(note ? { priceNote: note } : {})}
       placeholder={<Kind size={24} />}
       {...(photos && entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
+      {...(photos && !entry.lead.imageUrl ? { pictureSlot: true } : {})}
       selected={picking || inCart}
       extra={<TileMarks pieces={entry.pieces} today={today} none={stockTracked} />}
       {...(compact ? { compact: true } : {})}
-      onSelect={(event) => {
-        // A tap on a size chip says which size; the tile itself stays one button (no button inside a button)
-        const chip = (event.target as HTMLElement).closest?.('[data-size]');
-        const value = chip?.getAttribute('data-size');
-        const option = sizes?.find((s) => s.value === value)?.option;
-        onPick(entry.productId, value && option ? { option, value } : undefined);
-      }}
+      onSelect={() => onPick(entry.productId)}
       className="h-full w-full"
     />
   );
@@ -596,27 +620,37 @@ function isSoldOut(pieces: readonly CatalogItem[], today: string): boolean {
 /** «S 3 · M 1 · L»: the sizes of a model with what is left of each, a sold-out size struck through */
 function SizeChips({
   sizes,
+  onPick,
 }: {
   sizes: readonly { option: string; value: string; inStock: boolean; left: number | null }[];
+  onPick: (size: { option: string; value: string }) => void;
 }) {
   const digits = useDigits();
   return (
-    <span className="flex flex-wrap gap-x-2 gap-y-1 text-[0.8125rem] font-semibold">
+    <span
+      role="group"
+      aria-label="المقاسات"
+      className="flex flex-wrap gap-1.5 text-[0.8125rem] font-semibold"
+    >
       {sizes.map((s) =>
         s.inStock ? (
-          // The size is the chip you tap; what is left is a separate small count beside it
-          <bdi
+          // A size is a button of its own beside the tile's button: tab, Enter and a screen reader reach it
+          <button
             key={s.value}
-            data-size={s.value}
-            className="rounded-small bg-surface-muted px-2 py-0.5 text-xs font-semibold whitespace-nowrap text-ink"
+            type="button"
+            aria-label={`${s.value}${s.left !== null ? ` المتوفر ${formatQuantity(s.left, digits)}` : ''}`}
+            onClick={() => onPick(s)}
+            className="min-h-7 touch-manipulation rounded-small bg-surface-muted px-2 text-[0.8125rem] font-semibold whitespace-nowrap text-ink pointer-coarse:min-h-9"
           >
-            {s.value}
-            {s.left !== null ? (
-              <span className="num ms-1 text-xs font-normal text-ink-muted">
-                · {formatQuantity(s.left, digits)}
-              </span>
-            ) : null}
-          </bdi>
+            <bdi aria-hidden="true">
+              {s.value}
+              {s.left !== null ? (
+                <span className="num ms-1 text-[0.8125rem] font-normal text-ink-muted">
+                  · {formatQuantity(s.left, digits)}
+                </span>
+              ) : null}
+            </bdi>
+          </button>
         ) : (
           <bdi key={s.value} className="px-2 py-0.5 text-ink-muted line-through decoration-2">
             {s.value}
@@ -661,6 +695,7 @@ function TileMarks({
   none?: boolean;
 }) {
   const digits = useDigits();
+  const here = useContext(BranchStock);
   const info = tileInfo(pieces, today);
   const unsellable = info.expiredQty + info.blockedQty;
   if (none && info.stockQty === null && !pieces.every((p) => p.isService)) {
@@ -682,7 +717,7 @@ function TileMarks({
     <>
       {onShelf !== null ? (
         <span className={cn('num text-xs font-medium', nothingSellable ? 'text-ink-muted' : 'text-ink')}>
-          {nothingSellable ? 'نفد' : `متوفر ${formatQuantity(onShelf, digits)}`}
+          {nothingSellable ? 'نفد' : `متوفر ${formatQuantity(onShelf, digits)}${here ? ' هنا' : ''}`}
         </span>
       ) : null}
       {/* What is left out of the count (halted, expired): one small «⚠ 3 موقوفة» chip, never a second sentence */}

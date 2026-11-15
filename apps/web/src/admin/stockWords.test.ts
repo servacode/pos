@@ -22,8 +22,7 @@ describe('the sold-out sentence', () => {
 
 describe('one stock vocabulary', () => {
   it('says what the ran-out tile counts, and the shortage in sizes and colours for clothing', () => {
-    expect(soldOutLabel(true)).toBe('نفد من المقاسات/الألوان');
-    expect(soldOutLabel(false)).toBe('نفد من الأصناف');
+    expect(soldOutLabel()).toBe('نفد');
     expect(shortKinds(4, true)).toBe('4 مقاسات/ألوان ناقصة');
     expect(shortKinds(1, true)).toBe('مقاس/لون واحد ناقص');
     expect(shortKinds(2, true)).toBe('مقاسان/لونان ناقصان');

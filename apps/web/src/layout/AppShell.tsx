@@ -356,6 +356,7 @@ function SectionTabs({ section, pathname }: { section: NavSection; pathname: str
                 <Link
                   to={page.to}
                   aria-current={active ? 'page' : undefined}
+                  aria-label={page.tab ? page.label : undefined}
                   className={cn(
                     CONTROL_HEIGHT.comfortable,
                     // The focus ring is drawn inside the tab, so the scrolling strip never clips it.
@@ -365,7 +366,7 @@ function SectionTabs({ section, pathname }: { section: NavSection; pathname: str
                       : 'border-transparent text-ink-muted hover:border-line-control/50 hover:text-ink',
                   )}
                 >
-                  {page.label}
+                  {page.tab ?? page.label}
                 </Link>
               </li>
             );

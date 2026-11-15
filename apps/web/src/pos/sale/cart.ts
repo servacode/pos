@@ -75,6 +75,8 @@ export interface CartLine {
   /** One pack at the shelf price and at the wholesale price (null: none), in priceCurrency */
   retailPriceMinor?: number;
   wholesalePriceMinor?: number | null;
+  /** The customer's contract price was applied to this line (03 › أسعار العقود): the receipt says «سعر العقد» */
+  contractPriced?: boolean;
   /** The price was typed by hand (a service's fee): no price list, wholesale tier or contract ever re-prices it */
   priceTyped?: boolean;
   /** The average cost of one unit in priceCurrency, when the till knows it («أقل من التكلفة») */
@@ -524,7 +526,13 @@ export function applyContractPrices(
         return line;
       }
       const price = packPrice(contract.priceMinor, line.packQty, null);
-      return { ...line, priceMinor: price, retailPriceMinor: price, wholesalePriceMinor: price };
+      return {
+        ...line,
+        priceMinor: price,
+        retailPriceMinor: price,
+        wholesalePriceMinor: price,
+        contractPriced: true,
+      };
     }),
   };
 }

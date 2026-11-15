@@ -18,7 +18,7 @@ export function salesCsv(items: readonly SaleListItem[]): string {
     'طريقة الدفع',
     'العملة',
     'الإجمالي',
-    'الخصم',
+    'الحسم',
     'الضريبة',
     'المرتجع',
     'الحالة',

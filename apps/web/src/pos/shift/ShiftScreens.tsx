@@ -63,6 +63,8 @@ const LAST_OPENING_KEY = 'lastOpeningCount';
 const OPENING_JUMP = 100;
 /** Above this (in minor units) no opening count is believable, whatever the history */
 const ABSURD_OPENING_MINOR = 1_000_000_000_000;
+/** A foreign drawer counted above this (5,000 in a currency of 2 decimals) is asked about at closing */
+const ODD_FOREIGN_MINOR = 500_000;
 
 /** The drawers of the store: its base currency and each enabled one with a rate (10 › درج لكل عملة). */
 export function drawerCurrencies(catalog: Catalog): CurrencyCode[] {
@@ -142,7 +144,7 @@ function CountLayout({
         <div className="flex flex-col gap-2 max-lg:hidden">
           <Keypad label="لوحة العدّ" {...keypad.keypad} />
         </div>
-        <div className="flex flex-col gap-4 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-surface max-lg:p-3">
+        <div className="flex flex-col gap-4 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
           {children}
         </div>
       </aside>
@@ -350,6 +352,17 @@ export function ShiftCloseScreen({
     if (emptied.length === 0) setAskedEmpty(false);
   }, [emptied.length]);
 
+  // A foreign drawer counted far above what it should hold (the lira figure typed in the dollar box):
+  // asked about once, with the typed amount, before the summary. The expected figure stays hidden.
+  const odd = cash.filter(
+    (c) =>
+      c.currency !== settings.baseCurrency &&
+      c.countedMinor > 0 &&
+      (c.countedMinor > ODD_FOREIGN_MINOR || (c.expectedMinor > 0 && c.countedMinor > c.expectedMinor * 10)),
+  );
+  const oddSignature = odd.map((c) => `${c.currency}:${c.countedMinor}`).join();
+  const [askedOdd, setAskedOdd] = useState('');
+
   async function close() {
     if (!activity) return;
     setSaving(true);
@@ -433,17 +446,22 @@ export function ShiftCloseScreen({
         icon={step === 'count' ? <LockIcon size={24} /> : <ReportsIcon size={24} />}
         title={step === 'count' ? 'إغلاق الوردية' : step === 'done' ? 'أُغلقت الوردية' : 'ملخّص الوردية'}
         description={
-          <>
-            {shift.openedByName} ·{' '}
-            {step === 'done' && closedAt
-              ? `من ${clockText(shift.openedAt, digits)} إلى ${clockText(closedAt, digits)}`
-              : `منذ ${clockText(shift.openedAt, digits)}`}{' '}
-            ·{' '}
+          // Whole parts that wrap together: never a separator dot left at the end of a line.
+          // The summary step says the invoice count once, in its chip
+          <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+            <span className="whitespace-nowrap">{shift.openedByName}</span>
+            <span className="whitespace-nowrap">
+              {step === 'done' && closedAt
+                ? `من ${clockText(shift.openedAt, digits)} إلى ${clockText(closedAt, digits)}`
+                : `منذ ${clockText(shift.openedAt, digits)}`}
+            </span>
             <bdi dir="ltr" className="num whitespace-nowrap">
               {shift.number}
             </bdi>
-            {activity ? ` · ${counted(activity.saleCount, INVOICES, digits)}` : ''}
-          </>
+            {activity && step !== 'summary' ? (
+              <span className="whitespace-nowrap">{counted(activity.saleCount, INVOICES, digits)}</span>
+            ) : null}
+          </span>
         }
         actions={
           step === 'done' ? null : (
@@ -469,17 +487,33 @@ export function ShiftCloseScreen({
               الدرج فارغاً تابع، وإلا اكتب ما في يدك.
             </Alert>
           ) : null}
+          {odd.length > 0 && askedOdd === oddSignature ? (
+            <Alert tone="warning">
+              {odd.map((c) => (
+                <span key={c.currency} className="block">
+                  في {drawerName(c.currency)} كتبتَ <Money minor={c.countedMinor} currency={c.currency} />.{' '}
+                  {c.currency === 'USD' ? 'هل هذا المبلغ بالدولار؟' : 'هل هذا المبلغ صحيح؟'}
+                </span>
+              ))}
+              إن كان خطأً فصحّحه، وإلا تابع.
+            </Alert>
+          ) : null}
           <Button
             size="lg"
             fullWidth
             onClick={() => {
               // A drawer that should hold cash and was counted as nothing is asked about once (the amount stays hidden)
               if (emptied.length > 0 && !askedEmpty) setAskedEmpty(true);
+              else if (odd.length > 0 && askedOdd !== oddSignature) setAskedOdd(oddSignature);
               else setStep('summary');
             }}
             disabled={!activity}
           >
-            {emptied.length > 0 && askedEmpty ? 'نعم، الدرج فارغ، تابع' : 'تابع للملخّص'}
+            {emptied.length > 0 && askedEmpty
+              ? 'نعم، الدرج فارغ، تابع'
+              : odd.length > 0 && askedOdd === oddSignature
+                ? 'نعم، المبلغ صحيح، تابع'
+                : 'تابع للملخّص'}
           </Button>
         </CountLayout>
       ) : step === 'done' && activity ? (
@@ -496,7 +530,7 @@ export function ShiftCloseScreen({
               <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع التقرير ثم اضغط «تمّ».</Alert>
             </div>
             {/* The actions stay in view: «اطبع» first, then «تمّ» (the one way out) */}
-            <div className="flex flex-col gap-3 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:order-3 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-surface max-lg:p-3">
+            <div className="flex flex-col gap-3 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:order-3 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
               <Button size="lg" fullWidth icon={<PrintIcon />} onClick={() => print('80mm')}>
                 اطبع
               </Button>
@@ -572,7 +606,10 @@ export function ShiftCloseScreen({
                         className="flex flex-wrap items-center gap-x-1"
                       >
                         <bdi>{sellerNames.get(r.sellerId) ?? 'بائع'}</bdi> ·{' '}
-                        {counted(r.count, INVOICES, digits)} ·{' '}
+                        {/* One seller: the chip above already counts the invoices */}
+                        {new Set(activity.bySeller.map((s) => s.sellerId)).size > 1 ? (
+                          <>{counted(r.count, INVOICES, digits)} · </>
+                        ) : null}
                         <Money minor={r.totalMinor} currency={r.currency} className="text-ink" />
                       </span>
                     ))}

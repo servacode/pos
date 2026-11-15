@@ -78,6 +78,20 @@ export function knownSignedOut(): boolean {
   }
 }
 
+/**
+ * True when this browser has never been told anything about a session: no note at all (a fresh
+ * profile, a first visit). Nothing to refresh then, so the first load skips the request and its red
+ * 401 line. A note «in» or «out», or storage that cannot be read, answers false: ask as before.
+ */
+export function neverHadSession(): boolean {
+  try {
+    const ls = globalThis.localStorage;
+    return ls ? ls.getItem(SESSION_NOTE_KEY) === null : false;
+  } catch {
+    return false;
+  }
+}
+
 export function onSessionExpired(listener: () => void): () => void {
   sessionExpiredListeners.add(listener);
   return () => {

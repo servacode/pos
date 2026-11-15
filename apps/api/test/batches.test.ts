@@ -421,6 +421,7 @@ describe('blocking and recall', () => {
       batchNo: 'C-09',
       blocked: false,
       soldQty: 2 * BOX,
+      returnedQty: 0,
       receipts: [{ supplierName: 'الشفاء', qty: 20 * BOX }],
       branches: [{ qty: 18 * BOX }],
     });

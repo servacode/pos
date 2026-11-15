@@ -89,9 +89,9 @@ describe('/products list on a phone and the export', () => {
       });
       await screen.findByRole('list', { name: 'المنتجات' });
       // the tiles wait behind one line
-      expect(screen.queryByText('نفد من الأصناف')).not.toBeInTheDocument();
+      expect(screen.queryByText('القطع في المخزون')).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /الأرقام/ }));
-      expect(await screen.findByText('نفد من الأصناف')).toBeInTheDocument();
+      expect(await screen.findByText('القطع في المخزون')).toBeInTheDocument();
       // the selects are not on the page until «تصفية» opens
       expect(screen.queryByRole('combobox', { name: 'التصنيف' })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'تصفية' }));
@@ -109,12 +109,13 @@ describe('/products list on a phone and the export', () => {
 });
 
 describe('/products list: attention and sellable stock', () => {
-  it('shows «متاح للبيع» when expired or blocked batches make it less than the stock', async () => {
+  it('shows the available number, with the shelf total under it, when expired or blocked batches hold some back', async () => {
     openProducts({
       [list()]: page([listItem({ stockQty: 319_000, sellableQty: 219_000 })]),
     });
     const table = await screen.findByRole('table', { name: 'المنتجات' });
-    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 219');
+    expect(await within(table).findByText(/في المخزن/)).toHaveTextContent('في المخزن 319');
+    expect(within(table).getByText('219')).toBeInTheDocument();
   });
 
   it('keeps the uncategorised banner to one line with the services left out, and lets «بلا صورة» be dismissed', async () => {
@@ -197,7 +198,7 @@ describe('/products list', () => {
     await screen.findByText('شاي ربيع 400 غ');
     await vi.waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(2));
     expect(screen.getByText('12')).toBeInTheDocument();
-    expect(screen.getByText('نفد من الأصناف')).toBeInTheDocument();
+    expect(screen.getByText('نفد')).toBeInTheDocument();
   });
 
   it('proposes a category from each name, lets the owner review, then sets them on the ticked rows', async () => {
@@ -496,12 +497,14 @@ describe('/products list: photos, expiry and stock', () => {
     );
   });
 
-  it('shows the sellable stock beside a net that has a minus in it, and a kind icon where there is no photo', async () => {
+  it('shows one number (the available), with the minus told once under it, and a kind icon where there is no photo', async () => {
     openProducts({
       [list()]: page([listItem({ stockQty: 14_000, sellableQty: 16_000, hasImage: false, thumbUrl: null })]),
     });
     const table = await screen.findByRole('table', { name: 'المنتجات' });
-    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 16 · ناقص قطعتان');
+    expect(await within(table).findByText(/سالب قطعتان/)).toBeInTheDocument();
+    expect(within(table).getByText('16')).toBeInTheDocument();
+    expect(within(table).queryByText('14')).not.toBeInTheDocument();
     // no letter box: the picture's place holds an icon
     expect(table.querySelector('a[href$="#images"] svg')).not.toBeNull();
   });

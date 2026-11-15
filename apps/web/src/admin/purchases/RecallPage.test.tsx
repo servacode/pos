@@ -27,6 +27,7 @@ const found = (blocked: boolean): RecallResponse => ({
       ],
       branches: [{ branchId: 'br-1', branchName: 'الفرع الرئيسي', qty: 17_000 }],
       soldQty: 3_000,
+      returnedQty: 1_000,
     },
   ],
   sales: [
@@ -100,6 +101,19 @@ describe('«استدعاء دفعة»', () => {
     // an invoice with no customer is a risk line, and the buyers can be exported
     expect(screen.getByTestId('recall-anonymous')).toHaveTextContent('لا يمكن الوصول إلى مشتريها');
     expect(screen.getByRole('button', { name: 'صدّر الزبائن' })).toBeInTheDocument();
+    // one line on top, and «بِيع» is net of the customer's return (3 sold, 1 taken back: 2)
+    expect(screen.getByTestId('recall-headline')).toHaveTextContent(
+      'بِيع منها 2 بعد المرتجع · لـ زبون واحد · وبقي في الفروع 17',
+    );
+    expect(within(batch).getByRole('columnheader', { name: 'بِيع (بعد المرتجع)' })).toBeInTheDocument();
+    // «راسل الزبائن»: a WhatsApp link per known buyer with the batch in the message
+    await user.click(screen.getByRole('button', { name: 'راسل الزبائن' }));
+    const chat = within(await screen.findByRole('list', { name: 'زبائن الدفعة' })).getByRole('link', {
+      name: 'واتساب',
+    });
+    expect(chat.getAttribute('href')).toContain('https://wa.me/963955123456?text=');
+    expect(decodeURIComponent(chat.getAttribute('href') ?? '')).toContain('الدفعة C-09');
+    await user.keyboard('{Escape}');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
 
     await user.click(screen.getByRole('button', { name: 'أوقف بيعها في كل الفروع' }));

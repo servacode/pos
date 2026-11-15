@@ -54,6 +54,7 @@ import {
   Hash,
   House,
   ImageOff,
+  MessageCircle,
   Inbox,
   Info,
   KeyRound,
@@ -239,6 +240,7 @@ export const GridIcon = defineIcon(LayoutGrid);
 export const SparklesIcon = defineIcon(Sparkles);
 export const ShirtIcon = defineIcon(Shirt);
 export const NoImageIcon = defineIcon(ImageOff);
+export const ChatIcon = defineIcon(MessageCircle);
 export const PackageOpenIcon = defineIcon(PackageOpen);
 export const PanelIcon = defineIcon(PanelRight);
 export const WrenchIcon = defineIcon(Wrench);

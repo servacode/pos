@@ -198,22 +198,18 @@ function DayReportBody({ report }: { report: DayReport }) {
           value={<span className="num">{displayNumber(String(report.invoiceCount), digits)}</span>}
         />
         <StatTile label="متوسط الفاتورة" value={<Money minor={average} currency={base} />} />
-        <StatTile
-          label="المرتجعات"
-          value={<Money minor={report.returns.totalMinor} currency={base} />}
-          footnote={
-            <>
-              الحسم <Money minor={report.discountMinor} currency={base} />
-              {report.taxMinor !== 0 ? (
-                <>
-                  {' '}
-                  · الضريبة <Money minor={report.taxMinor} currency={base} />
-                </>
-              ) : null}
-            </>
-          }
-        />
+        <StatTile label="المرتجعات" value={<Money minor={report.returns.totalMinor} currency={base} />} />
       </div>
+      {/* The day's discount and tax are not part of «المرتجعات»: a quiet line of their own under the tiles */}
+      <p className="-mt-2 text-sm text-ink-muted max-sm:text-xs">
+        الحسم <Money minor={report.discountMinor} currency={base} />
+        {report.taxMinor !== 0 ? (
+          <>
+            {' '}
+            · الضريبة <Money minor={report.taxMinor} currency={base} />
+          </>
+        ) : null}
+      </p>
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <Section title="تفصيل المبيعات">

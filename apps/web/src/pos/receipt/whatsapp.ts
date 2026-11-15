@@ -4,6 +4,7 @@ import { normalizePhone } from '@serva/core/phone';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { methodLabel, type ReceiptData } from './Receipt';
+import { serialText, warrantyText } from './warranty';
 
 /** The wa.me address of a phone typed any common way (Syrian forms go to 963…), or null when it is not a phone */
 export function whatsappNumber(phone: string | null | undefined): string | null {
@@ -22,11 +23,22 @@ export function receiptText(data: ReceiptData): string {
   out.push('');
   for (const l of sale.lines) {
     out.push(`${l.name} × ${formatQuantity(l.qty)} = ${money(l.priced.totalMinor)}`);
+    if (data.contractVariantIds?.includes(l.variantId)) out.push('سعر العقد');
+    const serial = serialText(l, data.settings);
+    if (serial) out.push(serial);
+    const warranty = warrantyText(l, data.doc.deviceTime, data.settings);
+    if (warranty) out.push(warranty);
   }
   out.push('');
   out.push(`الإجمالي: ${money(sale.totals.totalMinor)}`);
   for (const p of sale.payments) {
     out.push(`${methodLabel(p.method, p.currency, base)}: ${money(p.amountMinor, p.currency)}`);
+  }
+  if (sale.cashRounding && sale.cashRounding.roundingMinor !== 0) {
+    const r = sale.cashRounding;
+    out.push(
+      `قُرّب المبلغ إلى ${money(r.dueMinor, r.currency)} (فرق ${money(Math.abs(r.roundingMinor), r.currency)})`,
+    );
   }
   if (sale.change) out.push(`الباقي للزبون: ${money(sale.change.amountMinor, sale.change.currency)}`);
   const debt = sale.customerBalanceAfterMinor;

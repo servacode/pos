@@ -651,6 +651,8 @@ export async function inventory(
       ref_qty: string;
       ref_value_minor: string;
       dead_qty: string;
+      last_cost: string | null;
+      typical_cost: string | null;
       attributes: { name: string; value: string }[] | null;
       product_id: string;
       product_name: string;
@@ -667,7 +669,16 @@ export async function inventory(
               where bm.expiry_date < current_date
                  or exists (select 1 from batch_blocks bl
                             where bl.tenant_id = l.tenant_id and bl.variant_id = l.variant_id
-                              and bl.batch_no = bm.batch_no and bl.released_at is null))::text as dead_qty
+                              and bl.batch_no = bm.batch_no and bl.released_at is null))::text as dead_qty,
+             (select (pl.cost_minor * 1000.0 / pl.qty)::text from purchase_lines pl
+              join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
+              where pl.tenant_id = l.tenant_id and pl.variant_id = l.variant_id and pl.qty > 0 and pl.cost_minor > 0
+              order by pu.business_date desc, pu.created_at desc, pl.line_no desc limit 1) as last_cost,
+             (select (percentile_cont(0.5) within group (order by t.c))::text from (
+                select pl.cost_minor * 1000.0 / pl.qty as c from purchase_lines pl
+                join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
+                where pl.tenant_id = l.tenant_id and pl.variant_id = l.variant_id and pl.qty > 0 and pl.cost_minor > 0
+                order by pu.business_date desc, pu.created_at desc, pl.line_no desc limit 5) t) as typical_cost
       from stock_levels l
       join variants v on v.tenant_id = l.tenant_id and v.id = l.variant_id
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
@@ -692,6 +703,8 @@ export async function inventory(
         refQty: Number(r.ref_qty),
         refValueMinor: Number(r.ref_value_minor),
         unitCostMinor: qty > 0 ? Math.round((value * 1000 * 10_000) / qty) / 10_000 : null,
+        lastCostMinor: r.last_cost === null ? null : Math.round(Number(r.last_cost) * 100) / 100,
+        typicalCostMinor: r.typical_cost === null ? null : Math.round(Number(r.typical_cost) * 100) / 100,
       };
     });
     return {

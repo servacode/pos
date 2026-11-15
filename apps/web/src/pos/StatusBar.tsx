@@ -268,7 +268,7 @@ export function StatusBar({
         {user ? (
           <>
             <Divider />
-            <div className="flex min-w-28 shrink-[2] items-center gap-2.5">
+            <div className="flex min-w-28 max-sm:min-w-20 shrink-[2] items-center gap-2.5">
               <Avatar name={user.name} size="sm" />
               <p className="flex min-w-0 flex-col">
                 <span className="truncate text-sm/tight font-semibold text-ink">{user.name}</span>

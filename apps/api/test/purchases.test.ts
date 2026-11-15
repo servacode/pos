@@ -118,6 +118,9 @@ describe('a purchase', () => {
         qty: 10 * PIECE,
         valueMinor: 200_000,
         unitCostMinor: 20_000,
+        // what one piece cost on its latest purchase, and the middle of the latest five (the purchase warning's references)
+        lastCostMinor: 20_000,
+        typicalCostMinor: 20_000,
         productName: 'حليب',
         attributes: [],
       }),

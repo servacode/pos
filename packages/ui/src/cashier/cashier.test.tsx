@@ -54,13 +54,39 @@ describe('ItemTile', () => {
     );
 
     const tile = screen.getByRole('button', { name: /لاتيه وسط/ });
-    expect(tile).toHaveClass('min-h-26', 'min-w-28');
+    // The card is the tile's frame; its button is inside, so chips can sit beside the button as real buttons
+    const card = tile.parentElement!;
+    expect(card).toHaveClass('min-h-26', 'min-w-28');
     expect(tile).toHaveAttribute('aria-pressed', 'true');
-    expect(tile).toHaveClass('bg-brand-soft');
-    expect(tile).not.toHaveClass('bg-surface');
+    expect(card).toHaveClass('bg-brand-soft');
+    expect(card).not.toHaveClass('bg-surface');
     expect(text(tile.querySelector('bdi.num')!)).toBe('120 ل.س');
     await user.click(tile);
     expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it('keeps chips as buttons of their own beside the tile button, never inside it', async () => {
+    const onSelect = vi.fn();
+    const onSize = vi.fn();
+    const { user } = renderUi(
+      <ItemTile
+        name="قميص"
+        priceMinor={12000}
+        currency="SYP"
+        chips={
+          <button type="button" onClick={onSize}>
+            M
+          </button>
+        }
+        onSelect={onSelect}
+      />,
+    );
+    const tile = screen.getByRole('button', { name: /قميص/ });
+    const chip = screen.getByRole('button', { name: 'M' });
+    expect(tile.contains(chip)).toBe(false);
+    await user.click(chip);
+    expect(onSize).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('cannot be sold when out of stock, and says so in words', () => {

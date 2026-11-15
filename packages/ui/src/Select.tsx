@@ -3,7 +3,7 @@ import { cn } from './cn';
 import { CONTROL_HEIGHT, useDensity, type Density } from './context';
 import { FieldError } from './FieldError';
 import { ExpandIcon } from './icons';
-import { FIELD_HINT, FIELD_LABEL, FIELD_TEXT } from './TextField';
+import { FIELD_HINT, FIELD_TEXT, FieldLabelRow, OPTIONAL_HINT } from './TextField';
 
 /** The text's inset, leaving room for the chevron at the end, and where the chevron sits. */
 const INSET: Record<Density, { text: string; chevron: string }> = {
@@ -39,6 +39,7 @@ export function Select({
   const density = useDensity();
   const autoId = useId();
   const selectId = id ?? autoId;
+  const beside = hint === OPTIONAL_HINT && !error;
   const showHint = Boolean(hint) && !error;
   const hintId = showHint ? `${selectId}-hint` : undefined;
   const errorId = error ? `${selectId}-error` : undefined;
@@ -57,9 +58,12 @@ export function Select({
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      <label htmlFor={selectId} className={cn(FIELD_LABEL, hideLabel && 'sr-only')}>
-        {label}
-      </label>
+      <FieldLabelRow
+        htmlFor={selectId}
+        label={label}
+        hideLabel={hideLabel}
+        optionalId={beside ? hintId : undefined}
+      />
       <div className="relative flex items-center">
         <select
           id={selectId}
@@ -84,7 +88,7 @@ export function Select({
         />
       </div>
       {error ? <FieldError id={errorId}>{error}</FieldError> : null}
-      {showHint ? (
+      {showHint && !beside ? (
         <p id={hintId} className={FIELD_HINT}>
           {hint}
         </p>

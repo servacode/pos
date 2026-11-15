@@ -24,6 +24,16 @@ describe('TextField', () => {
     expect(screen.queryByText('يبدأ بـ 09')).not.toBeInTheDocument();
   });
 
+  it('puts «اختياري» beside the label, and still describes the input with it', () => {
+    renderUi(<TextField label="رقم الفاتورة" hint="اختياري" />);
+    const input = screen.getByLabelText('رقم الفاتورة');
+    const word = screen.getByText('اختياري');
+    expect(input).toHaveAccessibleDescription('اختياري');
+    // The label's row holds both; nothing sits under the box
+    expect(word.parentElement).toBe(screen.getByText('رقم الفاتورة').parentElement);
+    expect(input.parentElement?.nextElementSibling).toBeNull();
+  });
+
   it('is 56 high with 18 px text on the touch density', () => {
     renderUi(<TextField label="الاسم" />, { density: 'touch' });
     const input = screen.getByLabelText('الاسم');

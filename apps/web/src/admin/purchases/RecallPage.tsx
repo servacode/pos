@@ -25,10 +25,12 @@ import {
   useDigits,
   type DataColumn,
 } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
 import { registeredAdjective } from '../../lib/plural';
+import { whatsappNumber } from '../../pos/receipt/whatsapp';
 import { downloadCsv } from '../exportCsv';
 import { getRecall, listExpiry, setBatchBlocked } from './api';
 import { SectionHead } from './parts';
@@ -45,6 +47,33 @@ export function buyersSummary(sales: RecallSale[]): string {
   ];
   if (anonymous > 0) parts.push(`${countNoun(anonymous, COUNT_NOUNS.invoice)} بلا زبون`);
   return parts.join(' · ');
+}
+
+/** What was sold of the batch once the returns are taken off (an older server sends no returns: all of it) */
+export function netSold(b: Pick<RecallBatch, 'soldQty' | 'returnedQty'>): number {
+  return Math.max(0, b.soldQty - (b.returnedQty ?? 0));
+}
+
+/** The one line on top: how much went out (after returns), to how many known buyers, what is left to pull back */
+export function recallHeadline(found: RecallResponse, digits: 'latn' | 'arab'): string {
+  const sold = found.batches.reduce((n, b) => n + netSold(b), 0);
+  const left = found.batches.reduce((n, b) => n + b.branches.reduce((m, x) => m + Math.max(0, x.qty), 0), 0);
+  const known = buyerList(found.sales).people.length;
+  const parts = [
+    `بِيع منها ${formatQuantity(sold, digits)} بعد المرتجع`,
+    known > 0 ? `لـ ${countNoun(known, COUNT_NOUNS.customer)}` : 'ولا زبون معروف',
+    `وبقي في الفروع ${formatQuantity(left, digits)}`,
+  ];
+  return parts.join(' · ');
+}
+
+/** The note a buyer gets: which batch, of what, what to do */
+export function recallMessage(batchNo: string, product: string, store: string): string {
+  return [
+    `السلام عليكم، من ${store}.`,
+    `نُعلمكم أن الدفعة ${batchNo} من «${product}» التي اشتريتموها سُحبت من السوق.`,
+    'نرجو التوقف عن استعمالها والتواصل معنا لاستبدالها أو استرداد ثمنها.',
+  ].join('\n');
 }
 
 /** The known buyers one by one (by phone, else by name), and the invoices that name nobody */
@@ -89,6 +118,7 @@ export function buyerList(sales: RecallSale[]): {
  */
 export function RecallPage() {
   const digits = useDigits();
+  const me = useMe();
   const [params] = useSearchParams();
   const [batchNo, setBatchNo] = useState(() => params.get('batch')?.slice(0, 60) ?? '');
   const [found, setFound] = useState<RecallResponse | null>(null);
@@ -99,6 +129,7 @@ export function RecallPage() {
   const [note, setNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [lifting, setLifting] = useState(false);
+  const [messaging, setMessaging] = useState(false);
   const [onShelf, setOnShelf] = useState<ExpiryRow[]>([]);
   // Which batches the picker offers: all, the stopped ones, those ending within three months, or those already past their date
   const [shelfFilter, setShelfFilter] = useState<'urgent' | 'all' | 'blocked' | 'soon' | 'expired'>('urgent');
@@ -228,6 +259,20 @@ export function RecallPage() {
     );
   }
 
+  /** Copy every buyer's phone, one per line, for a message list or a call sheet */
+  async function copyPhones() {
+    if (!found) return;
+    const phones = buyerList(found.sales)
+      .people.map((x) => x.phone)
+      .filter(Boolean);
+    try {
+      await navigator.clipboard?.writeText(phones.join('\n'));
+      setNote(`نُسخت أرقام ${countNoun(phones.length, COUNT_NOUNS.customer)} إلى الحافظة.`);
+    } catch {
+      setError('تعذّر النسخ، استخدم «صدّر الزبائن».');
+    }
+  }
+
   const blocked = found?.batches.some((b) => b.blocked) ?? false;
   const anonymousQty = found ? buyerList(found.sales).anonymous.qty : 0;
   const batchColumns: DataColumn<RecallBatch>[] = [
@@ -272,9 +317,9 @@ export function RecallPage() {
     },
     {
       key: 'sold',
-      header: 'بِيع',
+      header: 'بِيع (بعد المرتجع)',
       numeric: true,
-      cell: (b) => formatQuantity(b.soldQty, digits),
+      cell: (b) => formatQuantity(netSold(b), digits),
     },
     {
       key: 'state',
@@ -444,6 +489,9 @@ export function RecallPage() {
                       </Button>
                     </span>
                   </SectionHead>
+                  <p className="text-sm font-semibold text-ink" data-testid="recall-headline">
+                    {recallHeadline(found, digits)}
+                  </p>
                   <DataTable
                     caption="الدفعة وأصلها"
                     columns={batchColumns}
@@ -464,6 +512,9 @@ export function RecallPage() {
                       >
                         {buyersSummary(found.sales)}
                       </p>
+                      {buyerList(found.sales).people.length > 0 ? (
+                        <Button onClick={() => setMessaging(true)}>راسل الزبائن</Button>
+                      ) : null}
                       <Button variant="secondary" onClick={exportBuyers}>
                         صدّر الزبائن
                       </Button>
@@ -497,6 +548,63 @@ export function RecallPage() {
           ) : null}
         </div>
       </div>
+      <Dialog
+        open={messaging}
+        onOpenChange={setMessaging}
+        title="راسل الزبائن"
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => void copyPhones()}>
+              انسخ كل الأرقام
+            </Button>
+            <Button variant="secondary" onClick={() => setMessaging(false)}>
+              أغلق
+            </Button>
+          </>
+        }
+      >
+        {found ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-ink-muted">
+              اضغط «واتساب» أمام الزبون لتفتح محادثة جاهزة برسالة سحب الدفعة {found.batchNo}. تُرسل كل رسالة
+              منك.
+            </p>
+            <ul
+              aria-label="زبائن الدفعة"
+              className="flex max-h-80 flex-col divide-y divide-line overflow-y-auto"
+            >
+              {buyerList(found.sales).people.map((x) => {
+                const number = whatsappNumber(x.phone);
+                const text = recallMessage(found.batchNo, found.batches[0]?.name ?? '', me.tenant.name);
+                return (
+                  <li key={x.phone || x.name} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate font-semibold text-ink">{x.name || x.phone}</span>
+                      {x.phone ? (
+                        <bdi dir="ltr" className="num text-xs text-ink-muted">
+                          {x.phone}
+                        </bdi>
+                      ) : null}
+                    </span>
+                    {number ? (
+                      <a
+                        href={`https://wa.me/${number}?text=${encodeURIComponent(text)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex min-h-11 items-center rounded-control px-3 text-sm font-semibold text-brand-ink hover:underline"
+                      >
+                        واتساب
+                      </a>
+                    ) : (
+                      <span className="text-xs text-ink-subtle">بلا رقم</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
+      </Dialog>
       <Dialog
         open={confirming}
         onOpenChange={setConfirming}

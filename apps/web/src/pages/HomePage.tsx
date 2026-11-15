@@ -373,7 +373,7 @@ function HeroTile({
                 </span>
               ) : null}
               <span className="opacity-85">
-                الخصومات{' '}
+                الحسم{' '}
                 <Money minor={data.discountMinor} currency={data.baseCurrency} className="font-semibold" />
               </span>
             </div>
@@ -946,25 +946,39 @@ function waitingFigures({
   };
 }
 
+/** «SYR-C · حقنة 5 مل: دفعة موقوفة…»: the row says which batch it is (the first two, then «…») */
+function batchNamed(rows: { name: string; batchNo: string | null }[], text: string): string {
+  const names = rows.slice(0, 2).map((row) => (row.batchNo ? `${row.batchNo} · ${row.name}` : row.name));
+  if (names.length === 0) return text;
+  return `${names.join('، ')}${rows.length > 2 ? '…' : ''}: ${text}`;
+}
+
 /** How many rows «تحتاج انتباهك» shows before «عرض الكل» */
 const WAITING_ROWS = 3;
 
 function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   const [all, setAll] = useState(false);
   const { holds, online, stock, expiring, expired, recalled, loading, noPhoto, empty } = waitingFigures(args);
+  const batches = args.expiry.data?.items ?? [];
+  const recalledRows = batches.filter((row) => row.blocked);
+  const expiredRows = batches.filter((row) => !row.blocked && row.daysLeft !== null && row.daysLeft < 0);
+  const expiringRows = batches.filter((row) => !row.blocked && !(row.daysLeft !== null && row.daysLeft < 0));
   // Red only for what blocks (a recalled batch) or is wholly gone; everything else is amber or calm.
   // Most serious first, so the three rows shown are the three that matter.
   const rows: ReactNode[] = [];
   if (recalled > 0)
     rows.push(
       <WaitingRow key="recalled" to="/recall" count={null} tone="danger" icon={<WarningIcon />}>
-        {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : `${recalled} دفعات موقوفة عن البيع (استدعاء)`}
+        {batchNamed(
+          recalledRows,
+          recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : `${recalled} دفعات موقوفة عن البيع (استدعاء)`,
+        )}
       </WaitingRow>,
     );
   if (expired > 0)
     rows.push(
       <WaitingRow key="expired" to="/expiry" count={null} tone="danger" icon={<WarningIcon />}>
-        {expired === 1 ? 'دفعة منتهية الصلاحية' : `${expired} دفعات منتهية الصلاحية`}
+        {batchNamed(expiredRows, expired === 1 ? 'دفعة منتهية الصلاحية' : `${expired} دفعات منتهية الصلاحية`)}
       </WaitingRow>,
     );
   const rowOf = (group: (typeof stock)[number]) => {
@@ -1018,7 +1032,7 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   if (expiring > 0)
     rows.push(
       <WaitingRow key="expiring" to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
-        {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
+        {batchNamed(expiringRows, expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها')}
       </WaitingRow>,
     );
   if (noPhoto > 0)
@@ -1070,9 +1084,9 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   );
 }
 
-/** A low piece's chip: «نفد» for none, «ناقص 3» for a stock that went below zero, else the count */
+/** A low piece's chip: «نفد» for none, «سالب 3» for a stock that went below zero, else the count */
 function stockChip(qty: number): string {
-  if (qty < 0) return `ناقص ${formatQuantity(-qty)}`;
+  if (qty < 0) return `سالب ${formatQuantity(-qty)}`;
   if (qty === 0) return 'نفد';
   return formatQuantity(qty);
 }
@@ -1159,7 +1173,7 @@ function RunningLow({
           </ul>
           {low.some((item) => item.stockQty < 0) ? (
             <p className="text-sm text-ink-muted">
-              «ناقص» يعني أنك بعت أكثر من المسجّل. استلم البضاعة أو{' '}
+              «سالب» يعني أنك بعت أكثر من المسجّل. استلم البضاعة أو{' '}
               <Link
                 to={`/inventory?count=${negativeIds.join(',')}`}
                 className="font-semibold text-brand-ink hover:underline"

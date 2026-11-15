@@ -169,6 +169,9 @@ describe('cheques by due date', () => {
       within(table)
         .getAllByText(/^(FAR|NEAR|OUT)-1$/)
         .map((e) => e.textContent);
+    // the cheques waiting for the bank open by what falls due first; «الأحدث» gives the order they came in
+    expect(refs()).toEqual(['NEAR-1', 'FAR-1', 'OUT-1']);
+    await user.click(screen.getByRole('radio', { name: 'الأحدث' }));
     expect(refs()).toEqual(['FAR-1', 'NEAR-1', 'OUT-1']);
     await user.click(screen.getByRole('radio', { name: 'تاريخ الاستحقاق' }));
     expect(refs()[0]).toBe('NEAR-1');

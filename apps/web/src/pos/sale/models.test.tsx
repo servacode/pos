@@ -87,8 +87,10 @@ describe('the till grid for a clothing model', () => {
     const tiles = within(grid).getAllByRole('button', { name: /قميص كتان/ });
     expect(tiles).toHaveLength(1);
     // The tile names the sizes in stock (no stock known: all of them)
-    expect(tiles[0]).toHaveTextContent('M');
-    expect(tiles[0]).toHaveTextContent('L');
+    // (the sizes are buttons of their own beside the tile's button, inside the same card)
+    const card = tiles[0]!.parentElement!;
+    expect(within(card).getByRole('button', { name: 'M' })).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'L' })).toBeInTheDocument();
 
     await user.click(tiles[0]!);
     const picker = await screen.findByRole('region', { name: 'اختر من قميص كتان' });
@@ -102,6 +104,7 @@ describe('the till grid for a clothing model', () => {
     await user.click(within(picker).getByRole('button', { name: /^أضف إلى السلة/ }));
 
     expect(screen.queryByRole('region', { name: 'اختر من قميص كتان' })).not.toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'أسطر الفاتورة' })).toHaveTextContent('قميص كتان L أزرق');
+    expect(screen.getByRole('list', { name: 'أسطر الفاتورة' })).toHaveTextContent('قميص كتان');
+    expect(screen.getByRole('list', { name: 'أسطر الفاتورة' })).toHaveTextContent('L أزرق');
   });
 });

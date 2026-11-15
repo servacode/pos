@@ -63,6 +63,8 @@ export interface ReceiptData {
   vouchersAfter?: { code: string; balanceMinor: number; currency: CurrencyCode }[];
   /** The catalog's services: a fee is work, not a piece, so «عدد القطع» leaves it out */
   serviceVariantIds?: readonly string[];
+  /** The items whose price was the customer's contract price: their line says «سعر العقد» (display only) */
+  contractVariantIds?: readonly string[];
 }
 
 /** One whole piece at its own price (no unit, no pack): the line's amount is its price, so it is said once */
@@ -445,6 +447,9 @@ export function Receipt({
                 <bdi dir="ltr">−{amount(line.priced.lineDiscountMinor)}</bdi>
               </Row>
             ) : null}
+            {data.contractVariantIds?.includes(line.variantId) ? (
+              <span className="text-xs">سعر العقد</span>
+            ) : null}
             {line.serials?.length ? (
               <span className="text-start">
                 <bdi dir="ltr" className="num">
@@ -465,8 +470,14 @@ export function Receipt({
                         {' '}
                         · تنتهي <bdi>{dayText(b.expiry, digits)}</bdi>
                       </>
-                    ) : null}{' '}
-                    × <bdi className="num">{formatQuantity(b.qty, digits)}</bdi>
+                    ) : null}
+                    {/* One batch holds the whole line: the line above already says how many */}
+                    {line.batches!.length > 1 ? (
+                      <>
+                        {' '}
+                        × <bdi className="num">{formatQuantity(b.qty, digits)}</bdi>
+                      </>
+                    ) : null}
                   </span>
                 ))}
               </span>

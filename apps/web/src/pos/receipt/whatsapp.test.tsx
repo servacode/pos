@@ -65,3 +65,13 @@ describe('«أرسل عبر واتساب» on the finished sale', () => {
     expect(text).toContain('الإجمالي');
   });
 });
+
+describe('after the link opened (round 18)', () => {
+  it('says «فُتح واتساب ✓» on the button', async () => {
+    const { user } = await sold();
+    await user.click(screen.getByRole('button', { name: 'أرسل عبر واتساب' }));
+    await user.type(screen.getByLabelText('رقم جوال الزبون'), '0933123456');
+    await user.click(screen.getByRole('button', { name: 'أرسل' }));
+    expect(await screen.findByRole('button', { name: /فُتح واتساب/ })).toBeInTheDocument();
+  });
+});

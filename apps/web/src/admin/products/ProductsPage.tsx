@@ -22,7 +22,6 @@ import {
   ExpandIcon,
   IconButton,
   IconChip,
-  InfoIcon,
   Menu,
   MenuItem,
   Money,
@@ -60,7 +59,7 @@ import { downloadCsv } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
-import { shortPieces, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
+import { negativePieces, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
 import { SlimKpis } from '../SlimKpis';
 import { negativeNote } from '../../lib/stockCounts';
 import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
@@ -119,6 +118,53 @@ function summaryOf(items: readonly ProductListItem[]): ListSummary {
     runOut: stocked.filter((item) => item.stockQty <= 0).length,
     lowest: lowest ? { nameAr: lowest.nameAr, qty: lowest.stockQty } : null,
   };
+}
+
+/**
+ * The one stock number of a product: what is available (all branches, a combination below zero adds nothing),
+ * the same as the inventory grid. The gap to the plain sum is told once below it: «سالب 8» (sold more than
+ * recorded: count it), or the total on the shelf when expired or blocked batches hold some back.
+ */
+export function availableOf(item: Pick<ProductListItem, 'stockQty' | 'sellableQty'>): number {
+  return item.sellableQty ?? item.stockQty;
+}
+
+/** Some combination runs below zero: the available count is more than the plain sum */
+function hasNegative(item: Pick<ProductListItem, 'stockQty' | 'sellableQty'>): boolean {
+  return item.stockQty < 0 || (item.sellableQty !== undefined && item.sellableQty > item.stockQty);
+}
+
+function StockCell({ item, digits }: { item: ProductListItem; digits: 'latn' | 'arab' }) {
+  const avail = availableOf(item);
+  const below = hasNegative(item);
+  return (
+    <span className="flex flex-col items-end">
+      <span className="inline-flex items-center gap-1.5">
+        {below ? <Badge tone="danger">سالب</Badge> : null}
+        <span
+          className={cn('font-semibold', avail < 0 && 'text-danger-ink', avail === 0 && 'text-warning-ink')}
+        >
+          {formatQuantity(avail, digits)}
+        </span>
+      </span>
+      {item.sellableQty !== undefined && item.sellableQty !== item.stockQty ? (
+        <span className="text-xs whitespace-nowrap text-ink-muted">
+          {below ? (
+            <bdi className="text-danger-ink">
+              {negativePieces(
+                (item.sellableQty - item.stockQty) / 1000,
+                formatQuantity(item.sellableQty - item.stockQty, digits),
+              )}
+            </bdi>
+          ) : (
+            <>
+              في المخزن <bdi className="num">{formatQuantity(item.stockQty, digits)}</bdi>
+            </>
+          )}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function PriceCell({ item }: { item: ProductListItem }) {
@@ -729,36 +775,7 @@ function ProductsList() {
         item.type === 'service' ? (
           <span className="text-ink-subtle">—</span>
         ) : (
-          <span className="flex flex-col items-end">
-            <span className="inline-flex items-center gap-1.5">
-              {item.stockQty < 0 ? <Badge tone="danger">سالب</Badge> : null}
-              <span
-                className={cn(
-                  'font-semibold',
-                  item.stockQty < 0 && 'text-danger-ink',
-                  item.stockQty === 0 && 'text-warning-ink',
-                )}
-              >
-                {formatQuantity(item.stockQty, digits)}
-              </span>
-            </span>
-            {item.sellableQty !== undefined && item.sellableQty !== item.stockQty ? (
-              <span className="text-xs whitespace-nowrap text-ink-muted">
-                متاح للبيع <bdi className="num">{formatQuantity(item.sellableQty, digits)}</bdi>
-                {item.sellableQty > item.stockQty ? (
-                  <>
-                    {' · '}
-                    <bdi className="text-danger-ink">
-                      {shortPieces(
-                        (item.sellableQty - item.stockQty) / 1000,
-                        formatQuantity(item.sellableQty - item.stockQty, digits),
-                      )}
-                    </bdi>
-                  </>
-                ) : null}
-              </span>
-            ) : null}
-          </span>
+          <StockCell item={item} digits={digits} />
         ),
     },
     ...(showExpiry
@@ -896,7 +913,7 @@ function ProductsList() {
               },
               {
                 key: 'out',
-                label: soldOutLabel(clothingStore),
+                label: soldOutLabel(),
                 value: summary ? <bdi className="num">{`${summary.runOut}${more}`}</bdi> : '…',
                 tone: summary && summary.runOut > 0 ? 'warning' : undefined,
                 note: !summary?.lowest ? undefined : summary.runOut > 0 ? (
@@ -1183,12 +1200,10 @@ function ProductsList() {
                     </span>
                   ) : null}
                   <span className="ms-auto flex shrink-0 items-center gap-1">
-                    <IconButton
-                      size="xs"
-                      label={showWhy ? 'أخفِ الشرح' : 'اشرح'}
-                      icon={<InfoIcon size={16} />}
-                      onClick={() => setShowWhy((v) => !v)}
-                    />
+                    {/* A word, not a second «i»: the alert already wears its own icon */}
+                    <button type="button" className={textLinkClass} onClick={() => setShowWhy((v) => !v)}>
+                      {showWhy ? 'أخفِ الشرح' : 'اشرح'}
+                    </button>
                     {zeroPrice === 0 ? (
                       <IconButton
                         size="xs"
@@ -1238,15 +1253,14 @@ function ProductsList() {
                             <span>خدمة</span>
                           ) : (
                             <>
-                              {item.stockQty < 0 ? <Badge tone="danger">سالب</Badge> : null}
+                              {hasNegative(item) ? <Badge tone="danger">سالب</Badge> : null}
                               <span
                                 className={cn(
                                   'shrink-0 font-semibold',
-                                  item.stockQty < 0 && 'text-danger-ink',
-                                  item.stockQty === 0 && 'text-warning-ink',
+                                  availableOf(item) === 0 && 'text-warning-ink',
                                 )}
                               >
-                                {item.stockQty === 0 ? 'نفد' : formatQuantity(item.stockQty, digits)}
+                                {availableOf(item) === 0 ? 'نفد' : formatQuantity(availableOf(item), digits)}
                               </span>
                             </>
                           )}

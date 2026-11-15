@@ -75,3 +75,33 @@ describe('the model picker', () => {
     expect(onAdd).toHaveBeenCalledWith(pieces[1], 1);
   });
 });
+
+describe('the model picker (round 18)', () => {
+  it('chooses the only colour of a size by itself', async () => {
+    const { picker, user } = open();
+    await user.click(within(picker).getByRole('button', { name: 'M' }));
+    expect(within(picker).getByRole('button', { name: 'أبيض' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(picker).getByRole('button', { name: /^أضف إلى السلة/ })).toBeInTheDocument();
+  });
+
+  it('cannot swap a line to a combination with nothing left', async () => {
+    const onAdd = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <VariantPicker
+        name="قميص"
+        pieces={pieces}
+        swap
+        actionLabel="بدّل في السلة"
+        onAdd={onAdd}
+        onCancel={() => undefined}
+      />,
+    );
+    const picker = screen.getByRole('region', { name: 'اختر من قميص' });
+    await user.click(within(picker).getByRole('button', { name: 'L' }));
+    await user.click(within(picker).getByRole('button', { name: 'أبيض' }));
+    const button = within(picker).getByRole('button', { name: /نفد — اختر غيره/ });
+    expect(button).toBeDisabled();
+    expect(within(picker).queryByText(/أضفه رغم ذلك/)).not.toBeInTheDocument();
+  });
+});

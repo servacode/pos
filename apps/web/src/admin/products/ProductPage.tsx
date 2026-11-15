@@ -169,9 +169,8 @@ function StockByBranch({ product, numberFormat }: { product: ProductDetail; numb
       {minus > 0 ? (
         <div className="flex flex-col gap-1 border-t border-line pt-3 text-sm">
           <span className="text-ink-muted">
-            متاح للبيع{' '}
-            <bdi className="num font-semibold text-ink">{formatQuantity(sellable, numberFormat)}</bdi>
-            {' · '}ناقص{' '}
+            متوفر <bdi className="num font-semibold text-ink">{formatQuantity(sellable, numberFormat)}</bdi>
+            {' · '}سالب{' '}
             <bdi className="num font-semibold text-danger-ink">{formatQuantity(minus, numberFormat)}</bdi>
           </span>
           <Link

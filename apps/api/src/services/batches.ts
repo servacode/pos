@@ -578,11 +578,13 @@ export function recall(db: Database, auth: AccessClaims, batchNo: string): Promi
       name: string;
       expiry: string | null;
       sold: string;
+      returned: string;
       blocked: boolean;
       reason: string | null;
     }>(sql`
       select m.variant_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name, m.expiry_date::text as expiry,
              coalesce(-sum(m.qty) filter (where m.kind = 'sale'), 0)::text as sold,
+             coalesce(sum(m.qty) filter (where m.kind = 'return'), 0)::text as returned,
              (bl.id is not null) as blocked, bl.reason
       from batch_movements m
       join variants v on v.tenant_id = m.tenant_id and v.id = m.variant_id
@@ -667,6 +669,7 @@ export function recall(db: Database, auth: AccessClaims, batchNo: string): Promi
           .filter((l) => l.variant_id === f.variant_id && l.expiry === f.expiry)
           .map((l) => ({ branchId: l.branch_id, branchName: l.branch_name, qty: Number(l.qty) })),
         soldQty: Number(f.sold),
+        returnedQty: Number(f.returned),
       })),
       ...blocksOnly.map((b) => ({
         variantId: b.variant_id,
@@ -678,6 +681,7 @@ export function recall(db: Database, auth: AccessClaims, batchNo: string): Promi
         receipts: [],
         branches: [],
         soldQty: 0,
+        returnedQty: 0,
       })),
     ];
     return {

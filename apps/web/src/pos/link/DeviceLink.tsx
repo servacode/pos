@@ -179,7 +179,8 @@ export function DeviceLink({
     (stage.step === 'download' && stage.ownerSignedIn);
 
   return (
-    <div className="flex w-full flex-col items-center gap-8">
+    // my-auto: a wide screen centres the set-up in the page (it grows downward when it is taller)
+    <div className="my-auto flex w-full flex-col items-center gap-8">
       <div className="flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-card border border-line bg-surface px-5 py-3 shadow-e1">
         <p className="flex items-center gap-3 font-semibold text-ink">
           <IconChip size="sm">

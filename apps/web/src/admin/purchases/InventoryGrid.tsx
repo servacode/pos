@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { InventoryRow } from '@serva/core';
 import { Button, cn, formatQuantity, SegmentedControl } from '@serva/ui';
-import { shortPieces } from '../stockWords';
+import { negativePieces } from '../stockWords';
 import { gridOf } from './SizeGrid';
 
 type Piece = Pick<InventoryRow, 'variantId' | 'qty'> & { attributes: { name: string; value: string }[] };
@@ -58,7 +58,7 @@ export function InventoryGrid({
           onValueChange={setFilter}
           options={[
             { value: 'all', label: 'الكل' },
-            { value: 'out', label: 'ناقص أو نفد' },
+            { value: 'out', label: 'سالب أو نفد' },
             { value: 'low', label: 'قليل (2 أو أقل)' },
           ]}
         />
@@ -77,7 +77,7 @@ export function InventoryGrid({
       {models.map((m, index) => {
         const grid = gridOf(m.pieces as never);
         if (!grid.fits) return null;
-        // The totals are what can be sold: a piece below zero adds nothing, and is told apart as «ناقص»
+        // The totals are what can be sold: a piece below zero adds nothing, and is told apart as «سالب»
         const qtyOf = (v: unknown) => Math.max(0, (v as Piece).qty);
         const minus = m.pieces.reduce((n, p) => n + Math.max(0, -p.qty), 0);
         const minusIds = m.pieces.filter((p) => p.qty < 0).map((p) => p.variantId);
@@ -109,11 +109,11 @@ export function InventoryGrid({
                 {m.name}
               </button>
               <span className="num text-sm font-normal text-ink-muted">
-                المتاح {formatQuantity(total, numberFormat)}
+                متوفر {formatQuantity(total, numberFormat)}
               </span>
               {minus > 0 ? (
                 <span className="text-sm font-semibold text-danger-ink">
-                  <bdi>{shortPieces(minus / 1000, formatQuantity(minus, numberFormat))}</bdi>
+                  <bdi>{negativePieces(minus / 1000, formatQuantity(minus, numberFormat))}</bdi>
                 </span>
               ) : null}
               {minus > 0 && onCount ? (

@@ -306,6 +306,13 @@ export function SaleScreen(props: SaleScreenProps) {
     const timer = setTimeout(() => setJustAdded(null), 1600);
     return () => clearTimeout(timer);
   }, [justAdded]);
+  // «بُدّل ✓»: a line's size or colour swapped from the cart, said in its own words (the cart stays open)
+  const [justSwapped, setJustSwapped] = useState<string | null>(null);
+  useEffect(() => {
+    if (!justSwapped) return;
+    const timer = setTimeout(() => setJustSwapped(null), 1600);
+    return () => clearTimeout(timer);
+  }, [justSwapped]);
   const [quote, setQuote] = useState<QuoteData | null>(null);
   /** «عرض سعر»: asks a few optional details first, then saves a numbered quotation (and prints it if asked) */
   const [quoteAsk, setQuoteAsk] = useState<PricedCart | null>(null);
@@ -743,9 +750,19 @@ export function SaleScreen(props: SaleScreenProps) {
     window.print();
     setKitchen(null);
   }, [kitchen]);
+  // The selected line opens in place with its buttons: bring all of it into view, above the totals
+  useEffect(() => {
+    if (selected === null) return;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`cart-line-${selected}`)
+        ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [selected]);
   // A panel (quantity, discount, payment…) opens in the items area: on a phone, show that tab
   // (a unit sheet opened from the cart is the exception: it floats over the cart, which stays where it is)
-  const sheetOverCart = mode.kind === 'unit' && mode.replaceLine !== undefined;
+  const sheetOverCart = (mode.kind === 'unit' || mode.kind === 'pick') && mode.replaceLine !== undefined;
   useEffect(() => {
     if (mode.kind !== 'items' && !sheetOverCart) setPhoneView('items');
   }, [mode.kind, sheetOverCart]);
@@ -1484,7 +1501,7 @@ export function SaleScreen(props: SaleScreenProps) {
           </Button>
         </div>
       ) : null}
-      <div className="min-h-32 flex-1 overflow-y-auto">
+      <div className="min-h-32 flex-1 overflow-y-auto pb-2">
         {lineCount === 0 ? (
           // One short hint line, not a big empty state: the items are one glance away
           <p className="flex items-center justify-center gap-2 px-4 py-6 text-center text-sm text-ink-muted">
@@ -1540,6 +1557,11 @@ export function SaleScreen(props: SaleScreenProps) {
                   <span key="o" className="font-semibold text-success-ink">
                     {p.discount.reason} −
                     <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  </span>
+                ) : null,
+                line.contractPriced ? (
+                  <span key="c" className="font-semibold text-info-ink">
+                    سعر العقد
                   </span>
                 ) : null,
                 bump === line.lineNo ? (
@@ -1652,7 +1674,10 @@ export function SaleScreen(props: SaleScreenProps) {
                         الوزن
                       </Button>
                     ) : (
-                      <div className="inline-flex items-stretch overflow-hidden rounded-control border border-line-control/50 bg-surface shadow-e1">
+                      <div
+                        dir="ltr"
+                        className="inline-flex items-stretch overflow-hidden rounded-control border border-line-control/50 bg-surface shadow-e1"
+                      >
                         <button
                           type="button"
                           aria-label="أنقص الكمية"
@@ -1824,18 +1849,21 @@ export function SaleScreen(props: SaleScreenProps) {
               {lineCount === 0 && props.heldCount > 0 ? <UndoIcon size={20} /> : <ClockIcon size={20} />}
               <span>{lineCount === 0 && props.heldCount > 0 ? 'استرجع' : 'علّق'}</span>
             </button>
-            <button
-              type="button"
-              aria-label="خصم"
-              aria-keyshortcuts="Alt+1"
-              title="خصم على الفاتورة (Alt+1)"
-              onClick={() => setMode({ kind: 'invoice' })}
-              disabled={lineCount === 0}
-              className={CART_QUICK}
-            >
-              <PercentIcon size={20} />
-              <span>خصم</span>
-            </button>
+            {/* One «خصم» in view: while a line is open its own «خصم» is the one; Alt+1 still opens the invoice's */}
+            {selected === null ? (
+              <button
+                type="button"
+                aria-label="خصم"
+                aria-keyshortcuts="Alt+1"
+                title="خصم على الفاتورة (Alt+1)"
+                onClick={() => setMode({ kind: 'invoice' })}
+                disabled={lineCount === 0}
+                className={CART_QUICK}
+              >
+                <PercentIcon size={20} />
+                <span>خصم</span>
+              </button>
+            ) : null}
           </>
         }
         onPay={startPay}
@@ -1917,17 +1945,21 @@ export function SaleScreen(props: SaleScreenProps) {
         ) : undefined
       }
     >
-      {justAdded && !asking ? (
-        <p
-          role="status"
-          className="pointer-events-none fixed inset-x-4 bottom-24 z-70 md:bottom-4 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
-        >
-          <CheckIcon size={16} className="shrink-0" />
-          <span className="truncate">
-            أُضيف ✓ <bdi>{justAdded}</bdi>
-          </span>
-        </p>
-      ) : null}
+      {/* In the page body: on a phone the items tab is hidden while the cart shows, and so would a toast inside it */}
+      {(justSwapped ?? justAdded) && !asking
+        ? createPortal(
+            <p
+              role="status"
+              className="pointer-events-none fixed inset-x-4 bottom-24 z-70 md:bottom-4 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
+            >
+              <CheckIcon size={16} className="shrink-0" />
+              <span className="truncate">
+                {justSwapped ? 'بُدّل ✓' : 'أُضيف ✓'} <bdi>{justSwapped ?? justAdded}</bdi>
+              </span>
+            </p>,
+            document.body,
+          )
+        : null}
       {quoteAsk ? (
         <QuoteDialog
           customerName={cart.customer?.name ?? null}
@@ -2279,7 +2311,7 @@ export function SaleScreen(props: SaleScreenProps) {
           <VariantPicker
             key={effectiveMode.productId}
             {...(effectiveMode.initial ? { initial: effectiveMode.initial } : {})}
-            {...(effectiveMode.replaceLine !== undefined ? { actionLabel: 'بدّل في السلة' } : {})}
+            {...(effectiveMode.replaceLine !== undefined ? { actionLabel: 'بدّل في السلة', swap: true } : {})}
             name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
             pieces={pieces.get(effectiveMode.productId)!}
             inCart={inCartQty}
@@ -2313,7 +2345,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   return { ...next, lines };
                 });
                 setSelected(null);
-                setJustAdded(piece.name);
+                setJustSwapped(piece.name);
                 return;
               }
               setJustAdded(piece.name);
