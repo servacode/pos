@@ -3,6 +3,10 @@ import { cleanup, configure } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 import { setAccessToken } from './src/lib/api';
 import { setTestMode } from './src/lib/testMode';
+import { setClickGuardEnabled } from './src/pos/sale/clickGuard';
+
+// The till's tap guard swallows taps for 350 ms after a panel closes; scripted clicks land inside it
+setClickGuardEnabled(false);
 
 // How long findBy* waits for a render. The default is one second, which is enough on a
 // developer's machine and not on a loaded CI runner: the suite failed four times in one

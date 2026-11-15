@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CatalogItem } from '../catalog';
 import { sellableOnHand, shortfallOf } from '../../lib/sellable';
-import { armClickGuard, clicksSwallowed } from './clickGuard';
+import { armClickGuard, clicksSwallowed, setClickGuardEnabled } from './clickGuard';
 import { sizeStock, stockFor } from './models';
 import { isUnfedService, withoutUnfedServices } from './serviceFee';
 import { tileInfo } from './tileInfo';
@@ -84,9 +84,13 @@ describe('a service whose fee was never typed', () => {
 
 describe('the click guard', () => {
   it('swallows clicks for a moment after a close', () => {
+    setClickGuardEnabled(true);
     armClickGuard(1_000);
     expect(clicksSwallowed(1_200)).toBe(true);
     expect(clicksSwallowed(1_400)).toBe(false);
+    setClickGuardEnabled(false);
+    armClickGuard(1_000);
+    expect(clicksSwallowed(1_200)).toBe(false);
   });
 });
 
