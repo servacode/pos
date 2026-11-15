@@ -32,6 +32,12 @@ export function orderValues(optionName: string, values: readonly string[]): Orde
       if (!known.has(v)) known.set(v, { at: at++, group: g.label });
     }
   const unique = [...new Set(values)];
+  // Shoe and trouser numbers (37 38 39 40 …) read by their number, whether the list knows them or not
+  if (unique.length > 1 && unique.every((v) => /^\d+(\.\d+)?$/.test(v.trim()))) {
+    return unique
+      .sort((a, b) => Number(a) - Number(b))
+      .map((value) => ({ value, group: known.get(value)?.group ?? null }));
+  }
   const inLists = unique
     .filter((v) => known.has(listed(v)))
     .sort((a, b) => known.get(listed(a))!.at - known.get(listed(b))!.at)
@@ -64,15 +70,25 @@ export function sortByOptions<
     return r;
   };
   const position = new Map(rows.map((row, i) => [row, i]));
+  // Each model's rows stay together, models in the order they first appear (the comparison below is
+  // then one consistent order: rows of different models are never compared by their options)
+  const modelAt = new Map<string, number>();
+  for (const row of rows) {
+    const model = row.productId ?? '';
+    if (!modelAt.has(model)) modelAt.set(model, modelAt.size);
+  }
   return [...rows].sort((a, b) => {
-    if ((a.productId ?? '') === (b.productId ?? '') && a.attributes?.length) {
-      for (const [i, attr] of a.attributes.entries()) {
-        const other = b.attributes?.[i];
-        if (!other || other.name !== attr.name) break;
-        const ra = rankOf(a.productId ?? '', attr.name);
-        const diff = (ra.get(attr.value) ?? 0) - (ra.get(other.value) ?? 0);
-        if (diff !== 0) return diff;
-      }
+    const modelA = a.productId ?? '';
+    const modelB = b.productId ?? '';
+    if (modelA !== modelB) return modelAt.get(modelA)! - modelAt.get(modelB)!;
+    const length = Math.min(a.attributes?.length ?? 0, b.attributes?.length ?? 0);
+    for (let i = 0; i < length; i += 1) {
+      const attr = a.attributes![i]!;
+      const other = b.attributes![i]!;
+      if (other.name !== attr.name) break;
+      const ra = rankOf(modelA, attr.name);
+      const diff = (ra.get(attr.value) ?? 0) - (ra.get(other.value) ?? 0);
+      if (diff !== 0) return diff;
     }
     return position.get(a)! - position.get(b)!;
   });

@@ -4,6 +4,7 @@ import {
   BookIcon,
   CalendarIcon,
   Card,
+  cn,
   ClockIcon,
   CustomersIcon,
   IconChip,
@@ -160,9 +161,17 @@ export function ReportsHomePage() {
     ),
   }));
   const top = shown.flatMap((g) => g.questions.filter((q) => q.top));
+  const rest = shown.map((g) => ({ ...g, questions: g.questions.filter((q) => !q.top) }));
+  // A group of one or two questions does not stand alone: they gather under one heading, so the
+  // rows of the page are even instead of 3, 3, 1, 2
+  const small = rest.filter((g) => g.questions.length > 0 && g.questions.length <= 2);
+  const big = rest.filter((g) => g.questions.length > 2);
   const groups = [
     ...(top.length > 0 ? [{ title: 'الأكثر استخداماً', questions: top }] : []),
-    ...shown.map((g) => ({ ...g, questions: g.questions.filter((q) => !q.top) })),
+    ...big,
+    ...(small.length > 0
+      ? [{ title: small.map((g) => g.title).join(' و'), questions: small.flatMap((g) => g.questions) }]
+      : []),
   ].filter((g) => g.questions.length > 0);
   return (
     <ReportScreen
@@ -174,7 +183,13 @@ export function ReportsHomePage() {
       {groups.map((group) => (
         <section key={group.title} aria-label={group.title} className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold text-ink">{group.title}</h2>
-          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <ul
+            className={cn(
+              'grid gap-3 sm:grid-cols-2',
+              // Four cards make two and two, never three and one
+              group.questions.length === 4 ? 'xl:grid-cols-2' : 'xl:grid-cols-3',
+            )}
+          >
             {group.questions.map((q) => (
               <li key={q.to}>
                 <Link to={q.to} className="block">

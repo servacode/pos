@@ -43,6 +43,40 @@ afterEach(() => {
 });
 
 describe('«مبيعات اليوم»', () => {
+  it('averages the invoice net of the returns, and says the payments table is before them', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({
+        returns: { count: 1, totalMinor: 100_000, taxMinor: 0, byMethod: [] },
+        netSalesMinor: 1_184_500,
+      }),
+    });
+    const sales = await screen.findByText(
+      (_, el) => el?.tagName === 'P' && /فاتورة · متوسطها/.test(el.textContent ?? ''),
+    );
+    // (12,845 - 1,000) / 3 = 3,948, the same average the home page shows
+    expect(text(sales)).toContain('متوسطها 3,948 ل.س');
+    const methods = screen.getByRole('region', { name: 'حسب طريقة الدفع' });
+    expect(text(methods)).toContain('المبالغ أعلاه قبل المرتجعات12,845 ل.س');
+    expect(text(methods)).toContain('المرتجعات (1)−1,000 ل.س');
+    expect(text(methods)).toContain('بعد المرتجعات11,845 ل.س');
+  });
+
+  it('explains a few liras between the payments and the invoices', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({
+        cashRoundingMinor: 200,
+        tipsMinor: 0,
+        byMethod: [
+          { method: 'cash', currency: 'SYP', amountMinor: 1_284_700, baseAmountMinor: 1_284_700, count: 3 },
+        ],
+      }),
+    });
+    const methods = await screen.findByRole('region', { name: 'حسب طريقة الدفع' });
+    expect(text(methods)).toContain('مجموع الدفعات يختلف عن مجموع الفواتير بـ 2 ل.س: تقريب النقد 2 ل.س');
+  });
+
   it('heads the sellers table «البائع» with a real total row', async () => {
     openDay({
       status: 200,

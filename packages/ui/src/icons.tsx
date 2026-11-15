@@ -18,6 +18,12 @@ import {
   Accessibility,
   Footprints,
   Gem,
+  Handbag,
+  Glasses,
+  Watch,
+  Baby,
+  Snowflake,
+  Bed,
   HeartPulse,
   SprayCan,
   Syringe,
@@ -250,6 +256,12 @@ export const PerfumeIcon = defineIcon(SprayCan);
 export const SyringeIcon = defineIcon(Syringe);
 export const HeartPulseIcon = defineIcon(HeartPulse);
 export const WheelchairIcon = defineIcon(Accessibility);
+export const BagIcon = defineIcon(Handbag);
+export const GlassesIcon = defineIcon(Glasses);
+export const WatchIcon = defineIcon(Watch);
+export const KidsIcon = defineIcon(Baby);
+export const WinterIcon = defineIcon(Snowflake);
+export const SleepIcon = defineIcon(Bed);
 
 // The theme switch (هوية 4 › الوضع الداكن): light, dark, and «حسب الجهاز» (follow the device).
 export const SunIcon = defineIcon(Sun);

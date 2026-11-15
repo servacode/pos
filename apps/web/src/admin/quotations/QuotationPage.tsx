@@ -112,6 +112,14 @@ export function QuotationPage() {
 
   const locked = saved?.status === 'converted';
 
+  // A saved quotation opens at its top, not where the save button was
+  const savedVersion = saved ? `${saved.id}:${String(saved.version)}` : null;
+  useEffect(() => {
+    if (!savedVersion) return;
+    document.scrollingElement?.scrollTo?.({ top: 0 });
+    for (const box of document.querySelectorAll('main')) box.scrollTo?.({ top: 0 });
+  }, [savedVersion]);
+
   useEffect(() => {
     void listTaxRates().then(
       (r) => setTaxRates(r.items),
@@ -349,7 +357,7 @@ export function QuotationPage() {
 
   return (
     <ReportScreen me={me} access={['customers.manage']} title={saved ? saved.number : 'عرض سعر جديد'}>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         <PageHeader
           title={saved ? `عرض السعر ${saved.number}` : 'عرض سعر جديد'}
           description="لا يسجّل العرض بيعاً ولا يحرّك المخزون. يتحول إلى فاتورة من شاشة الكاشير."

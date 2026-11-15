@@ -111,7 +111,13 @@ export interface StatTileProps {
   /** The number, usually a <Money> or a count in a `num` span. */
   value: ReactNode;
   /** The change against the previous period, e.g. «+12%», with its comparison text. */
-  trend?: { direction: 'up' | 'down'; value: ReactNode; comparison?: ReactNode };
+  trend?: {
+    direction: 'up' | 'down';
+    value: ReactNode;
+    comparison?: ReactNode;
+    /** `neutral`: a plain grey pill, for a change on thin data or a jump too big to be a trend. */
+    tone?: 'neutral';
+  };
   /** A small note under the number, e.g. «مؤقت» or the dollar amount. */
   footnote?: ReactNode;
   /** The hero tile at the top of the dashboard: a bigger number (tab 14 › لوحات المؤشرات). */
@@ -190,7 +196,7 @@ export function StatTile({
     <Card
       className={cn(
         // On a phone every figure tile is the same compact block: less padding, a smaller number
-        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-0.5 max-sm:p-3',
+        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-0 max-sm:p-2.5',
         trend ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-1',
         className,
       )}
@@ -211,29 +217,38 @@ export function StatTile({
       <p
         className={cn(
           'col-span-full num font-bold tracking-tight text-ink',
-          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-xl', VALUE_UNIT),
+          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-lg', VALUE_UNIT),
         )}
       >
         {value}
       </p>
       {sparkline && sparkline.length > 1 ? <Sparkline values={sparkline} /> : null}
-      {footnote ? <p className="col-span-full text-sm text-ink-muted max-sm:text-xs">{footnote}</p> : null}
+      {footnote ? (
+        <p className="col-span-full text-sm text-ink-muted max-sm:truncate max-sm:text-xs">{footnote}</p>
+      ) : null}
       {trend ? (
         <span
           className={cn(
             'col-start-2 row-start-1 inline-flex items-center gap-1 self-center rounded-full px-2 py-0.5 text-xs font-semibold',
-            trend.direction === 'up' ? 'bg-success-soft text-success-ink' : 'bg-danger-soft text-danger-ink',
+            trend.tone === 'neutral'
+              ? 'bg-surface-muted text-ink-muted max-sm:col-start-1 max-sm:row-start-3 max-sm:mt-1 max-sm:justify-self-start'
+              : trend.direction === 'up'
+                ? 'bg-success-soft text-success-ink'
+                : 'bg-danger-soft text-danger-ink',
           )}
         >
-          <TrendIcon size={16} />
+          {trend.tone === 'neutral' ? null : <TrendIcon size={16} />}
           <span className="sr-only">{trend.direction === 'up' ? 'ارتفاع' : 'انخفاض'}</span>
-          <bdi className="num">{trend.value}</bdi>
+          <bdi className="num whitespace-nowrap">{trend.value}</bdi>
         </span>
       ) : null}
       {trend?.comparison ? (
         // Its own row across the tile, so a long comparison never squeezes the label; pulled up
         // to 4 under the pill and aligned to its edge, so it reads as the pill's.
-        <p className="col-span-full row-start-2 -mt-2 text-end text-xs text-ink-muted">{trend.comparison}</p>
+        // On a phone only a screen reader gets it: the tile stays one short block.
+        <p className="col-span-full row-start-2 -mt-2 text-end text-xs text-ink-muted max-sm:sr-only">
+          {trend.comparison}
+        </p>
       ) : null}
     </Card>
   );
@@ -262,7 +277,7 @@ function Sparkline({ values }: { values: readonly number[] }) {
       preserveAspectRatio="none"
       aria-hidden="true"
       focusable="false"
-      className="col-span-full h-9 w-full text-brand rtl:-scale-x-100"
+      className="col-span-full h-9 w-full text-brand max-sm:hidden rtl:-scale-x-100"
     >
       <defs>
         <linearGradient id={fill} x1="0" x2="0" y1="0" y2="1">

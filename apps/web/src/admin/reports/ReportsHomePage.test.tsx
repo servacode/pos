@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { mockFetch } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
@@ -47,5 +47,30 @@ describe('«التقارير»', () => {
       'href',
       '/reports/sales?by=season',
     );
+  });
+
+  it('gathers the groups of one or two questions under one heading, so no row stands alone', async () => {
+    const me = makeMe();
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': {
+        status: 200,
+        body: {
+          ...me,
+          user: {
+            ...me.user,
+            permissions: ['report.view', 'reports.financial', 'accounting.view', 'devices.view'],
+          },
+        },
+      },
+    });
+    renderApp('/reports');
+    await screen.findByRole('heading', { name: 'التقارير', level: 1 });
+    const sizes = screen
+      .getAllByRole('region')
+      .map((region) => within(region).queryAllByRole('listitem').length)
+      .filter((count) => count > 0);
+    expect(sizes.length).toBeGreaterThan(0);
+    expect(sizes.every((count) => count >= 3 || count === 0)).toBe(true);
   });
 });

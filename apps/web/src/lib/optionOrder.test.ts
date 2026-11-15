@@ -20,7 +20,34 @@ describe('orderValues', () => {
   });
 });
 
+describe('numbers', () => {
+  it('reads shoe numbers by their number, even those the lists do not know', () => {
+    expect(orderValues('النمرة', ['40', '42', '44', '41', '43']).map((o) => o.value)).toEqual([
+      '40',
+      '41',
+      '42',
+      '43',
+      '44',
+    ]);
+  });
+});
+
 describe('sortByOptions', () => {
+  it('keeps each model together even when the rows of two models are mixed', () => {
+    const piece = (productId: string, size: string) => ({
+      productId,
+      attributes: [{ name: 'المقاس', value: size }],
+    });
+    const rows = [piece('a', '40'), piece('b', '38'), piece('a', '41'), piece('b', '37'), piece('a', '39')];
+    expect(sortByOptions(rows).map((r) => `${r.productId}${r.attributes[0]!.value}`)).toEqual([
+      'a39',
+      'a40',
+      'a41',
+      'b37',
+      'b38',
+    ]);
+  });
+
   it('lists the sizes of one model as a shop reads them, and keeps the models in their order', () => {
     const piece = (productId: string, size: string) => ({
       productId,

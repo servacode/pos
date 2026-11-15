@@ -85,6 +85,7 @@ export function PosSession({ services, persisted }: { services: PosServices; per
     [catalog, services.device.branchCode],
   );
   const deviceKey = services.device.deviceId ?? services.device.deviceCode ?? '';
+  const [lockNote, setLockNote] = useState<string | null>(null);
   const signedIn = useCallback(
     (next: StaffSession) => {
       keepSession(
@@ -93,12 +94,14 @@ export function PosSession({ services, persisted }: { services: PosServices; per
         deviceKey,
         services.now(),
       );
+      setLockNote(null);
       setSession(next);
     },
     [staff, deviceKey, services],
   );
-  const signOut = useCallback(() => {
+  const signOut = useCallback((note?: string) => {
     forgetSession();
+    setLockNote(note ?? null);
     setSession(null);
   }, []);
   // A reload keeps the person signed in for the idle window, with no code kept (staff/persist.ts)
@@ -156,7 +159,17 @@ export function PosSession({ services, persisted }: { services: PosServices; per
           >
             {catalog ? (
               <Suspense fallback={null}>
-                <StaffSignIn staff={staff} onSignedIn={signedIn} />
+                <div className="flex w-full flex-col items-center">
+                  {lockNote ? (
+                    <p
+                      role="status"
+                      className="mb-4 rounded-control border border-line bg-surface-muted px-4 py-2 text-center text-sm text-ink"
+                    >
+                      {lockNote}
+                    </p>
+                  ) : null}
+                  <StaffSignIn staff={staff} onSignedIn={signedIn} />
+                </div>
               </Suspense>
             ) : null}
           </CashierShell>

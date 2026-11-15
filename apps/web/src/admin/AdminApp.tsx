@@ -1,8 +1,9 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
-import { FullScreenLoader } from '@serva/ui';
 import { AuthProvider } from '../auth/AuthProvider';
 import { GuestOnly, RequireAuth } from '../auth/guards';
+import { PageLoading } from '../layout/PageLoading';
+import { NotFoundPage } from '../pages/NotFoundPage';
 import { HomePage } from '../pages/HomePage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { LoginPage } from '../pages/LoginPage';
@@ -143,7 +144,7 @@ const ProfitLossPage = lazy(() =>
   import('./ledger/ProfitLossPage').then((m) => ({ default: m.ProfitLossPage })),
 );
 
-const page = (element: ReactNode) => <Suspense fallback={<FullScreenLoader />}>{element}</Suspense>;
+const page = (element: ReactNode) => <Suspense fallback={<PageLoading />}>{element}</Suspense>;
 
 /**
  * Store admin: online, signed in with phone and password. Booting it restores the session from
@@ -288,7 +289,9 @@ export function AdminApp() {
           <Route path="/accounting/trial-balance" element={page(<TrialBalancePage />)} />
           <Route path="/accounting/profit-loss" element={page(<ProfitLossPage />)} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route element={<RequireAuth />}>
+          <Route path="*" element={<NotFoundPage />} />
+        </Route>
       </Routes>
     </AuthProvider>
   );

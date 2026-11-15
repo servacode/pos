@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   CalendarIcon,
+  cn,
   DataTable,
   Dialog,
   EmptyState,
@@ -25,6 +26,8 @@ import {
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { dayText } from '../../lib/dates';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { recallAnswer, rememberAnswer } from '../reports/useReport';
 import { createStocktake, createSupplierReturn, listExpiry, qtyOf, setBatchBlocked, today } from './api';
 import { SectionHead } from './parts';
@@ -60,6 +63,7 @@ const ACTION_TITLE: Record<Action['kind'], string> = {
  */
 export function ExpiryPage() {
   const digits = useDigits();
+  const phone = useIsPhone();
   const [days, setDays] = useState<'30' | '90' | '180' | '3650'>('3650');
   // The last answer stays on screen while the new one loads, so the page never opens blank
   const [data, setData] = useState<ExpiryResponse | null>(() => recallAnswer<ExpiryResponse>('expiry|3650'));
@@ -174,6 +178,63 @@ export function ExpiryPage() {
     }
   }
 
+  /** Red only for what is gone or goes within the month; a batch with a long time left is a plain button */
+  const rowActions = (r: ExpiryRow) => {
+    const urgent = r.daysLeft !== null && r.daysLeft <= 30;
+    return (
+      <span className="flex items-center gap-1.5 whitespace-nowrap print:hidden">
+        {r.batchNo ? (
+          <Link
+            to={`/recall?batch=${encodeURIComponent(r.batchNo)}`}
+            aria-label={`استدعاء الدفعة ${r.batchNo} من «${r.name}»`}
+            className={cn(
+              'inline-flex min-h-9 items-center rounded-control border px-3 text-sm font-semibold transition-colors duration-120 ease-standard',
+              urgent
+                ? 'border-danger text-danger-ink hover:bg-danger-soft'
+                : 'border-line-control text-ink hover:bg-surface-muted',
+            )}
+          >
+            استدعاء
+          </Link>
+        ) : null}
+        <Menu
+          label={`إجراءات دفعة «${r.name}»`}
+          align="end"
+          trigger={<IconButton size="sm" label={`إجراءات دفعة «${r.name}»`} icon={<MoreIcon />} />}
+        >
+          <MenuItem tone="danger" onSelect={() => open('writeoff', r)}>
+            أتلف الدفعة
+          </MenuItem>
+          <MenuItem onSelect={() => open('count', r)}>عدّ</MenuItem>
+          <MenuItem onSelect={() => open('return', r)}>أرجع للمورد</MenuItem>
+          {r.batchNo ? (
+            <MenuItem onSelect={() => (r.blocked ? void toggleBlock(r) : setBlocking(r))}>
+              {r.blocked ? 'ارفع الإيقاف' : 'أوقف البيع'}
+            </MenuItem>
+          ) : null}
+          <MenuItem onSelect={() => setPrinting(r)}>اطبع</MenuItem>
+        </Menu>
+      </span>
+    );
+  };
+
+  const stateBadge = (r: ExpiryRow) => (
+    <span className="flex items-center gap-1.5 whitespace-nowrap">
+      {r.daysLeft === null ? (
+        <Badge tone="neutral">بلا تاريخ</Badge>
+      ) : r.daysLeft < 0 ? (
+        <Badge tone="danger">
+          منتهٍ منذ {countNoun(-r.daysLeft, COUNT_NOUNS.day, String(-r.daysLeft), true)}
+        </Badge>
+      ) : r.daysLeft <= 30 ? (
+        <Badge tone="warning">باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}</Badge>
+      ) : (
+        <Badge tone="neutral">باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}</Badge>
+      )}
+      {r.blocked ? <Badge tone="danger">موقوفة</Badge> : null}
+    </span>
+  );
+
   const columns: DataColumn<ExpiryRow>[] = [
     {
       key: 'name',
@@ -188,7 +249,7 @@ export function ExpiryPage() {
                 {r.batchNo}
               </bdi>
             ) : null}
-            {r.expiryDate ? <bdi className="num"> · {r.expiryDate}</bdi> : null}
+            {r.expiryDate ? <bdi className="num"> · {dayText(r.expiryDate, digits)}</bdi> : null}
           </span>
         </span>
       ),
@@ -197,33 +258,18 @@ export function ExpiryPage() {
       key: 'left',
       className: 'whitespace-nowrap',
       header: 'الحالة',
-      cell: (r) => (
-        <span className="flex items-center gap-1.5 whitespace-nowrap">
-          {r.daysLeft === null ? (
-            <Badge tone="neutral">بلا تاريخ</Badge>
-          ) : r.daysLeft < 0 ? (
-            <Badge tone="danger">
-              منتهٍ منذ {countNoun(-r.daysLeft, COUNT_NOUNS.day, String(-r.daysLeft), true)}
-            </Badge>
-          ) : r.daysLeft <= 30 ? (
-            <Badge tone="warning">
-              باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}
-            </Badge>
-          ) : (
-            <Badge tone="neutral">
-              باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}
-            </Badge>
-          )}
-          {r.blocked ? <Badge tone="danger">موقوفة</Badge> : null}
-        </span>
-      ),
+      cell: (r) => stateBadge(r),
     },
     {
       key: 'expiry',
       className: 'hidden whitespace-nowrap sm:table-cell',
       header: 'تاريخ الانتهاء',
       cell: (r) =>
-        r.expiryDate ? <bdi className="num">{r.expiryDate}</bdi> : <span className="text-ink-subtle">—</span>,
+        r.expiryDate ? (
+          <bdi className="num">{dayText(r.expiryDate, digits)}</bdi>
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        ),
     },
     {
       key: 'batch',
@@ -261,7 +307,8 @@ export function ExpiryPage() {
               {r.purchaseNumber}
             </bdi>
             <span className="text-xs text-ink-subtle">
-              {r.supplierName} · <span className="num">{r.receivedOn}</span>
+              {r.supplierName} ·{' '}
+              <span className="num">{r.receivedOn ? dayText(r.receivedOn, digits) : '—'}</span>
             </span>
           </span>
         ) : (
@@ -271,36 +318,7 @@ export function ExpiryPage() {
     {
       key: 'actions',
       header: 'إجراءات',
-      cell: (r) => (
-        <span className="flex items-center gap-1.5 whitespace-nowrap print:hidden">
-          {r.batchNo ? (
-            <Link
-              to={`/recall?batch=${encodeURIComponent(r.batchNo)}`}
-              aria-label={`استدعاء الدفعة ${r.batchNo} من «${r.name}»`}
-              className="inline-flex min-h-9 items-center rounded-control border border-danger px-3 text-sm font-semibold text-danger-ink transition-colors duration-120 ease-standard hover:bg-danger-soft"
-            >
-              استدعاء
-            </Link>
-          ) : null}
-          <Menu
-            label={`إجراءات دفعة «${r.name}»`}
-            align="end"
-            trigger={<IconButton size="sm" label={`إجراءات دفعة «${r.name}»`} icon={<MoreIcon />} />}
-          >
-            <MenuItem tone="danger" onSelect={() => open('writeoff', r)}>
-              أتلف الدفعة
-            </MenuItem>
-            <MenuItem onSelect={() => open('count', r)}>عدّ</MenuItem>
-            <MenuItem onSelect={() => open('return', r)}>أرجع للمورد</MenuItem>
-            {r.batchNo ? (
-              <MenuItem onSelect={() => (r.blocked ? void toggleBlock(r) : setBlocking(r))}>
-                {r.blocked ? 'ارفع الإيقاف' : 'أوقف البيع'}
-              </MenuItem>
-            ) : null}
-            <MenuItem onSelect={() => setPrinting(r)}>اطبع</MenuItem>
-          </Menu>
-        </span>
-      ),
+      cell: (r) => rowActions(r),
     },
   ];
 
@@ -379,29 +397,62 @@ export function ExpiryPage() {
               />
             </span>
           </SectionHead>
-          <DataTable
-            caption="الدفعات حسب الصلاحية"
-            columns={columns}
-            rows={shown}
-            rowKey={rowKey}
-            loading={!data && !error}
-            {...(error && !data ? { onRetry: load } : {})}
-            empty={
-              items.length > 0 ? (
-                <EmptyState
-                  icon={CalendarIcon}
-                  title="لا دفعات في هذه المجموعة."
-                  description="اختر «كل الدفعات» لترى الباقي."
-                />
-              ) : (
-                <EmptyState
-                  icon={CalendarIcon}
-                  title="لا شيء ينتهي في هذه المدة."
-                  description="اكتب الدفعة وتاريخ الانتهاء في فاتورة الشراء ليظهر هنا."
-                />
-              )
-            }
-          />
+          {phone && shown.length > 0 ? (
+            <ul
+              aria-label="الدفعات حسب الصلاحية"
+              className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface shadow-e1"
+            >
+              {shown.map((r) => (
+                <li key={rowKey(r)} className="flex flex-col gap-2 px-3 py-3">
+                  <span className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 font-semibold">{r.name}</span>
+                    {stateBadge(r)}
+                  </span>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-ink-muted">
+                    <span>
+                      المتبقي{' '}
+                      <bdi className="num font-semibold text-ink">{formatQuantity(r.qty, digits)}</bdi>
+                    </span>
+                    {r.expiryDate ? <span>· تنتهي {dayText(r.expiryDate, digits)}</span> : null}
+                    {r.batchNo ? (
+                      <span>
+                        · دفعة{' '}
+                        <bdi dir="ltr" className="num">
+                          {r.batchNo}
+                        </bdi>
+                      </span>
+                    ) : null}
+                    {r.branchName ? <span>· {r.branchName}</span> : null}
+                  </span>
+                  {rowActions(r)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <DataTable
+              caption="الدفعات حسب الصلاحية"
+              columns={columns}
+              rows={shown}
+              rowKey={rowKey}
+              loading={!data && !error}
+              {...(error && !data ? { onRetry: load } : {})}
+              empty={
+                items.length > 0 ? (
+                  <EmptyState
+                    icon={CalendarIcon}
+                    title="لا دفعات في هذه المجموعة."
+                    description="اختر «كل الدفعات» لترى الباقي."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={CalendarIcon}
+                    title="لا شيء ينتهي في هذه المدة."
+                    description="اكتب الدفعة وتاريخ الانتهاء في فاتورة الشراء ليظهر هنا."
+                  />
+                )
+              }
+            />
+          )}
         </section>
       </div>
       {printing ? (
@@ -409,7 +460,7 @@ export function ExpiryPage() {
           <h1 className="text-lg font-bold">دفعة {printing.batchNo ?? ''}</h1>
           <p>{printing.name}</p>
           <p>الفرع: {printing.branchName}</p>
-          <p>تنتهي: {printing.expiryDate ?? '—'}</p>
+          <p>تنتهي: {printing.expiryDate ? dayText(printing.expiryDate, digits) : '—'}</p>
           <p>المتبقي: {formatQuantity(printing.qty, digits)}</p>
           <p>المورد: {printing.supplierName ?? '—'}</p>
         </div>

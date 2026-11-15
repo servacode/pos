@@ -29,7 +29,7 @@ import {
 } from '@serva/ui';
 import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
 import { Kbd } from './Kbd';
-import { gridEntries, lowestPrice, piecesText, type GridEntry } from './models';
+import { gridEntries, lowestPrice, piecesText, sizeStock, type GridEntry } from './models';
 import { stockInPacks } from './packStock';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { expiryText, sellableQty, tileInfo } from './tileInfo';
@@ -107,7 +107,17 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
     () => searchCatalog(catalog, query, { categoryId: category, limit: 60 }),
     [catalog, query, category],
   );
-  const entries = useMemo(() => gridEntries(results, pieces), [results, pieces]);
+  const today = businessDateOf(
+    Date.now(),
+    catalog.settings?.timezone ?? 'UTC',
+    catalog.settings?.businessDayCutoff ?? '00:00',
+  );
+  // Sold-out tiles go last (stable: the order of the rest is kept)
+  const entries = useMemo(() => {
+    const all = gridEntries(results, pieces);
+    const out = (e: GridEntry) => isSoldOut(e.kind === 'model' ? e.pieces : [e.item], today);
+    return [...all.filter((e) => !out(e)), ...all.filter(out)];
+  }, [results, pieces, today]);
   // Photos in the grid where the products have any; one tap turns them off for a compact grid (kept on this device)
   const anyPhoto = useMemo(() => catalog.items.some((i) => Boolean(i.imageUrl)), [catalog.items]);
   const [photosOff, setPhotosOff] = useState(() => {
@@ -127,11 +137,6 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
   }, [photosOff]);
   // The picture's place (photo or letter) stays unless the cashier chose the compact grid, offered where photos exist
   const photos = !(anyPhoto && photosOff);
-  const today = businessDateOf(
-    Date.now(),
-    catalog.settings?.timezone ?? 'UTC',
-    catalog.settings?.businessDayCutoff ?? '00:00',
-  );
   // A dollar-priced tile says what it comes to in the till's currency
   // An item with no photo draws what it is (shoes, a key for a rental…): the same helper as the lists and the shop
   const iconOf = useMemo(() => {
@@ -384,7 +389,7 @@ const Grid = memo(function Grid({
     <div className="-m-1 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1 [scrollbar-width:thin]">
       <ul
         aria-label="الأصناف"
-        className="grid grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] content-start gap-3"
+        className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] content-start gap-3"
       >
         {entries.map((entry) =>
           entry.kind === 'model' ? (
@@ -449,6 +454,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
       {...(photos && item.imageUrl ? { imageUrl: item.imageUrl } : {})}
       pictureSlot={photos}
       selected={inCart}
+      soldOut={isSoldOut([item], today)}
       extra={<TileMarks pieces={[item]} today={today} />}
       onSelect={() => onPick(item)}
       className="h-full w-full"
@@ -476,13 +482,15 @@ const ModelTile = memo(function ModelTile({
   onPick: (productId: string) => void;
 }) {
   const price = lowestPrice(entry.pieces);
+  const sizes = useMemo(() => sizeStock(entry.pieces), [entry.pieces]);
   const note = fx ? dollarNote(price.priceMinor, price.currency, fx) : null;
   return (
     <ItemTile
       name={entry.name}
       priceMinor={price.priceMinor}
       currency={price.currency}
-      detail={piecesText(entry.pieces.length)}
+      detail={sizes ? <SizeChips sizes={sizes} /> : piecesText(entry.pieces.length)}
+      soldOut={isSoldOut(entry.pieces, today)}
       {...(note ? { priceNote: note } : {})}
       placeholder={<Kind size={24} />}
       pictureSlot={photos}
@@ -495,6 +503,29 @@ const ModelTile = memo(function ModelTile({
     />
   );
 });
+
+/** Nothing can be sold of these pieces (a known stock at or below zero): the tile dims and sinks to the end */
+function isSoldOut(pieces: readonly CatalogItem[], today: string): boolean {
+  const stock = tileInfo(pieces, today).stockQty;
+  return stock !== null && stock <= 0;
+}
+
+/** «S M L»: the sizes in stock of a model, a sold-out size struck through */
+function SizeChips({ sizes }: { sizes: readonly { value: string; inStock: boolean }[] }) {
+  return (
+    <span className="flex flex-wrap gap-x-1.5 gap-y-0.5 text-xs font-semibold">
+      {sizes.map((s) => (
+        <bdi
+          key={s.value}
+          className={s.inStock ? 'text-ink-muted' : 'text-ink-subtle line-through decoration-1'}
+        >
+          {s.value}
+          {s.inStock ? null : <span className="sr-only"> نفد</span>}
+        </bdi>
+      ))}
+    </span>
+  );
+}
 
 /** What the till needs to say a foreign price in its own currency */
 export interface TileFx {
@@ -522,7 +553,14 @@ function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: s
   const digits = useDigits();
   const info = tileInfo(pieces, today);
   const unsellable = info.expiredQty + info.blockedQty;
-  if (info.stockQty === null && !info.expiry && !info.tracksSerial && unsellable === 0) return null;
+  if (
+    info.stockQty === null &&
+    !info.expiry &&
+    !info.tracksSerial &&
+    unsellable === 0 &&
+    info.rentedCount === 0
+  )
+    return null;
   const nothingSellable = (info.stockQty ?? 0) <= 0;
   const why = info.blockedQty === 0 ? 'منتهية' : info.expiredQty === 0 ? 'موقوفة' : 'غير صالحة';
   return (
@@ -548,6 +586,9 @@ function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: s
         <Badge tone={info.expiry.tone}>
           {expiryText(info.expiry.days, (n) => displayNumber(String(n), digits))}
         </Badge>
+      ) : null}
+      {info.rentedCount > 0 ? (
+        <Badge tone="neutral">منها {formatQuantity(info.rentedCount * 1000, digits)} مؤجَّر</Badge>
       ) : null}
       {info.tracksSerial ? <Badge tone="neutral">برقم تسلسلي</Badge> : null}
     </>

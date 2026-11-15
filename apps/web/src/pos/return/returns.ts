@@ -50,7 +50,7 @@ export function returnableSales(
       sale: e.doc.payload as unknown as SalePayload,
       returned: returned.get(e.doc.id) ?? [],
     }))
-    .sort((a, b) => b.deviceTime.localeCompare(a.deviceTime));
+    .sort((a, b) => Date.parse(b.deviceTime) - Date.parse(a.deviceTime));
 }
 
 /**
@@ -81,7 +81,10 @@ export function saleFromServer(
 export function matchesNumber(number: string, typed: string): boolean {
   const digits = typed.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\D/g, '');
   if (!digits) return true;
-  return number.replace(/\D/g, '').endsWith(digits) || number.includes(typed.trim());
+  // The end of the number, or the number typed whole or from its start («INV-001-014» finds «INV-001-014-1»)
+  return (
+    number.replace(/\D/g, '').endsWith(digits) || number.toUpperCase().includes(typed.trim().toUpperCase())
+  );
 }
 
 /**

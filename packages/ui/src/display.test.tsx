@@ -250,6 +250,22 @@ describe('Card and StatTile', () => {
     expect(screen.getByText('عن الخميس الماضي')).toBeInTheDocument();
   });
 
+  it('draws a neutral change as a plain grey pill with no arrow, still said in words', () => {
+    renderUi(
+      <StatTile
+        label="متوسط الفاتورة"
+        value="4,208"
+        trend={{ direction: 'up', value: 'أكثر من الضعف', tone: 'neutral' }}
+      />,
+    );
+
+    const pill = screen.getByText('أكثر من الضعف').parentElement!;
+    expect(pill).toHaveClass('bg-surface-muted', 'text-ink-muted');
+    expect(pill).not.toHaveClass('bg-success-soft');
+    expect(pill.querySelector('svg')).toBeNull();
+    expect(pill).toHaveTextContent('ارتفاع');
+  });
+
   it('draws a card as a surface on a hairline with a soft lift', () => {
     renderUi(<Card>بقالية أبو خليل</Card>);
     expect(screen.getByText('بقالية أبو خليل')).toHaveClass(

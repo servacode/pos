@@ -427,7 +427,12 @@ export function PaymentPanel({
     setReference('');
     clearCheque();
     setError(null);
-    if (next.method !== 'cash') setTimeout(() => referenceRef.current?.focus(), 0);
+    if (next.method !== 'cash')
+      setTimeout(() => {
+        referenceRef.current?.focus();
+        // On a phone the fields sit below the methods: bring them into view
+        if (next.method === 'cheque') referenceRef.current?.scrollIntoView?.({ block: 'center' });
+      }, 0);
   }
 
   function addPart() {

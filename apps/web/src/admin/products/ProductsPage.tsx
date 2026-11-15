@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import type { Category, OptionValuesResponse, ProductListItem, ProductListQuery } from '@serva/core';
+import type {
+  Category,
+  OptionValuesResponse,
+  ProductListItem,
+  ProductListQuery,
+  ProductListTotals,
+} from '@serva/core';
 import { COUNT_NOUNS, countNoun, getCurrency } from '@serva/core';
 import {
   AddIcon,
@@ -8,11 +14,13 @@ import {
   Badge,
   Button,
   CameraIcon,
+  Checkbox,
   DataTable,
   EditIcon,
   EmptyState,
   IconButton,
   IconChip,
+  InfoIcon,
   KpiStrip,
   Menu,
   MenuItem,
@@ -28,7 +36,6 @@ import {
   Select,
   Skeleton,
   StatTile,
-  StatusChip,
   StockIcon,
   WarningIcon,
   cn,
@@ -40,8 +47,7 @@ import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
-import { createCategory, listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
-import { categoryExamples } from '../../lib/sectors';
+import { listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
 import { LiraCaption } from '../../lib/LiraCaption';
 import {
   barcodeOf,
@@ -53,8 +59,10 @@ import {
 } from '../catalog/catalog';
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
 import { downloadCsv } from '../exportCsv';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
+import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
 import { ButtonLink } from './parts';
 
 /** Typing pauses this long before the list is asked again. */
@@ -82,23 +90,6 @@ interface Filters {
 
 const NO_FILTERS: Filters = { q: '', categoryId: '', season: '', status: 'active', expiry: '' };
 
-/** A phone-width screen (under Tailwind's `sm`): the list becomes cards, as a table does not fit. */
-function useIsPhone(): boolean {
-  const query = '(max-width: 639px)';
-  const [phone, setPhone] = useState(
-    () => typeof window.matchMedia === 'function' && window.matchMedia(query).matches,
-  );
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const media = window.matchMedia(query);
-    const change = () => setPhone(media.matches);
-    change();
-    media.addEventListener('change', change);
-    return () => media.removeEventListener('change', change);
-  }, []);
-  return phone;
-}
-
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -109,19 +100,12 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 /** What the rows on screen add up to, for the tiles over the list. */
-interface ListSummary {
-  products: number;
-  variants: number;
-  /** Thousandths, over the stocked products with something in stock (a minus is not a piece) */
-  pieces: number;
-  /** Stocked products below zero: counted apart, not netted off the pieces */
-  negative: number;
-  /** Stocked products at zero or below */
-  runOut: number;
-  /** The stocked product with the least left */
-  lowest: ProductListItem | null;
-}
+type ListSummary = ProductListTotals;
 
+/**
+ * The tiles count the whole store (the server's `totals`), whatever the search shows. Only an older
+ * server, which sends no totals, falls back to adding up the rows on screen.
+ */
 function summaryOf(items: readonly ProductListItem[]): ListSummary {
   const stocked = items.filter((item) => item.type === 'stock');
   let lowest: ProductListItem | null = null;
@@ -132,7 +116,7 @@ function summaryOf(items: readonly ProductListItem[]): ListSummary {
     pieces: stocked.reduce((sum, item) => sum + Math.max(0, item.stockQty), 0),
     negative: stocked.filter((item) => item.stockQty < 0).length,
     runOut: stocked.filter((item) => item.stockQty <= 0).length,
-    lowest,
+    lowest: lowest ? { nameAr: lowest.nameAr, qty: lowest.stockQty } : null,
   };
 }
 
@@ -282,7 +266,12 @@ function Thumb({
       />
     );
   }
-  const Kind = placeholderIconFor({ categoryName: item.categoryName, name: item.nameAr, sectors });
+  const Kind = placeholderIconFor({
+    categoryName: item.categoryName,
+    name: item.nameAr,
+    sectors,
+    isService: item.type === 'service',
+  });
   if (canAdd && item.hasImage === false) {
     return (
       <Link
@@ -339,7 +328,6 @@ function StatusCell({ item }: { item: ProductListItem }) {
     <span className="flex flex-wrap gap-1.5">
       {item.archivedAt ? <Badge>مؤرشف</Badge> : null}
       {item.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
-      {!item.archivedAt && item.status !== 'temporary' ? <StatusChip status="active" /> : null}
     </span>
   );
 }
@@ -381,7 +369,10 @@ function ProductsList() {
     zeroPrice: number;
     noPhoto: number;
     expiringSoon?: number;
+    uncategorised?: number;
   } | null>(null);
+  // The whole store's stock numbers for the tiles: they stay while a search narrows the list
+  const [totals, setTotals] = useState<ProductListTotals | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -412,6 +403,7 @@ function ProductsList() {
       setItems(page.items);
       setNextCursor(page.nextCursor);
       if (page.attention) setAttention(page.attention);
+      if (page.totals) setTotals(page.totals);
     } catch (error) {
       if (id === request.current) setLoadError(errorMessage(error));
     }
@@ -521,34 +513,55 @@ function ProductsList() {
     attention?.zeroPrice ??
     (items ?? []).filter((i) => i.type !== 'service' && i.price !== null && i.price.minMinor === 0).length;
   const noPhoto = attention?.noPhoto ?? (items ?? []).filter((i) => i.hasImage === false).length;
-  // Every product is «بلا تصنيف»: offer the sector's usual categories in one press
-  const allUncategorised = Boolean(
-    items && canManage && !filtered && items.length >= 3 && items.every((i) => !i.categoryId),
-  );
-  const [suggesting, setSuggesting] = useState(false);
-  async function suggestCategories() {
-    setSuggesting(true);
+  // Products without a category: one press proposes a category for each from its name, then a review
+  const uncategorised = attention?.uncategorised ?? (items ?? []).filter((i) => !i.categoryId).length;
+  const [categorizing, setCategorizing] = useState<CategorizeItem[] | null>(null);
+  const [loadingAuto, setLoadingAuto] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [showWhy, setShowWhy] = useState(false);
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const asItem = (i: ProductListItem): CategorizeItem => ({
+    id: i.id,
+    nameAr: i.nameAr,
+    version: i.version,
+    categoryId: i.categoryId,
+  });
+  /** «صنّف المحددة»: the rows ticked in the list */
+  function categorizeSelected() {
+    setCategorizing((items ?? []).filter((i) => selected.has(i.id)).map(asItem));
+  }
+  /** «صنّف تلقائياً»: every active product without a category, not only the page on screen */
+  async function categorizeAuto() {
+    setLoadingAuto(true);
     try {
-      const have = new Set(categories.map((c) => c.name));
-      const names = categoryExamples(me.tenant.sectors).filter((n) => !have.has(n));
-      for (const [i, name] of names.entries()) await createCategory({ name, sortOrder: i });
-      setCategories((await listCategories()).items);
-      setNotice({
-        tone: 'success',
-        text:
-          names.length > 0
-            ? `أضفنا ${String(names.length)} من التصنيفات. اختر التصنيف من صفحة كل منتج.`
-            : 'تصنيفاتك المقترحة موجودة سابقاً.',
-      });
+      const found: CategorizeItem[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: Awaited<ReturnType<typeof listProducts>> = await listProducts({
+          status: 'active',
+          ...(cursor ? { cursor } : {}),
+          limit: 200,
+        });
+        found.push(...page.items.filter((i) => !i.categoryId).map(asItem));
+        cursor = page.nextCursor;
+      } while (cursor && found.length < 400);
+      if (found.length === 0) setNotice({ tone: 'info', text: 'كل منتجاتك لها تصنيف.' });
+      else setCategorizing(found);
     } catch (e) {
       setNotice({ tone: 'error', text: errorMessage(e) });
     } finally {
-      setSuggesting(false);
+      setLoadingAuto(false);
     }
   }
-  const summary = items ? summaryOf(items) : null;
+  const summary = totals ?? (items ? summaryOf(items) : null);
   // More pages wait behind «اعرض المزيد»: the tiles count what is on screen, «+» says there is more.
-  const more = nextCursor ? '+' : '';
+  const more = !totals && nextCursor ? '+' : '';
   const showSummary = !loadError && (items === null || items.length > 0);
 
   const today = isoDay(Date.now(), me.tenant.timezone);
@@ -557,7 +570,55 @@ function ProductsList() {
     filters.expiry !== '' || (attention?.expiringSoon ?? 0) > 0 || (items ?? []).some((i) => i.nearestExpiry);
   const expiringSoon = attention?.expiringSoon ?? 0;
 
+  const rowMenu = (item: ProductListItem) => (
+    <Menu
+      label={`إجراءات «${item.nameAr}»`}
+      align="end"
+      trigger={<IconButton size="sm" label={`إجراءات «${item.nameAr}»`} icon={<MoreIcon />} />}
+    >
+      <MenuItem icon={<EditIcon />} render={(props) => <Link to={`/products/${item.id}`} {...props} />}>
+        افتح المنتج
+      </MenuItem>
+      {!item.archivedAt ? (
+        <MenuItem
+          icon={<PrintIcon />}
+          render={(props) => <Link to={`/labels?product=${item.id}`} {...props} />}
+        >
+          اطبع الملصقات
+        </MenuItem>
+      ) : null}
+    </Menu>
+  );
+  const pickBox = (item: ProductListItem) => (
+    <Checkbox
+      label={<span className="sr-only">{`حدّد «${item.nameAr}»`}</span>}
+      checked={selected.has(item.id)}
+      onChange={() => toggle(item.id)}
+    />
+  );
+  const allShownPicked = (items ?? []).length > 0 && (items ?? []).every((i) => selected.has(i.id));
+  // «نشط» is the normal state and says nothing: the column shows only when some row is archived or waiting
+  const showStatus = (items ?? []).some((i) => i.archivedAt || i.status === 'temporary');
+
   const columns: DataColumn<ProductListItem>[] = [
+    ...(canManage && !phone
+      ? [
+          {
+            key: 'select',
+            header: (
+              <Checkbox
+                label={<span className="sr-only">حدّد كل المنتجات المعروضة</span>}
+                checked={allShownPicked}
+                onChange={() =>
+                  setSelected(allShownPicked ? new Set() : new Set((items ?? []).map((i) => i.id)))
+                }
+              />
+            ),
+            className: 'w-10',
+            cell: (item: ProductListItem) => pickBox(item),
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
     {
       key: 'name',
       header: 'المنتج',
@@ -565,12 +626,15 @@ function ProductsList() {
         <div className="flex min-w-0 items-center gap-3 py-2.5 sm:min-w-60">
           <Thumb item={item} canAdd={canManage && !item.archivedAt} sectors={me.tenant.sectors} />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <Link
-              to={`/products/${item.id}`}
-              className="rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
-            >
-              {item.nameAr}
-            </Link>
+            <span className="flex min-w-0 items-center gap-1">
+              <Link
+                to={`/products/${item.id}`}
+                className="rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
+              >
+                {item.nameAr}
+              </Link>
+              {canManage && !phone ? rowMenu(item) : null}
+            </span>
             {item.variantCount > 1 || item.barcode ? (
               <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-subtle">
                 {item.variantCount > 1 ? (
@@ -664,41 +728,12 @@ function ProductsList() {
           } satisfies DataColumn<ProductListItem>,
         ]
       : []),
-    { key: 'status', header: 'الحالة', cell: (item) => <StatusCell item={item} /> },
-    ...(canManage
+    ...(showStatus
       ? [
           {
-            key: 'actions',
-            // The words are for screen readers; the box around them keeps them inside the table's
-            // scroll on a phone (a lone sr-only box escapes it and widens the page).
-            header: (
-              <span className="relative block">
-                <span className="sr-only">إجراءات</span>
-              </span>
-            ),
-            className: 'w-14',
-            cell: (item: ProductListItem) => (
-              <Menu
-                label={`إجراءات «${item.nameAr}»`}
-                align="end"
-                trigger={<IconButton size="sm" label={`إجراءات «${item.nameAr}»`} icon={<MoreIcon />} />}
-              >
-                <MenuItem
-                  icon={<EditIcon />}
-                  render={(props) => <Link to={`/products/${item.id}`} {...props} />}
-                >
-                  افتح المنتج
-                </MenuItem>
-                {!item.archivedAt ? (
-                  <MenuItem
-                    icon={<PrintIcon />}
-                    render={(props) => <Link to={`/labels?product=${item.id}`} {...props} />}
-                  >
-                    اطبع الملصقات
-                  </MenuItem>
-                ) : null}
-              </Menu>
-            ),
+            key: 'status',
+            header: 'الحالة',
+            cell: (item: ProductListItem) => <StatusCell item={item} />,
           } satisfies DataColumn<ProductListItem>,
         ]
       : []),
@@ -778,7 +813,7 @@ function ProductsList() {
               }
             />
             <StatTile
-              label="نفد مخزونها"
+              label="نفد من الرف"
               icon={<WarningIcon />}
               iconTone={summary && summary.runOut > 0 ? 'warning' : 'neutral'}
               value={
@@ -791,9 +826,9 @@ function ProductsList() {
               footnote={
                 summary?.lowest ? (
                   <>
-                    أقلّها: {summary.lowest.nameAr} ·{' '}
+                    أقلّها مخزوناً: {summary.lowest.nameAr} —{' '}
                     <bdi className="num font-semibold text-ink">
-                      {formatQuantity(summary.lowest.stockQty, digits)}
+                      {formatQuantity(summary.lowest.qty, digits)}
                     </bdi>
                     {summary.negative > 0 && canManage ? (
                       <span className="mt-1 flex flex-wrap gap-x-3">
@@ -923,40 +958,70 @@ function ProductsList() {
             </Alert>
           ) : null}
 
-          {/* One attention line: no categories, price zero, no photo */}
-          {items && (allUncategorised || (filters.status === 'active' && (noPhoto > 0 || zeroPrice > 0))) ? (
-            <Alert tone="warning">
-              <span className="flex flex-col gap-1" aria-label="تحتاج انتباهك">
-                {allUncategorised ? (
-                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span>كل منتجاتك بلا تصنيف. التصنيفات تُسهّل البحث والتقارير.</span>
+          {/* One attention line: no category, price zero, no picture; the explanations are behind the «i» */}
+          {items &&
+          filters.status === 'active' &&
+          ((canManage && uncategorised > 0) || zeroPrice > 0 || noPhoto > 0) ? (
+            <Alert tone={zeroPrice > 0 ? 'warning' : 'info'}>
+              <span className="flex flex-col gap-1.5" aria-label="تحتاج انتباهك">
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    {[
+                      canManage && uncategorised > 0 ? `${String(uncategorised)} بلا تصنيف` : null,
+                      zeroPrice > 0 ? `${String(zeroPrice)} بسعر صفر` : null,
+                      noPhoto > 0 ? `${String(noPhoto)} بلا صورة` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                  {canManage && uncategorised > 0 ? (
                     <button
                       type="button"
                       className={textLinkClass}
-                      disabled={suggesting}
-                      onClick={() => void suggestCategories()}
+                      disabled={loadingAuto}
+                      onClick={() => void categorizeAuto()}
                     >
-                      اقترح تصنيفات
+                      صنّفها تلقائياً
                     </button>
-                    <Link to="/categories" className={textLinkClass}>
-                      أضف تصنيفات
-                    </Link>
-                  </span>
-                ) : null}
-                {filters.status === 'active' && zeroPrice > 0 ? (
-                  <span>
-                    <bdi className="num font-semibold">{zeroPrice}</bdi> بسعر صفر: تُباع مجاناً ولا تظهر في
-                    المتجر الإلكتروني.
-                  </span>
-                ) : null}
-                {filters.status === 'active' && noPhoto > 0 ? (
-                  <span>
-                    <bdi className="num font-semibold">{noPhoto}</bdi> بلا صورة: الصورة تُظهرها على شاشة البيع
-                    وفي المتجر.
+                  ) : null}
+                  <IconButton
+                    size="xs"
+                    label={showWhy ? 'أخفِ الشرح' : 'اشرح'}
+                    icon={<InfoIcon size={16} />}
+                    onClick={() => setShowWhy((v) => !v)}
+                  />
+                </span>
+                {showWhy ? (
+                  <span className="flex flex-col gap-1 text-sm">
+                    {canManage && uncategorised > 0 ? (
+                      <span>التصنيفات تُسهّل البحث والتقارير، وتُرتّب المتجر الإلكتروني.</span>
+                    ) : null}
+                    {zeroPrice > 0 ? (
+                      <span>بسعر صفر: تُباع مجاناً ولا تظهر في المتجر الإلكتروني.</span>
+                    ) : null}
+                    {noPhoto > 0 ? <span>الصورة تُظهرها على شاشة البيع وفي المتجر.</span> : null}
                   </span>
                 ) : null}
               </span>
             </Alert>
+          ) : null}
+
+          {canManage && selected.size > 0 ? (
+            <div
+              role="group"
+              aria-label="المحددة"
+              className="flex flex-wrap items-center gap-3 rounded-card border border-brand bg-brand-soft px-4 py-2.5"
+            >
+              <span className="font-semibold text-brand-ink">
+                <bdi className="num">{selected.size}</bdi> محددة
+              </span>
+              <Button variant="primary" onClick={categorizeSelected}>
+                صنّف المحددة
+              </Button>
+              <Button variant="ghost" onClick={() => setSelected(new Set())}>
+                ألغِ التحديد
+              </Button>
+            </div>
           ) : null}
 
           {phone && items && items.length > 0 ? (
@@ -968,6 +1033,7 @@ function ProductsList() {
                 const cell = (key: string) => columns.find((c) => c.key === key)?.cell?.(item);
                 return (
                   <li key={item.id} className="flex items-center gap-2 ps-3 pe-1">
+                    {canManage ? pickBox(item) : null}
                     <div className="min-w-0 flex-1">{cell('name')}</div>
                     <div className="flex shrink-0 flex-col items-end gap-0.5 text-sm">
                       <span className="font-semibold whitespace-nowrap">{cell('price')}</span>
@@ -979,7 +1045,7 @@ function ProductsList() {
                         {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
                       </span>
                     </div>
-                    {cell('actions')}
+                    {canManage ? rowMenu(item) : null}
                   </li>
                 );
               })}
@@ -1028,6 +1094,29 @@ function ProductsList() {
       </div>
       {canManage ? (
         <BulkPhotos open={photosOpen} onClose={() => setPhotosOpen(false)} onDone={() => void load()} />
+      ) : null}
+      {canManage ? (
+        <CategorizeDialog
+          open={categorizing !== null}
+          onClose={() => setCategorizing(null)}
+          products={categorizing ?? []}
+          categories={categories}
+          sectors={me.tenant.sectors}
+          onDone={(changed, created) => {
+            setSelected(new Set());
+            setNotice({
+              tone: 'success',
+              text:
+                created > 0
+                  ? `صنّفنا ${String(changed)} منتجاً وأضفنا ${String(created)} من التصنيفات.`
+                  : `صنّفنا ${String(changed)} منتجاً.`,
+            });
+            listCategories()
+              .then((answer) => setCategories(answer.items))
+              .catch(() => undefined);
+            void load();
+          }}
+        />
       ) : null}
     </>
   );

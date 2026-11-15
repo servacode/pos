@@ -12,6 +12,7 @@ import {
   type ProductListItem,
   type OptionValuesResponse,
   type ProductListResponse,
+  type ProductListTotals,
   type ProductStatus,
   type ProductType,
   type UpdateProductData,
@@ -233,6 +234,50 @@ function decodeCursor(cursor: string): [string, string] {
 const escapeLike = (text: string) => text.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /**
+ * The one stock count of the store (the products tiles, the inventory page and the dashboard say the same):
+ * pieces = what sits on the shelf, a piece below zero counted as 0; a combination (variant) is «نفد» at 0 or
+ * less and «ناقص» below 0. Over live variants of live stocked products, all branches.
+ */
+async function storeTotals(tx: Transaction, tenantId: string): Promise<ProductListTotals> {
+  const [row] = await tx.execute<{
+    products: number;
+    variants: number;
+    pieces: string;
+    negative: number;
+    run_out: number;
+  }>(sql`
+    with per_variant as (
+      select v.id, p.type, coalesce((select sum(s.qty) from stock_levels s
+        where s.tenant_id = v.tenant_id and s.variant_id = v.id), 0) as q
+      from products p join variants v on v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
+      where p.tenant_id = ${tenantId} and p.archived_at is null and p.status = 'active')
+    select (select count(*)::int from products p
+             where p.tenant_id = ${tenantId} and p.archived_at is null and p.status = 'active') as products,
+           count(*)::int as variants,
+           coalesce(sum(greatest(q, 0)) filter (where type = 'stock'), 0)::text as pieces,
+           (count(*) filter (where type = 'stock' and q < 0))::int as negative,
+           (count(*) filter (where type = 'stock' and q <= 0))::int as run_out
+    from per_variant`);
+  const [lowest] = await tx.execute<{ name_ar: string; q: string }>(sql`
+    select p.name_ar, t.q::text as q from (
+      select v.product_id, coalesce(sum(s.qty), 0) as q
+      from variants v left join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id
+      where v.tenant_id = ${tenantId} and v.archived_at is null
+      group by v.product_id) t
+    join products p on p.tenant_id = ${tenantId} and p.id = t.product_id
+    where p.type = 'stock' and p.archived_at is null and p.status = 'active'
+    order by t.q, p.name_ar limit 1`);
+  return {
+    products: row?.products ?? 0,
+    variants: row?.variants ?? 0,
+    pieces: Number(row?.pieces ?? 0),
+    negative: row?.negative ?? 0,
+    runOut: row?.run_out ?? 0,
+    lowest: lowest ? { nameAr: lowest.name_ar, qty: Number(lowest.q) } : null,
+  };
+}
+
+/**
  * GET /v1/products: by name (A→Z, then id), `q` on the normalized name or an exact barcode, keyset
  * pages. Prices, the first barcode and stock are over live variants.
  */
@@ -340,9 +385,15 @@ export async function listProducts(
     }));
     const last = page.at(-1);
     // What needs doing across the whole store (asked once, with the first page)
-    let attention: { zeroPrice: number; noPhoto: number; expiringSoon: number } | undefined;
+    let attention:
+      { zeroPrice: number; noPhoto: number; expiringSoon: number; uncategorised: number } | undefined;
     if (!query.cursor && query.status === 'active') {
-      const [counts] = await tx.execute<{ zero_price: number; no_photo: number; expiring_soon: number }>(sql`
+      const [counts] = await tx.execute<{
+        zero_price: number;
+        no_photo: number;
+        expiring_soon: number;
+        uncategorised: number;
+      }>(sql`
         select count(*) filter (where p.type <> 'service' and exists (
                  select 1 from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
                  where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
@@ -353,19 +404,25 @@ export async function listProducts(
                count(*) filter (where exists (
                  select 1 from variants v
                  where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
-                   and v.nearest_expiry >= current_date and v.nearest_expiry <= current_date + 30))::int as expiring_soon
+                   and v.nearest_expiry >= current_date and v.nearest_expiry <= current_date + 30))::int as expiring_soon,
+               count(*) filter (where p.category_id is null)::int as uncategorised
         from products p
         where p.tenant_id = ${ctx.auth.tenantId} and p.archived_at is null and p.status = 'active'`);
       attention = {
         zeroPrice: counts?.zero_price ?? 0,
         noPhoto: counts?.no_photo ?? 0,
         expiringSoon: counts?.expiring_soon ?? 0,
+        uncategorised: counts?.uncategorised ?? 0,
       };
     }
+    // The tiles over the list count the whole store, whatever the search or the page shows (first page only)
+    let totals: ProductListTotals | undefined;
+    if (!query.cursor && query.status === 'active') totals = await storeTotals(tx, ctx.auth.tenantId);
     return {
       items,
       nextCursor: rows.length > limit && last ? encodeCursor(last.name_ar, last.id) : null,
       ...(attention ? { attention } : {}),
+      ...(totals ? { totals } : {}),
     };
   });
 }

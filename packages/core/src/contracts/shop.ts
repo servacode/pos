@@ -124,6 +124,8 @@ export interface ShopStore {
   accent?: ShopAccent;
   logoUrl?: string | null;
   coverUrl?: string | null;
+  /** The store's business types: the icon of a product without a picture follows them; absent from older servers */
+  sectors?: string[];
 }
 
 export interface ShopProductCard {

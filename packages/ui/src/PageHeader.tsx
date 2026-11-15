@@ -21,15 +21,17 @@ export interface PageHeaderProps {
  */
 export function PageHeader({ title, description, icon, actions, className }: PageHeaderProps) {
   return (
-    <div className={cn('flex flex-wrap items-end justify-between gap-x-6 gap-y-4', className)}>
+    <div
+      className={cn('flex flex-wrap items-end justify-between gap-x-6 gap-y-4 max-sm:gap-y-2.5', className)}
+    >
       <div className="flex min-w-0 items-center gap-3.5">
         {icon ? <IconChip size={description ? 'lg' : 'md'}>{icon}</IconChip> : null}
-        <div className="flex min-w-0 flex-col gap-1">
-          <h1 className="text-2xl font-bold text-ink">{title}</h1>
+        <div className="flex min-w-0 flex-col gap-1 max-sm:gap-0.5">
+          <h1 className="text-2xl font-bold text-ink max-sm:text-xl">{title}</h1>
           {description ? <p className="text-sm text-ink-muted">{description}</p> : null}
         </div>
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex flex-wrap items-center gap-2 max-sm:w-full">{actions}</div> : null}
     </div>
   );
 }

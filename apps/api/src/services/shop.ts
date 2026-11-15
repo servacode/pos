@@ -87,8 +87,9 @@ export async function storeOf(tx: Transaction, tenantId: string) {
     accent: 'emerald' | 'teal' | 'blue';
     logo_upload_id: string | null;
     cover_upload_id: string | null;
+    sectors: string[];
   }>(sql`
-    select t.name, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
+    select t.name, t.sectors, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
            o.show_out_of_stock, o.order_mode, o.show_prices, o.delivery_fee_minor::text as delivery_fee_minor,
            o.delivery_areas, o.tagline, o.accent, o.logo_upload_id, o.cover_upload_id
     from online_stores o
@@ -387,6 +388,7 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           accent: store.accent,
           logoUrl: store.logo_upload_id ? imageUrl(tenantId, store.logo_upload_id, true) : null,
           coverUrl: store.cover_upload_id ? imageUrl(tenantId, store.cover_upload_id) : null,
+          sectors: store.sectors,
         },
         categories: categories
           .filter((c) => shown.has(c.id))

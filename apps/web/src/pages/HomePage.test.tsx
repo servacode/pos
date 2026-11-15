@@ -280,6 +280,61 @@ describe('HomePage', () => {
       expect(screen.getByText('طرق الدفع اليوم')).toBeInTheDocument();
     });
 
+    it('softens a change of more than double into «أكثر من الضعف» instead of a loud +150%', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({ totalMinor: 2_500_000 }) },
+        [WEEK]: weekOf(Object.fromEntries([1, 2, 3, 4, 5, 6].map((back) => [dayBack(back), 1_000_000]))),
+      });
+      renderApp('/');
+
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      expect((await within(sales).findAllByText('أكثر من الضعف')).length).toBeGreaterThan(0);
+      expect(within(sales).queryByText('150%')).not.toBeInTheDocument();
+    });
+
+    it('groups the sizes that ran out per product, and keeps «بلا صورة» a quiet suggestion', async () => {
+      const me = meWith([...OWNER_KEYS, 'catalog.manage']);
+      const piece = (variantId: string, size: string) => ({
+        variantId,
+        productId: 'p-1',
+        name: 'جاكيت شتوي',
+        label: size,
+        attributes: [{ name: 'المقاس', value: size }],
+        stockQty: 0,
+        soldQty: 6000,
+        minStockQty: null,
+      });
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: { ...me, tenant: { ...me.tenant, sectors: ['clothing'] } } },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
+          status: 200,
+          body: { lowStock: [piece('v-1', 'S'), piece('v-2', 'M'), piece('v-3', 'L')] },
+        },
+        'GET /v1/products?limit=100': {
+          status: 200,
+          body: {
+            items: [
+              { id: 'p-1', nameAr: 'جاكيت شتوي', hasImage: false },
+              { id: 'p-2', nameAr: 'قميص', hasImage: false },
+            ],
+            nextCursor: null,
+          },
+        },
+      });
+      renderApp('/');
+
+      // One row for the product, not three red «نفد» rows
+      expect(await screen.findByText('جاكيت شتوي: 3 مقاسات نفدت')).toBeInTheDocument();
+      expect(screen.queryByText(/المقاس S/)).not.toBeInTheDocument();
+      // The suggestion is a plain link without a count chip
+      const suggestion = await screen.findByRole('link', { name: /2 منتجين بلا صورة/ });
+      expect(suggestion).toHaveAttribute('href', '/products');
+    });
+
     it('says there is no history instead of drawing a climb from zero when only today has sold', async () => {
       const routes: Parameters<typeof mockFetch>[0] = {
         'POST /v1/auth/refresh': signedInRefresh,

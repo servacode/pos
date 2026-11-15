@@ -17,7 +17,6 @@ import {
   GiftIcon,
   PageHeader,
   PrintIcon,
-  ProductsIcon,
   RetryIcon,
   Select,
   ShirtIcon,
@@ -33,6 +32,7 @@ import {
   formatQuantity,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
+import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { dayText, isoDay, zonedDateTime } from '../../lib/dates';
@@ -547,6 +547,13 @@ function ProductCard() {
   const liveVariants = draft.variants.filter((v) => !v.archived);
   const archivedVariants = draft.variants.filter((v) => v.archived);
   const titled = draft.axes.length > 0 && liveVariants.some((v) => v.attributes.length > 0);
+  // The same icon as the list and the till for this product's name, category and kind
+  const Kind = placeholderIconFor({
+    name: draft.nameAr,
+    categoryName: lookups.categories.find((c) => c.id === draft.categoryId)?.name ?? null,
+    sectors: me.tenant.sectors,
+    isService: draft.type === 'service',
+  });
   const tree = categoryTree(lookups.categories.filter((c) => !c.archivedAt || c.id === draft.categoryId));
   const needle = normalizeArabic(categoryQuery.trim());
   const shownTree = needle
@@ -648,7 +655,7 @@ function ProductCard() {
             <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
               <SectionCard
                 title="البيانات الأساسية"
-                icon={<ProductsIcon />}
+                icon={<Kind />}
                 description="الاسم كما يظهر على الكاشير والإيصال والملصق."
               >
                 <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">

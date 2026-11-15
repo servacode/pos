@@ -23,10 +23,53 @@ export interface RecordHit {
 
 const FEW = 4;
 
-async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
+// The lists that have no search of their own are fetched whole and matched here. They do not depend
+// on what was typed, so each is asked once and kept for a short while (per signed-in user): the
+// next letter, and the next time the box opens, reuse it instead of fetching every list again.
+const LIST_FRESH_MS = 60_000;
+const lists = new WeakMap<MeResponse, Map<string, { at: number; answer: Promise<unknown> }>>();
+
+function kept<T>(me: MeResponse, key: string, load: () => Promise<T>): Promise<T> {
+  let byKey = lists.get(me);
+  if (!byKey) lists.set(me, (byKey = new Map()));
+  const hit = byKey.get(key);
+  if (hit && Date.now() - hit.at < LIST_FRESH_MS) return hit.answer as Promise<T>;
+  const answer = load();
+  byKey.set(key, { at: Date.now(), answer });
+  // A failed ask is not kept: the next letter tries again
+  answer.catch(() => byKey.delete(key));
+  return answer;
+}
+
+/**
+ * The search box asked for its first letter: warm the whole lists now, so the answer to the first
+ * query does not wait for them. Called when the box opens or takes focus.
+ */
+export function warmRecordSearch(me: MeResponse): void {
+  const can = (keys: AccessRule) => holdsAny(me, keys);
+  const quiet = (p: Promise<unknown>) => void p.catch(() => undefined);
+  if (can(['purchases.manage'])) {
+    quiet(kept(me, 'suppliers', () => listSuppliers()));
+    quiet(kept(me, 'purchases', () => listPurchases()));
+    quiet(kept(me, 'supplier-returns', supplierReturns));
+  }
+  if (can(['customers.view'])) {
+    quiet(kept(me, 'online-orders', onlineOrders));
+    quiet(kept(me, 'rentals', () => listRentals('all')));
+    quiet(kept(me, 'cheques', () => listCheques(undefined)));
+  }
+  if (can(['catalog.manage'])) quiet(kept(me, 'claims', () => listClaims('all')));
+}
+
+const onlineOrders = () => apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders', { auth: true });
+const supplierReturns = () =>
+  apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true });
+
+/** One promise per kind of record, each ready as soon as its own request answers. */
+function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
   const can = (keys: AccessRule) => holdsAny(me, keys);
   const quiet = <T>(p: Promise<T[]>): Promise<T[]> => p.catch(() => []);
-  const parts = await Promise.all([
+  const sources: (RecordHit[] | Promise<RecordHit[]>)[] = [
     can(['catalog.manage'])
       ? quiet(
           listProducts({ q, limit: FEW }).then((r) =>
@@ -55,7 +98,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
       : [],
     can(['purchases.manage'])
       ? quiet(
-          listSuppliers().then((r) =>
+          kept(me, 'suppliers', () => listSuppliers()).then((r) =>
             r.items
               .filter((s) => s.name.includes(q) || (s.phone ?? '').includes(q))
               .slice(0, FEW)
@@ -101,7 +144,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
     // Purchase invoices (PUR-…): the list has no search of its own, so the number is matched here
     can(['purchases.manage'])
       ? quiet(
-          listPurchases().then((r) => {
+          kept(me, 'purchases', () => listPurchases()).then((r) => {
             const needle = q.toLowerCase();
             return r.items
               .filter(
@@ -123,7 +166,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
     // Online orders (ONL-…): the list has no search of its own, so the number, name or phone is matched here
     can(['customers.view'])
       ? quiet(
-          apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders', { auth: true }).then((r) =>
+          kept(me, 'online-orders', onlineOrders).then((r) =>
             r.items
               .filter(
                 (o) =>
@@ -145,7 +188,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
     // Rentals (RNT-…) and cheque numbers, matched the same way
     can(['customers.view'])
       ? quiet(
-          listRentals('all').then((r) =>
+          kept(me, 'rentals', () => listRentals('all')).then((r) =>
             r.items
               .filter(
                 (x) =>
@@ -166,7 +209,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
       : [],
     can(['customers.view'])
       ? quiet(
-          listCheques(undefined).then((r) =>
+          kept(me, 'cheques', () => listCheques(undefined)).then((r) =>
             r.items
               .filter(
                 (c) =>
@@ -188,7 +231,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
     // and by the name or serial next to it
     can(['catalog.manage'])
       ? quiet(
-          listClaims('all').then((r) =>
+          kept(me, 'claims', () => listClaims('all')).then((r) =>
             r.items
               .filter(
                 (c) =>
@@ -209,7 +252,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
       : [],
     can(['purchases.manage'])
       ? quiet(
-          apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true }).then((r) =>
+          kept(me, 'supplier-returns', supplierReturns).then((r) =>
             r.items
               .filter((x) => x.number.toLowerCase().includes(q.toLowerCase()) || x.supplierName.includes(q))
               .slice(0, FEW)
@@ -262,8 +305,8 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
           ),
         )
       : [],
-  ]);
-  return parts.flat();
+  ];
+  return sources.map((source) => Promise.resolve(source));
 }
 
 /**
@@ -272,18 +315,33 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
  */
 export function useRecordSearch(me: MeResponse, query: string, enabled: boolean) {
   const q = query.trim();
-  const [state, setState] = useState<{ q: string; hits: RecordHit[] }>({ q: '', hits: [] });
+  const [state, setState] = useState<{ q: string; hits: RecordHit[]; pending: number }>({
+    q: '',
+    hits: [],
+    pending: 0,
+  });
   useEffect(() => {
     if (!enabled || q.length < 2) return;
     let current = true;
     const timer = window.setTimeout(() => {
-      void search(me, q).then((hits) => current && setState({ q, hits }));
-    }, 300);
+      // Each kind of record appears as soon as it is found; the slow ones add their rows later
+      const parts = search(me, q);
+      const found: RecordHit[][] = [];
+      let pending = parts.length;
+      parts.forEach((part, index) => {
+        void part.then((hits) => {
+          if (!current) return;
+          found[index] = hits;
+          pending -= 1;
+          setState({ q, hits: found.flat(), pending });
+        });
+      });
+    }, 200);
     return () => {
       current = false;
       window.clearTimeout(timer);
     };
   }, [me, q, enabled]);
   const ready = state.q === q && q.length >= 2;
-  return { hits: ready ? state.hits : [], searching: q.length >= 2 && !ready };
+  return { hits: ready ? state.hits : [], searching: q.length >= 2 && (!ready || state.pending > 0) };
 }

@@ -260,7 +260,7 @@ export function DrawerCounter({
       )}
       {offered ? (
         <Button
-          variant="ghost"
+          variant="secondary"
           className="self-start"
           onClick={() => {
             const next = byNote

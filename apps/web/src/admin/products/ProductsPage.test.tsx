@@ -97,19 +97,78 @@ describe('/products list', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
-  it('says how many products of the whole store sell at 0 and have no photo', async () => {
+  it('says in one line how many products of the whole store sell at 0 and have no photo', async () => {
     openProducts({
       [list()]: {
         status: 200,
         body: {
           items: [listItem({ hasImage: true })],
           nextCursor: null,
-          attention: { zeroPrice: 7, noPhoto: 40 },
+          attention: { zeroPrice: 7, noPhoto: 40, uncategorised: 3 },
         },
       },
     });
-    expect(await screen.findByText(/بسعر صفر: تُباع مجاناً/)).toHaveTextContent('7');
-    expect(screen.getByText(/بلا صورة:/)).toHaveTextContent('40');
+    const line = await screen.findByLabelText('تحتاج انتباهك');
+    expect(line).toHaveTextContent('3 بلا تصنيف · 7 بسعر صفر · 40 بلا صورة');
+    // the explanations wait behind the «i»
+    expect(screen.queryByText(/تُباع مجاناً/)).not.toBeInTheDocument();
+    fireEvent.click(within(line).getByRole('button', { name: 'اشرح' }));
+    expect(await screen.findByText(/تُباع مجاناً/)).toBeInTheDocument();
+  });
+
+  it('keeps the tiles whole-store while a search narrows the list', async () => {
+    const totals = { products: 12, variants: 30, pieces: 1_160_000, negative: 0, runOut: 2, lowest: null };
+    openProducts({
+      [list()]: { status: 200, body: { items: [listItem(), tea], nextCursor: null, totals } },
+      [list({ q: 'شاي' })]: page([tea]),
+    });
+    expect(await screen.findByText('12')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'ابحث بالاسم أو الباركود' }), {
+      target: { value: 'شاي' },
+    });
+    await screen.findByText('شاي ربيع 400 غ');
+    await vi.waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(2));
+    expect(screen.getByText('12')).toBeInTheDocument();
+    expect(screen.getByText('نفد من الرف')).toBeInTheDocument();
+  });
+
+  it('proposes a category from each name, lets the owner review, then sets them on the ticked rows', async () => {
+    const patches: unknown[] = [];
+    const glove = listItem({ id: ids.other, nameAr: 'قفازات طبية', categoryId: null, categoryName: null });
+    const medical = catalogMe();
+    openProducts({
+      'GET /v1/me': {
+        status: 200,
+        body: { ...medical, tenant: { ...medical.tenant, sectors: ['medical_supplies'] } },
+      },
+      [list()]: page([glove]),
+      [`PATCH /v1/products/${ids.other}`]: (request) => {
+        patches.push(request.body);
+        return { status: 200, body: product({ id: ids.other, version: 2 }) };
+      },
+      'POST /v1/categories': {
+        status: 201,
+        body: {
+          id: ids.milk,
+          name: 'مستهلكات',
+          parentId: null,
+          sortOrder: 0,
+          productCount: 0,
+          archivedAt: null,
+          version: 1,
+        },
+      },
+    });
+    await screen.findByText('قفازات طبية');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'حدّد «قفازات طبية»' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'صنّف المحددة' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('combobox', { name: 'تصنيف «قفازات طبية»' })).toHaveDisplayValue(
+      'مستهلكات (جديد)',
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: /طبّق على 1/ }));
+    await vi.waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]).toMatchObject({ categoryId: ids.milk });
   });
 
   it('shows the loading rows first', async () => {

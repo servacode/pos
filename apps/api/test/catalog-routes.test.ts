@@ -375,7 +375,7 @@ describe('GET /v1/products and GET /v1/barcodes/{code}', () => {
     const detail = await create();
     const [row] = (await list()).items;
     // Counts over the whole store come with the first page: one product, priced, no picture
-    expect((await list()).attention).toEqual({ zeroPrice: 0, noPhoto: 1, expiringSoon: 0 });
+    expect((await list()).attention).toEqual({ zeroPrice: 0, noPhoto: 1, expiringSoon: 0, uncategorised: 1 });
     expect(row).toEqual({
       id: detail.id,
       nameAr: 'شاي الربيع ٤٥٠ غ',

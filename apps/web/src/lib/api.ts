@@ -130,18 +130,42 @@ async function parse<T>(res: Response): Promise<T> {
   return (await readJson(res)) as T;
 }
 
-export function refreshAccessToken(): Promise<string | null> {
-  refreshInFlight ??= (async () => {
-    try {
-      const res = await send(REFRESH_PATH, 'POST', undefined, null);
-      if (!res.ok) return null;
-      const data = (await readJson(res)) as RefreshResponse | undefined;
-      accessToken = data?.accessToken ?? null;
-      return accessToken;
-    } finally {
-      refreshInFlight = null;
+/** The server answers 409 when another tab rotated the same refresh cookie a moment ago. */
+const REFRESH_RACE_RETRIES = 3;
+const REFRESH_RACE_WAIT_MS = 250;
+
+async function refreshOnce(): Promise<string | null> {
+  for (let attempt = 0; ; attempt += 1) {
+    const res = await send(REFRESH_PATH, 'POST', undefined, null);
+    // 409: another tab refreshed with this cookie and already holds the new one. Not a lost
+    // session: wait a moment and ask again, now with the cookie it set.
+    if (res.status === 409 && attempt < REFRESH_RACE_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, REFRESH_RACE_WAIT_MS * (attempt + 1)));
+      continue;
     }
-  })();
+    if (!res.ok) return null;
+    const data = (await readJson(res)) as RefreshResponse | undefined;
+    accessToken = data?.accessToken ?? null;
+    return accessToken;
+  }
+}
+
+/** One refresh at a time across the tabs of this browser (Web Locks), so two tabs never race. */
+async function refreshAcrossTabs(): Promise<string | null> {
+  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
+  if (!locks) return refreshOnce();
+  return await locks.request('serva-refresh', refreshOnce);
+}
+
+/**
+ * Asks for a new access token with the refresh cookie. One call at a time in this page (everyone
+ * who asks while it runs gets the same answer), one at a time across tabs, and a 409 race is
+ * retried rather than treated as a lost session. A network failure throws and does not sign out.
+ */
+export function refreshAccessToken(): Promise<string | null> {
+  refreshInFlight ??= refreshAcrossTabs().finally(() => {
+    refreshInFlight = null;
+  });
   return refreshInFlight;
 }
 
@@ -164,6 +188,9 @@ async function apiFetchOnce<T>(path: string, options: ApiRequestOptions): Promis
   const { method = 'GET', body, auth = false, authorization } = options;
   if (!auth) return parse<T>(await send(path, method, body, null, authorization));
 
+  // The page is still getting its first token: join that refresh instead of sending a request
+  // that is bound to be refused.
+  if (!accessToken && refreshInFlight) await refreshInFlight.catch(() => null);
   const usedToken = accessToken;
   const first = await send(path, method, body, usedToken);
   if (first.status !== 401) return parse<T>(first);

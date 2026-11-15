@@ -12,12 +12,14 @@ export interface ItemTileProps {
   imageUrl?: string;
   selected?: boolean;
   outOfStock?: boolean;
+  /** Nothing to sell but still tappable (the till can sell below zero): the tile dims and says «نفد» */
+  soldOut?: boolean;
   /** Sold by weight: the price is per kilo. */
   weighed?: boolean;
   /** Has an active offer. */
   onOffer?: boolean;
   /** A short line under the name: how many sizes and colours a model has («3 خيارات»). */
-  detail?: string;
+  detail?: ReactNode;
   /**
    * Keep the picture's place when there is no photo, in a grid where other tiles have one: a soft
    * 4:3 square with the name's first letter, so the rows stay even.
@@ -58,6 +60,7 @@ export function ItemTile({
   imageUrl,
   selected = false,
   outOfStock = false,
+  soldOut = false,
   weighed = false,
   onOffer = false,
   detail,
@@ -87,6 +90,7 @@ export function ItemTile({
           ? 'border-brand bg-brand-soft ring-1 ring-brand'
           : 'border-line bg-surface enabled:hover:border-line-control/50',
         outOfStock && 'cursor-not-allowed opacity-50',
+        soldOut && !outOfStock && 'opacity-60',
         className,
       )}
     >

@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mockFetch } from '../test/fetchMock';
+import { mockFetch, type MockReply } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
 
@@ -26,6 +26,8 @@ describe('the search box finds records as well as pages', () => {
       },
     });
     const { user } = renderApp('/products');
+    // The page's own shell replaces the loading shell once its code arrives: open the box after that
+    await screen.findByRole('heading', { level: 1, name: 'المنتجات' });
     await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
     const box = await screen.findByRole('textbox', { name: 'اسم الصفحة' });
     await user.type(box, 'ش');
@@ -99,6 +101,45 @@ describe('the search box finds online orders, rentals and cheques', () => {
     expect(await screen.findByRole('button', { name: /ONL-1100/ })).toHaveTextContent('ريم');
     expect(await screen.findByRole('button', { name: /RNT-1101/ })).toHaveTextContent('كرسي');
     expect(await screen.findByRole('button', { name: /CH-1102/ })).toHaveTextContent('سامر');
+  });
+});
+
+describe('the search box is quick', () => {
+  it('shows a record as soon as its own request answers, and asks each whole list once', async () => {
+    let finishOrders: (reply: MockReply) => void = () => {};
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: meWith(['customers.view']) },
+      'GET /v1/customers?q=%D8%B1%D9%8A': {
+        status: 200,
+        body: { items: [{ id: 'c-1', name: 'ريم', phone: '0999' }] },
+      },
+      'GET /v1/customers?q=%D8%B1%D9%8A%D9%85': {
+        status: 200,
+        body: { items: [{ id: 'c-1', name: 'ريم', phone: '0999' }] },
+      },
+      // The slowest list has not answered yet
+      'GET /v1/online-orders': () =>
+        new Promise<MockReply>((resolve) => {
+          finishOrders = resolve;
+        }),
+      'GET /v1/rentals?status=all': { status: 200, body: { items: [] } },
+      'GET /v1/cheques': { status: 200, body: { items: [] } },
+    });
+    const { user } = renderApp('/products');
+    await screen.findByRole('heading', { level: 1, name: 'المنتجات' });
+    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
+    const box = await screen.findByRole('textbox', { name: 'اسم الصفحة' });
+    await user.type(box, 'ري');
+
+    // The customer shows while the orders list is still on its way
+    expect(await screen.findByRole('button', { name: /ريم/ })).toBeInTheDocument();
+    finishOrders({ status: 200, body: { items: [] } });
+    await user.type(box, 'م');
+    await screen.findByRole('button', { name: /ريم/ });
+    // One more letter did not fetch the whole lists again
+    expect(requestsTo('GET', '/v1/online-orders')).toHaveLength(1);
+    expect(requestsTo('GET', '/v1/rentals?status=all')).toHaveLength(1);
   });
 });
 

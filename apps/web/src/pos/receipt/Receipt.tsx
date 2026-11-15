@@ -65,6 +65,13 @@ export interface ReceiptData {
 /** The store's own footer usually thanks the customer already: the fixed thanks only follows one that does not */
 export const needsThanks = (footer: string | null | undefined): boolean => !footer || !footer.includes('شكر');
 
+/** A payment's reference line («بنك سورية · 000123 · 2026-12-01»): the date in words, the rest as typed */
+function Reference({ text }: { text: string }) {
+  const digits = useDigits();
+  const shown = text.replace(/(\d{4}-\d{2}-\d{2})/g, (day) => dayText(day, digits));
+  return <bdi dir="auto">{shown}</bdi>;
+}
+
 function Row({
   label,
   children,
@@ -161,7 +168,7 @@ function PaymentVoucher({ data, width, copy }: { data: ReceiptData; width: Paper
       <Row label="الطريقة">{methodLabel(r.method, r.currency, r.currency)}</Row>
       {r.reference ? (
         <Row label={<span className="text-xs">المرجع</span>}>
-          <bdi dir="ltr">{r.reference}</bdi>
+          <Reference text={r.reference} />
         </Row>
       ) : null}
       {r.note ? <Row label={<span className="text-xs">ملاحظة</span>}>{r.note}</Row> : null}
@@ -232,7 +239,7 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
           </Row>
           {r.reference ? (
             <Row label={<span className="text-xs">المرجع</span>}>
-              <bdi dir="ltr">{r.reference}</bdi>
+              <Reference text={r.reference} />
             </Row>
           ) : null}
         </div>
@@ -473,7 +480,7 @@ export function Receipt({
           </Row>
           {p.reference ? (
             <Row label={<span className="text-xs">المرجع</span>}>
-              <bdi dir="ltr">{p.reference}</bdi>
+              <Reference text={p.reference} />
             </Row>
           ) : null}
         </div>

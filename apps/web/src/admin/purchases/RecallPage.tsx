@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router';
 import {
   COUNT_NOUNS,
@@ -27,6 +27,7 @@ import {
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { dayText } from '../../lib/dates';
 import { downloadCsv } from '../exportCsv';
 import { getRecall, listExpiry, setBatchBlocked } from './api';
 import { SectionHead } from './parts';
@@ -41,6 +42,8 @@ export function RecallPage() {
   const [params] = useSearchParams();
   const [batchNo, setBatchNo] = useState(() => params.get('batch')?.slice(0, 60) ?? '');
   const [found, setFound] = useState<RecallResponse | null>(null);
+  // The results open under the search: on a phone they are below the fold, so they scroll into view
+  const results = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -109,6 +112,11 @@ export function RecallPage() {
     setError(null);
     try {
       setFound(await getRecall(q));
+      if (!keepView) {
+        requestAnimationFrame(() =>
+          results.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }),
+        );
+      }
     } catch (e) {
       if (!keepView) setFound(null);
       setError(errorMessage(e));
@@ -162,7 +170,7 @@ export function RecallPage() {
     {
       key: 'expiry',
       header: 'تنتهي',
-      cell: (b) => (b.expiryDate ? <bdi className="num">{b.expiryDate}</bdi> : '—'),
+      cell: (b) => (b.expiryDate ? <bdi className="num">{dayText(b.expiryDate, digits)}</bdi> : '—'),
     },
     {
       key: 'receipts',
@@ -175,7 +183,7 @@ export function RecallPage() {
             {b.receipts.map((r) => (
               <span key={r.purchaseNumber}>
                 {r.supplierName} · <bdi className="num">{r.purchaseNumber}</bdi> ·{' '}
-                <span className="num">{r.receivedOn}</span>
+                <span className="num">{dayText(r.receivedOn, digits)}</span>
               </span>
             ))}
           </span>
@@ -226,7 +234,7 @@ export function RecallPage() {
         </bdi>
       ),
     },
-    { key: 'date', header: 'التاريخ', cell: (s) => <span className="num">{s.date}</span> },
+    { key: 'date', header: 'التاريخ', cell: (s) => <span className="num">{dayText(s.date, digits)}</span> },
     { key: 'branch', header: 'الفرع', cell: (s) => s.branchName },
     { key: 'item', header: 'الصنف', cell: (s) => s.name },
     { key: 'qty', header: 'الكمية', numeric: true, cell: (s) => formatQuantity(s.qty, digits) },
@@ -325,7 +333,7 @@ export function RecallPage() {
                       <span className="text-xs text-ink-muted">
                         {row.expiryDate ? (
                           <>
-                            تنتهي <bdi className="num">{row.expiryDate}</bdi>
+                            تنتهي <bdi className="num">{dayText(row.expiryDate, digits)}</bdi>
                           </>
                         ) : (
                           'بلا تاريخ انتهاء'
@@ -339,63 +347,68 @@ export function RecallPage() {
             </div>
           ) : null}
         </Card>
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        {note ? <Alert tone="success">{note}</Alert> : null}
-        {found ? (
-          found.batches.length === 0 ? (
-            <EmptyState
-              icon={SearchIcon}
-              title={`لا دفعة بالرقم ${found.batchNo}.`}
-              description="تأكد من الرقم كما كُتب على العلبة وفي فاتورة الشراء."
-            />
-          ) : (
-            <>
-              <section aria-label="الدفعة" className="flex flex-col gap-3">
-                <SectionHead title={`الدفعة ${found.batchNo}`} description="المنتج وأصل الدفعة وما بقي منها.">
-                  <span className="flex flex-wrap items-center gap-2 print:hidden">
-                    <Button
-                      variant={blocked ? 'secondary' : 'primary'}
-                      onClick={() => (blocked ? setLifting(true) : setConfirming(true))}
-                    >
-                      {blocked ? 'ارفع الإيقاف' : 'أوقف بيعها في كل الفروع'}
-                    </Button>
-                    <Button variant="secondary" onClick={() => window.print()}>
-                      اطبع
-                    </Button>
-                    <Button variant="secondary" onClick={exportCsv} disabled={found.sales.length === 0}>
-                      حمّل الجدول
-                    </Button>
-                  </span>
-                </SectionHead>
-                <DataTable
-                  caption="الدفعة وأصلها"
-                  columns={batchColumns}
-                  rows={found.batches}
-                  rowKey={(b) => `${b.variantId}|${b.expiryDate ?? ''}`}
-                />
-              </section>
-              <section aria-label="من اشترى الدفعة" className="flex flex-col gap-3">
-                <SectionHead
-                  title="من اشترى هذه الدفعة"
-                  description="كل فاتورة بيعت منها، مع الزبون وهاتفه إن عُرف."
-                />
-                <DataTable
-                  caption="فواتير الدفعة"
-                  columns={saleColumns}
-                  rows={found.sales}
-                  rowKey={(s) => `${s.invoiceId}|${s.variantId}`}
-                  empty={
-                    <EmptyState
-                      icon={SearchIcon}
-                      title="لم تُبَع هذه الدفعة بعد."
-                      description="لا فاتورة تحمل رقمها."
-                    />
-                  }
-                />
-              </section>
-            </>
-          )
-        ) : null}
+        <div ref={results} className="flex scroll-mt-24 flex-col gap-6">
+          {error ? <Alert tone="error">{error}</Alert> : null}
+          {note ? <Alert tone="success">{note}</Alert> : null}
+          {found ? (
+            found.batches.length === 0 ? (
+              <EmptyState
+                icon={SearchIcon}
+                title={`لا دفعة بالرقم ${found.batchNo}.`}
+                description="تأكد من الرقم كما كُتب على العلبة وفي فاتورة الشراء."
+              />
+            ) : (
+              <>
+                <section aria-label="الدفعة" className="flex flex-col gap-3">
+                  <SectionHead
+                    title={`الدفعة ${found.batchNo}`}
+                    description="المنتج وأصل الدفعة وما بقي منها."
+                  >
+                    <span className="flex flex-wrap items-center gap-2 print:hidden">
+                      <Button
+                        variant={blocked ? 'secondary' : 'primary'}
+                        onClick={() => (blocked ? setLifting(true) : setConfirming(true))}
+                      >
+                        {blocked ? 'ارفع الإيقاف' : 'أوقف بيعها في كل الفروع'}
+                      </Button>
+                      <Button variant="secondary" onClick={() => window.print()}>
+                        اطبع
+                      </Button>
+                      <Button variant="secondary" onClick={exportCsv} disabled={found.sales.length === 0}>
+                        حمّل الجدول
+                      </Button>
+                    </span>
+                  </SectionHead>
+                  <DataTable
+                    caption="الدفعة وأصلها"
+                    columns={batchColumns}
+                    rows={found.batches}
+                    rowKey={(b) => `${b.variantId}|${b.expiryDate ?? ''}`}
+                  />
+                </section>
+                <section aria-label="من اشترى الدفعة" className="flex flex-col gap-3">
+                  <SectionHead
+                    title="من اشترى هذه الدفعة"
+                    description="كل فاتورة بيعت منها، مع الزبون وهاتفه إن عُرف."
+                  />
+                  <DataTable
+                    caption="فواتير الدفعة"
+                    columns={saleColumns}
+                    rows={found.sales}
+                    rowKey={(s) => `${s.invoiceId}|${s.variantId}`}
+                    empty={
+                      <EmptyState
+                        icon={SearchIcon}
+                        title="لم تُبَع هذه الدفعة بعد."
+                        description="لا فاتورة تحمل رقمها."
+                      />
+                    }
+                  />
+                </section>
+              </>
+            )
+          ) : null}
+        </div>
       </div>
       <Dialog
         open={confirming}

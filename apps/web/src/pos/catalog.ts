@@ -63,6 +63,8 @@ export interface CatalogItem {
   stockQty?: number | null;
   /** Each piece is sold by its serial number or IMEI (03 › الإلكترونيات) */
   tracksSerial?: boolean;
+  /** How many of its numbered units are out on rent now (still counted in the stock) */
+  rentedCount?: number;
   /** A service (a fee, no stock): no zero-price warning, the fee is asked at the sale */
   isService?: boolean;
   warrantyMonths?: number | null;
@@ -196,6 +198,10 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     }
   }
 
+  const rented = new Map<string, number>();
+  for (const row of sets.serials ?? [])
+    if (row.status === 'rented') rented.set(row.variantId, (rented.get(row.variantId) ?? 0) + 1);
+
   const items: CatalogItem[] = [];
   const byVariant = new Map<string, CatalogItem>();
   const variants = [...sets.variants].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -224,6 +230,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       imageUrl: variant.imageUrl ?? null,
       stockQty: stock.get(variant.id) ?? null,
       tracksSerial: product.tracksSerial ?? false,
+      ...(rented.has(variant.id) ? { rentedCount: rented.get(variant.id)! } : {}),
       isService: product.type === 'service',
       warrantyMonths: product.warrantyMonths ?? null,
       unit: units.get(product.unitId) ?? null,

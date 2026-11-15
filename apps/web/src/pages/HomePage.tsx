@@ -89,16 +89,13 @@ function TrialBanner({ me }: { me: MeResponse }) {
   const [hidden, setHidden] = useState(trialDismissed);
   if (status !== 'trialing') return null;
   const endingSoon = daysLeft !== null && daysLeft <= 3;
-  if (hidden && !endingSoon) return null;
+  // The last days are said once, by the warning bar of every page (SubscriptionBanner)
+  if (endingSoon || hidden) return null;
 
   return (
     <div
-      className={cn(
-        'flex items-center gap-4 rounded-card border px-4 py-4 shadow-e1 sm:px-5',
-        endingSoon
-          ? 'border-warning-ink/20 bg-warning-soft text-warning-ink'
-          : 'border-brand/20 bg-brand-soft text-brand-ink',
-      )}
+      // Said once: from 1024 px the sidebar's plan card carries these days, so this is for phones
+      className="flex items-center gap-4 rounded-card border border-brand/20 bg-brand-soft px-4 py-4 text-brand-ink shadow-e1 sm:px-5 lg:hidden"
     >
       <span className="grid size-11 shrink-0 place-items-center rounded-full bg-surface/70">
         <GiftIcon />
@@ -109,23 +106,21 @@ function TrialBanner({ me }: { me: MeResponse }) {
         </p>
         <p className="text-sm opacity-85">كل المزايا متاحة لك خلال التجربة.</p>
       </div>
-      {endingSoon ? null : (
-        <button
-          type="button"
-          aria-label="أخفِ هذا الشريط"
-          className="ms-auto grid size-9 shrink-0 place-items-center rounded-full hover:bg-surface/60 pointer-coarse:size-12"
-          onClick={() => {
-            try {
-              localStorage.setItem(TRIAL_DISMISSED_KEY, '1');
-            } catch {
-              // The banner just comes back next time
-            }
-            setHidden(true);
-          }}
-        >
-          <CloseIcon size={20} />
-        </button>
-      )}
+      <button
+        type="button"
+        aria-label="أخفِ هذا الشريط"
+        className="ms-auto grid size-9 shrink-0 place-items-center rounded-full hover:bg-surface/60 pointer-coarse:size-12"
+        onClick={() => {
+          try {
+            localStorage.setItem(TRIAL_DISMISSED_KEY, '1');
+          } catch {
+            // The banner just comes back next time
+          }
+          setHidden(true);
+        }}
+      >
+        <CloseIcon size={20} />
+      </button>
     </div>
   );
 }
@@ -179,16 +174,22 @@ function changeOf(
   current: number,
   previous: number | null | undefined,
   digits: NumberFormat,
+  thin = false,
 ): StatTileProps['trend'] {
   if (previous === null || previous === undefined || previous <= 0) return undefined;
   // A base under a tenth of the figure says «+900%»: a jump from almost nothing, not a trend
   if (previous < current / 10) return undefined;
   const percent = Math.round(((current - previous) / previous) * 100);
   if (percent === 0) return undefined;
+  const direction = percent > 0 ? 'up' : 'down';
+  // A figure more than doubled says so in words, in grey: «+484%» in a loud green pill is a
+  // jump from a small base, not good news to celebrate. The same on thin data (a few days of sales).
+  if (percent >= 100) return { direction, value: 'أكثر من الضعف', comparison: 'عن أمس', tone: 'neutral' };
   return {
-    direction: percent > 0 ? 'up' : 'down',
+    direction,
     value: `${formatNumber(Math.abs(percent), digits)}%`,
     comparison: 'عن أمس',
+    ...(thin ? { tone: 'neutral' as const } : {}),
   };
 }
 
@@ -201,16 +202,16 @@ function QuickActions({ me }: { me: MeResponse }) {
   return (
     <>
       {canCatalog ? (
-        <ButtonLink to="/products/new" icon={<AddIcon />}>
+        <ButtonLink to="/products/new" icon={<AddIcon />} className="max-sm:hidden">
           منتج جديد
         </ButtonLink>
       ) : null}
       {canCatalog ? (
-        <ButtonLink to="/labels" icon={<PrintIcon />}>
+        <ButtonLink to="/labels" icon={<PrintIcon />} className="max-sm:hidden">
           اطبع ملصقات
         </ButtonLink>
       ) : null}
-      <ButtonLink to="/pos" reloadDocument variant="primary" icon={<CartIcon />}>
+      <ButtonLink to="/pos" reloadDocument variant="primary" icon={<CartIcon />} className="max-sm:w-full">
         افتح الكاشير
       </ButtonLink>
     </>
@@ -247,7 +248,7 @@ function WeekBars({ values }: { values: readonly number[] }) {
   const today = values.length - 1;
   const noHistory = values.slice(0, today).every((v) => v <= 0);
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 max-sm:hidden">
       <div aria-hidden="true" className="flex h-16 items-end gap-1.5 border-b border-on-brand/25">
         {values.map((value, index) => (
           <span
@@ -288,8 +289,8 @@ function HeroTile({
 }) {
   const TrendIcon = trend?.direction === 'down' ? TrendDownIcon : TrendUpIcon;
   return (
-    <div className="relative flex flex-wrap items-end justify-between gap-x-8 gap-y-5 overflow-hidden rounded-panel bg-brand bg-[radial-gradient(120%_120%_at_0%_0%,color-mix(in_oklab,var(--color-brand-hover)_80%,transparent),transparent_60%)] p-5 text-on-brand shadow-e2 sm:p-7 dark:[--color-brand-hover:var(--color-mark-to)] dark:[--color-brand:var(--color-mark-from)] dark:[--color-on-brand:var(--color-on-mark)]">
-      <div className="flex min-w-0 flex-col gap-3">
+    <div className="relative flex flex-wrap items-end justify-between gap-x-8 gap-y-5 overflow-hidden rounded-panel bg-brand bg-[radial-gradient(120%_120%_at_0%_0%,color-mix(in_oklab,var(--color-brand-hover)_80%,transparent),transparent_60%)] p-5 text-on-brand shadow-e2 max-sm:gap-y-2 max-sm:p-4 sm:p-7 dark:[--color-brand-hover:var(--color-mark-to)] dark:[--color-brand:var(--color-mark-from)] dark:[--color-on-brand:var(--color-on-mark)]">
+      <div className="flex min-w-0 flex-col gap-3 max-sm:gap-2">
         <div className="flex items-center justify-between gap-3">
           <p className="flex items-center gap-2 text-sm font-semibold opacity-90">
             <SalesIcon size={20} />
@@ -350,16 +351,16 @@ function HeroTile({
 
 function TileSkeleton() {
   return (
-    <Card className="flex min-w-60 shrink-0 snap-start flex-col gap-3 sm:min-w-0">
+    <Card className="flex shrink-0 snap-start flex-col gap-3 max-sm:w-[42%] max-sm:min-w-36 max-sm:gap-1.5 max-sm:p-2.5 sm:min-w-0">
       <Skeleton className="h-4 w-24" />
-      <Skeleton className="h-9 w-32" />
-      <Skeleton className="h-9" />
+      <Skeleton className="h-9 w-32 max-sm:h-6" />
+      <Skeleton className="h-9 max-sm:hidden" />
     </Card>
   );
 }
 
 /** On a phone the tiles scroll sideways, one snapping into place; from 640 px they share the row. */
-const TILE_CLASS = 'min-w-44 shrink-0 snap-start sm:min-w-0';
+const TILE_CLASS = 'shrink-0 snap-start max-sm:w-[42%] max-sm:min-w-36 sm:min-w-0';
 
 function KpiBand({
   me,
@@ -417,14 +418,14 @@ function KpiBand({
     <section aria-label="مبيعات اليوم" className="flex flex-col gap-4">
       <HeroTile
         data={data}
-        trend={data ? changeOf(netOfReturns(data), yesterday?.total, digits) : undefined}
+        trend={data ? changeOf(netOfReturns(data), yesterday?.total, digits, thin) : undefined}
         week={weekReady && data && !noHistory && !thin ? totals : null}
         noHistory={noHistory}
         zeroMorning={zeroMorning}
       />
       <SnapRow
         label="مؤشرات اليوم"
-        className="relative flex snap-x snap-mandatory gap-4 overflow-x-auto pb-1 sm:grid sm:auto-cols-fr sm:grid-flow-col sm:overflow-visible sm:pb-0"
+        className="scrollbar-none relative flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 max-sm:-mx-4 max-sm:scroll-px-4 max-sm:px-4 sm:grid sm:auto-cols-fr sm:grid-flow-col sm:gap-4 sm:overflow-visible sm:pb-0"
       >
         {data ? (
           <>
@@ -432,14 +433,14 @@ function KpiBand({
               className={TILE_CLASS}
               label="الفواتير"
               value={<span className="num">{formatNumber(data.invoiceCount, digits)}</span>}
-              trend={zeroMorning ? undefined : changeOf(data.invoiceCount, yesterday?.count, digits)}
+              trend={zeroMorning ? undefined : changeOf(data.invoiceCount, yesterday?.count, digits, thin)}
               sparkline={!thin ? counts : undefined}
             />
             <StatTile
               className={TILE_CLASS}
               label="متوسط الفاتورة"
               value={<Money minor={average} currency={data.baseCurrency} />}
-              trend={zeroMorning ? undefined : changeOf(average, yesterdayAverage, digits)}
+              trend={zeroMorning ? undefined : changeOf(average, yesterdayAverage, digits, thin)}
               sparkline={!thin ? averages : undefined}
             />
           </>
@@ -753,22 +754,47 @@ function WaitingRow({
 const sizeOf = (item: { attributes?: { name: string; value: string }[] }) =>
   item.attributes?.find((a) => a.name === 'المقاس')?.value ?? null;
 
-/** How many pieces short of a size the home list names one by one; the rest stay in the count */
+/** How many products short of sizes the home list names one by one; the rest stay in the count */
 const SIZED_ROWS = 4;
 
-/** The low pieces «ما ينتظرك» names one by one (clothing): «يوشك على النفاد» does not list them again */
-const sizedLow = <
-  T extends { attributes?: { name: string; value: string }[]; variantId: string; stockQty: number },
->(
-  items: readonly T[],
-): Set<string> =>
-  new Set(
-    items
-      // A negative piece is named once, in «يوشك على النفاد», with its link to the count
-      .filter((item) => sizeOf(item) !== null && item.stockQty >= 0)
-      .slice(0, SIZED_ROWS)
-      .map((item) => item.variantId),
-  );
+interface SizedLowItem {
+  attributes?: { name: string; value: string }[];
+  variantId: string;
+  productId: string;
+  name: string;
+  stockQty: number;
+}
+
+/**
+ * The sized pieces that ran low, one group per product («جاكيت شتوي: 3 مقاسات نفدت»), the first
+ * few products only. A negative piece is named once, in «يوشك على النفاد», with its link to the
+ * count, so it is not here.
+ */
+function sizedGroups<T extends SizedLowItem>(items: readonly T[]): { productId: string; items: T[] }[] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    if (sizeOf(item) === null || item.stockQty < 0) continue;
+    const list = groups.get(item.productId);
+    if (list) list.push(item);
+    else groups.set(item.productId, [item]);
+  }
+  return [...groups.entries()].slice(0, SIZED_ROWS).map(([productId, list]) => ({ productId, items: list }));
+}
+
+/** The low pieces «ما ينتظرك» names (clothing): «يوشك على النفاد» does not list them again */
+const sizedLow = (items: readonly SizedLowItem[]): Set<string> =>
+  new Set(sizedGroups(items).flatMap((group) => group.items.map((item) => item.variantId)));
+
+/** «جاكيت شتوي: 3 مقاسات نفدت» for a product with several low sizes */
+function groupText(name: string, items: readonly SizedLowItem[]): string {
+  const out = items.filter((item) => item.stockQty <= 0).length;
+  const lowOnes = items.length - out;
+  const sizes = (n: number) => (n === 2 ? 'مقاسان' : n >= 3 && n <= 10 ? `${n} مقاسات` : `${n} مقاساً`);
+  const parts: string[] = [];
+  if (out > 0) parts.push(`${sizes(out)} ${out === 2 ? 'نفدا' : 'نفدت'}`);
+  if (lowOnes > 0) parts.push(`${sizes(lowOnes)} ${lowOnes === 2 ? 'يوشكان' : 'يوشك'} على النفاد`);
+  return `${name}: ${parts.join(' و')}`;
+}
 
 type OrdersState = ReportState<{ items: OnlineOrder[] }>;
 type MerchState = ReportState<Awaited<ReturnType<typeof getMerchandise>>>;
@@ -807,8 +833,8 @@ function waitingFigures({
   // A clothing store hears which size ran out («المقاس M من قميص كذا نفد»), one row per piece
   // A piece below zero is named once, in «يوشك على النفاد», where its chip opens the count
   const notNegative = (merch.data?.lowStock ?? []).filter((item) => item.stockQty >= 0);
-  const sized = sizes ? notNegative.filter((item) => sizeOf(item) !== null).slice(0, SIZED_ROWS) : [];
-  const low = notNegative.length - sized.length;
+  const sized = sizes ? sizedGroups(notNegative) : [];
+  const low = notNegative.length - sized.reduce((n, group) => n + group.items.length, 0);
   const expiring = expiry.data?.items.length ?? 0;
   // A recalled batch no till sells (استدعاء دفعة): it waits for the owner's decision
   const recalled = expiry.data?.items.filter((row) => row.blocked).length ?? 0;
@@ -816,7 +842,8 @@ function waitingFigures({
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
   const chequesDue = cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
   const chequesOut = cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
-  const total = online + holds + low + sized.length + expiring + recalled + chequesDue + chequesOut + noPhoto;
+  // «بلا صورة» is a suggestion, not something waiting: it is shown, but not counted in the tab
+  const total = online + holds + low + sized.length + expiring + recalled + chequesDue + chequesOut;
   return {
     holds,
     online,
@@ -829,7 +856,7 @@ function waitingFigures({
     chequesOut,
     noPhoto,
     total,
-    empty: total === 0,
+    empty: total === 0 && noPhoto === 0,
   };
 }
 
@@ -853,18 +880,28 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
             {holds === 1 ? 'قطعة محجوزة بعربون' : 'قطع محجوزة بعربون'}
           </WaitingRow>
         ) : null}
-        {sized.map((item) => {
+        {sized.map((group) => {
+          const [item] = group.items;
+          if (!item) return null;
+          const single = group.items.length === 1;
           const colour = item.attributes?.find((a) => a.name === 'اللون')?.value;
           return (
             <WaitingRow
-              key={item.variantId}
-              to={`/products/${item.productId}`}
-              count={stockChip(item.stockQty)}
+              key={group.productId}
+              to={`/products/${group.productId}`}
+              count={single ? stockChip(item.stockQty) : group.items.length}
               tone="danger"
               icon={<WarningIcon />}
             >
-              المقاس {sizeOf(item)}
-              {colour ? ` (${colour})` : ''} من {item.name} {item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد'}
+              {single ? (
+                <>
+                  المقاس {sizeOf(item)}
+                  {colour ? ` (${colour})` : ''} من {item.name}{' '}
+                  {item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد'}
+                </>
+              ) : (
+                groupText(item.name, group.items)
+              )}
             </WaitingRow>
           );
         })}
@@ -885,11 +922,6 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
               : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
           </WaitingRow>
         ) : null}
-        {noPhoto > 0 ? (
-          <WaitingRow to="/products" count={noPhoto} tone="brand" icon={<ProductsIcon />}>
-            {noPhoto === 1 ? 'منتج بلا صورة' : `${products(noPhoto)} بلا صورة`}
-          </WaitingRow>
-        ) : null}
         {recalled > 0 ? (
           <WaitingRow to="/recall" count={recalled} tone="danger" icon={<WarningIcon />}>
             {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : 'دفعات موقوفة عن البيع (استدعاء)'}
@@ -899,6 +931,22 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
           <WaitingRow to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
             {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
           </WaitingRow>
+        ) : null}
+        {noPhoto > 0 ? (
+          // A suggestion, not an alarm: grey, last, no count chip
+          <li>
+            <Link
+              to="/products"
+              className="flex min-h-11 items-center gap-3 rounded-card px-3 text-sm text-ink-muted transition-colors duration-120 hover:bg-surface-muted"
+            >
+              <ProductsIcon size={20} />
+              <span className="min-w-0 flex-1">
+                {noPhoto === 1 ? 'منتج واحد بلا صورة' : `${noPhoto} ${products(noPhoto)} بلا صورة`}. أضف صوراً
+                ليسهل البيع.
+              </span>
+              <NextIcon size={16} />
+            </Link>
+          </li>
         ) : null}
       </ul>
     );
@@ -1238,9 +1286,12 @@ export function HomePage() {
           actions={<QuickActions me={me} />}
         />
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <div className="flex min-w-0 flex-col gap-6 xl:col-start-1 xl:row-start-1">
+          <div className="flex min-w-0 flex-col gap-6 max-xl:contents xl:col-start-1 xl:row-start-1">
             {seesSales ? (
-              <KpiBand me={me} day={day} points={weekPoints} profit={profit} seesProfit={seesProfit} />
+              // Below 1280 px the figures come first, then what needs attention, then the rest
+              <div className="min-w-0 max-xl:order-[-2]">
+                <KpiBand me={me} day={day} points={weekPoints} profit={profit} seesProfit={seesProfit} />
+              </div>
             ) : null}
             {seesSales && brandNew ? (
               <EmptyState
@@ -1281,7 +1332,7 @@ export function HomePage() {
             {!seesSales ? <StoreCard me={me} /> : null}
           </div>
           <div className="contents xl:col-start-2 xl:row-start-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
-            <div className="order-first flex min-w-0 flex-col gap-6 empty:hidden xl:order-none">
+            <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] xl:order-none">
               {showWaiting ? (
                 <AttentionPanel
                   waiting={{

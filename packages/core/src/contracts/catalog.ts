@@ -495,9 +495,26 @@ export interface ProductListItem {
   version: number;
 }
 
+/** The store's stock in numbers (whole store, whatever the list's search shows): one definition for every screen */
+export interface ProductListTotals {
+  products: number;
+  /** Live combinations (sizes, colours…) over all products */
+  variants: number;
+  /** Thousandths on the shelf: each combination's stock, one below zero counted as 0 */
+  pieces: number;
+  /** Stocked combinations below zero («ناقص») */
+  negative: number;
+  /** Stocked combinations at zero or below («نفد») */
+  runOut: number;
+  /** The stocked product with the least left */
+  lowest: { nameAr: string; qty: number } | null;
+}
+
 export type ProductListResponse = ListResponse<ProductListItem> & {
+  /** Whole-store stock numbers for the tiles (first page of the active list only) */
+  totals?: ProductListTotals;
   /** Over every active product of the store, not the page: how many sell at 0 and how many have no picture (first page only) */
-  attention?: { zeroPrice: number; noPhoto: number; expiringSoon?: number };
+  attention?: { zeroPrice: number; noPhoto: number; expiringSoon?: number; uncategorised?: number };
 };
 
 /**

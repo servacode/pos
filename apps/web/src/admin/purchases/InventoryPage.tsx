@@ -119,11 +119,15 @@ export function InventoryPage() {
   const manyBranches = me.branches.length > 1;
   const branchName = (id: string) => me.branches.find((b) => b.id === id)?.name ?? '';
   const items = stock?.items ?? [];
-  // Same count as the products page: a shelf below zero is not a piece, it is told apart as «سالب»
-  const onShelf = items.reduce((sum, r) => sum + Math.max(0, r.qty), 0);
-  const belowZero = items.filter((r) => r.qty < 0).length;
-  const kinds = new Set(items.map((r) => r.variantId)).size;
-  const soldOut = items.filter((r) => r.qty <= 0).length;
+  // The same count as the products page (one definition): per combination over all branches, a
+  // combination below zero is not a piece, it is counted apart as «ناقص»; «نفد» is zero or less
+  const perKind = new Map<string, number>();
+  for (const r of items) perKind.set(r.variantId, (perKind.get(r.variantId) ?? 0) + r.qty);
+  const totals = [...perKind.values()];
+  const onShelf = totals.reduce((sum, q) => sum + Math.max(0, q), 0);
+  const belowZero = totals.filter((q) => q < 0).length;
+  const kinds = totals.length;
+  const soldOut = totals.filter((q) => q <= 0).length;
   const counted = Object.values(counts).filter((text) => qtyOf(text) !== null).length;
   const countProblems = Object.values(counts).some((text) => countProblem(text) !== null);
   const review = reviewing ? reviewCount(items, counts) : [];
@@ -547,7 +551,7 @@ export function InventoryPage() {
                   {belowZero > 0 ? (
                     <>
                       {' '}
-                      · منها سالب: <span className="num">{belowZero}</span>
+                      · منها ناقص: <span className="num">{belowZero}</span>
                     </>
                   ) : null}
                 </>

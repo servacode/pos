@@ -232,14 +232,17 @@ function PriceOnRequest({ className }: { className?: string }) {
 function NoPicture({
   name,
   categoryName = null,
+  sectors,
   large = false,
 }: {
   name: string;
   categoryName?: string | null;
+  /** The store's business types (a clothing store never draws a medical icon) */
+  sectors?: readonly string[];
   large?: boolean;
 }) {
   // The icon of its kind on a soft tint reads as a deliberate tile, not a missing image
-  const Kind = placeholderIconFor({ categoryName, name });
+  const Kind = placeholderIconFor({ categoryName, name, ...(sectors ? { sectors } : {}) });
   return (
     <span
       aria-hidden="true"
@@ -391,6 +394,7 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                   ) : (
                     <NoPicture
                       name={p.name}
+                      sectors={home.store.sectors}
                       categoryName={home.categories.find((c) => c.id === p.categoryId)?.name ?? null}
                     />
                   )}
@@ -531,6 +535,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
             ) : (
               <NoPicture
                 name={product.name}
+                sectors={home.store.sectors}
                 categoryName={home.categories.find((c) => c.id === product.categoryId)?.name ?? null}
                 large
               />
@@ -966,7 +971,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
                 {line.imageUrl ? (
                   <img src={line.imageUrl} alt="" className="size-full object-cover" />
                 ) : (
-                  <NoPicture name={line.name} />
+                  <NoPicture name={line.name} sectors={home.store.sectors} />
                 )}
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-1">

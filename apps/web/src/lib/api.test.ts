@@ -6,6 +6,7 @@ import {
   apiFetch,
   getAccessToken,
   onSessionExpired,
+  refreshAccessToken,
   setAccessToken,
 } from './api';
 
@@ -121,5 +122,65 @@ describe('apiFetch', () => {
       code: 'network_error',
       message: NETWORK_ERROR_MESSAGE,
     });
+  });
+
+  it('treats a 409 from the refresh as another tab winning the race, and asks again', async () => {
+    setAccessToken('stale');
+    let asked = 0;
+    const { requestsTo } = mockFetch({
+      'GET /v1/me': meRoute('fresh'),
+      'POST /v1/auth/refresh': () => {
+        asked += 1;
+        return asked === 1
+          ? apiError(409, 'conflict', 'جُدّد دخولك للتو من نافذة أخرى. أعد المحاولة.')
+          : { status: 200, body: { accessToken: 'fresh', expiresIn: 900 } };
+      },
+    });
+    const signOut = vi.fn();
+    const unsubscribe = onSessionExpired(signOut);
+
+    await expect(apiFetch('/v1/me', { auth: true })).resolves.toEqual({ ok: true });
+
+    expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(2);
+    expect(signOut).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('makes a request that has no token yet wait for the refresh already running', async () => {
+    setAccessToken(null);
+    const { requestsTo } = mockFetch({
+      'GET /v1/me': meRoute('fresh'),
+      'POST /v1/auth/refresh': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return { status: 200, body: { accessToken: 'fresh', expiresIn: 900 } };
+      },
+    });
+
+    const boot = refreshAccessToken();
+    await expect(apiFetch('/v1/me', { auth: true })).resolves.toEqual({ ok: true });
+    await boot;
+
+    // No request was sent with an empty token, and only one refresh ran
+    expect(requestsTo('GET', '/v1/me').map((r) => r.headers.Authorization)).toEqual(['Bearer fresh']);
+    expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(1);
+  });
+
+  it('does not sign out when the refresh fails for want of a connection', async () => {
+    setAccessToken('stale');
+    const signOut = vi.fn();
+    const unsubscribe = onSessionExpired(signOut);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init: RequestInit = {}) => {
+        if (init.method === 'POST') throw new TypeError('Failed to fetch');
+        return new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'x' } }), {
+          status: 401,
+        });
+      }),
+    );
+
+    await expect(apiFetch('/v1/me', { auth: true })).rejects.toMatchObject({ code: 'network_error' });
+    expect(signOut).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });

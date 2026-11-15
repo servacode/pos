@@ -11,6 +11,8 @@ import {
   DataTable,
   Dialog,
   EmptyState,
+  IconButton,
+  InfoIcon,
   Money,
   PageHeader,
   SegmentedControl,
@@ -122,6 +124,7 @@ export function ChequesPage() {
   const canManage = me.user.permissions.includes('customers.manage');
   const [filter, setFilter] = useState<ChequeStatus | 'all'>('pending');
   const [order, setOrder] = useState<'recent' | 'due'>('recent');
+  const [showWhy, setShowWhy] = useState(false);
   const [items, setItems] = useState<Cheque[] | null>(null);
   const [base, setBase] = useState<CurrencyCode>('SYP');
   const [error, setError] = useState<string | null>(null);
@@ -218,20 +221,24 @@ export function ChequesPage() {
               </span>
             )}
             {/* On a phone the one cell carries what the other columns show from 640 px */}
-            {bank ? <span className="text-xs text-ink-muted sm:hidden">{bank}</span> : null}
-            {number ? (
+            {bank || number ? (
               <span className="text-xs text-ink-muted sm:hidden">
-                {c.direction === 'out' ? (c.supplierName ?? '—') : (c.customerName ?? '—')}
+                {[
+                  bank,
+                  number ? (c.direction === 'out' ? (c.supplierName ?? '—') : (c.customerName ?? '—')) : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             ) : null}
-            {due ? (
-              <span
-                className={`text-xs sm:hidden ${late ? 'font-semibold text-danger-ink' : 'text-ink-muted'}`}
-              >
-                الاستحقاق <span className="whitespace-nowrap">{dayText(due, digits)}</span>
-              </span>
-            ) : null}
-            <span className="sm:hidden">{status(c)}</span>
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 sm:hidden">
+              {status(c)}
+              {due ? (
+                <span className={`text-xs ${late ? 'font-semibold text-danger-ink' : 'text-ink-muted'}`}>
+                  الاستحقاق <span className="whitespace-nowrap">{dayText(due, digits)}</span>
+                </span>
+              ) : null}
+            </span>
           </div>
         );
       },
@@ -404,24 +411,37 @@ export function ChequesPage() {
               ]}
             />
           </div>
-          {soon.length + soonOut.length > 0 ? (
-            <Alert tone="warning">
-              {[
-                soon.length > 0
-                  ? `${soon.length} ${soon.length === 1 ? 'شيك زبون يستحق' : 'شيكات زبائن تستحق'} أو فات موعدها`
-                  : null,
-                soonOut.length > 0
-                  ? `${soonOut.length} ${soonOut.length === 1 ? 'شيك صادر للمورد يستحق' : 'شيكات صادرة للموردين تستحق'}: جهّز الرصيد في البنك`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}{' '}
-              (خلال {CHEQUE_DUE_SOON_DAYS} أيام).
-            </Alert>
-          ) : null}
-          <Alert tone="info">
-            «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد واحد في
-            الدفاتر.
+          <Alert tone={soon.length + soonOut.length > 0 ? 'warning' : 'info'}>
+            <span className="flex flex-col gap-1.5">
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>
+                  {soon.length + soonOut.length > 0
+                    ? `${[
+                        soon.length > 0
+                          ? `${String(soon.length)} ${soon.length === 1 ? 'شيك زبون يستحق' : 'شيكات زبائن تستحق'} أو فات موعدها`
+                          : null,
+                        soonOut.length > 0
+                          ? `${String(soonOut.length)} ${soonOut.length === 1 ? 'شيك صادر للمورد يستحق' : 'شيكات صادرة للموردين تستحق'}: جهّز الرصيد في البنك`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')} (خلال ${String(CHEQUE_DUE_SOON_DAYS)} أيام).`
+                    : 'لا شيء يحتاج انتباهك'}
+                </span>
+                <IconButton
+                  size="xs"
+                  label={showWhy ? 'أخفِ الشرح' : 'اشرح'}
+                  icon={<InfoIcon size={16} />}
+                  onClick={() => setShowWhy((v) => !v)}
+                />
+              </span>
+              {showWhy ? (
+                <span className="text-sm">
+                  «حُصّل» ينقل المبلغ إلى البنك. «مرتجع» يعيده ديناً على الزبون في كشف حسابه. كل منهما قيد
+                  واحد في الدفاتر.
+                </span>
+              ) : null}
+            </span>
           </Alert>
           <DataTable
             caption="الشيكات"

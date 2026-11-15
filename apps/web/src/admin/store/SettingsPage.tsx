@@ -106,9 +106,9 @@ function SettingsLoading() {
   return (
     <div aria-busy="true" className="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start">
       <span className="sr-only">نحمّل إعدادات المتجر…</span>
-      <div className="flex gap-2 lg:flex-col">
+      <div className="flex max-w-full gap-2 lg:flex-col">
         {Array.from({ length: 4 }, (_, index) => (
-          <Skeleton key={index} className="h-10 w-32 lg:w-full" />
+          <Skeleton key={index} className="h-10 min-w-0 flex-1 lg:w-full lg:flex-none" />
         ))}
       </div>
       <div className="flex flex-col gap-6">

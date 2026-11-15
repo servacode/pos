@@ -33,3 +33,21 @@ export function capToStock(sellable: number | null, stockQty: number | null | un
   if (stockQty === null || stockQty === undefined) return sellable;
   return Math.min(sellable, stockQty);
 }
+
+/**
+ * THE STOCK RULE (till, product list, inventory, dashboard):
+ * - on hand = the plain sum of stock levels; «ناقص» is how far negative combinations run;
+ * - sellable = the sum of each combination's own stock with negatives counted as 0, so one combination
+ *   below zero never hides what the others still have;
+ * - the till only sees its own branch (sync scope), the admin lists all branches unless a branch is picked:
+ *   when they differ, show the branch on the list rather than a different number;
+ * - online reservations (reserved_qty) are not taken off anywhere, so nothing is «محجوز».
+ */
+export function sellableOnHand(qty: number): number {
+  return Math.max(0, qty);
+}
+
+/** «ناقص»: how far below zero the combinations run, as a positive number (0 when none does) */
+export function shortfallOf(qtys: readonly number[]): number {
+  return qtys.reduce((sum, q) => (q < 0 ? sum - q : sum), 0);
+}

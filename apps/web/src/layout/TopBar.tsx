@@ -36,7 +36,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../auth/useAuth';
 import { useOnline } from '../pos/useOnline';
-import { useRecordSearch } from './recordSearch';
+import { useRecordSearch, warmRecordSearch } from './recordSearch';
 import { pageOwns, type NavSection } from './nav';
 
 /** One line of the bell's list: something that waits for the user, and where to deal with it. */
@@ -523,11 +523,13 @@ function PageSearch({
     if (open) {
       setQuery('');
       setActive(0);
+      // The lists the search matches by hand start loading now, while the first letters are typed
+      warmRecordSearch(me);
       const focus = window.setTimeout(() => input.current?.focus(), 0);
       return () => window.clearTimeout(focus);
     }
     return undefined;
-  }, [open]);
+  }, [open, me]);
 
   const results = useMemo(() => {
     const q = query.trim();

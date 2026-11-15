@@ -135,10 +135,11 @@ export function StatusBar({
         <span
           role="alert"
           title="هذا المتصفح قد يمسح البيانات، ثبّت التطبيق"
-          className="inline-flex min-h-8 min-w-0 items-center gap-1 rounded-full bg-surface-muted ps-3 pe-1 text-sm font-medium text-ink-muted"
+          className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full bg-surface-muted ps-3 pe-1 text-sm font-medium text-ink-muted sm:min-w-0 sm:shrink"
         >
           <WarningIcon size={16} className="shrink-0" />
-          <span className="truncate">
+          {/* On a phone the words would squeeze the store and the person out: the icon and the close button stay, the sentence is spoken */}
+          <span className="sr-only sm:not-sr-only sm:truncate">
             <span className="sr-only 2xl:not-sr-only">هذا المتصفح قد يمسح البيانات، </span>ثبّت التطبيق
           </span>
           <button
@@ -173,13 +174,17 @@ export function StatusBar({
           <span
             aria-hidden="true"
             title={connectionText(online, outbox?.pending ?? 0)}
-            className="hidden whitespace-nowrap sm:max-[1279px]:block"
+            className={
+              online
+                ? 'hidden whitespace-nowrap sm:max-[1279px]:block'
+                : 'text-xs font-semibold whitespace-nowrap max-[1279px]:block min-[1280px]:hidden'
+            }
           >
             {online ? 'متصل' : 'دون إنترنت'}
             {(outbox?.pending ?? 0) > 0 ? ` · ${outbox!.pending}` : ''}
           </span>
           {/* On a phone the sentence is spoken only; what waits shows as a number, so it is never squeezed */}
-          {(outbox?.pending ?? 0) > 0 ? (
+          {online && (outbox?.pending ?? 0) > 0 ? (
             <span aria-hidden="true" className="num sm:hidden">
               {outbox!.pending}
             </span>

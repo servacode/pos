@@ -36,7 +36,7 @@ import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
-import { DrawerCounter, emptyCount, useCountKeypad } from './DrawerCounter';
+import { DrawerCounter, drawerName, emptyCount, useCountKeypad } from './DrawerCounter';
 import { ZReport } from './ZReport';
 import {
   cashMovementPayload,
@@ -335,6 +335,13 @@ export function ShiftCloseScreen({
     [activity, counts, settings.baseCurrency, catalog.rates, shift.opening],
   );
 
+  // Drawers counted as nothing although they should hold cash: asked about once before the summary
+  const [askedEmpty, setAskedEmpty] = useState(false);
+  const emptied = cash.filter((c) => c.countedMinor === 0 && c.expectedMinor > 0);
+  useEffect(() => {
+    if (emptied.length === 0) setAskedEmpty(false);
+  }, [emptied.length]);
+
   async function close() {
     if (!activity) return;
     setSaving(true);
@@ -436,8 +443,23 @@ export function ShiftCloseScreen({
           till={settings.till}
           intro={<Alert tone="info">عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.</Alert>}
         >
-          <Button size="lg" fullWidth onClick={() => setStep('summary')} disabled={!activity}>
-            تابع للملخّص
+          {emptied.length > 0 && askedEmpty ? (
+            <Alert tone="warning">
+              لم تعدّ شيئاً في {emptied.map((c) => drawerName(c.currency)).join(' و')}. هل هذا صحيح؟ إن كان
+              الدرج فارغاً تابع، وإلا اكتب ما في يدك.
+            </Alert>
+          ) : null}
+          <Button
+            size="lg"
+            fullWidth
+            onClick={() => {
+              // A drawer that should hold cash and was counted as nothing is asked about once (the amount stays hidden)
+              if (emptied.length > 0 && !askedEmpty) setAskedEmpty(true);
+              else setStep('summary');
+            }}
+            disabled={!activity}
+          >
+            {emptied.length > 0 && askedEmpty ? 'نعم، الدرج فارغ، تابع' : 'تابع للملخّص'}
           </Button>
         </CountLayout>
       ) : step === 'done' && activity ? (

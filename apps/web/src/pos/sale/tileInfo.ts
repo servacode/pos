@@ -1,5 +1,6 @@
 import { batchState } from '@serva/core/pharmacy';
 import type { CatalogItem } from '../catalog';
+import { sellableOnHand } from '../../lib/sellable';
 
 /** What a tile says about its stock, beyond name and price (display only) */
 export interface TileInfo {
@@ -11,6 +12,8 @@ export interface TileInfo {
   /** The nearest date among the sellable batches, with the days left */
   expiry: { days: number; tone: 'danger' | 'warning' } | null;
   tracksSerial: boolean;
+  /** Numbered units out on rent (counted in the stock, not at the shelf) */
+  rentedCount: number;
 }
 
 const DAY = 86_400_000;
@@ -60,7 +63,7 @@ export function tileInfo(pieces: readonly CatalogItem[], today: string): TileInf
     }
     if (typeof p.stockQty === 'number') {
       // Never more than the stock itself says: the batch ledger can run a few pieces over it
-      stock = (stock ?? 0) + (sellable === null ? p.stockQty : Math.min(sellable, p.stockQty));
+      stock = (stock ?? 0) + sellableOnHand(sellable === null ? p.stockQty : Math.min(sellable, p.stockQty));
     }
   }
   const days = nearest ? daysUntil(nearest, today) : null;
@@ -73,6 +76,7 @@ export function tileInfo(pieces: readonly CatalogItem[], today: string): TileInf
         ? { days, tone: days <= EXPIRY_DANGER_DAYS ? 'danger' : 'warning' }
         : null,
     tracksSerial: pieces.some((p) => p.tracksSerial),
+    rentedCount: pieces.reduce((n, p) => n + (p.rentedCount ?? 0), 0),
   };
 }
 

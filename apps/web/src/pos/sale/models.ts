@@ -1,5 +1,6 @@
 import { toLatinDigits } from '@serva/core/text';
 import type { CatalogItem } from '../catalog';
+import { sellableOnHand } from '../../lib/sellable';
 
 /**
  * The till's grid (هوية 2): a model sold in several sizes or colours shows as one tile, and its
@@ -122,7 +123,8 @@ export function stockFor(
     );
     if (!fits || !attrs.some((a) => a.name === name && a.value === value)) continue;
     if (piece.stockQty === null || piece.stockQty === undefined) continue;
-    total = (total ?? 0) + piece.stockQty - (inCart.get(piece.variantId) ?? 0);
+    // A combination below zero adds nothing: the same rule as the list's «متاح للبيع» (lib/sellable)
+    total = (total ?? 0) + sellableOnHand(piece.stockQty - (inCart.get(piece.variantId) ?? 0));
   }
   return total;
 }
@@ -161,6 +163,25 @@ export function piecesText(count: number): string {
   if (count === 2) return 'خياران';
   if (count <= 10) return `${count} خيارات`;
   return `${count} خياراً`;
+}
+
+/**
+ * The sizes of a model with whether each still has stock, in natural order («S M L XL»), for its tile.
+ * Null when the model has no size option to show (colour-only or several options at once).
+ */
+export function sizeStock(pieces: readonly CatalogItem[]): { value: string; inStock: boolean }[] | null {
+  const options = optionsOf(pieces);
+  const size =
+    options.find((o) => /مقاس|size/i.test(o.name)) ?? (options.length === 1 ? options[0] : undefined);
+  if (!size || /لون|colou?r/i.test(size.name)) return null;
+  return size.values.map((value) => {
+    const mine = pieces.filter((p) =>
+      (p.attributes ?? []).some((a) => a.name === size.name && a.value === value),
+    );
+    // Unknown stock counts as available: only a known empty size is struck
+    const inStock = mine.some((p) => p.stockQty === null || p.stockQty === undefined || p.stockQty > 0);
+    return { value, inStock };
+  });
 }
 
 /** The lowest price among a model's pieces, for its tile («من 45,000»). */

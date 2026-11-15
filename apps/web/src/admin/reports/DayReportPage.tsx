@@ -153,11 +153,13 @@ function withTotals<Row>(columns: DataColumn<Row>[], totals: Record<string, Reac
 function DayReportBody({ report }: { report: DayReport }) {
   const digits = useDigits();
   const base = report.baseCurrency;
-  const average = report.invoiceCount > 0 ? Math.round(report.totalMinor / report.invoiceCount) : 0;
-  // The headline is net of the day's returns, the same figure as the home page; the invoices' total
-  // and the returns sit under it
+  // The headline and the average are net of the day's returns, the same figures as the home page;
+  // the invoices' total and the returns sit under them
   const net = report.totalMinor - (report.returns?.totalMinor ?? 0);
+  const average = report.invoiceCount > 0 ? Math.round(net / report.invoiceCount) : 0;
   const methodsBase = report.byMethod.reduce((sum, row) => sum + row.baseAmountMinor, 0);
+  // What the payments add up to against the invoices: cash rounding and tips ride on the payments
+  const methodsGap = methodsBase - report.totalMinor;
   const cashierInvoices = report.byCashier.reduce((sum, row) => sum + row.invoiceCount, 0);
   const cashierTotal = report.byCashier.reduce((sum, row) => sum + row.totalMinor, 0);
 
@@ -216,6 +218,36 @@ function DayReportBody({ report }: { report: DayReport }) {
             rows={report.byMethod}
             rowKey={(row) => `${row.method}-${row.currency}`}
           />
+          <dl className="flex flex-col text-sm">
+            <Line label="المبالغ أعلاه قبل المرتجعات">
+              <Money minor={methodsBase} currency={base} />
+            </Line>
+            {report.returns.count > 0 ? (
+              <>
+                <Line label={`المرتجعات (${report.returns.count})`}>
+                  <Money minor={-report.returns.totalMinor} currency={base} />
+                </Line>
+                <Line label="بعد المرتجعات" strong>
+                  <Money minor={methodsBase - report.returns.totalMinor} currency={base} />
+                </Line>
+              </>
+            ) : null}
+          </dl>
+          {methodsGap !== 0 ? (
+            <p className="text-sm text-ink-muted">
+              مجموع الدفعات يختلف عن مجموع الفواتير بـ <Money minor={methodsGap} currency={base} />: تقريب
+              النقد <Money minor={report.cashRoundingMinor} currency={base} /> والإكرامية{' '}
+              <Money minor={report.tipsMinor} currency={base} />
+              {methodsGap - report.cashRoundingMinor - report.tipsMinor !== 0 ? (
+                <>
+                  ، والباقي{' '}
+                  <Money minor={methodsGap - report.cashRoundingMinor - report.tipsMinor} currency={base} />{' '}
+                  بيع بالدين أو دفعة لم تُحسب
+                </>
+              ) : null}
+              .
+            </p>
+          ) : null}
           <p className="text-sm text-ink-muted">
             الدولار محسوب بسعر كل فاتورة. البطاقة وشام كاش تُطابقان مع الكشف، لا مع الدرج.
           </p>

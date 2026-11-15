@@ -134,7 +134,7 @@ export function AdminShell({
         </header>
         <main
           className={cn(
-            'mx-auto w-full max-w-330 flex-1 px-4 pt-6 pb-16 sm:px-6 lg:px-8 lg:pt-8',
+            'mx-auto w-full max-w-330 flex-1 px-4 pt-4 pb-16 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8',
             contentClassName,
           )}
         >

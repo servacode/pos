@@ -64,6 +64,49 @@ async function chooseMore(user: ReturnType<typeof renderApp>['user'], table: HTM
   await user.click(await screen.findByRole('menuitem', { name: item }));
 }
 
+describe('«الصلاحية» on a phone and the recall button', () => {
+  it('shows each batch as a card with its action in view, dates in Arabic, and a red recall only for the urgent', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      server({
+        'GET /v1/inventory/expiry?days=3650': () => ({
+          status: 200,
+          body: {
+            today: '2026-10-30',
+            items: [
+              row({}),
+              row({
+                variantId: 'v-3',
+                name: 'شاش معقم',
+                batchNo: 'B-77',
+                expiryDate: '2029-01-01',
+                daysLeft: 800,
+              }),
+            ],
+          },
+        }),
+      });
+      renderApp('/expiry');
+      const cards = await screen.findByRole('list', { name: 'الدفعات حسب الصلاحية' });
+      expect(screen.queryByRole('table', { name: 'الدفعات حسب الصلاحية' })).not.toBeInTheDocument();
+      expect(cards).not.toHaveTextContent('2026-10-25');
+      expect(cards).toHaveTextContent('25 تشرين الأول 2026');
+      const urgent = within(cards).getByRole('link', { name: /استدعاء الدفعة A-01/ });
+      const calm = within(cards).getByRole('link', { name: /استدعاء الدفعة B-77/ });
+      expect(urgent).toHaveClass('border-danger');
+      expect(calm).not.toHaveClass('border-danger');
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+});
+
 describe('«الصلاحية»', () => {
   it('keeps the last answer, so the next visit opens with it instead of a blank skeleton', async () => {
     server();

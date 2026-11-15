@@ -86,7 +86,9 @@ describe('the till grid for a clothing model', () => {
     const grid = screen.getByRole('list', { name: 'الأصناف' });
     const tiles = within(grid).getAllByRole('button', { name: /قميص كتان/ });
     expect(tiles).toHaveLength(1);
-    expect(tiles[0]).toHaveTextContent('3 خيارات');
+    // The tile names the sizes in stock (no stock known: all of them)
+    expect(tiles[0]).toHaveTextContent('M');
+    expect(tiles[0]).toHaveTextContent('L');
 
     await user.click(tiles[0]!);
     const picker = await screen.findByRole('region', { name: 'اختر من قميص كتان' });

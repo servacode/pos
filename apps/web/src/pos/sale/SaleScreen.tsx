@@ -104,6 +104,8 @@ import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
 import { HoldPanel } from './HoldPanel';
 import { HeldList, HoldNamePanel } from './HeldList';
 import { dollarNote, ItemsArea, type PriceCheck } from './ItemsArea';
+import { armClickGuard, clicksSwallowed } from './clickGuard';
+import { isUnfedService } from './serviceFee';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
 import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
@@ -407,6 +409,7 @@ export function SaleScreen(props: SaleScreenProps) {
     needs.size > 0 ||
     invoiceNeeds !== null ||
     unnumbered.length > 0 ||
+    cart.lines.some((l) => isUnfedService(l, catalog.byVariant)) ||
     guard.blocks.length > 0 ||
     guard.stockBlocks.length > 0 ||
     batchWaits;
@@ -727,8 +730,14 @@ export function SaleScreen(props: SaleScreenProps) {
   handlers.current = { add, scan, showPrice, packsByVariant };
   // A second tap on «أضف» lands on the tile that appears under the closed picker: swallowed for a moment
   const pickerAddedAt = useRef(0);
+  // Leaving a dialog or panel (hold, price, size...) back to the grid: its last click must not reach a tile
+  const lastKind = useRef(mode.kind);
+  useEffect(() => {
+    if (lastKind.current !== mode.kind && mode.kind === 'items') armClickGuard();
+    lastKind.current = mode.kind;
+  }, [mode.kind]);
   const pickItem = useCallback((item: CatalogItem, hit?: BarcodeHit | null) => {
-    if (Date.now() - pickerAddedAt.current < 350) return;
+    if (Date.now() - pickerAddedAt.current < 350 || clicksSwallowed()) return;
     if (checkingRef.current) handlers.current.showPrice(item, hit);
     else if (!hit && handlers.current.packsByVariant.has(item.variantId))
       // Picked with no barcode: the piece or which box?
@@ -737,7 +746,7 @@ export function SaleScreen(props: SaleScreenProps) {
   }, []);
   const pickModel = useCallback(
     (productId: string) => {
-      if (Date.now() - pickerAddedAt.current < 350) return;
+      if (Date.now() - pickerAddedAt.current < 350 || clicksSwallowed()) return;
       if (checkingRef.current) {
         const model = pieces.get(productId);
         if (model)

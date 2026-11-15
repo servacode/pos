@@ -16,6 +16,7 @@ import {
   ReportsIcon,
   SegmentedControl,
   Select,
+  KpiStrip,
   StatTile,
   TextField,
   useDigits,
@@ -245,11 +246,6 @@ export function MerchandisePage() {
           className="print:hidden"
           icon={<ReportsIcon />}
           title="حركة الأصناف"
-          actions={
-            <Button variant="ghost" size="sm" onClick={() => setOpened(allOpen ? new Set() : new Set(FOLDS))}>
-              {allOpen ? 'اطوِ كل الأقسام' : 'افتح كل الأقسام'}
-            </Button>
-          }
           description={
             clothing
               ? 'ما يُباع من كل مقاس ولون وما يرجع، وما بقي من كل موديل، والقطع الراكدة على الرف.'
@@ -294,7 +290,7 @@ export function MerchandisePage() {
           ) : null}
           <p className="text-sm text-ink-muted">راكد: لم يُبع ولم يصل منذ {IDLE_TEXT[idle]}.</p>
         </Card>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <KpiStrip columns={2}>
           <StatTile
             label="قطع راكدة"
             value={<span className="num">{data ? data.slowMovers.length : '—'}</span>}
@@ -306,6 +302,13 @@ export function MerchandisePage() {
               footnote="بكلفة الشراء"
             />
           ) : null}
+        </KpiStrip>
+
+        {/* One switch for every section, just above them (it was a stray button in the page head) */}
+        <div className="-mb-2 flex justify-end print:hidden">
+          <Button variant="ghost" size="sm" onClick={() => setOpened(allOpen ? new Set() : new Set(FOLDS))}>
+            {allOpen ? 'اطوِ كل الأقسام' : 'افتح كل الأقسام'}
+          </Button>
         </div>
 
         {data && data.byDepartment.length > 0 && (departments.length > 0 || department) ? (
@@ -532,17 +535,20 @@ export function MerchandisePage() {
           </Fold>
         ) : null}
 
-        <Fold title="القطع الراكدة" open={isOpen('slow') || !data} onToggle={() => toggle('slow')}>
-          <DataTable
-            caption="القطع الراكدة"
-            columns={slowColumns}
-            rows={data?.slowMovers ?? []}
-            rowKey={(r) => r.variantId}
-            loading={!data && !error}
-            {...(error ? { onRetry: load } : {})}
-            empty="لا قطع راكدة: كل ما على الرف بيع منه شيء أو وصل حديثاً."
-          />
-        </Fold>
+        {/* No sleeping pieces: the section is left out, the tile above already says «0» */}
+        {data && data.slowMovers.length === 0 && !error ? null : (
+          <Fold title="القطع الراكدة" open={isOpen('slow') || !data} onToggle={() => toggle('slow')}>
+            <DataTable
+              caption="القطع الراكدة"
+              columns={slowColumns}
+              rows={data?.slowMovers ?? []}
+              rowKey={(r) => r.variantId}
+              loading={!data && !error}
+              {...(error ? { onRetry: load } : {})}
+              empty="لا قطع راكدة: كل ما على الرف بيع منه شيء أو وصل حديثاً."
+            />
+          </Fold>
+        )}
       </div>
     </AppShell>
   );

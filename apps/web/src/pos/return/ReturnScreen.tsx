@@ -455,10 +455,7 @@ export function ReturnScreen({
               {!remote.hits?.length ? (
                 <p className="text-xs font-semibold text-ink-muted">آخر فواتير المحل (من أجهزة أخرى)</p>
               ) : null}
-              <ul
-                aria-label="فواتير المحل"
-                className="-mx-1 flex max-h-[20rem] flex-col gap-1 overflow-y-auto px-1 pb-4"
-              >
+              <ul aria-label="فواتير المحل" className="-mx-1 flex flex-col gap-1 px-1 pb-2">
                 {storeList.map((h) => {
                   const at = Date.parse(h.deviceTime);
                   return (
@@ -507,7 +504,7 @@ export function ReturnScreen({
           !(remote.hits && remote.hits.length > 0) ? (
             <p className="py-6 text-center text-sm text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
           ) : null}
-          <ul className="-mx-1 flex max-h-[28rem] flex-col gap-1 overflow-y-auto px-1 pb-4 pt-0.5">
+          <ul className="-mx-1 flex flex-col gap-1 px-1 pb-4 pt-0.5">
             {shown.map((s) => {
               const at = Date.parse(s.deviceTime);
               const selected = current?.id === s.id;

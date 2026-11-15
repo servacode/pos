@@ -1,9 +1,12 @@
 import {
   AccessoryIcon,
+  BagIcon,
   BakeryIcon,
   BuildingMaterialsIcon,
   CafeIcon,
+  GlassesIcon,
   HeartPulseIcon,
+  KidsIcon,
   KeyIcon,
   MedicalSuppliesIcon,
   PerfumeIcon,
@@ -14,25 +17,47 @@ import {
   ScissorsIcon,
   ShirtIcon,
   ShoeIcon,
+  SleepIcon,
   SupermarketIcon,
   SyringeIcon,
   WheelchairIcon,
+  WatchIcon,
   WholesaleIcon,
+  WinterIcon,
   WrenchIcon,
   type Icon,
 } from '@serva/ui';
 
-/** Words of a category (or of the item itself) that tell what kind of thing it is, first match wins */
-const BY_WORD: readonly (readonly [RegExp, Icon])[] = [
-  [/كرسي متحرك|كراسي متحركة|عكاز|مشاية/, WheelchairIcon],
-  [/حقنة|حقن|سرنجة|محقن/, SyringeIcon],
-  [/جهاز|أجهزة|سماعة طبية|ضغط|سكري|قياس|ميزان حرارة/, HeartPulseIcon],
-  [/حذاء|أحذية|صندل|جزمة|بوت|نعل|جوارب|كلسات|شحاطة/, ShoeIcon],
+type Rule = readonly [RegExp, Icon];
+
+/** What a garment or accessory is (clothing shops, and any shop that sells clothes): first match wins */
+const CLOTHING_WORDS: readonly Rule[] = [
+  [/حذاء|أحذية|صندل|جزمة|بوت|نعل|جوارب|كلسات|شحاطة|سكربين|كوتشي/, ShoeIcon],
+  [/حقيبة|حقائب|شنطة|شنط|محفظة|جزدان/, BagIcon],
+  [/نظارة|نظارات/, GlassesIcon],
+  [/ساعة|ساعات/, WatchIcon],
   [/عطر|عطور|كولونيا|بخاخ/, PerfumeIcon],
-  [/إكسسوار|اكسسوار|مجوهرات|ساعة|حزام|حقيبة|نظارة|خاتم|سوار|قلادة/, AccessoryIcon],
-  [/ملابس|قميص|بنطال|جينز|جاكيت|فستان|تيشرت|بلوزة|عباية|تنورة|معطف|بيجاما/, ShirtIcon],
+  [/إكسسوار|اكسسوار|مجوهرات|حزام|خاتم|سوار|قلادة|وشاح|شال|قبعة|ايشارب|إيشارب|ربطة عنق/, AccessoryIcon],
+  [/بيجاما|منامة|قميص نوم|بيجامة/, SleepIcon],
+  [/جاكيت|معطف|بالطو|سترة|كنزة|بلوفر|جاكيت|شتوي|شتوية|صوف/, WinterIcon],
+  [
+    /ملابس|قميص|بنطال|بنطلون|سروال|جينز|فستان|تيشرت|تيشيرت|بلوزة|عباية|تنورة|بدلة|شورت|ترينج|هودي|لباس/,
+    ShirtIcon,
+  ],
+  [/أطفال|اطفال|طفل|رضع|مواليد|بيبي/, KidsIcon],
+];
+
+/** Medical and pharmacy words: only where the shop sells them («قطن» alone is a fabric, not cotton wool) */
+const MEDICAL_WORDS: readonly Rule[] = [
+  [/كرسي متحرك|كراسي متحركة|عكاز|مشاية/, WheelchairIcon],
+  [/حقنة|حقن|سرنجة|سرنغات|سرنجات|محقن/, SyringeIcon],
+  [/جهاز|أجهزة|سماعة طبية|ضغط|سكري|قياس|ميزان حرارة/, HeartPulseIcon],
   [/دواء|أدوية|صيدلية|شراب|حبوب|مضاد|فيتامين/, PharmacyIcon],
-  [/كمامة|قفاز|ضماد|مستلزمات طبية|قطن|شاش|معقم/, MedicalSuppliesIcon],
+  [/كمامة|كمامات|قفاز|قفازات|ضماد|مستلزمات طبية|قطن طبي|شاش|معقم|محاليل|محلول/, MedicalSuppliesIcon],
+];
+
+/** Everything else a shop can sell */
+const GENERAL_WORDS: readonly Rule[] = [
   [/خبز|معجنات|حلويات|كعك|كيك/, BakeryIcon],
   [/خضار|فواكه|فاكهة|بندورة|تفاح/, ProduceIcon],
   [/قهوة|مشروب|عصير|شاي|مياه/, CafeIcon],
@@ -40,6 +65,8 @@ const BY_WORD: readonly (readonly [RegExp, Icon])[] = [
   [/إسمنت|حديد|دهان|بلاط|أدوات بناء|بناء/, BuildingMaterialsIcon],
   [/مواد غذائية|معلبات|ألبان|زيت|سكر|أرز/, SupermarketIcon],
 ];
+
+const MEDICAL_SECTORS = ['pharmacy', 'medical_supplies'];
 
 /** The store's business type when nothing else says what the item is */
 const BY_SECTOR: Readonly<Record<string, Icon>> = {
@@ -76,12 +103,24 @@ export function placeholderIconFor(opts: {
     // Tailoring belongs to the clothing shop; every other service is work done for the customer
     return (opts.sectors ?? []).includes('clothing') ? ScissorsIcon : WrenchIcon;
   }
-  for (const text of [opts.categoryName, opts.name]) {
+  // Sector first: a clothing shop never draws medical things («قطن» there is a fabric); a medical or
+  // pharmacy shop reads its own words first. Then the item's own name, before its category's.
+  const sectors = opts.sectors ?? [];
+  const medicalShop = sectors.some((s) => MEDICAL_SECTORS.includes(s));
+  const clothingShop = sectors.includes('clothing');
+  const maps: readonly (readonly Rule[])[] = medicalShop
+    ? [MEDICAL_WORDS, CLOTHING_WORDS, GENERAL_WORDS]
+    : clothingShop
+      ? [CLOTHING_WORDS, GENERAL_WORDS]
+      : [CLOTHING_WORDS, MEDICAL_WORDS, GENERAL_WORDS];
+  for (const text of [opts.name, opts.categoryName]) {
     if (!text) continue;
-    const hit = BY_WORD.find(([word]) => word.test(text));
-    if (hit) return hit[1];
+    for (const map of maps) {
+      const hit = map.find(([word]) => word.test(text));
+      if (hit) return hit[1];
+    }
   }
-  for (const sector of opts.sectors ?? []) {
+  for (const sector of sectors) {
     const icon = BY_SECTOR[sector];
     if (icon) return icon;
   }

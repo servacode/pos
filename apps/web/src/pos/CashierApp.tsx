@@ -11,7 +11,9 @@ import {
   CashierShell,
   EmptyState,
   GiftIcon,
+  displayNumber,
   IconButton,
+  KeyIcon,
   ListIcon,
   LockIcon,
   LogoutIcon,
@@ -21,14 +23,15 @@ import {
   MoreIcon,
   PrintIcon,
   ScissorsIcon,
-  SerialIcon,
-  SettingsIcon,
   TransferIcon,
   UndoIcon,
   useDigits,
   WarningIcon,
+  WrenchIcon,
 } from '@serva/ui';
 import type { Catalog } from './catalog';
+import { armClickGuard } from './sale/clickGuard';
+import { withoutUnfedServices } from './sale/serviceFee';
 import { clockText } from './format';
 import { PrintableReceipt, type PaperWidth, type ReceiptData } from './receipt/Receipt';
 import { printJob as escposJob } from './print/escpos';
@@ -170,7 +173,8 @@ export interface CashierAppProps {
   persisted: boolean | null;
   online: boolean;
   outbox: OutboxStatus | null;
-  onSignOut: () => void;
+  /** `note` says what was kept for the next sign-in (an unfinished sale), shown on the code screen */
+  onSignOut: (note?: string) => void;
 }
 
 /**
@@ -194,6 +198,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const tillSubscription = useTillSubscription(pos.device.token);
   const notice = <SubscriptionChip subscription={tillSubscription} />;
   const settings = catalog.settings;
+  const catalogRef = useRef(catalog);
+  catalogRef.current = catalog;
   // The menu shows only what this business type does: alterations for clothes, gift vouchers where gifts are sold
   const alters = storeSells(settings?.sectors, ALTERATION_SECTORS);
   const rents = storeSells(settings?.sectors, RENTAL_SECTORS);
@@ -203,7 +209,12 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     [catalog.staff, pos.device.branchCode],
   );
   const [shift, setShift] = useState<OpenShift | null | undefined>(undefined);
-  const [view, setView] = useState<View>('sale');
+  const [view, setViewNow] = useState<View>('sale');
+  // Coming back from a sub-screen (rentals, returns...): its closing click must not reach a tile
+  const setView = useCallback((next: View) => {
+    armClickGuard();
+    setViewNow(next);
+  }, []);
   // «تبديل» from the menu opens the return screen already set on an exchange
   const [startExchange, setStartExchange] = useState(false);
   const [cart, setCartState] = useState<Cart>(EMPTY_CART);
@@ -253,7 +264,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       // A cart kept by the old lock (one per cashier) is read once and moved to the new place
       const legacy = await pos.local.get<Cart>(cartKey(session.userId));
       if (legacy) void pos.local.remove(cartKey(session.userId));
-      let mine = saved && saved.userId === session.userId ? saved.cart : null;
+      let mine =
+        saved && saved.userId === session.userId
+          ? withoutUnfedServices(saved.cart, catalogRef.current.byVariant)
+          : null;
       if (mine && (mine.lines.length > 0 || mine.voucher)) {
         const pending = await pos.store.listPending().catch(() => []);
         const sold = [...pending.map((e) => e.doc), ...(last ? [last.doc] : [])];
@@ -321,6 +335,12 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     return missing;
   };
   const [quotationNote, setQuotationNote] = useState<string | null>(null);
+  const [openedNote, setOpenedNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openedNote) return;
+    const timer = setTimeout(() => setOpenedNote(null), 8_000);
+    return () => clearTimeout(timer);
+  }, [openedNote]);
   const fromAddress = useRef<(q: Quotation) => void>(() => undefined);
   fromAddress.current = (q) => {
     openQuotation(q);
@@ -396,7 +416,10 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         ? pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart: current, savedAt: Date.now() })
         : Promise.resolve(),
     );
-    void cartWrites.current.finally(onSignOut);
+    const kept = current.lines.length > 0 || Boolean(current.voucher);
+    void cartWrites.current.finally(() =>
+      onSignOut(kept ? 'الفاتورة الجارية محفوظة، وتجدها عند دخولك مرة ثانية.' : undefined),
+    );
   }, [pos.local, session.userId, onSignOut, writeCart]);
 
   const idleMinutes = settings?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
@@ -449,7 +472,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           icon={WarningIcon}
           title="إعدادات المتجر لم تصل إلى هذا الجهاز بعد"
           description="تصل مع أول اتصال بالإنترنت، ثم يعمل البيع دون إنترنت."
-          action={<Button onClick={onSignOut}>ارجع لشاشة الدخول</Button>}
+          action={<Button onClick={() => onSignOut()}>ارجع لشاشة الدخول</Button>}
         />
       </CashierShell>
     );
@@ -898,12 +921,12 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             </MenuItem>
           ) : null}
           {rents ? (
-            <MenuItem icon={<SerialIcon />} onSelect={() => setView('rentals')}>
+            <MenuItem icon={<KeyIcon />} onSelect={() => setView('rentals')}>
               التأجير
             </MenuItem>
           ) : null}
           {rents && shift && session.permissions.has('sale.create') ? (
-            <MenuItem icon={<ListIcon />} onSelect={() => setView('maintenance')}>
+            <MenuItem icon={<WrenchIcon />} onSelect={() => setView('maintenance')}>
               عقود الصيانة
             </MenuItem>
           ) : null}
@@ -923,7 +946,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
               إيصال آخر فاتورة
             </MenuItem>
           ) : null}
-          <MenuItem icon={<SettingsIcon />} onSelect={() => setView('printer')}>
+          <MenuItem icon={<PrintIcon />} onSelect={() => setView('printer')}>
             الطابعة
           </MenuItem>
           <MenuSeparator />
@@ -994,7 +1017,21 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         <TillBoundary onBack={() => setView('sale')}>
           <Suspense fallback={null}>
             {shift === null ? (
-              <ShiftOpenScreen session={session} catalog={catalog} onOpened={setShift} />
+              <ShiftOpenScreen
+                session={session}
+                catalog={catalog}
+                onOpened={(opened) => {
+                  setShift(opened);
+                  // Said once on the sale screen: which shift, and the float it opened with
+                  const float = opened.opening
+                    .filter((o) => o.amountMinor > 0)
+                    .map((o) => displayNumber(formatMoney(o.amountMinor, o.currency), digits))
+                    .join(' و');
+                  setOpenedNote(
+                    `فُتحت الوردية ${displayNumber(opened.number, digits)}${float ? ` بعهدة افتتاح ${float}` : ''}.`,
+                  );
+                }}
+              />
             ) : view === 'close' ? (
               <ShiftCloseScreen
                 session={session}
@@ -1236,6 +1273,21 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'gift' }, copy: false })
         }
       />
+      {openedNote ? (
+        <p
+          role="status"
+          className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-success-ink shadow-e2"
+        >
+          <span className="min-w-0 flex-1">{openedNote}</span>
+          <button
+            type="button"
+            onClick={() => setOpenedNote(null)}
+            className="min-h-12 shrink-0 rounded-control px-3 font-bold"
+          >
+            حسناً
+          </button>
+        </p>
+      ) : null}
       {quotationNote ? (
         <p
           role="status"
