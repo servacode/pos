@@ -16,7 +16,7 @@ const METHOD_NAMES: Record<string, string> = {
   account: 'إلى حساب الزبون',
 };
 
-const MOVEMENT_NAMES: Record<CashMovementKind, string> = {
+export const MOVEMENT_NAMES: Record<CashMovementKind, string> = {
   pay_in: 'إيداع في الدرج',
   pay_out: 'سحب من الدرج',
   expense: 'مصروف',
@@ -153,21 +153,23 @@ export function ZReport({
           );
         })}
       </Section>
-      <Section title="المرتجعات">
-        <Line label="العدد">{counted(activity.returns.count, RETURNS, digits)}</Line>
-        {activity.returns.byMethod
-          .filter((row) => row.method !== 'voucher')
-          .map((row) => (
-            <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
+      {hasReturns ? (
+        <Section title="المرتجعات">
+          <Line label="العدد">{counted(activity.returns.count, RETURNS, digits)}</Line>
+          {activity.returns.byMethod
+            .filter((row) => row.method !== 'voucher')
+            .map((row) => (
+              <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
+                <Money minor={row.amountMinor} currency={row.currency} />
+              </Line>
+            ))}
+          {refundedVouchers.map((row) => (
+            <Line key={`rv:${row.currency}`} label="قسائم مرتجع صادرة">
               <Money minor={row.amountMinor} currency={row.currency} />
             </Line>
           ))}
-        {refundedVouchers.map((row) => (
-          <Line key={`rv:${row.currency}`} label="قسائم مرتجع صادرة">
-            <Money minor={row.amountMinor} currency={row.currency} />
-          </Line>
-        ))}
-      </Section>
+        </Section>
+      ) : null}
       {activity.returns.count > 0 ? (
         // The same figures as the closing summary: payments less the cash paid back for returns
         <Section title="الصافي بعد المرتجعات">
@@ -194,14 +196,16 @@ export function ZReport({
           ))}
         </Section>
       ) : null}
-      <Section title="قسائم الهدية المباعة وعربون التأجير">
-        <Line label="العدد">{counted(activity.vouchers.count, VOUCHERS, digits)}</Line>
-        {activity.vouchers.byCurrency.map((row) => (
-          <Line key={row.currency} label="قيمتها">
-            <Money minor={row.amountMinor} currency={row.currency} />
-          </Line>
-        ))}
-      </Section>
+      {activity.vouchers.count > 0 ? (
+        <Section title="قسائم الهدية المباعة وعربون التأجير">
+          <Line label="العدد">{counted(activity.vouchers.count, VOUCHERS, digits)}</Line>
+          {activity.vouchers.byCurrency.map((row) => (
+            <Line key={row.currency} label="قيمتها">
+              <Money minor={row.amountMinor} currency={row.currency} />
+            </Line>
+          ))}
+        </Section>
+      ) : null}
       <Section title="حركات الدرج">
         {!hasDrawerLines ? <span>لا حركات.</span> : null}
         {(cashIn?.receipts ?? []).map((r) => (

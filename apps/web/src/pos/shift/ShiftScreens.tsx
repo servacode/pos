@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import type { CashMovementKind, CashMovementPayload } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
@@ -36,8 +36,8 @@ import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
-import { DrawerCounter, drawerName, emptyCount, totalCount, useCountKeypad } from './DrawerCounter';
-import { ZReport } from './ZReport';
+import { DrawerCounter, drawerName, totalCount, useCountKeypad } from './DrawerCounter';
+import { MOVEMENT_NAMES, ZReport } from './ZReport';
 import {
   cashMovementPayload,
   closeDrawer,
@@ -132,11 +132,6 @@ function CountLayout({
         </div>
         {/* The phone's own keyboard types the amount; the pad is for a till with a mouse or a wide screen */}
         <div className="flex flex-col gap-2 max-lg:hidden">
-          {keypad.targetText && counts.some((c) => c.notes) ? (
-            <p className="truncate text-sm text-ink-muted">
-              الفئة المختارة: <span className="font-semibold text-ink">{keypad.targetText}</span>
-            </p>
-          ) : null}
           <Keypad label="لوحة العدّ" {...keypad.keypad} />
         </div>
         <div className="flex flex-col gap-4 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-surface max-lg:p-3">
@@ -297,9 +292,8 @@ export function ShiftCloseScreen({
   const [confirming, setConfirming] = useState(false);
   const [closedAt, setClosedAt] = useState(0);
   const { paper, print } = usePrint();
-  const [counts, setCounts] = useState<DrawerCount[]>(() =>
-    drawerCurrencies(catalog).map((c) => emptyCount(c, catalog.settings?.till)),
-  );
+  // The same as opening: one (blind) amount per drawer, note by note one tap away («عدّ تفصيلي»)
+  const [counts, setCounts] = useState<DrawerCount[]>(() => drawerCurrencies(catalog).map(totalCount));
   const [activity, setActivity] = useState<ShiftActivity | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -385,7 +379,7 @@ export function ShiftCloseScreen({
   });
 
   // Display only: «الصافي» is what stayed in the drawer from payments, the cash paid back for returns taken off
-  const methodRows = netMethodRows(activity);
+  const methodRows = netMethodRows(activity).filter((row) => row.count > 0 || row.amountMinor !== 0);
   // What the returns paid back, per currency, for the line under the table
   const returnedByCurrency = new Map<string, number>();
   for (const refund of activity?.returns.byMethod ?? [])
@@ -403,7 +397,8 @@ export function ShiftCloseScreen({
           row.method === 'cash' && row.currency !== settings.baseCurrency ? ' بالدولار' : ''
         }`,
     },
-    { key: 'count', header: 'دفعات', numeric: true, cell: (row) => row.count },
+    // A row that only paid cash back (no payment taken) has no count: a dash, never «0 دفعات» beside an amount
+    { key: 'count', header: 'دفعات', numeric: true, cell: (row) => (row.count > 0 ? row.count : '—') },
     {
       key: 'amount',
       header: 'الصافي بعد المرتجعات',
@@ -415,8 +410,9 @@ export function ShiftCloseScreen({
   return (
     <div className="flex w-full max-w-6xl flex-col gap-6">
       <FlowHeader
-        onBack={step === 'count' ? onBack : step === 'done' ? onClosed : () => setStep('count')}
-        backLabel={step === 'count' ? 'ارجع للبيع' : step === 'done' ? 'اخرج' : 'ارجع للعدّ'}
+        // Once closed the only way out is «تمّ» beside the slip: one exit, never two
+        onBack={step === 'count' ? onBack : step === 'done' ? undefined : () => setStep('count')}
+        backLabel={step === 'count' ? 'ارجع للبيع' : 'ارجع للعدّ'}
         icon={step === 'count' ? <LockIcon size={24} /> : <ReportsIcon size={24} />}
         title={step === 'count' ? 'إغلاق الوردية' : step === 'done' ? 'أُغلقت الوردية' : 'ملخّص الوردية'}
         description={
@@ -463,21 +459,25 @@ export function ShiftCloseScreen({
       ) : step === 'done' && activity ? (
         <section
           aria-label="تقرير الإغلاق"
-          className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-x-8"
+          className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[auto_minmax(0,22rem)] lg:justify-center lg:gap-x-8"
         >
-          <div className="rounded-card border border-line bg-surface p-3 shadow-e1 max-lg:order-3 lg:row-span-2">
+          <div className="mx-auto rounded-card border border-line bg-surface p-3 shadow-e1 max-lg:order-2 lg:mx-0">
             <ZReport {...zProps(activity)} />
           </div>
-          <div className="max-lg:order-1">
-            <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع تقرير الإغلاق ثم اخرج.</Alert>
-          </div>
-          <div className="flex flex-wrap gap-3 max-lg:order-2 lg:self-start">
-            <Button size="lg" icon={<ReportsIcon />} onClick={() => print('80mm')}>
-              اطبع تقرير الإغلاق
-            </Button>
-            <Button size="lg" variant="secondary" onClick={onClosed}>
-              تمّ، اخرج
-            </Button>
+          {/* A wide screen: the slip on one side, this column (the word, then the two buttons) on the other */}
+          <div className="contents lg:flex lg:flex-col lg:gap-4 lg:self-start">
+            <div className="max-lg:order-1">
+              <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع التقرير ثم اضغط «تمّ».</Alert>
+            </div>
+            {/* The actions stay in view: «اطبع» first, then «تمّ» (the one way out) */}
+            <div className="flex flex-col gap-3 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:order-3 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-surface max-lg:p-3">
+              <Button size="lg" fullWidth icon={<ReportsIcon />} onClick={() => print('80mm')}>
+                اطبع
+              </Button>
+              <Button size="lg" fullWidth variant="secondary" onClick={onClosed}>
+                تمّ
+              </Button>
+            </div>
           </div>
           {paper ? (
             <PrintSheet paper={paper}>
@@ -506,20 +506,37 @@ export function ShiftCloseScreen({
               }
             />
             {activity &&
-            (activity.returns.count > 0 || activity.vouchers.count > 0 || activity.saleCount > 0) ? (
+            (activity.returns.count > 0 ||
+              activity.vouchers.count > 0 ||
+              activity.saleCount > 0 ||
+              activity.movements.length > 0 ||
+              (activity.cashIn?.receipts.length ?? 0) > 0) ? (
               <ul aria-label="مرتجعات وقسائم" className="flex flex-col gap-1 text-sm text-ink-muted">
                 {/* The same figures the closing slip opens with, so the two agree */}
-                {activity.salesTotals.map((t) => (
-                  <li key={t.currency} className="flex flex-wrap items-center gap-x-1">
-                    {activity.returns.count > 0 ? 'إجمالي المبيعات قبل المرتجعات' : 'إجمالي المبيعات'}:{' '}
-                    <Money minor={t.totalMinor} currency={t.currency} className="text-ink" />
-                    {t.discountMinor > 0 ? (
-                      <>
-                        {' · '}منها خصومات <Money minor={t.discountMinor} currency={t.currency} />
-                      </>
-                    ) : null}
-                  </li>
-                ))}
+                {activity.salesTotals
+                  .filter((t) => t.totalMinor !== 0)
+                  .map((t) => {
+                    const back = returnedByCurrency.get(t.currency) ?? 0;
+                    return (
+                      <Fragment key={t.currency}>
+                        <li className="flex flex-wrap items-center gap-x-1">
+                          {activity.returns.count > 0 ? 'إجمالي المبيعات قبل المرتجعات' : 'إجمالي المبيعات'}:{' '}
+                          <Money minor={t.totalMinor} currency={t.currency} className="text-ink" />
+                          {t.discountMinor > 0 ? (
+                            <>
+                              {' · '}منها خصومات <Money minor={t.discountMinor} currency={t.currency} />
+                            </>
+                          ) : null}
+                        </li>
+                        {activity.returns.count > 0 && back > 0 ? (
+                          <li className="flex flex-wrap items-center gap-x-1">
+                            صافي المبيعات بعد المرتجعات:{' '}
+                            <Money minor={t.totalMinor - back} currency={t.currency} className="text-ink" />
+                          </li>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 {activity.bySeller.length > 0 ? (
                   <li className="flex flex-col gap-0.5">
                     <span className="font-semibold text-ink">البائعون</span>
@@ -547,6 +564,19 @@ export function ShiftCloseScreen({
                     ))}
                   </li>
                 ) : null}
+                {/* What came into the drawer besides sales, as on the final slip, so the cash row is no surprise */}
+                {(activity.cashIn?.receipts ?? []).map((r) => (
+                  <li key={`rc:${r.currency}`} className="flex flex-wrap items-center gap-x-1">
+                    دفعات زبائن نقداً:{' '}
+                    <Money minor={r.amountMinor} currency={r.currency} className="text-ink" />
+                  </li>
+                ))}
+                {activity.movements.map((m, i) => (
+                  <li key={`mv:${i}`} className="flex flex-wrap items-center gap-x-1">
+                    {MOVEMENT_NAMES[m.kind]} · <bdi>{m.reason}</bdi>:{' '}
+                    <Money minor={m.amountMinor} currency={m.currency} className="text-ink" />
+                  </li>
+                ))}
                 {refundVouchers(activity).map((v) => (
                   <li key={v.currency} className="flex flex-wrap items-center gap-x-1">
                     قسائم مرتجع صادرة:{' '}

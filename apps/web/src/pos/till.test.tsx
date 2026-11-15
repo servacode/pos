@@ -149,6 +149,11 @@ describe('return rules by store', () => {
     };
     expect(await searchInvoice('INV-1', 't', answer(200, lookup))).toEqual({ found: lookup });
     expect(await searchInvoice('INV-9', 't', answer(404, {}))).toEqual({ found: null, reason: 'missing' });
+    // The quiet answer (200, no invoice) is «missing» too
+    expect(await searchInvoice('INV-9', 't', answer(200, { invoice: null }))).toEqual({
+      found: null,
+      reason: 'missing',
+    });
     expect(await searchInvoice('INV-9', 't', answer(503, {}))).toEqual({ found: null, reason: 'offline' });
     const down = (async () => {
       throw new TypeError('Failed to fetch');
@@ -477,7 +482,8 @@ describe('closing the shift', () => {
     await user.click(screen.getByRole('button', { name: 'المزيد' }));
     await user.click(screen.getByRole('menuitem', { name: 'أغلق الوردية' }));
     await screen.findByText('عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.');
-    // The first note is picked: the digits typed on the keyboard go into it
+    // Counting note by note is one tap away; the first note is then picked and the keyboard digits go into it
+    await user.click(screen.getAllByRole('button', { name: 'عدّ تفصيلي' })[0]!);
     await user.keyboard('3');
     const first = () => screen.getAllByLabelText(/^عدد أوراق/)[0]!;
     expect(first()).toHaveValue('3');

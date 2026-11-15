@@ -194,7 +194,7 @@ describe('the tile counts only what can be sold', () => {
     const tile = within(screen.getByRole('list', { name: 'الأصناف' })).getByRole('button', {
       name: /بانادول 500/,
     });
-    expect(plain(tile)).toContain('المتوفر للبيع 5');
+    expect(plain(tile)).toContain('متوفر 5');
     expect(plain(tile)).toMatch(/9 منتهية/);
     expect(plain(tile)).not.toContain('نفد');
   });
@@ -204,7 +204,7 @@ describe('the tile counts only what can be sold', () => {
     const tile = within(screen.getByRole('list', { name: 'الأصناف' })).getByRole('button', {
       name: /بانادول 500/,
     });
-    expect(plain(tile)).toContain('نفد');
+    expect(plain(tile)).toContain('غير متوفر');
     expect(plain(tile)).toContain('منتهية');
   });
 });

@@ -456,6 +456,10 @@ describe('renaming and stopping a device', () => {
     expect(await screen.findByText('كاشير قديم')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'إجراءات «كاشير قديم»' }));
     await user.click(screen.getByRole('menuitem', { name: 'احذف من القائمة: كاشير قديم' }));
+    // asks first: nothing is sent until the dialog is confirmed
+    const sure = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/devices/dev-3/hide')).toHaveLength(0);
+    await user.click(within(sure).getByRole('button', { name: 'احذفه من القائمة' }));
     await vi.waitFor(() => expect(screen.queryByText('كاشير قديم')).not.toBeInTheDocument());
     expect(requestsTo('POST', '/v1/devices/dev-3/hide')).toHaveLength(1);
     expect(screen.getByText('كاشير 1')).toBeInTheDocument();

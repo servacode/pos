@@ -67,7 +67,7 @@ import { voucherBalancesAfter } from './pay/vouchers';
 import { readShift, type OpenShift } from './shift/shift';
 import { staffRoster, type StaffSession } from './staff/staff';
 import { SubscriptionChip, useTillSubscription } from '../layout/subscription-banner';
-import { StatusBar, type OutboxStatus } from './StatusBar';
+import { InstallHintMenuItem, StatusBar, type OutboxStatus } from './StatusBar';
 import { useIdle } from './useIdle';
 import { DEFAULT_IDLE_MINUTES } from './staff/persist';
 import { cartAlreadySold } from './soldCart';
@@ -868,7 +868,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             type="button"
             onClick={reprint}
             aria-label="إيصال آخر فاتورة"
-            className="hidden min-h-12 shrink-0 items-center gap-2 rounded-control px-3 text-sm text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink xl:inline-flex"
+            className="flex min-h-12 w-full items-center gap-2 rounded-control px-3 text-sm text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink"
           >
             <PrintIcon size={16} />
             آخر فاتورة{' '}
@@ -952,6 +952,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           <MenuItem icon={<PrintIcon />} onSelect={() => setView('printer')}>
             الطابعة
           </MenuItem>
+          <InstallHintMenuItem persisted={persisted} />
           <MenuSeparator />
           <MenuItem icon={<LockIcon />} shortcut="Alt+L" onSelect={lock}>
             اقفل الشاشة
@@ -1277,7 +1278,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       {openedNote ? (
         <p
           role="status"
-          className="fixed inset-x-4 top-[4.5rem] z-50 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-success-ink shadow-e2"
+          className="fixed inset-x-4 top-[calc(var(--till-chrome,4rem)+0.5rem)] z-70 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-success/20 bg-success-soft px-4 py-3 text-sm font-semibold text-success-ink shadow-e2"
         >
           <span className="min-w-0 flex-1">{openedNote}</span>
           <button
@@ -1292,7 +1293,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       {quotationNote ? (
         <p
           role="status"
-          className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-warning/20 bg-warning-soft px-4 py-3 text-sm font-semibold text-warning-ink shadow-e2"
+          className="fixed inset-x-4 bottom-4 z-70 mx-auto flex max-w-xl items-center gap-3 rounded-card border border-warning/20 bg-warning-soft px-4 py-3 text-sm font-semibold text-warning-ink shadow-e2"
         >
           <span className="min-w-0 flex-1">{quotationNote}</span>
           <button

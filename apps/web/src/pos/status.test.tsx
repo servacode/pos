@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import { stripBidiControls } from '@serva/core/text';
@@ -22,7 +23,8 @@ describe('status bar (kit cashier/StatusBar)', () => {
     expect(connectionText(false, 12)).toBe('دون إنترنت · البيع مستمر · 12 بانتظار الإرسال');
   });
 
-  it('shows the last time the device sent its documents', () => {
+  it('shows the last time the device sent its documents', async () => {
+    const user = userEvent.setup();
     const at = new Date(2026, 9, 30, 16, 32).getTime();
     render(
       <StatusBar
@@ -34,7 +36,13 @@ describe('status bar (kit cashier/StatusBar)', () => {
       />,
     );
     expect(screen.getByText('دون إنترنت · البيع مستمر · 2 بانتظار الإرسال')).toBeInTheDocument();
+    // One chip: the rest (what waits, the last send) opens on a tap and closes with Esc
+    expect(screen.queryByText('آخر إرسال 4:32 م')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'حالة الاتصال والإرسال' }));
     expect(screen.getByText('آخر إرسال 4:32 م')).toBeInTheDocument();
+    expect(screen.getByText('2 بانتظار الإرسال')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByText('آخر إرسال 4:32 م')).not.toBeInTheDocument();
     expect(screen.getByText('وردية منذ 8:10 ص')).toBeInTheDocument();
   });
 });

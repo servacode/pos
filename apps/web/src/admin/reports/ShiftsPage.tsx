@@ -66,7 +66,7 @@ export function ShiftsPage() {
     { key: 'count', header: 'الفواتير', numeric: true, cell: (row) => row.salesCount, total: salesCount },
     {
       key: 'total',
-      header: 'المبيعات',
+      header: 'إجمالي المبيعات',
       numeric: true,
       cell: (row) => <Money minor={row.salesTotalMinor} currency={base} />,
       total: <Money minor={salesTotal} currency={base} />,

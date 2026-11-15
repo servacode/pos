@@ -37,6 +37,8 @@ import { pieceWord } from './packText';
 import { clicksSwallowed } from './clickGuard';
 
 const PHOTOS_OFF_KEY = 'tillPhotosOff';
+/** The compact tile density, kept on this device */
+const COMPACT_KEY = 'tillCompactTiles';
 
 export interface PriceCheck {
   /** The product's name */
@@ -136,6 +138,22 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
       // Storage is closed: the choice lasts until the page is reloaded
     }
   }, [photosOff]);
+  // Compact tiles (smaller, a little less to read): one tap, kept on this device
+  const [compact, setCompact] = useState(() => {
+    try {
+      return localStorage.getItem(COMPACT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (compact) localStorage.setItem(COMPACT_KEY, '1');
+      else localStorage.removeItem(COMPACT_KEY);
+    } catch {
+      // Storage is closed: the choice lasts until the page is reloaded
+    }
+  }, [compact]);
   // The picture's place (photo or letter) stays unless the cashier chose the compact grid, offered where photos exist
   const photos = anyPhoto && !photosOff;
   // A dollar-priced tile says what it comes to in the till's currency
@@ -342,6 +360,17 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
               </button>
             );
           })}
+          {results.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="md"
+              className="shrink-0 max-sm:min-h-11"
+              aria-pressed={compact}
+              onClick={() => setCompact((v) => !v)}
+            >
+              {compact ? 'بطاقات عادية' : 'بطاقات مضغوطة'}
+            </Button>
+          ) : null}
           {anyPhoto && results.length > 0 ? (
             <Button
               variant="ghost"
@@ -372,6 +401,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           pickingProduct={pickingProduct}
           today={today}
           photos={photos}
+          compact={compact}
           stockTracked={stockTracked}
           fx={fx}
           iconOf={iconOf}
@@ -395,6 +425,7 @@ const Grid = memo(function Grid({
   pickingProduct,
   today,
   photos,
+  compact,
   stockTracked,
   fx,
   iconOf,
@@ -402,6 +433,7 @@ const Grid = memo(function Grid({
   onPickModel,
 }: {
   photos: boolean;
+  compact: boolean;
   stockTracked: boolean;
   fx: TileFx | null;
   iconOf: (item: CatalogItem) => Icon;
@@ -417,7 +449,12 @@ const Grid = memo(function Grid({
     <div className="-m-1 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1 [scrollbar-width:thin]">
       <ul
         aria-label="الأصناف"
-        className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))] content-start gap-3"
+        className={cn(
+          'grid auto-rows-fr content-start gap-3',
+          compact
+            ? 'grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-2'
+            : 'grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]',
+        )}
       >
         {entries.map((entry) =>
           entry.kind === 'model' ? (
@@ -428,6 +465,7 @@ const Grid = memo(function Grid({
                 inCart={entry.pieces.some((p) => inCart.has(p.variantId))}
                 today={today}
                 photos={photos}
+                compact={compact}
                 stockTracked={stockTracked}
                 fx={fx}
                 Kind={iconOf(entry.lead)}
@@ -441,6 +479,7 @@ const Grid = memo(function Grid({
                 inCart={inCart.has(entry.item.variantId)}
                 today={today}
                 photos={photos}
+                compact={compact}
                 stockTracked={stockTracked}
                 fx={fx}
                 Kind={iconOf(entry.item)}
@@ -459,6 +498,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
   inCart,
   today,
   photos,
+  compact,
   stockTracked,
   fx,
   Kind,
@@ -468,6 +508,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
   inCart: boolean;
   today: string;
   photos: boolean;
+  compact: boolean;
   stockTracked: boolean;
   fx: TileFx | null;
   Kind: Icon;
@@ -487,6 +528,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
       selected={inCart}
       soldOut={isSoldOut([item], today)}
       extra={<TileMarks pieces={[item]} today={today} none={stockTracked} />}
+      {...(compact || item.isService ? { compact: true } : {})}
       onSelect={() => onPick(item)}
       className="h-full w-full"
     />
@@ -499,6 +541,7 @@ const ModelTile = memo(function ModelTile({
   inCart,
   today,
   photos,
+  compact,
   stockTracked,
   fx,
   Kind,
@@ -509,6 +552,7 @@ const ModelTile = memo(function ModelTile({
   inCart: boolean;
   today: string;
   photos: boolean;
+  compact: boolean;
   stockTracked: boolean;
   fx: TileFx | null;
   Kind: Icon;
@@ -529,6 +573,7 @@ const ModelTile = memo(function ModelTile({
       {...(photos && entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
       selected={picking || inCart}
       extra={<TileMarks pieces={entry.pieces} today={today} none={stockTracked} />}
+      {...(compact ? { compact: true } : {})}
       onSelect={() => onPick(entry.productId)}
       className="h-full w-full"
     />
@@ -591,7 +636,7 @@ function TileMarks({
   const info = tileInfo(pieces, today);
   const unsellable = info.expiredQty + info.blockedQty;
   if (none && info.stockQty === null && !pieces.every((p) => p.isService)) {
-    return <span className="num text-xs font-medium text-ink-muted">لا مخزون</span>;
+    return <span className="num text-xs font-medium text-ink-muted">غير متوفر</span>;
   }
   if (
     info.stockQty === null &&
@@ -608,21 +653,15 @@ function TileMarks({
   return (
     <>
       {onShelf !== null ? (
-        <span
-          className={cn('num text-xs font-medium', nothingSellable ? 'text-danger-ink' : 'text-ink-muted')}
-        >
-          {nothingSellable ? 'نفد' : `المتوفر للبيع ${formatQuantity(onShelf, digits)}`}
+        <span className={cn('num text-xs font-medium', nothingSellable ? 'text-ink-muted' : 'text-ink')}>
+          {nothingSellable ? 'غير متوفر' : `متوفر ${formatQuantity(onShelf, digits)}`}
         </span>
       ) : null}
-      {/* Red only when nothing can be sold; otherwise a muted note of what is left out of the count */}
+      {/* What is left out of the count (halted, expired): one small «⚠ 3 موقوفة» chip, never a second sentence */}
       {unsellable > 0 ? (
-        nothingSellable ? (
-          <Badge tone="danger">{why}</Badge>
-        ) : (
-          <Badge tone="neutral">
-            {formatQuantity(unsellable, digits)} {why}
-          </Badge>
-        )
+        <Badge tone={nothingSellable ? 'warning' : 'neutral'}>
+          ⚠ {formatQuantity(unsellable, digits)} {why}
+        </Badge>
       ) : null}
       {info.expiry ? (
         <span title="أقرب انتهاء أولاً">

@@ -239,6 +239,68 @@ describe('HomePage', () => {
       expect(await screen.findByText(/منها قسائم مستردّة/)).toBeInTheDocument();
       const recalled = await screen.findByRole('link', { name: /دفعة موقوفة عن البيع/ });
       expect(recalled).toHaveAttribute('href', '/recall');
+      expect(recalled.className).toContain('bg-danger-soft');
+    });
+
+    it('is red for an expired batch and amber for one that only nears its date', async () => {
+      const batch = (variantId: string, daysLeft: number) => ({
+        variantId,
+        name: 'مضاد ' + variantId,
+        batchNo: 'B' + variantId,
+        expiryDate: '2026-12-01',
+        purchaseNumber: null,
+        receivedOn: '2026-10-01',
+        qty: 5000,
+        daysLeft,
+        blocked: false,
+        blockReason: null,
+      });
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'purchases.manage']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        'GET /v1/inventory/expiry?days=30': {
+          status: 200,
+          body: { today: TODAY, items: [batch('a', -3), batch('b', 12)] },
+        },
+      });
+      renderApp('/');
+
+      const expired = await screen.findByRole('link', { name: 'دفعة منتهية الصلاحية' });
+      expect(expired.className).toContain('bg-danger-soft');
+      const near = await screen.findByRole('link', { name: /دفعة يقترب انتهاؤها/ });
+      expect(near.className).toContain('bg-warning-soft');
+    });
+
+    it('agrees the count with its verb: «مقاس واحد نفد و5 مقاسات توشك على النفاد»', async () => {
+      const piece = (variantId: string, size: string, stockQty: number) => ({
+        variantId,
+        productId: 'p-1',
+        name: 'فستان',
+        label: size,
+        attributes: [{ name: 'المقاس', value: size }],
+        stockQty,
+        soldQty: 6000,
+        minStockQty: null,
+      });
+      const me = meWith([...OWNER_KEYS, 'catalog.manage']);
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: { ...me, tenant: { ...me.tenant, sectors: ['clothing'] } } },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
+          status: 200,
+          body: {
+            lowStock: [
+              piece('v-1', 'S', 0),
+              ...['M', 'L', 'XL', 'XXL', '3XL'].map((size, i) => piece(`v-${i + 2}`, size, 1000)),
+            ],
+          },
+        },
+      });
+      renderApp('/');
+
+      expect(await screen.findByText('فستان: مقاس واحد نفد و5 مقاسات توشك على النفاد')).toBeInTheDocument();
     });
 
     it('compares today with yesterday, shows the payment mix and the expiring batches', async () => {
@@ -334,7 +396,7 @@ describe('HomePage', () => {
       expect(suggestion).toHaveAttribute('href', '/products');
     });
 
-    it('shows three rows at most, red only for what ran out, and the rest behind «عرض الكل»', async () => {
+    it('shows three rows at most, amber for what ran out, and the rest behind «عرض الكل»', async () => {
       const piece = (n: number, stockQty: number) => ({
         variantId: `v-${n}`,
         productId: `p-${n}`,
@@ -357,7 +419,8 @@ describe('HomePage', () => {
 
       // The one that is gone comes first, and has no second «نفد» chip beside its sentence
       const first = await screen.findByRole('link', { name: 'صنف 2: نفد' });
-      expect(first.className).toContain('bg-danger-soft');
+      expect(first.className).toContain('bg-warning-soft');
+      expect(first.className).not.toContain('bg-danger-soft');
       const amber = screen.getByRole('link', { name: /صنف 1: يوشك على النفاد/ });
       expect(amber.className).toContain('bg-warning-soft');
       expect(screen.queryByRole('link', { name: /صنف 4/ })).not.toBeInTheDocument();
@@ -366,7 +429,7 @@ describe('HomePage', () => {
       expect(screen.getByRole('button', { name: 'عرض أقل' })).toBeInTheDocument();
     });
 
-    it('is amber when a product still has sizes in stock, red only when it is wholly out', async () => {
+    it('is amber whether a product still has sizes in stock or is wholly out', async () => {
       const piece = (variantId: string, productId: string, name: string, inStock: number) => ({
         variantId,
         productId,
@@ -393,7 +456,7 @@ describe('HomePage', () => {
       const partial = await screen.findByRole('link', { name: /قميص: المقاس M نفد/ });
       expect(partial.className).toContain('bg-warning-soft');
       const whole = await screen.findByRole('link', { name: /بنطال: المقاس M نفد/ });
-      expect(whole.className).toContain('bg-danger-soft');
+      expect(whole.className).toContain('bg-warning-soft');
     });
 
     it('says there is no history instead of drawing a climb from zero when only today has sold', async () => {

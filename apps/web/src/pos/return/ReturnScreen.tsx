@@ -46,7 +46,6 @@ import type { StaffMember, StaffSession } from '../staff/staff';
 import { hasBlockedPick, medicineRulesOf, MedicineReturnNote, sealedConfirmed } from './medicineReturn';
 import {
   matchesInvoice,
-  matchesNumber,
   DAMAGED_REASON,
   returnableSales,
   returnReasons,
@@ -195,13 +194,17 @@ export function ReturnScreen({
       { kind: 'local'; at: number; sale: ReturnableSale } | { kind: 'hit'; at: number; hit: InvoiceHit }
     )[] = [
       ...shown.map((sale) => ({ kind: 'local' as const, at: Date.parse(sale.deviceTime), sale })),
+      // An invoice of another till found by its number stays in the list once it is chosen
+      ...(remote.sale && !shown.some((x) => x.number === remote.sale!.number)
+        ? [{ kind: 'local' as const, at: Date.parse(remote.sale.deviceTime), sale: remote.sale }]
+        : []),
       ...storeList
         .filter((h) => !shown.some((x) => x.number === h.number))
         .map((hit) => ({ kind: 'hit' as const, at: Date.parse(hit.deviceTime), hit })),
     ];
     return list.sort((x, y) => y.at - x.at);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown.map((x) => x.id).join(), storeList]);
+  }, [shown.map((x) => x.id).join(), storeList, remote.sale]);
 
   // Nothing here matches what is typed: the whole store is searched by itself, no second tap
   const typedNow = search.trim();
@@ -349,7 +352,7 @@ export function ReturnScreen({
       });
       return;
     }
-    setRemote({ sale, busy: false, note: null });
+    setRemote((r) => ({ ...r, sale, busy: false, note: null }));
     choose(sale);
   }
 
@@ -367,7 +370,8 @@ export function ReturnScreen({
       setRemote({ sale: null, busy: false, note: 'تعذّر فتح هذه الفاتورة الآن. حاول مرة أخرى.' });
       return;
     }
-    setRemote({ sale, busy: false, note: null });
+    // The list stays as it was: choosing an invoice never empties it
+    setRemote((r) => ({ ...r, sale, busy: false, note: null }));
     choose(sale);
   }
 
@@ -460,9 +464,10 @@ export function ReturnScreen({
               // A scanner types the barcode and presses Enter: the whole number goes to the store
               if (e.key === 'Enter') {
                 e.preventDefault();
-                const here = shown.length === 1 && matchesNumber(shown[0]!.number, search);
-                if (here && shown[0]!.number.toUpperCase() === search.trim().toUpperCase()) choose(shown[0]!);
-                else void findInStore();
+                // An invoice of this device that matches is never asked of the server
+                const exact = shown.find((s) => s.number.toUpperCase() === search.trim().toUpperCase());
+                if (exact) choose(exact);
+                else if (shown.length === 0) void findInStore();
               }
             }}
             inputClassName="num"
@@ -488,6 +493,7 @@ export function ReturnScreen({
           ) : null}
           {entries &&
           shown.length === 0 &&
+          !current &&
           !remote.note &&
           !remote.busy &&
           storeList.length === 0 &&
@@ -592,9 +598,12 @@ export function ReturnScreen({
                 <Button variant="secondary" icon={<PrintIcon />} onClick={() => onPrint(saved)}>
                   اطبع الإيصال مرة أخرى
                 </Button>
-                <Button variant="secondary" onClick={() => setSaved(null)}>
-                  مرتجع آخر من نفس الفاتورة
-                </Button>
+                {/* Nothing left to take back from this invoice: no offer of another return */}
+                {lines.length > 0 ? (
+                  <Button variant="secondary" onClick={() => setSaved(null)}>
+                    مرتجع آخر من نفس الفاتورة
+                  </Button>
+                ) : null}
                 <Button variant="ghost" onClick={onBack}>
                   ارجع للبيع
                 </Button>

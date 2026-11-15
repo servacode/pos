@@ -5,7 +5,6 @@ import {
   BandageIcon,
   DropIcon,
   GloveIcon,
-  MedicalSuppliesIcon,
   ThermometerIcon,
   TubeIcon,
   KidsIcon,
@@ -22,6 +21,8 @@ import {
   TrousersIcon,
   SkirtIcon,
   DressIcon,
+  MaskIcon,
+  RobeIcon,
   TopIcon,
   BeltIcon,
   ScarfIcon,
@@ -78,6 +79,10 @@ describe('placeholderIconFor', () => {
     expect(placeholderIconFor({ name: 'حزام جلد', sectors: clothing })).toBe(BeltIcon);
     expect(placeholderIconFor({ name: 'وشاح حرير', sectors: clothing })).toBe(ScarfIcon);
     expect(placeholderIconFor({ name: 'فستان سهرة', sectors: clothing })).toBe(DressIcon);
+    // An abaya is a robe, not a dress; water and solutions are a droplet; a mask is its own glyph
+    expect(placeholderIconFor({ name: 'عباية سوداء', sectors: clothing })).toBe(RobeIcon);
+    expect(placeholderIconFor({ name: 'ماء معقم', sectors: ['medical_supplies'] })).toBe(DropIcon);
+    expect(placeholderIconFor({ name: 'كمامة جراحية', sectors: ['medical_supplies'] })).toBe(MaskIcon);
     expect(placeholderIconFor({ name: 'بلوزة قطن', sectors: clothing })).toBe(TopIcon);
     expect(placeholderIconFor({ name: 'بيجاما أطفال', sectors: clothing })).toBe(SleepIcon);
     expect(placeholderIconFor({ name: 'حقيبة يد', sectors: clothing })).toBe(BagIcon);
@@ -97,7 +102,7 @@ describe('placeholderIconFor', () => {
     expect(placeholderIconFor({ name: 'سيروم ملحي 500', sectors: medical })).toBe(DropIcon);
     expect(placeholderIconFor({ name: 'قسطرة بولية', sectors: medical })).toBe(TubeIcon);
     expect(placeholderIconFor({ name: 'محرار رقمي', sectors: medical })).toBe(ThermometerIcon);
-    expect(placeholderIconFor({ name: 'كمامة', sectors: medical })).toBe(MedicalSuppliesIcon);
+    expect(placeholderIconFor({ name: 'كمامة', sectors: medical })).toBe(MaskIcon);
   });
 
   it('keeps cotton wool and the medical words for a medical store', () => {

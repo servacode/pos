@@ -60,7 +60,7 @@ describe('/pos on a new device', () => {
     expect(helpers.current.runBootstrap).toHaveBeenCalledOnce();
     expect(await deviceStore().getDevice()).toMatchObject({ deviceCode: '003' });
     // The status bar now names the store, the branch and the device.
-    expect(screen.getByText('مقهى الياسمين')).toBeInTheDocument();
+    expect(screen.getAllByText('مقهى الياسمين').length).toBeGreaterThan(0);
     expect(screen.getByText('الرقة · شارع تل أبيض · كاشير 3')).toBeInTheDocument();
   });
 

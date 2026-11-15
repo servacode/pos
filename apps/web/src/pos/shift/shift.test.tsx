@@ -126,7 +126,10 @@ describe('shift', () => {
     expect(
       await screen.findByText('عدّ أعمى: لا يظهر المبلغ المتوقع. عُدّ ما في يدك فقط.'),
     ).toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: 'تخطَّ العدّ واكتب المجموع' })[0]!);
+    // One total per drawer, note by note behind a button, and no jargon line about the chosen note
+    await screen.findAllByRole('textbox', { name: 'المجموع' });
+    expect(screen.getAllByRole('button', { name: 'عدّ تفصيلي' }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/الفئة المختارة/)).not.toBeInTheDocument();
     await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '240');
     await user.click(screen.getByRole('button', { name: 'تابع للملخّص' }));
 
@@ -146,9 +149,12 @@ describe('shift', () => {
     expect(z).toHaveTextContent('المعدود');
     expect(z).not.toHaveTextContent('المتوقع');
     expect(z).not.toHaveTextContent('الفرق');
-    await user.click(screen.getByRole('button', { name: 'اطبع تقرير الإغلاق' }));
+    await user.click(screen.getByRole('button', { name: 'اطبع' }));
     expect(window.print).toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'تمّ، اخرج' }));
+    // One way out: «تمّ» beside the slip, and no second «اخرج»
+    expect(screen.queryByRole('button', { name: 'اخرج' })).not.toBeInTheDocument();
+    expect(z).not.toHaveTextContent('0 مرتجع');
+    await user.click(screen.getByRole('button', { name: 'تمّ' }));
 
     expect(await screen.findByRole('heading', { name: 'من يعمل الآن؟' })).toBeInTheDocument();
     const [close] = docsOf<ShiftClosePayload>(outbox, 'shift_close');

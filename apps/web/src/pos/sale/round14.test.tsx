@@ -53,12 +53,12 @@ describe('an item with nothing left (round 14)', () => {
     expect(screen.queryByRole('list', { name: 'أسطر الفاتورة' })).not.toBeInTheDocument();
   });
 
-  it('does not ask for an item that has stock, and a new product with no level says «لا مخزون» on its tile', async () => {
+  it('does not ask for an item that has stock, and a new product with no level says «غير متوفر» on its tile', async () => {
     const { user } = await saleScreen({ sets: outSets(5000) });
     const grid = screen.getByRole('list', { name: 'الأصناف' });
     expect(
       plain(within(grid).getByRole('button', { name: new RegExp(PRODUCTS.oil.product.nameAr) })),
-    ).toContain('لا مخزون');
+    ).toContain('غير متوفر');
     await user.click(within(grid).getByRole('button', { name: new RegExp(PRODUCTS.sugar.product.nameAr) }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(cartLines()).toHaveTextContent(PRODUCTS.sugar.product.nameAr);

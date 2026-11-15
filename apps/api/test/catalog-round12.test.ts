@@ -75,6 +75,23 @@ describe('the products tiles', () => {
     await makeProduct(app, store, 'شاي', 10_000);
     expect((await list(store)).attention?.uncategorised).toBe(2);
   });
+
+  it('leaves a service (like the rent line) out of the uncategorised count', async () => {
+    const store = await openStore(app);
+    await makeProduct(app, store, 'حليب', 25_000);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/products',
+      headers: as(store),
+      payload: {
+        nameAr: 'إيجار',
+        type: 'service',
+        variants: [{ price: { currency: 'SYP', priceMinor: 50_000 } }],
+      },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect((await list(store)).attention?.uncategorised).toBe(1);
+  });
 });
 
 describe('the online store', () => {

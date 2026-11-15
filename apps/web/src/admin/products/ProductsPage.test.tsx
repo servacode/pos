@@ -89,9 +89,9 @@ describe('/products list on a phone and the export', () => {
       });
       await screen.findByRole('list', { name: 'المنتجات' });
       // the tiles wait behind one line
-      expect(screen.queryByText('نفد من الرف')).not.toBeInTheDocument();
+      expect(screen.queryByText('أصناف نفدت')).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: /الأرقام/ }));
-      expect(await screen.findByText('نفد من الرف')).toBeInTheDocument();
+      expect(await screen.findByText('أصناف نفدت')).toBeInTheDocument();
       // the selects are not on the page until «تصفية» opens
       expect(screen.queryByRole('combobox', { name: 'التصنيف' })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'تصفية' }));
@@ -197,7 +197,7 @@ describe('/products list', () => {
     await screen.findByText('شاي ربيع 400 غ');
     await vi.waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(2));
     expect(screen.getByText('12')).toBeInTheDocument();
-    expect(screen.getByText('نفد من الرف')).toBeInTheDocument();
+    expect(screen.getByText('أصناف نفدت')).toBeInTheDocument();
   });
 
   it('proposes a category from each name, lets the owner review, then sets them on the ticked rows', async () => {

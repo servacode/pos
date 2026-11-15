@@ -33,6 +33,8 @@ export interface CashierShellProps {
   onMobileView?: (view: 'items' | 'cart') => void;
   /** The cart tab's count (pieces in the cart), shown beside its name on a phone */
   cartBadge?: ReactNode;
+  /** A phone's items view: a sticky bar under the grid (count, total, «عرض السلة»); hidden from a tablet up */
+  miniBar?: ReactNode;
 }
 
 /**
@@ -48,6 +50,7 @@ export function CashierShell({
   mobileView,
   onMobileView,
   cartBadge,
+  miniBar,
 }: CashierShellProps) {
   const [own, setOwn] = useState<'items' | 'cart'>('items');
   const view = mobileView ?? own;
@@ -113,6 +116,7 @@ export function CashierShell({
             >
               {children}
             </main>
+            {view === 'items' && miniBar ? <div className="shrink-0 md:hidden">{miniBar}</div> : null}
           </div>
         ) : (
           <main className={cn('min-h-0 overflow-y-auto', mainClassName)}>{children}</main>

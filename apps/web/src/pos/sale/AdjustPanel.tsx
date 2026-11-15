@@ -125,6 +125,8 @@ export interface AdjustPanelProps {
   staff: readonly StaffMember[];
   /** The value shown before typing, e.g. the current quantity */
   preview?: (value: AdjustValue | null) => React.ReactNode;
+  /** A small centred pad (a service's fee): the field above the keys, not spread over the whole area */
+  compact?: boolean;
 }
 
 /**
@@ -144,6 +146,7 @@ export function AdjustPanel({
   onClose,
   staff,
   preview,
+  compact = false,
 }: AdjustPanelProps) {
   const digits = useDigits();
   const [mode, setMode] = useState<AdjustMode>(initialMode);
@@ -209,6 +212,7 @@ export function AdjustPanel({
       subtitle={subtitle}
       icon={mode === 'qty' ? null : mode === 'price' ? <OfferIcon size={20} /> : <PercentIcon size={20} />}
       bodyClassName="@container"
+      className={compact ? 'mx-auto w-full max-w-md lg:my-auto' : undefined}
       actions={
         <>
           {onRemove ? (
@@ -268,7 +272,9 @@ export function AdjustPanel({
               ))}
             </div>
           ) : null}
-          <div className="grid gap-5 @lg:grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_21rem]">
+          <div
+            className={cn('grid gap-5', !compact && '@lg:grid-cols-2 @3xl:grid-cols-[minmax(0,1fr)_21rem]')}
+          >
             <div className="flex flex-col gap-3">
               {/* The value as typed: a field in focus, the number large at the start, its unit at the end */}
               <output

@@ -5,6 +5,9 @@ import {
   Card,
   cn,
   CONTROL_HEIGHT,
+  ExpandIcon,
+  Menu,
+  MenuItem,
   PageHeader,
   SettingsIcon,
   Skeleton,
@@ -73,7 +76,45 @@ function SettingsNav({ sections }: { sections: readonly SettingsSection[] }) {
   const current = useSectionInView(sections.map((section) => section.id)) ?? sections[0]?.id;
   return (
     <nav aria-label="أقسام الإعدادات" className="min-w-0 lg:sticky lg:top-32 lg:self-start">
-      <ul className="scrollbar-none -mx-4 flex gap-1 overflow-x-auto px-4 sm:-mx-6 sm:px-6 lg:mx-0 lg:flex-col lg:px-0">
+      {/* On a phone one button opens the list: the page already has the section tabs above it */}
+      <div className="lg:hidden">
+        <Menu
+          label="أقسام الإعدادات"
+          align="start"
+          className="w-64"
+          trigger={
+            <button
+              type="button"
+              className={cn(
+                CONTROL_HEIGHT[density],
+                'flex w-full items-center gap-2.5 rounded-control border border-line bg-surface px-3 text-start text-[0.9375rem] font-semibold text-ink shadow-e1',
+              )}
+            >
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-normal text-ink-muted">القسم: </span>
+                {sections.find((section) => section.id === current)?.title}
+              </span>
+              <ExpandIcon size={16} className="shrink-0 text-ink-subtle" />
+            </button>
+          }
+        >
+          {sections.map((section) => {
+            const SectionIcon = section.icon;
+            return (
+              <MenuItem
+                key={section.id}
+                icon={<SectionIcon size={20} />}
+                onSelect={() =>
+                  document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+              >
+                {section.title}
+              </MenuItem>
+            );
+          })}
+        </Menu>
+      </div>
+      <ul className="hidden gap-1 lg:flex lg:flex-col">
         {sections.map((section) => {
           const SectionIcon = section.icon;
           const active = section.id === current;

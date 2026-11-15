@@ -269,7 +269,7 @@ export function Menu({
       {triggerElement}
       {shown
         ? createPortal(
-            <div ref={boxRef} dir={dir} className="fixed start-0 top-0 z-50">
+            <div ref={boxRef} dir={dir} className="fixed start-0 top-0 z-70">
               <div
                 ref={listRef}
                 id={menuId}
@@ -386,7 +386,7 @@ export function MenuItem({
         <span className="min-w-0 flex-1 truncate">{children}</span>
         {trailing}
         {shortcut ? (
-          <kbd dir="ltr" className="shrink-0 font-sans text-xs text-ink-muted">
+          <kbd dir="ltr" className="shrink-0 font-sans text-xs text-ink-muted pointer-coarse:hidden">
             {shortcut}
           </kbd>
         ) : null}

@@ -53,6 +53,15 @@ describe('Dialog', () => {
     expect(dialog).toHaveAttribute('dir', 'rtl');
   });
 
+  it('lays the buttons out reversed in Arabic, so the main action (last) is on the right', async () => {
+    const { user } = renderUi(<ConfirmDelete />);
+    await user.click(screen.getByRole('button', { name: 'احذف' }));
+    const action = await screen.findByRole('button', { name: 'افتح نافذة ثانية' });
+    const row = action.parentElement as HTMLElement;
+    expect(row.className).toContain('rtl:flex-row-reverse');
+    expect(row.className).toContain('justify-end');
+  });
+
   it('closes with Esc and with its close button, but not with a click outside', async () => {
     const { user } = renderUi(<ConfirmDelete />);
     await user.click(screen.getByRole('button', { name: 'احذف' }));

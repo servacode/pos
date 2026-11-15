@@ -381,7 +381,7 @@ export function PaymentPanel({
                 ? 'اكتب البنك ورقم الشيك وتاريخ الاستحقاق.'
                 : 'اكتب رقم الموافقة أو المرجع لهذه الدفعة.'
               : tenders.length === 0
-                ? 'اختر طريقة الدفع وأدخل المبلغ.'
+                ? `أدخل المبلغ المدفوع (${option.label}).`
                 : 'error' in settlement
                   ? 'تحقّق من المبلغ المكتوب.'
                   : !settlement.covered

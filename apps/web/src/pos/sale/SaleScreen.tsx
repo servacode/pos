@@ -30,7 +30,6 @@ import {
   CloseIcon,
   cn,
   displayNumber,
-  EmptyState,
   formatQuantity,
   IconButton,
   IconChip,
@@ -489,6 +488,26 @@ export function SaleScreen(props: SaleScreenProps) {
         setZeroAsk({ item, hit: hit ?? null, weighedQty, choice });
         return;
       }
+      // A piece sold by its serial number: a second tap never piles up lines of numbers not given yet,
+      // nor of pieces beyond what the store holds (it asks, like an item with nothing left)
+      if (item.tracksSerial && feeMinor === undefined && !outOk.current) {
+        const mine = cartRef.current.lines.filter((l) => l.variantId === item.variantId);
+        const pieces = (l: Line) => Math.round((l.qty * l.packQty) / 1_000_000);
+        const waiting = mine.find((l) => (l.serials?.length ?? 0) < pieces(l));
+        if (waiting) {
+          setSelected(waiting.lineNo);
+          setMode({ kind: 'serial', lineNo: waiting.lineNo });
+          return;
+        }
+        if (
+          mine.length > 0 &&
+          typeof item.stockQty === 'number' &&
+          mine.reduce((sum, l) => sum + pieces(l), 0) * 1000 >= item.stockQty
+        ) {
+          setOutAsk({ item, hit: hit ?? null, weighedQty, choice });
+          return;
+        }
+      }
       if (
         !item.isService &&
         feeMinor === undefined &&
@@ -566,6 +585,7 @@ export function SaleScreen(props: SaleScreenProps) {
             priceMinor: feeMinor,
             priceCurrency: ctx.currency,
             adjustment: null,
+            priceTyped: true,
           };
           next = { ...current, nextLineNo: fresh.nextLineNo, lines: [...current.lines, line] };
           added = line.lineNo;
@@ -702,9 +722,11 @@ export function SaleScreen(props: SaleScreenProps) {
     setKitchen(null);
   }, [kitchen]);
   // A panel (quantity, discount, payment…) opens in the items area: on a phone, show that tab
+  // (a unit sheet opened from the cart is the exception: it floats over the cart, which stays where it is)
+  const sheetOverCart = mode.kind === 'unit' && mode.replaceLine !== undefined;
   useEffect(() => {
-    if (mode.kind !== 'items') setPhoneView('items');
-  }, [mode.kind]);
+    if (mode.kind !== 'items' && !sheetOverCart) setPhoneView('items');
+  }, [mode.kind, sheetOverCart]);
   useEffect(() => {
     if (bump === null) return;
     const timer = setTimeout(() => setBump(null), 900);
@@ -942,7 +964,7 @@ export function SaleScreen(props: SaleScreenProps) {
     // The fee of a service becomes the line's price (no discount is made of it, so it can be above the shelf price)
     const patch: Partial<Line> =
       value.mode === 'price' && catalog.byVariant.get(line.variantId)?.isService
-        ? { priceMinor: value.minor, priceCurrency: ctx.currency, adjustment: null }
+        ? { priceMinor: value.minor, priceCurrency: ctx.currency, adjustment: null, priceTyped: true }
         : linePatch(line, value);
     setCart((c) => updateLine(c, line.lineNo, value.mode === 'qty' ? patch : { ...patch, approval }));
     setMode({ kind: 'items' });
@@ -1116,8 +1138,8 @@ export function SaleScreen(props: SaleScreenProps) {
                 'لا أسطر بعد'
               ) : (
                 <>
-                  <span className="whitespace-nowrap">
-                    {counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)} ·
+                  <span className="me-2 whitespace-nowrap">
+                    {counted(lineCount, ['سطر واحد', 'سطران', 'أسطر', 'سطراً'], digits)}
                   </span>
                   <span className="whitespace-nowrap">
                     {pieceTotal > 0
@@ -1374,14 +1396,13 @@ export function SaleScreen(props: SaleScreenProps) {
       ) : null}
       <div className="min-h-32 flex-1 overflow-y-auto">
         {lineCount === 0 ? (
-          <div className="h-full p-4">
-            <EmptyState
-              icon={BarcodeIcon}
-              title="السلة فارغة"
-              description="امسح الباركود أو اختر صنفاً من الشبكة."
-              className="h-full justify-center"
-            />
-          </div>
+          // One short hint line, not a big empty state: the items are one glance away
+          <p className="flex items-center justify-center gap-2 px-4 py-6 text-center text-sm text-ink-muted">
+            <BarcodeIcon size={20} className="shrink-0" aria-hidden="true" />
+            <span>
+              <span className="font-semibold text-ink">السلة فارغة</span> · امسح الباركود أو اختر صنفاً.
+            </span>
+          </p>
         ) : (
           <ul aria-label="أسطر الفاتورة" className="flex flex-col gap-0.5 p-2">
             {cart.lines.map((line, i) => {
@@ -1782,11 +1803,31 @@ export function SaleScreen(props: SaleScreenProps) {
       mobileView={phoneView}
       onMobileView={setPhoneView}
       cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
+      miniBar={
+        lineCount > 0 && mode.kind === 'items' ? (
+          // A phone, in the grid: what is in the cart and its total, one tap from the cart (and the pay button there)
+          <div
+            role="group"
+            aria-label="ملخّص السلة"
+            className="flex min-h-14 items-center gap-3 rounded-card border border-line bg-surface px-3 py-2 shadow-e2"
+          >
+            <span className="min-w-0 flex-1 text-sm/tight font-semibold text-ink">
+              {counted(lineCount, ['صنف واحد', 'صنفان', 'أصناف', 'صنفاً'], digits)}
+              <span className="block text-ink-muted">
+                المجموع <Money minor={totalMinor} currency={ctx.currency} className="font-bold text-ink" />
+              </span>
+            </span>
+            <Button size="md" aria-label="افتح السلة" onClick={() => setPhoneView('cart')}>
+              عرض السلة
+            </Button>
+          </div>
+        ) : undefined
+      }
     >
       {justAdded ? (
         <p
           role="status"
-          className="pointer-events-none fixed inset-x-4 top-[4.5rem] z-50 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
+          className="pointer-events-none fixed inset-x-4 top-[calc(var(--till-chrome,4rem)+0.5rem)] z-70 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
         >
           <CheckIcon size={16} className="shrink-0" />
           <span className="truncate">
@@ -1993,6 +2034,7 @@ export function SaleScreen(props: SaleScreenProps) {
           subtitle={effectiveMode.item.name}
           modes={['price']}
           initialMode="price"
+          compact
           currency={ctx.currency}
           staff={staff}
           check={(value) =>
@@ -2118,7 +2160,17 @@ export function SaleScreen(props: SaleScreenProps) {
                 : undefined;
               if (old) {
                 // The same quantity in the other unit: the line is replaced, not added to
-                setCart((c) => addItem(removeLine(c, old.lineNo), item, hit, old.qty));
+                setCart((c) => {
+                  const index = c.lines.findIndex((l) => l.lineNo === old.lineNo);
+                  const without = removeLine(c, old.lineNo);
+                  const next = addItem(without, item, hit, old.qty);
+                  // The new line takes the old one's place, not the end of the cart
+                  const added = next.lines.length > without.lines.length ? next.lines.at(-1) : undefined;
+                  if (!added || index < 0) return next;
+                  const lines = next.lines.slice(0, -1);
+                  lines.splice(Math.min(index, lines.length), 0, added);
+                  return { ...next, lines };
+                });
                 setSelected(null);
               } else add(item, hit);
             }}

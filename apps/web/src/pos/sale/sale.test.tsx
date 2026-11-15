@@ -275,6 +275,7 @@ describe('sale screen', () => {
     );
     await user.keyboard('{Enter}');
     await screen.findByRole('region', { name: 'تمت البيعة' });
+    await user.click(screen.getByRole('button', { name: 'حالة الاتصال والإرسال' }));
     await user.click(screen.getByRole('button', { name: 'إيصال آخر فاتورة' }));
     expect(print).toHaveBeenCalledTimes(2);
     const printed = document.querySelector('[data-print-receipt]')!;

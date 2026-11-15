@@ -63,6 +63,8 @@ export function DevicesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pairing, setPairing] = useState(false);
   const [revoking, setRevoking] = useState<DeviceSummary | null>(null);
+  // «احذف من القائمة» asks first: the device only leaves the list, but nobody should lose a row by a stray tap
+  const [hiding, setHiding] = useState<DeviceSummary | null>(null);
   const now = useNow(30_000);
 
   const refresh = useCallback(async () => {
@@ -235,7 +237,7 @@ export function DevicesPage() {
                   canManage={isOwner}
                   onRename={rename}
                   onRevoke={setRevoking}
-                  onHide={(d) => void decide(d, 'hide')}
+                  onHide={(d) => setHiding(d)}
                 />
               ))}
             </ul>
@@ -297,6 +299,29 @@ export function DevicesPage() {
       >
         {revoking ? <RevokeDetails device={revoking} /> : null}
       </Dialog>
+      <Dialog
+        open={hiding !== null}
+        onOpenChange={(open) => {
+          if (!open) setHiding(null);
+        }}
+        title={hiding ? `احذف «${hiding.name}» من القائمة؟` : ''}
+        description="يختفي من هذه القائمة فقط، وتبقى فواتيره وحساباته كما هي."
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setHiding(null)}>
+              لا، أبقِه
+            </Button>
+            <Button
+              loading={hiding !== null && busyId === hiding.id}
+              onClick={async () => {
+                if (hiding && (await decide(hiding, 'hide'))) setHiding(null);
+              }}
+            >
+              احذفه من القائمة
+            </Button>
+          </>
+        }
+      />
     </AppShell>
   );
 }

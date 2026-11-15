@@ -32,6 +32,18 @@ import { downloadCsv } from '../exportCsv';
 import { getRecall, listExpiry, setBatchBlocked } from './api';
 import { SectionHead } from './parts';
 
+/** «3 زبائن معروفين · 2 فاتورتان بلا زبون»: who to call first, and what cannot be traced */
+export function buyersSummary(sales: RecallSale[]): string {
+  const known = new Set(
+    sales.filter((s) => s.customerName || s.customerPhone).map((s) => s.customerPhone ?? s.customerName),
+  );
+  const anonymous = new Set(sales.filter((s) => !s.customerName && !s.customerPhone).map((s) => s.invoiceId))
+    .size;
+  const parts = [`${countNoun(known.size, COUNT_NOUNS.customer)} مسجَّل في الفواتير`];
+  if (anonymous > 0) parts.push(`${countNoun(anonymous, COUNT_NOUNS.invoice)} بلا زبون`);
+  return parts.join(' · ');
+}
+
 /**
  * «استدعاء دفعة (سحب من السوق)» (03 › الصيدليات): a batch number leads to its product, the receipt and supplier it came
  * in on, what is left of it in each branch, and every invoice and customer that got it (with the
@@ -391,6 +403,11 @@ export function RecallPage() {
                     title="من اشترى هذه الدفعة"
                     description="كل فاتورة بيعت منها، مع الزبون وهاتفه إن عُرف."
                   />
+                  {found.sales.length > 0 ? (
+                    <p className="text-sm text-ink-muted" data-testid="recall-buyers-summary">
+                      {buyersSummary(found.sales)}
+                    </p>
+                  ) : null}
                   <DataTable
                     caption="فواتير الدفعة"
                     columns={saleColumns}

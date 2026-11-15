@@ -42,7 +42,7 @@ import { sortByOptions } from '../../lib/optionOrder';
 import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 import { SectionHead } from './parts';
-import { shortKinds, soldOutSentence, StockDefinitions } from '../stockWords';
+import { shortKinds, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
 import { InventoryGrid } from './InventoryGrid';
 import { downloadCsv } from '../exportCsv';
 import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
@@ -590,13 +590,15 @@ export function InventoryPage() {
                 <>
                   {me.tenant.sectors.includes('clothing') ? 'المقاسات والألوان' : 'عدد الأصناف'}:{' '}
                   <span className="num">{kinds}</span>
-                  {belowZero > 0 ? <> · {shortKinds(belowZero)}</> : null}
+                  {belowZero > 0 ? (
+                    <> · {shortKinds(belowZero, me.tenant.sectors.includes('clothing'))}</>
+                  ) : null}
                 </>
               ) : undefined
             }
           />
           <StatTile
-            label="نفد من الرف"
+            label={soldOutLabel(me.tenant.sectors.includes('clothing'))}
             value={stock ? soldOut : <Skeleton className="h-9 w-12" />}
             footnote={
               stock

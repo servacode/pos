@@ -6,7 +6,11 @@ import { IconButton, InfoIcon } from '@serva/ui';
  * The shortage in the unit it is counted in: kinds (combinations of size and colour) are «أصناف ناقصة»,
  * pieces are «ناقص 9 قطع», so the same word never means two different things on two screens.
  */
-export function shortKinds(count: number): string {
+export function shortKinds(count: number, clothing = false): string {
+  if (clothing) {
+    const tail = count === 1 ? 'ناقص' : count === 2 ? 'ناقصان' : count <= 10 ? 'ناقصة' : 'ناقصاً';
+    return `${countNoun(count, SIZE_COLOUR)} ${tail}`;
+  }
   if (count === 1) return 'صنف واحد ناقص';
   if (count === 2) return 'صنفان ناقصان';
   return count >= 3 && count <= 10
@@ -77,3 +81,6 @@ export function StockDefinitions() {
     </div>
   );
 }
+
+/** The label of the «ran out» tile: it says what it counts, the same words on products, inventory and home */
+export const soldOutLabel = (clothing: boolean): string => (clothing ? 'مقاسات/ألوان نفدت' : 'أصناف نفدت');

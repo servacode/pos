@@ -12,7 +12,7 @@ export interface ItemTileProps {
   imageUrl?: string;
   selected?: boolean;
   outOfStock?: boolean;
-  /** Nothing to sell but still tappable (the till can sell below zero): the tile dims and says «نفد» */
+  /** Nothing to sell but still tappable (the till can sell below zero): the tile dims and says «غير متوفر» */
   soldOut?: boolean;
   /** Sold by weight: the price is per kilo. */
   weighed?: boolean;
@@ -38,6 +38,8 @@ export interface ItemTileProps {
   priceNote?: ReactNode;
   /** Small marks under the price (stock left, an expiry date, «برقم تسلسلي») */
   extra?: ReactNode;
+  /** A tighter tile: a service with nothing to say but its name and fee, or the compact list density */
+  compact?: boolean;
   onSelect: () => void;
   className?: string;
 }
@@ -70,6 +72,7 @@ export function ItemTile({
   priceLabel,
   priceNote,
   extra,
+  compact = false,
   onSelect,
   className,
 }: ItemTileProps) {
@@ -84,10 +87,11 @@ export function ItemTile({
       disabled={outOfStock}
       aria-pressed={selected}
       className={cn(
-        'flex min-h-26 min-w-28 flex-col gap-3 max-sm:gap-2 rounded-card border text-start text-ink shadow-e1 select-none touch-manipulation',
+        'flex min-w-28 flex-col rounded-card border text-start text-ink shadow-e1 select-none touch-manipulation',
+        compact ? 'min-h-16 gap-1.5' : 'min-h-26 gap-3 max-sm:gap-2',
         'transition-[background-color,border-color,box-shadow,translate,scale] duration-120 ease-standard',
         'enabled:hover:shadow-e2 motion-safe:enabled:hover:-translate-y-0.5 motion-safe:enabled:active:scale-[0.98]',
-        picture ? 'p-2 pb-3 max-sm:pb-2' : 'p-3.5 max-sm:p-3',
+        picture ? 'p-2 pb-3 max-sm:pb-2' : compact ? 'p-3' : 'p-3.5 max-sm:p-3',
         selected
           ? 'border-brand bg-brand-soft ring-1 ring-brand'
           : 'border-line bg-surface enabled:hover:border-line-control/50',
@@ -136,7 +140,7 @@ export function ItemTile({
         className={cn(
           'flex gap-0.5',
           inlineIcon ? 'flex-row items-start gap-2.5' : 'flex-col',
-          !inlineIcon && (detail && !monogram ? 'min-h-[4rem]' : 'min-h-[2.75rem]'),
+          !inlineIcon && !compact && (detail && !monogram ? 'min-h-[4rem]' : 'min-h-[2.75rem]'),
           picture && 'px-1.5',
         )}
       >
@@ -154,7 +158,7 @@ export function ItemTile({
         <span
           className={cn(
             'line-clamp-2 min-w-0 text-base/[22px] font-semibold',
-            inlineIcon && 'min-h-[2.75rem] flex-1',
+            inlineIcon && (compact ? 'flex-1' : 'min-h-[2.75rem] flex-1'),
           )}
         >
           <bdi>{name}</bdi>
@@ -174,7 +178,7 @@ export function ItemTile({
           />
         )}
         {outOfStock ? (
-          <span className="text-xs font-semibold text-ink-muted">نفد</span>
+          <span className="text-xs font-semibold text-ink-muted">غير متوفر</span>
         ) : weighed || onOffer ? (
           <span className="flex items-center gap-1">
             {weighed ? (

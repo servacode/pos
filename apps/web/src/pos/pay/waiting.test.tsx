@@ -19,11 +19,9 @@ describe('«أتمّ الدفع» when it is not ready', () => {
     await user.click(within(pay).getByRole('button', { name: 'قسّم الدفع' }));
     const done = within(pay).getByRole('button', { name: /أتمّ الدفع/ });
     expect(done).toBeDisabled();
-    expect(
-      within(pay).getByText(/اختر طريقة الدفع وأدخل المبلغ|المبلغ لا يغطي الفاتورة/),
-    ).toBeInTheDocument();
+    expect(within(pay).getByText(/أدخل المبلغ المدفوع|المبلغ لا يغطي الفاتورة/)).toBeInTheDocument();
     await user.click(within(pay).getByRole('button', { name: 'دفعة واحدة' }));
     await user.click(within(pay).getByRole('button', { name: /المبلغ تماماً/ }));
-    expect(within(pay).queryByText(/اختر طريقة الدفع وأدخل المبلغ|المبلغ لا يغطي الفاتورة/)).toBeNull();
+    expect(within(pay).queryByText(/أدخل المبلغ المدفوع|المبلغ لا يغطي الفاتورة/)).toBeNull();
   });
 });

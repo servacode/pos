@@ -146,13 +146,16 @@ export async function searchInvoice(
   fetchFn: typeof fetch = (...args) => globalThis.fetch(...args),
 ): Promise<InvoiceSearch> {
   try {
-    const res = await fetchFn(`/v1/device/invoices/lookup?q=${encodeURIComponent(q.trim())}`, {
+    const res = await fetchFn(`/v1/device/invoices/lookup?q=${encodeURIComponent(q.trim())}&quiet=1`, {
       headers: { Accept: 'application/json', Authorization: `Device ${token}`, 'X-App-Version': APP_VERSION },
       signal: AbortSignal.timeout(8_000),
     });
     if (res.status === 404) return { found: null, reason: 'missing' };
     if (!res.ok) return { found: null, reason: 'offline' };
-    return { found: (await res.json()) as InvoiceLookup };
+    const body = (await res.json()) as InvoiceLookup | { invoice: null };
+    // `quiet=1`: «not found» comes back as 200 {invoice:null}, so the console stays clean
+    if ('invoice' in body && body.invoice === null) return { found: null, reason: 'missing' };
+    return { found: body as InvoiceLookup };
   } catch {
     return { found: null, reason: 'offline' };
   }

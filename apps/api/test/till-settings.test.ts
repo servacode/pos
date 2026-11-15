@@ -147,5 +147,13 @@ describe('invoice lookup for a return', () => {
     expect((await look(digits)).json<InvoiceLookup>().id).toBe(sold.id);
     expect((await look('INV-999-999-0000001')).statusCode).toBe(404);
     expect((await look('12')).statusCode).toBe(404);
+    // `quiet=1`: «no such invoice» is an ordinary 200 answer the till's console does not log as an error
+    const quiet = await app.inject({
+      method: 'GET',
+      url: '/v1/device/invoices/lookup?q=INV-999-999-0000001&quiet=1',
+      headers: { authorization: store.device.authorization },
+    });
+    expect(quiet.statusCode).toBe(200);
+    expect(quiet.json()).toEqual({ invoice: null });
   });
 });

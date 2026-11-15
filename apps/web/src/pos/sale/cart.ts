@@ -75,6 +75,8 @@ export interface CartLine {
   /** One pack at the shelf price and at the wholesale price (null: none), in priceCurrency */
   retailPriceMinor?: number;
   wholesalePriceMinor?: number | null;
+  /** The price was typed by hand (a service's fee): no price list, wholesale tier or contract ever re-prices it */
+  priceTyped?: boolean;
   /** The average cost of one unit in priceCurrency, when the till knows it («أقل من التكلفة») */
   costMinor?: number | null;
 }
@@ -266,6 +268,7 @@ export function setPriceTier(cart: Cart, tier: 'retail' | 'wholesale'): Cart {
     ...cart,
     priceTier: tier,
     lines: cart.lines.map((line) => {
+      if (line.priceTyped) return line;
       const retail = line.retailPriceMinor ?? line.priceMinor;
       const wholesale = line.wholesalePriceMinor ?? null;
       return { ...line, priceMinor: tier === 'wholesale' && wholesale !== null ? wholesale : retail };
@@ -498,7 +501,8 @@ export const hasWarrantyDevice = (cart: Cart): boolean =>
 /**
  * A customer's contract prices (03 › أسعار العقود: a hospital's tender price): each line of a product
  * that has one is priced at it, per pack, in place of the shelf or wholesale price. A line whose price
- * the cashier typed, or in another currency than the contract's, is left as it is.
+ * the cashier typed (a service's fee, a manual price), or in another currency than the contract's, is
+ * left as it is, and so is a contract price that is not above zero.
  */
 export function applyContractPrices(
   cart: Cart,
@@ -510,7 +514,15 @@ export function applyContractPrices(
     ...cart,
     lines: cart.lines.map((line) => {
       const contract = byVariant.get(line.variantId);
-      if (!contract || contract.currency !== line.priceCurrency || line.adjustment !== null) return line;
+      if (
+        !contract ||
+        contract.priceMinor <= 0 ||
+        line.priceTyped ||
+        contract.currency !== line.priceCurrency ||
+        line.adjustment !== null
+      ) {
+        return line;
+      }
       const price = packPrice(contract.priceMinor, line.packQty, null);
       return { ...line, priceMinor: price, retailPriceMinor: price, wholesalePriceMinor: price };
     }),

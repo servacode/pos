@@ -60,6 +60,14 @@ describe('A4 documents', () => {
     expect([...rows].map((r) => r.querySelector('td')?.textContent)).toEqual(['1', '2', '3']);
   });
 
+  it('prints the warranty end under a serial item, and nothing for a line without serials', () => {
+    const phone = line(1, 'هاتف', { serials: ['IMEI-351'], warrantyMonths: 12 });
+    render(<InvoiceA4 data={data([phone, line(2, 'كفر', { warrantyMonths: 12 })])} />);
+    const text = screen.getByLabelText('أصناف الفاتورة').textContent ?? '';
+    expect(text).toContain('الكفالة حتى');
+    expect(text.match(/الكفالة حتى/g)).toHaveLength(1);
+  });
+
   it('prints each batch on the delivery note, one under the other, numbering rows 1..n', () => {
     render(<DeliveryNoteA4 data={data([split, line(9, 'ب')])} withPrices={false} />);
     const table = screen.getByLabelText('أصناف التسليم');

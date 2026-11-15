@@ -23,7 +23,11 @@ import {
   Dialog,
   EmptyState,
   formatQuantity,
+  IconButton,
+  Menu,
+  MenuItem,
   Money,
+  MoreIcon,
   NumberField,
   PackageOpenIcon,
   PageHeader,
@@ -37,7 +41,6 @@ import {
   StatTile,
   Switch,
   TextField,
-  TextLink,
   TruckIcon,
   useDigits,
   UserIcon,
@@ -203,10 +206,18 @@ export function PurchasesPage() {
           <Button variant="ghost" size="xs" aria-label={`تفاصيل ${p.number}`} onClick={() => setOpened(p)}>
             التفاصيل
           </Button>
-          <TextLink as={Link} to={`/labels?purchase=${p.id}`} className="inline-flex items-center gap-1.5">
-            <PrintIcon size={16} />
-            الملصقات
-          </TextLink>
+          <Menu
+            label={`المزيد: ${p.number}`}
+            align="end"
+            trigger={<IconButton label={`المزيد: ${p.number}`} icon={<MoreIcon />} />}
+          >
+            <MenuItem
+              icon={<PrintIcon size={16} />}
+              render={(props) => <Link to={`/labels?purchase=${p.id}`} {...props} />}
+            >
+              الملصقات
+            </MenuItem>
+          </Menu>
         </span>
       ),
     },

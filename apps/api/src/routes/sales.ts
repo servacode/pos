@@ -29,7 +29,15 @@ export async function saleRoutes(app: FastifyInstance): Promise<void> {
   // The till finds an invoice of any till of the store to return from (contracts/till.ts)
   app.get('/v1/device/invoices/lookup', { onRequest: requireDevice() }, async (request) => {
     if (!request.device) throw unauthorized();
-    return lookupInvoice(db, request.device, parseBody(invoiceLookupQuery, request.query).q);
+    const q = parseBody(invoiceLookupQuery, request.query).q;
+    // `quiet=1`: a till asking «is there such an invoice?» gets 200 {invoice:null} instead of a 404 its console logs as an error
+    const quiet = (request.query as { quiet?: string }).quiet === '1';
+    try {
+      return await lookupInvoice(db, request.device, q);
+    } catch (error) {
+      if (quiet && error instanceof AppError && error.statusCode === 404) return { invoice: null };
+      throw error;
+    }
   });
 
   // …or finds recent ones by the customer's name, phone or the end of the number

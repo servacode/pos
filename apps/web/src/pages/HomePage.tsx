@@ -24,6 +24,7 @@ import {
   cn,
   compactNumber,
   EmptyState,
+  ExpandIcon,
   formatQuantity,
   GiftIcon,
   IconChip,
@@ -810,21 +811,28 @@ function groupText(name: string, items: readonly LowItem[]): string {
   const out = items.filter((item) => item.stockQty <= 0).length;
   const lowOnes = items.length - out;
   const sized = items.every((item) => sizeOf(item) !== null);
-  const unit = (n: number) =>
-    sized
-      ? n === 2
-        ? 'مقاسان'
-        : n >= 3 && n <= 10
-          ? `${n} مقاسات`
-          : `${n} مقاساً`
-      : n === 2
-        ? 'صنفان'
-        : n >= 3 && n <= 10
-          ? `${n} أصناف`
-          : `${n} صنفاً`;
+  // The noun and its verb agree with the number: one and two (dual), three to ten (plural, the verb
+  // in the feminine plural), eleven or more (singular noun, masculine verb)
+  const phrase = (
+    n: number,
+    noun: { one: string; two: string; few: string; many: string },
+    verb: string[],
+  ) => {
+    const [one, two, few, many] = verb as [string, string, string, string];
+    if (n === 1) return `${noun.one} ${one}`;
+    if (n === 2) return `${noun.two} ${two}`;
+    if (n >= 3 && n <= 10) return `${n} ${noun.few} ${few}`;
+    return `${n} ${noun.many} ${many}`;
+  };
+  const noun = sized
+    ? { one: 'مقاس واحد', two: 'مقاسان', few: 'مقاسات', many: 'مقاساً' }
+    : { one: 'صنف واحد', two: 'صنفان', few: 'أصناف', many: 'صنفاً' };
   const parts: string[] = [];
-  if (out > 0) parts.push(`${unit(out)} ${out === 2 ? 'نفدا' : 'نفدت'}`);
-  if (lowOnes > 0) parts.push(`${unit(lowOnes)} ${lowOnes === 2 ? 'يوشكان' : 'يوشك'} على النفاد`);
+  if (out > 0) parts.push(phrase(out, noun, ['نفد', 'نفدا', 'نفدت', 'نفد']));
+  if (lowOnes > 0)
+    parts.push(
+      phrase(lowOnes, noun, ['يوشك على النفاد', 'يوشكان على النفاد', 'توشك على النفاد', 'يوشك على النفاد']),
+    );
   return `${name}: ${parts.join(' و')}`;
 }
 
@@ -863,7 +871,10 @@ function waitingFigures({
   // Every low product is one group, whatever the store sells; a piece below zero is named once, in
   // «المخزون», where its chip opens the count
   const stock = lowGroups(merch.data?.lowStock ?? []);
-  const expiring = expiry.data?.items.length ?? 0;
+  // A batch past its date is gone for sale (red); one that nears it is only a warning (amber)
+  const expired =
+    expiry.data?.items.filter((row) => !row.blocked && row.daysLeft !== null && row.daysLeft < 0).length ?? 0;
+  const expiring = (expiry.data?.items.filter((row) => !row.blocked).length ?? 0) - expired;
   // A recalled batch no till sells (استدعاء دفعة): it waits for the owner's decision
   const recalled = expiry.data?.items.filter((row) => row.blocked).length ?? 0;
   const loading =
@@ -876,6 +887,7 @@ function waitingFigures({
     (holds > 0 ? 1 : 0) +
     stock.length +
     (expiring > 0 ? 1 : 0) +
+    (expired > 0 ? 1 : 0) +
     (recalled > 0 ? 1 : 0) +
     (chequesDue > 0 ? 1 : 0) +
     (chequesOut > 0 ? 1 : 0);
@@ -884,6 +896,7 @@ function waitingFigures({
     online,
     stock,
     expiring,
+    expired,
     recalled,
     loading,
     chequesDue,
@@ -899,8 +912,19 @@ const WAITING_ROWS = 3;
 
 function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   const [all, setAll] = useState(false);
-  const { holds, online, stock, expiring, recalled, loading, chequesDue, chequesOut, noPhoto, empty } =
-    waitingFigures(args);
+  const {
+    holds,
+    online,
+    stock,
+    expiring,
+    expired,
+    recalled,
+    loading,
+    chequesDue,
+    chequesOut,
+    noPhoto,
+    empty,
+  } = waitingFigures(args);
   // Red only for what blocks (a recalled batch) or is wholly gone; everything else is amber or calm.
   // Most serious first, so the three rows shown are the three that matter.
   const rows: ReactNode[] = [];
@@ -908,6 +932,12 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
     rows.push(
       <WaitingRow key="recalled" to="/recall" count={null} tone="danger" icon={<WarningIcon />}>
         {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : `${recalled} دفعات موقوفة عن البيع (استدعاء)`}
+      </WaitingRow>,
+    );
+  if (expired > 0)
+    rows.push(
+      <WaitingRow key="expired" to="/expiry" count={null} tone="danger" icon={<WarningIcon />}>
+        {expired === 1 ? 'دفعة منتهية الصلاحية' : `${expired} دفعات منتهية الصلاحية`}
       </WaitingRow>,
     );
   const rowOf = (group: (typeof stock)[number]) => {
@@ -924,7 +954,7 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
         // «نفد» is in the sentence: no second «نفد» beside it
         // The sentence names the pieces and their state: no bare number beside it
         count={null}
-        tone={group.allOut ? 'danger' : 'warning'}
+        tone="warning"
         icon={<WarningIcon />}
       >
         {single ? (
@@ -1064,7 +1094,7 @@ function RunningLow({
         <div className="flex justify-end">{allLink}</div>
       ) : (
         <div className="flex items-center justify-between gap-3">
-          <SectionTitle icon={<WarningIcon size={20} />} tone="danger">
+          <SectionTitle icon={<WarningIcon size={20} />} tone="warning">
             يوشك على النفاد
           </SectionTitle>
           {allLink}
@@ -1092,8 +1122,8 @@ function RunningLow({
                   className={cn(
                     'num inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-full px-2 text-sm font-bold',
                     item.stockQty <= 1000
-                      ? 'bg-danger-soft text-danger-ink'
-                      : 'bg-warning-soft text-warning-ink',
+                      ? 'bg-warning-soft text-warning-ink'
+                      : 'bg-surface-muted text-ink-muted',
                   )}
                 >
                   {item.stockQty <= 1000 ? <WarningIcon size={16} /> : null}
@@ -1239,6 +1269,7 @@ function StoreCard({ me }: { me: MeResponse }) {
 export function HomePage() {
   const me = useMe();
   const [range, setRange] = useState<Range>('7');
+  const [kpiOpen, setKpiOpen] = useState(false);
   const seesSales = holdsAny(me, DAY_REPORT_ACCESS);
   const seesOrders = holdsAny(me, ['customers.view']);
   const seesStock = holdsAny(me, ['report.view']);
@@ -1353,8 +1384,38 @@ export function HomePage() {
           <div className="flex min-w-0 flex-col gap-6 max-xl:contents xl:col-start-1 xl:row-start-1">
             {seesSales ? (
               // Below 1280 px the figures come first, then what needs attention, then the rest
-              <div className="min-w-0 max-xl:order-[-2]">
-                <KpiBand me={me} day={day} points={weekPoints} profit={profit} seesProfit={seesProfit} />
+              <div className="flex min-w-0 flex-col gap-3 max-xl:order-[-2]">
+                {/* On a phone the figures fold behind one line, so «تحتاج انتباهك» comes first */}
+                <button
+                  type="button"
+                  aria-expanded={kpiOpen}
+                  onClick={() => setKpiOpen((v) => !v)}
+                  className="flex min-h-11 items-center gap-2 rounded-card border border-line bg-surface px-3 text-start text-sm text-ink-muted shadow-e1 md:hidden"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    مبيعات اليوم
+                    {day.data ? (
+                      <>
+                        {' '}
+                        <Money
+                          minor={netOfReturns(day.data)}
+                          currency={day.data.baseCurrency}
+                          className="font-semibold text-ink"
+                        />
+                      </>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 text-xs font-semibold text-brand-ink">
+                    {kpiOpen ? 'أخفِ الأرقام' : 'الأرقام'}
+                  </span>
+                  <ExpandIcon
+                    size={16}
+                    className={cn('shrink-0 transition-transform', kpiOpen && 'rotate-180')}
+                  />
+                </button>
+                <div className={cn('min-w-0', !kpiOpen && 'max-md:hidden')}>
+                  <KpiBand me={me} day={day} points={weekPoints} profit={profit} seesProfit={seesProfit} />
+                </div>
               </div>
             ) : null}
             {seesSales && brandNew ? (
@@ -1396,7 +1457,7 @@ export function HomePage() {
             {!seesSales ? <StoreCard me={me} /> : null}
           </div>
           <div className="contents xl:col-start-2 xl:row-start-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
-            <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] xl:order-none">
+            <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] max-md:order-[-3] xl:order-none">
               {showWaiting ? (
                 <AttentionPanel
                   waiting={{

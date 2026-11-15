@@ -65,7 +65,7 @@ import { downloadCsv } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
-import { lowestSentence, shortKinds, shortPieces, soldOutSentence, StockDefinitions } from '../stockWords';
+import { shortKinds, shortPieces, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
 import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
 import { ButtonLink } from './parts';
 
@@ -877,6 +877,7 @@ function ProductsList() {
         {showSummary && (!phone || kpiOpen) ? (
           <KpiStrip columns={showExpiry ? 4 : 3}>
             <StatTile
+              className="sm:gap-y-1 sm:p-4"
               label="المنتجات"
               icon={<ProductsIcon />}
               value={
@@ -896,6 +897,7 @@ function ProductsList() {
               }
             />
             <StatTile
+              className="sm:gap-y-1 sm:p-4"
               label="القطع في المخزون"
               icon={<StockIcon />}
               iconTone="neutral"
@@ -909,13 +911,16 @@ function ProductsList() {
               footnote={
                 summary && summary.negative > 0 ? (
                   <>
-                    <bdi className="font-semibold text-ink">{shortKinds(summary.negative)}</bdi>
+                    <bdi className="font-semibold text-ink">
+                      {shortKinds(summary.negative, clothingStore)}
+                    </bdi>
                   </>
                 ) : undefined
               }
             />
             <StatTile
-              label="نفد من الرف"
+              className="sm:gap-y-1 sm:p-4"
+              label={soldOutLabel(clothingStore)}
               icon={<WarningIcon />}
               iconTone={summary && summary.runOut > 0 ? 'warning' : 'neutral'}
               value={
@@ -944,27 +949,19 @@ function ProductsList() {
                         </span>
                       ) : null}
                     </>
-                  ) : (
-                    <span className="flex flex-col gap-0.5">
-                      {summary.runOut > 0 ? (
-                        <span className="font-semibold text-ink">
-                          {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
-                        </span>
-                      ) : null}
-                      <span>
-                        {lowestSentence(
-                          summary.lowest.nameAr,
-                          formatQuantity(summary.lowest.qty, digits),
-                          summary.lowest.qty,
-                        )}
-                      </span>
+                  ) : summary.runOut > 0 ? (
+                    <span className="font-semibold text-ink">
+                      {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
                     </span>
+                  ) : (
+                    'في كل صنف قطع على الرف'
                   )
                 ) : undefined
               }
             />
             {showExpiry ? (
               <StatTile
+                className="sm:gap-y-1 sm:p-4"
                 label="ينتهي خلال 30 يوماً"
                 icon={<WarningIcon />}
                 iconTone={expiringSoon > 0 ? 'warning' : 'neutral'}
@@ -1195,7 +1192,7 @@ function ProductsList() {
           !notice &&
           !(zeroPrice === 0 && uncategorised <= dismissed.u && noPhoto <= dismissed.p) &&
           ((canManage && uncategorised > 0) || zeroPrice > 0 || noPhoto > 0) ? (
-            <Alert tone={zeroPrice > 0 ? 'warning' : 'info'}>
+            <Alert tone={zeroPrice > 0 ? 'warning' : 'info'} className="[&>div]:flex-1">
               <span className="flex flex-col gap-1.5" aria-label="تحتاج انتباهك">
                 <span
                   className={cn(

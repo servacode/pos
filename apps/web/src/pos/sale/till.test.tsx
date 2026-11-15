@@ -5,7 +5,8 @@ import { stripBidiControls } from '@serva/core/text';
 import { memoryLocal } from '../../offline/local';
 import { ids, PINS, posSets, PRODUCTS, product } from '../../test/pos';
 import { openShift, renderPos, saleScreen, scan } from '../../test/renderPos';
-import { StatusBar } from '../StatusBar';
+import { Menu } from '@serva/ui';
+import { InstallHintMenuItem, StatusBar } from '../StatusBar';
 import { explainAdjust, MAX_QTY, parseAdjust } from './AdjustPanel';
 import { orderValues, sizeRank } from './models';
 import { useScanner } from './useScanner';
@@ -623,5 +624,36 @@ describe('the install hint', () => {
     unmount();
     render(<StatusBar device={device} persisted={false} online />);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('collapses into the menu once it has been on screen for a while, and a tap shows it again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { unmount } = render(<StatusBar device={device} persisted={false} online />);
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8100);
+      });
+      unmount();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(
+        <StatusBar
+          device={device}
+          persisted={false}
+          online
+          menu={
+            <Menu label="المزيد" trigger={<button type="button">فتح</button>}>
+              <InstallHintMenuItem persisted={false} />
+            </Menu>
+          }
+        />,
+      );
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'فتح' }));
+      await user.click(screen.getByRole('menuitem', { name: 'ثبّت التطبيق' }));
+      expect(screen.getByRole('alert')).toHaveTextContent('ثبّت التطبيق');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

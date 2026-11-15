@@ -79,6 +79,9 @@ describe('«استدعاء دفعة»', () => {
     expect(sales).toHaveTextContent('مستشفى الأمل');
     expect(sales).toHaveTextContent('0955123456');
     expect(sales).toHaveTextContent('INV-0002');
+    expect(screen.getByTestId('recall-buyers-summary')).toHaveTextContent(
+      'زبون واحد مسجَّل في الفواتير · فاتورة واحدة بلا زبون',
+    );
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
 
     await user.click(screen.getByRole('button', { name: 'أوقف بيعها في كل الفروع' }));

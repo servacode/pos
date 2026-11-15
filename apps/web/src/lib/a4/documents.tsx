@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { addMonthsIso } from '@serva/core/contracts/warranty';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import type { Quotation } from '@serva/core/contracts/quotations';
 import { formatQuantity, Money, useDigits } from '@serva/ui';
@@ -218,6 +219,12 @@ export function InvoiceA4({ data }: { data: A4SaleData }) {
               ...batchNote(line),
               ...(line.serials && line.serials.length > 0
                 ? [`أرقام تسلسلية: ${line.serials.join('، ')}`]
+                : []),
+              // The warranty end of a serial item, counted from the invoice day printed above
+              ...(line.serials && line.serials.length > 0 && line.warrantyMonths
+                ? [
+                    `الكفالة حتى ${dayText(addMonthsIso(data.deviceTime.slice(0, 10), line.warrantyMonths), digits)}`,
+                  ]
                 : []),
             ];
             return (

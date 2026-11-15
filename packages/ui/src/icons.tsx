@@ -304,6 +304,19 @@ const Coat = glyph('serva-coat', [
   ['path', { d: 'M9 3l3 5 3-5' }],
   ['path', { d: 'M12 8v13' }],
 ]);
+// An abaya or a robe: long to the ankle, wide sleeves, the opening down the middle (not the dress's flare)
+const Robe = glyph('serva-robe', [
+  ['path', { d: 'M9 2h6l1.5 3.5L21 9l-2 4-2.5-1.5V22h-9V11.5L5 13 3 9l4.5-3.5z' }],
+  ['path', { d: 'M12 5.5V22' }],
+]);
+// A face mask: the curved body, the ear loops and two pleats
+const Mask = glyph('serva-mask', [
+  ['path', { d: 'M5 7.5c4.5-2 9.5-2 14 0v5c0 3-3.2 5-7 5s-7-2-7-5z' }],
+  ['path', { d: 'M5 9.5H2.5v3L5 12.5M19 9.5h2.5v3L19 12.5' }],
+  ['path', { d: 'M8 11.5h8M8.5 14h7' }],
+]);
+export const RobeIcon = defineIcon(Robe);
+export const MaskIcon = defineIcon(Mask);
 export const TrousersIcon = defineIcon(Trousers);
 export const SkirtIcon = defineIcon(Skirt);
 export const DressIcon = defineIcon(Dress);

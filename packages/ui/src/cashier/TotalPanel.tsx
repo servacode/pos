@@ -119,7 +119,7 @@ export function TotalPanel({
             <kbd
               aria-hidden="true"
               dir="ltr"
-              className="rounded-small bg-on-brand/15 px-1.5 font-sans text-xs/5 font-semibold text-on-brand"
+              className="hidden rounded-small bg-on-brand/15 px-1.5 font-sans text-xs/5 font-semibold text-on-brand md:pointer-fine:inline-block"
             >
               {payShortcut}
             </kbd>

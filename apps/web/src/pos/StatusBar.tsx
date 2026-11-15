@@ -1,13 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Avatar,
   CashierStatusBar,
   CloseIcon,
   cn,
   ConnectionPill,
+  ExpandIcon,
   InfoIcon,
   Logo,
   LogoMark,
+  MenuItem,
   ThemeToggle,
   useDigits,
 } from '@serva/ui';
@@ -44,12 +46,31 @@ export interface StatusBarProps {
 /** Where the cashier's «understood» for the browser warning is kept (this browser, not the store's data). */
 export const INSTALL_HINT_KEY = 'serva.installHintDismissed';
 
-function installHintDismissed(): boolean {
+/** Set the first time the hint is drawn: from then on it lives in «المزيد» and the strip stays away. */
+export const INSTALL_HINT_SEEN_KEY = 'serva.installHintSeen';
+const INSTALL_HINT_EVENT = 'serva:install-hint';
+
+function readFlag(key: string): boolean {
   try {
-    return window.localStorage.getItem(INSTALL_HINT_KEY) === '1';
+    return window.localStorage.getItem(key) === '1';
   } catch {
     return false;
   }
+}
+
+function installHintDismissed(): boolean {
+  return readFlag(INSTALL_HINT_KEY);
+}
+
+/** «ثبّت التطبيق» inside «المزيد»: where the browser warning goes once it has been seen or dismissed. */
+export function InstallHintMenuItem({ persisted }: { persisted: boolean | null }) {
+  if (persisted !== false) return null;
+  if (!readFlag(INSTALL_HINT_KEY) && !readFlag(INSTALL_HINT_SEEN_KEY)) return null;
+  return (
+    <MenuItem icon={<InfoIcon />} onSelect={() => window.dispatchEvent(new Event(INSTALL_HINT_EVENT))}>
+      ثبّت التطبيق
+    </MenuItem>
+  );
 }
 
 /** A hairline between the bar's groups. */
@@ -79,6 +100,88 @@ function Clock() {
 }
 
 /**
+ * The one status chip of the bar: «متصل» (or what goes on without internet) at a glance, and on a tap
+ * the connection in full, the last send, the time and the last receipt. Esc or a tap elsewhere closes it.
+ */
+function StatusChip({
+  online,
+  outbox,
+  lastInvoice,
+}: {
+  online: boolean;
+  outbox?: OutboxStatus | null;
+  lastInvoice?: ReactNode;
+}) {
+  const digits = useDigits();
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLSpanElement>(null);
+  const pending = outbox?.pending ?? 0;
+  const sentence = connectionText(online, pending);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (event.target instanceof Node && !box.current?.contains(event.target)) setOpen(false);
+    };
+    const esc = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', away, true);
+    window.addEventListener('keydown', esc, true);
+    return () => {
+      document.removeEventListener('pointerdown', away, true);
+      window.removeEventListener('keydown', esc, true);
+    };
+  }, [open]);
+  return (
+    <span ref={box} className="relative flex shrink-0 items-center">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label="حالة الاتصال والإرسال"
+        onClick={() => setOpen((v) => !v)}
+        className="flex min-h-12 shrink-0 items-center gap-2 rounded-full pe-1 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
+      >
+        <ConnectionPill online={online}>
+          {/* The sentence is the chip's text (spoken, and kept for the tooltip); the face shows the short words */}
+          <span className="sr-only">{sentence}</span>
+          <span aria-hidden="true" title={sentence} className="whitespace-nowrap max-sm:hidden">
+            {online ? 'متصل' : 'دون إنترنت'}
+          </span>
+          {pending > 0 ? (
+            <span aria-hidden="true" className="num">
+              {pending}
+            </span>
+          ) : null}
+        </ConnectionPill>
+        <span className="hidden sm:contents">
+          <Clock />
+        </span>
+        <ExpandIcon size={16} className="shrink-0 text-ink-subtle" />
+      </button>
+      {open ? (
+        <div
+          role="group"
+          aria-label="تفاصيل الحالة"
+          className="absolute end-0 top-full z-70 mt-2 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-card border border-line bg-surface p-3 text-sm shadow-e3"
+        >
+          <p className="font-semibold text-ink">{online ? 'متصل بالإنترنت' : 'دون إنترنت: البيع مستمر'}</p>
+          <p className="text-ink-muted">{pending > 0 ? `${pending} بانتظار الإرسال` : 'كل شيء أُرسل'}</p>
+          {outbox?.lastSentAt ? (
+            <p className="text-ink-muted">آخر إرسال {clockText(outbox.lastSentAt, digits)}</p>
+          ) : null}
+          <p className="text-ink-muted sm:hidden">
+            الساعة <Clock />
+          </p>
+          {lastInvoice ? <div className="-mx-1 border-t border-line pt-2">{lastInvoice}</div> : null}
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+/**
  * The cashier status bar (kit cashier/StatusBar; هوية 4): at the start the store, the branch and
  * device, and who works with their shift; at the end the browser warning when there is one, the
  * last invoice, the connection with what waits to be sent and when it last went, the time, the
@@ -94,11 +197,49 @@ export function StatusBar({
   menu,
   notice,
 }: StatusBarProps) {
-  const digits = useDigits();
   const [hintHidden, setHintHidden] = useState(installHintDismissed);
-  const showHint = persisted === false && !hintHidden;
+  // Seen once on this device: the strip stays away and the hint waits in «المزيد» (asked for, it shows again)
+  const [seenBefore] = useState(() => readFlag(INSTALL_HINT_SEEN_KEY));
+  const [forced, setForced] = useState(false);
+  const showHint = persisted === false && !hintHidden && (!seenBefore || forced);
+  // Seen means on screen for a few seconds (a screen that swaps its bar at once has not been read yet)
+  useEffect(() => {
+    if (!showHint) return;
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(INSTALL_HINT_SEEN_KEY, '1');
+      } catch {
+        // The browser keeps nothing: the strip simply shows again next time.
+      }
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [showHint]);
+  useEffect(() => {
+    const again = () => {
+      setHintHidden(false);
+      setForced(true);
+    };
+    window.addEventListener(INSTALL_HINT_EVENT, again);
+    return () => window.removeEventListener(INSTALL_HINT_EVENT, again);
+  }, []);
+  // The full height of the top chrome (bar + strip), so what floats under it (toasts) never sits beneath
+  const chrome = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = chrome.current;
+    if (!element) return;
+    const root = document.documentElement;
+    const measure = () =>
+      root.style.setProperty('--till-chrome', `${Math.round(element.getBoundingClientRect().bottom)}px`);
+    measure();
+    const watcher = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    watcher?.observe(element);
+    return () => {
+      watcher?.disconnect();
+      root.style.removeProperty('--till-chrome');
+    };
+  }, []);
   return (
-    <div className="relative z-60">
+    <div ref={chrome} className="relative z-60">
       <CashierStatusBar>
         {/* The whole logo where the bar is wide; the mark alone where the store and the person need room */}
         <span className="hidden shrink-0 xl:flex">
@@ -113,7 +254,7 @@ export function StatusBar({
             {/* A phone has no room for the whole block: the branch alone, so the cashier knows where this till is */}
             <p className={cn('min-w-0 max-w-24 shrink-[3] sm:hidden', user && 'hidden')}>
               <span className="block truncate text-xs/tight font-semibold text-ink-muted">
-                {device.branchName}
+                {device.storeName}
               </span>
             </p>
             <p className="hidden min-w-24 shrink-[2] flex-col sm:flex">
@@ -132,55 +273,17 @@ export function StatusBar({
               <p className="flex min-w-0 flex-col">
                 <span className="truncate text-sm/tight font-semibold text-ink">{user.name}</span>
                 <span className="truncate text-xs/tight text-ink-muted max-sm:hidden">{user.detail}</span>
-                {/* A phone has no room beside the name: the branch goes under it */}
+                {/* A phone has no room beside the name: the store goes under it, so the cashier knows whose till this is */}
                 {device ? (
-                  <span className="truncate text-xs/tight text-ink-muted sm:hidden">{device.branchName}</span>
+                  <span className="truncate text-xs/tight text-ink-muted sm:hidden">{device.storeName}</span>
                 ) : null}
               </p>
             </div>
           </>
         ) : null}
         <span className="flex-1" />
-        {lastInvoice}
-        <span className="flex shrink-0 items-center gap-2.5">
-          <ConnectionPill online={online}>
-            {/* The long sentence gives way (shortened with its full text on hover) so the store and the person keep their names */}
-            <span
-              title={connectionText(online, outbox?.pending ?? 0)}
-              className="sr-only min-[1280px]:not-sr-only min-[1280px]:block min-[1280px]:max-w-72 min-[1536px]:max-w-none"
-            >
-              {connectionText(online, outbox?.pending ?? 0)}
-            </span>
-            {/* Between a phone and a wide bar: the short words, whole, never cut mid-sentence */}
-            <span
-              aria-hidden="true"
-              title={connectionText(online, outbox?.pending ?? 0)}
-              className={
-                online
-                  ? 'hidden whitespace-nowrap sm:max-[1279px]:block'
-                  : 'text-xs font-semibold whitespace-nowrap max-sm:hidden sm:max-[1279px]:block min-[1280px]:hidden'
-              }
-            >
-              {online ? 'متصل' : 'دون إنترنت'}
-              {(outbox?.pending ?? 0) > 0 ? ` · ${outbox!.pending}` : ''}
-            </span>
-            {/* On a phone the sentence is spoken only; what waits shows as a number, so it is never squeezed */}
-            {(outbox?.pending ?? 0) > 0 ? (
-              <span aria-hidden="true" className="num sm:hidden">
-                {outbox!.pending}
-              </span>
-            ) : null}
-          </ConnectionPill>
-          {outbox?.lastSentAt ? (
-            <span className="hidden shrink-0 text-xs whitespace-nowrap text-ink-muted xl:inline">
-              آخر إرسال {clockText(outbox.lastSentAt, digits)}
-            </span>
-          ) : null}
-        </span>
-        <span className="hidden sm:contents">
-          <Divider />
-          <Clock />
-        </span>
+        {/* One status chip: the connection at a glance; a tap opens the rest (what waits, the last send, the time, the last receipt) */}
+        <StatusChip online={online} outbox={outbox} lastInvoice={lastInvoice} />
         <span className="flex shrink-0 items-center gap-1">
           <ThemeToggle size="md" />
           {menu}
@@ -207,6 +310,7 @@ export function StatusBar({
               aria-label="أخفِ تنبيه التثبيت"
               onClick={() => {
                 setHintHidden(true);
+                setForced(false);
                 try {
                   window.localStorage.setItem(INSTALL_HINT_KEY, '1');
                 } catch {

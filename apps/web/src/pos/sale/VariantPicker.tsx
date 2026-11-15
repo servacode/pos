@@ -98,7 +98,9 @@ export function VariantPicker({
       title={name}
       subtitle={
         <>
-          {piecesText(pieces.length)} · من <Money minor={from.priceMinor} currency={from.currency} />
+          {piecesText(pieces.length)} ·{' '}
+          {pieces.every((p) => p.price.priceMinor === from.priceMinor) ? null : 'من '}
+          <Money minor={from.priceMinor} currency={from.currency} />
           {priceNote?.(from.priceMinor, from.currency) ? (
             <> {priceNote(from.priceMinor, from.currency)}</>
           ) : null}
@@ -139,7 +141,7 @@ export function VariantPicker({
               'نفد — أضفه رغم ذلك'
             ) : (
               <>
-                أضف {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
+                أضف إلى السلة · {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
                 <Money minor={piece.price.priceMinor * qty} currency={piece.price.currency} />
               </>
             )}
@@ -262,12 +264,8 @@ export function VariantPicker({
           )}
         </p>
         <div className="flex items-center gap-1" role="group" aria-label="الكمية">
-          <IconButton
-            label="أنقص الكمية"
-            icon={<RemoveIcon size={20} />}
-            disabled={qty <= 1}
-            onClick={() => stepQty(-1)}
-          />
+          {/* Never dimmed: at one piece it simply stays at one */}
+          <IconButton label="أنقص الكمية" icon={<RemoveIcon size={20} />} onClick={() => stepQty(-1)} />
           <output aria-label="عدد القطع" className="num min-w-8 text-center text-lg font-bold text-ink">
             {formatQuantity(qty * 1000, digits)}
           </output>

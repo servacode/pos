@@ -118,9 +118,12 @@ export function Dialog({
               </RadixDialog.Close>
             </div>
             {children}
-            {/* At the end of the line, the safe action first (هوية 4 › Dialog). */}
+            {/* The safe action comes first in the DOM (it has focus); in Arabic the row is reversed so
+                the main action sits at the right, where the eye starts. */}
             {actions ? (
-              <div className="flex flex-wrap items-center justify-end gap-3 pt-1">{actions}</div>
+              <div className="flex flex-wrap items-center justify-end gap-3 pt-1 rtl:flex-row-reverse">
+                {actions}
+              </div>
             ) : null}
           </RadixDialog.Content>
         </RadixDialog.Overlay>
