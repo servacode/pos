@@ -104,7 +104,7 @@ import type { SavedGiftVoucher } from '../customers/GiftVoucherScreen';
 import { HoldPanel } from './HoldPanel';
 import { HeldList, HoldNamePanel } from './HeldList';
 import { dollarNote, ItemsArea, type PriceCheck } from './ItemsArea';
-import { armClickGuard, clicksSwallowed } from './clickGuard';
+import { armClickGuard } from './clickGuard';
 import { isUnfedService } from './serviceFee';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { OnlineOrdersPanel } from './OnlineOrdersPanel';
@@ -737,7 +737,7 @@ export function SaleScreen(props: SaleScreenProps) {
     lastKind.current = mode.kind;
   }, [mode.kind]);
   const pickItem = useCallback((item: CatalogItem, hit?: BarcodeHit | null) => {
-    if (Date.now() - pickerAddedAt.current < 350 || clicksSwallowed()) return;
+    if (Date.now() - pickerAddedAt.current < 350) return;
     if (checkingRef.current) handlers.current.showPrice(item, hit);
     else if (!hit && handlers.current.packsByVariant.has(item.variantId))
       // Picked with no barcode: the piece or which box?
@@ -746,7 +746,7 @@ export function SaleScreen(props: SaleScreenProps) {
   }, []);
   const pickModel = useCallback(
     (productId: string) => {
-      if (Date.now() - pickerAddedAt.current < 350 || clicksSwallowed()) return;
+      if (Date.now() - pickerAddedAt.current < 350) return;
       if (checkingRef.current) {
         const model = pieces.get(productId);
         if (model)

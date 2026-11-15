@@ -34,6 +34,7 @@ import { stockInPacks } from './packStock';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { expiryText, sellableQty, tileInfo } from './tileInfo';
 import { pieceWord } from './packText';
+import { clicksSwallowed } from './clickGuard';
 
 const PHOTOS_OFF_KEY = 'tillPhotosOff';
 
@@ -354,8 +355,13 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           photos={photos}
           fx={fx}
           iconOf={iconOf}
-          onPickItem={onPickItem}
-          onPickModel={props.onPickModel}
+          // Taps on tiles only: right after a dialog closes, its second click must not pick a tile
+          onPickItem={(item, hit) => {
+            if (!clicksSwallowed()) onPickItem(item, hit);
+          }}
+          onPickModel={(productId) => {
+            if (!clicksSwallowed()) props.onPickModel(productId);
+          }}
         />
       )}
     </>

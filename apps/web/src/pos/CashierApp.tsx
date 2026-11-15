@@ -211,8 +211,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const [shift, setShift] = useState<OpenShift | null | undefined>(undefined);
   const [view, setViewNow] = useState<View>('sale');
   // Coming back from a sub-screen (rentals, returns...): its closing click must not reach a tile
+  const viewRef = useRef<View>('sale');
   const setView = useCallback((next: View) => {
-    armClickGuard();
+    // Only a sub-screen closing back to the sale arms the guard (not sign-in or the first screen)
+    if (next === 'sale' && viewRef.current !== 'sale') armClickGuard();
+    viewRef.current = next;
     setViewNow(next);
   }, []);
   // «تبديل» from the menu opens the return screen already set on an exchange
