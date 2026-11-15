@@ -199,7 +199,7 @@ describe('held carts are a list', () => {
     await user.click(screen.getByRole('button', { name: /^علّق/ }));
     // Left empty: held without a name
     await user.click(await screen.findByRole('button', { name: 'علّق الفاتورة' }));
-    expect(screen.getByText('2 فواتير معلّقة')).toBeInTheDocument();
+    expect(screen.getByText('2 معلّقة')).toBeInTheDocument();
 
     await user.keyboard('{F4}');
     const list = await screen.findByRole('list', { name: 'الفواتير المعلّقة' });
@@ -215,7 +215,7 @@ describe('held carts are a list', () => {
 
     await user.click(within(list).getByRole('button', { name: /استرجع أم أحمد/ }));
     expect(cartLines()).toHaveTextContent('شاي أحمر');
-    expect(screen.getByText('فاتورة معلّقة')).toBeInTheDocument();
+    expect(screen.getByText('1 معلّقة')).toBeInTheDocument();
   });
 
   it('a single held cart still comes back with one press of «استرجع المعلّقة»', async () => {
@@ -234,12 +234,12 @@ describe('held carts are a list', () => {
     await user.click(screen.getByRole('button', { name: 'افتح الفواتير المعلّقة' }));
     await user.click(await screen.findByRole('button', { name: /استرجع بدون اسم/ }));
     expect(cartLines()).toHaveTextContent('شاي أحمر');
-    expect(screen.getByText('فاتورة معلّقة')).toBeInTheDocument();
+    expect(screen.getByText('1 معلّقة')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'افتح الفواتير المعلّقة' }));
     await user.click(await screen.findByRole('button', { name: /احذف/ }));
     await user.click(screen.getByRole('button', { name: 'تأكيد الحذف' }));
-    expect(screen.queryByText('فاتورة معلّقة')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 معلّقة')).not.toBeInTheDocument();
   });
 });
 

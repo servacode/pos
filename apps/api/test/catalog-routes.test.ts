@@ -391,6 +391,7 @@ describe('GET /v1/products and GET /v1/barcodes/{code}', () => {
       price: { currency: 'SYP', minMinor: 4_500_000, maxMinor: 4_500_000 },
       barcode: '6281234500012',
       stockQty: 0,
+      sellableQty: 0,
       hasImage: false,
       thumbUrl: null,
       nearestExpiry: null,

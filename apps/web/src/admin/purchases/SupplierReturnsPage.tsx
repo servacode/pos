@@ -6,6 +6,7 @@ import type {
   SupplierReturnRow,
 } from '@serva/core';
 import {
+  AddIcon,
   Alert,
   Badge,
   BookIcon,
@@ -95,6 +96,8 @@ export function SupplierReturnsPage() {
   const [note, setNote] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
   const [saving, setSaving] = useState(false);
+  // The list of returns comes first; the form opens from «مرتجع جديد»
+  const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const errorBox = useRef<HTMLDivElement>(null);
@@ -160,6 +163,7 @@ export function SupplierReturnsPage() {
       setLines([]);
       setReference('');
       setNote('');
+      setFormOpen(false);
       load();
     } catch (e) {
       const named = e instanceof ApiError ? (e.fields ?? {}) : {};
@@ -227,235 +231,255 @@ export function SupplierReturnsPage() {
         <PageHeader
           title="مرتجع إلى المورد"
           description="قطع ترجع لمورّدها: تخرج من المخزون بكلفتها، وتنزل من رصيده أو تستردّ ثمنها."
+          actions={
+            formOpen ? null : (
+              <Button icon={<AddIcon />} onClick={() => setFormOpen(true)}>
+                مرتجع جديد
+              </Button>
+            )
+          }
         />
-        <section aria-label="مرتجع جديد">
-          <Card>
-            <CardHeader
-              icon={<UndoIcon />}
-              title="مرتجع جديد"
-              description="اختر المورد وطريقة الاسترداد، ثم أضف القطع الراجعة."
-            />
-            <div className="flex flex-col gap-5">
-              {error ? (
-                <div ref={errorBox}>
-                  <Alert tone="error">{error}</Alert>
-                </div>
-              ) : null}
-              {done ? (
-                <Alert tone="success">
-                  سُجّل المرتجع {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
-                  {done.refund === 'credit' ? 'نزلت من رصيد المورد.' : 'استرددتها منه.'} خرجت القطع من
-                  المخزون.
-                </Alert>
-              ) : null}
-              {suppliers && active.length === 0 ? (
-                <Alert tone="info">لا موردين بعد. أضف المورد من «المشتريات».</Alert>
-              ) : null}
-              {/* The way the pieces go: out of a branch, back to the supplier. */}
-              <div
-                className={
-                  branches.length > 1
-                    ? 'grid grid-cols-1 items-start gap-x-3 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
-                    : 'grid grid-cols-1 gap-4 md:grid-cols-2'
-                }
-              >
-                {branches.length > 1 ? (
-                  <>
-                    <Select label="من فرع" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-                      {branches.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </Select>
-                    <WayArrow />
-                  </>
-                ) : null}
-                <Select
-                  label="المورد"
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  error={fields.supplierId}
-                >
-                  {supplierId ? null : <option value="">اختر المورد</option>}
-                  {active.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <RadioGroup legend="الاسترداد">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  {(Object.keys(REFUND_CHOICE) as SupplierReturnRow['refund'][]).map((r) => {
-                    const RefundIcon = REFUND_CHOICE[r].icon;
-                    return (
-                      <ChoiceCard
-                        key={r}
-                        name="supplier-return-refund"
-                        value={r}
-                        checked={refund === r}
-                        onChange={() => setRefund(r)}
-                        title={REFUND_CHOICE[r].title}
-                        description={REFUND_CHOICE[r].hint}
-                        leading={<RefundIcon />}
-                      />
-                    );
-                  })}
-                </div>
-              </RadioGroup>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <TextField
-                  label="رقم إشعار المورد (اختياري)"
-                  dir="ltr"
-                  value={reference}
-                  onChange={(e) => setReference(e.target.value.slice(0, 64))}
-                />
-                <TextField
-                  label="السبب (اختياري)"
-                  placeholder="عيب خياطة، مقاس خطأ…"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value.slice(0, 200))}
-                />
-              </div>
-              <VariantPicker
-                onPick={(v) =>
-                  // The same item may come twice, each from its own batch
-                  setLines((list) => [...list, { ...v, qty: '', packQty: 1000, amount: '' }])
-                }
-                onPickGrid={(picked) =>
-                  setLines((list) => [
-                    ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
-                    ...picked.map((p) => ({
-                      variantId: p.variantId,
-                      name: p.name,
-                      qty: p.qty,
-                      packQty: 1000,
-                      amount: '',
-                    })),
-                  ])
-                }
+        {done && !formOpen ? (
+          <Alert tone="success">
+            سُجّل المرتجع {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
+            {done.refund === 'credit' ? 'نزلت من رصيد المورد.' : 'استرددتها منه.'} خرجت القطع من المخزون.
+          </Alert>
+        ) : null}
+        {formOpen ? (
+          <section aria-label="مرتجع جديد">
+            <Card>
+              <CardHeader
+                icon={<UndoIcon />}
+                title="مرتجع جديد"
+                description="اختر المورد وطريقة الاسترداد، ثم أضف القطع الراجعة."
               />
-              {lines.length > 0 ? (
-                <LinesTable
-                  label="أصناف المرتجع"
-                  head={
-                    <LinesHead className={LINE_COLUMNS}>
-                      <span>الصنف</span>
-                      <span>الكمية</span>
-                      <span>المبلغ (فارغ: بكلفتها)</span>
-                      <span />
-                    </LinesHead>
+              <div className="flex flex-col gap-5">
+                {error ? (
+                  <div ref={errorBox}>
+                    <Alert tone="error">{error}</Alert>
+                  </div>
+                ) : null}
+                {suppliers && active.length === 0 ? (
+                  <Alert tone="info">لا موردين بعد. أضف المورد من «المشتريات».</Alert>
+                ) : null}
+                {/* The way the pieces go: out of a branch, back to the supplier. */}
+                <div
+                  className={
+                    branches.length > 1
+                      ? 'grid grid-cols-1 items-start gap-x-3 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+                      : 'grid grid-cols-1 gap-4 md:grid-cols-2'
                   }
                 >
-                  {lines.map((l, i) => (
-                    <li
-                      key={`${l.variantId}-${i}`}
-                      className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 px-4 py-3 md:items-center ${LINE_COLUMNS}`}
-                    >
-                      <span className="col-span-2 flex min-w-0 flex-col md:col-span-1">
-                        <span className="truncate font-semibold text-ink">{l.name}</span>
-                        {l.packQty > 1000 && parsed[i]!.qty ? (
-                          <span className="text-xs text-ink-subtle">
-                            {packSummary(
-                              qtyOf(l.qty) ?? 0,
-                              l.packs?.find((x) => x.qty === l.packQty) ?? null,
-                              (q) => formatQuantity(q, digits),
-                            )}
-                          </span>
-                        ) : null}
-                      </span>
-                      <div className="col-span-3 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
-                        <Caption>الكمية</Caption>
-                        <PackQty
-                          name={l.name}
-                          packs={l.packs}
-                          qty={l.qty}
-                          packQty={l.packQty}
-                          onChange={(patch) =>
-                            setLines((all) => all.map((x, j) => (j === i ? withPackChange(x, patch) : x)))
-                          }
-                          error={fields[`lines.${i}.qty`]}
-                        />
-                      </div>
-                      <div className="col-span-3 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
-                        <Caption>المبلغ (فارغ: بكلفتها)</Caption>
-                        <NumberField
-                          label={`مبلغ ${l.name}`}
-                          hideLabel
-                          placeholder="بكلفتها"
-                          decimals={2}
-                          value={l.amount}
-                          onValueChange={(amount) =>
-                            setLines((all) => all.map((x, j) => (j === i ? { ...x, amount } : x)))
-                          }
-                          error={fields[`lines.${i}.amountMinor`]}
-                        />
-                      </div>
-                      <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto">
-                        <RemoveLine
-                          name={l.name}
-                          onRemove={() => setLines((all) => all.filter((_, j) => j !== i))}
-                        />
-                      </div>
-                      <div className="col-span-3 row-start-4 md:col-span-4 md:row-start-auto">
-                        <BatchSelect
-                          variantId={l.variantId}
-                          branchId={branchId || undefined}
-                          value={l.batch ?? null}
-                          onChange={(batch) =>
-                            setLines((all) => all.map((x, j) => (j === i ? { ...x, batch } : x)))
-                          }
-                          error={fields[`lines.${i}.batchNo`]}
-                        />
-                      </div>
-
-                      {l.tracksSerial || fields[`lines.${i}.serials`] || l.serials ? (
-                        <div className="col-span-3 md:col-span-4">
-                          <label className="flex flex-col gap-1.5">
-                            <span className="text-xs font-semibold text-ink-subtle">
-                              الأرقام التسلسلية (رقم لكل قطعة، واحد في كل سطر)
-                            </span>
-                            <textarea
-                              aria-label={`أرقام ${l.name}`}
-                              dir="ltr"
-                              rows={2}
-                              value={l.serials ?? ''}
-                              onChange={(e) =>
-                                setLines((all) =>
-                                  all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)),
-                                )
-                              }
-                              className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden"
-                            />
-                            {fields[`lines.${i}.serials`] ? (
-                              <span className="text-sm text-danger-ink">{fields[`lines.${i}.serials`]}</span>
-                            ) : null}
-                          </label>
-                        </div>
-                      ) : null}
-                    </li>
-                  ))}
-                </LinesTable>
-              ) : null}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
-                <p className="text-sm text-ink-muted">
-                  {lines.length > 0 ? (
+                  {branches.length > 1 ? (
                     <>
-                      الأصناف: <span className="num font-semibold text-ink">{lines.length}</span> · القطع:{' '}
-                      <span className="num font-semibold text-ink">{formatQuantity(pieces, digits)}</span>
+                      <Select label="من فرع" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </Select>
+                      <WayArrow />
                     </>
-                  ) : (
-                    'ابحث عن القطعة الراجعة وأضفها بكميتها.'
-                  )}
-                </p>
-                <Button icon={<UndoIcon />} disabled={!ready} loading={saving} onClick={() => void save()}>
-                  سجّل المرتجع
-                </Button>
+                  ) : null}
+                  <Select
+                    label="المورد"
+                    value={supplierId}
+                    onChange={(e) => setSupplierId(e.target.value)}
+                    error={fields.supplierId}
+                  >
+                    {supplierId ? null : <option value="">اختر المورد</option>}
+                    {active.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <RadioGroup legend="الاسترداد">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    {(Object.keys(REFUND_CHOICE) as SupplierReturnRow['refund'][]).map((r) => {
+                      const RefundIcon = REFUND_CHOICE[r].icon;
+                      return (
+                        <ChoiceCard
+                          key={r}
+                          name="supplier-return-refund"
+                          value={r}
+                          checked={refund === r}
+                          onChange={() => setRefund(r)}
+                          title={REFUND_CHOICE[r].title}
+                          description={REFUND_CHOICE[r].hint}
+                          leading={<RefundIcon />}
+                        />
+                      );
+                    })}
+                  </div>
+                </RadioGroup>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <TextField
+                    label="رقم إشعار المورد (اختياري)"
+                    dir="ltr"
+                    value={reference}
+                    onChange={(e) => setReference(e.target.value.slice(0, 64))}
+                  />
+                  <TextField
+                    label="السبب (اختياري)"
+                    placeholder="عيب في الصنع، كمية خطأ…"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value.slice(0, 200))}
+                  />
+                </div>
+                <VariantPicker
+                  onPick={(v) =>
+                    // The same item may come twice, each from its own batch
+                    setLines((list) => [...list, { ...v, qty: '', packQty: 1000, amount: '' }])
+                  }
+                  onPickGrid={(picked) =>
+                    setLines((list) => [
+                      ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
+                      ...picked.map((p) => ({
+                        variantId: p.variantId,
+                        name: p.name,
+                        qty: p.qty,
+                        packQty: 1000,
+                        amount: '',
+                      })),
+                    ])
+                  }
+                />
+                {lines.length > 0 ? (
+                  <LinesTable
+                    label="أصناف المرتجع"
+                    head={
+                      <LinesHead className={LINE_COLUMNS}>
+                        <span>الصنف</span>
+                        <span>الكمية</span>
+                        <span>المبلغ (فارغ: بكلفتها)</span>
+                        <span />
+                      </LinesHead>
+                    }
+                  >
+                    {lines.map((l, i) => (
+                      <li
+                        key={`${l.variantId}-${i}`}
+                        className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 px-4 py-3 md:items-center ${LINE_COLUMNS}`}
+                      >
+                        <span className="col-span-2 flex min-w-0 flex-col md:col-span-1">
+                          <span className="truncate font-semibold text-ink">{l.name}</span>
+                          {l.packQty > 1000 && parsed[i]!.qty ? (
+                            <span className="text-xs text-ink-subtle">
+                              {packSummary(
+                                qtyOf(l.qty) ?? 0,
+                                l.packs?.find((x) => x.qty === l.packQty) ?? null,
+                                (q) => formatQuantity(q, digits),
+                              )}
+                            </span>
+                          ) : null}
+                        </span>
+                        <div className="col-span-3 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
+                          <Caption>الكمية</Caption>
+                          <PackQty
+                            name={l.name}
+                            packs={l.packs}
+                            qty={l.qty}
+                            packQty={l.packQty}
+                            onChange={(patch) =>
+                              setLines((all) => all.map((x, j) => (j === i ? withPackChange(x, patch) : x)))
+                            }
+                            error={fields[`lines.${i}.qty`]}
+                          />
+                        </div>
+                        <div className="col-span-3 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
+                          <Caption>المبلغ (فارغ: بكلفتها)</Caption>
+                          <NumberField
+                            label={`مبلغ ${l.name}`}
+                            hideLabel
+                            placeholder="بكلفتها"
+                            decimals={2}
+                            value={l.amount}
+                            onValueChange={(amount) =>
+                              setLines((all) => all.map((x, j) => (j === i ? { ...x, amount } : x)))
+                            }
+                            error={fields[`lines.${i}.amountMinor`]}
+                          />
+                        </div>
+                        <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto">
+                          <RemoveLine
+                            name={l.name}
+                            onRemove={() => setLines((all) => all.filter((_, j) => j !== i))}
+                          />
+                        </div>
+                        <div className="col-span-3 row-start-4 md:col-span-4 md:row-start-auto">
+                          <BatchSelect
+                            variantId={l.variantId}
+                            branchId={branchId || undefined}
+                            value={l.batch ?? null}
+                            onChange={(batch) =>
+                              setLines((all) => all.map((x, j) => (j === i ? { ...x, batch } : x)))
+                            }
+                            error={fields[`lines.${i}.batchNo`]}
+                          />
+                        </div>
+
+                        {l.tracksSerial || fields[`lines.${i}.serials`] || l.serials ? (
+                          <div className="col-span-3 md:col-span-4">
+                            <label className="flex flex-col gap-1.5">
+                              <span className="text-xs font-semibold text-ink-subtle">
+                                الأرقام التسلسلية (رقم لكل قطعة، واحد في كل سطر)
+                              </span>
+                              <textarea
+                                aria-label={`أرقام ${l.name}`}
+                                dir="ltr"
+                                rows={2}
+                                value={l.serials ?? ''}
+                                onChange={(e) =>
+                                  setLines((all) =>
+                                    all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)),
+                                  )
+                                }
+                                className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden"
+                              />
+                              {fields[`lines.${i}.serials`] ? (
+                                <span className="text-sm text-danger-ink">
+                                  {fields[`lines.${i}.serials`]}
+                                </span>
+                              ) : null}
+                            </label>
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </LinesTable>
+                ) : null}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
+                  <p className="text-sm text-ink-muted">
+                    {lines.length > 0 ? (
+                      <>
+                        الأصناف: <span className="num font-semibold text-ink">{lines.length}</span> · القطع:{' '}
+                        <span className="num font-semibold text-ink">{formatQuantity(pieces, digits)}</span>
+                      </>
+                    ) : (
+                      'ابحث عن القطعة الراجعة وأضفها بكميتها.'
+                    )}
+                  </p>
+                  <span className="flex items-center gap-2">
+                    <Button variant="ghost" onClick={() => setFormOpen(false)}>
+                      إلغاء
+                    </Button>
+                    <Button
+                      icon={<UndoIcon />}
+                      disabled={!ready}
+                      loading={saving}
+                      onClick={() => void save()}
+                    >
+                      سجّل المرتجع
+                    </Button>
+                  </span>
+                </div>
               </div>
-            </div>
-          </Card>
-        </section>
+            </Card>
+          </section>
+        ) : null}
         <section aria-label="المرتجعات السابقة" className="flex flex-col gap-3">
           <SectionHead title="المرتجعات إلى الموردين" description="الأحدث أولاً." />
           <DataTable

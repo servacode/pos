@@ -167,9 +167,9 @@ describe('«حركة الأصناف»', () => {
     await user.selectOptions(screen.getByLabelText('القسم'), 'كل الأقسام');
 
     // Without «التكلفة» the cost is not there
-    await user.click(screen.getByRole('radio', { name: '3 أشهر' }));
+    await user.click(screen.getByRole('radio', { name: 'آخر 3 أشهر' }));
     await screen.findByRole('table', { name: 'القطع الراكدة' });
-    expect(requestsTo('GET', url(30, 90))).toHaveLength(1);
+    expect(requestsTo('GET', url(90, 90))).toHaveLength(1);
     expect(screen.queryByText('رأس مال نائم فيها')).not.toBeInTheDocument();
   });
 });

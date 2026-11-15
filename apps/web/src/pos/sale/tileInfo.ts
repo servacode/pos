@@ -1,4 +1,5 @@
 import { batchState } from '@serva/core/pharmacy';
+import type { StockBatch } from '@serva/core/contracts/pharmacy';
 import type { CatalogItem } from '../catalog';
 
 /** What a tile says about its stock, beyond name and price (display only) */
@@ -25,6 +26,15 @@ export const EXPIRY_CHIP_DAYS = 90;
 /** Red under this many days */
 export const EXPIRY_DANGER_DAYS = 30;
 
+/** What can be sold from the batches: the valid ones plus the no-batch row, even below zero (one rule everywhere) */
+export function sellableQty(batches: readonly StockBatch[], today: string): number {
+  let sum = 0;
+  for (const b of batches) {
+    if (batchState(b, today) === 'ok' || (b.qty < 0 && !b.batchNo)) sum += b.qty;
+  }
+  return sum;
+}
+
 export function tileInfo(pieces: readonly CatalogItem[], today: string): TileInfo {
   let stock: number | null = null;
   let expiredQty = 0;
@@ -41,6 +51,9 @@ export function tileInfo(pieces: readonly CatalogItem[], today: string): TileInf
         if (state === 'ok') {
           sellable += b.qty;
           if (b.expiry && (nearest === null || b.expiry < nearest)) nearest = b.expiry;
+        } else if (state === 'empty' && b.qty < 0 && !b.batchNo) {
+          // The no-batch row can run below zero: it takes from what can be sold, the same everywhere
+          sellable += b.qty;
         } else if (state === 'expired') {
           expiredQty += b.qty;
           left = true;

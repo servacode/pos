@@ -51,6 +51,7 @@ import {
 } from '../catalog/catalog';
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
 import { downloadCsv } from '../exportCsv';
+import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
 import { ButtonLink } from './parts';
 
@@ -238,10 +239,19 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
 }
 
 /**
- * The product's first picture, small; a product with none shows its letter (and, to a manager, a «+»
- * that opens the card on its pictures), so the list shows at a glance which still need one.
+ * The product's first picture, small. One with none shows the icon of its kind (its category, else
+ * the store's business type), never a letter; to a manager that icon is the single «أضف صورة»
+ * action, and a camera shows over it when the pointer is on it.
  */
-function Thumb({ item, canAdd }: { item: ProductListItem; canAdd: boolean }) {
+function Thumb({
+  item,
+  canAdd,
+  sectors,
+}: {
+  item: ProductListItem;
+  canAdd: boolean;
+  sectors: readonly string[];
+}) {
   const [broken, setBroken] = useState(false);
   if (item.thumbUrl && !broken) {
     return (
@@ -254,26 +264,29 @@ function Thumb({ item, canAdd }: { item: ProductListItem; canAdd: boolean }) {
       />
     );
   }
-  const letter = Array.from(item.nameAr.trim())[0] ?? '';
+  const Kind = placeholderIconFor({ categoryName: item.categoryName, name: item.nameAr, sectors });
   if (canAdd && item.hasImage === false) {
     return (
       <Link
         to={`/products/${item.id}#images`}
         aria-label={`أضف صورة لـ«${item.nameAr}»`}
         title="أضف صورة"
-        className="relative grid size-11 shrink-0 place-items-center rounded-control border border-dashed border-line-control bg-surface-muted text-base font-bold text-ink-subtle transition-colors duration-120 ease-standard hover:border-brand hover:text-brand-ink max-sm:size-10"
+        className="group relative grid size-11 shrink-0 place-items-center rounded-control border border-line bg-surface-muted text-ink-subtle transition-colors duration-120 ease-standard hover:border-brand hover:bg-brand-soft hover:text-brand-ink focus-visible:border-brand max-sm:size-10"
       >
-        <span aria-hidden="true">{letter}</span>
-        <span
+        <Kind size={20} aria-hidden="true" className="group-hover:hidden group-focus-visible:hidden" />
+        <CameraIcon
+          size={20}
           aria-hidden="true"
-          className="absolute -end-1 -bottom-1 grid size-4 place-items-center rounded-full bg-brand text-on-brand"
-        >
-          <AddIcon size={16} className="size-3" />
-        </span>
+          className="hidden group-hover:block group-focus-visible:block"
+        />
       </Link>
     );
   }
-  return <IconChip className="size-11 text-base font-bold max-sm:size-10">{letter}</IconChip>;
+  return (
+    <IconChip tone="neutral" className="size-11 max-sm:size-10">
+      <Kind size={20} aria-hidden="true" />
+    </IconChip>
+  );
 }
 
 /** «ينتهي قريباً» in amber, «منتهية» in red, under the date of the nearest expiry */
@@ -487,7 +500,8 @@ function ProductsList() {
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
   // What the shown list needs done: a price of 0 sells for nothing, and a missing picture shows as a letter
   const zeroPrice =
-    attention?.zeroPrice ?? (items ?? []).filter((i) => i.price !== null && i.price.minMinor === 0).length;
+    attention?.zeroPrice ??
+    (items ?? []).filter((i) => i.type !== 'service' && i.price !== null && i.price.minMinor === 0).length;
   const noPhoto = attention?.noPhoto ?? (items ?? []).filter((i) => i.hasImage === false).length;
   const summary = items ? summaryOf(items) : null;
   // More pages wait behind «اعرض المزيد»: the tiles count what is on screen, «+» says there is more.
@@ -506,7 +520,7 @@ function ProductsList() {
       header: 'المنتج',
       cell: (item) => (
         <div className="flex min-w-0 items-center gap-3 py-2.5 sm:min-w-60">
-          <Thumb item={item} canAdd={canManage && !item.archivedAt} />
+          <Thumb item={item} canAdd={canManage && !item.archivedAt} sectors={me.tenant.sectors} />
           <div className="flex min-w-0 flex-col gap-0.5">
             <Link
               to={`/products/${item.id}`}
@@ -573,14 +587,24 @@ function ProductsList() {
         item.type === 'service' ? (
           <span className="text-ink-subtle">—</span>
         ) : (
-          <span
-            className={cn(
-              'font-semibold',
-              item.stockQty < 0 && 'text-danger-ink',
-              item.stockQty === 0 && 'text-warning-ink',
-            )}
-          >
-            {formatQuantity(item.stockQty, digits)}
+          <span className="flex flex-col items-end">
+            <span
+              className={cn(
+                'font-semibold',
+                item.stockQty < 0 && 'text-danger-ink',
+                item.stockQty === 0 && 'text-warning-ink',
+              )}
+            >
+              {formatQuantity(item.stockQty, digits)}
+            </span>
+            {item.sellableQty !== undefined && item.sellableQty > item.stockQty ? (
+              <span className="text-xs whitespace-nowrap text-ink-muted">
+                متاح للبيع <bdi className="num">{formatQuantity(item.sellableQty, digits)}</bdi> · ناقص{' '}
+                <bdi className="num text-danger-ink">
+                  {formatQuantity(item.sellableQty - item.stockQty, digits)}
+                </bdi>
+              </span>
+            ) : null}
           </span>
         ),
     },
@@ -640,7 +664,13 @@ function ProductsList() {
         صدّر الجدول
       </Button>
       <Button variant="secondary" icon={<CameraIcon />} onClick={() => setPhotosOpen(true)}>
-        أضف صوراً دفعة واحدة
+        {noPhoto > 0 && items && filters.status === 'active' ? (
+          <>
+            أضف صوراً دفعة واحدة · <bdi className="num">{noPhoto}</bdi> بلا صورة
+          </>
+        ) : (
+          'أضف صوراً دفعة واحدة'
+        )}
       </Button>
       <ButtonLink to="/import?type=products" icon={<PackageOpenIcon />}>
         استيراد من ملف
@@ -833,6 +863,18 @@ function ProductsList() {
                     أضف منتجاً بهذا الباركود
                   </Link>
                 ) : null}
+              </span>
+            </Alert>
+          ) : null}
+
+          {/* Every product is «بلا تصنيف»: say how to find them faster */}
+          {items && canManage && !filtered && items.length >= 3 && items.every((i) => !i.categoryId) ? (
+            <Alert tone="info">
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>كل منتجاتك بلا تصنيف. التصنيفات (مثل «رجالي» و«أحذية») تُسهّل البحث والتقارير.</span>
+                <Link to="/categories" className={textLinkClass}>
+                  أضف تصنيفات
+                </Link>
               </span>
             </Alert>
           ) : null}

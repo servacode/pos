@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CatalogItem } from '../catalog';
-import { expiryText, tileInfo } from './tileInfo';
+import { expiryText, sellableQty, tileInfo } from './tileInfo';
 import { isColourOption, swatchOf } from './swatch';
 
 const piece = (over: Partial<CatalogItem>) => over as CatalogItem;
@@ -78,5 +78,26 @@ describe('colour dots', () => {
     expect(swatchOf('غير معروف')).toBeNull();
     expect(isColourOption('اللون')).toBe(true);
     expect(isColourOption('المقاس')).toBe(false);
+  });
+});
+
+describe('one sellable-stock rule', () => {
+  it('counts the no-batch row below zero together with the valid batches', () => {
+    const gauze = tileInfo(
+      [
+        piece({
+          stockQty: 274_000,
+          stockBatches: [
+            { batchNo: 'A', expiry: '2027-06-30', qty: 175_000 },
+            { batchNo: 'OLD', expiry: '2026-01-01', qty: 100_000 },
+            { batchNo: null, expiry: null, qty: -1_000 },
+          ],
+        }),
+      ],
+      '2026-11-14',
+    );
+    expect(gauze.stockQty).toBe(174_000);
+    expect(gauze.expiredQty).toBe(100_000);
+    expect(sellableQty([{ batchNo: null, expiry: null, qty: -20_000 }], '2026-11-14')).toBe(-20_000);
   });
 });

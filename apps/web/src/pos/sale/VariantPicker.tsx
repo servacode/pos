@@ -57,7 +57,7 @@ export function VariantPicker({
   return (
     <SalePanel
       label={`اختر من ${name}`}
-      className="mx-auto w-full max-w-3xl"
+      className="mx-auto w-full max-w-2xl"
       title={name}
       subtitle={
         <>
@@ -69,12 +69,12 @@ export function VariantPicker({
           <img
             src={image}
             alt=""
-            className="size-20 shrink-0 rounded-control bg-surface-muted object-cover"
+            className="size-16 shrink-0 rounded-control bg-surface-muted object-cover"
           />
         ) : (
           <span
             aria-hidden="true"
-            className="grid size-20 shrink-0 place-items-center rounded-control bg-brand-soft text-3xl font-bold text-brand-ink"
+            className="grid size-16 shrink-0 place-items-center rounded-control bg-brand-soft text-2xl font-bold text-brand-ink"
           >
             {Array.from(name.trim())[0] ?? ''}
           </span>
@@ -113,7 +113,9 @@ export function VariantPicker({
     >
       {options.map((option) => {
         // The count shows once: under the sizes (or the only option), not again under every colour
-        const showStock = options.length === 1 || !isColourOption(option.name);
+        // …and under the colours too once a size is chosen, so «نفد» shows for the combination
+        const otherChosen = Object.keys(chosen).some((k) => k !== option.name);
+        const showStock = options.length === 1 || !isColourOption(option.name) || otherChosen;
         return (
           <div key={option.name} role="group" aria-label={option.name} className="flex flex-col gap-3">
             <p className="flex items-center gap-2 text-sm font-semibold text-ink-muted">
@@ -138,12 +140,14 @@ export function VariantPicker({
                     disabled={!possible}
                     onClick={() => choose(option.name, value)}
                     className={cn(
-                      'min-h-14 min-w-16 rounded-small border px-4 text-lg font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
+                      'min-h-12 min-w-16 rounded-small border px-4 text-base font-semibold transition-[background-color,border-color,color,box-shadow] duration-120 ease-standard select-none',
                       on
                         ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
-                        : possible
-                          ? 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted'
-                          : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
+                        : possible && left !== null && left <= 0 && options.length > 1 && otherChosen
+                          ? 'border-line-control/40 bg-surface-muted text-ink-subtle'
+                          : possible
+                            ? 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted'
+                            : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
                     )}
                   >
                     <span aria-hidden="true" className="flex flex-col items-center leading-tight">

@@ -780,6 +780,13 @@ export function PaymentPanel({
                 </span>
               </span>
             </div>
+            {option.method === 'cash' && option.currency === base && dueHere !== remainingBase ? (
+              <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
+                المستحق <Money minor={remainingBase} currency={base} className="font-semibold text-ink" />
+                {' · '}يُقرَّب نقداً إلى{' '}
+                <Money minor={dueHere} currency={base} className="font-semibold text-ink" />
+              </p>
+            ) : null}
             {option.method === 'credit' ? (
               <p className="flex items-start gap-2 rounded-card border border-warning/20 bg-warning-soft px-3 py-2.5 text-sm text-warning-ink">
                 <BookIcon size={20} className="shrink-0" />

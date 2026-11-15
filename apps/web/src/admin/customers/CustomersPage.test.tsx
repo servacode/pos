@@ -279,6 +279,38 @@ describe('«الزبائن» by kind of store', () => {
     expect(await screen.findAllByLabelText('نوع الزبون')).toHaveLength(2);
   });
 
+  it('makes the debt tile follow the 90-day filter like the others, and says so', async () => {
+    const away = {
+      ...detail(),
+      id: 'c-9',
+      name: 'غائب',
+      balanceMinor: 100_000,
+      lastPurchaseDate: '2025-01-01',
+    };
+    const near = {
+      ...detail(),
+      id: 'c-8',
+      name: 'حاضر',
+      balanceMinor: 900_000,
+      lastPurchaseDate: '2026-11-10',
+    };
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
+      'GET /v1/customers': () => ({
+        status: 200,
+        body: { items: [away, near], totalOwedMinor: 1_000_000, baseCurrency: 'SYP' },
+      }),
+    });
+    const { user } = renderApp('/customers');
+    const tile = async () => (await screen.findByText('الديون على الزبائن')).closest('div')?.parentElement;
+    await screen.findByText('حاضر');
+    const before = (await tile())?.textContent;
+    await user.click(await screen.findByRole('checkbox', { name: 'لم يزر منذ 90 يوماً' }));
+    expect(await screen.findByText('الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.')).toBeInTheDocument();
+    expect((await tile())?.textContent).not.toBe(before);
+  });
+
   it('says so, not «لا زبائن بعد», when nobody has been away for 90 days', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,

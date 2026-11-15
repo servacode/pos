@@ -438,7 +438,9 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
         field: 'barcode',
         message:
           `الباركود ${p.barcode} مكرر: سبق في السطر ${String(first.line)}` +
-          (wanted ? ` فلم يُستورد «${wanted}». أعطِ كل مقاس ولون باركوداً خاصاً به` : ''),
+          (wanted
+            ? ` فلم يُستورد «${wanted}». أعطِ كل خيار مختلف (حجم أو لون أو غيره) باركوداً خاصاً به`
+            : ''),
       },
     ]);
     parsed.splice(parsed.indexOf(p), 1);

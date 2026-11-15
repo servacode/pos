@@ -272,6 +272,9 @@ const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from
 const unitsLeftSql = sql`(case when p.type = 'service' then null else coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} end)`;
 /** At most this many pieces left shows «بقي 2 فقط» */
 const LOW_STOCK = 3;
+/** The most one order may hold of a piece: what is on the shelf, whole pieces, at most 50; null for a service */
+const maxQtyOf = (units: string | null): number | null =>
+  units === null ? null : Math.min(50, Math.max(0, Math.floor(Number(units) / 1000)));
 const leftOf = (units: string | null): number | null => {
   if (units === null) return null;
   const n = Number(units);
@@ -435,6 +438,7 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
             wasPriceMinor: store.show_prices ? priced.wasPriceMinor : null,
             available: r.available,
             left: r.available ? leftOf(r.units) : null,
+            maxQty: r.available ? maxQtyOf(r.units) : 0,
           },
         ];
       });
@@ -498,9 +502,11 @@ async function priceLines(
     price: string;
     was: string | null;
     available: boolean;
+    units: string | null;
   }>(sql`
     select v.id, p.id as product_id, p.category_id, p.name_ar as name, v.label, pr.currency,
-           pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available
+           pr.price_minor::text as price, pr.was_price_minor::text as was, ${availableSql} as available,
+           ${unitsLeftSql}::text as units
     from variants v
     join products p on p.id = v.product_id
     join prices pr on pr.id = v.id
@@ -518,6 +524,17 @@ async function priceLines(
       : null;
     if (!row || price === null || (needOnShelf && !row.available)) {
       throw fieldError(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
+    }
+    // More than the shelf holds is refused with the number that is there (the shop's cart already stops at it)
+    if (needOnShelf && row.units !== null) {
+      const wanted = input.filter((l) => l.variantId === line.variantId).reduce((n, l) => n + l.qty, 0);
+      const left = Math.max(0, Math.floor(Number(row.units) / 1000));
+      if (wanted > left) {
+        throw fieldError(
+          `lines.${index}`,
+          `المتوفر من «${row.name}${row.label ? ` (${row.label})` : ''}» ${left} فقط. خفّض الكمية وأكمل الطلب.`,
+        );
+      }
     }
     const existing = lines.find((l) => l.variantId === line.variantId);
     if (existing) {

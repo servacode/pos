@@ -27,6 +27,7 @@ import {
   TransferIcon,
   UndoIcon,
   UserIcon,
+  WrenchIcon,
   CardIcon,
   type Icon,
 } from '@serva/ui';
@@ -112,7 +113,7 @@ export const NAV_SECTIONS: readonly { key: NavSectionKey; group: NavGroupKey; la
     { key: 'purchases', group: 'buying', label: 'المشتريات', icon: CartIcon },
     { key: 'inventory', group: 'stock', label: 'المخزون', icon: StockIcon },
     { key: 'money', group: 'money', label: 'المال', icon: ChequeIcon },
-    { key: 'services', group: 'money', label: 'الخدمات', icon: SerialIcon },
+    { key: 'services', group: 'money', label: 'الخدمات', icon: WrenchIcon },
     { key: 'reports', group: 'admin', label: 'التقارير', icon: ReportsIcon },
     { key: 'settings', group: 'admin', label: 'الإعدادات', icon: SettingsIcon },
   ];
@@ -307,7 +308,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   {
     section: 'inventory',
     to: '/recall',
-    label: 'سحب دفعة',
+    label: 'استدعاء دفعة',
     icon: ShieldCheckIcon,
     permission: ['purchases.manage'],
     sectors: EXPIRY_SECTORS,
@@ -323,7 +324,7 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   {
     section: 'services',
     to: '/warranty',
-    label: 'الضمان والصيانة',
+    label: 'طلبات الكفالة',
     icon: ShieldCheckIcon,
     permission: ['catalog.manage'],
     sectors: WARRANTY_SECTORS,

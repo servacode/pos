@@ -28,6 +28,12 @@ export interface ItemTileProps {
    * grid with no photos at all, so it reads apart from single items at a glance.
    */
   initial?: boolean;
+  /** An icon in the picture's place when there is no photo (instead of the name's first letter) */
+  placeholder?: ReactNode;
+  /** Words in place of the price («السعر عند البيع»: an item whose price is set at the sale) */
+  priceLabel?: string;
+  /** A small line under the price («≈ 5,850 ل.س»: a dollar price in the till's currency) */
+  priceNote?: ReactNode;
   /** Small marks under the price (stock left, an expiry date, «برقم تسلسلي») */
   extra?: ReactNode;
   onSelect: () => void;
@@ -57,6 +63,9 @@ export function ItemTile({
   detail,
   pictureSlot = false,
   initial = false,
+  placeholder,
+  priceLabel,
+  priceNote,
   extra,
   onSelect,
   className,
@@ -95,7 +104,7 @@ export function ItemTile({
             selected ? 'bg-surface' : 'bg-surface-muted',
           )}
         >
-          {firstLetter(name)}
+          {placeholder ?? firstLetter(name)}
         </span>
       ) : null}
       {monogram ? (
@@ -123,12 +132,16 @@ export function ItemTile({
         {detail && !monogram ? <span className="text-sm text-ink-muted">{detail}</span> : null}
       </span>
       <span className={cn('mt-auto flex items-center justify-between gap-2', picture && 'px-1.5')}>
-        <Money
-          minor={priceMinor}
-          currency={currency}
-          className="text-base font-bold text-ink"
-          unitClassName="text-xs font-semibold text-ink-subtle"
-        />
+        {priceLabel ? (
+          <span className="text-sm font-semibold text-ink-muted">{priceLabel}</span>
+        ) : (
+          <Money
+            minor={priceMinor}
+            currency={currency}
+            className="text-base font-bold text-ink"
+            unitClassName="text-xs font-semibold text-ink-subtle"
+          />
+        )}
         {outOfStock ? (
           <span className="text-xs font-semibold text-ink-muted">نفد</span>
         ) : weighed || onOffer ? (
@@ -148,6 +161,9 @@ export function ItemTile({
           </span>
         ) : null}
       </span>
+      {priceNote ? (
+        <span className={cn('-mt-2 text-xs text-ink-muted', picture && 'px-1.5')}>{priceNote}</span>
+      ) : null}
       {extra ? (
         <span className={cn('flex flex-wrap items-center gap-1', picture && 'px-1.5')}>{extra}</span>
       ) : null}

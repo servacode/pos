@@ -249,7 +249,7 @@ describe('sale screen', () => {
     await scan(user, PRODUCTS.tea.barcode!.code);
     await user.keyboard('{F4}');
     expect(screen.getByText('السلة فارغة')).toBeInTheDocument();
-    expect(screen.getByText('فاتورة معلّقة')).toBeInTheDocument();
+    expect(screen.getByText('1 معلّقة')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'استرجع المعلّقة' }));
     expect(cartLines()).toHaveTextContent('شاي أحمر');
   });

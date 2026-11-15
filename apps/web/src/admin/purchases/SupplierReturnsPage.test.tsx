@@ -67,7 +67,7 @@ describe('«مرتجع إلى المورد»', () => {
         expect(r.body).toMatchObject({
           supplierId: 's-1',
           refund: 'credit',
-          note: 'عيب خياطة',
+          note: 'عيب في الصنع',
           lines: [{ variantId: 'v-1', qty: 3000, amountMinor: null }],
         });
         listed = true;
@@ -91,8 +91,9 @@ describe('«مرتجع إلى المورد»', () => {
       },
     });
     const { user } = renderApp('/supplier-returns');
+    await user.click(await screen.findByRole('button', { name: 'مرتجع جديد' }));
     await screen.findByRole('option', { name: 'معمل الأمل' });
-    await user.type(screen.getByLabelText('السبب (اختياري)'), 'عيب خياطة');
+    await user.type(screen.getByLabelText('السبب (اختياري)'), 'عيب في الصنع');
     await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'فستان');
     await user.click(await screen.findByRole('button', { name: 'فستان' }));
     await user.type(await screen.findByLabelText('كمية فستان'), '3');
@@ -157,6 +158,7 @@ describe('«مرتجع إلى المورد»', () => {
       },
     });
     const { user } = renderApp('/supplier-returns');
+    await user.click(await screen.findByRole('button', { name: 'مرتجع جديد' }));
     await screen.findByRole('option', { name: 'معمل الأمل' });
     await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'مصل');
     await user.click(await screen.findByRole('button', { name: 'مصل' }));
@@ -207,6 +209,7 @@ describe('«مرتجع إلى المورد»', () => {
       },
     });
     const { user } = renderApp('/supplier-returns');
+    await user.click(await screen.findByRole('button', { name: 'مرتجع جديد' }));
     await screen.findByRole('option', { name: 'معمل الأمل' });
     await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'مصل');
     await user.click(await screen.findByRole('button', { name: 'مصل' }));
@@ -254,6 +257,7 @@ describe('«مرتجع إلى المورد»', () => {
         },
       });
       const { user } = renderApp('/supplier-returns');
+      await user.click(await screen.findByRole('button', { name: 'مرتجع جديد' }));
       await screen.findByRole('option', { name: 'معمل الأمل' });
       await user.type(screen.getByLabelText('أضف صنفاً بالاسم أو الباركود'), 'جهاز');
       await user.click(await screen.findByRole('button', { name: 'جهاز ضغط' }));

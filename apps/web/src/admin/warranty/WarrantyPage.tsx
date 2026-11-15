@@ -358,10 +358,10 @@ export function WarrantyPage() {
 
   return (
     <AppShell>
-      <title>الضمان والصيانة · SERFA</title>
+      <title>طلبات الكفالة · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
-          title="الضمان والصيانة"
+          title="طلبات الكفالة"
           description="ابحث عن القطعة برقمها التسلسلي لترى فاتورتها وزبونها ونهاية كفالتها، وافتح مطالبة وتابعها حتى تُسلَّم."
         />
 

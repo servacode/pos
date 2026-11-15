@@ -35,3 +35,22 @@ describe('an item priced at zero', () => {
     expect(screen.queryByRole('dialog', { name: 'السعر 0 — تأكيد؟' })).not.toBeInTheDocument();
   });
 });
+
+describe('a service priced at zero', () => {
+  const service = product('تقصير', 0, '6291009999992');
+  it('asks no zero-price question and opens the fee at once', async () => {
+    const s = posSets();
+    const { user } = await saleScreen({
+      sets: {
+        ...s,
+        products: [...s.products, { ...service.product, type: 'service' }],
+        variants: [...s.variants, service.variant],
+        prices: [...s.prices, service.price],
+        barcodes: [...s.barcodes, service.barcode!],
+      },
+    });
+    await scan(user, '6291009999992');
+    expect(screen.queryByRole('dialog', { name: 'السعر 0 — تأكيد؟' })).not.toBeInTheDocument();
+    expect(await screen.findByText('حدّد الأجرة')).toBeInTheDocument();
+  });
+});

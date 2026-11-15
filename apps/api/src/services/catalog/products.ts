@@ -202,6 +202,7 @@ interface ListRow extends Record<string, unknown> {
   max_price: string | null;
   barcode: string | null;
   stock_qty: string;
+  sellable_qty: string;
   has_image: boolean;
   image_upload: string | null;
   nearest_expiry: string | null;
@@ -284,6 +285,11 @@ export async function listProducts(
              (select coalesce(sum(s.qty), 0)::text from variants v
               join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id ${branchFilter}
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as stock_qty,
+             (select coalesce(sum(greatest(t.q, 0)), 0)::text from (
+                select sum(s.qty) as q from variants v
+                join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id ${branchFilter}
+                where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
+                group by v.id) t) as sellable_qty,
              exists (select 1 from product_images pi
                      where pi.tenant_id = p.tenant_id and pi.product_id = p.id) as has_image,
              (select pi.upload_id::text from product_images pi
@@ -326,6 +332,7 @@ export async function listProducts(
           : null,
       barcode: r.barcode,
       stockQty: Number(r.stock_qty),
+      sellableQty: Number(r.sellable_qty),
       hasImage: r.has_image,
       thumbUrl: r.image_upload ? imageUrl(ctx.auth.tenantId, r.image_upload, true) : null,
       nearestExpiry: r.nearest_expiry,
@@ -336,7 +343,7 @@ export async function listProducts(
     let attention: { zeroPrice: number; noPhoto: number; expiringSoon: number } | undefined;
     if (!query.cursor && query.status === 'active') {
       const [counts] = await tx.execute<{ zero_price: number; no_photo: number; expiring_soon: number }>(sql`
-        select count(*) filter (where exists (
+        select count(*) filter (where p.type <> 'service' and exists (
                  select 1 from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
                  where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
                    and x.price_minor = 0))::int as zero_price,

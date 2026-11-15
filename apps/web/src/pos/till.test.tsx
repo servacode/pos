@@ -252,6 +252,46 @@ describe('«مرتجع»: an invoice of another till, and the exchange', () => {
     expect(await screen.findByRole('heading', { name: /INV-001-009-0000043/ })).toBeInTheDocument();
   });
 
+  it('searches the whole store by itself when nothing here matches, and shows the recent ones first', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const staff = staffServer();
+    const hit = {
+      id: '0192a000-0000-7000-8000-0000000000cc',
+      number: 'INV-001-009-0000077',
+      deviceTime: new Date().toISOString(),
+      customerName: 'ريم',
+      customerPhone: '+963933333333',
+      totalMinor: 50_000,
+      currency: 'SYP',
+    };
+    const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href.startsWith('/v1/device/invoices/lookup'))
+        return new Response(JSON.stringify({ error: { code: 'not_found', message: 'لا' } }), { status: 404 });
+      if (href.startsWith('/v1/device/invoices/search')) {
+        const q = new URL(href, 'http://x').searchParams.get('q');
+        return new Response(JSON.stringify({ invoices: q === '' || q === '0933333333' ? [hit] : [] }), {
+          status: 200,
+        });
+      }
+      return staff(url, init);
+    }) as unknown as typeof fetch;
+    const { user } = renderPos({ local, fetch: fetchFn });
+    await signIn(user);
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await user.keyboard('{Alt>}r{/Alt}');
+    await screen.findByRole('heading', { name: 'مرتجع' });
+    // Open: the store's newest invoices are already there
+    const recent = await screen.findByRole('list', { name: 'فواتير المحل' });
+    expect(within(recent).getByRole('button', { name: /INV-001-009-0000077/ })).toBeInTheDocument();
+    // Typed with no match here and no second tap: the store is searched, and the stale line is gone
+    await user.type(screen.getByLabelText('رقم الفاتورة'), '0933333333');
+    const found = await screen.findByRole('list', { name: 'فواتير المحل' });
+    expect(within(found).getByRole('button', { name: /INV-001-009-0000077/ })).toBeInTheDocument();
+    expect(screen.queryByText('لا فواتير على هذا الجهاز تطابق البحث.')).not.toBeInTheDocument();
+  });
+
   it('says so when the invoice is not in the store, and when the till is offline', async () => {
     const local = memoryLocal();
     await openShift(local);

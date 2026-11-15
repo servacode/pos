@@ -316,7 +316,7 @@ export function duplicateAnswer(
   if (type === 'products' && wanted !== earlier) {
     return {
       status: 'error',
-      message: `الباركود مكرر: سبق في السطر ${String(row.duplicateOf)}${wanted ? ` فلم يُستورد «${wanted}»` : ''}. أعطِ كل مقاس ولون باركوداً خاصاً به`,
+      message: `الباركود مكرر: سبق في السطر ${String(row.duplicateOf)}${wanted ? ` فلم يُستورد «${wanted}»` : ''}. أعطِ كل خيار مختلف (حجم أو لون أو غيره) باركوداً خاصاً به`,
     };
   }
   return { status: 'skip', message: `مكرر في الملف: سبق في السطر ${String(row.duplicateOf)}` };

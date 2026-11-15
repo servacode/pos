@@ -154,6 +154,8 @@ export interface Cart {
   customer?: { id: string; name: string };
   /** Set while the cart is held: the name it was put aside under and when (the held carts' list) */
   held?: { name: string; at: number };
+  /** The seller picked for this sale (kept with a held cart, restored when it is brought back) */
+  sellerId?: string;
 }
 
 export const EMPTY_CART: Cart = { lines: [], nextLineNo: 1, invoiceDiscount: null, invoiceApproval: null };

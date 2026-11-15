@@ -26,7 +26,44 @@ import { apiFetch, errorMessage } from '../../lib/api';
 import { listCategories } from '../catalog/api';
 import { ButtonLink } from './parts';
 
-type Row = BulkPriceResult['items'][number];
+type Item = BulkPriceResult['items'][number];
+/** A line of the preview: one piece, or a whole model whose pieces all change the same way */
+type Row = Item & { pieces?: number };
+
+/** The words every name starts with: «قميص كتان» of «قميص كتان M أبيض» and «قميص كتان L أزرق» */
+function commonStart(names: readonly string[]): string {
+  const parts = names.map((n) => n.trim().split(/\s+/));
+  const first = parts[0] ?? [];
+  let n = 0;
+  while (n < first.length && parts.every((w) => w[n] === first[n])) n += 1;
+  return n === 0 ? (names[0] ?? '') : first.slice(0, n).join(' ');
+}
+
+/**
+ * The preview grouped per model: the pieces of a model that all go from the same price to the same
+ * price are one line with their count; a model whose pieces differ keeps a line for each piece.
+ */
+export function groupByModel(items: readonly Item[]): Row[] {
+  const byProduct = new Map<string, Item[]>();
+  for (const item of items) byProduct.set(item.productId, [...(byProduct.get(item.productId) ?? []), item]);
+  const out: Row[] = [];
+  for (const list of byProduct.values()) {
+    const [head] = list;
+    const same =
+      head !== undefined &&
+      list.length > 1 &&
+      list.every(
+        (i) =>
+          i.oldMinor === head.oldMinor &&
+          i.newMinor === head.newMinor &&
+          i.wasMinor === head.wasMinor &&
+          i.currency === head.currency,
+      );
+    if (same) out.push({ ...head, name: commonStart(list.map((i) => i.name)), pieces: list.length });
+    else out.push(...list);
+  }
+  return out;
+}
 
 const ROUNDING = [1, 100, 500, 1000, 5000] as const;
 
@@ -132,7 +169,14 @@ function BulkPrices() {
     {
       key: 'name',
       header: 'القطعة',
-      cell: (r) => <span className="font-semibold whitespace-nowrap">{r.name}</span>,
+      cell: (r) => (
+        <span className="font-semibold whitespace-nowrap">
+          {r.name}
+          {r.pieces ? (
+            <span className="font-normal text-ink-muted"> · {countNoun(r.pieces, COUNT_NOUNS.piece)}</span>
+          ) : null}
+        </span>
+      ),
     },
     {
       key: 'old',
@@ -320,7 +364,7 @@ function BulkPrices() {
                 <DataTable
                   caption={result.applied ? 'الأسعار بعد التغيير' : 'ما سيتغيّر'}
                   columns={columns}
-                  rows={result.items}
+                  rows={groupByModel(result.items)}
                   rowKey={(r) => r.variantId}
                   empty={
                     <EmptyState

@@ -7,6 +7,8 @@ export interface ReportState<T> {
   /** True while the new answer loads; `data` may then be the last answer from before */
   loading: boolean;
   retry: () => void;
+  /** True when no answer has come for 10 seconds and there is nothing older to show */
+  slow: boolean;
 }
 
 /**
@@ -30,6 +32,9 @@ export function recallAnswer<T>(key: string): T | null {
 export function clearReportCache(): void {
   lastAnswers.clear();
 }
+
+/** After this long without an answer, a screen says so instead of staying a blank skeleton */
+export const SLOW_AFTER_MS = 10_000;
 
 export interface ReportOptions {
   /** Names the screen; with it the last answer is shown first while the new one loads */
@@ -74,10 +79,22 @@ export function useReport<T>(
 
   const fresh = state.key === key && key !== null;
   const stale = !fresh && cacheKey !== null ? ((lastAnswers.get(cacheKey) as T | undefined) ?? null) : null;
+  const loading = key !== null && !fresh;
+  const waiting = loading && (fresh ? state.data : stale) === null;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!waiting) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), SLOW_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [waiting, key, attempt]);
   return {
     data: fresh ? state.data : stale,
     error: fresh ? state.error : null,
-    loading: key !== null && !fresh,
+    loading,
     retry,
+    slow,
   };
 }

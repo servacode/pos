@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import type { InventoryRow } from '@serva/core';
-import { cn, formatQuantity } from '@serva/ui';
+import { Button, cn, formatQuantity, SegmentedControl } from '@serva/ui';
 import { gridOf } from './SizeGrid';
 
 type Piece = Pick<InventoryRow, 'variantId' | 'qty'> & { attributes: { name: string; value: string }[] };
@@ -12,10 +13,17 @@ type Piece = Pick<InventoryRow, 'variantId' | 'qty'> & { attributes: { name: str
 export function InventoryGrid({
   rows,
   numberFormat,
+  onCount,
 }: {
   rows: readonly InventoryRow[];
   numberFormat: 'latn' | 'arab';
+  /** «صحّح بالجرد»: opens the count on these pieces; absent when the person cannot count */
+  onCount?: (variantIds: string[]) => void;
 }) {
+  // Which models show: all, those with a piece below zero or out, those running low (2 or fewer)
+  const [filter, setFilter] = useState<'all' | 'out' | 'low'>('all');
+  // A model the person opened or closed by hand; the others follow the default (the thinnest few open)
+  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
   const byProduct = new Map<string, { name: string; pieces: Map<string, Piece> }>();
   for (const r of rows) {
     if (!r.productId || !r.attributes || r.attributes.length === 0) continue;
@@ -25,22 +33,54 @@ export function InventoryGrid({
     else model.pieces.set(r.variantId, { variantId: r.variantId, qty: r.qty, attributes: r.attributes });
     byProduct.set(r.productId, model);
   }
-  const models = [...byProduct.entries()]
+  const allModels = [...byProduct.entries()]
     .map(([id, m]) => {
       const pieces = [...m.pieces.values()];
       return { id, name: m.name, pieces, lowest: Math.min(...pieces.map((p) => p.qty)) };
     })
     // The models with the thinnest size first: that is the one to restock
     .sort((a, b) => a.lowest - b.lowest || a.name.localeCompare(b.name, 'ar'));
+  const models = allModels.filter((m) =>
+    filter === 'out' ? m.lowest <= 0 : filter === 'low' ? m.lowest <= 2000 : true,
+  );
   if (models.length === 0) {
     return <p className="text-sm text-ink-muted">لا أصناف بمقاسات وألوان لتُعرض شبكة.</p>;
   }
+  const isOpen = (id: string, index: number) => toggled.get(id) ?? index < 4;
+  const flip = (id: string, index: number) => setToggled((now) => new Map(now).set(id, !isOpen(id, index)));
   return (
     <div className="flex flex-col gap-4">
-      {models.map((m) => {
+      <div className="flex flex-wrap items-center gap-3">
+        <SegmentedControl
+          label="الأصناف المعروضة"
+          value={filter}
+          onValueChange={setFilter}
+          options={[
+            { value: 'all', label: 'الكل' },
+            { value: 'out', label: 'ناقص أو نفد' },
+            { value: 'low', label: 'قليل (2 أو أقل)' },
+          ]}
+        />
+        {models.length > 4 ? (
+          <span className="flex items-center gap-2">
+            <Button variant="ghost" onClick={() => setToggled(new Map(models.map((m) => [m.id, true])))}>
+              افتح الكل
+            </Button>
+            <Button variant="ghost" onClick={() => setToggled(new Map(models.map((m) => [m.id, false])))}>
+              اطوِ الكل
+            </Button>
+          </span>
+        ) : null}
+      </div>
+      {models.length === 0 ? <p className="text-sm text-ink-muted">لا صنف في هذه المجموعة.</p> : null}
+      {models.map((m, index) => {
         const grid = gridOf(m.pieces as never);
         if (!grid.fits) return null;
-        const qtyOf = (v: unknown) => (v as Piece).qty;
+        // The totals are what can be sold: a piece below zero adds nothing, and is told apart as «ناقص»
+        const qtyOf = (v: unknown) => Math.max(0, (v as Piece).qty);
+        const minus = m.pieces.reduce((n, p) => n + Math.max(0, -p.qty), 0);
+        const minusIds = m.pieces.filter((p) => p.qty < 0).map((p) => p.variantId);
+        const open = isOpen(m.id, index);
         const rowTotal = (row: string) =>
           grid.cols.reduce((n, col) => {
             const v = grid.cell(row, col);
@@ -55,83 +95,118 @@ export function InventoryGrid({
         const totalCell = 'num px-3 py-2.5 text-center text-sm font-bold text-ink-muted';
         return (
           <section key={m.id} aria-label={`شبكة ${m.name}`} className="flex flex-col gap-2">
-            <h3 className="font-semibold text-ink">{m.name}</h3>
-            <div className="relative overflow-x-auto">
-              <table className="border-separate border-spacing-1.5">
-                <thead>
-                  <tr>
-                    <th className="pe-3 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle">
-                      {grid.rowName}
-                      {grid.colName ? ` ‏/ ${grid.colName}` : ''}
-                    </th>
-                    {grid.cols.map((col) => (
-                      <th
-                        key={col || '_'}
-                        scope="col"
-                        className="px-2 pb-1 text-center text-xs font-semibold whitespace-nowrap text-ink-subtle"
-                      >
-                        {col || 'الكمية'}
+            <h3 className="flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold text-ink">
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => flip(m.id, index)}
+                className="flex min-h-9 items-center gap-2 rounded-small text-start"
+              >
+                <span aria-hidden="true" className="text-ink-subtle">
+                  {open ? '▾' : '◂'}
+                </span>
+                {m.name}
+              </button>
+              <span className="num text-sm font-normal text-ink-muted">
+                المتاح {formatQuantity(total, numberFormat)}
+              </span>
+              {minus > 0 ? (
+                <span className="text-sm font-semibold text-danger-ink">
+                  ناقص <bdi className="num">{formatQuantity(minus, numberFormat)}</bdi>
+                </span>
+              ) : null}
+              {minus > 0 && onCount ? (
+                <button
+                  type="button"
+                  onClick={() => onCount(minusIds)}
+                  className="rounded-small text-sm font-semibold text-brand-ink underline-offset-4 hover:underline"
+                >
+                  صحّح بالجرد
+                </button>
+              ) : null}
+            </h3>
+            {open ? (
+              <div className="relative overflow-x-auto">
+                <table className="border-separate border-spacing-1.5">
+                  <thead>
+                    <tr>
+                      <th className="pe-3 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle">
+                        {grid.rowName}
+                        {grid.colName ? ` ‏/ ${grid.colName}` : ''}
                       </th>
-                    ))}
-                    {grid.colName ? (
-                      <th scope="col" className="px-2 pb-1 text-center text-xs font-semibold text-ink-subtle">
-                        المجموع
-                      </th>
-                    ) : null}
-                  </tr>
-                </thead>
-                <tbody>
-                  {grid.rows.map((row) => (
-                    <tr key={row}>
-                      <th scope="row" className="pe-3 text-start font-semibold whitespace-nowrap text-ink">
-                        {row}
-                      </th>
-                      {grid.cols.map((col) => {
-                        const v = grid.cell(row, col);
-                        if (!v) {
+                      {grid.cols.map((col) => (
+                        <th
+                          key={col || '_'}
+                          scope="col"
+                          className="px-2 pb-1 text-center text-xs font-semibold whitespace-nowrap text-ink-subtle"
+                        >
+                          {col || 'الكمية'}
+                        </th>
+                      ))}
+                      {grid.colName ? (
+                        <th
+                          scope="col"
+                          className="px-2 pb-1 text-center text-xs font-semibold text-ink-subtle"
+                        >
+                          المجموع
+                        </th>
+                      ) : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grid.rows.map((row) => (
+                      <tr key={row}>
+                        <th scope="row" className="pe-3 text-start font-semibold whitespace-nowrap text-ink">
+                          {row}
+                        </th>
+                        {grid.cols.map((col) => {
+                          const v = grid.cell(row, col);
+                          if (!v) {
+                            return (
+                              <td
+                                key={col || '_'}
+                                className="min-w-16 rounded-small border border-dashed border-line text-center text-ink-subtle"
+                              >
+                                —
+                              </td>
+                            );
+                          }
+                          const rawQty = (v as unknown as Piece).qty;
+                          const qty = rawQty;
                           return (
                             <td
                               key={col || '_'}
-                              className="min-w-16 rounded-small border border-dashed border-line text-center text-ink-subtle"
+                              className={cn(
+                                'num min-w-16 rounded-small px-3 py-2.5 text-center font-semibold',
+                                qty <= 0 ? 'bg-danger-soft text-danger-ink' : 'bg-surface-muted text-ink',
+                              )}
                             >
-                              —
+                              {formatQuantity(rawQty, numberFormat)}
                             </td>
                           );
-                        }
-                        const qty = qtyOf(v);
-                        return (
-                          <td
-                            key={col || '_'}
-                            className={cn(
-                              'num min-w-16 rounded-small px-3 py-2.5 text-center font-semibold',
-                              qty <= 0 ? 'bg-danger-soft text-danger-ink' : 'bg-surface-muted text-ink',
-                            )}
-                          >
-                            {formatQuantity(qty, numberFormat)}
+                        })}
+                        {grid.colName ? (
+                          <td className={totalCell}>{formatQuantity(rowTotal(row), numberFormat)}</td>
+                        ) : null}
+                      </tr>
+                    ))}
+                    {grid.colName ? (
+                      <tr>
+                        <th scope="row" className="pe-3 text-start text-xs font-semibold text-ink-subtle">
+                          المجموع
+                        </th>
+                        {grid.cols.map((col) => (
+                          <td key={col || '_'} className={totalCell}>
+                            {formatQuantity(colTotal(col), numberFormat)}
                           </td>
-                        );
-                      })}
-                      {grid.colName ? (
-                        <td className={totalCell}>{formatQuantity(rowTotal(row), numberFormat)}</td>
-                      ) : null}
-                    </tr>
-                  ))}
-                  {grid.colName ? (
-                    <tr>
-                      <th scope="row" className="pe-3 text-start text-xs font-semibold text-ink-subtle">
-                        المجموع
-                      </th>
-                      {grid.cols.map((col) => (
-                        <td key={col || '_'} className={totalCell}>
-                          {formatQuantity(colTotal(col), numberFormat)}
-                        </td>
-                      ))}
-                      <td className={cn(totalCell, 'text-ink')}>{formatQuantity(total, numberFormat)}</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
+                        ))}
+                        <td className={cn(totalCell, 'text-ink')}>{formatQuantity(total, numberFormat)}</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
           </section>
         );
       })}

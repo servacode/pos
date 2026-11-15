@@ -301,7 +301,7 @@ describe('AppShell', () => {
         .find((s) => s.key === section)
         ?.pages.map((page) => page.label);
     expect(labelsIn('money')).toEqual(['الشيكات', 'المصاريف', 'أعمار الديون']);
-    expect(labelsIn('services')).toEqual(['التأجير', 'عقود الصيانة', 'الضمان والصيانة']);
+    expect(labelsIn('services')).toEqual(['التأجير', 'عقود الصيانة', 'طلبات الكفالة']);
     // None of them is a tab of the customers any more, and the routes are unchanged
     expect(labelsIn('customers')).not.toContain('الشيكات');
     expect(navFor({ ...me, user }).find((page) => page.label === 'الشيكات')?.to).toBe('/cheques');

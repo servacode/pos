@@ -1,4 +1,4 @@
-import { useId, type FormEvent, type ReactNode, type Ref } from 'react';
+import { useId, useState, type FormEvent, type ReactNode, type Ref } from 'react';
 import {
   AlertCircleIcon,
   ArchiveIcon,
@@ -113,12 +113,28 @@ export function SettingsCard({
 }) {
   const titleId = useId();
   const SectionIcon = section?.icon;
+  // On the settings page the save bar waits for an edit (the card is quiet until then) and, once
+  // there is one, stays in view. The wizard's forms (no section) always show their bar.
+  const [edited, setEdited] = useState(false);
+  const markEdited = () => setEdited(true);
+  const showBar = !section || edited;
   return (
     <Card id={section?.id} className={cn('scroll-mt-32', className)}>
       <form
         ref={formRef}
         noValidate
         onSubmit={onSubmit}
+        onChange={markEdited}
+        onInput={markEdited}
+        onClickCapture={(event) => {
+          // A switch, a chip or a small button of the form is an edit: its click is the edit
+          if (
+            (event.target as HTMLElement).closest(
+              '[role="switch"],[role="checkbox"],[aria-pressed],button:not([type="submit"])',
+            )
+          )
+            markEdited();
+        }}
         aria-labelledby={section ? titleId : undefined}
         aria-label={section ? undefined : label}
         className="flex flex-col"
@@ -137,7 +153,7 @@ export function SettingsCard({
           </div>
         ) : null}
         <div className="flex flex-col gap-5">{children}</div>
-        <CardBar sticky={stickyBar}>{footer}</CardBar>
+        {showBar ? <CardBar sticky={stickyBar}>{footer}</CardBar> : null}
       </form>
     </Card>
   );

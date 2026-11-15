@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { ExpiryRow, RecallBatch, RecallResponse, RecallSale } from '@serva/core';
+import { useSearchParams } from 'react-router';
+import {
+  COUNT_NOUNS,
+  countNoun,
+  type ExpiryRow,
+  type RecallBatch,
+  type RecallResponse,
+  type RecallSale,
+} from '@serva/core';
 import {
   Alert,
   Badge,
@@ -24,13 +32,14 @@ import { getRecall, listExpiry, setBatchBlocked } from './api';
 import { SectionHead } from './parts';
 
 /**
- * «سحب دفعة» (03 › الصيدليات): a batch number leads to its product, the receipt and supplier it came
+ * «استدعاء دفعة (سحب من السوق)» (03 › الصيدليات): a batch number leads to its product, the receipt and supplier it came
  * in on, what is left of it in each branch, and every invoice and customer that got it (with the
  * phone). One press stops every till from selling it. The list prints, or goes to a CSV file.
  */
 export function RecallPage() {
   const digits = useDigits();
-  const [batchNo, setBatchNo] = useState('');
+  const [params] = useSearchParams();
+  const [batchNo, setBatchNo] = useState(() => params.get('batch')?.slice(0, 60) ?? '');
   const [found, setFound] = useState<RecallResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +62,13 @@ export function RecallPage() {
       alive = false;
     };
   }, []);
+
+  // A red «استدعاء» on a batch row opens this page with its number: the search runs by itself
+  const prefilled = params.get('batch')?.trim() ?? '';
+  useEffect(() => {
+    if (prefilled) void search(prefilled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefilled]);
 
   const suggestions = useMemo(() => {
     const seen = new Set<string>();
@@ -98,7 +114,7 @@ export function RecallPage() {
       const done = await setBatchBlocked({ batchNo: found.batchNo }, blocked);
       setNote(
         blocked
-          ? `أُوقف بيع الدفعة ${found.batchNo} في كل الفروع (${done.count} صنف).`
+          ? `أُوقف بيع الدفعة ${found.batchNo} في كل الفروع (${countNoun(done.count, COUNT_NOUNS.item)}).`
           : `رُفع الإيقاف عن الدفعة ${found.batchNo}.`,
       );
       await search(found.batchNo, true);
@@ -179,7 +195,14 @@ export function RecallPage() {
     {
       key: 'state',
       header: 'الحالة',
-      cell: (b) => (b.blocked ? <Badge tone="danger">موقوفة</Badge> : <Badge tone="neutral">تُباع</Badge>),
+      cell: (b) =>
+        b.blocked ? (
+          <Badge tone="danger">موقوفة</Badge>
+        ) : b.expiryDate && b.expiryDate < new Date().toISOString().slice(0, 10) ? (
+          <Badge tone="warning">منتهية</Badge>
+        ) : (
+          <Badge tone="neutral">تُباع</Badge>
+        ),
     },
   ];
   const saleColumns: DataColumn<RecallSale>[] = [
@@ -217,10 +240,10 @@ export function RecallPage() {
 
   return (
     <AppShell>
-      <title>سحب دفعة · SERFA</title>
+      <title>استدعاء دفعة · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
-          title="سحب دفعة"
+          title="استدعاء دفعة (سحب من السوق)"
           description="اكتب رقم الدفعة لترى من أين جاءت وأين بقي منها ومن اشتراها، ثم أوقف بيعها في كل الفروع."
         />
         <Card className="print:hidden">

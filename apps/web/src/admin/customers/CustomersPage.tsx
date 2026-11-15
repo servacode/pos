@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
   CUSTOMER_KIND_LABELS,
@@ -47,6 +47,7 @@ import { dayText, isoDay } from '../../lib/dates';
 
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { recallAnswer, rememberAnswer, SLOW_AFTER_MS } from '../reports/useReport';
 import { listCustomers } from './api';
 import { CustomerForm, KIND_SECTORS } from './CustomerForm';
 
@@ -140,8 +141,13 @@ export function CustomersPage() {
   const digits = useDigits();
   const navigate = useNavigate();
   const canManage = me.user.permissions.includes('customers.manage');
-  const [list, setList] = useState<CustomerListResponse | null>(null);
+  // The last list is on screen at once while the new one loads (kept in memory, wiped at sign-out)
+  const [list, setList] = useState<CustomerListResponse | null>(() =>
+    recallAnswer<CustomerListResponse>('customers||0|'),
+  );
   const [error, setError] = useState<string | null>(null);
+  const shown = useRef(list !== null);
+  shown.current = list !== null;
   const [search, setSearch] = useState('');
   const [owing, setOwing] = useState(false);
   const [away, setAway] = useState(false);
@@ -158,9 +164,21 @@ export function CustomersPage() {
 
   const load = useCallback(() => {
     setError(null);
+    // Ten seconds without an answer and nothing older to show: say so, with a retry
+    const slow = setTimeout(() => {
+      if (!shown.current) setError((was) => was ?? 'تأخّر الرد أكثر من المعتاد. أعد المحاولة.');
+    }, SLOW_AFTER_MS);
     listCustomers(search.trim(), owing, kind || undefined)
-      .then(setList)
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .then((answer) => {
+        clearTimeout(slow);
+        rememberAnswer(`customers|${search.trim()}|${owing ? 1 : 0}|${kind}`, answer);
+        setList(answer);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        clearTimeout(slow);
+        setError(errorMessage(e));
+      });
   }, [search, owing, kind]);
   useEffect(() => {
     const timer = setTimeout(load, 200);
@@ -175,6 +193,10 @@ export function CustomersPage() {
     (c) => !away || (!!c.lastPurchaseDate && c.lastPurchaseDate < cutoff),
   );
   const owingCount = items.filter((c) => c.balanceMinor > 0).length;
+  // The debt tile follows the same filter as the other tiles (all of them say so below when it is on)
+  const owedMinor = away
+    ? items.reduce((sum, c) => sum + Math.max(0, c.balanceMinor), 0)
+    : (list?.totalOwedMinor ?? 0);
   const overCount = items.filter(overLimit).length;
   // A number of the tiles: a placeholder while the list loads, a dash when it could not.
   const kpi = (value: ReactNode) => (list ? value : error ? '—' : <Skeleton className="h-9 w-24" />);
@@ -334,11 +356,12 @@ export function CustomersPage() {
             onCancel={() => setAdding(false)}
           />
         ) : null}
+        {away ? <p className="text-sm text-ink-muted">الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.</p> : null}
         <KpiStrip columns={4}>
           <StatTile
             label="الديون على الزبائن"
             icon={<CashIcon />}
-            value={kpi(<Money minor={list?.totalOwedMinor ?? 0} currency={base} />)}
+            value={kpi(<Money minor={owedMinor} currency={base} />)}
           />
           <StatTile
             label="عليهم دين"

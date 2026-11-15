@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { ShopProductCard } from '@serva/core';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { Button, Checkbox, cn, CONTROL_HEIGHT, Select, TextField, ToggleChip, useDensity } from '@serva/ui';
@@ -115,6 +115,14 @@ export function CatalogueFilters({
   const text = (minor: number | null) => (minor === null ? '' : String(minor / 10 ** decimals));
   const [priceText, setPriceText] = useState({ min: text(filters.minPrice), max: text(filters.maxPrice) });
   const hasAnything = choices.length > 0 || showPrices || mixedStock;
+
+  // Esc closes the sheet
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   function setPrice(side: 'min' | 'max', value: string) {
     const clipped = value.slice(0, 12);

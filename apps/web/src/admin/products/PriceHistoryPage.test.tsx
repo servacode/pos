@@ -66,7 +66,8 @@ describe('«سجل تغيير الأسعار»', () => {
     expect(rows[0]).toHaveTextContent('صفحة المنتج');
     expect(rows[1]).toHaveTextContent('تحديث من ملف');
     // A bulk change is one row with its count, and no old and new price
-    expect(rows[2]).toHaveTextContent('تعديل جماعي -30٪ على 12 قطعة');
+    expect(rows[2]).toHaveTextContent('تعديل جماعي −30٪ على 12 قطعة');
+    expect(rows[2]).toHaveTextContent('تغيير قديم: التفاصيل غير محفوظة');
     expect(within(rows[2]!).getAllByText('—')).toHaveLength(2);
 
     await user.type(screen.getByLabelText('من تاريخ'), '2026-11-01');

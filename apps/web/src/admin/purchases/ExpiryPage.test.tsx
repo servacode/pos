@@ -77,8 +77,11 @@ describe('«الصلاحية»', () => {
     const { user } = renderApp('/expiry');
     const table = await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
     expect(await within(table).findByText('بانادول 500')).toBeInTheDocument();
-    expect(table).toHaveTextContent('منتهٍ منذ 5 يوماً');
+    expect(table).toHaveTextContent('منتهٍ منذ 5 أيام');
     expect(table).toHaveTextContent('باقٍ 16 يوماً');
+    // A red «استدعاء» on a batch row opens the recall page with its number
+    const recall = within(table).getAllByRole('link', { name: /^استدعاء الدفعة/ })[0]!;
+    expect(recall.getAttribute('href')).toContain('/recall?batch=');
     expect(table).toHaveTextContent('مستودع الشفاء');
     expect(table).toHaveTextContent('الفرع الرئيسي');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);

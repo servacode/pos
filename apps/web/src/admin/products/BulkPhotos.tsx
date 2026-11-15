@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { normalizeArabic } from '@serva/core';
+import { COUNT_NOUNS, countNoun, normalizeArabic } from '@serva/core';
 import { Alert, Button, Dialog, cn } from '@serva/ui';
 import { errorMessage } from '../../lib/api';
 import { resizeImage } from '../../lib/images';
@@ -133,7 +133,7 @@ export function BulkPhotos({
             disabled={ready === 0 || busy !== null}
             onClick={() => void send()}
           >
-            {ready > 0 ? `ارفع ${String(ready)} صورة` : 'ارفع الصور'}
+            {ready > 0 ? `ارفع ${countNoun(ready, COUNT_NOUNS.photo, String(ready), true)}` : 'ارفع الصور'}
           </Button>
         </>
       }

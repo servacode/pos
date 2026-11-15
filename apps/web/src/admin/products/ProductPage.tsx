@@ -132,26 +132,57 @@ function StockByBranch({ product, numberFormat }: { product: ProductDetail; numb
     }
   }
   if (branches.size === 0) return <p className="text-sm text-ink-muted">لا مخزون مسجّل بعد.</p>;
+  // What can be sold is each piece's stock with the ones below zero left out; the minus is told apart
+  let sellable = 0;
+  let minus = 0;
+  const minusIds: string[] = [];
+  for (const variant of product.variants) {
+    if (variant.archivedAt) continue;
+    const sum = variant.stock.reduce((n, s) => n + s.qty, 0);
+    if (sum >= 0) sellable += sum;
+    else {
+      minus -= sum;
+      minusIds.push(variant.id);
+    }
+  }
   const total = [...branches.values()].reduce((sum, branch) => sum + branch.qty, 0);
   return (
-    <dl className="-my-2.5 flex flex-col divide-y divide-line">
-      {[...branches.entries()].map(([id, { name, qty }]) => (
-        <div key={id} className="flex items-center justify-between gap-3 py-2.5">
-          <dt className="text-sm text-ink">{name}</dt>
-          <dd className={cn('num font-semibold', qty < 0 ? 'text-danger-ink' : 'text-ink')}>
-            {formatQuantity(qty, numberFormat)}
-          </dd>
-        </div>
-      ))}
-      {branches.size > 1 ? (
-        <div className="flex items-center justify-between gap-3 py-2.5">
-          <dt className="text-sm font-semibold text-ink-muted">في كل الفروع معاً</dt>
-          <dd className={cn('num font-bold', total < 0 ? 'text-danger-ink' : 'text-ink')}>
-            {formatQuantity(total, numberFormat)}
-          </dd>
+    <>
+      <dl className="-my-2.5 flex flex-col divide-y divide-line">
+        {[...branches.entries()].map(([id, { name, qty }]) => (
+          <div key={id} className="flex items-center justify-between gap-3 py-2.5">
+            <dt className="text-sm text-ink">{name}</dt>
+            <dd className={cn('num font-semibold', qty < 0 ? 'text-danger-ink' : 'text-ink')}>
+              {formatQuantity(qty, numberFormat)}
+            </dd>
+          </div>
+        ))}
+        {branches.size > 1 ? (
+          <div className="flex items-center justify-between gap-3 py-2.5">
+            <dt className="text-sm font-semibold text-ink-muted">في كل الفروع معاً</dt>
+            <dd className={cn('num font-bold', total < 0 ? 'text-danger-ink' : 'text-ink')}>
+              {formatQuantity(total, numberFormat)}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      {minus > 0 ? (
+        <div className="flex flex-col gap-1 border-t border-line pt-3 text-sm">
+          <span className="text-ink-muted">
+            متاح للبيع{' '}
+            <bdi className="num font-semibold text-ink">{formatQuantity(sellable, numberFormat)}</bdi>
+            {' · '}ناقص{' '}
+            <bdi className="num font-semibold text-danger-ink">{formatQuantity(minus, numberFormat)}</bdi>
+          </span>
+          <Link
+            to={`/inventory?count=${minusIds.join(',')}`}
+            className="w-fit rounded-small font-semibold text-brand-ink underline-offset-4 hover:underline"
+          >
+            صحّح بالجرد
+          </Link>
         </div>
       ) : null}
-    </dl>
+    </>
   );
 }
 
@@ -271,17 +302,21 @@ function ProductCard() {
         const defaultBp = taxRates.defaultRateBp ?? 0;
         const defaultTax =
           defaultBp > 0 ? taxRates.items.find((t) => !t.archivedAt && t.rateBp === defaultBp) : undefined;
-        setDraft({
-          ...emptyDraft({
-            currency: me.settings.baseCurrency,
-            unitId: piece?.id ?? '',
-            barcode: initialBarcode ? barcodeOf(initialBarcode) : undefined,
-          }),
-          taxRateId: defaultTax?.id ?? '',
-          // A new product of a medical supplies store starts as «يتطلب صلاحية»: only new ones, and
-          // the owner can switch it off (gauze and masks are checked by batch like the rest).
-          ...(storeSells(me.tenant.sectors, ['medical_supplies']) ? { requiresExpiry: true } : {}),
-        });
+        // Whatever is already typed stays: a late answer (or a reload of the same lookups) never wipes the form
+        setDraft(
+          (typed) =>
+            typed ?? {
+              ...emptyDraft({
+                currency: me.settings.baseCurrency,
+                unitId: piece?.id ?? '',
+                barcode: initialBarcode ? barcodeOf(initialBarcode) : undefined,
+              }),
+              taxRateId: defaultTax?.id ?? '',
+              // A new product of a medical supplies store starts as «يتطلب صلاحية»: only new ones, and
+              // the owner can switch it off (gauze and masks are checked by batch like the rest).
+              ...(storeSells(me.tenant.sectors, ['medical_supplies']) ? { requiresExpiry: true } : {}),
+            },
+        );
       }
     } catch (error) {
       setLoadError(errorMessage(error));
@@ -379,7 +414,9 @@ function ProductCard() {
       setNotice('لا تغييرات لحفظها.');
       return;
     }
-    const zero = draft.variants.filter((v) => !v.archived && v.priceMinor === 0);
+    // A service may stay at 0: its fee is asked at the till when it is sold
+    const zero =
+      draft.type === 'service' ? [] : draft.variants.filter((v) => !v.archived && v.priceMinor === 0);
     if (zero.length > 0 && !freeOk.current) {
       setAskFree(true);
       setFormError(
@@ -959,6 +996,12 @@ function ProductCard() {
                     <option value="stock">بضاعة لها مخزون</option>
                     <option value="service">خدمة بلا مخزون</option>
                   </Select>
+                  {draft.type === 'service' ? (
+                    <p className="-mt-2 text-sm text-ink-muted">
+                      الخدمة بلا مخزون. اترك السعر صفراً إن كانت أجرتها تتغيّر، فيسأل الكاشير عن الأجرة عند
+                      البيع.
+                    </p>
+                  ) : null}
                   <Select
                     name="unitId"
                     label="الوحدة"

@@ -63,6 +63,8 @@ export interface CatalogItem {
   stockQty?: number | null;
   /** Each piece is sold by its serial number or IMEI (03 › الإلكترونيات) */
   tracksSerial?: boolean;
+  /** A service (a fee, no stock): no zero-price warning, the fee is asked at the sale */
+  isService?: boolean;
   warrantyMonths?: number | null;
   unit: UnitRow | null;
   taxRate: TaxRateRow | null;
@@ -222,6 +224,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       imageUrl: variant.imageUrl ?? null,
       stockQty: stock.get(variant.id) ?? null,
       tracksSerial: product.tracksSerial ?? false,
+      isService: product.type === 'service',
       warrantyMonths: product.warrantyMonths ?? null,
       unit: units.get(product.unitId) ?? null,
       taxRate: product.taxRateId ? (taxes.get(product.taxRateId) ?? null) : null,

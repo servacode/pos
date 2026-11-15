@@ -358,6 +358,7 @@ describe('/products list: photos, expiry and stock', () => {
       ]),
     });
     const table = await screen.findByRole('table', { name: 'المنتجات' });
+    await within(table).findByRole('link', { name: 'أضف صورة لـ«شاي»' });
     expect(table.querySelector('img[src^="/v1/images"]')).toHaveAttribute(
       'src',
       '/v1/images/t/u1?size=thumb',
@@ -366,6 +367,16 @@ describe('/products list: photos, expiry and stock', () => {
       'href',
       `/products/${ids.other}#images`,
     );
+  });
+
+  it('shows the sellable stock beside a net that has a minus in it, and a kind icon where there is no photo', async () => {
+    openProducts({
+      [list()]: page([listItem({ stockQty: 14_000, sellableQty: 16_000, hasImage: false, thumbUrl: null })]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 16 · ناقص 2');
+    // no letter box: the picture's place holds an icon
+    expect(table.querySelector('a[href$="#images"] svg')).not.toBeNull();
   });
 
   it('adds up only positive stock and says how many are below zero', async () => {
@@ -406,7 +417,7 @@ describe('/products list: photos, expiry and stock', () => {
 describe('/products list: photos in bulk', () => {
   it('opens the bulk-photo window, which says how files are matched', async () => {
     const { user } = openProducts();
-    await user.click(await screen.findByRole('button', { name: 'أضف صوراً دفعة واحدة' }));
+    await user.click(await screen.findByRole('button', { name: /^أضف صوراً دفعة واحدة/ }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/سمِّ كل ملف باسم المنتج أو باركوده/)).toBeInTheDocument();
     expect(within(dialog).getByLabelText('ملفات الصور')).toHaveAttribute('multiple');

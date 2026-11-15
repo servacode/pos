@@ -541,10 +541,13 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   }
 
   /** Puts the cart aside under a name (the customer's, when attached); several can wait together. */
-  function hold(name?: string) {
+  function hold(name?: string, sellerId?: string) {
     if (cart.lines.length === 0) return;
     const label = (name ?? '').trim() || cart.customer?.name || cart.onlineOrder?.customerName || '';
-    const next = [...held, { ...cart, held: { name: label, at: Date.now() } }];
+    const next = [
+      ...held,
+      { ...cart, ...(sellerId ? { sellerId } : {}), held: { name: label, at: Date.now() } },
+    ];
     setHeld(next);
     void pos.local.set(HELD_KEY, next);
     setCartState(EMPTY_CART);

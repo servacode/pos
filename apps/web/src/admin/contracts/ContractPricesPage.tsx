@@ -63,6 +63,8 @@ export function ContractPricesPage() {
   const [items, setItems] = useState<ContractPrice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The prices come first; the form opens from «سعر جديد», or from «عدّل» on a price
+  const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<ContractPrice | null>(null);
   const [removing, setRemoving] = useState<ContractPrice | null>(null);
   const [target, setTarget] = useState<Target>('');
@@ -91,6 +93,7 @@ export function ContractPricesPage() {
   useEffect(load, [load]);
 
   function reset() {
+    setAdding(false);
     setEditing(null);
     setVariant(null);
     setPrice('');
@@ -106,6 +109,11 @@ export function ContractPricesPage() {
     setValidFrom(p.validFrom);
     setValidTo(p.validTo ?? '');
     setFormError(null);
+    // The form opens at the top: bring it into view from a price far down the list
+    setTimeout(
+      () => document.querySelector('[aria-label="سعر عقد"]')?.scrollIntoView?.({ block: 'start' }),
+      0,
+    );
   }
 
   async function submit(event: FormEvent) {
@@ -158,81 +166,88 @@ export function ContractPricesPage() {
         <PageHeader
           title="أسعار العقود"
           description="سعر خاص لزبون أو لنوع من الزبائن (مشفى، عيادة…) على صنف، بين تاريخين. يطبّقه الصندوق وحده عند اختيار الزبون."
+          actions={
+            adding || editing ? null : (
+              <Button icon={<AddIcon />} onClick={() => setAdding(true)}>
+                سعر جديد
+              </Button>
+            )
+          }
         />
-        <section aria-label="سعر عقد" className="flex flex-col gap-3">
-          <SectionHead title={editing ? 'تعديل السعر' : 'سعر جديد'} />
-          <Card>
-            <form noValidate onSubmit={(e) => void submit(e)} className="flex flex-col gap-4">
-              {formError ? <Alert tone="error">{formError}</Alert> : null}
-              <Select label="لمن" value={target} onChange={(e) => setTarget(e.target.value)}>
-                <option value="">اختر</option>
-                <optgroup label="نوع زبائن">
-                  {CUSTOMER_KINDS.map((k) => (
-                    <option key={k} value={`k:${k}`}>
-                      كل زبائن النوع: {CUSTOMER_KIND_LABELS[k]}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="زبون">
-                  {customers.map((c) => (
-                    <option key={c.id} value={`c:${c.id}`}>
-                      {c.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </Select>
-              {variant ? (
-                <div className="flex items-center gap-3">
-                  <span className="font-semibold text-ink">{variant.name}</span>
-                  {editing ? null : (
-                    <Button variant="ghost" onClick={() => setVariant(null)}>
-                      غيّر الصنف
-                    </Button>
-                  )}
+        {adding || editing ? (
+          <section aria-label="سعر عقد" className="flex flex-col gap-3">
+            <SectionHead title={editing ? 'تعديل السعر' : 'سعر جديد'} />
+            <Card>
+              <form noValidate onSubmit={(e) => void submit(e)} className="flex flex-col gap-4">
+                {formError ? <Alert tone="error">{formError}</Alert> : null}
+                <Select label="لمن" value={target} onChange={(e) => setTarget(e.target.value)}>
+                  <option value="">اختر</option>
+                  <optgroup label="نوع زبائن">
+                    {CUSTOMER_KINDS.map((k) => (
+                      <option key={k} value={`k:${k}`}>
+                        كل زبائن النوع: {CUSTOMER_KIND_LABELS[k]}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="زبون">
+                    {customers.map((c) => (
+                      <option key={c.id} value={`c:${c.id}`}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                </Select>
+                {variant ? (
+                  <div className="flex items-center gap-3">
+                    <span className="font-semibold text-ink">{variant.name}</span>
+                    {editing ? null : (
+                      <Button variant="ghost" onClick={() => setVariant(null)}>
+                        غيّر الصنف
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <VariantPicker onPick={setVariant} />
+                )}
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <TextField
+                    label="السعر للوحدة"
+                    dir="ltr"
+                    inputMode="decimal"
+                    inputClassName="num"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                  />
+                  <DateField label="من" value={validFrom} onChange={setValidFrom} />
+                  <DateField label="إلى (اختياري)" value={validTo} onChange={setValidTo} />
                 </div>
-              ) : (
-                <VariantPicker onPick={setVariant} />
-              )}
-              <div className="grid gap-4 sm:grid-cols-3">
-                <TextField
-                  label="السعر للوحدة"
-                  dir="ltr"
-                  inputMode="decimal"
-                  inputClassName="num"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                />
-                <DateField label="من" value={validFrom} onChange={setValidFrom} />
-                <DateField label="إلى (اختياري)" value={validTo} onChange={setValidTo} />
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <Button
-                  type="submit"
-                  icon={<AddIcon />}
-                  loading={saving}
-                  disabled={!variant || !target || !price.trim()}
-                >
-                  {editing ? 'احفظ التعديل' : 'أضف السعر'}
-                </Button>
-                {editing ? (
-                  <Button variant="secondary" onClick={reset}>
-                    إلغاء التعديل
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <Button
+                    type="submit"
+                    icon={<AddIcon />}
+                    loading={saving}
+                    disabled={!variant || !target || !price.trim()}
+                  >
+                    {editing ? 'احفظ التعديل' : 'أضف السعر'}
                   </Button>
-                ) : null}
+                  <Button variant="secondary" onClick={reset}>
+                    {editing ? 'إلغاء التعديل' : 'إلغاء'}
+                  </Button>
 
-                {!variant || !target || !price.trim() ? (
-                  <p className="text-sm text-ink-muted">
-                    {!variant
-                      ? 'اختر الصنف أولاً.'
-                      : !target
-                        ? 'اختر الزبون أو نوع الزبون.'
-                        : 'اكتب السعر للوحدة ليُحفظ.'}
-                  </p>
-                ) : null}
-              </div>
-            </form>
-          </Card>
-        </section>
+                  {!variant || !target || !price.trim() ? (
+                    <p className="text-sm text-ink-muted">
+                      {!variant
+                        ? 'اختر الصنف أولاً.'
+                        : !target
+                          ? 'اختر الزبون أو نوع الزبون.'
+                          : 'اكتب السعر للوحدة ليُحفظ.'}
+                    </p>
+                  ) : null}
+                </div>
+              </form>
+            </Card>
+          </section>
+        ) : null}
 
         <section aria-label="الأسعار" className="flex flex-col gap-3">
           <SectionHead title="الأسعار">

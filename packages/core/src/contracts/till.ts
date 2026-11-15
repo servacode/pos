@@ -107,7 +107,8 @@ export const invoiceLookupQuery = z.object({ q: z.string().trim().min(1).max(64)
  * last digits of the invoice number; newest first, at most 20. `days` (default 30) is how far back.
  */
 export const invoiceSearchQuery = z.object({
-  q: z.string().trim().min(2).max(64),
+  // Empty = the newest invoices of the store (the return screen shows them when it opens)
+  q: z.string().trim().max(64).default(''),
   days: z.coerce.number().int().min(1).max(3650).default(30),
 });
 

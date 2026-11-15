@@ -91,6 +91,7 @@ function sellableOf(pool: readonly StockBatch[], today: string): number | null {
   for (const b of pool) {
     const state = batchState(b, today);
     if (state === 'ok') ok += b.qty;
+    else if (state === 'empty' && b.qty < 0 && !b.batchNo) ok += b.qty;
     else if (state === 'expired' || state === 'blocked') left = true;
   }
   return left ? ok : null;

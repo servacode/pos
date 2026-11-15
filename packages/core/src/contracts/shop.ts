@@ -173,6 +173,8 @@ export interface ShopProduct {
     available: boolean;
     /** «بقي 2 فقط»: the pieces left, only when 3 or fewer are (the shop never gives a bigger count) */
     left: number | null;
+    /** The most one order may hold of the piece: what is on the shelf, at most 50; null: nothing to count (a service) */
+    maxQty?: number | null;
   }[];
   /** The running offer's name on any of its pieces; null: none */
   offer: string | null;

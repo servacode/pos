@@ -36,6 +36,9 @@ export const SOURCE_TEXT: Record<PriceChangeSource, string> = {
   bulk: 'تغيير جماعي',
 };
 
+/** «-10%» as written in Arabic print: a true minus before a number and the Arabic percent sign */
+export const properSigns = (text: string | null) => (text ?? '').replace(/-(?=\d)/g, '−').replace(/%/g, '٪');
+
 /** Local date and time, «2026-11-13 14:30» */
 export const whenText = (iso: string) => {
   const d = new Date(iso);
@@ -142,7 +145,15 @@ function PriceHistory() {
               {r.variantLabel ? <span className="text-ink-muted"> · {r.variantLabel}</span> : null}
             </span>
           ) : (
-            <span className="text-ink-muted">{r.note}</span>
+            // An old summary row (before each piece was logged on its own): its details were never kept
+            <details className="text-sm">
+              <summary className="cursor-pointer rounded-small text-ink-muted hover:text-ink">
+                {properSigns(r.note)}
+              </summary>
+              <p className="pt-1 text-xs text-ink-subtle">
+                تغيير قديم: التفاصيل غير محفوظة. التغييرات الجديدة تُسجَّل لكل صنف على حدة.
+              </p>
+            </details>
           ),
       },
       {

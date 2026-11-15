@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router';
 import type { InventoryResponse, InventoryRow, ProfitReport, StocktakeDetail } from '@serva/core';
 import {
   AlertCircleIcon,
@@ -72,6 +73,8 @@ export function InventoryPage() {
   // The picker narrows by typing (a store has hundreds of pieces); the write-off is confirmed first
   const [wasteQuery, setWasteQuery] = useState('');
   const [wasteAsk, setWasteAsk] = useState(false);
+  // What went wrong with the waste: told inside its window, not behind it
+  const [wasteError, setWasteError] = useState<string | null>(null);
   // Counting by scanning (03 › الألبسة: الجرد بالمسح): each scan adds one piece (or its pack)
   const [scan, setScan] = useState('');
   const [scanned, setScanned] = useState<{ variantId: string; name: string } | null>(null);
@@ -84,6 +87,20 @@ export function InventoryPage() {
   const [view, setView] = useState<'list' | 'grid'>(me.tenant.sectors.includes('clothing') ? 'grid' : 'list');
   // «سجّل هدراً» opens from a button, in a window of its own
   const [wasteOpen, setWasteOpen] = useState(false);
+  // «?count=id,id» (the home page's «ناقص» chips): the count opens on these items only
+  const [params] = useSearchParams();
+  const [only, setOnly] = useState<ReadonlySet<string> | null>(() => {
+    const ids = (params.get('count') ?? '').split(',').filter(Boolean);
+    return ids.length > 0 ? new Set(ids) : null;
+  });
+  useEffect(() => {
+    if (only && canCount) {
+      setCounting(true);
+      setView('list');
+    }
+    // once, when the page opens with the items to count
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = useCallback(() => {
     setError(null);
@@ -110,7 +127,10 @@ export function InventoryPage() {
   const reviewTotal = review.reduce((sum, l) => sum + l.diffValueMinor, 0);
   const needle = query.trim();
   const shown = items.filter(
-    (r) => (!branchShown || r.branchId === branchShown) && (!needle || r.name.includes(needle)),
+    (r) =>
+      (!branchShown || r.branchId === branchShown) &&
+      (!needle || r.name.includes(needle)) &&
+      (!only || only.has(r.variantId)),
   );
 
   const columns: DataColumn<InventoryRow>[] = [
@@ -275,13 +295,24 @@ export function InventoryPage() {
     return !typed || `${r.branchId}:${r.variantId}` === wasteKey || r.name.toLowerCase().includes(typed);
   });
 
-  function askWaste() {
+  /** What is wrong with the typed waste, or null: nothing leaves that is not on the shelf */
+  function wasteProblem(): string | null {
     const qty = qtyOf(wasteQty);
-    if (!wasteRow || !qty || qty <= 0) {
-      setError('اختر الصنف واكتب كمية الهدر.');
+    if (!wasteRow || !qty || qty <= 0) return 'اختر الصنف واكتب كمية الهدر.';
+    if (wasteRow.qty <= 0) return 'لا مخزون لهذا الصنف ليخرج منه هدر.';
+    if (qty > wasteRow.qty) {
+      return `الموجود من هذا الصنف ${formatQuantity(wasteRow.qty, digits)} فقط. اكتب كمية أقل.`;
+    }
+    return null;
+  }
+
+  function askWaste() {
+    const problem = wasteProblem();
+    setWasteError(problem);
+    if (problem) {
+      setWasteAsk(false);
       return;
     }
-    setError(null);
     setWasteAsk(true);
   }
 
@@ -289,12 +320,14 @@ export function InventoryPage() {
     const row = wasteRow;
     const qty = qtyOf(wasteQty);
     setWasteAsk(false);
-    if (!row || !qty || qty <= 0) {
-      setError('اختر الصنف واكتب كمية الهدر.');
+    const problem = wasteProblem();
+    if (problem || !row || !qty) {
+      setWasteError(problem);
       return;
     }
     setSaving(true);
     setError(null);
+    setWasteError(null);
     try {
       setResult(
         await createStocktake({
@@ -310,7 +343,7 @@ export function InventoryPage() {
       setWasteOpen(false);
       load();
     } catch (e) {
-      setError(errorMessage(e));
+      setWasteError(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -334,7 +367,14 @@ export function InventoryPage() {
           actions={
             <>
               {showWaste ? (
-                <Button variant="secondary" icon={<DeleteIcon />} onClick={() => setWasteOpen(true)}>
+                <Button
+                  variant="secondary"
+                  icon={<DeleteIcon />}
+                  onClick={() => {
+                    setWasteError(null);
+                    setWasteOpen(true);
+                  }}
+                >
                   سجّل هدراً
                 </Button>
               ) : null}
@@ -568,15 +608,21 @@ export function InventoryPage() {
               onValueChange={setQuery}
               className="w-full sm:w-64"
             />
-            <SegmentedControl
-              label="طريقة العرض"
-              value={view}
-              onValueChange={setView}
-              options={[
-                { value: 'list', label: 'قائمة' },
-                { value: 'grid', label: 'شبكة المقاس واللون' },
-              ]}
-            />
+            {/* The grid only means something when a product has options; «المقاس واللون» is a clothing store's words */}
+            {items.some((r) => r.attributes && r.attributes.length > 0) ? (
+              <SegmentedControl
+                label="طريقة العرض"
+                value={view}
+                onValueChange={setView}
+                options={[
+                  { value: 'list', label: 'قائمة' },
+                  {
+                    value: 'grid',
+                    label: me.tenant.sectors.includes('clothing') ? 'شبكة المقاس واللون' : 'شبكة الخيارات',
+                  },
+                ]}
+              />
+            ) : null}
             <Button variant="secondary" disabled={shown.length === 0} onClick={exportStock}>
               صدّر إلى إكسل
             </Button>
@@ -597,8 +643,28 @@ export function InventoryPage() {
               </Select>
             ) : null}
           </SectionHead>
+          {only ? (
+            <p className="flex flex-wrap items-center gap-3 text-sm text-ink-muted">
+              <span>تعرض الصفحة الأصناف الناقصة فقط.</span>
+              <Button variant="ghost" onClick={() => setOnly(null)}>
+                اعرض كل الأصناف
+              </Button>
+            </p>
+          ) : null}
           {view === 'grid' && stock ? (
-            <InventoryGrid rows={shown} numberFormat={digits} />
+            <InventoryGrid
+              rows={shown}
+              numberFormat={digits}
+              {...(canCount
+                ? {
+                    onCount: (ids: string[]) => {
+                      setOnly(new Set(ids));
+                      setCounting(true);
+                      setView('list');
+                    },
+                  }
+                : {})}
+            />
           ) : (
             <DataTable
               caption="المخزون"
@@ -647,6 +713,7 @@ export function InventoryPage() {
               onValueChange={(v) => {
                 setWasteQuery(v);
                 setWasteAsk(false);
+                setWasteError(null);
               }}
             />
             <Select
@@ -655,6 +722,7 @@ export function InventoryPage() {
               onChange={(e) => {
                 setWasteKey(e.target.value);
                 setWasteAsk(false);
+                setWasteError(null);
               }}
             >
               <option value="">اختر الصنف</option>
@@ -673,6 +741,7 @@ export function InventoryPage() {
                 onChange={(e) => {
                   setWasteQty(e.target.value);
                   setWasteAsk(false);
+                  setWasteError(null);
                 }}
                 className="min-w-0 flex-1"
                 inputClassName="num"
@@ -681,6 +750,13 @@ export function InventoryPage() {
                 سجّل الهدر
               </Button>
             </div>
+            {wasteRow && wasteRow.qty > 0 ? (
+              <p className="text-sm text-ink-muted">
+                الموجود من «{wasteRow.name}»:{' '}
+                <bdi className="num font-semibold">{formatQuantity(wasteRow.qty, digits)}</bdi>
+              </p>
+            ) : null}
+            {wasteError ? <Alert tone="error">{wasteError}</Alert> : null}
             {wasteAsk && wasteRow ? (
               <Alert tone="warning">
                 <div className="flex flex-col gap-3">

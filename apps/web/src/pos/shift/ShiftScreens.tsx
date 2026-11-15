@@ -366,6 +366,7 @@ export function ShiftCloseScreen({
     }
   }
 
+  const sellerNames = new Map(catalog.staff.users.map((u) => [u.id, u.fullName]));
   const zProps = (a: ShiftActivity) => ({
     shift,
     closedAt,
@@ -375,7 +376,7 @@ export function ShiftCloseScreen({
     baseCurrency: settings.baseCurrency,
     storeName: settings.storeName || pos.device.storeName,
     showDifference: canSeeDifference,
-    sellerNames: new Map(catalog.staff.users.map((u) => [u.id, u.fullName])),
+    sellerNames,
   });
 
   // Display only: «الصافي» is what stayed in the drawer from payments, the cash paid back for returns taken off
@@ -493,6 +494,21 @@ export function ShiftCloseScreen({
                     ) : null}
                   </li>
                 ))}
+                {activity.bySeller.length > 0 ? (
+                  <li className="flex flex-col gap-0.5">
+                    <span className="font-semibold text-ink">البائعون</span>
+                    {activity.bySeller.map((r) => (
+                      <span
+                        key={`${r.sellerId}:${r.currency}`}
+                        className="flex flex-wrap items-center gap-x-1"
+                      >
+                        <bdi>{sellerNames.get(r.sellerId) ?? 'بائع'}</bdi> ·{' '}
+                        {counted(r.count, INVOICES, digits)} ·{' '}
+                        <Money minor={r.totalMinor} currency={r.currency} className="text-ink" />
+                      </span>
+                    ))}
+                  </li>
+                ) : null}
                 {activity.returns.count > 0 ? (
                   <li>
                     المرتجعات:{' '}

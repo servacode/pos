@@ -161,7 +161,7 @@ describe('شبكة المقاس واللون في المخزون', () => {
       }),
     });
     const { user } = renderApp('/inventory');
-    await user.click(await screen.findByRole('radio', { name: 'شبكة المقاس واللون' }));
+    await user.click(await screen.findByRole('radio', { name: 'شبكة الخيارات' }));
     const grid = await screen.findByRole('region', { name: 'شبكة قميص' });
     expect(within(grid).getByRole('columnheader', { name: 'أزرق' })).toBeInTheDocument();
     expect(within(grid).getByRole('rowheader', { name: 'L' })).toBeInTheDocument();
@@ -218,5 +218,56 @@ describe('a clothing shop’s inventory', () => {
     expect(shirt.getByText('10')).toBeInTheDocument();
     // 4 is a cell (M red) and also the S row's total
     expect(shirt.getAllByText('4')).toHaveLength(2);
+  });
+});
+
+describe('stock numbers that explain themselves', () => {
+  it('keeps a minus out of the grid totals, says «ناقص» apart, and opens the count on it', async () => {
+    const piece = (id: string, size: string, qty: number) => ({
+      variantId: id,
+      productId: 'p-1',
+      productName: 'قميص',
+      name: `قميص ${size}`,
+      attributes: [{ name: 'المقاس', value: size }],
+      branchId: 'b-1',
+      qty,
+      valueMinor: 0,
+      unitCostMinor: 0,
+    });
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({
+        status: 200,
+        body: {
+          ...stock,
+          items: [piece('a', 'S', 5000), piece('b', 'M', -2000)],
+        } satisfies InventoryResponse,
+      }),
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('radio', { name: 'شبكة الخيارات' }));
+    const grid = within(await screen.findByRole('region', { name: 'شبكة قميص' }));
+    expect(grid.getByText('المتاح 5')).toBeInTheDocument();
+    expect(grid.getByText('ناقص')).toBeInTheDocument();
+    await user.click(grid.getByRole('button', { name: 'صحّح بالجرد' }));
+    expect(await screen.findByText('تعرض الصفحة الأصناف الناقصة فقط.')).toBeInTheDocument();
+  });
+
+  it('tells a waste larger than the stock inside its window, before asking to confirm', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory': () => ({ status: 200, body: stock }),
+    });
+    const { user } = renderApp('/inventory');
+    await user.click(await screen.findByRole('button', { name: 'سجّل هدراً' }));
+    const form = await screen.findByRole('form', { name: 'سجّل هدراً' });
+    await user.selectOptions(within(form).getByLabelText('الصنف التالف'), 'b-1:v-1');
+    await user.type(within(form).getByLabelText('كمية الهدر'), '99');
+    await user.click(within(form).getByRole('button', { name: 'سجّل الهدر' }));
+    expect(within(form).getByText(/الموجود من هذا الصنف/)).toBeInTheDocument();
+    expect(within(form).queryByRole('button', { name: 'أكّد الهدر' })).not.toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/stocktakes')).toHaveLength(0);
   });
 });

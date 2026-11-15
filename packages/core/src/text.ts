@@ -124,4 +124,6 @@ export const COUNT_NOUNS = {
   piece: { one: 'قطعة واحدة', two: 'قطعتان', few: 'قطع', many: 'قطعة' },
   batch: { one: 'دفعة واحدة', two: 'دفعتان', few: 'دفعات', many: 'دفعة' },
   row: { one: 'سطر واحد', two: 'سطران', few: 'أسطر', many: 'سطراً' },
+  photo: { one: 'صورة واحدة', two: 'صورتان', few: 'صور', many: 'صورة' },
+  day: { one: 'يوم واحد', two: 'يومان', few: 'أيام', many: 'يوماً' },
 } as const satisfies Record<string, CountForms>;

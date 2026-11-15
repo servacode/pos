@@ -5,6 +5,7 @@ import {
   CalendarIcon,
   Card,
   ClockIcon,
+  cn,
   CustomersIcon,
   IconChip,
   ListIcon,
@@ -164,7 +165,15 @@ export function ReportsHomePage() {
       {groups.map((group) => (
         <section key={group.title} aria-label={group.title} className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold text-ink">{group.title}</h2>
-          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {/* Cards fill whole rows: a lone last card on a phone-wide row stretches, and the desktop columns follow the count */}
+          <ul
+            className={cn(
+              'grid gap-3 sm:grid-cols-2 sm:[&>li:last-child:nth-child(odd)]:col-span-2',
+              group.questions.length % 3 === 0 || group.questions.length === 5
+                ? 'xl:grid-cols-3 xl:[&>li:last-child:nth-child(odd)]:col-span-1'
+                : 'xl:[&>li:last-child:nth-child(odd)]:col-span-2',
+            )}
+          >
             {group.questions.map((q) => (
               <li key={q.to}>
                 <Link to={q.to} className="block">

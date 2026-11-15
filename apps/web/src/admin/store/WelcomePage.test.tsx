@@ -167,7 +167,7 @@ describe('«إعدادات المتجر»', () => {
     const rate = await screen.findByLabelText('سعر الدولار اليوم بالليرة');
     await user.clear(rate);
     await user.type(rate, '132');
-    await user.click(screen.getAllByRole('button', { name: 'احفظ' })[1]!);
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
     expect(await screen.findByText('حُفظت العملة وسعر الصرف.')).toBeInTheDocument();
     expect(saved().usdRate).toBe('132');
   });

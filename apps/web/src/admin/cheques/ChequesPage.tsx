@@ -63,6 +63,40 @@ export function dueDayOf(c: Pick<Cheque, 'dueDate' | 'reference'>): string | nul
 }
 
 /**
+ * A cheque's number, bank and due day apart: the structured fields first, and for a cheque typed as
+ * one line («بنك · CH-8001 · 2026-11-20») the pieces of that line, so none is shown twice.
+ */
+export function chequeParts(c: Pick<Cheque, 'reference' | 'bank' | 'dueDate'>): {
+  number: string | null;
+  bank: string | null;
+  due: string | null;
+} {
+  const parts = (c.reference ?? '')
+    .split(/\s*[·•|،,]\s*/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  let due = c.dueDate ?? null;
+  let bank = c.bank ?? null;
+  let number: string | null = null;
+  const rest: string[] = [];
+  for (const part of parts) {
+    const day = /\d{4}-\d{2}-\d{2}/.exec(part)?.[0];
+    if (day) {
+      due ??= day;
+      const left = part.replace(day, '').trim();
+      if (left) rest.push(left);
+    } else rest.push(part);
+  }
+  for (const part of rest) {
+    if (number === null && /\d/.test(part) && !/\s/.test(part)) number = part;
+    else if (bank === null && !/^\d/.test(part)) bank = part;
+    else number ??= part;
+  }
+  if (c.bank && number === c.bank) number = null;
+  return { number, bank, due };
+}
+
+/**
  * Cheques still waiting whose due day is within the next days. A customer's cheque counts from
  * today and also past due (it still has to be cashed or bounced); a cheque we gave a supplier has
  * no mark, so it counts only until its day. The home page counts both too.
@@ -162,30 +196,34 @@ export function ChequesPage() {
       key: 'reference',
       header: 'رقم الشيك',
       className: 'px-2! sm:px-4!',
-      cell: (c) => (
-        <div className="flex flex-col items-start gap-1 py-2.5">
-          {c.reference ? (
-            <bdi dir="ltr" className="num max-w-48 font-semibold break-words">
-              {c.reference}
-            </bdi>
-          ) : (
-            <span className="text-ink-subtle">بلا رقم</span>
-          )}
-          <span className="hidden text-xs text-ink-muted sm:block">
-            <bdi dir="ltr" className="num whitespace-nowrap">
-              {c.documentNumber}
-            </bdi>
-          </span>
-          {c.bank ? <span className="text-xs text-ink-muted 2xl:hidden">{c.bank}</span> : null}
-          <span className="text-xs text-ink-muted sm:hidden">{c.customerName ?? '—'}</span>
-          {dueDayOf(c) ? (
+      cell: (c) => {
+        const { number, bank, due } = chequeParts(c);
+        const late = due !== null && c.status === 'pending' && c.direction !== 'out' && due <= today();
+        return (
+          <div className="flex flex-col items-start gap-1 py-2.5">
+            {number ? (
+              <bdi dir="ltr" className="num max-w-48 font-semibold break-words">
+                {number}
+              </bdi>
+            ) : (
+              <span className="text-ink-subtle">بلا رقم</span>
+            )}
+            {/* On a phone the one cell carries what the other columns show from 640 px */}
+            {bank ? <span className="text-xs text-ink-muted sm:hidden">{bank}</span> : null}
             <span className="text-xs text-ink-muted sm:hidden">
-              الاستحقاق <span className="whitespace-nowrap">{dayText(dueDayOf(c)!, digits)}</span>
+              {c.direction === 'out' ? (c.supplierName ?? '—') : (c.customerName ?? '—')}
             </span>
-          ) : null}
-          <span className="sm:hidden">{status(c)}</span>
-        </div>
-      ),
+            {due ? (
+              <span
+                className={`text-xs sm:hidden ${late ? 'font-semibold text-danger-ink' : 'text-ink-muted'}`}
+              >
+                الاستحقاق <span className="whitespace-nowrap">{dayText(due, digits)}</span>
+              </span>
+            ) : null}
+            <span className="sm:hidden">{status(c)}</span>
+          </div>
+        );
+      },
     },
     {
       key: 'customer',
@@ -193,23 +231,38 @@ export function ChequesPage() {
       className: 'hidden sm:table-cell',
       cell: (c) =>
         c.direction === 'out' ? (
-          <span className="line-clamp-2 min-w-28 font-semibold">{c.supplierName ?? '—'}</span>
+          <span className="flex min-w-28 flex-col">
+            <span className="line-clamp-2 font-semibold">{c.supplierName ?? '—'}</span>
+            <bdi dir="ltr" className="num text-xs whitespace-nowrap text-ink-muted">
+              {c.documentNumber}
+            </bdi>
+          </span>
         ) : c.customerName ? (
           <span className="flex min-w-28 items-center gap-2.5">
             <Avatar name={c.customerName} size="sm" className="shrink-0" />
-            <span className="line-clamp-2 font-semibold">{c.customerName}</span>
+            <span className="flex flex-col">
+              <span className="line-clamp-2 font-semibold">{c.customerName}</span>
+              <bdi dir="ltr" className="num text-xs whitespace-nowrap text-ink-muted">
+                {c.documentNumber}
+              </bdi>
+            </span>
           </span>
         ) : (
-          <span className="text-ink-subtle">—</span>
+          <span className="flex flex-col">
+            <span className="text-ink-subtle">—</span>
+            <bdi dir="ltr" className="num text-xs whitespace-nowrap text-ink-muted">
+              {c.documentNumber}
+            </bdi>
+          </span>
         ),
     },
     {
       key: 'bank',
       header: 'البنك',
-      className: 'hidden 2xl:table-cell',
+      className: 'hidden sm:table-cell',
       cell: (c) => (
         <span className="flex flex-col items-start">
-          <span>{c.bank ?? <span className="text-ink-subtle">—</span>}</span>
+          <span>{chequeParts(c).bank ?? <span className="text-ink-subtle">—</span>}</span>
           {c.drawer ? <span className="text-xs text-ink-muted">الساحب: {c.drawer}</span> : null}
         </span>
       ),
@@ -218,20 +271,22 @@ export function ChequesPage() {
       key: 'due',
       header: 'الاستحقاق',
       className: 'hidden sm:table-cell',
-      cell: (c) =>
-        dueDayOf(c) ? (
+      cell: (c) => {
+        const due = chequeParts(c).due;
+        return due ? (
           <span
             className={`whitespace-nowrap ${
-              c.status === 'pending' && c.direction !== 'out' && dueDayOf(c)! <= today()
+              c.status === 'pending' && c.direction !== 'out' && due <= today()
                 ? 'font-semibold text-danger-ink'
                 : 'text-ink'
             }`}
           >
-            {dayText(dueDayOf(c)!, digits)}
+            {dayText(due, digits)}
           </span>
         ) : (
           <span className="text-ink-subtle">—</span>
-        ),
+        );
+      },
     },
     {
       key: 'date',

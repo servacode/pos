@@ -165,9 +165,18 @@ export function StatusBar({
           {/* The long sentence gives way (shortened with its full text on hover) so the store and the person keep their names */}
           <span
             title={connectionText(online, outbox?.pending ?? 0)}
-            className="sr-only sm:not-sr-only sm:block sm:max-w-40 sm:truncate min-[1280px]:max-w-72 min-[1536px]:max-w-none"
+            className="sr-only min-[1280px]:not-sr-only min-[1280px]:block min-[1280px]:max-w-72 min-[1536px]:max-w-none"
           >
             {connectionText(online, outbox?.pending ?? 0)}
+          </span>
+          {/* Between a phone and a wide bar: the short words, whole, never cut mid-sentence */}
+          <span
+            aria-hidden="true"
+            title={connectionText(online, outbox?.pending ?? 0)}
+            className="hidden whitespace-nowrap sm:max-[1279px]:block"
+          >
+            {online ? 'متصل' : 'دون إنترنت'}
+            {(outbox?.pending ?? 0) > 0 ? ` · ${outbox!.pending}` : ''}
           </span>
           {/* On a phone the sentence is spoken only; what waits shows as a number, so it is never squeezed */}
           {(outbox?.pending ?? 0) > 0 ? (

@@ -308,7 +308,7 @@ function HeroTile({
               ) : null}
               {data.returns && data.returns.totalMinor > 0 ? (
                 <span className="opacity-85">
-                  بعد مرتجع{' '}
+                  المرتجعات{' '}
                   <Money
                     minor={data.returns.totalMinor}
                     currency={data.baseCurrency}
@@ -346,7 +346,7 @@ function TileSkeleton() {
 }
 
 /** On a phone the tiles scroll sideways, one snapping into place; from 640 px they share the row. */
-const TILE_CLASS = 'min-w-60 shrink-0 snap-start sm:min-w-0';
+const TILE_CLASS = 'min-w-44 shrink-0 snap-start sm:min-w-0';
 
 function KpiBand({
   me,
@@ -654,6 +654,10 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
       value: m.baseAmountMinor / factor,
     }))
     .sort((a, b) => b.value - a.value);
+  // Vouchers are not money taken today: they pay for what an earlier voucher was bought with
+  const voucherMinor = (data?.byMethod ?? [])
+    .filter((m) => m.method === 'voucher')
+    .reduce((sum, m) => sum + m.baseAmountMinor, 0);
   return (
     <Card className="flex flex-col gap-4">
       <SectionTitle icon={<SalesIcon size={20} />}>طرق الدفع اليوم</SectionTitle>
@@ -664,6 +668,11 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
         formatValue={(value) => formatMoney(Math.round(value * factor), base, { digits })}
         empty={<p className="text-ink-muted">لا دفعات بعد اليوم.</p>}
       />
+      {voucherMinor > 0 ? (
+        <p className="text-sm text-ink-muted">
+          منها قسائم مستردّة <Money minor={voucherMinor} currency={base} className="font-semibold" />
+        </p>
+      ) : null}
     </Card>
   );
 }
@@ -720,12 +729,15 @@ const sizeOf = (item: { attributes?: { name: string; value: string }[] }) =>
 const SIZED_ROWS = 4;
 
 /** The low pieces «ما ينتظرك» names one by one (clothing): «يوشك على النفاد» does not list them again */
-const sizedLow = <T extends { attributes?: { name: string; value: string }[]; variantId: string }>(
+const sizedLow = <
+  T extends { attributes?: { name: string; value: string }[]; variantId: string; stockQty: number },
+>(
   items: readonly T[],
 ): Set<string> =>
   new Set(
     items
-      .filter((item) => sizeOf(item) !== null)
+      // A negative piece is named once, in «يوشك على النفاد», with its link to the count
+      .filter((item) => sizeOf(item) !== null && item.stockQty >= 0)
       .slice(0, SIZED_ROWS)
       .map((item) => item.variantId),
   );
@@ -764,16 +776,19 @@ function Waiting({
   const holds = orders.data?.items.filter((order) => order.source === 'hold').length ?? 0;
   const online = count - holds;
   // A clothing store hears which size ran out («المقاس M من قميص كذا نفد»), one row per piece
-  const sized = sizes
-    ? (merch.data?.lowStock ?? []).filter((item) => sizeOf(item) !== null).slice(0, SIZED_ROWS)
-    : [];
-  const low = (merch.data?.lowStock.length ?? 0) - sized.length;
+  // A piece below zero is named once, in «يوشك على النفاد», where its chip opens the count
+  const notNegative = (merch.data?.lowStock ?? []).filter((item) => item.stockQty >= 0);
+  const sized = sizes ? notNegative.filter((item) => sizeOf(item) !== null).slice(0, SIZED_ROWS) : [];
+  const low = notNegative.length - sized.length;
   const expiring = expiry.data?.items.length ?? 0;
+  // A recalled batch no till sells (استدعاء دفعة): it waits for the owner's decision
+  const recalled = expiry.data?.items.filter((row) => row.blocked).length ?? 0;
   const loading =
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
   const chequesDue = cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
   const chequesOut = cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
-  const empty = online + holds + low + sized.length + expiring + chequesDue + chequesOut + noPhoto === 0;
+  const empty =
+    online + holds + low + sized.length + expiring + recalled + chequesDue + chequesOut + noPhoto === 0;
   return (
     <Card className="flex flex-col gap-3">
       <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
@@ -800,7 +815,7 @@ function Waiting({
             return (
               <WaitingRow
                 key={item.variantId}
-                to={item.stockQty < 0 ? '/inventory' : `/products/${item.productId}`}
+                to={`/products/${item.productId}`}
                 count={stockChip(item.stockQty)}
                 tone="danger"
                 icon={<WarningIcon />}
@@ -832,6 +847,11 @@ function Waiting({
               {noPhoto === 1 ? 'منتج بلا صورة' : `${products(noPhoto)} بلا صورة`}
             </WaitingRow>
           ) : null}
+          {recalled > 0 ? (
+            <WaitingRow to="/recall" count={recalled} tone="danger" icon={<WarningIcon />}>
+              {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : 'دفعات موقوفة عن البيع (استدعاء)'}
+            </WaitingRow>
+          ) : null}
           {expiring > 0 ? (
             <WaitingRow to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
               {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
@@ -852,6 +872,10 @@ function stockChip(qty: number): string {
 
 function RunningLow({ report, skip }: { report: MerchState; skip?: ReadonlySet<string> | undefined }) {
   const low = (report.data?.lowStock ?? []).filter((item) => !skip?.has(item.variantId)).slice(0, 5);
+  // Every piece below zero, shown or not: one link opens the count with all of them
+  const negativeIds = (report.data?.lowStock ?? [])
+    .filter((item) => item.stockQty < 0)
+    .map((i) => i.variantId);
   // Every low piece is already named in «ما ينتظرك»: the list would only repeat it
   if (low.length === 0 && (report.data?.lowStock.length ?? 0) > 0) return null;
   return (
@@ -892,7 +916,11 @@ function RunningLow({ report, skip }: { report: MerchState; skip?: ReadonlySet<s
                 >
                   {item.stockQty <= 1000 ? <WarningIcon size={16} /> : null}
                   {item.stockQty < 0 ? (
-                    <Link to="/inventory" className="hover:underline">
+                    <Link
+                      to={`/inventory?count=${item.variantId}`}
+                      aria-label={`اجرد ${item.name}`}
+                      className="hover:underline"
+                    >
                       {stockChip(item.stockQty)}
                     </Link>
                   ) : (
@@ -905,7 +933,10 @@ function RunningLow({ report, skip }: { report: MerchState; skip?: ReadonlySet<s
           {low.some((item) => item.stockQty < 0) ? (
             <p className="text-sm text-ink-muted">
               «ناقص» يعني أنك بعت أكثر من المسجّل. استلم البضاعة أو{' '}
-              <Link to="/inventory" className="font-semibold text-brand-ink hover:underline">
+              <Link
+                to={`/inventory?count=${negativeIds.join(',')}`}
+                className="font-semibold text-brand-ink hover:underline"
+              >
                 اجرد المخزون
               </Link>{' '}
               ليصحّ الرقم.
@@ -1062,6 +1093,14 @@ export function HomePage() {
             aria-label="يتحدّث"
             className="h-0.5 w-full animate-pulse overflow-hidden rounded-full bg-brand/40"
           />
+        ) : null}
+        {day.slow ? (
+          <Alert tone="warning">
+            الأرقام تأخّرت أكثر من المعتاد.{' '}
+            <button type="button" className="font-semibold underline" onClick={day.retry}>
+              أعد المحاولة
+            </button>
+          </Alert>
         ) : null}
         <TrialBanner me={me} />
         <PageHeader

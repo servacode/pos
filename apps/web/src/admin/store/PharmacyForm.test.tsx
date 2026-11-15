@@ -148,6 +148,9 @@ describe('«الصيدلية» in the settings', () => {
     });
     const { user } = renderApp('/settings');
     const form = await screen.findByRole('form', { name: 'الصيدلية' });
+    // The save bar waits for an edit
+    expect(within(form).queryByRole('button', { name: 'احفظ' })).not.toBeInTheDocument();
+    await user.click(within(form).getByRole('switch', { name: /إلزاميان/ }));
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     expect(await within(form).findByText(/تعذّر الحفظ|حدث خطأ/)).toBeInTheDocument();
   });

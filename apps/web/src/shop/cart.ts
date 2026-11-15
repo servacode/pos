@@ -15,9 +15,14 @@ export interface ShopCartLine {
   imageUrl: string | null;
   priceMinor: number;
   qty: number;
+  /** What the shelf holds when the page was read; the cart never goes above it */
+  maxQty?: number | null;
 }
 
 export const MAX_QTY = 50;
+/** The most the cart may hold of a piece: 50, or what is on the shelf when that is fewer */
+export const capOf = (line: { maxQty?: number | null }): number =>
+  typeof line.maxQty === 'number' && line.maxQty > 0 ? Math.min(MAX_QTY, line.maxQty) : MAX_QTY;
 const keyOf = (slug: string) => `serva-shop-cart:${slug}`;
 
 function read(slug: string): ShopCartLine[] {
@@ -43,8 +48,10 @@ function write(slug: string, lines: ShopCartLine[]) {
 /** Adds a piece, or more of it when it is already in the cart (at most MAX_QTY). */
 export function addLine(lines: readonly ShopCartLine[], line: ShopCartLine): ShopCartLine[] {
   const at = lines.findIndex((l) => l.variantId === line.variantId);
-  if (at < 0) return [...lines, { ...line, qty: Math.min(MAX_QTY, line.qty) }];
-  return lines.map((l, i) => (i === at ? { ...l, qty: Math.min(MAX_QTY, l.qty + line.qty) } : l));
+  if (at < 0) return [...lines, { ...line, qty: Math.min(capOf(line), line.qty) }];
+  return lines.map((l, i) =>
+    i === at ? { ...l, maxQty: line.maxQty ?? l.maxQty, qty: Math.min(capOf(line), l.qty + line.qty) } : l,
+  );
 }
 
 export const cartTotal = (lines: readonly ShopCartLine[]) =>
@@ -70,7 +77,7 @@ export function useShopCart(slug: string) {
       update((l) =>
         qty <= 0
           ? l.filter((x) => x.variantId !== variantId)
-          : l.map((x) => (x.variantId === variantId ? { ...x, qty: Math.min(MAX_QTY, qty) } : x)),
+          : l.map((x) => (x.variantId === variantId ? { ...x, qty: Math.min(capOf(x), qty) } : x)),
       ),
     clear: () => update(() => []),
   };

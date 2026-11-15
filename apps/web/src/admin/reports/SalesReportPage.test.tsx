@@ -241,6 +241,28 @@ describe('softer changes, sell-through and the cross-table', () => {
     ).toEqual(['4', '2', '6']);
   });
 
+  it('orders the sizes by the lists they come from, letters before numbers, with the group named', () => {
+    render(
+      <CrossTable
+        cross={{
+          rowOption: 'اللون',
+          colOption: 'المقاس',
+          cells: ['XL', '44', 'S', '30', 'M'].map((col) => ({ row: 'أبيض', col, qty: 1000, totalMinor: 1 })),
+        }}
+      />,
+    );
+    const heads = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(heads.filter((h) => ['S', 'M', 'XL', '30', '44'].includes(h ?? ''))).toEqual([
+      'S',
+      'M',
+      'XL',
+      '30',
+      '44',
+    ]);
+    expect(screen.getByText('بالحروف')).toBeInTheDocument();
+    expect(screen.getByText('بالأرقام')).toBeInTheDocument();
+  });
+
   it('says so when no piece sold with two options', () => {
     render(<CrossTable cross={{ rowOption: 'المقاس', colOption: 'اللون', cells: [] }} />);
     expect(screen.getByText('لا مبيعات بخيارين في هذه المدة.')).toBeInTheDocument();
@@ -284,7 +306,7 @@ describe('the daily bars and the other shops', () => {
     await screen.findByText('قميص قطني');
     expect(await screen.findByRole('heading', { name: 'المبيع كل يوم' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'الموسم' })).not.toBeInTheDocument();
-    expect(screen.getByText('بعد المرتجع، مع الضريبة')).toBeInTheDocument();
+    expect(screen.getByText('إجمالي المبيعات (بعد المرتجع، مع الضريبة)')).toBeInTheDocument();
   });
 
   it('shows no chart under three days', async () => {
@@ -298,6 +320,8 @@ describe('the daily bars and the other shops', () => {
     });
     renderApp('/reports/sales');
     await screen.findByText('قميص قطني');
+    expect(screen.queryByRole('heading', { name: 'المبيع كل يوم' })).not.toBeInTheDocument();
+    expect(screen.getByText('يظهر الرسم بعد 3 أيام فيها مبيعات.')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'المبيع كل يوم' })).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'الموسم' })).toBeInTheDocument();
   });

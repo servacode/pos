@@ -316,6 +316,36 @@ describe('the online shop', () => {
     expect(stale.statusCode).toBe(409);
   });
 
+  it('caps an order at what is on the shelf, tells the page the most it can hold, and says how many are left', async () => {
+    const store = await openStore(app);
+    const { l, m, shirt } = await goods(store);
+    await openShop(store);
+    const page = await app.inject({
+      method: 'GET',
+      url: `/v1/shop/nour-fashion/products/${shirt.id}`,
+    });
+    expect(page.statusCode, page.body).toBe(200);
+    const variants = page.json<ShopProduct>().variants;
+    // 5 on the shelf for L; M ran out and can hold none
+    expect(variants.find((v) => v.id === l)?.maxQty).toBe(5);
+    expect(variants.find((v) => v.id === m)?.maxQty ?? 0).toBe(0);
+
+    const tooMany = await order('nour-fashion', [{ variantId: l, qty: 6 }]);
+    expect(tooMany.statusCode).toBe(400);
+    expect(tooMany.json()).toMatchObject({
+      error: { fields: { 'lines.0': expect.stringContaining('المتوفر') } },
+    });
+    expect(tooMany.json().error.fields['lines.0']).toContain('5 فقط');
+    // Two lines of the same piece count together
+    const split = await order('nour-fashion', [
+      { variantId: l, qty: 3 },
+      { variantId: l, qty: 3 },
+    ]);
+    expect(split.statusCode).toBe(400);
+    // Exactly what is there is fine
+    expect((await order('nour-fashion', [{ variantId: l, qty: 5 }])).statusCode).toBe(201);
+  });
+
   it('keeps each store’s shop and orders to itself', async () => {
     const a = await openStore(app);
     const { shirt, l } = await goods(a);

@@ -34,6 +34,7 @@ import { storeSells } from '../../lib/sectors';
 import { csvField, downloadText, minorToDecimal } from '../accounting/csv';
 import { apiFetch } from '../../lib/api';
 import { commissionOf } from './MerchandisePage';
+import { orderValues } from './optionOrder';
 import { DayField, ReportFilters, ReportScreen } from './parts';
 import { useReport } from './useReport';
 
@@ -57,6 +58,7 @@ export function changePercent(now: number, before: number): number | null {
 export function softChange(change: number): { text: string; tone: 'success' | 'neutral' | 'warning' } {
   if (change > 100) return { text: 'أكثر من الضعف', tone: 'success' };
   if (change <= -100) return { text: 'لا مبيع', tone: 'neutral' };
+  if (change <= -90) return { text: 'انخفاض كبير', tone: 'warning' };
   const text = `${change > 0 ? '+' : change < 0 ? '−' : ''}${Math.abs(change)}٪`;
   return { text, tone: change >= 0 ? 'success' : change <= -50 ? 'warning' : 'neutral' };
 }
@@ -127,8 +129,24 @@ export function salesBreakdownCsv(s: SalesBreakdown, commission: string): string
 
 /** Pieces sold across two options (size down, colour across), with row and column totals */
 export function CrossTable({ cross }: { cross: SalesCross }) {
-  const rows = [...new Set(cross.cells.map((c) => c.row))];
-  const cols = [...new Set(cross.cells.map((c) => c.col))];
+  // Each option's values in the order its own list defines (S M L XL, 30 32 34…), grouped by kind
+  const rowValues = orderValues(
+    cross.rowOption,
+    cross.cells.map((c) => c.row),
+  );
+  const colValues = orderValues(
+    cross.colOption,
+    cross.cells.map((c) => c.col),
+  );
+  const rows = rowValues.map((v) => v.value);
+  const cols = colValues.map((v) => v.value);
+  const colGroups = colValues.reduce<{ label: string | null; span: number }[]>((out, v) => {
+    const last = out[out.length - 1];
+    if (last && last.label === v.group) last.span += 1;
+    else out.push({ label: v.group, span: 1 });
+    return out;
+  }, []);
+  const grouped = colGroups.some((g) => g.label !== null);
   const at = (row: string, col: string) => cross.cells.find((c) => c.row === row && c.col === col)?.qty ?? 0;
   const rowTotal = (row: string) => cols.reduce((n, col) => n + at(row, col), 0);
   const colTotal = (col: string) => rows.reduce((n, row) => n + at(row, col), 0);
@@ -144,6 +162,17 @@ export function CrossTable({ cross }: { cross: SalesCross }) {
       <table className="w-full min-w-max text-sm">
         <caption className="sr-only">{`القطع المباعة بحسب ${cross.rowOption} و${cross.colOption}`}</caption>
         <thead>
+          {grouped ? (
+            <tr className="bg-surface-muted text-xs text-ink-subtle">
+              <td />
+              {colGroups.map((g, i) => (
+                <th key={i} colSpan={g.span} scope="colgroup" className="px-3 pt-2 text-center font-semibold">
+                  {g.label ?? ''}
+                </th>
+              ))}
+              <td />
+            </tr>
+          ) : null}
           <tr className="border-b border-line bg-surface-muted text-ink-muted">
             <th scope="col" className="px-3 py-2 text-start font-semibold">
               {`${cross.rowOption} / ${cross.colOption}`}
@@ -235,6 +264,7 @@ export function SalesReportPage() {
   }, [by, from, to, optionNames.length]);
   const base = data?.baseCurrency ?? me.settings.baseCurrency;
   const needsOption = by === 'option' && !option;
+  const noOptions = data !== null && data.optionNames.length === 0;
   const days = data ? everyDay(data.from, data.to, data.daily ?? []) : [];
   // A shop of clothes names sizes and colours; any other shop just picks one of its options
   // Seasons are a clothing idea: other shops do not see the tab
@@ -261,6 +291,8 @@ export function SalesReportPage() {
       cell: (r) => {
         const change = changePercent(r.totalMinor, r.previousTotalMinor);
         if (change === null) return r.totalMinor > 0 ? <Badge tone="info">جديد</Badge> : '—';
+        // A base too small to compare with (under 3% of the whole previous period) says nothing
+        if (data && r.previousTotalMinor * 33 < data.previousTotalMinor) return '—';
         const soft = softChange(change);
         return (
           <Badge tone={soft.tone}>
@@ -313,7 +345,12 @@ export function SalesReportPage() {
     {
       key: 'name',
       header: groupLabel(by),
-      cell: (r) => <span className="font-semibold">{r.name}</span>,
+      cell: (r) => (
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold">{r.name}</span>
+          {r.qty < 0 ? <Badge tone="warning">مرتجع بلا بيع في المدة</Badge> : null}
+        </span>
+      ),
     },
     { key: 'qty', header: 'الكمية', numeric: true, cell: (r) => formatQuantity(r.qty) },
     {
@@ -330,7 +367,11 @@ export function SalesReportPage() {
     <ReportScreen me={me} access={['report.view']} title="تقرير المبيعات">
       <PageHeader
         title="تقرير المبيعات"
-        description="ما بيع في المدة، مجمّعاً كما تشاء، مقارناً بالمدة السابقة المساوية لها."
+        description={
+          hasHistory
+            ? 'ما بيع في المدة، مجمّعاً كما تشاء، مقارناً بالمدة السابقة المساوية لها.'
+            : 'ما بيع في المدة، مجمّعاً كما تشاء. لا مبيع قبلها للمقارنة.'
+        }
         icon={<ReportsIcon />}
         actions={
           <Button
@@ -384,9 +425,12 @@ export function SalesReportPage() {
         <div className="max-w-full min-w-0 overflow-x-auto">
           <SegmentedControl
             label="التجميع"
-            options={SALES_GROUPS.filter((g) => g !== 'season' || sellsSeasons || by === 'season').map(
-              (g) => ({ value: g, label: groupLabel(g) }),
-            )}
+            options={SALES_GROUPS.filter(
+              (g) =>
+                (g !== 'season' || sellsSeasons || by === 'season') &&
+                // A store whose pieces have no options (size, colour…) has nothing to group by them
+                (g !== 'option' || by === 'option' || !noOptions),
+            ).map((g) => ({ value: g, label: groupLabel(g) }))}
             value={by}
             onValueChange={setBy}
           />
@@ -430,9 +474,8 @@ export function SalesReportPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <StatTile
-              label="مبيع المدة"
+              label="إجمالي المبيعات (بعد المرتجع، مع الضريبة)"
               value={<Money minor={data.totalMinor} currency={base} />}
-              footnote="بعد المرتجع، مع الضريبة"
             />
             {hasHistory ? (
               <StatTile
@@ -478,7 +521,17 @@ export function SalesReportPage() {
                 formatTick={(value) => compactNumber(value, me.settings.numberFormat)}
                 labelHeader="اليوم"
               />
+              <p className="text-xs text-ink-muted">
+                الأرقام تحت الأعمدة هي أيام الشهر، من {dayText(data.from)} إلى {dayText(data.to)}.
+              </p>
             </Card>
+          ) : (
+            <p className="text-sm text-ink-muted">يظهر الرسم بعد 3 أيام فيها مبيعات.</p>
+          )}
+          {hasHistory ? (
+            <p className="text-sm text-ink-muted">
+              مقارنة بـ {dayText(data.previousFrom)} إلى {dayText(data.previousTo)}.
+            </p>
           ) : null}
           {by === 'option' && data.cross ? (
             <SegmentedControl

@@ -193,7 +193,7 @@ export function TopBar({
         )}
       >
         <SearchIcon size={16} />
-        <span className="min-w-0 flex-1 truncate">ابحث عن منتج أو زبون أو دفعة…</span>
+        <span className="min-w-0 flex-1 truncate">ابحث في المتجر…</span>
         <kbd
           dir="ltr"
           className="rounded-small border border-line bg-surface-muted px-1.5 font-sans text-xs/5 font-semibold text-ink-muted"
@@ -573,7 +573,7 @@ function PageSearch({
         }}
         onKeyDown={onKeyDown}
         autoComplete="off"
-        placeholder="صفحة، منتج، زبون، مورد، فاتورة، فاتورة شراء، رقم تسلسلي…"
+        placeholder="صفحة، منتج، زبون، مورد، فاتورة، طلب، تأجير، شيك، رقم تسلسلي…"
         startAdornment={<SearchIcon size={20} className="ms-3" />}
       />
       {results.length ? (

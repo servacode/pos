@@ -484,6 +484,8 @@ export interface ProductListItem {
   barcode: string | null;
   /** Sum over live variants (and branches, unless branchId was given), thousandths */
   stockQty: number;
+  /** What can be sold: each piece's stock, the ones below zero counted as 0 (thousandths); absent from older servers */
+  sellableQty?: number;
   /** At least one picture on the product (the list's «بلا صورة» count); absent from older servers */
   hasImage?: boolean;
   /** The first picture's thumbnail (for the list's small photo); absent from older servers */

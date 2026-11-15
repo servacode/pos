@@ -87,6 +87,7 @@ import {
   Warehouse,
   Wifi,
   WifiOff,
+  Wrench,
   X,
   type LucideIcon,
   type LucideProps,
@@ -222,6 +223,7 @@ export const ShirtIcon = defineIcon(Shirt);
 export const NoImageIcon = defineIcon(ImageOff);
 export const PackageOpenIcon = defineIcon(PackageOpen);
 export const PanelIcon = defineIcon(PanelRight);
+export const WrenchIcon = defineIcon(Wrench);
 
 // The activity (sector) icons of tab 14 › أيقونة كل نشاط. Clothing, electronics, cosmetics and the
 // general shop reuse ShirtIcon, PhoneIcon, SparklesIcon and StoreIcon above.

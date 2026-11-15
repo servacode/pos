@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
-import type { MeResponse } from '@serva/core';
+import type { MeResponse, OnlineOrder } from '@serva/core';
 import { listProducts } from '../admin/catalog/api';
 import { listCustomers } from '../admin/customers/api';
 import { findSerials, getRecall, listPurchases, listSuppliers } from '../admin/purchases/api';
+import { listCheques } from '../admin/cheques/api';
+import { listRentals } from '../admin/contracts/api';
 import { holdsAny, type AccessRule } from '../admin/reports/access';
+import { apiFetch } from '../lib/api';
+import { dayText } from '../lib/dates';
 import { listSales } from '../admin/sales/api';
 
 /** One record the search found: a product, a customer, a supplier, an invoice, a purchase invoice, a serial number or a batch. */
@@ -86,7 +90,7 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
               key: `i:${s.id}`,
               group: 'الفواتير',
               label: s.number,
-              detail: s.customer?.name ?? s.businessDate,
+              detail: s.customer?.name ?? dayText(s.businessDate),
               to: `/sales/invoices?q=${encodeURIComponent(s.number)}`,
             })),
           ),
@@ -112,6 +116,70 @@ async function search(me: MeResponse, q: string): Promise<RecordHit[]> {
                 to: `/purchases?q=${encodeURIComponent(p.number)}`,
               }));
           }),
+        )
+      : [],
+    // Online orders (ONL-…): the list has no search of its own, so the number, name or phone is matched here
+    can(['customers.view'])
+      ? quiet(
+          apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders', { auth: true }).then((r) =>
+            r.items
+              .filter(
+                (o) =>
+                  o.number.toLowerCase().includes(q.toLowerCase()) ||
+                  o.customerName.includes(q) ||
+                  o.phone.includes(q),
+              )
+              .slice(0, FEW)
+              .map((o): RecordHit => ({
+                key: `o:${o.id}`,
+                group: 'طلبات المتجر الإلكتروني',
+                label: o.number,
+                detail: o.customerName,
+                to: '/online-store',
+              })),
+          ),
+        )
+      : [],
+    // Rentals (RNT-…) and cheque numbers, matched the same way
+    can(['customers.view'])
+      ? quiet(
+          listRentals('all').then((r) =>
+            r.items
+              .filter(
+                (x) =>
+                  x.number.toLowerCase().includes(q.toLowerCase()) ||
+                  x.customerName.includes(q) ||
+                  x.item.includes(q),
+              )
+              .slice(0, FEW)
+              .map((x): RecordHit => ({
+                key: `r:${x.id}`,
+                group: 'التأجير',
+                label: x.number,
+                detail: `${x.item} · ${x.customerName}`,
+                to: '/rentals',
+              })),
+          ),
+        )
+      : [],
+    can(['customers.view'])
+      ? quiet(
+          listCheques(undefined).then((r) =>
+            r.items
+              .filter(
+                (c) =>
+                  (c.reference ?? '').toLowerCase().includes(q.toLowerCase()) ||
+                  c.documentNumber.toLowerCase().includes(q.toLowerCase()),
+              )
+              .slice(0, FEW)
+              .map((c): RecordHit => ({
+                key: `q:${c.sourceType}:${c.sourceId}:${c.paymentNo}`,
+                group: 'الشيكات',
+                label: c.reference ?? c.documentNumber,
+                detail: c.customerName ?? undefined,
+                to: '/cheques',
+              })),
+          ),
         )
       : [],
     can(['catalog.manage']) && q.length >= 3

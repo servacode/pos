@@ -1711,6 +1711,12 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     expect(hit.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
       sold.number,
     );
+    // Nothing typed: the newest invoices of the store, for the return screen's first view
+    const recent = await search(owner.device.authorization, '');
+    expect(recent.statusCode).toBe(200);
+    expect(recent.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
+      sold.number,
+    );
     // By the customer's phone however it is typed, and by name
     for (const typed of ['0955123456', '0955 123 456', '+963 955 123 456', '955123', 'ريم']) {
       const found = await search(owner.device.authorization, typed);

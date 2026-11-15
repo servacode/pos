@@ -1,6 +1,12 @@
 import { Link, useSearchParams } from 'react-router';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import type { PurchasePayment, PurchaseRow, SupplierListResponse, SupplierRow } from '@serva/core';
+import {
+  contactPhoneSchema,
+  type PurchasePayment,
+  type PurchaseRow,
+  type SupplierListResponse,
+  type SupplierRow,
+} from '@serva/core';
 import {
   AddIcon,
   Alert,
@@ -528,6 +534,12 @@ export function SupplierForm({
             setConfirmed(true);
             return;
           }
+          // A phone that cannot be right is told here, before anything is sent
+          const wrong = contactPhoneSchema.safeParse(phone);
+          if (!wrong.success) {
+            s.setFields({ phone: wrong.error.issues[0]?.message ?? 'رقم الهاتف غير صحيح' });
+            return;
+          }
           void s.run(() => createSupplier({ name, phone })).then((r) => r && onSaved());
         }}
       >
@@ -555,7 +567,10 @@ export function SupplierForm({
           hint="اختياري"
           dir="ltr"
           value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={(e) => {
+            setPhone(e.target.value);
+            if (s.fields.phone) s.setFields({});
+          }}
           error={s.fields.phone}
         />
         <div className="flex flex-wrap items-center justify-end gap-3 pt-1">

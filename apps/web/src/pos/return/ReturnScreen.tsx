@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   REFUND_METHODS,
   type Approval,
@@ -175,6 +175,31 @@ export function ReturnScreen({
   const online = pos.online();
   const shown = sales.filter((s) => matchesInvoice(s, search, catalog.customers)).slice(0, 30);
 
+  // The store's newest invoices (other tills too), shown when the screen opens and nothing is typed
+  const [recent, setRecent] = useState<readonly InvoiceHit[]>([]);
+  useEffect(() => {
+    const token = pos.device.token;
+    if (!token || !pos.online()) return;
+    let alive = true;
+    void searchInvoices('', windowDays, token, pos.fetch).then((list) => alive && setRecent(list ?? []));
+    return () => {
+      alive = false;
+    };
+  }, [pos, windowDays, tick]);
+  const recentOther0 = recent.filter((h) => !sales.some((s) => s.number === h.number)).slice(0, 8);
+  const recentOther = search.trim() === '' ? recentOther0 : [];
+  const storeList: readonly InvoiceHit[] = remote.hits?.length ? remote.hits : recentOther;
+
+  // Nothing here matches what is typed: the whole store is searched by itself, no second tap
+  const typedNow = search.trim();
+  const searchStoreRef = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => {
+    if (typedNow.length < 2 || entries === null || shown.length > 0 || !pos.online()) return;
+    const timer = setTimeout(() => void searchStoreRef.current(), 450);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typedNow, entries, shown.length]);
+
   // The picked invoice as it is now (a return saved here a moment ago counts)
   const current = picked ? (sales.find((s) => s.id === picked.id) ?? picked) : null;
   const isExchange = exchange && current !== null;
@@ -299,6 +324,9 @@ export function ReturnScreen({
     choose(sale);
   }
 
+  // Never once an invoice is picked: it would start the pick over
+  searchStoreRef.current = () => (picked ? Promise.resolve() : findInStore());
+
   /** One of the store's matching invoices: the full invoice is fetched by its number, then chosen */
   async function pickHit(hit: InvoiceHit) {
     const token = pos.device.token;
@@ -422,42 +450,47 @@ export function ReturnScreen({
             </Button>
           ) : null}
           {remote.note ? <Alert tone="info">{remote.note}</Alert> : null}
-          {remote.hits && remote.hits.length > 0 ? (
-            <ul
-              aria-label="فواتير المحل"
-              className="-mx-1 flex max-h-[20rem] flex-col gap-1 overflow-y-auto px-1"
-            >
-              {remote.hits.map((h) => {
-                const at = Date.parse(h.deviceTime);
-                return (
-                  <li key={h.id}>
-                    <button
-                      type="button"
-                      disabled={remote.busy}
-                      onClick={() => void pickHit(h)}
-                      className="flex min-h-14 w-full items-center justify-between gap-3 rounded-control border border-transparent px-3 py-2 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
-                    >
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
-                          {h.number}
-                        </bdi>
-                        <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
-                          <span className="num">
-                            {dateText(at, digits)} ، {clockText(at, digits)}
+          {storeList.length > 0 ? (
+            <>
+              {!remote.hits?.length ? (
+                <p className="text-xs font-semibold text-ink-muted">آخر فواتير المحل (من أجهزة أخرى)</p>
+              ) : null}
+              <ul
+                aria-label="فواتير المحل"
+                className="-mx-1 flex max-h-[20rem] flex-col gap-1 overflow-y-auto px-1 pb-2"
+              >
+                {storeList.map((h) => {
+                  const at = Date.parse(h.deviceTime);
+                  return (
+                    <li key={h.id}>
+                      <button
+                        type="button"
+                        disabled={remote.busy}
+                        onClick={() => void pickHit(h)}
+                        className="flex min-h-14 w-full items-center justify-between gap-3 rounded-control border border-transparent px-3 py-2 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
+                            {h.number}
+                          </bdi>
+                          <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+                            <span className="num">
+                              {dateText(at, digits)} ، {clockText(at, digits)}
+                            </span>
+                            {h.customerName ? <bdi>{h.customerName}</bdi> : null}
                           </span>
-                          {h.customerName ? <bdi>{h.customerName}</bdi> : null}
                         </span>
-                      </span>
-                      <Money
-                        minor={h.totalMinor}
-                        currency={h.currency}
-                        className="shrink-0 font-bold text-ink"
-                      />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                        <Money
+                          minor={h.totalMinor}
+                          currency={h.currency}
+                          className="shrink-0 font-bold text-ink"
+                        />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           ) : null}
           {entries === null ? (
             <div aria-hidden="true" className="flex flex-col gap-2 py-1">
@@ -466,10 +499,14 @@ export function ReturnScreen({
               ))}
             </div>
           ) : null}
-          {entries && shown.length === 0 && !remote.note ? (
+          {entries &&
+          shown.length === 0 &&
+          !remote.note &&
+          !remote.busy &&
+          !(remote.hits && remote.hits.length > 0) ? (
             <p className="py-6 text-center text-sm text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
           ) : null}
-          <ul className="-mx-1 flex max-h-[28rem] flex-col gap-1 overflow-y-auto px-1 py-0.5">
+          <ul className="-mx-1 flex max-h-[28rem] flex-col gap-1 overflow-y-auto px-1 pb-2 pt-0.5">
             {shown.map((s) => {
               const at = Date.parse(s.deviceTime);
               const selected = current?.id === s.id;

@@ -63,6 +63,45 @@ describe('the search box finds purchase invoices', () => {
   });
 });
 
+describe('the search box finds online orders, rentals and cheques', () => {
+  it('lists each by its number under its own group', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: meWith(['customers.view']) },
+      'GET /v1/customers?q=11': { status: 200, body: { items: [] } },
+      'GET /v1/online-orders': {
+        status: 200,
+        body: { items: [{ id: 'o-1', number: 'ONL-1100', customerName: 'ريم', phone: '0999' }] },
+      },
+      'GET /v1/rentals?status=all': {
+        status: 200,
+        body: { items: [{ id: 'r-1', number: 'RNT-1101', item: 'كرسي', customerName: 'هدى' }] },
+      },
+      'GET /v1/cheques': {
+        status: 200,
+        body: {
+          items: [
+            {
+              sourceType: 'invoice',
+              sourceId: 'i-1',
+              paymentNo: 1,
+              documentNumber: 'INV-1',
+              reference: 'CH-1102',
+              customerName: 'سامر',
+            },
+          ],
+        },
+      },
+    });
+    const { user } = renderApp('/products');
+    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
+    await user.type(await screen.findByRole('textbox', { name: 'اسم الصفحة' }), '11');
+    expect(await screen.findByRole('button', { name: /ONL-1100/ })).toHaveTextContent('ريم');
+    expect(await screen.findByRole('button', { name: /RNT-1101/ })).toHaveTextContent('كرسي');
+    expect(await screen.findByRole('button', { name: /CH-1102/ })).toHaveTextContent('سامر');
+  });
+});
+
 describe('the trial banner', () => {
   it('can be hidden on this device', async () => {
     mockFetch({

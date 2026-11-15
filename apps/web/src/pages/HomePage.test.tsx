@@ -172,6 +172,51 @@ describe('HomePage', () => {
       ).toBeInTheDocument();
     });
 
+    it('names the returns, notes the vouchers in the payment mix, and counts recalled batches', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'purchases.manage']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: {
+          status: 200,
+          body: dayReport({
+            returns: { count: 1, totalMinor: 22_340, taxMinor: 0, byMethod: [] },
+            byMethod: [
+              { method: 'cash', currency: 'SYP', amountMinor: 50_000, baseAmountMinor: 50_000, count: 1 },
+              { method: 'voucher', currency: 'SYP', amountMinor: 13_900, baseAmountMinor: 13_900, count: 1 },
+            ],
+          }),
+        },
+        'GET /v1/inventory/expiry?days=30': {
+          status: 200,
+          body: {
+            today: TODAY,
+            items: [
+              {
+                variantId: 'v-1',
+                name: 'مضاد',
+                batchNo: 'B7',
+                expiryDate: '2027-05-05',
+                purchaseNumber: 'PUR-1',
+                receivedOn: '2026-10-01',
+                qty: 5000,
+                daysLeft: 150,
+                blocked: true,
+                blockReason: 'استدعاء',
+              },
+            ],
+          },
+        },
+      });
+      renderApp('/');
+
+      const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
+      expect(await within(sales).findByText(/المرتجعات/)).toBeInTheDocument();
+      expect(sales).not.toHaveTextContent('بعد مرتجع');
+      expect(await screen.findByText(/منها قسائم مستردّة/)).toBeInTheDocument();
+      const recalled = await screen.findByRole('link', { name: /دفعة موقوفة عن البيع/ });
+      expect(recalled).toHaveAttribute('href', '/recall');
+    });
+
     it('compares today with yesterday, shows the payment mix and the expiring batches', async () => {
       const days = [6, 5, 4, 3, 2].map((back) => `2026-10-${String(31 - back).padStart(2, '0')}`);
       const routes: Parameters<typeof mockFetch>[0] = {
@@ -281,7 +326,7 @@ describe('HomePage', () => {
       expect(within(sales).queryByRole('img')).not.toBeInTheDocument();
     });
 
-    it('names a short size once, with «ناقص» linking to the stock count', async () => {
+    it('names a negative piece once, in «يوشك على النفاد», with «ناقص» opening the count on it', async () => {
       const me = meWith([...OWNER_KEYS, 'catalog.manage']);
       const low = {
         variantId: 'v-1',
@@ -307,12 +352,16 @@ describe('HomePage', () => {
       });
       renderApp('/');
 
-      const row = await screen.findByRole('link', { name: /من قميص كتان/ });
-      expect(row).toHaveAttribute('href', '/inventory');
-      expect(row).toHaveTextContent('ناقص 11');
-      // It is not listed a second time under «يوشك على النفاد»
-      expect(screen.queryByText('يوشك على النفاد')).not.toBeInTheDocument();
+      const chip = await screen.findByRole('link', { name: 'اجرد قميص كتان' });
+      expect(chip).toHaveAttribute('href', '/inventory?count=v-1');
+      expect(chip).toHaveTextContent('ناقص 11');
+      // It is not named a second time under «ما ينتظرك»
       expect(screen.getAllByText('ناقص 11')).toHaveLength(1);
+      expect(screen.queryByText(/من قميص كتان/)).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'اجرد المخزون' })).toHaveAttribute(
+        'href',
+        '/inventory?count=v-1',
+      );
     });
 
     it('greets «أبو» and «أم» names whole', async () => {

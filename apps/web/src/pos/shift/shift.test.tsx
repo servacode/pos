@@ -114,6 +114,8 @@ describe('shift', () => {
     expect(await screen.findByRole('heading', { name: 'ملخّص الوردية' })).toBeInTheDocument();
     expect(screen.getByText('المتوقع والفرق يراهما المدير فقط.')).toBeInTheDocument();
     expect(screen.queryByText(/المتوقع/, { selector: 'span' })).not.toBeInTheDocument();
+    // The sellers show whenever a sale was made, even when the cashier sold it himself
+    expect(screen.getByLabelText('مرتجعات وقسائم')).toHaveTextContent('البائعون');
     await user.click(screen.getByRole('button', { name: 'أغلق الوردية' }));
     // A confirmation first, then the Z report, then the cashier leaves
     expect(screen.getByRole('alertdialog', { name: 'تأكيد إغلاق الوردية' })).toBeInTheDocument();
@@ -121,6 +123,7 @@ describe('shift', () => {
     await user.click(screen.getByRole('button', { name: 'نعم، أغلق الوردية' }));
     const z = await screen.findByLabelText('تقرير إغلاق الوردية');
     // The cashier has no «shift.view_difference»: the slip carries the count, not the expected cash
+    expect(z).toHaveTextContent('البائعون');
     expect(z).toHaveTextContent('المعدود');
     expect(z).not.toHaveTextContent('المتوقع');
     expect(z).not.toHaveTextContent('الفرق');

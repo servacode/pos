@@ -185,9 +185,13 @@ describe('«أسعار العقود»', () => {
       }),
       'GET /v1/contract-prices': () => ({ status: 200, body: { items: prices } }),
     });
-    renderApp('/contract-prices');
+    const { user } = renderApp('/contract-prices');
     expect(await screen.findByText('كرسي متحرك')).toBeInTheDocument();
     expect(screen.getByText(/نوع الزبون: مشفى/)).toBeInTheDocument();
+    // The list comes first; the form opens from «سعر جديد»
+    expect(screen.queryByRole('region', { name: 'سعر عقد' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سعر جديد' }));
+    expect(await screen.findByRole('region', { name: 'سعر عقد' })).toBeInTheDocument();
   });
 });
 

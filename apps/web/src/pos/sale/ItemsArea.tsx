@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useState, type RefObject } from 'react';
+import { memo, useEffect, useMemo, useState, type ReactNode, type RefObject } from 'react';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { batchState } from '@serva/core/pharmacy';
-import { businessDateOf } from '@serva/core/sale';
+import { convert } from '@serva/core/money';
+import { businessDateOf, rateFor } from '@serva/core/sale';
 import { toLatinDigits } from '@serva/core/text';
 import { dayText } from '../../lib/dates';
 import {
@@ -20,6 +21,7 @@ import {
   Money,
   ProductsIcon,
   RetryIcon,
+  ScissorsIcon,
   SearchIcon,
   TextField,
   useDigits,
@@ -29,7 +31,7 @@ import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogI
 import { Kbd } from './Kbd';
 import { gridEntries, lowestPrice, piecesText, type GridEntry } from './models';
 import { stockInPacks } from './packStock';
-import { expiryText, tileInfo } from './tileInfo';
+import { expiryText, sellableQty, tileInfo } from './tileInfo';
 import { pieceWord } from './packText';
 
 const PHOTOS_OFF_KEY = 'tillPhotosOff';
@@ -128,6 +130,11 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
     Date.now(),
     catalog.settings?.timezone ?? 'UTC',
     catalog.settings?.businessDayCutoff ?? '00:00',
+  );
+  // A dollar-priced tile says what it comes to in the till's currency
+  const fx = useMemo<TileFx | null>(
+    () => (catalog.settings ? { base: catalog.settings.baseCurrency, rates: catalog.rates } : null),
+    [catalog.settings, catalog.rates],
   );
 
   function onSearchKey(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -325,6 +332,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           pickingProduct={pickingProduct}
           today={today}
           photos={photos}
+          fx={fx}
           onPickItem={onPickItem}
           onPickModel={props.onPickModel}
         />
@@ -340,10 +348,12 @@ const Grid = memo(function Grid({
   pickingProduct,
   today,
   photos,
+  fx,
   onPickItem,
   onPickModel,
 }: {
   photos: boolean;
+  fx: TileFx | null;
   entries: readonly GridEntry[];
   inCart: ReadonlySet<string>;
   pickingProduct: string | null;
@@ -367,6 +377,7 @@ const Grid = memo(function Grid({
                 inCart={entry.pieces.some((p) => inCart.has(p.variantId))}
                 today={today}
                 photos={photos}
+                fx={fx}
                 onPick={onPickModel}
               />
             </li>
@@ -377,6 +388,7 @@ const Grid = memo(function Grid({
                 inCart={inCart.has(entry.item.variantId)}
                 today={today}
                 photos={photos}
+                fx={fx}
                 onPick={onPickItem}
               />
             </li>
@@ -392,19 +404,25 @@ const ItemTileMemo = memo(function ItemTileMemo({
   inCart,
   today,
   photos,
+  fx,
   onPick,
 }: {
   item: CatalogItem;
   inCart: boolean;
   today: string;
   photos: boolean;
+  fx: TileFx | null;
   onPick: ItemsAreaProps['onPickItem'];
 }) {
+  const note = fx ? dollarNote(item.price.priceMinor, item.price.currency, fx) : null;
   return (
     <ItemTile
       name={item.name}
       priceMinor={item.price.priceMinor}
       currency={item.price.currency}
+      {...(item.isService && item.price.priceMinor === 0 ? { priceLabel: 'السعر عند البيع' } : {})}
+      {...(note ? { priceNote: note } : {})}
+      placeholder={item.isService ? <ScissorsIcon size={24} /> : <ProductsIcon size={24} />}
       weighed={item.unit?.allowsFraction ?? false}
       {...(photos && item.imageUrl ? { imageUrl: item.imageUrl } : {})}
       pictureSlot={photos}
@@ -422,6 +440,7 @@ const ModelTile = memo(function ModelTile({
   inCart,
   today,
   photos,
+  fx,
   onPick,
 }: {
   entry: Extract<GridEntry, { kind: 'model' }>;
@@ -429,15 +448,19 @@ const ModelTile = memo(function ModelTile({
   inCart: boolean;
   today: string;
   photos: boolean;
+  fx: TileFx | null;
   onPick: (productId: string) => void;
 }) {
   const price = lowestPrice(entry.pieces);
+  const note = fx ? dollarNote(price.priceMinor, price.currency, fx) : null;
   return (
     <ItemTile
       name={entry.name}
       priceMinor={price.priceMinor}
       currency={price.currency}
       detail={piecesText(entry.pieces.length)}
+      {...(note ? { priceNote: note } : {})}
+      placeholder={<ProductsIcon size={24} />}
       pictureSlot={photos}
       initial={!photos}
       {...(photos && entry.lead.imageUrl ? { imageUrl: entry.lead.imageUrl } : {})}
@@ -448,6 +471,27 @@ const ModelTile = memo(function ModelTile({
     />
   );
 });
+
+/** What the till needs to say a foreign price in its own currency */
+interface TileFx {
+  base: CurrencyCode;
+  rates: Catalog['rates'];
+}
+
+/** «≈ 5,850 ل.س» under a price that is not in the till's currency; null when the rate is not known */
+function dollarNote(priceMinor: number, currency: CurrencyCode, fx: TileFx): ReactNode {
+  if (currency === fx.base || priceMinor === 0) return null;
+  try {
+    const minor = convert(priceMinor, currency, fx.base, rateFor(fx.rates, currency, fx.base));
+    return (
+      <span dir="rtl">
+        ≈ <Money minor={minor} currency={fx.base} className="font-semibold" />
+      </span>
+    );
+  } catch {
+    return null;
+  }
+}
 
 /** Under a tile's price: what is left, the nearest expiry (amber, then red) and «برقم تسلسلي» */
 function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: string }) {
@@ -523,9 +567,7 @@ export function PriceCheckCard({ check, today }: { check: PriceCheck; today?: st
           const why = expiredQty === 0 ? 'موقوفة' : expiredQty === unsellable ? 'منتهية' : 'منتهية أو موقوفة';
           const boxes = check.packs?.[piece.variantId] ?? [];
           // Never more than the stock itself says: the batch ledger can run a few pieces over it
-          const sellable = batched
-            ? batched.reduce((sum, b) => sum + (batchState(b, today!) === 'ok' ? b.qty : 0), 0)
-            : null;
+          const sellable = batched ? sellableQty(batched, today!) : null;
           const left =
             sellable === null
               ? (piece.stockQty ?? null)

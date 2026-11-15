@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
-import type { ExpiryResponse, ExpiryRow } from '@serva/core';
+import { COUNT_NOUNS, countNoun, type ExpiryResponse, type ExpiryRow } from '@serva/core';
 import {
   Alert,
   Badge,
@@ -55,7 +55,7 @@ const ACTION_TITLE: Record<Action['kind'], string> = {
  * «الصلاحية» (03 › الصيدليات): the batches the store holds, with what is really left of each in
  * each branch (the batch ledger). An expired batch stays here until it is written off. Each batch
  * can be written off (through the count), counted, sent back to its supplier, or blocked so no till
- * sells it; «سحب دفعة» finds a batch by its number and everyone who got it.
+ * sells it; «استدعاء دفعة» finds a batch by its number and everyone who got it.
  */
 export function ExpiryPage() {
   const digits = useDigits();
@@ -184,11 +184,17 @@ export function ExpiryPage() {
           {r.daysLeft === null ? (
             <Badge tone="neutral">بلا تاريخ</Badge>
           ) : r.daysLeft < 0 ? (
-            <Badge tone="danger">منتهٍ منذ {-r.daysLeft} يوماً</Badge>
+            <Badge tone="danger">
+              منتهٍ منذ {countNoun(-r.daysLeft, COUNT_NOUNS.day, String(-r.daysLeft), true)}
+            </Badge>
           ) : r.daysLeft <= 30 ? (
-            <Badge tone="warning">باقٍ {r.daysLeft} يوماً</Badge>
+            <Badge tone="warning">
+              باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}
+            </Badge>
           ) : (
-            <Badge tone="neutral">باقٍ {r.daysLeft} يوماً</Badge>
+            <Badge tone="neutral">
+              باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}
+            </Badge>
           )}
           {r.blocked ? <Badge tone="danger">موقوفة</Badge> : null}
         </span>
@@ -244,6 +250,15 @@ export function ExpiryPage() {
       header: 'إجراءات',
       cell: (r) => (
         <span className="flex items-center gap-1.5 whitespace-nowrap print:hidden">
+          {r.batchNo ? (
+            <Link
+              to={`/recall?batch=${encodeURIComponent(r.batchNo)}`}
+              aria-label={`استدعاء الدفعة ${r.batchNo} من «${r.name}»`}
+              className="inline-flex min-h-9 items-center rounded-control border border-danger px-3 text-sm font-semibold text-danger-ink transition-colors duration-120 ease-standard hover:bg-danger-soft"
+            >
+              استدعاء
+            </Link>
+          ) : null}
           <Button size="sm" variant="secondary" onClick={() => open('writeoff', r)}>
             أتلف الدفعة
           </Button>
@@ -283,7 +298,7 @@ export function ExpiryPage() {
               to="/recall"
               className="inline-flex min-h-11 items-center rounded-control border border-line px-4 text-sm font-semibold text-ink hover:bg-surface-muted"
             >
-              سحب دفعة
+              استدعاء دفعة
             </Link>
           }
         />
@@ -316,7 +331,7 @@ export function ExpiryPage() {
               value={urgency}
               onValueChange={setUrgency}
               options={[
-                { value: 'all', label: 'الكل' },
+                { value: 'all', label: 'كل الدفعات' },
                 { value: 'expired', label: <UrgencyLabel text="منتهية" n={data ? expired.length : null} /> },
                 { value: 'week', label: <UrgencyLabel text="هذا الأسبوع" n={data ? week.length : null} /> },
                 { value: 'month', label: <UrgencyLabel text="هذا الشهر" n={data ? month.length : null} /> },
@@ -350,7 +365,7 @@ export function ExpiryPage() {
                 <EmptyState
                   icon={CalendarIcon}
                   title="لا دفعات في هذه المجموعة."
-                  description="اختر «الكل» لترى الباقي."
+                  description="اختر «كل الدفعات» لترى الباقي."
                 />
               ) : (
                 <EmptyState

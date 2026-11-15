@@ -139,8 +139,7 @@ export function ZReport({
           ))}
         </Section>
       ) : null}
-      {activity.bySeller.length > 1 ||
-      activity.bySeller.some((r) => sellerNames?.get(r.sellerId) !== shift.openedByName) ? (
+      {activity.bySeller.length > 0 ? (
         <Section title="البائعون">
           {activity.bySeller.map((r) => (
             <Line

@@ -128,11 +128,11 @@ function methodColumns(base: CurrencyCode): DataColumn<MethodRow>[] {
   ];
 }
 
-function cashierColumns(base: CurrencyCode): DataColumn<CashierRow>[] {
+function cashierColumns(base: CurrencyCode, header = 'الكاشير'): DataColumn<CashierRow>[] {
   return [
     {
       key: 'name',
-      header: 'الكاشير',
+      header,
       cell: (row) => <span className="font-semibold">{row.fullName}</span>,
       total: 'المجموع',
     },
@@ -230,7 +230,15 @@ function DayReportBody({ report }: { report: DayReport }) {
         <Section title="حسب البائع">
           <DataTable
             caption="المبيعات حسب البائع"
-            columns={cashierColumns(base)}
+            columns={withTotals(cashierColumns(base, 'البائع'), {
+              count: (report.bySalesperson ?? []).reduce((sum, row) => sum + row.invoiceCount, 0),
+              total: (
+                <Money
+                  minor={(report.bySalesperson ?? []).reduce((sum, row) => sum + row.totalMinor, 0)}
+                  currency={base}
+                />
+              ),
+            })}
             rows={report.bySalesperson}
             rowKey={(row) => row.userId}
           />

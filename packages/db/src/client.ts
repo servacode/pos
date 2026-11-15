@@ -35,7 +35,9 @@ export function createDb(
   const client = postgres(url, {
     max: options.max ?? 10,
     onnotice: () => {},
-    connection: { application_name: options.applicationName ?? 'serva-api', ...timeouts },
+    // jit off: the planner's JIT compile costs 0.4-1.2 s on the first run of a heavier read (the customers list)
+    // and buys nothing on a store's few thousand rows.
+    connection: { application_name: options.applicationName ?? 'serva-api', jit: 'off', ...timeouts },
   });
   return { db: drizzle(client, { schema }), client };
 }

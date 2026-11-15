@@ -152,7 +152,7 @@ export interface SaleScreenProps {
   /** The held carts, for the list to pick from */
   heldList?: readonly Cart[];
   /** Puts the cart aside under an optional name */
-  onHold: (name?: string) => void;
+  onHold: (name?: string, sellerId?: string) => void;
   /** Brings a held cart back (the last one when none is named) */
   onResume: (index?: number) => void;
   onDiscardHeld?: (index: number) => void;
@@ -349,10 +349,20 @@ export function SaleScreen(props: SaleScreenProps) {
   }, [pos.local, staff, session.userId]);
   // The sale put on hold keeps its seller with it: the new empty cart starts with the cashier again
   const holdSale = (name?: string) => {
+    const heldSeller = seller !== session.userId ? seller : undefined;
     setSeller(session.userId);
     void pos.local.remove(SELLER_KEY);
-    props.onHold(name);
+    props.onHold(name, heldSeller);
   };
+  // A held cart brought back restores the seller it was held with
+  const cartSeller = cart.sellerId;
+  useEffect(() => {
+    if (!cartSeller) return;
+    if (!staff.some((m) => m.id === cartSeller)) return;
+    setSeller(cartSeller);
+    void pos.local.set(SELLER_KEY, { by: session.userId, id: cartSeller });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartSeller]);
   // Online orders this till sold, until the next pull says they are done
   const [soldOnline, setSoldOnline] = useState<string[]>([]);
   useEffect(() => {
@@ -417,6 +427,7 @@ export function SaleScreen(props: SaleScreenProps) {
     (item: CatalogItem, hit?: BarcodeHit | null, weighedQty?: number, choice?: ItemChoice) => {
       if (
         item.price.priceMinor === 0 &&
+        !item.isService &&
         !zeroOk.current &&
         !cartRef.current.lines.some((l) => l.variantId === item.variantId)
       ) {
@@ -502,6 +513,10 @@ export function SaleScreen(props: SaleScreenProps) {
       if (item.tracksSerial && added !== null) {
         setSelected(added);
         setMode({ kind: 'serial', lineNo: added });
+      } else if (item.isService && item.price.priceMinor === 0 && added !== null) {
+        // A service with no fixed fee: the fee is asked for at once
+        setSelected(added);
+        setMode({ kind: 'line', lineNo: added, adjust: 'price' });
       } else if (item.unit?.allowsFraction && added !== null && weighedQty === undefined) {
         setSelected(added);
         setMode({ kind: 'line', lineNo: added, adjust: 'qty' });
@@ -986,6 +1001,8 @@ export function SaleScreen(props: SaleScreenProps) {
                 onChange={(e) => {
                   setSeller(e.target.value);
                   void pos.local.set(SELLER_KEY, { by: session.userId, id: e.target.value });
+                  const picked = e.target.value;
+                  if (cart.lines.length > 0) setCart((c) => ({ ...c, sellerId: picked }));
                 }}
                 className="w-36"
               >
@@ -1060,12 +1077,11 @@ export function SaleScreen(props: SaleScreenProps) {
               <button
                 type="button"
                 aria-label="افتح الفواتير المعلّقة"
+                title="الفواتير المعلّقة: اضغط لفتح القائمة"
                 onClick={() => setMode({ kind: 'heldList' })}
                 className="min-h-11 rounded-full transition-opacity duration-120 ease-standard hover:opacity-80"
               >
-                <Badge tone="warning">
-                  {props.heldCount === 1 ? 'فاتورة معلّقة' : `${props.heldCount} فواتير معلّقة`}
-                </Badge>
+                <Badge tone="warning">{`${props.heldCount} معلّقة`}</Badge>
               </button>
             ) : null}
           </div>
@@ -1671,7 +1687,10 @@ export function SaleScreen(props: SaleScreenProps) {
                     ? 'الوزن'
                     : 'الكمية'
                   : effectiveMode.adjust === 'price'
-                    ? 'سعر جديد في السلة'
+                    ? catalog.byVariant.get(line.variantId)?.isService &&
+                      catalog.byVariant.get(line.variantId)?.price.priceMinor === 0
+                      ? 'حدّد الأجرة'
+                      : 'سعر جديد في السلة'
                     : 'خصم على السطر'
               }
               subtitle={line.name}

@@ -186,7 +186,7 @@ describe('typed amounts', () => {
     await user.type(within(grid).getByLabelText('كمية M · أبيض'), '6');
     await user.type(within(grid).getByLabelText('كمية L · أبيض'), '4');
     await user.type(within(grid).getByLabelText('كلفة القطعة الواحدة'), '12500');
-    await user.click(within(grid).getByRole('button', { name: 'أضف 10 قطعة' }));
+    await user.click(within(grid).getByRole('button', { name: 'أضف 10 قطع' }));
     expect(screen.getByLabelText('كمية قميص كتان M · أبيض')).toHaveValue('6');
     expect(screen.getByLabelText('كلفة قميص كتان L · أبيض')).toHaveValue('50,000');
     await user.click(screen.getByRole('button', { name: 'سجّل الفاتورة' }));
@@ -303,6 +303,16 @@ describe('payments and duplicate suppliers', () => {
     });
     return { ...mock, ...renderApp('/purchases') };
   }
+
+  it('tells a supplier phone that cannot be right before sending, and sends nothing', async () => {
+    const { user, requestsTo } = openWithSupplier();
+    await user.click(await screen.findByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'شركة جديدة');
+    await user.type(screen.getByLabelText('الجوال'), 'abc');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/رقم الهاتف غير صحيح/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/suppliers')).toHaveLength(0);
+  });
 
   it('asks to confirm a payment above what is owed and sends it as an advance', async () => {
     const { user, requestsTo } = openWithSupplier();

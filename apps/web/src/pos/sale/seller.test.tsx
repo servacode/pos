@@ -46,4 +46,14 @@ describe('the seller', () => {
     await screen.findByRole('button', { name: 'افتح الفواتير المعلّقة' });
     expect((screen.getByLabelText('البائع') as HTMLSelectElement).value).toBe(ids.samer);
   });
+
+  it('comes back with the held cart: the seller held with is restored on recall', async () => {
+    const { user } = await saleScreen();
+    await user.selectOptions(screen.getByLabelText('البائع'), ids.maryam);
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    await user.keyboard('{F4}');
+    await screen.findByRole('button', { name: 'افتح الفواتير المعلّقة' });
+    await user.click(screen.getByRole('button', { name: 'استرجع المعلّقة' }));
+    expect((screen.getByLabelText('البائع') as HTMLSelectElement).value).toBe(ids.maryam);
+  });
 });

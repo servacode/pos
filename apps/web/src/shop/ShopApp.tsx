@@ -47,8 +47,9 @@ import {
 } from '@serva/ui';
 import { ApiError, apiFetch, errorMessage } from '../lib/api';
 import { counted } from '../pos/format';
+import { placeholderIconFor } from '../lib/productPlaceholder';
 import { isColourOption, swatchOf } from '../pos/sale/swatch';
-import { canChoose, canPick, cartCount, cartTotal, MAX_QTY, useShopCart, variantFor } from './cart';
+import { canChoose, canPick, capOf, cartCount, cartTotal, useShopCart, variantFor } from './cart';
 import { openWhatsApp, withTrackingLink } from './open';
 import { getOnce } from './getOnce';
 import { CatalogueFilters } from './CatalogueFilters';
@@ -229,18 +230,23 @@ function PriceOnRequest({ className }: { className?: string }) {
   return <span className={cn('font-semibold text-ink-muted', className)}>السعر عند الطلب</span>;
 }
 
-function NoPicture({ name, large = false }: { name: string; large?: boolean }) {
-  // The piece's own first letter on a soft tint reads as a deliberate tile, not a missing image
-  const letter = Array.from(name.trim())[0] ?? '';
+function NoPicture({
+  name,
+  categoryName = null,
+  large = false,
+}: {
+  name: string;
+  categoryName?: string | null;
+  large?: boolean;
+}) {
+  // The icon of its kind on a soft tint reads as a deliberate tile, not a missing image
+  const Kind = placeholderIconFor({ categoryName, name });
   return (
     <span
       aria-hidden="true"
-      className={cn(
-        'grid size-full place-items-center bg-linear-to-br from-brand-soft to-surface-muted font-bold text-brand-ink/70 select-none',
-        large ? 'text-7xl' : 'text-5xl',
-      )}
+      className="grid size-full place-items-center bg-linear-to-br from-brand-soft to-surface-muted text-brand-ink/60 select-none"
     >
-      {letter}
+      <Kind size={large ? 48 : 32} />
     </span>
   );
 }
@@ -384,7 +390,10 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                       )}
                     />
                   ) : (
-                    <NoPicture name={p.name} />
+                    <NoPicture
+                      name={p.name}
+                      categoryName={home.categories.find((c) => c.id === p.categoryId)?.name ?? null}
+                    />
                   )}
                   {p.offer ? (
                     <OfferTag className="absolute start-2 top-2 max-w-[calc(100%-1rem)] shadow-e1">
@@ -489,6 +498,10 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
     );
   }
   const variant = variantFor(product, chosen);
+  // The shelf's count caps the quantity: the cart never holds more than is there
+  const stockCap = variant?.maxQty ?? null;
+  const cap = variant ? capOf(variant) : 50;
+  const shownQty = Math.max(1, Math.min(qty, cap));
   // The picture of a chosen colour first
   const images = product.images;
   const matching = images.findIndex((i) => i.optionValue && Object.values(chosen).includes(i.optionValue));
@@ -517,7 +530,11 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
             {main ? (
               <img src={main.url} alt={product.name} className="size-full object-contain" />
             ) : (
-              <NoPicture name={product.name} large />
+              <NoPicture
+                name={product.name}
+                categoryName={home.categories.find((c) => c.id === product.categoryId)?.name ?? null}
+                large
+              />
             )}
           </div>
           {images.length > 1 ? (
@@ -641,6 +658,11 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
               </span>
             </p>
           ) : null}
+          {variant && variant.available && stockCap !== null && stockCap > 3 && stockCap < 50 ? (
+            <p className="text-sm text-ink-muted">
+              المتوفر <span className="num">{stockCap}</span>
+            </p>
+          ) : null}
           {variant && !variant.available ? (
             <p className="flex items-center gap-2 text-sm font-semibold text-danger-ink">
               <AlertCircleIcon size={16} />
@@ -678,17 +700,17 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                 size="lg"
                 label="أنقص"
                 icon={<RemoveIcon />}
-                disabled={qty <= 1}
-                onClick={() => setQty((q) => q - 1)}
+                disabled={shownQty <= 1}
+                onClick={() => setQty(shownQty - 1)}
               />
-              <output className="num min-w-9 text-center text-lg font-bold">{qty}</output>
+              <output className="num min-w-9 text-center text-lg font-bold">{shownQty}</output>
               <IconButton
                 variant="secondary"
                 size="lg"
                 label="زد"
                 icon={<AddIcon />}
-                disabled={qty >= MAX_QTY}
-                onClick={() => setQty((q) => q + 1)}
+                disabled={shownQty >= cap}
+                onClick={() => setQty(shownQty + 1)}
               />
             </div>
             <Button
@@ -705,7 +727,8 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                   label: variant.label,
                   imageUrl: product.images[0]?.thumbUrl ?? null,
                   priceMinor: variant.priceMinor ?? 0,
-                  qty,
+                  qty: shownQty,
+                  maxQty: variant.maxQty ?? null,
                 });
                 setAdded(true);
               }}
@@ -940,6 +963,14 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate font-semibold">{line.name}</span>
                   {line.label ? <span className="text-sm text-ink-muted">{line.label}</span> : null}
+                  {typeof line.maxQty === 'number' &&
+                  line.maxQty > 0 &&
+                  line.qty >= capOf(line) &&
+                  line.maxQty < 50 ? (
+                    <span className="text-xs font-semibold text-warning-ink">
+                      المتوفر <span className="num">{line.maxQty}</span> فقط
+                    </span>
+                  ) : null}
                 </span>
                 <span className="flex items-center justify-between gap-3">
                   {showPrices ? (
@@ -969,7 +1000,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
                       variant="secondary"
                       label="زد"
                       icon={<AddIcon size={16} />}
-                      disabled={line.qty >= MAX_QTY}
+                      disabled={line.qty >= capOf(line)}
                       onClick={() => cart.setQty(line.variantId, line.qty + 1)}
                     />
                   </span>

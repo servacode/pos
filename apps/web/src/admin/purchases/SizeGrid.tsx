@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { catalogOptionsOf, type CatalogOptions, type ProductDetail, type SizeRun } from '@serva/core';
+import {
+  catalogOptionsOf,
+  COUNT_NOUNS,
+  countNoun,
+  type CatalogOptions,
+  type ProductDetail,
+  type SizeRun,
+} from '@serva/core';
 import { AddIcon, Alert, Button, GridIcon, IconChip, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { errorMessage } from '../../lib/api';
@@ -354,7 +361,7 @@ export function SizeGrid({
             )
           }
         >
-          أضف {totalPieces} قطعة
+          أضف {countNoun(totalPieces, COUNT_NOUNS.piece, String(totalPieces), true)}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
           إلغاء

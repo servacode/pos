@@ -54,7 +54,7 @@ const found = (blocked: boolean): RecallResponse => ({
   ],
 });
 
-describe('«سحب دفعة»', () => {
+describe('«استدعاء دفعة»', () => {
   it('finds a batch by its number: its product, supplier, what is left and who bought it', async () => {
     let blocked = false;
     const { requestsTo } = mockFetch({
@@ -204,5 +204,24 @@ describe('«سحب دفعة»', () => {
     await user.clear(field);
     await user.type(field, 'ERR{Enter}');
     expect(await within(document.body).findByText('تعذّر البحث.')).toBeInTheDocument();
+  });
+});
+
+describe('«استدعاء» from a batch row', () => {
+  it('opens with the batch number searched by itself, and calls an expired batch «منتهية»', async () => {
+    const expired = found(false);
+    expired.batches[0]!.expiryDate = '2020-01-01';
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: expired }),
+    });
+    renderApp('/recall?batch=C-09');
+    const batch = await screen.findByRole('table', { name: 'الدفعة وأصلها' });
+    expect(within(batch).getByText('منتهية')).toBeInTheDocument();
+    expect(within(batch).queryByText('تُباع')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'استدعاء دفعة (سحب من السوق)', level: 1 }),
+    ).toBeInTheDocument();
   });
 });

@@ -43,6 +43,17 @@ afterEach(() => {
 });
 
 describe('«مبيعات اليوم»', () => {
+  it('heads the sellers table «البائع» with a real total row', async () => {
+    openDay({
+      status: 200,
+      body: dayReport({
+        bySalesperson: [{ userId: 'u-9', fullName: 'مهنّد', invoiceCount: 3, totalMinor: 1_284_500 }],
+      }),
+    });
+    const sellers = within(await screen.findByRole('region', { name: 'حسب البائع' })).getAllByRole('row');
+    expect(sellers.map(text)).toEqual(['البائعالفواتيرالمبيعات', 'مهنّد312,845 ل.س', 'المجموع312,845 ل.س']);
+  });
+
   it("shows today's totals for every branch, by payment method and by cashier", async () => {
     const { requestsTo } = openDay();
 

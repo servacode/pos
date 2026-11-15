@@ -135,9 +135,9 @@ const HERO_UNIT =
   '[&_[data-money-unit]]:text-base [&_[data-money-unit]]:font-semibold [&_[data-money-unit]]:text-ink-subtle';
 
 /**
- * The row of figure tiles at the top of a page: two to a row on a phone (a last odd tile takes the
- * whole row), three or four across from 640 px. One pattern for every page, so no page stacks its
- * tiles in a tall column or scrolls them sideways.
+ * The row of figure tiles at the top of a page: on a phone one compact strip of small tiles that
+ * scrolls sideways and snaps (the same as the home page's), three or four across from 640 px. One
+ * pattern for every page, so no page stacks its tiles in a tall column or in a 2 + 1 grid.
  */
 export function KpiStrip({
   columns = 3,
@@ -154,7 +154,7 @@ export function KpiStrip({
     <div
       {...rest}
       className={cn(
-        'grid grid-cols-2 gap-3 sm:gap-4 [&>:last-child:nth-child(odd)]:max-sm:col-span-2',
+        'scrollbar-none flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 max-sm:*:min-w-44 max-sm:*:shrink-0 max-sm:*:snap-start sm:grid sm:gap-4 sm:overflow-visible sm:pb-0',
         columns === 2 ? 'sm:grid-cols-2' : columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4',
         className,
       )}

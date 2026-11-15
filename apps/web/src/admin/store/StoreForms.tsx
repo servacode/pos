@@ -9,6 +9,8 @@ import {
   type StoreResponse,
 } from '@serva/core';
 import {
+  Alert,
+  Badge,
   BakeryIcon,
   BuildingMaterialsIcon,
   Button,
@@ -17,6 +19,7 @@ import {
   cn,
   FieldError,
   FieldGroup,
+  LockIcon,
   MedicalSuppliesIcon,
   PharmacyIcon,
   PhoneIcon,
@@ -244,6 +247,8 @@ export function ProfileForm({
   secondaryAction?: ReactNode;
 }) {
   const [saved, setSaved] = useState(false);
+  // On the settings page the business types sit behind a lock: they change which screens the store sees
+  const [unlocked, setUnlocked] = useState(false);
   const form = useForm<ProfileValues, StoreProfileInput>({
     initialValues: () => profileValues(store),
     fieldOrder: ['name', 'sectors', 'legalName', 'taxNumber', 'address', 'phone', 'receiptFooter'],
@@ -281,12 +286,40 @@ export function ProfileForm({
             onChange={(e) => setValue('name', e.target.value)}
             error={errors.name}
           />
-          {showSectors ? (
-            <SectorPicker
-              value={values.sectors}
-              onChange={(next) => setValue('sectors', next)}
-              error={errors.sectors}
-            />
+          {showSectors && section && !unlocked ? (
+            <div className="flex flex-col gap-3 rounded-control border border-line bg-surface-muted/60 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <LockIcon size={16} />
+                نشاط المحل
+              </p>
+              <ul className="flex flex-wrap gap-2" aria-label="نشاط المحل">
+                {SECTORS.filter((x) => values.sectors.includes(x.key)).map((x) => (
+                  <li key={x.key}>
+                    <Badge tone="brand">{x.labelAr}</Badge>
+                  </li>
+                ))}
+              </ul>
+              <div>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setUnlocked(true)}>
+                  غيّر النشاط
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {showSectors && (unlocked || !section) ? (
+            <>
+              {section ? (
+                <Alert tone="warning">
+                  تغيير النشاط يغيّر الشاشات والأقسام التي تراها في متجرك. غيّره فقط إن تغيّر عملك، ولا تُحذف
+                  بياناتك.
+                </Alert>
+              ) : null}
+              <SectorPicker
+                value={values.sectors}
+                onChange={(next) => setValue('sectors', next)}
+                error={errors.sectors}
+              />
+            </>
           ) : null}
           <div className="grid gap-5 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
             <TextField

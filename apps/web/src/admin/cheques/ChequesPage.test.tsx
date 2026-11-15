@@ -5,7 +5,7 @@ import { mockFetch, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
-import { addDays, dueSoon } from './ChequesPage';
+import { addDays, chequeParts, dueSoon } from './ChequesPage';
 
 const todayText = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Damascus' }).format(new Date());
 
@@ -115,7 +115,7 @@ describe('the cheques table on narrow screens', () => {
     const head = (name: string) => within(table).getByRole('columnheader', { name, hidden: true });
     expect(head('المبلغ').className).not.toContain('hidden');
     expect(head('إجراءات').className).not.toContain('hidden');
-    expect(head('البنك').className).toContain('2xl:table-cell');
+    expect(head('البنك').className).toContain('sm:table-cell');
     expect(head('التاريخ').className).toContain('2xl:table-cell');
     expect(head('الزبون').className).toContain('hidden sm:table-cell');
     expect(table.parentElement!.parentElement!.innerHTML).not.toContain('min-w-44');
@@ -173,9 +173,13 @@ describe('cheques by due date', () => {
     await user.click(screen.getByRole('radio', { name: 'تاريخ الاستحقاق' }));
     expect(refs()[0]).toBe('NEAR-1');
     const outRow = within(table).getByText('OUT-1').closest('tr') as HTMLElement;
-    expect(within(outRow).getByText('مورد المواد')).toBeInTheDocument();
+    expect(within(outRow).getAllByText('مورد المواد').length).toBeGreaterThan(0);
     // a name wraps to two lines at most instead of widening the table past its box
-    expect(within(outRow).getByText('مورد المواد')).toHaveClass('line-clamp-2');
+    expect(
+      within(outRow)
+        .getAllByText('مورد المواد')
+        .some((e) => e.classList.contains('line-clamp-2')),
+    ).toBe(true);
     expect(within(outRow).getAllByText('بنك الشرق').length).toBeGreaterThan(0);
     expect(within(outRow).queryByRole('button', { name: 'حُصّل' })).not.toBeInTheDocument();
   });
@@ -253,5 +257,28 @@ describe('cheque reminders', () => {
     await waitFor(() => expect(customers).toHaveTextContent('2'));
     expect(suppliers).toHaveTextContent('1');
     expect(screen.queryByText('عدد الشيكات')).not.toBeInTheDocument();
+  });
+});
+
+describe('a cheque typed as one line', () => {
+  it('shows its number, bank and due day once each, apart', () => {
+    expect(chequeParts({ reference: 'بنك سورية · CH-8001 · 2026-11-20', bank: null, dueDate: null })).toEqual(
+      {
+        number: 'CH-8001',
+        bank: 'بنك سورية',
+        due: '2026-11-20',
+      },
+    );
+    // The structured fields win, and a number is not taken for the bank
+    expect(chequeParts({ reference: 'CH-1', bank: 'بنك الشرق', dueDate: '2026-12-01' })).toEqual({
+      number: 'CH-1',
+      bank: 'بنك الشرق',
+      due: '2026-12-01',
+    });
+    expect(chequeParts({ reference: null, bank: null, dueDate: null })).toEqual({
+      number: null,
+      bank: null,
+      due: null,
+    });
   });
 });

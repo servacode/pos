@@ -14,7 +14,9 @@ import {
   TextField,
   TruckIcon,
 } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { apiFetch, errorMessage } from '../../lib/api';
+import { zonedDateTime } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
 
 /**
@@ -33,8 +35,9 @@ const setDelivery = (order: OnlineOrder, body: { stage: 'out'; courier: string }
 
 const getCod = () => apiFetch<CodSummary>('/v1/online-orders/cod', { auth: true });
 
-/** When the order's stage was set, short: «2026-11-13 14:30» of the browser's clock */
-const stamp = (iso: string | null | undefined) => (iso ? iso.slice(0, 16).replace('T', ' ') : '');
+/** When the order's stage was set, in words and the store's time zone: «13 تشرين الثاني 2026، 2:30 م» */
+const stamp = (iso: string | null | undefined, timeZone: string, digits: 'latn' | 'arab') =>
+  iso ? zonedDateTime(iso, timeZone, digits) : '';
 
 /** What the courier takes from the customer: the pieces and his own fee */
 export const collectOf = (o: Pick<OnlineOrder, 'totalMinor' | 'deliveryFeeMinor'>) =>
@@ -138,6 +141,9 @@ export function DeliveryActions({
   }
 
   const stage = order.deliveryStage ?? null;
+  const me = useMe();
+  const tz = me.tenant.timezone;
+  const digits = me.settings.numberFormat;
   return (
     <div
       role="group"
@@ -170,7 +176,7 @@ export function DeliveryActions({
             <p className="min-w-0 flex-1 text-sm text-ink">
               <Badge tone="info">خرج للتوصيل</Badge> مع{' '}
               <span className="font-semibold">{order.courierName}</span>
-              <span className="num text-ink-muted"> · {stamp(order.outAt)}</span>
+              <span className="num text-ink-muted"> · {stamp(order.outAt, tz, digits)}</span>
             </p>
             <Button
               size="sm"
@@ -185,7 +191,7 @@ export function DeliveryActions({
           <p className="min-w-0 flex-1 text-sm text-ink">
             <Badge tone="success">سُلّم</Badge>
             {order.courierName ? ` بيد ${order.courierName}` : ''}
-            <span className="num text-ink-muted"> · {stamp(order.deliveredAt)}</span>
+            <span className="num text-ink-muted"> · {stamp(order.deliveredAt, tz, digits)}</span>
           </p>
         )}
         <Button size="sm" variant="secondary" icon={<PrintIcon size={16} />} onClick={() => slip.print('A4')}>

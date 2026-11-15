@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import {
+  COUNT_NOUNS,
   IMPORT_TYPES,
   IMPORT_TYPE_LABELS,
+  countNoun,
   emptyImportTotals,
   type ImportRowResult,
   type ImportTotals,
@@ -298,7 +300,7 @@ function Import() {
         <PageHeader
           icon={<PackageOpenIcon />}
           title="استيراد البيانات"
-          description="انقل المنتجات والزبائن والموردين من ملف إكسل أو CSV. يُفحص الملف كله قبل أن يتغيّر شيء."
+          description="انقل المنتجات والزبائن والموردين من ملف إكسل أو ملف نصي مفصول بفواصل. يُفحص الملف كله قبل أن يتغيّر شيء."
         />
         <ol className="flex flex-wrap gap-2" aria-label="خطوات الاستيراد">
           {STEPS.map((s) => (
@@ -341,7 +343,7 @@ function Import() {
                 ))}
             </ul>
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-control/60 px-6 py-10 text-center hover:bg-surface-muted">
-              <span className="font-semibold text-ink">اختر ملف إكسل (xlsx) أو CSV</span>
+              <span className="font-semibold text-ink">اختر ملف إكسل أو ملفاً نصياً مفصولاً بفواصل</span>
               <span className="text-sm text-ink-muted">حتى 15 ميغابايت و20 ألف صف</span>
               <input
                 type="file"
@@ -617,8 +619,14 @@ function Import() {
                 {phase === 'checked' ? (
                   <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 ps-5 shadow-e3">
                     <p className="text-sm text-ink-muted">
-                      سيُضاف <bdi className="num font-semibold text-ink">{totals.create}</bdi> ويُحدَّث{' '}
-                      <bdi className="num font-semibold text-ink">{totals.update}</bdi>
+                      سيُضاف{' '}
+                      <bdi className="num font-semibold text-ink">
+                        {countNoun(totals.create, COUNT_NOUNS.row)}
+                      </bdi>{' '}
+                      ويُحدَّث{' '}
+                      <bdi className="num font-semibold text-ink">
+                        {countNoun(totals.update, COUNT_NOUNS.row)}
+                      </bdi>
                     </p>
                     <Button
                       disabled={totals.create + totals.update === 0}

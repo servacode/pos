@@ -32,7 +32,9 @@ type Slow = MerchandiseReport['slowMovers'][number];
 type Piece = MerchandiseReport['models'][number]['pieces'][number];
 
 const PERIODS = { '30': 'آخر 30 يوماً', '90': 'آخر 3 أشهر', '365': 'آخر سنة' } as const;
-const IDLE = { '30': 'شهر', '60': 'شهرين', '90': '3 أشهر' } as const;
+/** How long without a sale or a delivery makes a piece «راكد», for each period: one picker decides both */
+const IDLE_FOR = { '30': '60', '90': '90', '365': '90' } as const;
+const IDLE_TEXT = { '60': 'شهرين', '90': '3 أشهر' } as const;
 
 /** YYYY-MM-DD of `days` days before today, in the browser's calendar */
 export function daysAgo(days: number, from: Date = new Date()): string {
@@ -135,7 +137,7 @@ export function MerchandisePage() {
       .then((r) => setDepartments(r.items.filter((c) => c.parentId === null && !c.archivedAt)))
       .catch(() => setDepartments([]));
   }, []);
-  const [idle, setIdle] = useState<keyof typeof IDLE>('60');
+  const idle = IDLE_FOR[period];
   const [data, setData] = useState<MerchandiseReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -285,15 +287,7 @@ export function MerchandisePage() {
               ))}
             </Select>
           ) : null}
-          <SegmentedControl
-            label="راكد إن لم يُبع ولم يصل منذ"
-            value={idle}
-            onValueChange={setIdle}
-            options={(Object.keys(IDLE) as (keyof typeof IDLE)[]).map((value) => ({
-              value,
-              label: IDLE[value],
-            }))}
-          />
+          <p className="text-sm text-ink-muted">راكد: لم يُبع ولم يصل منذ {IDLE_TEXT[idle]}.</p>
         </Card>
         <div className="grid gap-4 sm:grid-cols-2">
           <StatTile
@@ -315,7 +309,7 @@ export function MerchandisePage() {
           </Button>
         </div>
 
-        {data && data.byDepartment.length > 0 ? (
+        {data && data.byDepartment.length > 0 && (departments.length > 0 || department) ? (
           <Fold title="المبيعات حسب القسم" open={isOpen('dept')} onToggle={() => toggle('dept')}>
             {data.byDepartment.length > 1 ? (
               <Card className="flex flex-col gap-3">
