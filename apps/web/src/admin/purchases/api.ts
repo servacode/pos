@@ -59,8 +59,10 @@ export function moneyOf(text: string): number | null {
 }
 
 /** `GET /v1/inventory/expiry?days=` (purchases.manage): batches on the shelf ending within `days` */
-export const listExpiry = (days: number) =>
-  apiFetch<ExpiryResponse>(`/v1/inventory/expiry?days=${days}`, { auth: true });
+export const listExpiry = (days: number, unbatched = false) =>
+  apiFetch<ExpiryResponse>(`/v1/inventory/expiry?days=${days}${unbatched ? '&unbatched=1' : ''}`, {
+    auth: true,
+  });
 
 /** `GET /v1/serials?q=` (catalog.manage): a piece by its serial number or IMEI */
 export const findSerials = (q: string) =>

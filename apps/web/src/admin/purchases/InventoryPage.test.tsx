@@ -277,7 +277,9 @@ describe('stock numbers that explain themselves', () => {
     await user.click(await screen.findByRole('radio', { name: 'شبكة الخيارات' }));
     const grid = within(await screen.findByRole('region', { name: 'شبكة قميص' }));
     expect(grid.getByText('المتاح 5')).toBeInTheDocument();
-    expect(grid.getByText('ناقص')).toBeInTheDocument();
+    expect(grid.getByText('ناقص قطعتان')).toBeInTheDocument();
+    // the cell below zero reads «سالب 2», not «-2»
+    expect(grid.getByText(/سالب/)).toHaveTextContent('سالب 2');
     await user.click(grid.getByRole('button', { name: 'صحّح بالجرد' }));
     expect(await screen.findByText('تعرض الصفحة الأصناف الناقصة فقط.')).toBeInTheDocument();
   });

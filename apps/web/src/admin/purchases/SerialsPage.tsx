@@ -9,9 +9,11 @@ import {
   PageHeader,
   SearchField,
   SegmentedControl,
-  SerialIcon,
+  BarcodeIcon,
+  useDigits,
   type DataColumn,
 } from '@serva/ui';
+import { dayText } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { useMe } from '../../auth/useAuth';
@@ -20,13 +22,14 @@ import { SectionHead } from './parts';
 
 /** A document number over its date, or a dash when there is none. */
 function DocCell({ number, date }: { number: string | null; date: string | null }) {
+  const digits = useDigits();
   if (!number) return <span className="text-ink-subtle">—</span>;
   return (
     <span className="flex flex-col items-start">
       <bdi dir="ltr" className="num text-sm">
         {number}
       </bdi>
-      {date ? <span className="num text-xs text-ink-subtle">{date}</span> : null}
+      {date ? <span className="num text-xs text-ink-subtle">{dayText(date, digits)}</span> : null}
     </span>
   );
 }
@@ -36,6 +39,7 @@ function DocCell({ number, date }: { number: string | null; date: string | null 
  * and went out, and until when its warranty runs.
  */
 export function SerialsPage() {
+  const digits = useDigits();
   const me = useMe();
   const label = serialLabel(me.tenant.sectors);
   const [q, setQ] = useState('');
@@ -110,7 +114,7 @@ export function SerialsPage() {
       header: 'الكفالة حتى',
       cell: (r) =>
         r.warrantyUntil ? (
-          <span className="num">{r.warrantyUntil}</span>
+          <span className="num">{dayText(r.warrantyUntil, digits)}</span>
         ) : (
           <span className="text-ink-subtle">—</span>
         ),
@@ -202,7 +206,7 @@ export function SerialsPage() {
             loading={!items && !error}
             empty={
               <EmptyState
-                icon={SerialIcon}
+                icon={BarcodeIcon}
                 title="لا رقم مطابق."
                 description="الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
               />

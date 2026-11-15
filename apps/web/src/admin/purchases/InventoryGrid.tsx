@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { InventoryRow } from '@serva/core';
 import { Button, cn, formatQuantity, SegmentedControl } from '@serva/ui';
+import { shortPieces } from '../stockWords';
 import { gridOf } from './SizeGrid';
 
 type Piece = Pick<InventoryRow, 'variantId' | 'qty'> & { attributes: { name: string; value: string }[] };
@@ -112,7 +113,7 @@ export function InventoryGrid({
               </span>
               {minus > 0 ? (
                 <span className="text-sm font-semibold text-danger-ink">
-                  ناقص <bdi className="num">{formatQuantity(minus, numberFormat)}</bdi>
+                  <bdi>{shortPieces(minus / 1000, formatQuantity(minus, numberFormat))}</bdi>
                 </span>
               ) : null}
               {minus > 0 && onCount ? (
@@ -181,7 +182,13 @@ export function InventoryGrid({
                                 qty <= 0 ? 'bg-danger-soft text-danger-ink' : 'bg-surface-muted text-ink',
                               )}
                             >
-                              {formatQuantity(rawQty, numberFormat)}
+                              {rawQty < 0 ? (
+                                <>
+                                  سالب <bdi className="num">{formatQuantity(-rawQty, numberFormat)}</bdi>
+                                </>
+                              ) : (
+                                formatQuantity(rawQty, numberFormat)
+                              )}
                             </td>
                           );
                         })}

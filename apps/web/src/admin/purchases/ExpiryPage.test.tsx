@@ -53,7 +53,7 @@ const server = (extra: Record<string, (r: MockRequest) => { status: number; body
   mockFetch({
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
-    'GET /v1/inventory/expiry?days=3650': () => ({ status: 200, body: report(90) }),
+    'GET /v1/inventory/expiry?days=3650&unbatched=1': () => ({ status: 200, body: report(90) }),
     'GET /v1/inventory/expiry?days=30': () => ({ status: 200, body: report(30) }),
     ...extra,
   });
@@ -75,7 +75,7 @@ describe('«الصلاحية» on a phone and the recall button', () => {
     })) as unknown as typeof window.matchMedia;
     try {
       server({
-        'GET /v1/inventory/expiry?days=3650': () => ({
+        'GET /v1/inventory/expiry?days=3650&unbatched=1': () => ({
           status: 200,
           body: {
             today: '2026-10-30',
@@ -128,7 +128,7 @@ describe('«الصلاحية»', () => {
     expect(table).toHaveTextContent('مستودع الشفاء');
     expect(table).toHaveTextContent('الفرع الرئيسي');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
-    expect(requestsTo('GET', '/v1/inventory/expiry?days=3650')).toHaveLength(1);
+    expect(requestsTo('GET', '/v1/inventory/expiry?days=3650&unbatched=1')).toHaveLength(1);
     await user.click(screen.getByRole('radio', { name: '30 يوماً' }));
     expect(await screen.findByText(/لا شيء ينتهي في هذه المدة/)).toBeInTheDocument();
     expect(requestsTo('GET', '/v1/inventory/expiry?days=30')).toHaveLength(1);
@@ -202,7 +202,7 @@ describe('«الصلاحية»', () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: owner() }),
-      'GET /v1/inventory/expiry?days=3650': () => ({
+      'GET /v1/inventory/expiry?days=3650&unbatched=1': () => ({
         status: 200,
         body: {
           today: '2026-10-30',
@@ -221,5 +221,28 @@ describe('«الصلاحية»', () => {
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'أرجع للمورد' }));
     expect(await within(dialog).findByText(/لا مورد معروف لهذه الدفعة/)).toBeInTheDocument();
+  });
+  it('lists the «بلا دفعة» row (below zero) so the batches add up to the stock, with no actions on it', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/inventory/expiry?days=3650&unbatched=1': () => ({
+        status: 200,
+        body: {
+          today: '2026-10-30',
+          items: [
+            row({ qty: 29_000, daysLeft: 20 }),
+            row({ batchNo: null, expiryDate: null, daysLeft: null, qty: -20_000, purchaseNumber: null }),
+          ],
+        },
+      }),
+    });
+    renderApp('/expiry');
+    const table = await screen.findByRole('table', { name: 'الدفعات حسب الصلاحية' });
+    expect(await within(table).findByText('بلا دفعة')).toBeInTheDocument();
+    expect(within(table).getByText('سالب')).toBeInTheDocument();
+    expect(screen.getByText(/فمجموع كل الصفوف يساوي المخزون/)).toBeInTheDocument();
+    // only the real batch has an actions menu
+    expect(within(table).getAllByRole('button', { name: /إجراءات دفعة/ })).toHaveLength(1);
   });
 });

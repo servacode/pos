@@ -632,10 +632,12 @@ function PageSearch({
                     chosen ? 'bg-brand-soft text-brand-ink' : 'text-ink hover:bg-surface-muted',
                   )}
                 >
-                  <span className="min-w-0 flex-1 truncate font-semibold">{hit.label}</span>
+                  <span className="min-w-0 flex-1 truncate font-semibold">
+                    {hit.labelLtr ? <bdi dir="ltr">{hit.label}</bdi> : hit.label}
+                  </span>
                   {hit.detail ? (
                     <span className={cn('shrink-0 text-sm', chosen ? 'text-brand-ink' : 'text-ink-muted')}>
-                      {hit.detail}
+                      {hit.detailLtr ? <bdi dir="ltr">{hit.detail}</bdi> : hit.detail}
                     </span>
                   ) : null}
                 </button>

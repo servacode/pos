@@ -19,7 +19,7 @@ import {
   PrintIcon,
   SegmentedControl,
   Select,
-  SerialIcon,
+  KeyIcon,
   Skeleton,
   Switch,
   TextField,
@@ -241,7 +241,7 @@ export function RentalsScreen({
     <div className="flex w-full max-w-7xl flex-col gap-6">
       <FlowHeader
         onBack={onBack}
-        icon={<SerialIcon size={24} />}
+        icon={<KeyIcon size={24} />}
         title={startTab === 'maintenance' ? 'عقود الصيانة' : 'التأجير'}
         description="أجهزة تُسلَّم برقمها التسلسلي بعربون، وتُباع الأجرة عند الإرجاع. وعقود الصيانة التي تنتظر التحصيل."
       />
@@ -404,7 +404,7 @@ export function RentalsScreen({
             {rentals === null ? <Skeleton className="h-32 w-full rounded-card" /> : null}
             {rentals && rentals.length === 0 && !error ? (
               <EmptyState
-                icon={SerialIcon}
+                icon={KeyIcon}
                 title="لا أجهزة مؤجَّرة."
                 description="اختر جهازاً من القائمة وسجّل المستأجر، فيظهر هنا حتى يرجع."
               />
@@ -489,7 +489,7 @@ export function RentalsScreen({
           {contracts === null ? <Skeleton className="h-32 w-full rounded-card" /> : null}
           {contracts && contracts.length === 0 && !error ? (
             <EmptyState
-              icon={SerialIcon}
+              icon={KeyIcon}
               title="لا عقود تنتظر التحصيل."
               description="العقود الجديدة تُضاف من «عقود الصيانة» في لوحة الإدارة، وتظهر هنا حتى يُباع سعرها."
             />

@@ -12,6 +12,14 @@ import {
   ScissorsIcon,
   ShirtIcon,
   ShoeIcon,
+  SockIcon,
+  TrousersIcon,
+  SkirtIcon,
+  DressIcon,
+  TopIcon,
+  BeltIcon,
+  ScarfIcon,
+  CoatIcon,
   WheelchairIcon,
   WrenchIcon,
 } from '@serva/ui';
@@ -21,8 +29,8 @@ describe('placeholderIconFor', () => {
   it('draws what the item is, not the shop it sits in', () => {
     const clothing = ['clothing'];
     expect(placeholderIconFor({ name: 'حذاء رياضي', sectors: clothing })).toBe(ShoeIcon);
-    expect(placeholderIconFor({ name: 'جوارب قطن', sectors: clothing })).toBe(ShoeIcon);
-    expect(placeholderIconFor({ name: 'بنطال جينز', sectors: clothing })).toBe(ShirtIcon);
+    expect(placeholderIconFor({ name: 'جوارب قطن', sectors: clothing })).toBe(SockIcon);
+    expect(placeholderIconFor({ name: 'بنطال جينز', sectors: clothing })).toBe(TrousersIcon);
     expect(placeholderIconFor({ categoryName: 'إكسسوارات', name: 'x', sectors: clothing })).toBe(
       AccessoryIcon,
     );
@@ -53,17 +61,22 @@ describe('placeholderIconFor', () => {
     expect(
       placeholderIconFor({ name: 'تيشيرت قطن رجالي', categoryName: 'مستهلكات', sectors: clothing }),
     ).toBe(ShirtIcon);
-    expect(placeholderIconFor({ name: 'جوارب قطن', sectors: clothing })).toBe(ShoeIcon);
+    expect(placeholderIconFor({ name: 'جوارب قطن', sectors: clothing })).toBe(SockIcon);
     expect(placeholderIconFor({ name: 'جهاز', sectors: clothing })).toBe(ShirtIcon);
   });
 
   it('tells garments apart where the icon set allows', () => {
     const clothing = ['clothing'];
-    expect(placeholderIconFor({ name: 'جاكيت شتوي', sectors: clothing })).toBe(WinterIcon);
+    expect(placeholderIconFor({ name: 'جاكيت شتوي', sectors: clothing })).toBe(CoatIcon);
+    expect(placeholderIconFor({ name: 'كنزة شتوية', sectors: clothing })).toBe(WinterIcon);
+    expect(placeholderIconFor({ name: 'حزام جلد', sectors: clothing })).toBe(BeltIcon);
+    expect(placeholderIconFor({ name: 'وشاح حرير', sectors: clothing })).toBe(ScarfIcon);
+    expect(placeholderIconFor({ name: 'فستان سهرة', sectors: clothing })).toBe(DressIcon);
+    expect(placeholderIconFor({ name: 'بلوزة قطن', sectors: clothing })).toBe(TopIcon);
     expect(placeholderIconFor({ name: 'بيجاما أطفال', sectors: clothing })).toBe(SleepIcon);
     expect(placeholderIconFor({ name: 'حقيبة يد', sectors: clothing })).toBe(BagIcon);
-    expect(placeholderIconFor({ name: 'تنورة طويلة', sectors: clothing })).toBe(ShirtIcon);
-    expect(placeholderIconFor({ name: 'سروال', sectors: clothing })).toBe(ShirtIcon);
+    expect(placeholderIconFor({ name: 'تنورة طويلة', sectors: clothing })).toBe(SkirtIcon);
+    expect(placeholderIconFor({ name: 'سروال', sectors: clothing })).toBe(TrousersIcon);
     expect(placeholderIconFor({ name: 'لعبة', categoryName: 'ملابس أطفال', sectors: clothing })).toBe(
       ShirtIcon,
     );

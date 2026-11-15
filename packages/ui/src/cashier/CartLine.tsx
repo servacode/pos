@@ -1,6 +1,8 @@
 import { QTY_SCALE, type CurrencyId } from '@serva/core';
 import type { ReactNode } from 'react';
+import { IconButton } from '../Button';
 import { cn } from '../cn';
+import { DeleteIcon } from '../icons';
 import { useDigits } from '../context';
 import { Money } from '../Money';
 import { displayNumber } from '../NumberField';
@@ -28,6 +30,8 @@ export interface CartLineProps {
   meta?: ReactNode;
   selected?: boolean;
   onSelect: () => void;
+  /** A delete button always in view at the line's end (no need to open the line to remove it). */
+  onRemove?: () => void;
   /** A control that sits under the line, always in view, outside its button (a button cannot hold a button). */
   extra?: ReactNode;
   /** The selected line's actions, shown under it in place (tab 14 › سلة الكاشير). */
@@ -50,6 +54,7 @@ export function CartLine({
   meta,
   selected = false,
   onSelect,
+  onRemove,
   extra,
   children,
 }: CartLineProps) {
@@ -61,37 +66,49 @@ export function CartLine({
         selected ? 'bg-brand-soft ring-1 ring-brand/25' : 'hover:bg-surface-muted/70',
       )}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-expanded={selected}
-        className="flex min-h-16 w-full items-start gap-3 rounded-card px-3 py-3 text-start motion-safe:animate-rise"
-      >
-        <span
-          aria-hidden="true"
-          className={cn(
-            'num grid h-7 min-w-7 shrink-0 place-items-center rounded-small px-1.5 text-sm font-bold transition-colors duration-120 ease-standard',
-            selected ? 'bg-brand text-on-brand' : 'bg-surface-muted text-ink',
-          )}
+      <div className="flex items-start">
+        <button
+          type="button"
+          onClick={onSelect}
+          aria-expanded={selected}
+          className="flex min-h-16 min-w-0 flex-1 items-start gap-3 rounded-card px-3 py-3 text-start motion-safe:animate-rise"
         >
-          {formatQuantity(qtyThousandths, digits)}
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="line-clamp-2 text-base/7 font-semibold text-ink">
-            <bdi>{name}</bdi>
+          <span
+            aria-hidden="true"
+            className={cn(
+              'num grid h-7 min-w-7 shrink-0 place-items-center rounded-small px-1.5 text-sm font-bold transition-colors duration-120 ease-standard',
+              selected ? 'bg-brand text-on-brand' : 'bg-surface-muted text-ink',
+            )}
+          >
+            {formatQuantity(qtyThousandths, digits)}
           </span>
-          <span className="text-sm text-ink-muted">
-            {/* One right-to-left isolate: «1.250 كغ × 300» reads quantity, unit, ×, price. */}
-            <bdi dir="rtl" className="num">
-              {formatQuantity(qtyThousandths, digits)}
-              {unit ? ` ${unit}` : ''} × <Money minor={unitPriceMinor} currency={currency} symbol={false} />
-            </bdi>
-            {/* On its own line, whole items wrapping: no separator dot left stranded at a line's end */}
-            {meta ? <span className="block">{meta}</span> : null}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="line-clamp-2 text-base/7 font-semibold text-ink">
+              <bdi>{name}</bdi>
+            </span>
+            <span className="text-sm text-ink-muted">
+              {/* One right-to-left isolate: «1.250 كغ × 300» reads quantity, unit, ×, price. */}
+              <bdi dir="rtl" className="num">
+                {formatQuantity(qtyThousandths, digits)}
+                {unit ? ` ${unit}` : ''} × <Money minor={unitPriceMinor} currency={currency} symbol={false} />
+              </bdi>
+              {/* On its own line, whole items wrapping: no separator dot left stranded at a line's end */}
+              {meta ? <span className="block">{meta}</span> : null}
+            </span>
           </span>
-        </span>
-        <Money minor={lineTotalMinor} currency={currency} className="text-base/7 font-bold text-ink" />
-      </button>
+          <Money minor={lineTotalMinor} currency={currency} className="text-base/7 font-bold text-ink" />
+        </button>
+        {onRemove ? (
+          <IconButton
+            label="احذف السطر"
+            size="md"
+            variant="danger-soft"
+            icon={<DeleteIcon size={20} />}
+            onClick={onRemove}
+            className="mt-2 me-2 shrink-0"
+          />
+        ) : null}
+      </div>
       {extra ? <div className="px-3 pb-3 ps-[3.75rem] text-sm">{extra}</div> : null}
       {selected && children ? (
         <div className="flex flex-wrap items-center gap-2 px-3 pb-3">{children}</div>

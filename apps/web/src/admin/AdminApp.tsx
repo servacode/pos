@@ -164,6 +164,7 @@ export function AdminApp() {
           <Route path="/" element={<HomePage />} />
           <Route path="/devices" element={page(<DevicesPage />)} />
           <Route path="/products" element={page(<ProductsPage />)} />
+          <Route path="/products/import" element={<Navigate to="/import?type=products" replace />} />
           <Route path="/products/:id" element={page(<ProductRoute />)} />
           <Route path="/categories" element={page(<CategoriesPage />)} />
           <Route path="/promotions" element={page(<PromotionsPage />)} />
@@ -278,6 +279,9 @@ export function AdminApp() {
           <Route path="/welcome" element={page(<WelcomePage />)} />
           <Route path="/settings" element={page(<SettingsPage />)} />
           <Route path="/subscription" element={page(<SubscriptionPage />)} />
+          {/* A parent path with no page of its own opens its first child, not «غير موجود» */}
+          <Route path="/sales" element={<Navigate to="/sales/today" replace />} />
+          <Route path="/me" element={<Navigate to="/me/pin" replace />} />
           <Route path="/sales/today" element={page(<DayReportPage />)} />
           <Route path="/sales/invoices" element={page(<InvoicesPage />)} />
           <Route path="/shifts" element={page(<ShiftsPage />)} />

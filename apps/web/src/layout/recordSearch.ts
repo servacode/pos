@@ -18,8 +18,33 @@ export interface RecordHit {
   group: string;
   label: string;
   detail?: string;
+  /** The label is a number or a code (INV-…, a serial): drawn left to right inside the Arabic line */
+  labelLtr?: boolean;
+  /** The detail is a phone number: drawn left to right, so its + and digits do not jump */
+  detailLtr?: boolean;
   to: string;
 }
+
+const CODE_GROUPS = new Set([
+  'الفواتير',
+  'فواتير الشراء',
+  'طلبات المتجر الإلكتروني',
+  'التأجير',
+  'مطالبات الضمان',
+  'مرتجعات الموردين',
+  'عروض الأسعار',
+  'الأرقام التسلسلية',
+]);
+const PHONE_GROUPS = new Set(['الزبائن', 'الموردون']);
+
+const decorate = (hit: RecordHit): RecordHit => ({
+  ...hit,
+  ...(CODE_GROUPS.has(hit.group) ? { labelLtr: true } : {}),
+  ...(PHONE_GROUPS.has(hit.group) && hit.detail ? { detailLtr: true } : {}),
+});
+
+/** «بنك · 000123 · 2026-12-01» with the date in words («1 كانون الأول 2026») */
+const withArabicDates = (text: string): string => text.replace(/\d{4}-\d{2}-\d{2}/g, (day) => dayText(day));
 
 const FEW = 4;
 
@@ -220,7 +245,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
               .map((c): RecordHit => ({
                 key: `q:${c.sourceType}:${c.sourceId}:${c.paymentNo}`,
                 group: 'الشيكات',
-                label: c.reference ?? c.documentNumber,
+                label: withArabicDates(c.reference ?? c.documentNumber),
                 detail: c.customerName ?? undefined,
                 to: '/cheques',
               })),
@@ -306,7 +331,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
         )
       : [],
   ];
-  return sources.map((source) => Promise.resolve(source));
+  return sources.map((source) => Promise.resolve(source).then((hits) => hits.map(decorate)));
 }
 
 /**

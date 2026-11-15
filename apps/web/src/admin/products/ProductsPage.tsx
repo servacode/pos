@@ -15,6 +15,7 @@ import {
   Button,
   CameraIcon,
   Checkbox,
+  CloseIcon,
   DataTable,
   EditIcon,
   EmptyState,
@@ -62,6 +63,7 @@ import { downloadCsv } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
+import { shortKinds, shortPieces, StockDefinitions } from '../stockWords';
 import { CategorizeDialog, type CategorizeItem } from './CategorizeDialog';
 import { ButtonLink } from './parts';
 
@@ -112,7 +114,7 @@ function summaryOf(items: readonly ProductListItem[]): ListSummary {
   for (const item of stocked) if (!lowest || item.stockQty < lowest.stockQty) lowest = item;
   return {
     products: items.length,
-    variants: items.reduce((sum, item) => sum + item.variantCount, 0),
+    variants: stocked.reduce((sum, item) => sum + item.variantCount, 0),
     pieces: stocked.reduce((sum, item) => sum + Math.max(0, item.stockQty), 0),
     negative: stocked.filter((item) => item.stockQty < 0).length,
     runOut: stocked.filter((item) => item.stockQty <= 0).length,
@@ -514,11 +516,32 @@ function ProductsList() {
     (items ?? []).filter((i) => i.type !== 'service' && i.price !== null && i.price.minMinor === 0).length;
   const noPhoto = attention?.noPhoto ?? (items ?? []).filter((i) => i.hasImage === false).length;
   // Products without a category: one press proposes a category for each from its name, then a review
-  const uncategorised = attention?.uncategorised ?? (items ?? []).filter((i) => !i.categoryId).length;
+  const uncategorised =
+    attention?.uncategorised ?? (items ?? []).filter((i) => !i.categoryId && i.type !== 'service').length;
   const [categorizing, setCategorizing] = useState<CategorizeItem[] | null>(null);
   const [loadingAuto, setLoadingAuto] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [showWhy, setShowWhy] = useState(false);
+  // «أخفِ هذا التنبيه»: hidden until the counts grow past what was dismissed (kept on this device)
+  const [dismissed, setDismissed] = useState<{ u: number; p: number }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('serva.products.attention') ?? 'null') as {
+        u?: number;
+        p?: number;
+      } | null;
+      return { u: saved?.u ?? -1, p: saved?.p ?? -1 };
+    } catch {
+      return { u: -1, p: -1 };
+    }
+  });
+  const dismissAttention = (value: { u: number; p: number }) => {
+    setDismissed(value);
+    try {
+      localStorage.setItem('serva.products.attention', JSON.stringify(value));
+    } catch {
+      // The dismissal then lasts until the page is left
+    }
+  };
   const toggle = (id: string) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -548,7 +571,7 @@ function ProductsList() {
           ...(cursor ? { cursor } : {}),
           limit: 200,
         });
-        found.push(...page.items.filter((i) => !i.categoryId).map(asItem));
+        found.push(...page.items.filter((i) => !i.categoryId && i.type !== 'service').map(asItem));
         cursor = page.nextCursor;
       } while (cursor && found.length < 400);
       if (found.length === 0) setNotice({ tone: 'info', text: 'كل منتجاتك لها تصنيف.' });
@@ -707,12 +730,21 @@ function ProductsList() {
                 {formatQuantity(item.stockQty, digits)}
               </span>
             </span>
-            {item.sellableQty !== undefined && item.sellableQty > item.stockQty ? (
+            {item.sellableQty !== undefined && item.sellableQty !== item.stockQty ? (
               <span className="text-xs whitespace-nowrap text-ink-muted">
-                متاح للبيع <bdi className="num">{formatQuantity(item.sellableQty, digits)}</bdi> · ناقص{' '}
-                <bdi className="num text-danger-ink">
-                  {formatQuantity(item.sellableQty - item.stockQty, digits)}
-                </bdi>
+                متاح للبيع <bdi className="num">{formatQuantity(item.sellableQty, digits)}</bdi>
+                {item.sellableQty > item.stockQty ? (
+                  <>
+                    {' '}
+                    ·{' '}
+                    <bdi className="text-danger-ink">
+                      {shortPieces(
+                        (item.sellableQty - item.stockQty) / 1000,
+                        formatQuantity(item.sellableQty - item.stockQty, digits),
+                      )}
+                    </bdi>
+                  </>
+                ) : null}
               </span>
             ) : null}
           </span>
@@ -739,7 +771,30 @@ function ProductsList() {
       : []),
   ];
 
-  const addProduct = (
+  // A phone gets one primary «+ منتج» and the rest behind «⋯»: the first product stays near the top
+  const addProduct = phone ? (
+    <div className="flex items-center gap-2">
+      <ButtonLink to="/products/new" variant="primary" icon={<AddIcon />} aria-label="أضف منتجاً">
+        منتج
+      </ButtonLink>
+      <Menu
+        label="المزيد من الإجراءات"
+        align="end"
+        trigger={<IconButton label="المزيد من الإجراءات" icon={<MoreIcon />} />}
+      >
+        <MenuItem onSelect={() => void exportAll()}>صدّر الجدول</MenuItem>
+        <MenuItem icon={<CameraIcon />} onSelect={() => setPhotosOpen(true)}>
+          أضف صوراً دفعة واحدة
+        </MenuItem>
+        <MenuItem
+          icon={<PackageOpenIcon />}
+          render={(props) => <Link to="/import?type=products" {...props} />}
+        >
+          استيراد من ملف
+        </MenuItem>
+      </Menu>
+    </div>
+  ) : (
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="secondary" loading={exporting} onClick={() => void exportAll()}>
         صدّر الجدول
@@ -786,9 +841,9 @@ function ProductsList() {
                 )
               }
               footnote={
-                summary && summary.variants > summary.products ? (
+                summary && summary.variants > 0 && summary.variants !== summary.products ? (
                   <>
-                    المتغيّرات: <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
+                    عدد الأصناف: <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
                   </>
                 ) : undefined
               }
@@ -807,7 +862,7 @@ function ProductsList() {
               footnote={
                 summary && summary.negative > 0 ? (
                   <>
-                    منها ناقص: <bdi className="num font-semibold text-ink">{summary.negative}</bdi>
+                    <bdi className="font-semibold text-ink">{shortKinds(summary.negative)}</bdi>
                   </>
                 ) : undefined
               }
@@ -825,22 +880,26 @@ function ProductsList() {
               }
               footnote={
                 summary?.lowest ? (
-                  <>
-                    أقلّها مخزوناً: {summary.lowest.nameAr} —{' '}
-                    <bdi className="num font-semibold text-ink">
-                      {formatQuantity(summary.lowest.qty, digits)}
-                    </bdi>
-                    {summary.negative > 0 && canManage ? (
-                      <span className="mt-1 flex flex-wrap gap-x-3">
-                        <Link to="/inventory" className={textLinkClass}>
-                          اجرد المخزون
-                        </Link>
-                        <Link to="/purchases" className={textLinkClass}>
-                          سجّل استلاماً
-                        </Link>
-                      </span>
-                    ) : null}
-                  </>
+                  summary.lowest.qty < 0 ? (
+                    <>
+                      <Badge tone="danger">سالب</Badge> {summary.lowest.nameAr}: بعتَ أكثر مما سجّلت، صحّح
+                      الجرد.
+                      {canManage ? (
+                        <span className="mt-1 flex">
+                          <Link to="/inventory" className={textLinkClass}>
+                            اجرد المخزون
+                          </Link>
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      أقلّها مخزوناً: {summary.lowest.nameAr} —{' '}
+                      <bdi className="num font-semibold text-ink">
+                        {formatQuantity(summary.lowest.qty, digits)}
+                      </bdi>
+                    </>
+                  )
                 ) : undefined
               }
             />
@@ -865,6 +924,7 @@ function ProductsList() {
             ) : null}
           </KpiStrip>
         ) : null}
+        {showSummary && !phone ? <StockDefinitions /> : null}
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -961,6 +1021,8 @@ function ProductsList() {
           {/* One attention line: no category, price zero, no picture; the explanations are behind the «i» */}
           {items &&
           filters.status === 'active' &&
+          !notice &&
+          !(zeroPrice === 0 && uncategorised <= dismissed.u && noPhoto <= dismissed.p) &&
           ((canManage && uncategorised > 0) || zeroPrice > 0 || noPhoto > 0) ? (
             <Alert tone={zeroPrice > 0 ? 'warning' : 'info'}>
               <span className="flex flex-col gap-1.5" aria-label="تحتاج انتباهك">
@@ -984,12 +1046,22 @@ function ProductsList() {
                       صنّفها تلقائياً
                     </button>
                   ) : null}
-                  <IconButton
-                    size="xs"
-                    label={showWhy ? 'أخفِ الشرح' : 'اشرح'}
-                    icon={<InfoIcon size={16} />}
-                    onClick={() => setShowWhy((v) => !v)}
-                  />
+                  <span className="ms-auto flex items-center gap-1">
+                    <IconButton
+                      size="xs"
+                      label={showWhy ? 'أخفِ الشرح' : 'اشرح'}
+                      icon={<InfoIcon size={16} />}
+                      onClick={() => setShowWhy((v) => !v)}
+                    />
+                    {zeroPrice === 0 ? (
+                      <IconButton
+                        size="xs"
+                        label="أخفِ هذا التنبيه"
+                        icon={<CloseIcon size={16} />}
+                        onClick={() => dismissAttention({ u: uncategorised, p: noPhoto })}
+                      />
+                    ) : null}
+                  </span>
                 </span>
                 {showWhy ? (
                   <span className="flex flex-col gap-1 text-sm">
@@ -1004,24 +1076,6 @@ function ProductsList() {
                 ) : null}
               </span>
             </Alert>
-          ) : null}
-
-          {canManage && selected.size > 0 ? (
-            <div
-              role="group"
-              aria-label="المحددة"
-              className="flex flex-wrap items-center gap-3 rounded-card border border-brand bg-brand-soft px-4 py-2.5"
-            >
-              <span className="font-semibold text-brand-ink">
-                <bdi className="num">{selected.size}</bdi> محددة
-              </span>
-              <Button variant="primary" onClick={categorizeSelected}>
-                صنّف المحددة
-              </Button>
-              <Button variant="ghost" onClick={() => setSelected(new Set())}>
-                ألغِ التحديد
-              </Button>
-            </div>
           ) : null}
 
           {phone && items && items.length > 0 ? (
@@ -1083,6 +1137,24 @@ function ProductsList() {
             />
           )}
 
+          {canManage && selected.size > 0 ? (
+            <div
+              role="group"
+              aria-label="المحددة"
+              className="sticky bottom-3 z-20 flex flex-wrap items-center gap-3 rounded-card border border-brand bg-brand-soft px-4 py-2.5 shadow-e2"
+            >
+              <span className="font-semibold text-brand-ink">
+                <bdi className="num">{selected.size}</bdi> محددة
+              </span>
+              <Button variant="primary" onClick={categorizeSelected}>
+                صنّف المحددة
+              </Button>
+              <Button variant="secondary" onClick={() => setSelected(new Set())}>
+                ألغِ التحديد
+              </Button>
+            </div>
+          ) : null}
+
           {nextCursor && items ? (
             <div className="flex justify-center">
               <Button variant="secondary" loading={loadingMore} onClick={() => void loadMore()}>
@@ -1108,8 +1180,8 @@ function ProductsList() {
               tone: 'success',
               text:
                 created > 0
-                  ? `صنّفنا ${String(changed)} منتجاً وأضفنا ${String(created)} من التصنيفات.`
-                  : `صنّفنا ${String(changed)} منتجاً.`,
+                  ? `صنّفنا ${countNoun(changed, COUNT_NOUNS.product)} وأضفنا ${countNoun(created, COUNT_NOUNS.category)} جديدة.`
+                  : `صنّفنا ${countNoun(changed, COUNT_NOUNS.product)}.`,
             });
             listCategories()
               .then((answer) => setCategories(answer.items))

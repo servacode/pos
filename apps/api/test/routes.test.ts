@@ -1712,6 +1712,19 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     expect(hit.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
       sold.number,
     );
+    // By any part of the printed number: the whole of it, from the middle, or lower case
+    const parts = sold.number!.split('-');
+    for (const typed of [
+      sold.number!,
+      sold.number!.toLowerCase(),
+      parts.slice(1).join('-'),
+      parts.slice(-2).join('-'),
+    ]) {
+      const part = await search(owner.device.authorization, typed);
+      expect(part.json<{ invoices: { number: string }[] }>().invoices.map((i) => i.number)).toContain(
+        sold.number,
+      );
+    }
     // Nothing typed: the newest invoices of the store, for the return screen's first view
     const recent = await search(owner.device.authorization, '');
     expect(recent.statusCode).toBe(200);

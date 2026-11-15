@@ -44,6 +44,7 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { storeSells } from '../../lib/sectors';
 import { dayText, isoDay } from '../../lib/dates';
+import { countWord } from '../../lib/plural';
 
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
@@ -357,7 +358,7 @@ export function CustomersPage() {
           />
         ) : null}
         {away ? <p className="text-sm text-ink-muted">الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.</p> : null}
-        <KpiStrip columns={4}>
+        <KpiStrip columns={3}>
           <StatTile
             label="الديون على الزبائن"
             icon={<CashIcon />}
@@ -374,12 +375,6 @@ export function CustomersPage() {
             icon={<WarningIcon />}
             iconTone={overCount > 0 ? 'danger' : 'neutral'}
             value={kpi(<bdi className="num">{overCount}</bdi>)}
-          />
-          <StatTile
-            label="عدد الزبائن"
-            icon={<CustomersIcon />}
-            iconTone="neutral"
-            value={kpi(<bdi className="num">{items.length}</bdi>)}
           />
         </KpiStrip>
         <div className="flex flex-col gap-3">
@@ -417,6 +412,13 @@ export function CustomersPage() {
               onChange={(e) => setAway(e.target.checked)}
             />
           </div>
+          {/* The count is a line over the list, not a card of its own */}
+          {list ? (
+            <p className="text-sm text-ink-muted">
+              <bdi className="num font-semibold text-ink">{items.length}</bdi>{' '}
+              {countWord(items.length, { one: 'زبون', two: 'زبونان', few: 'زبائن' })}
+            </p>
+          ) : null}
           <DataTable
             caption="الزبائن وأرصدتهم"
             columns={columns}

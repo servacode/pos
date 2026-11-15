@@ -117,6 +117,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     return expiryReport(app.db, request.auth, q.days, app.clock.now(), {
       variantId: q.variantId,
       branchId: q.branchId,
+      unbatched: q.unbatched === '1',
     });
   });
   // Recall (سحب دفعة): who got a batch, and stopping every till from selling it

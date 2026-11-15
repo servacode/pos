@@ -42,6 +42,7 @@ import { sortByOptions } from '../../lib/optionOrder';
 import { lookupBarcode } from '../catalog/api';
 import { createStocktake, getInventory, getProfit, qtyOf, today } from './api';
 import { SectionHead } from './parts';
+import { shortKinds, StockDefinitions } from '../stockWords';
 import { InventoryGrid } from './InventoryGrid';
 import { downloadCsv } from '../exportCsv';
 import { countProblem, differenceWord, reviewCount } from './stocktakeReview';
@@ -164,9 +165,16 @@ export function InventoryPage() {
           ) : r.qty === 0 ? (
             <Badge tone="danger">نفد</Badge>
           ) : null}
-          <bdi dir="ltr" className="num">
-            {formatQuantity(r.qty, digits)}
-          </bdi>
+          <span className="flex flex-col items-end">
+            <bdi dir="ltr" className="num">
+              {formatQuantity(r.qty, digits)}
+            </bdi>
+            {r.sellableQty !== undefined && r.qty > 0 && r.sellableQty < r.qty ? (
+              <span className="text-xs whitespace-nowrap text-ink-muted">
+                متاح للبيع <bdi className="num">{formatQuantity(r.sellableQty, digits)}</bdi>
+              </span>
+            ) : null}
+          </span>
         </span>
       ),
     },
@@ -301,7 +309,18 @@ export function InventoryPage() {
   }
 
   const wasteRow = stock?.items.find((r) => `${r.branchId}:${r.variantId}` === wasteKey);
-  const wasteOptions = sortByOptions(stock?.items ?? []).filter((r) => {
+  // Pieces of one item keep a fixed branch order: the main branch (the first code) first, the rest by name
+  const mainId = [...me.branches].sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true }))[0]
+    ?.id;
+  const branchRank = new Map(
+    [...me.branches]
+      .sort((a, b) => Number(b.id === mainId) - Number(a.id === mainId) || a.name.localeCompare(b.name, 'ar'))
+      .map((b, i) => [b.id, i]),
+  );
+  const byBranch = [...(stock?.items ?? [])].sort(
+    (a, b) => (branchRank.get(a.branchId) ?? 0) - (branchRank.get(b.branchId) ?? 0),
+  );
+  const wasteOptions = sortByOptions(byBranch).filter((r) => {
     const typed = wasteQuery.trim().toLowerCase();
     return !typed || `${r.branchId}:${r.variantId}` === wasteKey || r.name.toLowerCase().includes(typed);
   });
@@ -548,12 +567,7 @@ export function InventoryPage() {
               stock ? (
                 <>
                   عدد الأصناف: <span className="num">{kinds}</span>
-                  {belowZero > 0 ? (
-                    <>
-                      {' '}
-                      · منها ناقص: <span className="num">{belowZero}</span>
-                    </>
-                  ) : null}
+                  {belowZero > 0 ? <> · {shortKinds(belowZero)}</> : null}
                 </>
               ) : undefined
             }
@@ -566,6 +580,7 @@ export function InventoryPage() {
             }
           />
         </KpiStrip>
+        <StockDefinitions />
         {profit ? (
           <div className="grid grid-cols-1 gap-6">
             {profit ? (

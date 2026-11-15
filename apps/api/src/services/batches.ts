@@ -420,7 +420,11 @@ export function expiryReport(
   auth: AccessClaims,
   days: number,
   now: Date,
-  only: { variantId?: string | undefined; branchId?: string | undefined } = {},
+  only: {
+    variantId?: string | undefined;
+    branchId?: string | undefined;
+    unbatched?: boolean | undefined;
+  } = {},
 ): Promise<ExpiryResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'purchases.manage');
@@ -448,7 +452,9 @@ export function expiryReport(
              r.number, r.supplier_id, r.supplier_name, r.received_on,
              (bl.id is not null) as blocked, bl.reason
       from (select variant_id, branch_id, batch_no, expiry_date, sum(qty) as qty
-            from batch_movements group by variant_id, branch_id, batch_no, expiry_date having sum(qty) > 0) b
+            from batch_movements group by variant_id, branch_id, batch_no, expiry_date
+            having sum(qty) > 0
+              ${only.unbatched || only.variantId ? sql`or (batch_no = '' and expiry_date is null and sum(qty) <> 0)` : sql``}) b
       join variants v on v.tenant_id = ${auth.tenantId} and v.id = b.variant_id
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
       join branches br on br.tenant_id = ${auth.tenantId} and br.id = b.branch_id
@@ -464,7 +470,10 @@ export function expiryReport(
       where ${
         only.variantId
           ? sql`b.variant_id = ${only.variantId}`
-          : sql`(bl.id is not null or b.expiry_date <= ${today}::date + ${days}::int)`
+          : only.unbatched
+            ? sql`(bl.id is not null or b.expiry_date <= ${today}::date + ${days}::int
+                or (b.batch_no = '' and b.expiry_date is null))`
+            : sql`(bl.id is not null or b.expiry_date <= ${today}::date + ${days}::int)`
       }
         ${only.branchId ? sql`and b.branch_id = ${only.branchId}` : sql``}
       order by b.expiry_date nulls last, name, br.name`);

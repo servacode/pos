@@ -286,6 +286,32 @@ describe('the close summary rows', () => {
     ]);
     expect(netMethodRows(only)).toEqual([{ method: 'cash', currency: 'SYP', count: 0, amountMinor: -5_000 }]);
     expect(netMethodRows(null)).toEqual([]);
+    // A card sale refunded to the card, and an exchange refunded on a voucher, are taken off too
+    const mixed = shiftActivity(SHIFT_ID, [
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          payments: [{ method: 'card', currency: 'SYP', amountMinor: 20_000 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'card', currency: 'SYP', amountMinor: 8_000 }] },
+        2,
+      ),
+      doc(
+        'return',
+        { shiftId: SHIFT_ID, refunds: [{ method: 'voucher', currency: 'SYP', amountMinor: 3_500 }] },
+        3,
+      ),
+    ]);
+    expect(netMethodRows(mixed)).toEqual([
+      { method: 'card', currency: 'SYP', count: 1, amountMinor: 12_000 },
+      { method: 'voucher', currency: 'SYP', count: 0, amountMinor: -3_500 },
+    ]);
   });
 });
 

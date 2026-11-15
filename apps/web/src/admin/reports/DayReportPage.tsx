@@ -73,9 +73,11 @@ function Breakdown({ report }: { report: DayReport }) {
       <Line label="الصافي قبل الضريبة">
         <Money minor={report.netExTaxMinor} currency={base} />
       </Line>
-      <Line label="الضريبة">
-        <Money minor={report.taxMinor} currency={base} />
-      </Line>
+      {report.taxMinor !== 0 ? (
+        <Line label="الضريبة">
+          <Money minor={report.taxMinor} currency={base} />
+        </Line>
+      ) : null}
       <Line label="مجموع الفواتير" strong>
         <Money minor={report.totalMinor} currency={base} />
       </Line>
@@ -176,10 +178,16 @@ function DayReportBody({ report }: { report: DayReport }) {
 
   return (
     <>
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        className={cn(
+          'grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2',
+          report.taxMinor !== 0 ? 'xl:grid-cols-4' : 'xl:grid-cols-3',
+        )}
+      >
         <StatTile
           hero
           className="sm:col-span-2"
+          wrapFootnote
           label={report.returns.count > 0 ? 'المبيعات بعد المرتجعات' : 'المبيعات'}
           value={<Money minor={net} currency={base} />}
           footnote={
@@ -196,8 +204,15 @@ function DayReportBody({ report }: { report: DayReport }) {
             </>
           }
         />
-        <StatTile label="الحسم" value={<Money minor={report.discountMinor} currency={base} />} />
-        <StatTile label="الضريبة" value={<Money minor={report.taxMinor} currency={base} />} />
+        <StatTile
+          className={report.taxMinor === 0 ? 'sm:col-span-2 xl:col-span-1' : undefined}
+          label="الحسم"
+          value={<Money minor={report.discountMinor} currency={base} />}
+        />
+        {/* A store with no tax has nothing to show here: the card would only say 0 */}
+        {report.taxMinor !== 0 ? (
+          <StatTile label="الضريبة" value={<Money minor={report.taxMinor} currency={base} />} />
+        ) : null}
       </div>
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">

@@ -53,6 +53,14 @@ export function VariantPicker({
   const piece = pieceFor(pieces, chosen, options.length);
   const image = (piece ?? pieces.find((p) => p.imageUrl))?.imageUrl ?? null;
   const from = lowestPrice(pieces);
+  // The pieces still possible with what is chosen so far: their price shows as soon as the options narrow
+  const narrowed = pieces.filter((p) =>
+    Object.entries(chosen).every(([option, value]) =>
+      (p.attributes ?? []).some((a) => a.name === option && a.value === value),
+    ),
+  );
+  const narrowFrom = lowestPrice(narrowed.length > 0 ? narrowed : pieces);
+  const samePrice = narrowed.every((p) => p.price.priceMinor === narrowFrom.priceMinor);
   const [qty, setQty] = useState(1);
   const [qtyTouched, setQtyTouched] = useState(false);
   const stepQty = (delta: number) => {
@@ -86,7 +94,7 @@ export function VariantPicker({
   return (
     <SalePanel
       label={`اختر من ${name}`}
-      className="mx-auto w-full max-w-lg"
+      className="mx-auto w-full max-w-lg lg:my-auto lg:max-w-xl lg:shadow-e3"
       title={name}
       subtitle={
         <>
@@ -125,26 +133,18 @@ export function VariantPicker({
         </Button>
       }
       footer={
-        <Button
-          size="lg"
-          fullWidth
-          icon={<AddIcon size={20} />}
-          disabled={!piece}
-          onClick={() => piece && onAdd(piece, qty)}
-        >
-          {piece ? (
-            outOfStock ? (
+        piece ? (
+          <Button size="lg" fullWidth icon={<AddIcon size={20} />} onClick={() => onAdd(piece, qty)}>
+            {outOfStock ? (
               'نفد — أضفه رغم ذلك'
             ) : (
               <>
                 أضف {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
                 <Money minor={piece.price.priceMinor * qty} currency={piece.price.currency} />
               </>
-            )
-          ) : (
-            'اختر لتضيف'
-          )}
-        </Button>
+            )}
+          </Button>
+        ) : undefined
       }
     >
       {options.map((option) => {
@@ -180,7 +180,7 @@ export function VariantPicker({
                       on
                         ? 'border-brand bg-brand-soft text-brand-ink ring-1 ring-brand'
                         : possible && left !== null && left <= 0 && options.length > 1 && otherChosen
-                          ? 'border-line-control/40 bg-surface-muted text-ink-subtle'
+                          ? 'border-line-control/60 bg-surface-muted text-ink-muted'
                           : possible
                             ? 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted'
                             : 'cursor-not-allowed border-dashed border-line-control/50 text-ink-subtle line-through',
@@ -194,13 +194,23 @@ export function VariantPicker({
                             style={{ backgroundColor: swatchOf(value)! }}
                           />
                         ) : null}
-                        {value}
+                        <span
+                          className={cn(
+                            possible &&
+                              left !== null &&
+                              left <= 0 &&
+                              showStock &&
+                              'line-through decoration-2',
+                          )}
+                        >
+                          {value}
+                        </span>
                       </span>
                       {left !== null && possible && showStock ? (
                         <span
                           className={cn(
-                            'num text-xs font-medium',
-                            left <= 0 ? 'text-danger-ink' : 'text-ink-subtle',
+                            'num text-xs font-semibold',
+                            left <= 0 ? 'text-danger-ink' : 'text-ink-muted',
                           )}
                         >
                           {left <= 0 ? 'نفد' : formatQuantity(left, digits)}
@@ -237,6 +247,16 @@ export function VariantPicker({
               </span>
               {outOfStock ? <span className="font-semibold text-danger-ink">نفد هذا الاختيار</span> : null}
             </>
+          ) : narrowed.length > 0 ? (
+            <span className="flex flex-wrap items-baseline gap-2">
+              {samePrice ? null : <span>من</span>}
+              <Money
+                minor={narrowFrom.priceMinor}
+                currency={narrowFrom.currency}
+                className="text-lg font-bold text-ink"
+              />
+              {priceNote?.(narrowFrom.priceMinor, narrowFrom.currency)}
+            </span>
           ) : (
             <span>اختر كل الخيارات لترى السعر</span>
           )}

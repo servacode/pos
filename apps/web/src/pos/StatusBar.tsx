@@ -4,11 +4,11 @@ import {
   CashierStatusBar,
   CloseIcon,
   ConnectionPill,
+  InfoIcon,
   Logo,
   LogoMark,
   ThemeToggle,
   useDigits,
-  WarningIcon,
 } from '@serva/ui';
 import type { LocalDevice } from '../offline/device';
 import { clockText } from './format';
@@ -107,6 +107,12 @@ export function StatusBar({
           <span className="hidden sm:contents">
             <Divider />
           </span>
+          {/* A phone has no room for the whole block: the branch alone, so the cashier knows where this till is */}
+          <p className="min-w-0 max-w-24 shrink-[3] sm:hidden">
+            <span className="block truncate text-xs/tight font-semibold text-ink-muted">
+              {device.branchName}
+            </span>
+          </p>
           <p className="hidden min-w-24 shrink-[2] flex-col sm:flex">
             <span className="truncate text-sm/tight font-semibold text-ink">{device.storeName}</span>
             <span className="truncate text-xs/tight text-ink-muted">
@@ -137,9 +143,9 @@ export function StatusBar({
           title="هذا المتصفح قد يمسح البيانات، ثبّت التطبيق"
           className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full bg-surface-muted ps-3 pe-1 text-sm font-medium text-ink-muted sm:min-w-0 sm:shrink"
         >
-          <WarningIcon size={16} className="shrink-0" />
-          {/* On a phone the words would squeeze the store and the person out: the icon and the close button stay, the sentence is spoken */}
-          <span className="sr-only sm:not-sr-only sm:truncate">
+          <InfoIcon size={16} className="shrink-0" />
+          {/* The short words always show (a phone too): a readable chip, never a blank pill */}
+          <span className="truncate">
             <span className="sr-only 2xl:not-sr-only">هذا المتصفح قد يمسح البيانات، </span>ثبّت التطبيق
           </span>
           <button

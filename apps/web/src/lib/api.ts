@@ -143,7 +143,11 @@ async function refreshOnce(): Promise<string | null> {
       await new Promise((resolve) => setTimeout(resolve, REFRESH_RACE_WAIT_MS * (attempt + 1)));
       continue;
     }
-    if (!res.ok) return null;
+    // Only a real «no» (no cookie, expired or revoked session) ends the session. A busy server, a
+    // rate limit or a race that outlasted its retries is a failed attempt: it throws, the caller
+    // keeps the signed-in screen, and the next request asks again (this was the rare bounce).
+    if (res.status === 401 || res.status === 403) return null;
+    if (!res.ok) throw await toApiError(res);
     const data = (await readJson(res)) as RefreshResponse | undefined;
     accessToken = data?.accessToken ?? null;
     return accessToken;

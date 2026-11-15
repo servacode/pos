@@ -11,12 +11,24 @@ interface Rule {
 
 const MEDICAL: readonly SectorKey[] = ['medical_supplies', 'pharmacy'];
 const CLOTHES: readonly SectorKey[] = ['clothing'];
+/** Food and drink categories belong to the stores that sell food, never to a medical or clothing store */
+const FOOD: readonly SectorKey[] = [
+  'supermarket',
+  'restaurant',
+  'cafe',
+  'bakery',
+  'produce',
+  'wholesale',
+  'general',
+];
 
 /** First match wins: the specific words go first. */
 const RULES: readonly Rule[] = [
   { words: /كرسي|كراسي|عكاز|مشاي|سرير|مرتبه/, category: 'كراسي متحركة', sectors: MEDICAL },
+  // Catheters and tubes first: «قسطرة فولي» holds the letters of «فول» (beans) and must not read as groceries
+  { words: /قسطر|قثطر|فولي|كانيول|انبوب|خرطوم|مبوله|كيس بول/, category: 'مستهلكات', sectors: MEDICAL },
   {
-    words: /ضغط|سكر|حراره|ميزان|سماعه|اوكسجين|نبض|بخار|قياس|جهاز|اجهزه/,
+    words: /ضغط|سكر|حراره|ترمومتر|ميزان|سماعه|اوكسجين|نبض|بخار|قياس|جهاز|اجهزه/,
     category: 'أجهزة قياس',
     sectors: MEDICAL,
   },
@@ -45,14 +57,14 @@ const RULES: readonly Rule[] = [
   { words: /مكياج|احمر شفاه|ماسكرا|كحل/, category: 'مكياج' },
   { words: /شامبو|بلسم|شعر/, category: 'عناية بالشعر' },
   { words: /كريم|غسول|مرطب|بشره/, category: 'عناية بالبشرة' },
-  { words: /خبز|صمون|فينو/, category: 'خبز' },
-  { words: /معجنات|فطائر|مناقيش/, category: 'معجنات' },
-  { words: /كعك|بيتي فور|معمول/, category: 'كعك' },
-  { words: /حلو|كيك|بقلاو|كنافه/, category: 'حلويات' },
-  { words: /حليب|لبن|جبن|جبنه|قشطه|زبده|لبنه/, category: 'ألبان وأجبان' },
-  { words: /منظف|صابون|جافيل|مطهر|سائل جلي/, category: 'منظفات' },
-  { words: /معلب|تونه|فول|حمص|مربى/, category: 'معلبات' },
-  { words: /عصير|ماء|مياه|مشروب|كولا|بيبسي|شاي|قهوه/, category: 'مشروبات' },
+  { words: /خبز|صمون|فينو/, category: 'خبز', sectors: FOOD },
+  { words: /معجنات|فطائر|مناقيش/, category: 'معجنات', sectors: FOOD },
+  { words: /كعك|بيتي فور|معمول/, category: 'كعك', sectors: FOOD },
+  { words: /حلو|كيك|بقلاو|كنافه/, category: 'حلويات', sectors: FOOD },
+  { words: /حليب|لبن|جبن|جبنه|قشطه|زبده|لبنه/, category: 'ألبان وأجبان', sectors: FOOD },
+  { words: /منظف|صابون|جافيل|مطهر|سائل جلي/, category: 'منظفات', sectors: FOOD },
+  { words: /معلب|تونه|فول|حمص|مربى/, category: 'معلبات', sectors: FOOD },
+  { words: /عصير|ماء|مياه|مشروب|كولا|بيبسي|شاي|قهوه/, category: 'مشروبات', sectors: FOOD },
   { words: /جوال|هاتف|موبايل|ايفون|سامسونج/, category: 'جوالات', sectors: ['electronics'] },
   { words: /شاحن|كيبل|كابل|سماعات|باور/, category: 'شواحن وسماعات', sectors: ['electronics'] },
 ];
@@ -98,7 +110,12 @@ export function suggestFor(
   const suggested = suggestCategoryName(productName, sectors);
   if (suggested) {
     const wanted = key(suggested);
-    const same = live.find((c) => key(c.name) === wanted);
+    // The store's own name for it may say more («مستهلكات طبية» for «مستهلكات»)
+    const same =
+      live.find((c) => key(c.name) === wanted) ??
+      (wanted.length >= 4
+        ? live.find((c) => key(c.name).startsWith(`${wanted} `) || wanted.startsWith(`${key(c.name)} `))
+        : undefined);
     if (same) return { categoryId: same.id, newName: null };
   }
   const name = key(productName);

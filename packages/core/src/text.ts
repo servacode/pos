@@ -119,6 +119,8 @@ export const COUNT_NOUNS = {
   user: { one: 'مستخدم واحد', two: 'مستخدمان', few: 'مستخدمين', many: 'مستخدماً' },
   device: { one: 'جهاز واحد', two: 'جهازان', few: 'أجهزة', many: 'جهازاً' },
   branch: { one: 'فرع واحد', two: 'فرعان', few: 'فروع', many: 'فرعاً' },
+  product: { one: 'منتج واحد', two: 'منتجان', few: 'منتجات', many: 'منتجاً' },
+  category: { one: 'تصنيف واحد', two: 'تصنيفان', few: 'تصنيفات', many: 'تصنيفاً' },
   item: { one: 'صنف واحد', two: 'صنفان', few: 'أصناف', many: 'صنفاً' },
   customer: { one: 'زبون واحد', two: 'زبونان', few: 'زبائن', many: 'زبوناً' },
   piece: { one: 'قطعة واحدة', two: 'قطعتان', few: 'قطع', many: 'قطعة' },

@@ -691,6 +691,50 @@ describe('the batch ledger keeps adding up to the stock', () => {
     expect(await gaps(d)).toEqual([0]);
   });
 
+  it('lists the no-batch row (below zero too) on request, so the batches add up to the stock', async () => {
+    const d = await aDay();
+    await pushSale(d, saleOf(d, 30 * BOX));
+    // Without the flag the expiry report keeps to real batches
+    expect((await expiry(d.store, 3650)).items.map((r) => r.batchNo)).toEqual(['A-01']);
+    const all = await expiry(d.store, 3650, '&unbatched=1');
+    expect(all.items.map((r) => [r.batchNo, r.qty])).toEqual([
+      ['A-01', 10 * BOX],
+      [null, -5 * BOX],
+    ]);
+    // An item's own batches always show it (the supplier return picks from this list)
+    const own = await expiry(d.store, 3650, `&variantId=${d.variantId}`);
+    expect(own.items.some((r) => r.batchNo === null && r.qty === -5 * BOX)).toBe(true);
+    // The batches then add up to the stock the ledger holds
+    expect(all.items.reduce((sum, r) => sum + r.qty, 0)).toBe(5 * BOX);
+  });
+
+  it('shows sellable stock on the product list and the inventory: no expired or blocked batch in it', async () => {
+    const d = await aDay();
+    await app.inject({
+      method: 'POST',
+      url: '/v1/batches/block',
+      headers: as(d.store),
+      payload: { batchNo: 'C-09' },
+    });
+    // A-01 is past its date; B-07 is too once the real date passes it (the SQL reads the database's day)
+    const [dbDay] = await ownerDb()<{ today: string }[]>`select current_date::text as today`;
+    const b07Expired = '2026-11-15' < dbDay!.today;
+    const left = (35 - 10 - 20 - (b07Expired ? 5 : 0)) * BOX;
+    const list = (await app.inject({ method: 'GET', url: '/v1/products', headers: as(d.store) })).json<{
+      items: { id: string; stockQty: number; sellableQty: number }[];
+    }>();
+    const row = list.items.find((i) => i.id === d.productId)!;
+    expect(row.stockQty).toBe(35 * BOX);
+    expect(row.sellableQty).toBe(left);
+    const inv = (await app.inject({ method: 'GET', url: '/v1/inventory', headers: as(d.store) })).json<{
+      items: { variantId: string; qty: number; sellableQty: number }[];
+    }>();
+    expect(inv.items.find((i) => i.variantId === d.variantId)).toMatchObject({
+      qty: 35 * BOX,
+      sellableQty: left,
+    });
+  });
+
   it('a till that allocated less than it sold gets the rest on the no-batch row too', async () => {
     const d = await aDay();
     const { res, doc } = await pushSale(

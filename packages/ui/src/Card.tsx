@@ -1,6 +1,7 @@
-import { useId, type ComponentProps, type ReactNode } from 'react';
+import { useId, useRef, type ComponentProps, type ReactNode } from 'react';
 import { cn } from './cn';
 import { TrendDownIcon, TrendUpIcon } from './icons';
+import { SnapDots } from './Scroller';
 
 export interface CardProps extends ComponentProps<'div'> {
   /** Hover lift for a card that opens something (kit .card.is-click). */
@@ -120,6 +121,8 @@ export interface StatTileProps {
   };
   /** A small note under the number, e.g. «مؤقت» or the dollar amount. */
   footnote?: ReactNode;
+  /** Let a long footnote wrap on a phone instead of ending in «…» (a sentence, not a tag) */
+  wrapFootnote?: boolean;
   /** The hero tile at the top of the dashboard: a bigger number (tab 14 › لوحات المؤشرات). */
   hero?: boolean;
   /** A picture beside the label, in a soft square. */
@@ -156,16 +159,23 @@ export function KpiStrip({
   className?: string;
   children: ReactNode;
 } & Omit<ComponentProps<'div'>, 'children' | 'className'>) {
+  const ref = useRef<HTMLDivElement>(null);
   return (
-    <div
-      {...rest}
-      className={cn(
-        'scrollbar-none flex max-w-full min-w-0 snap-x snap-mandatory gap-2 overflow-x-auto pb-1 max-sm:-mx-4 max-sm:scroll-px-4 max-sm:px-4 max-sm:*:w-[42%] max-sm:*:min-w-36 max-sm:*:shrink-0 max-sm:*:snap-start sm:grid sm:gap-4 sm:overflow-visible sm:pb-0',
-        columns === 2 ? 'sm:grid-cols-2' : columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4',
-        className,
-      )}
-    >
-      {children}
+    <div className="flex min-w-0 flex-col gap-1">
+      <div
+        {...rest}
+        ref={ref}
+        className={cn(
+          // Two whole tiles and a clear peek of the next on a phone (never a tile cut in the middle
+          // of its figure); a dot under the row for every tile
+          'scrollbar-none flex max-w-full min-w-0 snap-x snap-mandatory gap-2 overflow-x-auto pb-1 max-sm:-mx-4 max-sm:scroll-px-4 max-sm:px-4 max-sm:*:w-[calc((100%-0.5rem)/2.3)] max-sm:*:min-w-36 max-sm:*:shrink-0 max-sm:*:snap-start sm:grid sm:gap-4 sm:overflow-visible sm:pb-0',
+          columns === 2 ? 'sm:grid-cols-2' : columns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-4',
+          className,
+        )}
+      >
+        {children}
+      </div>
+      <SnapDots scrollerRef={ref} label="المؤشرات" className="sm:hidden" />
     </div>
   );
 }
@@ -185,6 +195,7 @@ export function StatTile({
   value,
   trend,
   footnote,
+  wrapFootnote = false,
   hero = false,
   icon,
   iconTone = 'brand',
@@ -196,7 +207,7 @@ export function StatTile({
     <Card
       className={cn(
         // On a phone every figure tile is the same compact block: less padding, a smaller number
-        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-0 max-sm:p-2.5',
+        'grid content-start gap-x-3 gap-y-3 max-sm:gap-y-0 max-sm:p-2',
         trend ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-1',
         className,
       )}
@@ -217,21 +228,28 @@ export function StatTile({
       <p
         className={cn(
           'col-span-full num font-bold tracking-tight text-ink',
-          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-lg', VALUE_UNIT),
+          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-base max-sm:leading-6', VALUE_UNIT),
         )}
       >
         {value}
       </p>
       {sparkline && sparkline.length > 1 ? <Sparkline values={sparkline} /> : null}
       {footnote ? (
-        <p className="col-span-full text-sm text-ink-muted max-sm:truncate max-sm:text-xs">{footnote}</p>
+        <p
+          className={cn(
+            'col-span-full text-sm text-ink-muted max-sm:text-xs',
+            !wrapFootnote && 'max-sm:truncate',
+          )}
+        >
+          {footnote}
+        </p>
       ) : null}
       {trend ? (
         <span
           className={cn(
             'col-start-2 row-start-1 inline-flex items-center gap-1 self-center rounded-full px-2 py-0.5 text-xs font-semibold',
             trend.tone === 'neutral'
-              ? 'bg-surface-muted text-ink-muted max-sm:col-start-1 max-sm:row-start-3 max-sm:mt-1 max-sm:justify-self-start'
+              ? 'bg-surface-muted text-ink-muted max-sm:col-start-1 max-sm:row-start-3 max-sm:mt-0.5 max-sm:justify-self-start max-sm:py-0 max-sm:text-[0.6875rem]'
               : trend.direction === 'up'
                 ? 'bg-success-soft text-success-ink'
                 : 'bg-danger-soft text-danger-ink',

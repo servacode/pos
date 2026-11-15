@@ -351,7 +351,7 @@ function HeroTile({
 
 function TileSkeleton() {
   return (
-    <Card className="flex shrink-0 snap-start flex-col gap-3 max-sm:w-[42%] max-sm:min-w-36 max-sm:gap-1.5 max-sm:p-2.5 sm:min-w-0">
+    <Card className="flex shrink-0 snap-start flex-col gap-3 max-sm:w-[calc((100%-0.5rem)/2.3)] max-sm:min-w-36 max-sm:gap-1 max-sm:p-2 sm:min-w-0">
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-9 w-32 max-sm:h-6" />
       <Skeleton className="h-9 max-sm:hidden" />
@@ -360,7 +360,7 @@ function TileSkeleton() {
 }
 
 /** On a phone the tiles scroll sideways, one snapping into place; from 640 px they share the row. */
-const TILE_CLASS = 'shrink-0 snap-start max-sm:w-[42%] max-sm:min-w-36 sm:min-w-0';
+const TILE_CLASS = 'shrink-0 snap-start max-sm:w-[calc((100%-0.5rem)/2.3)] max-sm:min-w-36 sm:min-w-0';
 
 function KpiBand({
   me,
@@ -727,7 +727,7 @@ function WaitingRow({
   children,
 }: {
   to: string;
-  count: number | string;
+  count: number | string | null;
   tone: WaitingTone;
   icon: ReactNode;
   children: ReactNode;
@@ -743,7 +743,7 @@ function WaitingRow({
       >
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface/70">{icon}</span>
         <span className="min-w-0 flex-1">{children}</span>
-        <span className="num text-lg font-bold">{count}</span>
+        {count === null ? null : <span className="num text-lg font-bold">{count}</span>}
         <NextIcon size={16} />
       </Link>
     </li>
@@ -754,10 +754,7 @@ function WaitingRow({
 const sizeOf = (item: { attributes?: { name: string; value: string }[] }) =>
   item.attributes?.find((a) => a.name === 'المقاس')?.value ?? null;
 
-/** How many products short of sizes the home list names one by one; the rest stay in the count */
-const SIZED_ROWS = 4;
-
-interface SizedLowItem {
+interface LowItem {
   attributes?: { name: string; value: string }[];
   variantId: string;
   productId: string;
@@ -765,34 +762,58 @@ interface SizedLowItem {
   stockQty: number;
 }
 
+/** A product with pieces that ran low: all its pieces in one group, one row on the home page */
+interface LowGroup<T extends LowItem> {
+  productId: string;
+  items: T[];
+  /** Every piece is gone: the only case shown in red */
+  allOut: boolean;
+}
+
 /**
- * The sized pieces that ran low, one group per product («جاكيت شتوي: 3 مقاسات نفدت»), the first
- * few products only. A negative piece is named once, in «يوشك على النفاد», with its link to the
- * count, so it is not here.
+ * The pieces that ran low, one group per product, for every kind of store («جاكيت شتوي: 3 مقاسات
+ * نفدت», «حليب يوشك على النفاد»). A piece below zero is named once, in «المخزون», with its link to
+ * the count, so it is not here.
  */
-function sizedGroups<T extends SizedLowItem>(items: readonly T[]): { productId: string; items: T[] }[] {
+function lowGroups<T extends LowItem>(items: readonly T[]): LowGroup<T>[] {
   const groups = new Map<string, T[]>();
   for (const item of items) {
-    if (sizeOf(item) === null || item.stockQty < 0) continue;
+    if (item.stockQty < 0) continue;
     const list = groups.get(item.productId);
     if (list) list.push(item);
     else groups.set(item.productId, [item]);
   }
-  return [...groups.entries()].slice(0, SIZED_ROWS).map(([productId, list]) => ({ productId, items: list }));
+  return [...groups.entries()].map(([productId, list]) => ({
+    productId,
+    items: list,
+    allOut: list.every((item) => item.stockQty <= 0),
+  }));
 }
 
-/** The low pieces «ما ينتظرك» names (clothing): «يوشك على النفاد» does not list them again */
-const sizedLow = (items: readonly SizedLowItem[]): Set<string> =>
-  new Set(sizedGroups(items).flatMap((group) => group.items.map((item) => item.variantId)));
+/** The low pieces «تحتاج انتباهك» names per product: «المخزون» does not list them again */
+const groupedLow = (items: readonly LowItem[]): Set<string> =>
+  new Set(lowGroups(items).flatMap((group) => group.items.map((item) => item.variantId)));
 
-/** «جاكيت شتوي: 3 مقاسات نفدت» for a product with several low sizes */
-function groupText(name: string, items: readonly SizedLowItem[]): string {
+/** «جاكيت شتوي: 3 مقاسات نفدت» for a product with several low pieces («أصناف» when they are no sizes) */
+function groupText(name: string, items: readonly LowItem[]): string {
   const out = items.filter((item) => item.stockQty <= 0).length;
   const lowOnes = items.length - out;
-  const sizes = (n: number) => (n === 2 ? 'مقاسان' : n >= 3 && n <= 10 ? `${n} مقاسات` : `${n} مقاساً`);
+  const sized = items.every((item) => sizeOf(item) !== null);
+  const unit = (n: number) =>
+    sized
+      ? n === 2
+        ? 'مقاسان'
+        : n >= 3 && n <= 10
+          ? `${n} مقاسات`
+          : `${n} مقاساً`
+      : n === 2
+        ? 'صنفان'
+        : n >= 3 && n <= 10
+          ? `${n} أصناف`
+          : `${n} صنفاً`;
   const parts: string[] = [];
-  if (out > 0) parts.push(`${sizes(out)} ${out === 2 ? 'نفدا' : 'نفدت'}`);
-  if (lowOnes > 0) parts.push(`${sizes(lowOnes)} ${lowOnes === 2 ? 'يوشكان' : 'يوشك'} على النفاد`);
+  if (out > 0) parts.push(`${unit(out)} ${out === 2 ? 'نفدا' : 'نفدت'}`);
+  if (lowOnes > 0) parts.push(`${unit(lowOnes)} ${lowOnes === 2 ? 'يوشكان' : 'يوشك'} على النفاد`);
   return `${name}: ${parts.join(' و')}`;
 }
 
@@ -808,7 +829,6 @@ interface WaitingArgs {
   seesOrders: boolean;
   seesStock: boolean;
   seesExpiry: boolean;
-  sizes: boolean;
   cheques?: ChequesState | null;
   today?: string;
   noPhoto?: number;
@@ -822,7 +842,6 @@ function waitingFigures({
   seesOrders,
   seesStock,
   seesExpiry,
-  sizes,
   cheques,
   today,
   noPhoto = 0,
@@ -830,11 +849,9 @@ function waitingFigures({
   const count = orders.data?.items.length ?? 0;
   const holds = orders.data?.items.filter((order) => order.source === 'hold').length ?? 0;
   const online = count - holds;
-  // A clothing store hears which size ran out («المقاس M من قميص كذا نفد»), one row per piece
-  // A piece below zero is named once, in «يوشك على النفاد», where its chip opens the count
-  const notNegative = (merch.data?.lowStock ?? []).filter((item) => item.stockQty >= 0);
-  const sized = sizes ? sizedGroups(notNegative) : [];
-  const low = notNegative.length - sized.reduce((n, group) => n + group.items.length, 0);
+  // Every low product is one group, whatever the store sells; a piece below zero is named once, in
+  // «المخزون», where its chip opens the count
+  const stock = lowGroups(merch.data?.lowStock ?? []);
   const expiring = expiry.data?.items.length ?? 0;
   // A recalled batch no till sells (استدعاء دفعة): it waits for the owner's decision
   const recalled = expiry.data?.items.filter((row) => row.blocked).length ?? 0;
@@ -842,13 +859,19 @@ function waitingFigures({
     (seesOrders && orders.loading) || (seesStock && merch.loading) || (seesExpiry && expiry.loading);
   const chequesDue = cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
   const chequesOut = cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
-  // «بلا صورة» is a suggestion, not something waiting: it is shown, but not counted in the tab
-  const total = online + holds + low + sized.length + expiring + recalled + chequesDue + chequesOut;
+  // The tab counts rows, as the list shows them; «بلا صورة» is a suggestion, shown but not counted
+  const total =
+    (online > 0 ? 1 : 0) +
+    (holds > 0 ? 1 : 0) +
+    stock.length +
+    (expiring > 0 ? 1 : 0) +
+    (recalled > 0 ? 1 : 0) +
+    (chequesDue > 0 ? 1 : 0) +
+    (chequesOut > 0 ? 1 : 0);
   return {
     holds,
     online,
-    sized,
-    low,
+    stock,
     expiring,
     recalled,
     loading,
@@ -860,95 +883,124 @@ function waitingFigures({
   };
 }
 
+/** How many rows «تحتاج انتباهك» shows before «عرض الكل» */
+const WAITING_ROWS = 3;
+
 function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
-  const { holds, online, sized, low, expiring, recalled, loading, chequesDue, chequesOut, noPhoto, empty } =
+  const [all, setAll] = useState(false);
+  const { holds, online, stock, expiring, recalled, loading, chequesDue, chequesOut, noPhoto, empty } =
     waitingFigures(args);
+  // Red only for what blocks (a recalled batch) or is wholly gone; everything else is amber or calm.
+  // Most serious first, so the three rows shown are the three that matter.
+  const rows: ReactNode[] = [];
+  if (recalled > 0)
+    rows.push(
+      <WaitingRow key="recalled" to="/recall" count={recalled} tone="danger" icon={<WarningIcon />}>
+        {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : 'دفعات موقوفة عن البيع (استدعاء)'}
+      </WaitingRow>,
+    );
+  const rowOf = (group: (typeof stock)[number]) => {
+    const [item] = group.items;
+    if (!item) return null;
+    const single = group.items.length === 1;
+    const colour = item.attributes?.find((a) => a.name === 'اللون')?.value;
+    const size = sizeOf(item);
+    const state = item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد';
+    return (
+      <WaitingRow
+        key={group.productId}
+        to={`/products/${group.productId}`}
+        // «نفد» is in the sentence: no second «نفد» beside it
+        count={single ? (item.stockQty <= 0 ? null : stockChip(item.stockQty)) : group.items.length}
+        tone={group.allOut ? 'danger' : 'warning'}
+        icon={<WarningIcon />}
+      >
+        {single ? (
+          size ? (
+            <>
+              المقاس {size}
+              {colour ? ` (${colour})` : ''} من {item.name} {state}
+            </>
+          ) : (
+            <>
+              {item.name} {state}
+            </>
+          )
+        ) : (
+          groupText(item.name, group.items)
+        )}
+      </WaitingRow>
+    );
+  };
+  for (const group of stock.filter((g) => g.allOut)) rows.push(rowOf(group));
+  if (online > 0)
+    rows.push(
+      <WaitingRow key="online" to="/online-store" count={online} tone="warning" icon={<StoreIcon />}>
+        {online === 1 ? 'طلب جديد من المتجر الإلكتروني' : 'طلبات جديدة من المتجر الإلكتروني'}
+      </WaitingRow>,
+    );
+  if (holds > 0)
+    rows.push(
+      <WaitingRow key="holds" to="/online-store" count={holds} tone="brand" icon={<GiftIcon />}>
+        {holds === 1 ? 'قطعة محجوزة بعربون' : 'قطع محجوزة بعربون'}
+      </WaitingRow>,
+    );
+  for (const group of stock.filter((g) => !g.allOut)) rows.push(rowOf(group));
+  if (chequesDue > 0)
+    rows.push(
+      <WaitingRow key="due" to="/cheques" count={chequesDue} tone="warning" icon={<CalendarIcon />}>
+        {chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
+      </WaitingRow>,
+    );
+  if (chequesOut > 0)
+    rows.push(
+      <WaitingRow key="out" to="/cheques" count={chequesOut} tone="warning" icon={<CalendarIcon />}>
+        {chequesOut === 1 ? 'شيك صادر للمورد يستحق خلال 7 أيام' : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
+      </WaitingRow>,
+    );
+  if (expiring > 0)
+    rows.push(
+      <WaitingRow key="expiring" to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
+        {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
+      </WaitingRow>,
+    );
+  if (noPhoto > 0)
+    // A suggestion, not an alarm: grey, last, no count chip
+    rows.push(
+      <li key="photos">
+        <Link
+          to="/products"
+          className="flex min-h-11 items-center gap-3 rounded-card px-3 text-sm text-ink-muted transition-colors duration-120 hover:bg-surface-muted"
+        >
+          <ProductsIcon size={20} />
+          <span className="min-w-0 flex-1">
+            {noPhoto === 1 ? 'منتج واحد بلا صورة' : `${noPhoto} ${products(noPhoto)} بلا صورة`}. أضف صوراً
+            ليسهل البيع.
+          </span>
+          <NextIcon size={16} />
+        </Link>
+      </li>,
+    );
+  const shown = all ? rows : rows.slice(0, WAITING_ROWS);
   const body =
     loading && empty ? (
       <Skeleton className="h-14" />
     ) : empty ? (
       <p className="text-ink-muted">لا شيء ينتظرك الآن.</p>
     ) : (
-      <ul className="flex flex-col gap-2">
-        {online > 0 ? (
-          <WaitingRow to="/online-store" count={online} tone="warning" icon={<StoreIcon />}>
-            {online === 1 ? 'طلب جديد من المتجر الإلكتروني' : 'طلبات جديدة من المتجر الإلكتروني'}
-          </WaitingRow>
+      <>
+        <ul className="flex flex-col gap-2">{shown}</ul>
+        {rows.length > WAITING_ROWS ? (
+          <button
+            type="button"
+            aria-expanded={all}
+            className="min-h-11 self-start rounded-control px-2 text-sm font-semibold text-brand-ink hover:underline"
+            onClick={() => setAll((now) => !now)}
+          >
+            {all ? 'عرض أقل' : `عرض الكل (${rows.length})`}
+          </button>
         ) : null}
-        {holds > 0 ? (
-          <WaitingRow to="/online-store" count={holds} tone="brand" icon={<GiftIcon />}>
-            {holds === 1 ? 'قطعة محجوزة بعربون' : 'قطع محجوزة بعربون'}
-          </WaitingRow>
-        ) : null}
-        {sized.map((group) => {
-          const [item] = group.items;
-          if (!item) return null;
-          const single = group.items.length === 1;
-          const colour = item.attributes?.find((a) => a.name === 'اللون')?.value;
-          return (
-            <WaitingRow
-              key={group.productId}
-              to={`/products/${group.productId}`}
-              count={single ? stockChip(item.stockQty) : group.items.length}
-              tone="danger"
-              icon={<WarningIcon />}
-            >
-              {single ? (
-                <>
-                  المقاس {sizeOf(item)}
-                  {colour ? ` (${colour})` : ''} من {item.name}{' '}
-                  {item.stockQty <= 0 ? 'نفد' : 'يوشك على النفاد'}
-                </>
-              ) : (
-                groupText(item.name, group.items)
-              )}
-            </WaitingRow>
-          );
-        })}
-        {low > 0 ? (
-          <WaitingRow to="/reports/merchandise" count={low} tone="danger" icon={<WarningIcon />}>
-            {low === 1 ? 'صنف يوشك مخزونه على النفاد' : 'أصناف يوشك مخزونها على النفاد'}
-          </WaitingRow>
-        ) : null}
-        {chequesDue > 0 ? (
-          <WaitingRow to="/cheques" count={chequesDue} tone="warning" icon={<CalendarIcon />}>
-            {chequesDue === 1 ? 'شيك يستحق خلال 7 أيام' : 'شيكات تستحق خلال 7 أيام'}
-          </WaitingRow>
-        ) : null}
-        {chequesOut > 0 ? (
-          <WaitingRow to="/cheques" count={chequesOut} tone="warning" icon={<CalendarIcon />}>
-            {chequesOut === 1
-              ? 'شيك صادر للمورد يستحق خلال 7 أيام'
-              : 'شيكات صادرة للموردين تستحق خلال 7 أيام'}
-          </WaitingRow>
-        ) : null}
-        {recalled > 0 ? (
-          <WaitingRow to="/recall" count={recalled} tone="danger" icon={<WarningIcon />}>
-            {recalled === 1 ? 'دفعة موقوفة عن البيع (استدعاء)' : 'دفعات موقوفة عن البيع (استدعاء)'}
-          </WaitingRow>
-        ) : null}
-        {expiring > 0 ? (
-          <WaitingRow to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
-            {expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها'}
-          </WaitingRow>
-        ) : null}
-        {noPhoto > 0 ? (
-          // A suggestion, not an alarm: grey, last, no count chip
-          <li>
-            <Link
-              to="/products"
-              className="flex min-h-11 items-center gap-3 rounded-card px-3 text-sm text-ink-muted transition-colors duration-120 hover:bg-surface-muted"
-            >
-              <ProductsIcon size={20} />
-              <span className="min-w-0 flex-1">
-                {noPhoto === 1 ? 'منتج واحد بلا صورة' : `${noPhoto} ${products(noPhoto)} بلا صورة`}. أضف صوراً
-                ليسهل البيع.
-              </span>
-              <NextIcon size={16} />
-            </Link>
-          </li>
-        ) : null}
-      </ul>
+      </>
     );
   if (bare) return body;
   return (
@@ -1345,13 +1397,10 @@ export function HomePage() {
                     cheques,
                     noPhoto,
                     today,
-                    sizes: me.tenant.sectors.includes('clothing'),
                   }}
                   merch={merch}
                   showStock={seesStock}
-                  skip={
-                    me.tenant.sectors.includes('clothing') ? sizedLow(merch.data?.lowStock ?? []) : undefined
-                  }
+                  skip={groupedLow(merch.data?.lowStock ?? [])}
                 />
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}

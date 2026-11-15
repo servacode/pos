@@ -21,10 +21,12 @@ import {
   PrintIcon,
   SearchIcon,
   SegmentedControl,
-  SerialIcon,
+  BarcodeIcon,
   TextField,
   type BadgeTone,
+  useDigits,
 } from '@serva/ui';
+import { dayText } from '../../lib/dates';
 import { useMe } from '../../auth/useAuth';
 import { serialWord } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
@@ -65,6 +67,7 @@ function fieldError(e: unknown): string {
 
 /** The slip a customer takes: what was left, why, and the steps so far */
 function ClaimSlip({ claim }: { claim: WarrantyClaim }) {
+  const digits = useDigits();
   return createPortal(
     <div data-print-receipt="" className="hidden print:block" dir="rtl">
       <style>{'@page { size: A5; margin: 12mm }'}</style>
@@ -93,14 +96,14 @@ function ClaimSlip({ claim }: { claim: WarrantyClaim }) {
         <div>
           <dt className="inline font-semibold">الفاتورة: </dt>
           <dd className="inline">
-            {claim.saleNumber ?? '—'} {claim.soldOn ? `· ${claim.soldOn}` : ''}
+            {claim.saleNumber ?? '—'} {claim.soldOn ? `· ${dayText(claim.soldOn, digits)}` : ''}
           </dd>
         </div>
         <div>
           <dt className="inline font-semibold">الكفالة: </dt>
           <dd className="inline">
             {claim.warrantyUntil
-              ? `حتى ${claim.warrantyUntil} (${claim.underWarranty ? 'سارية عند الاستلام' : 'منتهية عند الاستلام'})`
+              ? `حتى ${dayText(claim.warrantyUntil, digits)} (${claim.underWarranty ? 'سارية عند الاستلام' : 'منتهية عند الاستلام'})`
               : 'لا كفالة'}
           </dd>
         </div>
@@ -258,6 +261,7 @@ function StepDialog({
  * moves no stock and posts nothing.
  */
 export function WarrantyPage() {
+  const digits = useDigits();
   const me = useMe();
   const [params] = useSearchParams();
   const [serial, setSerial] = useState(params.get('serial') ?? '');
@@ -410,7 +414,7 @@ export function WarrantyPage() {
                   <div>
                     <dt className="text-ink-muted">الفاتورة</dt>
                     <dd className="num font-semibold">
-                      <bdi dir="ltr">{found.saleNumber}</bdi> · {found.soldOn}
+                      <bdi dir="ltr">{found.saleNumber}</bdi> · {dayText(found.soldOn, digits)}
                     </dd>
                   </div>
                   <div>
@@ -424,7 +428,9 @@ export function WarrantyPage() {
                   </div>
                   <div>
                     <dt className="text-ink-muted">الكفالة حتى</dt>
-                    <dd className="num font-semibold">{found.warrantyUntil ?? '—'}</dd>
+                    <dd className="num font-semibold">
+                      {found.warrantyUntil ? dayText(found.warrantyUntil, digits) : '—'}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-ink-muted">مطالبات سابقة</dt>
@@ -498,7 +504,7 @@ export function WarrantyPage() {
           {listError ? <Alert tone="error">{listError}</Alert> : null}
           {claims && claims.length === 0 ? (
             <EmptyState
-              icon={SerialIcon}
+              icon={BarcodeIcon}
               title="لا مطالبات."
               description="تظهر هنا القطع التي رجعت للضمان أو الصيانة."
             />

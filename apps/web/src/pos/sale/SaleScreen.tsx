@@ -29,7 +29,6 @@ import {
   ClockIcon,
   CloseIcon,
   cn,
-  DeleteIcon,
   displayNumber,
   EmptyState,
   formatQuantity,
@@ -123,6 +122,7 @@ const PaymentPanel = lazyChunk(() =>
 export type SaleMode =
   | { kind: 'items' }
   | { kind: 'line'; lineNo: number; adjust: AdjustMode }
+  | { kind: 'fee'; item: CatalogItem; hit: BarcodeHit | null }
   | { kind: 'invoice' }
   | { kind: 'approve'; lineNo: number | null; need: ApprovalNeed }
   | { kind: 'batchApprove' }
@@ -180,6 +180,8 @@ export interface SaleScreenProps {
 }
 
 const SELLER_KEY = 'salesperson';
+/** The unit last used for each item (the piece or a box), so the unit sheet offers it first */
+const LAST_UNIT_KEY = 'serva.lastUnit';
 
 const SHORTCUTS: [string, string][] = [
   ['ابحث أو امسح', 'F2 أو /'],
@@ -350,9 +352,25 @@ export function SaleScreen(props: SaleScreenProps) {
       alive = false;
     };
   }, [pos.local, staff, session.userId]);
+  const [lastUnits, setLastUnits] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let alive = true;
+    void pos.local.get<Record<string, string>>(LAST_UNIT_KEY).then((saved) => {
+      if (alive && saved && typeof saved === 'object') setLastUnits(saved);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [pos.local]);
   // The sale put on hold keeps its seller with it: the new empty cart starts with the cashier again
   const holdSale = (name?: string) => {
-    const heldSeller = seller !== session.userId ? seller : undefined;
+    // A service with no fee is not a sale yet: it is never held
+    if (cart.lines.some((l) => isUnfedService(l, catalog.byVariant))) {
+      setNotice({ tone: 'warning', text: 'حدّد أجرة الخدمة أولاً، أو احذف سطرها، ثم علّق الفاتورة.' });
+      return;
+    }
+    // Every held cart keeps its seller (the cashier when none was picked), so the list always says who
+    const heldSeller = seller;
     setSeller(session.userId);
     void pos.local.remove(SELLER_KEY);
     props.onHold(name, heldSeller);
@@ -428,7 +446,18 @@ export function SaleScreen(props: SaleScreenProps) {
   } | null>(null);
   const zeroOk = useRef(false);
   const add = useCallback(
-    (item: CatalogItem, hit?: BarcodeHit | null, weighedQty?: number, choice?: ItemChoice) => {
+    (
+      item: CatalogItem,
+      hit?: BarcodeHit | null,
+      weighedQty?: number,
+      choice?: ItemChoice,
+      feeMinor?: number,
+    ) => {
+      // A service with no fixed fee: the fee pad opens first and NO line exists until the fee is confirmed
+      if (item.isService && item.price.priceMinor === 0 && feeMinor === undefined) {
+        setMode({ kind: 'fee', item, hit: hit ?? null });
+        return;
+      }
       if (
         item.price.priceMinor === 0 &&
         !item.isService &&
@@ -487,10 +516,33 @@ export function SaleScreen(props: SaleScreenProps) {
       if (props.done) props.onNextSale();
       // From the latest cart, so scans arriving before the next render all count.
       const current = cartRef.current;
-      const next = addItem(current, item, hit, qty, choice ?? null, batch);
+      let next: Cart;
+      let added: number | null;
+      if (feeMinor !== undefined) {
+        // Confirmed fee: a line of its own at that fee (the same fee again just adds one more)
+        const sameFee = current.lines.find(
+          (l) => l.variantId === item.variantId && l.priceMinor === feeMinor && l.adjustment === null,
+        );
+        if (sameFee) {
+          next = updateLine(current, sameFee.lineNo, { qty: sameFee.qty + qty });
+          added = sameFee.lineNo;
+        } else {
+          const fresh = addItem({ ...current, lines: [] }, item, hit, qty, choice ?? null, batch);
+          const line = {
+            ...fresh.lines[0]!,
+            priceMinor: feeMinor,
+            priceCurrency: ctx.currency,
+            adjustment: null,
+          };
+          next = { ...current, nextLineNo: fresh.nextLineNo, lines: [...current.lines, line] };
+          added = line.lineNo;
+        }
+      } else {
+        next = addItem(current, item, hit, qty, choice ?? null, batch);
+        added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
+      }
       cartRef.current = next;
       setCart(() => next);
-      const added = next.lines.find((l, i) => l !== current.lines[i])?.lineNo ?? null;
       setBump(added);
       // 03 › الصيدليات: what is on the shelf may have expired, or soon will
       const expiry = shown ? shown.expiry : planned ? null : item.nearestExpiry;
@@ -506,21 +558,18 @@ export function SaleScreen(props: SaleScreenProps) {
             text: `صلاحية «${item.name}» انتهت في ${dayText(expiry, digits)} حسب آخر استلام. تأكد من العلبة قبل البيع.`,
           });
         } else if (expiry <= soon) {
+          // Near its end: it goes first, whatever else is on the shelf (nearest expiry first)
           setNotice({
-            tone: 'info',
+            tone: 'warning',
             text: shown?.batchNo
-              ? `صلاحية «${item.name}» (دفعة ${shown.batchNo}) تنتهي في ${dayText(expiry, digits)}.`
-              : `صلاحية «${item.name}» تنتهي في ${dayText(expiry, digits)}.`,
+              ? `صلاحية «${item.name}» (دفعة ${shown.batchNo}) تنتهي في ${dayText(expiry, digits)}. أقرب انتهاء أولاً: تأكد من العلبة قبل البيع.`
+              : `صلاحية «${item.name}» تنتهي في ${dayText(expiry, digits)}. أقرب انتهاء أولاً: تأكد من العلبة قبل البيع.`,
           });
         }
       }
       if (item.tracksSerial && added !== null) {
         setSelected(added);
         setMode({ kind: 'serial', lineNo: added });
-      } else if (item.isService && item.price.priceMinor === 0 && added !== null) {
-        // A service with no fixed fee: the fee is asked for at once
-        setSelected(added);
-        setMode({ kind: 'line', lineNo: added, adjust: 'price' });
       } else if (item.unit?.allowsFraction && added !== null && weighedQty === undefined) {
         setSelected(added);
         setMode({ kind: 'line', lineNo: added, adjust: 'qty' });
@@ -592,6 +641,7 @@ export function SaleScreen(props: SaleScreenProps) {
 
   const keypadOpen =
     mode.kind === 'line' ||
+    mode.kind === 'fee' ||
     mode.kind === 'invoice' ||
     mode.kind === 'approve' ||
     mode.kind === 'batchApprove' ||
@@ -1344,6 +1394,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   }
                   selected={selected === line.lineNo}
                   onSelect={() => setSelected((s) => (s === line.lineNo ? null : line.lineNo))}
+                  onRemove={() => remove(line.lineNo)}
                 >
                   {need ? (
                     <p
@@ -1392,14 +1443,6 @@ export function SaleScreen(props: SaleScreenProps) {
                         </button>
                       </div>
                     )}
-                    <span className="flex-1" />
-                    <IconButton
-                      label="احذف السطر"
-                      size="md"
-                      variant="danger-soft"
-                      icon={<DeleteIcon size={20} />}
-                      onClick={() => remove(line.lineNo)}
-                    />
                   </div>
                   <div className="grid w-full auto-cols-fr grid-flow-col gap-2">
                     <Button
@@ -1759,6 +1802,27 @@ export function SaleScreen(props: SaleScreenProps) {
             />
           );
         })()
+      ) : effectiveMode.kind === 'fee' ? (
+        <AdjustPanel
+          key={effectiveMode.item.variantId}
+          title="حدّد الأجرة"
+          subtitle={effectiveMode.item.name}
+          modes={['price']}
+          initialMode="price"
+          currency={ctx.currency}
+          staff={staff}
+          check={(value) =>
+            value.mode === 'price' && value.minor > 0 ? { need: null } : { error: 'اكتب الأجرة بالأرقام.' }
+          }
+          onApply={(value) => {
+            if (value.mode !== 'price') return;
+            const { item, hit } = effectiveMode;
+            setMode({ kind: 'items' });
+            add(item, hit, undefined, undefined, value.minor);
+          }}
+          onClose={() => setMode({ kind: 'items' })}
+          preview={() => <span>خدمة: الأجرة تُحدَّد عند البيع</span>}
+        />
       ) : effectiveMode.kind === 'invoice' ? (
         <AdjustPanel
           title="خصم على الفاتورة"
@@ -1857,8 +1921,12 @@ export function SaleScreen(props: SaleScreenProps) {
           key={effectiveMode.variantId}
           item={catalog.byVariant.get(effectiveMode.variantId)!}
           packs={packsByVariant.get(effectiveMode.variantId) ?? []}
+          lastUnit={lastUnits[effectiveMode.variantId]}
           onPick={(hit) => {
             const item = catalog.byVariant.get(effectiveMode.variantId)!;
+            const next = { ...lastUnits, [effectiveMode.variantId]: hit ? hit.barcode.id : 'piece' };
+            setLastUnits(next);
+            void pos.local.set(LAST_UNIT_KEY, next);
             setMode({ kind: 'items' });
             add(item, hit);
           }}

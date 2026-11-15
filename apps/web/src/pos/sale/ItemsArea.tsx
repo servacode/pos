@@ -567,15 +567,17 @@ function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: s
     info.rentedCount === 0
   )
     return null;
-  const nothingSellable = (info.stockQty ?? 0) <= 0;
+  // «المتوفر للبيع» leaves out what is rented out as well as the expired and the blocked: one sentence for all of them
+  const onShelf = info.stockQty === null ? null : Math.max(0, info.stockQty - info.rentedCount * 1000);
+  const nothingSellable = (onShelf ?? 0) <= 0;
   const why = info.blockedQty === 0 ? 'منتهية' : info.expiredQty === 0 ? 'موقوفة' : 'غير صالحة';
   return (
     <>
-      {info.stockQty !== null ? (
+      {onShelf !== null ? (
         <span
           className={cn('num text-xs font-medium', nothingSellable ? 'text-danger-ink' : 'text-ink-muted')}
         >
-          {nothingSellable ? 'نفد' : `المتوفر ${formatQuantity(info.stockQty, digits)}`}
+          {nothingSellable ? 'نفد' : `المتوفر للبيع ${formatQuantity(onShelf, digits)}`}
         </span>
       ) : null}
       {/* Red only when nothing can be sold; otherwise a muted note of what is left out of the count */}
@@ -584,17 +586,19 @@ function TileMarks({ pieces, today }: { pieces: readonly CatalogItem[]; today: s
           <Badge tone="danger">{why}</Badge>
         ) : (
           <Badge tone="neutral">
-            منها {formatQuantity(unsellable, digits)} {why}
+            {formatQuantity(unsellable, digits)} {why}
           </Badge>
         )
       ) : null}
       {info.expiry ? (
-        <Badge tone={info.expiry.tone}>
-          {expiryText(info.expiry.days, (n) => displayNumber(String(n), digits))}
-        </Badge>
+        <span title="أقرب انتهاء أولاً">
+          <Badge tone={info.expiry.tone}>
+            {expiryText(info.expiry.days, (n) => displayNumber(String(n), digits))}
+          </Badge>
+        </span>
       ) : null}
       {info.rentedCount > 0 ? (
-        <Badge tone="neutral">منها {formatQuantity(info.rentedCount * 1000, digits)} مؤجَّر</Badge>
+        <Badge tone="neutral">{formatQuantity(info.rentedCount * 1000, digits)} مؤجَّر</Badge>
       ) : null}
       {info.tracksSerial ? <Badge tone="neutral">برقم تسلسلي</Badge> : null}
     </>

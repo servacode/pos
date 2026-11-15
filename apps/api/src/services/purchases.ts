@@ -648,6 +648,9 @@ export async function inventory(
       name: string;
       qty: string;
       value_minor: string;
+      ref_qty: string;
+      ref_value_minor: string;
+      dead_qty: string;
       attributes: { name: string; value: string }[] | null;
       product_id: string;
       product_name: string;
@@ -655,7 +658,16 @@ export async function inventory(
     }>(sql`
       select l.variant_id, l.branch_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
              v.attributes, p.id as product_id, p.name_ar as product_name, un.allows_fraction,
-             l.qty::text, coalesce(sv.value_minor, 0)::text as value_minor
+             l.qty::text, coalesce(sv.value_minor, 0)::text as value_minor,
+             coalesce(sv.ref_qty, 0)::text as ref_qty, coalesce(sv.ref_value_minor, 0)::text as ref_value_minor,
+             (select coalesce(sum(bm.q), 0) from (
+                select m.batch_no, m.expiry_date, sum(m.qty) as q from batch_movements m
+                where m.tenant_id = l.tenant_id and m.variant_id = l.variant_id and m.branch_id = l.branch_id
+                group by m.batch_no, m.expiry_date having sum(m.qty) > 0) bm
+              where bm.expiry_date < current_date
+                 or exists (select 1 from batch_blocks bl
+                            where bl.tenant_id = l.tenant_id and bl.variant_id = l.variant_id
+                              and bl.batch_no = bm.batch_no and bl.released_at is null))::text as dead_qty
       from stock_levels l
       join variants v on v.tenant_id = l.tenant_id and v.id = l.variant_id
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
@@ -676,6 +688,9 @@ export async function inventory(
         allowsFraction: r.allows_fraction ?? false,
         qty,
         valueMinor: value,
+        sellableQty: Math.max(0, qty - Number(r.dead_qty)),
+        refQty: Number(r.ref_qty),
+        refValueMinor: Number(r.ref_value_minor),
         unitCostMinor: qty > 0 ? Math.round((value * 1000 * 10_000) / qty) / 10_000 : null,
       };
     });

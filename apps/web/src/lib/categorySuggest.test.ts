@@ -20,6 +20,24 @@ describe('suggestCategoryName', () => {
     expect(suggestCategoryName('قفازات صوف', clothes)).toBeNull();
   });
 
+  it('never proposes a grocery category in a medical store, and reads catheters and thermometers', () => {
+    const med = ['medical_supplies'] as const;
+    expect(suggestCategoryName('قسطرة فولي', med)).toBe('مستهلكات');
+    expect(suggestCategoryName('ميزان حرارة رقمي', med)).toBe('أجهزة قياس');
+    expect(suggestCategoryName('ترمومتر', med)).toBe('أجهزة قياس');
+    expect(suggestCategoryName('حليب أطفال', med)).not.toBe('ألبان وأجبان');
+    expect(suggestCategoryName('معلب فول', ['pharmacy'])).toBeNull();
+    // A grocery store keeps them
+    expect(suggestCategoryName('فول مدمس', ['supermarket'])).toBe('معلبات');
+  });
+
+  it('uses the store’s own longer name for a category', () => {
+    expect(suggestFor('قفازات', [cat('c1', 'مستهلكات طبية')], ['medical_supplies'])).toEqual({
+      categoryId: 'c1',
+      newName: null,
+    });
+  });
+
   it('says nothing for a name it does not know', () => {
     expect(suggestCategoryName('شيء غريب', ['supermarket'])).toBeNull();
     expect(suggestCategoryName('   ', undefined)).toBeNull();

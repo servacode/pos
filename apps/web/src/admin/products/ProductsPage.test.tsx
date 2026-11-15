@@ -58,6 +58,10 @@ describe('/products list on a phone and the export', () => {
       expect(first).toHaveTextContent('حليب المراعي 1 لتر');
       expect(first).toHaveTextContent('ألبان وأجبان');
       expect(shownText(first)).toContain('150 ل.س');
+      // one primary «+ منتج»; the export, the photos and the import sit behind «⋯»
+      expect(screen.getAllByRole('link', { name: 'أضف منتجاً' })).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: 'صدّر الجدول' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'المزيد من الإجراءات' })).toBeInTheDocument();
     } finally {
       window.matchMedia = original;
     }
@@ -66,6 +70,35 @@ describe('/products list on a phone and the export', () => {
   it('offers «صدّر الجدول» for the whole search', async () => {
     openProducts();
     expect(await screen.findByRole('button', { name: 'صدّر الجدول' })).toBeInTheDocument();
+  });
+});
+
+describe('/products list: attention and sellable stock', () => {
+  it('shows «متاح للبيع» when expired or blocked batches make it less than the stock', async () => {
+    openProducts({
+      [list()]: page([listItem({ stockQty: 319_000, sellableQty: 219_000 })]),
+    });
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 219');
+  });
+
+  it('keeps the uncategorised banner to one line with the services left out, and lets «بلا صورة» be dismissed', async () => {
+    localStorage.removeItem('serva.products.attention');
+    openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem({ hasImage: false })],
+          nextCursor: null,
+          attention: { zeroPrice: 0, noPhoto: 12, expiringSoon: 0, uncategorised: 0 },
+        },
+      },
+    });
+    const line = await screen.findByLabelText('تحتاج انتباهك');
+    expect(line).toHaveTextContent('12 بلا صورة');
+    expect(line).not.toHaveTextContent('بلا تصنيف');
+    fireEvent.click(screen.getByRole('button', { name: 'أخفِ هذا التنبيه' }));
+    expect(screen.queryByLabelText('تحتاج انتباهك')).not.toBeInTheDocument();
   });
 });
 
@@ -433,7 +466,7 @@ describe('/products list: photos, expiry and stock', () => {
       [list()]: page([listItem({ stockQty: 14_000, sellableQty: 16_000, hasImage: false, thumbUrl: null })]),
     });
     const table = await screen.findByRole('table', { name: 'المنتجات' });
-    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 16 · ناقص 2');
+    expect(await within(table).findByText(/متاح للبيع/)).toHaveTextContent('متاح للبيع 16 · ناقص قطعتان');
     // no letter box: the picture's place holds an icon
     expect(table.querySelector('a[href$="#images"] svg')).not.toBeNull();
   });
@@ -442,14 +475,16 @@ describe('/products list: photos, expiry and stock', () => {
     openProducts();
     await screen.findByText('القطع في المخزون');
     // 94 on the shelf; the −2.5 of the other product is not netted off, it is counted apart
-    expect(await screen.findByText(/منها ناقص/)).toHaveTextContent('1');
+    expect(await screen.findByText('صنف واحد ناقص')).toBeInTheDocument();
   });
 
   it('tells a negative stock apart with «سالب» and offers the count and the receiving', async () => {
     openProducts();
-    expect(await screen.findByText('سالب')).toBeInTheDocument();
+    expect((await screen.findAllByText('سالب')).length).toBeGreaterThan(0);
+    // one plain sentence and one action on the «نفد من الرف» card
+    expect(screen.getByText(/بعتَ أكثر مما سجّلت، صحّح/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'اجرد المخزون' })).toHaveAttribute('href', '/inventory');
-    expect(screen.getByRole('link', { name: 'سجّل استلاماً' })).toHaveAttribute('href', '/purchases');
+    expect(screen.queryByRole('link', { name: 'سجّل استلاماً' })).not.toBeInTheDocument();
   });
 
   it('says a service has no shelf price, instead of 0', async () => {

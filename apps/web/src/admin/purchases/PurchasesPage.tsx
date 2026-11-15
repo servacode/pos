@@ -1,5 +1,5 @@
 import { Link, useSearchParams } from 'react-router';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   contactPhoneSchema,
   type PurchasePayment,
@@ -127,6 +127,11 @@ export function PurchasesPage() {
   useEffect(load, [load]);
 
   const base = suppliers?.baseCurrency ?? 'SYP';
+  // After a save the form closes and the page is left scrolled down: bring the success message into view
+  const noticeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (notice && mode === 'list') noticeRef.current?.scrollIntoView?.({ block: 'start' });
+  }, [notice, mode]);
   const done = (message: string) => {
     setNotice(message);
     setMode('list');
@@ -240,7 +245,11 @@ export function PurchasesPage() {
           }
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
-        {notice && mode === 'list' ? <Alert tone="success">{notice}</Alert> : null}
+        {notice && mode === 'list' ? (
+          <div ref={noticeRef} className="scroll-mt-24">
+            <Alert tone="success">{notice}</Alert>
+          </div>
+        ) : null}
         {mode === 'buy' && suppliers ? (
           <PurchaseForm
             suppliers={suppliers.items}

@@ -1030,9 +1030,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                     .filter((o) => o.amountMinor > 0)
                     .map((o) => displayNumber(formatMoney(o.amountMinor, o.currency), digits))
                     .join(' و');
-                  setOpenedNote(
-                    `فُتحت الوردية ${displayNumber(opened.number, digits)}${float ? ` بعهدة افتتاح ${float}` : ''}.`,
-                  );
+                  setOpenedNote(`فُتحت الوردية ${opened.number}${float ? ` بعهدة افتتاح ${float}` : ''}.`);
                 }}
               />
             ) : view === 'close' ? (

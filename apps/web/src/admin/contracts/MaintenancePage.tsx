@@ -11,7 +11,7 @@ import {
   Money,
   PageHeader,
   SegmentedControl,
-  SerialIcon,
+  BarcodeIcon,
   TextField,
   useDigits,
   type BadgeTone,
@@ -282,7 +282,7 @@ export function MaintenancePage() {
           {error ? <Alert tone="error">{error}</Alert> : null}
           {items && items.length === 0 ? (
             <EmptyState
-              icon={SerialIcon}
+              icon={BarcodeIcon}
               title={view === 'upcoming' ? 'لا زيارات قريبة.' : 'لا عقود صيانة.'}
               description="أضف عقداً بزر «عقد جديد»، وتظهر هنا زياراته عند اقترابها."
             />

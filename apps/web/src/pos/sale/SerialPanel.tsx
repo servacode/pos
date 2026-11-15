@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Approval, SalePayload } from '@serva/core/contracts/documents';
 import { serialLabel } from '@serva/core/contracts/warranty';
-import { Alert, Button, CheckIcon, SerialIcon, TextField } from '@serva/ui';
+import { Alert, Button, CheckIcon, BarcodeIcon, TextField } from '@serva/ui';
 import type { OutboxEntry } from '@serva/sync';
 import type { Catalog } from '../catalog';
 import { usePos } from '../services';
@@ -121,7 +121,7 @@ export function SerialPanel({
 
   if (unknown) {
     return (
-      <SalePanel label="الرقم التسلسلي" title={line.name} icon={<SerialIcon size={20} />}>
+      <SalePanel label="الرقم التسلسلي" title={line.name} icon={<BarcodeIcon size={20} />}>
         <ManagerCode
           staff={staff}
           permission="inventory.adjust"
@@ -134,7 +134,7 @@ export function SerialPanel({
   }
 
   return (
-    <SalePanel label="الرقم التسلسلي" title={line.name} icon={<SerialIcon size={20} />}>
+    <SalePanel label="الرقم التسلسلي" title={line.name} icon={<BarcodeIcon size={20} />}>
       {error ? <Alert tone="error">{error}</Alert> : null}
       <form
         className="flex flex-col gap-5"

@@ -69,7 +69,7 @@ export function RecallPage() {
   // A red «استدعاء» on a batch row opens this page with its number: the search runs by itself
   const prefilled = params.get('batch')?.trim() ?? '';
   useEffect(() => {
-    if (prefilled) void search(prefilled);
+    if (prefilled) void search(prefilled, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefilled]);
 

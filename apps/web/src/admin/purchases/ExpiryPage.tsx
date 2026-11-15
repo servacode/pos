@@ -47,6 +47,9 @@ const IN_URGENCY: Record<Exclude<Urgency, 'all'>, (r: ExpiryRow) => boolean> = {
   month: (r) => daysOf(r) >= 0 && daysOf(r) <= 30,
 };
 
+/** The «بلا دفعة» row: what no batch holds (it can run below zero), so the batches add up to the stock */
+const isUnbatched = (r: ExpiryRow) => !r.batchNo && !r.expiryDate;
+
 const rowKey = (r: ExpiryRow) => `${r.variantId}|${r.branchId}|${r.batchNo ?? ''}|${r.expiryDate ?? ''}`;
 
 const ACTION_TITLE: Record<Action['kind'], string> = {
@@ -81,7 +84,7 @@ export function ExpiryPage() {
     setError(null);
     const key = `expiry|${days}`;
     setData((now) => recallAnswer<ExpiryResponse>(key) ?? now);
-    listExpiry(Number(days))
+    listExpiry(Number(days), days === '3650')
       .then((answer) => {
         rememberAnswer(key, answer);
         setData(answer);
@@ -180,6 +183,7 @@ export function ExpiryPage() {
 
   /** Red only for what is gone or goes within the month; a batch with a long time left is a plain button */
   const rowActions = (r: ExpiryRow) => {
+    if (isUnbatched(r)) return null;
     const urgent = r.daysLeft !== null && r.daysLeft <= 30;
     return (
       <span className="flex items-center gap-1.5 whitespace-nowrap print:hidden">
@@ -218,22 +222,32 @@ export function ExpiryPage() {
     );
   };
 
-  const stateBadge = (r: ExpiryRow) => (
-    <span className="flex items-center gap-1.5 whitespace-nowrap">
-      {r.daysLeft === null ? (
-        <Badge tone="neutral">بلا تاريخ</Badge>
-      ) : r.daysLeft < 0 ? (
-        <Badge tone="danger">
-          منتهٍ منذ {countNoun(-r.daysLeft, COUNT_NOUNS.day, String(-r.daysLeft), true)}
-        </Badge>
-      ) : r.daysLeft <= 30 ? (
-        <Badge tone="warning">باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}</Badge>
-      ) : (
-        <Badge tone="neutral">باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}</Badge>
-      )}
-      {r.blocked ? <Badge tone="danger">موقوفة</Badge> : null}
-    </span>
-  );
+  const stateBadge = (r: ExpiryRow) =>
+    isUnbatched(r) ? (
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        <Badge tone="neutral">بلا دفعة</Badge>
+        {r.qty < 0 ? <Badge tone="danger">سالب</Badge> : null}
+      </span>
+    ) : (
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        {r.daysLeft === null ? (
+          <Badge tone="neutral">بلا تاريخ</Badge>
+        ) : r.daysLeft < 0 ? (
+          <Badge tone="danger">
+            منتهٍ منذ {countNoun(-r.daysLeft, COUNT_NOUNS.day, String(-r.daysLeft), true)}
+          </Badge>
+        ) : r.daysLeft <= 30 ? (
+          <Badge tone="warning">
+            باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}
+          </Badge>
+        ) : (
+          <Badge tone="neutral">
+            باقٍ {countNoun(r.daysLeft, COUNT_NOUNS.day, String(r.daysLeft), true)}
+          </Badge>
+        )}
+        {r.blocked ? <Badge tone="danger">موقوفة</Badge> : null}
+      </span>
+    );
 
   const columns: DataColumn<ExpiryRow>[] = [
     {
@@ -294,7 +308,7 @@ export function ExpiryPage() {
       key: 'qty',
       header: 'المتبقي',
       numeric: true,
-      cell: (r) => formatQuantity(r.qty, digits),
+      cell: (r) => <bdi className="num">{formatQuantity(r.qty, digits)}</bdi>,
     },
     {
       key: 'purchase',
@@ -453,6 +467,12 @@ export function ExpiryPage() {
               }
             />
           )}
+          {shown.some(isUnbatched) ? (
+            <p className="text-sm text-ink-muted">
+              «بلا دفعة» هو ما لا تحمله أي دفعة (قد يكون سالباً بعد بيع بلا رقم دفعة)، فمجموع كل الصفوف يساوي
+              المخزون.
+            </p>
+          ) : null}
         </section>
       </div>
       {printing ? (

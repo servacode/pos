@@ -189,6 +189,19 @@ export function ReturnScreen({
   const recentOther0 = recent.filter((h) => !sales.some((s) => s.number === h.number)).slice(0, 8);
   const recentOther = search.trim() === '' ? recentOther0 : [];
   const storeList: readonly InvoiceHit[] = remote.hits?.length ? remote.hits : recentOther;
+  // This device's invoices and the store's, one list, the newest first (a store invoice already here shows once)
+  const rows = useMemo(() => {
+    const list: (
+      { kind: 'local'; at: number; sale: ReturnableSale } | { kind: 'hit'; at: number; hit: InvoiceHit }
+    )[] = [
+      ...shown.map((sale) => ({ kind: 'local' as const, at: Date.parse(sale.deviceTime), sale })),
+      ...storeList
+        .filter((h) => !shown.some((x) => x.number === h.number))
+        .map((hit) => ({ kind: 'hit' as const, at: Date.parse(hit.deviceTime), hit })),
+    ];
+    return list.sort((x, y) => y.at - x.at);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown.map((x) => x.id).join(), storeList]);
 
   // Nothing here matches what is typed: the whole store is searched by itself, no second tap
   const typedNow = search.trim();
@@ -199,6 +212,22 @@ export function ReturnScreen({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [typedNow, entries, shown.length]);
+
+  // Some match here: the store's other matches join the same list (newest first), without opening any
+  useEffect(() => {
+    const token = pos.device.token;
+    if (typedNow.length < 3 || shown.length === 0 || picked || !token || !pos.online()) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      void searchInvoices(typedNow, windowDays, token, pos.fetch).then((hits) => {
+        if (alive && hits && hits.length > 0) setRemote((r) => (r.busy ? r : { ...r, hits }));
+      });
+    }, 450);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [typedNow, shown.length, picked, pos, windowDays]);
 
   // The picked invoice as it is now (a return saved here a moment ago counts)
   const current = picked ? (sales.find((s) => s.id === picked.id) ?? picked) : null;
@@ -450,45 +479,6 @@ export function ReturnScreen({
             </Button>
           ) : null}
           {remote.note ? <Alert tone="info">{remote.note}</Alert> : null}
-          {storeList.length > 0 ? (
-            <>
-              {!remote.hits?.length ? (
-                <p className="text-xs font-semibold text-ink-muted">آخر فواتير المحل (من أجهزة أخرى)</p>
-              ) : null}
-              <ul aria-label="فواتير المحل" className="-mx-1 flex flex-col gap-1 px-1 pb-2">
-                {storeList.map((h) => {
-                  const at = Date.parse(h.deviceTime);
-                  return (
-                    <li key={h.id}>
-                      <button
-                        type="button"
-                        disabled={remote.busy}
-                        onClick={() => void pickHit(h)}
-                        className="flex min-h-14 w-full items-center justify-between gap-3 rounded-control border border-transparent px-3 py-2 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
-                      >
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
-                            {h.number}
-                          </bdi>
-                          <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
-                            <span className="num">
-                              {dateText(at, digits)} ، {clockText(at, digits)}
-                            </span>
-                            {h.customerName ? <bdi>{h.customerName}</bdi> : null}
-                          </span>
-                        </span>
-                        <Money
-                          minor={h.totalMinor}
-                          currency={h.currency}
-                          className="shrink-0 font-bold text-ink"
-                        />
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
-          ) : null}
           {entries === null ? (
             <div aria-hidden="true" className="flex flex-col gap-2 py-1">
               {[0, 1, 2].map((i) => (
@@ -504,48 +494,81 @@ export function ReturnScreen({
           !(remote.hits && remote.hits.length > 0) ? (
             <p className="py-6 text-center text-sm text-ink-muted">لا فواتير على هذا الجهاز تطابق البحث.</p>
           ) : null}
-          <ul className="-mx-1 flex flex-col gap-1 px-1 pb-4 pt-0.5">
-            {shown.map((s) => {
-              const at = Date.parse(s.deviceTime);
-              const selected = current?.id === s.id;
-              return (
-                <li key={s.id}>
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => choose(s)}
-                    className={cn(
-                      'flex min-h-14 w-full items-center justify-between gap-3 rounded-control border px-3 py-2 text-start transition-colors duration-120 ease-standard',
-                      selected
-                        ? 'border-brand bg-brand-soft/60 ring-4 ring-brand/10'
-                        : 'border-transparent hover:bg-surface-muted',
-                    )}
-                  >
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
-                        {s.number}
-                      </bdi>
-                      <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
-                        <span className="num">
-                          {dateText(at, digits)} ، {clockText(at, digits)}
+          {rows.length > 0 ? (
+            <ul aria-label="فواتير المحل" className="-mx-1 flex flex-col gap-1 px-1 pb-4 pt-0.5">
+              {rows.map((row) => {
+                if (row.kind === 'hit') {
+                  const h = row.hit;
+                  return (
+                    <li key={h.id}>
+                      <button
+                        type="button"
+                        disabled={remote.busy}
+                        onClick={() => void pickHit(h)}
+                        className="flex min-h-14 w-full items-center justify-between gap-3 rounded-control border border-transparent px-3 py-2 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
+                            {h.number}
+                          </bdi>
+                          <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+                            <span className="num">
+                              {dateText(row.at, digits)} ، {clockText(row.at, digits)}
+                            </span>
+                            {h.customerName ? <bdi>{h.customerName}</bdi> : null}
+                          </span>
                         </span>
-                        {s.returned.length > 0 ? (
-                          <span className="text-warning-ink">· رجع منها شيء</span>
-                        ) : (
-                          ''
-                        )}
+                        <Money
+                          minor={h.totalMinor}
+                          currency={h.currency}
+                          className="shrink-0 font-bold text-ink"
+                        />
+                      </button>
+                    </li>
+                  );
+                }
+                const s = row.sale;
+                const at = row.at;
+                const selected = current?.id === s.id;
+                return (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => choose(s)}
+                      className={cn(
+                        'flex min-h-14 w-full items-center justify-between gap-3 rounded-control border px-3 py-2 text-start transition-colors duration-120 ease-standard',
+                        selected
+                          ? 'border-brand bg-brand-soft/60 ring-4 ring-brand/10'
+                          : 'border-transparent hover:bg-surface-muted',
+                      )}
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <bdi dir="ltr" className="num font-semibold text-ink [overflow-wrap:anywhere]">
+                          {s.number}
+                        </bdi>
+                        <span className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
+                          <span className="num">
+                            {dateText(at, digits)} ، {clockText(at, digits)}
+                          </span>
+                          {s.returned.length > 0 ? (
+                            <span className="text-warning-ink">· رجع منها شيء</span>
+                          ) : (
+                            ''
+                          )}
+                        </span>
                       </span>
-                    </span>
-                    <Money
-                      minor={s.sale.totals.totalMinor}
-                      currency={s.sale.currency}
-                      className="shrink-0 font-bold text-ink"
-                    />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                      <Money
+                        minor={s.sale.totals.totalMinor}
+                        currency={s.sale.currency}
+                        className="shrink-0 font-bold text-ink"
+                      />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
         </section>
         {!current ? (
           <EmptyState

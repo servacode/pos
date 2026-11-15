@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { mockFetch, type MockReply } from './test/fetchMock';
 import { makeMe, signedInRefresh, signedOutRefresh } from './test/fixtures';
 import { renderApp } from './test/renderApp';
+import { setAccessToken } from './lib/api';
 
 describe('routing', () => {
   it('shows a loader while the session is being restored', async () => {
@@ -74,7 +75,19 @@ describe('routing', () => {
     expect(screen.getByRole('heading', { name: 'أهلاً، أحمد' })).toBeInTheDocument();
   });
 
+  it('does not ask for a new token when this tab already holds one (coming from the till)', async () => {
+    sessionStorage.setItem('serva.me', JSON.stringify(makeMe()));
+    setAccessToken('held');
+    const { requestsTo } = mockFetch({ 'GET /v1/me': { status: 200, body: makeMe() } });
+    renderApp('/');
+
+    expect(await screen.findByRole('heading', { name: 'أهلاً، أحمد' })).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(0);
+  });
+
   it('ends at the login page when the kept session turns out to be lost', async () => {
+    // A fresh page load: no token held in memory yet
+    setAccessToken(null);
     sessionStorage.setItem('serva.me', JSON.stringify(makeMe()));
     mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
     renderApp('/');

@@ -82,10 +82,10 @@ export function ItemTile({
       disabled={outOfStock}
       aria-pressed={selected}
       className={cn(
-        'flex min-h-26 min-w-28 flex-col gap-3 rounded-card border text-start text-ink shadow-e1 select-none touch-manipulation',
+        'flex min-h-26 min-w-28 flex-col gap-3 max-sm:gap-2 rounded-card border text-start text-ink shadow-e1 select-none touch-manipulation',
         'transition-[background-color,border-color,box-shadow,translate,scale] duration-120 ease-standard',
         'enabled:hover:shadow-e2 motion-safe:enabled:hover:-translate-y-0.5 motion-safe:enabled:active:scale-[0.98]',
-        picture ? 'p-2 pb-3' : 'p-3.5',
+        picture ? 'p-2 pb-3 max-sm:pb-2' : 'p-3.5 max-sm:p-3',
         selected
           ? 'border-brand bg-brand-soft ring-1 ring-brand'
           : 'border-line bg-surface enabled:hover:border-line-control/50',
@@ -98,13 +98,13 @@ export function ItemTile({
         <img
           src={imageUrl}
           alt=""
-          className="aspect-[4/3] w-full rounded-control bg-surface-muted object-cover"
+          className="aspect-[4/3] max-sm:aspect-[3/2] w-full rounded-control bg-surface-muted object-cover"
         />
       ) : pictureSlot ? (
         <span
           aria-hidden="true"
           className={cn(
-            'grid aspect-[4/3] w-full place-items-center rounded-control text-2xl font-bold text-ink-subtle',
+            'grid aspect-[4/3] max-sm:aspect-[3/2] w-full place-items-center rounded-control text-2xl font-bold text-ink-subtle',
             selected ? 'bg-surface' : 'bg-surface-muted',
           )}
         >
@@ -129,13 +129,20 @@ export function ItemTile({
           ) : null}
         </span>
       ) : null}
-      <span className={cn('flex flex-col gap-0.5', picture && 'px-1.5')}>
+      {/* Two lines of name are always reserved, so the price sits at the same height on every tile of a row */}
+      <span
+        className={cn(
+          'flex flex-col gap-0.5',
+          detail && !monogram ? 'min-h-[4rem]' : 'min-h-[2.75rem]',
+          picture && 'px-1.5',
+        )}
+      >
         <span className="line-clamp-2 text-base/[22px] font-semibold">
           <bdi>{name}</bdi>
         </span>
         {detail && !monogram ? <span className="text-sm text-ink-muted">{detail}</span> : null}
       </span>
-      <span className={cn('mt-auto flex items-center justify-between gap-2', picture && 'px-1.5')}>
+      <span className={cn('flex items-center justify-between gap-2', picture && 'px-1.5')}>
         {priceLabel ? (
           <span className="text-sm font-semibold text-ink-muted">{priceLabel}</span>
         ) : (

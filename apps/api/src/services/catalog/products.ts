@@ -253,7 +253,7 @@ async function storeTotals(tx: Transaction, tenantId: string): Promise<ProductLi
       where p.tenant_id = ${tenantId} and p.archived_at is null and p.status = 'active')
     select (select count(*)::int from products p
              where p.tenant_id = ${tenantId} and p.archived_at is null and p.status = 'active') as products,
-           count(*)::int as variants,
+           (count(*) filter (where type = 'stock'))::int as variants,
            coalesce(sum(greatest(q, 0)) filter (where type = 'stock'), 0)::text as pieces,
            (count(*) filter (where type = 'stock' and q < 0))::int as negative,
            (count(*) filter (where type = 'stock' and q <= 0))::int as run_out
@@ -319,6 +319,7 @@ export async function listProducts(
       filters.push(sql`(p.name_ar, p.id) > (${name}, ${id}::uuid)`);
     }
     const branchFilter = query.branchId ? sql`and s.branch_id = ${query.branchId}` : sql``;
+    const movementBranch = query.branchId ? sql`and m.branch_id = ${query.branchId}` : sql``;
     const rows = await tx.execute<ListRow>(sql`
       select p.id, p.name_ar, p.name_en, p.category_id, c.name as category_name, p.season, p.type, p.status,
              p.archived_at, p.version,
@@ -330,11 +331,20 @@ export async function listProducts(
              (select coalesce(sum(s.qty), 0)::text from variants v
               join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id ${branchFilter}
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as stock_qty,
-             (select coalesce(sum(greatest(t.q, 0)), 0)::text from (
-                select sum(s.qty) as q from variants v
+             (select coalesce(sum(greatest(t.q - t.dead, 0)), 0)::text from (
+                select sum(s.qty) as q,
+                       (select coalesce(sum(bm.q), 0) from (
+                          select m.batch_no, m.expiry_date, sum(m.qty) as q from batch_movements m
+                          where m.tenant_id = v.tenant_id and m.variant_id = v.id ${movementBranch}
+                          group by m.branch_id, m.batch_no, m.expiry_date having sum(m.qty) > 0) bm
+                        where bm.expiry_date < current_date
+                           or exists (select 1 from batch_blocks bl
+                                      where bl.tenant_id = v.tenant_id and bl.variant_id = v.id
+                                        and bl.batch_no = bm.batch_no and bl.released_at is null)) as dead
+                from variants v
                 join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id ${branchFilter}
                 where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
-                group by v.id) t) as sellable_qty,
+                group by v.tenant_id, v.id) t) as sellable_qty,
              exists (select 1 from product_images pi
                      where pi.tenant_id = p.tenant_id and pi.product_id = p.id) as has_image,
              (select pi.upload_id::text from product_images pi
@@ -405,7 +415,7 @@ export async function listProducts(
                  select 1 from variants v
                  where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
                    and v.nearest_expiry >= current_date and v.nearest_expiry <= current_date + 30))::int as expiring_soon,
-               count(*) filter (where p.category_id is null)::int as uncategorised
+               count(*) filter (where p.category_id is null and p.type <> 'service')::int as uncategorised
         from products p
         where p.tenant_id = ${ctx.auth.tenantId} and p.archived_at is null and p.status = 'active'`);
       attention = {

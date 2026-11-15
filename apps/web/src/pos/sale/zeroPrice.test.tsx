@@ -85,4 +85,25 @@ describe('a service priced at zero', () => {
     await user.click(within(panel).getByRole('button', { name: /ارجع للأصناف/ }));
     expect(screen.queryByRole('list', { name: 'أسطر الفاتورة' })).not.toBeInTheDocument();
   });
+
+  it('adds no line while the fee pad is open, and Esc adds nothing', async () => {
+    const { user } = await saleScreen({ sets: serviceSets() });
+    await scan(user, '6291009999992');
+    await screen.findByRole('region', { name: 'حدّد الأجرة' });
+    expect(screen.queryByRole('list', { name: 'أسطر الفاتورة' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('region', { name: 'حدّد الأجرة' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'أسطر الفاتورة' })).not.toBeInTheDocument();
+  });
+
+  it('a confirmed fee makes exactly one line at that fee', async () => {
+    const { user } = await saleScreen({ sets: serviceSets() });
+    await scan(user, '6291009999992');
+    const panel = await screen.findByRole('region', { name: 'حدّد الأجرة' });
+    await user.keyboard('2500');
+    await user.click(within(panel).getByRole('button', { name: 'طبّق' }));
+    const list = await screen.findByRole('list', { name: 'أسطر الفاتورة' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(1);
+    expect(list).toHaveTextContent('2,500');
+  });
 });

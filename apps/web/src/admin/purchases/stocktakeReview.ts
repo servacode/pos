@@ -1,4 +1,4 @@
-import type { InventoryRow } from '@serva/core';
+import { stockBack, stockOut, type InventoryRow } from '@serva/core';
 import { qtyOf } from './api';
 
 /** What is wrong with a counted quantity the owner typed, or null (an empty box is «not counted»). */
@@ -35,7 +35,24 @@ export function reviewCount(items: InventoryRow[], counts: Record<string, string
     const counted = qtyOf(counts[row.variantId] ?? '');
     if (counted === null) continue;
     const diffQty = counted - row.qty;
-    const cost = row.unitCostMinor ?? 0;
+    // The same costing the save uses (stock at or below zero is valued at the last known average)
+    let diffValueMinor: number;
+    if (row.refQty !== undefined && row.refValueMinor !== undefined) {
+      const was = {
+        qty: row.qty,
+        valueMinor: row.valueMinor,
+        refQty: row.refQty,
+        refValueMinor: row.refValueMinor,
+      };
+      diffValueMinor =
+        diffQty < 0
+          ? -stockOut(was, -diffQty).costMinor
+          : diffQty > 0
+            ? stockBack(was, diffQty).valueMinor
+            : 0;
+    } else {
+      diffValueMinor = Math.round(((row.unitCostMinor ?? 0) * diffQty) / 1000);
+    }
     lines.push({
       variantId: row.variantId,
       name: row.name,
@@ -43,7 +60,7 @@ export function reviewCount(items: InventoryRow[], counts: Record<string, string
       countedQty: counted,
       expectedQty: row.qty,
       diffQty,
-      diffValueMinor: Math.round((cost * diffQty) / 1000),
+      diffValueMinor,
     });
   }
   return lines;

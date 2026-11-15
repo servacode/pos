@@ -104,6 +104,48 @@ describe('the search box finds online orders, rentals and cheques', () => {
   });
 });
 
+describe('the search box keeps numbers and dates readable in Arabic', () => {
+  it('draws phones and codes left to right and writes a cheque date in words', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: meWith(['customers.view']) },
+      'GET /v1/customers?q=11': {
+        status: 200,
+        body: { items: [{ id: 'c-1', name: 'ريم', phone: '+963944555222' }] },
+      },
+      'GET /v1/online-orders': {
+        status: 200,
+        body: { items: [{ id: 'o-1', number: 'ONL-1100', customerName: 'ريم', phone: '0999' }] },
+      },
+      'GET /v1/rentals?status=all': { status: 200, body: { items: [] } },
+      'GET /v1/cheques': {
+        status: 200,
+        body: {
+          items: [
+            {
+              sourceType: 'invoice',
+              sourceId: 'i-1',
+              paymentNo: 1,
+              documentNumber: 'INV-1',
+              reference: 'بنك سورية · 1100 · 2026-12-01',
+              customerName: 'سامر',
+            },
+          ],
+        },
+      },
+    });
+    const { user } = renderApp('/products');
+    await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
+    await user.type(await screen.findByRole('textbox', { name: 'اسم الصفحة' }), '11');
+    const phone = await screen.findByText('+963944555222');
+    expect(phone.closest('bdi')).toHaveAttribute('dir', 'ltr');
+    expect(await screen.findByText('ONL-1100')).toHaveAttribute('dir', 'ltr');
+    const cheque = await screen.findByRole('button', { name: /بنك سورية/ });
+    expect(cheque).toHaveTextContent('1 كانون الأول 2026');
+    expect(cheque).not.toHaveTextContent('2026-12-01');
+  });
+});
+
 describe('the search box is quick', () => {
   it('shows a record as soon as its own request answers, and asks each whole list once', async () => {
     let finishOrders: (reply: MockReply) => void = () => {};

@@ -92,6 +92,8 @@ export function searchInvoices(
         : sql``;
     const byNumber =
       digits.length >= 3 ? sql`or regexp_replace(i.number, '\D', '', 'g') like ${`%${digits}`}` : sql``;
+    // …or any part of the printed number as typed: «INV-001-014», «001-014», «14-0000003»
+    const byText = typed.length >= 3 ? sql`or i.number ilike ${like(typed)}` : sql``;
     const rows = await tx.execute<{
       id: string;
       number: string;
@@ -105,7 +107,7 @@ export function searchInvoices(
              c.phone as customer_phone, i.total_minor::text, i.currency
       from invoices i left join customers c on c.tenant_id = i.tenant_id and c.id = i.customer_id
       where i.device_time >= now() - (${days}::int * interval '1 day')
-        and (coalesce(c.name, i.customer_name, '') ilike ${like(typed)} ${byPhone} ${byNumber})
+        and (coalesce(c.name, i.customer_name, '') ilike ${like(typed)} ${byPhone} ${byNumber} ${byText})
       order by i.device_time desc limit 20`);
     return {
       invoices: rows.map((r) => ({

@@ -117,7 +117,7 @@ describe('HomePage', () => {
           },
         },
       });
-      const { user } = renderApp('/');
+      renderApp('/');
 
       const sales = await screen.findByRole('region', { name: 'مبيعات اليوم' });
       expect(await within(sales).findByText('الفواتير')).toBeInTheDocument();
@@ -129,8 +129,9 @@ describe('HomePage', () => {
       expect(screen.getByText('قطعة محجوزة بعربون')).toBeInTheDocument();
       // «تحتاج انتباهك» is one card: what waits first, the stock under its second tab
       expect(screen.getByRole('heading', { name: 'تحتاج انتباهك' })).toBeInTheDocument();
-      await user.click(screen.getByRole('tab', { name: /المخزون/ }));
-      expect(await screen.findByText('· M · أبيض', { exact: false })).toBeInTheDocument();
+      // A low piece is one row of the same card, named by its product (no second list)
+      expect(await screen.findByText('قميص كتان يوشك على النفاد')).toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: /المخزون/ })).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'منتج جديد' })).toHaveAttribute('href', '/products/new');
       expect(screen.getByRole('link', { name: 'افتح الكاشير' })).toHaveAttribute('href', '/pos');
     });
@@ -333,6 +334,38 @@ describe('HomePage', () => {
       // The suggestion is a plain link without a count chip
       const suggestion = await screen.findByRole('link', { name: /2 منتجين بلا صورة/ });
       expect(suggestion).toHaveAttribute('href', '/products');
+    });
+
+    it('shows three rows at most, red only for what ran out, and the rest behind «عرض الكل»', async () => {
+      const piece = (n: number, stockQty: number) => ({
+        variantId: `v-${n}`,
+        productId: `p-${n}`,
+        name: `صنف ${n}`,
+        label: null,
+        stockQty,
+        soldQty: 6000,
+        minStockQty: null,
+      });
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
+          status: 200,
+          body: { lowStock: [piece(1, 2000), piece(2, 0), piece(3, 3000), piece(4, 1000), piece(5, 4000)] },
+        },
+      });
+      const { user } = renderApp('/');
+
+      // The one that is gone comes first, and has no second «نفد» chip beside its sentence
+      const first = await screen.findByRole('link', { name: 'صنف 2 نفد' });
+      expect(first.className).toContain('bg-danger-soft');
+      const amber = screen.getByRole('link', { name: /صنف 1 يوشك على النفاد/ });
+      expect(amber.className).toContain('bg-warning-soft');
+      expect(screen.queryByRole('link', { name: /صنف 4/ })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'عرض الكل (5)' }));
+      expect(screen.getByRole('link', { name: /صنف 5 يوشك/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'عرض أقل' })).toBeInTheDocument();
     });
 
     it('says there is no history instead of drawing a climb from zero when only today has sold', async () => {

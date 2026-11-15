@@ -73,7 +73,7 @@ describe('«الضمان والصيانة»', () => {
     await user.click(screen.getByRole('button', { name: 'ابحث' }));
     expect(await screen.findByText('تحت الكفالة')).toBeInTheDocument();
     expect(screen.getByText('سامر الحلبي')).toBeInTheDocument();
-    expect(screen.getByText('2027-10-30')).toBeInTheDocument();
+    expect(screen.getByText('30 تشرين الأول 2027')).toBeInTheDocument();
 
     const open = screen.getByRole('button', { name: 'افتح مطالبة' });
     expect(open).toBeDisabled();

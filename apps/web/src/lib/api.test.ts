@@ -146,6 +146,23 @@ describe('apiFetch', () => {
     unsubscribe();
   });
 
+  it('does not sign out when the server is busy or rate limits the refresh', async () => {
+    for (const status of [429, 500, 503]) {
+      setAccessToken('stale');
+      const signOut = vi.fn();
+      const unsubscribe = onSessionExpired(signOut);
+      mockFetch({
+        'GET /v1/me': unauthorized,
+        'POST /v1/auth/refresh': apiError(status, 'internal', 'busy'),
+      });
+
+      await expect(apiFetch('/v1/me', { auth: true })).rejects.toMatchObject({ status });
+
+      expect(signOut).not.toHaveBeenCalled();
+      unsubscribe();
+    }
+  });
+
   it('makes a request that has no token yet wait for the refresh already running', async () => {
     setAccessToken(null);
     const { requestsTo } = mockFetch({

@@ -12,7 +12,7 @@ import {
   PageHeader,
   PrintIcon,
   SegmentedControl,
-  SerialIcon,
+  KeyIcon,
   Skeleton,
   StatTile,
   WarningIcon,
@@ -67,13 +67,14 @@ export function RentalsPage() {
       <title>التأجير · SERFA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
+          icon={<KeyIcon />}
           title="التأجير"
           description="الأجهزة المؤجَّرة الآن والمتأخرة منها أولاً. التسليم والاستلام من الصندوق، وتُباع الأجرة ببند «إيجار»."
         />
         <KpiStrip columns={3}>
           <StatTile
             label="خارج المحل الآن"
-            icon={<SerialIcon />}
+            icon={<KeyIcon />}
             value={kpi(<bdi className="num">{out.length}</bdi>)}
           />
           <StatTile
@@ -113,7 +114,7 @@ export function RentalsPage() {
           {error ? <Alert tone="error">{error}</Alert> : null}
           {items && items.length === 0 ? (
             <EmptyState
-              icon={SerialIcon}
+              icon={KeyIcon}
               title="لا أجهزة مؤجَّرة."
               description="فعّل «قابل للتأجير» في صفحة الصنف، ثم أجِّر قطعة برقمها التسلسلي من الصندوق."
             />

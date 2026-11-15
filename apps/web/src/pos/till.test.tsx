@@ -292,6 +292,45 @@ describe('«مرتجع»: an invoice of another till, and the exchange', () => {
     expect(screen.queryByText('لا فواتير على هذا الجهاز تطابق البحث.')).not.toBeInTheDocument();
   });
 
+  it('lists this device’s invoice and the store’s older ones together, the newest first', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const staff = staffServer();
+    const old = {
+      id: '0192a000-0000-7000-8000-0000000000dd',
+      number: 'INV-009-009-0000001',
+      deviceTime: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      customerName: null,
+      customerPhone: null,
+      totalMinor: 50_000,
+      currency: 'SYP',
+    };
+    const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href.startsWith('/v1/device/invoices/lookup'))
+        return new Response(JSON.stringify({ error: { code: 'not_found', message: 'لا' } }), { status: 404 });
+      if (href.startsWith('/v1/device/invoices/search')) {
+        const q = new URL(href, 'http://x').searchParams.get('q');
+        return new Response(JSON.stringify({ invoices: q ? [old] : [] }), { status: 200 });
+      }
+      return staff(url, init);
+    }) as unknown as typeof fetch;
+    const { user, outbox } = renderPos({ local, fetch: fetchFn });
+    await signIn(user);
+    await sellTwoOils(user);
+    const mine = outbox.find((e) => e.type === 'sale')!;
+    await user.keyboard('{Alt>}r{/Alt}');
+    await screen.findByRole('heading', { name: 'مرتجع' });
+    await user.type(screen.getByLabelText('رقم الفاتورة'), mine.doc.number!.replace(/\D/g, '').slice(-3));
+    const list = await screen.findByRole('list', { name: 'فواتير المحل' });
+    await within(list).findByRole('button', { name: /INV-009-009-0000001/ });
+    const names = within(list)
+      .getAllByRole('button')
+      .map((b) => b.textContent ?? '');
+    expect(names[0]).toContain(mine.doc.number!);
+    expect(names[names.length - 1]).toContain('INV-009-009-0000001');
+  });
+
   it('says so when the invoice is not in the store, and when the till is offline', async () => {
     const local = memoryLocal();
     await openShift(local);

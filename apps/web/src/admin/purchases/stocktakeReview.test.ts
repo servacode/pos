@@ -31,6 +31,26 @@ describe('reviewCount', () => {
     ]);
     expect(reviewCount(items, {})).toEqual([]);
   });
+  it('values a count of stock below zero like the save does: at the last known average', () => {
+    // 20 below zero, last average 40 per piece; counting 0 brings it back to nothing: a surplus with a value
+    const below: InventoryRow = {
+      ...row('x', -20_000, null),
+      valueMinor: -800_000,
+      refQty: 100_000,
+      refValueMinor: 4_000_000,
+    };
+    const [line] = reviewCount([below], { x: '0' });
+    expect(line!.diffQty).toBe(20_000);
+    expect(line!.diffValueMinor).toBe(800_000);
+    // Counting less than what the shelf holds is a loss at the running average
+    const held: InventoryRow = {
+      ...row('y', 10_000, 5000),
+      valueMinor: 50_000,
+      refQty: 10_000,
+      refValueMinor: 50_000,
+    };
+    expect(reviewCount([held], { y: '4' })[0]!.diffValueMinor).toBe(-30_000);
+  });
   it('names a difference', () => {
     expect([differenceWord(5), differenceWord(-5), differenceWord(0)]).toEqual(['زيادة', 'نقص', 'مطابق']);
   });

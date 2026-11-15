@@ -237,7 +237,7 @@ describe('held carts are a list', () => {
     expect(screen.getByText('1 معلّقة')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'افتح الفواتير المعلّقة' }));
-    await user.click(await screen.findByRole('button', { name: /احذف/ }));
+    await user.click(await screen.findByRole('button', { name: /احذف بدون اسم/ }));
     await user.click(screen.getByRole('button', { name: 'تأكيد الحذف' }));
     expect(screen.queryByText('1 معلّقة')).not.toBeInTheDocument();
   });

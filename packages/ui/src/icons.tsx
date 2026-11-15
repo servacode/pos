@@ -16,13 +16,14 @@ import {
   Hammer,
   Pill,
   Accessibility,
-  Footprints,
   Gem,
   Handbag,
   Glasses,
   Watch,
   Baby,
   Snowflake,
+  SportShoe,
+  createLucideIcon,
   Bed,
   HeartPulse,
   SprayCan,
@@ -250,7 +251,62 @@ export const ProduceIcon = defineIcon(Carrot);
 export const WholesaleIcon = defineIcon(Boxes);
 
 // What an item is (the placeholder of an item with no photo): shoes, jewellery, perfume, syringes, devices.
-export const ShoeIcon = defineIcon(Footprints);
+export const ShoeIcon = defineIcon(SportShoe);
+export const SneakerIcon = ShoeIcon;
+
+// Garments lucide has no picture for (round 13): drawn on the same 24 grid, same stroke, so they sit with the rest.
+/** lucide wants a key on every part of a drawing */
+function glyph(name: string, parts: [string, Record<string, string | number>][]): LucideIcon {
+  return createLucideIcon(
+    name,
+    parts.map(([tag, attrs], i) => [tag, { ...attrs, key: `p${i}` }]) as Parameters<
+      typeof createLucideIcon
+    >[1],
+  );
+}
+const Trousers = glyph('serva-trousers', [
+  ['path', { d: 'M7 3h10l1.5 18h-5L12 10l-1.5 11h-5z' }],
+  ['path', { d: 'M7.2 7h9.6' }],
+]);
+const Skirt = glyph('serva-skirt', [
+  ['path', { d: 'M9 3h6l5.5 17h-17z' }],
+  ['path', { d: 'M8.3 7h7.4' }],
+  ['path', { d: 'M12 7v13' }],
+]);
+const Dress = glyph('serva-dress', [
+  ['path', { d: 'M9 2l.5 5L8 10 3.5 21h17L16 10l-1.5-3L15 2' }],
+  ['path', { d: 'M8 10h8' }],
+]);
+const Top = glyph('serva-top', [
+  ['path', { d: 'M8 3v4c0 1.5-1 2.5-2 3l1 11h10l1-11c-1-.5-2-1.5-2-3V3' }],
+  ['path', { d: 'M8 3c1 2 2 3 4 3s3-1 4-3' }],
+]);
+const Sock = glyph('serva-sock', [
+  ['path', { d: 'M8 3h7v9l5 3.5a3 3 0 0 1-1.5 5.5H10a3 3 0 0 1-2-3z' }],
+  ['path', { d: 'M8 7h7' }],
+]);
+const Belt = glyph('serva-belt', [
+  ['rect', { x: 2, y: 9, width: 20, height: 6, rx: 1 }],
+  ['rect', { x: 10, y: 7, width: 4, height: 10, rx: 1 }],
+  ['path', { d: 'M5 12h.01M18 12h.01' }],
+]);
+const Scarf = glyph('serva-scarf', [
+  ['path', { d: 'M6 4c0 3.5 2.5 6 6 6s6-2.5 6-6' }],
+  ['path', { d: 'M10 9.5L8 21h4.5l1-11' }],
+]);
+const Coat = glyph('serva-coat', [
+  ['path', { d: 'M9 3L4 6v7l3 .5V21h10v-7.5l3-.5V6l-5-3' }],
+  ['path', { d: 'M9 3l3 5 3-5' }],
+  ['path', { d: 'M12 8v13' }],
+]);
+export const TrousersIcon = defineIcon(Trousers);
+export const SkirtIcon = defineIcon(Skirt);
+export const DressIcon = defineIcon(Dress);
+export const TopIcon = defineIcon(Top);
+export const SockIcon = defineIcon(Sock);
+export const BeltIcon = defineIcon(Belt);
+export const ScarfIcon = defineIcon(Scarf);
+export const CoatIcon = defineIcon(Coat);
 export const AccessoryIcon = defineIcon(Gem);
 export const PerfumeIcon = defineIcon(SprayCan);
 export const SyringeIcon = defineIcon(Syringe);

@@ -61,7 +61,7 @@ function Statement({ p }: { p: ProfitLoss }) {
   const base = p.baseCurrency;
   return (
     <dl className="flex flex-col">
-      <Row label="الإيرادات (بعد الحسميات والمردودات)" strong>
+      <Row label="الإيرادات (بعد الحسميات والمردودات، بدون الضريبة)" strong>
         <Money minor={p.revenue.totalMinor} currency={base} />
       </Row>
       <Accounts accounts={p.revenue.accounts} base={base} />
@@ -154,6 +154,7 @@ export function ProfitLossPage() {
       <div className="grid gap-4 sm:grid-cols-3 print:hidden">
         <StatTile
           label="الإيرادات"
+          footnote="بدون الضريبة"
           value={tile((p) => (
             <Money minor={p.revenue.totalMinor} currency={base} />
           ))}

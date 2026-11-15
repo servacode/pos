@@ -189,6 +189,11 @@ export interface InventoryRow {
   /** Base units, thousandths */
   qty: number;
   valueMinor: number;
+  /** What can be sold: the stock without the expired and blocked batches, never below zero; absent from older servers */
+  sellableQty?: number;
+  /** The last known average (what a count's difference is valued at when the stock is at or below zero); absent from older servers */
+  refQty?: number;
+  refValueMinor?: number;
   /** For display: value of one base unit, four decimals of the minor unit at most */
   unitCostMinor: number | null;
 }
@@ -250,6 +255,11 @@ export const expiryQuery = z.object({
   /** One item's batches, whatever their dates (the supplier return and the count pick from them) */
   variantId: uuidSchema.optional(),
   branchId: uuidSchema.optional(),
+  /**
+   * `1`: also list the «بلا دفعة» row (what no batch holds, even below zero) so the batches add up to the
+   * stock; always on with `variantId`
+   */
+  unbatched: z.enum(['1']).optional(),
 });
 
 /**

@@ -228,7 +228,16 @@ export function MerchandisePage() {
 
   // The long tables open one at a time (or all together), so the page is one screen long
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
-  const FOLDS = ['dept', 'options', 'models', 'sellers', 'low', 'slow'] as const;
+  // Only the sections that exist for this store and period: the switch counts those, and is not
+  // shown when there is nothing (or only one thing) to open
+  const FOLDS = [
+    data && data.byDepartment.length > 0 && (departments.length > 0 || department) ? 'dept' : null,
+    data && data.byOption.length > 0 ? 'options' : null,
+    data && data.models.length > 0 ? 'models' : null,
+    data && data.bySeller.length > 0 ? 'sellers' : null,
+    data && data.lowStock.length > 0 ? 'low' : null,
+    data && data.slowMovers.length === 0 && !error ? null : 'slow',
+  ].filter((id): id is string => id !== null);
   const isOpen = (id: string) => opened.has(id);
   const toggle = (id: string) =>
     setOpened((o) => {
@@ -305,11 +314,13 @@ export function MerchandisePage() {
         </KpiStrip>
 
         {/* One switch for every section, just above them (it was a stray button in the page head) */}
-        <div className="-mb-2 flex justify-end print:hidden">
-          <Button variant="ghost" size="sm" onClick={() => setOpened(allOpen ? new Set() : new Set(FOLDS))}>
-            {allOpen ? 'اطوِ كل الأقسام' : 'افتح كل الأقسام'}
-          </Button>
-        </div>
+        {FOLDS.length > 1 ? (
+          <div className="-mb-2 flex justify-end print:hidden">
+            <Button variant="ghost" size="sm" onClick={() => setOpened(allOpen ? new Set() : new Set(FOLDS))}>
+              {allOpen ? 'اطوِ كل الأقسام' : 'افتح كل الأقسام'}
+            </Button>
+          </div>
+        ) : null}
 
         {data && data.byDepartment.length > 0 && (departments.length > 0 || department) ? (
           <Fold title="المبيعات حسب القسم" open={isOpen('dept')} onToggle={() => toggle('dept')}>
