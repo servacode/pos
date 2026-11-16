@@ -367,6 +367,23 @@ describe('the close summary rows', () => {
   });
 });
 
+describe('deposits («عربون») in the shift', () => {
+  it('counts a cash deposit into the drawer like a gift voucher did, and keeps it apart from gifts', () => {
+    const doc = (type: string, payload: Record<string, unknown>, seq: number) =>
+      ({ seq, type, doc: { type, payload } }) as never;
+    const a = shiftActivity(SHIFT_ID, [
+      doc('deposit', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 50_000 }, 1),
+      doc('deposit', { shiftId: SHIFT_ID, method: 'card', currency: 'SYP', amountMinor: 20_000 }, 2),
+      doc('gift_voucher', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 30_000 }, 3),
+    ]);
+    expect(a.deposits).toEqual({ count: 2, byCurrency: [{ currency: 'SYP', amountMinor: 70_000 }] });
+    expect(a.vouchers).toEqual({ count: 1, byCurrency: [{ currency: 'SYP', amountMinor: 30_000 }] });
+    expect(a.cashIn?.deposits).toEqual([{ currency: 'SYP', amountMinor: 50_000 }]);
+    expect(a.cashIn?.vouchers).toEqual([{ currency: 'SYP', amountMinor: 30_000 }]);
+    expect(a.terms.get('SYP')?.receiptsMinor).toBe(80_000);
+  });
+});
+
 describe('the banknotes the counter offers', () => {
   const withTill = (till: unknown) => {
     const base = posSets();

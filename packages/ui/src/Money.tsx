@@ -6,6 +6,12 @@ import { useDigits } from './context';
 /** POP DIRECTIONAL ISOLATE (U+2069): formatMoney closes the whole amount with it. */
 const PDI = String.fromCharCode(0x2069);
 
+/** The decimals an amount needs to read exactly: none for a whole amount, the stored ones for a half unit */
+export function exactDecimals(minor: number, currency: CurrencyId): number | undefined {
+  const stored = getCurrency(currency).decimals;
+  return stored > 0 && minor % 10 ** stored !== 0 ? stored : undefined;
+}
+
 export interface MoneyProps
   extends
     Omit<ComponentProps<'bdi'>, 'children'>,

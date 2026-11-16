@@ -3,6 +3,7 @@ import type { CashMovementKind, ShiftCloseCash } from '@serva/core/contracts/doc
 import { cn, useDigits } from '@serva/ui';
 import { ExactMoney } from '../ExactMoney';
 import { clockText, counted, dateText, INVOICES } from '../format';
+import { PAPER } from '../receipt/Receipt';
 import { netMethodRows, refundVouchers, type OpenShift, type ShiftActivity } from './shift';
 
 const METHOD_NAMES: Record<string, string> = {
@@ -26,6 +27,7 @@ export const MOVEMENT_NAMES: Record<CashMovementKind, string> = {
 
 const RETURNS = ['مرتجع واحد', 'مرتجعان', 'مرتجعات', 'مرتجعاً'] as const;
 const VOUCHERS = ['قسيمة واحدة', 'قسيمتان', 'قسائم', 'قسيمة'] as const;
+const DEPOSITS = ['عربون واحد', 'عربونان', 'عرابين', 'عربوناً'] as const;
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -83,12 +85,16 @@ export function ZReport({
   const refundedVouchers = refundVouchers(activity);
   const cashIn = activity.cashIn;
   const hasDrawerLines =
-    activity.movements.length > 0 || (cashIn?.receipts.length ?? 0) > 0 || (cashIn?.vouchers.length ?? 0) > 0;
+    activity.movements.length > 0 ||
+    (cashIn?.receipts.length ?? 0) > 0 ||
+    (cashIn?.vouchers.length ?? 0) > 0 ||
+    (cashIn?.deposits?.length ?? 0) > 0;
   return (
     <div
       dir="rtl"
       lang="ar"
       aria-label="تقرير إغلاق الوردية"
+      style={PAPER}
       className="flex w-[72mm] flex-col gap-3 bg-surface px-1 py-3 text-[13px]/[1.55] font-semibold text-ink"
     >
       <div className="flex flex-col items-center text-center">
@@ -204,10 +210,20 @@ export function ZReport({
         </Section>
       ) : null}
       {activity.vouchers.count > 0 ? (
-        <Section title="قسائم الهدية المباعة والعربون">
+        <Section title="قسائم الهدية المباعة">
           <Line label="العدد">{counted(activity.vouchers.count, VOUCHERS, digits)}</Line>
           {activity.vouchers.byCurrency.map((row) => (
             <Line key={row.currency} label="قيمتها">
+              <ExactMoney minor={row.amountMinor} currency={row.currency} />
+            </Line>
+          ))}
+        </Section>
+      ) : null}
+      {(activity.deposits?.count ?? 0) > 0 ? (
+        <Section title="عربون">
+          <Line label="العدد">{counted(activity.deposits!.count, DEPOSITS, digits)}</Line>
+          {activity.deposits!.byCurrency.map((row) => (
+            <Line key={row.currency} label="قيمته">
               <ExactMoney minor={row.amountMinor} currency={row.currency} />
             </Line>
           ))}
@@ -221,7 +237,12 @@ export function ZReport({
           </Line>
         ))}
         {(cashIn?.vouchers ?? []).map((r) => (
-          <Line key={`gv:${r.currency}`} label="قسائم وعربون بيعت نقداً">
+          <Line key={`gv:${r.currency}`} label="قسائم بيعت نقداً">
+            <ExactMoney minor={r.amountMinor} currency={r.currency} />
+          </Line>
+        ))}
+        {(cashIn?.deposits ?? []).map((r) => (
+          <Line key={`dp:${r.currency}`} label="عربون نقداً">
             <ExactMoney minor={r.amountMinor} currency={r.currency} />
           </Line>
         ))}

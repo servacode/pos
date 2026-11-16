@@ -58,4 +58,18 @@ describe('purchase sanity warnings', () => {
     );
     expect(purchaseWarnings([{ variantId: 'v', name: 'شاش', qty: null, costMinor: null }], avg)).toEqual([]);
   });
+
+  it('warns about a cost over twenty times the shelf price, even for a new item with no earlier cost', () => {
+    const none = new Map<string, number>();
+    const line = (costMinor: number) => ({
+      variantId: 'n',
+      name: 'قميص',
+      qty: 1000,
+      costMinor,
+      priceMinor: 100_000,
+    });
+    expect(purchaseWarnings([line(2_100_000)], none)[0]).toContain('20 ضعف سعر بيعها');
+    expect(purchaseWarnings([line(1_900_000)], none)).toEqual([]);
+    expect(purchaseWarnings([{ ...line(9_000_000), priceMinor: null }], none)).toEqual([]);
+  });
 });

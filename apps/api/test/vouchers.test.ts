@@ -129,6 +129,57 @@ describe('exchange vouchers', () => {
     expect(rebuilt.same).toBe(true);
   });
 
+  it('takes a deposit («عربون») with the same accounts as a gift voucher, spends it like one, and the old gift deposit still posts', async () => {
+    const store = await openStore(app);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const body = (amountMinor: number, method: 'cash' | 'card', reference: string | null) => ({
+      shiftId: open.id,
+      cashierId: store.userId,
+      currency: 'SYP',
+      amountMinor,
+      method,
+      reference,
+      forName: 'سلمى',
+    });
+    const dep = doc('deposit', body(100_000, 'cash', null));
+    const depCard = doc('deposit', body(50_000, 'card', 'A-9'));
+    const oldGift = doc('gift_voucher', body(100_000, 'cash', null));
+    const res = await push(app, store.device, [open, dep, depCard, oldGift]);
+    expect(res.results.map((r) => r.status)).toEqual(['accepted', 'accepted', 'accepted', 'accepted']);
+    expect(dep.number).toMatch(/^DEP-001-/);
+    const entries = await postedEntries(store.tenantId);
+    const mine = entries.find((e) => e.sourceId === dep.id)!;
+    expect(mine.sourceType).toBe('deposit');
+    expect(compact(mine)).toEqual([
+      ['111001', 100_000, 0],
+      ['2310', 0, 100_000],
+    ]);
+    expect(compact(entries.find((e) => e.sourceId === depCard.id))).toEqual([
+      ['1140', 50_000, 0],
+      ['2310', 0, 50_000],
+    ]);
+    // The same lines an old gift-voucher deposit posts
+    expect(compact(entries.find((e) => e.sourceId === oldGift.id))).toEqual(compact(mine));
+    expect(entries.find((e) => e.sourceId === oldGift.id)!.sourceType).toBe('gift_voucher');
+
+    // Cash of both kinds is in the drawer; the deposit's code is spent at the till like a voucher
+    const shift = (
+      await app.inject({ method: 'GET', url: `/v1/shifts/${open.id}`, headers: as(store) })
+    ).json<ShiftReport>();
+    expect(shift.byCurrency[0]).toMatchObject({ receiptsMinor: 200_000 });
+    const spent = doc('sale', spend(store, open.id, dep.number!, 80_000, 80_000));
+    expect((await push(app, store.device, [spent])).results[0]!.flags).toEqual([]);
+    const report = await withTenant(appDb().db, store.tenantId, (tx) => checkIntegrity(tx, store.tenantId));
+    expect(report.checks.flatMap((x) => x.problems.map((p) => `${x.name}: ${p}`))).toEqual([]);
+    const rebuilt = await checkRebuild(owner.db, {
+      tenantId: store.tenantId,
+      processors: DOCUMENT_PROCESSORS,
+      now: new Date('2026-10-31T00:00:00Z'),
+    });
+    expect(rebuilt.same).toBe(true);
+  });
+
   it('sells a gift voucher into the drawer, owes it in 2310, and a sale spends it like any voucher', async () => {
     const store = await openStore(app);
     const doc = documents(store.device);

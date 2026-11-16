@@ -684,7 +684,8 @@ describe('«التعديلات»: the deposit, the delivery and the late ones', 
     await user.click(within(form).getByRole('button', { name: 'سجّل واطبع التذكرة' }));
     await screen.findByRole('listitem', { name: 'التذكرة ALT-000009' });
 
-    const gift = outbox.find((e) => e.type === 'gift_voucher')!;
+    const gift = outbox.find((e) => e.type === 'deposit')!;
+    expect(outbox.some((e) => e.type === 'gift_voucher')).toBe(false);
     expect(gift.doc.payload as unknown as GiftVoucherPayload).toMatchObject({
       amountMinor: 50_000,
       method: 'cash',

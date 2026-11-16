@@ -49,6 +49,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/batches/block': 'signed-in',
   'POST /v1/batches/unblock': 'signed-in',
   'GET /v1/serials': 'signed-in',
+  'GET /v1/serials/unassigned': 'signed-in',
   'POST /v1/serials/fix': 'signed-in',
   'GET /v1/recipes/:productId': 'signed-in',
   'PUT /v1/recipes/:productId': 'signed-in',

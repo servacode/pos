@@ -73,6 +73,12 @@ export function SerialPanel({
       .map((r) => r.serial)
       .sort();
   }, [catalog.serials, entries, line.variantId, taken]);
+  // More numbers «في المحل» than pieces in stock: an earlier sale left without its number (the owner fixes it)
+  const stockQty = catalog.byVariant.get(line.variantId)?.stockQty;
+  const mismatch =
+    typeof stockQty === 'number' && available.length + taken.size > 0
+      ? available.length - Math.max(0, Math.floor(stockQty / 1000))
+      : 0;
   const MAX_LISTED = 12;
   // Typing narrows the list
   const typed = serialKey(value);
@@ -136,6 +142,14 @@ export function SerialPanel({
   return (
     <SalePanel label="الرقم التسلسلي" title={line.name} icon={<BarcodeIcon size={20} />}>
       {error ? <Alert tone="error">{error}</Alert> : null}
+      {mismatch > 0 ? (
+        <Alert tone="warning">
+          <span data-testid="serial-mismatch">
+            الأرقام المسجّلة ({available.length}) أكثر من المخزون ({Math.floor((stockQty ?? 0) / 1000)}): بيعة
+            سابقة خرجت بلا رقم. تأكد من الرقم على الجهاز نفسه قبل أن تختار.
+          </span>
+        </Alert>
+      ) : null}
       <form
         className="flex flex-col gap-5"
         onSubmit={(e) => {
@@ -196,9 +210,12 @@ export function SerialPanel({
               اسمح به بمدير
             </Button>
           ) : null}
-          <Button variant="secondary" onClick={onCancel}>
-            لاحقاً
-          </Button>
+          {/* A serial product is sold with its number: «لاحقاً» is only for a line that already has one */}
+          {(line.serials?.length ?? 0) > 0 ? (
+            <Button variant="secondary" onClick={onCancel}>
+              إغلاق
+            </Button>
+          ) : null}
         </div>
       </form>
     </SalePanel>

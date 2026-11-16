@@ -2,6 +2,8 @@ import type { InventoryRow } from '@serva/core';
 
 /** A cost this many times the usual one is asked about before it is saved */
 export const COST_JUMP = 5;
+/** A cost per piece this many times the shelf price is asked about too (a slipped key, not a real purchase) */
+export const PRICE_JUMP = 20;
 
 /** One line of a purchase as the owner typed it: pieces (thousandths) and what the line cost (minor units) */
 export interface SanityLine {
@@ -9,6 +11,8 @@ export interface SanityLine {
   name: string;
   qty: number | null;
   costMinor: number | null;
+  /** The shelf price of one piece, when known */
+  priceMinor?: number | null;
 }
 
 /**
@@ -83,6 +87,11 @@ export function purchaseWarnings(
     const ref: CostReference = typeof known === 'number' ? { average: known } : (known ?? {});
     if (l.qty && l.qty > 0) {
       const perPiece = (l.costMinor * 1000) / l.qty;
+      if (l.priceMinor && l.priceMinor > 0 && perPiece > l.priceMinor * PRICE_JUMP) {
+        out.push(
+          `«${l.name}»: كلفة القطعة ${group(perPiece / 100)} أكثر من ${PRICE_JUMP} ضعف سعر بيعها ${group(l.priceMinor / 100)}.`,
+        );
+      }
       // Either jump asks: against the shelf average, the last purchase, or the middle of the last five; the smallest one that is passed is told
       const candidates: { value: number | null | undefined; words: string }[] = [
         { value: ref.average, words: 'كلفتها المعتادة' },

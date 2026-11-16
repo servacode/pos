@@ -2,6 +2,7 @@ import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import {
   cashMovementPayloadSchema,
   customerPayloadSchema,
+  depositPayloadSchema,
   giftVoucherPayloadSchema,
   receiptPayloadSchema,
   returnPayloadSchema,
@@ -36,6 +37,7 @@ import {
 import type { SyncFlag } from '@serva/sync';
 import {
   postCashMovement,
+  postDeposit,
   postGiftVoucher,
   postReceipt,
   postReturn,
@@ -626,6 +628,42 @@ async function processGiftVoucher({ tx, device, doc }: DocumentContext) {
   return { flags: [] };
 }
 
+/**
+ * deposit (DEP, «عربون»): an alteration or order deposit, the same money and the same 2310 as a gift
+ * voucher; its voucher row is kind 'deposit' so the drawer reports count it apart from gifts.
+ */
+async function processDeposit({ tx, device, doc }: DocumentContext) {
+  const g = depositPayloadSchema.parse(doc.payload);
+  const [inserted] = await tx
+    .insert(vouchers)
+    .values({
+      tenantId: device.tenantId,
+      code: doc.number!,
+      returnId: doc.id,
+      kind: 'deposit',
+      shiftId: g.shiftId,
+      method: g.method,
+      currency: g.currency,
+      amountMinor: g.amountMinor,
+    })
+    .onConflictDoNothing()
+    .returning({ id: vouchers.id });
+  if (inserted) {
+    await postDeposit(
+      tx,
+      {
+        tenantId: device.tenantId,
+        branchId: device.branchId,
+        docId: doc.id,
+        number: doc.number!,
+        businessDate: doc.businessDate,
+      },
+      g,
+    );
+  }
+  return { flags: [] };
+}
+
 /** Sales, returns, payments and movements that named this shift before it arrived are linked to it now. */
 async function linkToShift(tx: Transaction, shiftId: string): Promise<void> {
   await tx
@@ -766,6 +804,7 @@ export const DOCUMENT_PROCESSORS: SyncProcessors = {
   return: processReturn,
   receipt: processReceipt,
   gift_voucher: processGiftVoucher,
+  deposit: processDeposit,
   customer: processCustomer,
   shift_open: processShiftOpen,
   shift_close: processShiftClose,

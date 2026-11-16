@@ -90,4 +90,4 @@ export function StockDefinitions() {
 }
 
 /** The label of the «ran out» tile: one word; the line under it says what it counts (see `soldOutSentence`) */
-export const soldOutLabel = (clothing = false): string => (clothing ? 'مقاسات نفد' : 'نفد');
+export const soldOutLabel = (clothing = false): string => (clothing ? 'نفد من الرف' : 'نفد');

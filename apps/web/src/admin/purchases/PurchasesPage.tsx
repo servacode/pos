@@ -723,6 +723,7 @@ function PurchaseForm({
             name: l.name,
             qty: parsed[i]!.qty,
             costMinor: parsed[i]!.cost,
+            priceMinor: l.priceMinor ?? null,
           })),
           averages,
         );

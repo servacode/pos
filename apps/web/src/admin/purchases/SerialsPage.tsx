@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { COUNT_NOUNS, countNoun, SERIAL_FLAG_LABELS, serialLabel, type SerialRow } from '@serva/core';
+import {
+  COUNT_NOUNS,
+  countNoun,
+  SERIAL_FLAG_LABELS,
+  serialLabel,
+  type SerialRow,
+  type UnassignedSerialSale,
+} from '@serva/core';
 import {
   Alert,
   Badge,
@@ -17,7 +24,7 @@ import { dayText } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { useMe } from '../../auth/useAuth';
-import { fixSerialRow, serialsOf } from '../warranty/api';
+import { fixSerialRow, serialsOf, unassignedSerialSales } from '../warranty/api';
 import { getInventory } from './api';
 import { SectionHead } from './parts';
 
@@ -52,6 +59,19 @@ export function SerialsPage() {
   // Read-only check: a device with more numbers «في المحل» than pieces in stock (a sale went out without its number)
   const [all, setAll] = useState<SerialRow[] | null>(null);
   const [stock, setStock] = useState<Map<string, number> | null>(null);
+  // «بيعات بلا رقم»: sales accepted from a till without a number for a device; the owner picks which piece left
+  const [unassigned, setUnassigned] = useState<UnassignedSerialSale[]>([]);
+  const [picked, setPicked] = useState<{ key: string; serial: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void unassignedSerialSales().then(
+      (r) => alive && setUnassigned(r.items),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [reloads]);
   useEffect(() => {
     let alive = true;
     void Promise.all([serialsOf({ q: '', flagged: false }), getInventory()]).then(
@@ -102,6 +122,17 @@ export function SerialsPage() {
     setConfirming(null);
     try {
       await fixSerialRow({ serial: r.serial, status: r.status === 'sold' ? 'in_stock' : 'sold' });
+      setReloads((n) => n + 1);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  /** The owner says which in-stock piece left with a sale that had no number */
+  async function assign(item: UnassignedSerialSale, serial: string) {
+    setPicked(null);
+    try {
+      await fixSerialRow({ serial, status: 'sold', saleId: item.saleId });
       setReloads((n) => n + 1);
     } catch (e) {
       setError(errorMessage(e));
@@ -215,14 +246,64 @@ export function SerialsPage() {
           description="كل جهاز برقمه: في المحل أو مباع، متى استُلم ومتى بيع، والكفالة حتى متى."
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
+        {unassigned.length > 0 ? (
+          <Alert tone="warning">
+            <span data-testid="serials-unassigned" className="flex flex-col gap-3">
+              <span className="font-semibold">
+                بيعات خرجت بلا رقم تسلسلي. اختر الجهاز الذي خرج مع كل بيعة:
+              </span>
+              {unassigned.map((item) => {
+                const key = `${item.saleId}:${item.variantId}`;
+                return (
+                  <span key={key} className="flex flex-col gap-2">
+                    <span>
+                      <bdi dir="ltr" className="num font-semibold">
+                        {item.saleNumber}
+                      </bdi>{' '}
+                      · {item.name} · ينقصها {countNoun(item.missing, COUNT_NOUNS.piece)} برقم
+                    </span>
+                    {item.candidates.length === 0 ? (
+                      <span className="text-sm">لا رقم «في المحل» لهذا الصنف.</span>
+                    ) : picked?.key === key ? (
+                      <span className="flex flex-wrap items-center gap-2">
+                        <bdi dir="ltr" className="num font-semibold">
+                          {picked.serial}
+                        </bdi>
+                        <Button size="sm" onClick={() => void assign(item, picked.serial)}>
+                          نعم، هذا الذي خرج
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setPicked(null)}>
+                          لا
+                        </Button>
+                      </span>
+                    ) : (
+                      <span className="flex flex-wrap gap-2" role="group" aria-label="الأرقام في المحل">
+                        {item.candidates.map((serial) => (
+                          <button
+                            key={serial}
+                            type="button"
+                            onClick={() => setPicked({ key, serial })}
+                            className="num min-h-11 rounded-control border border-line-control bg-surface px-3 text-sm font-semibold text-ink hover:border-brand hover:bg-brand-soft"
+                          >
+                            <bdi dir="ltr">{serial}</bdi>
+                          </button>
+                        ))}
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
+            </span>
+          </Alert>
+        ) : null}
         {ahead.length > 0 ? (
           <Alert tone="warning">
             <span data-testid="serials-ahead" className="flex flex-col gap-1">
               {ahead.map((x) => (
                 <span key={x.name}>
                   {x.name}: {countNoun(x.n, COUNT_NOUNS.piece)} برقم مسجّل · المخزون{' '}
-                  <bdi className="num font-semibold">{x.inStock}</bdi> — في بيعة بلا رقم. صحّح الرقم الزائد
-                  بزر «تصحيح».
+                  <bdi className="num font-semibold">{x.inStock}</bdi> — في بيعة بلا رقم. اختر الرقم الذي خرج
+                  من قائمة «بيعات خرجت بلا رقم» إن ظهرت.
                 </span>
               ))}
             </span>

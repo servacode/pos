@@ -37,7 +37,7 @@ export function WhatsAppSend({
   };
   if (typing) {
     return (
-      <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
+      <div className="flex w-full flex-col gap-2">
         <TextField
           label="رقم جوال الزبون"
           type="tel"
@@ -55,6 +55,7 @@ export function WhatsAppSend({
         <Button
           size="lg"
           icon={<ChatIcon />}
+          className="w-full"
           onClick={() => {
             if (open(typed)) setTyping(false);
             else setError('رقم الجوال غير صحيح. مثال: 0912345678');

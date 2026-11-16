@@ -27,6 +27,7 @@ import {
   CartLine,
   CashierShell,
   Dialog,
+  DensityProvider,
   ClockIcon,
   CloseIcon,
   cn,
@@ -52,6 +53,7 @@ import {
   WeighedIcon,
 } from '@serva/ui';
 import { barcodeKey, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
+import { ExactMoney } from '../ExactMoney';
 import { counted } from '../format';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
@@ -1281,24 +1283,26 @@ export function SaleScreen(props: SaleScreenProps) {
               <span aria-hidden="true" className="hidden text-sm text-ink-subtle sm:inline">
                 البائع
               </span>
-              <Select
-                label="البائع"
-                hideLabel
-                value={seller}
-                onChange={(e) => {
-                  setSeller(e.target.value);
-                  void pos.local.set(SELLER_KEY, { by: session.userId, id: e.target.value });
-                  const picked = e.target.value;
-                  if (cart.lines.length > 0) setCart((c) => ({ ...c, sellerId: picked }));
-                }}
-                className="w-36"
-              >
-                {staff.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.fullName}
-                  </option>
-                ))}
-              </Select>
+              <DensityProvider density="dense">
+                <Select
+                  label="البائع"
+                  hideLabel
+                  value={seller}
+                  onChange={(e) => {
+                    setSeller(e.target.value);
+                    void pos.local.set(SELLER_KEY, { by: session.userId, id: e.target.value });
+                    const picked = e.target.value;
+                    if (cart.lines.length > 0) setCart((c) => ({ ...c, sellerId: picked }));
+                  }}
+                  className="w-28"
+                >
+                  {staff.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.fullName}
+                    </option>
+                  ))}
+                </Select>
+              </DensityProvider>
             </div>
           ) : null}
         </div>
@@ -1314,6 +1318,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 onClick={() => setMode({ kind: 'online' })}
                 className="border-brand/40 bg-brand-soft text-brand-ink"
               >
+                <span aria-hidden="true">طلبات المتجر</span>
                 <span
                   aria-hidden="true"
                   className="num grid h-7 min-w-7 place-items-center rounded-full bg-brand px-2 text-sm font-bold text-on-brand shadow-e1"
@@ -1555,7 +1560,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 discounted && p ? (
                   <span key="was" className="whitespace-nowrap text-ink-subtle">
                     <s>
-                      <Money minor={p.priced.grossMinor} currency={ctx.currency} symbol={false} />
+                      <ExactMoney minor={p.priced.grossMinor} currency={ctx.currency} symbol={false} />
                     </s>
                   </span>
                 ) : null,
@@ -1563,18 +1568,18 @@ export function SaleScreen(props: SaleScreenProps) {
                   <span key="d" className="inline-flex items-center gap-1 font-semibold text-info-ink">
                     <PercentIcon size={16} className="shrink-0" aria-hidden="true" />
                     خصم{percent !== null ? ` ${displayNumber(String(percent / 100), digits)}%` : ''}{' '}
-                    <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                    <ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
                 discounted && p && adj?.kind === 'price' ? (
                   <span key="pd" className="font-semibold text-info-ink">
-                    −<Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                    −<ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
                 p && p.priced.lineDiscountMinor > 0 && p.discount?.source === 'promotion' ? (
                   <span key="o" className="font-semibold text-success-ink">
                     {p.discount.reason} −
-                    <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                    <ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
                 customerPriceKind(line) !== null ? (
@@ -1783,7 +1788,7 @@ export function SaleScreen(props: SaleScreenProps) {
               {cart.invoiceDiscount.type === 'percent'
                 ? `${displayNumber(String(cart.invoiceDiscount.bp / 100), digits)}%`
                 : ''}{' '}
-              <Money minor={totals.invoiceDiscountMinor} currency={ctx.currency} symbol={false} />
+              <ExactMoney minor={totals.invoiceDiscountMinor} currency={ctx.currency} symbol={false} />
             </span>
             <span className="sr-only">يشمل كل الأسطر، وما تضيفه بعد الآن.</span>
           </span>
@@ -1967,7 +1972,8 @@ export function SaleScreen(props: SaleScreenProps) {
             <span className="min-w-0 flex-1 text-sm/tight font-semibold text-ink">
               {counted(lineCount, ['صنف واحد', 'صنفان', 'أصناف', 'صنفاً'], digits)}
               <span className="block text-ink-muted">
-                المجموع <Money minor={totalMinor} currency={ctx.currency} className="font-bold text-ink" />
+                المجموع{' '}
+                <ExactMoney minor={totalMinor} currency={ctx.currency} className="font-bold text-ink" />
               </span>
             </span>
             <Button size="md" aria-label="افتح السلة" onClick={() => setPhoneView('cart')}>
@@ -2209,7 +2215,12 @@ export function SaleScreen(props: SaleScreenProps) {
       ) : effectiveMode.kind === 'invoice' ? (
         <AdjustPanel
           title="خصم على الفاتورة"
-          subtitle={`يشمل كل أسطر الفاتورة (${displayNumber(String(lineCount), digits)}) وما تضيفه بعدها`}
+          subtitle={(() => {
+            // A service (alteration fee, rent, contract) never takes the invoice discount
+            const services = cart.lines.filter((l) => l.isService).length;
+            const goods = displayNumber(String(lineCount - services), digits);
+            return `يشمل كل أسطر الفاتورة (${goods})${services > 0 ? ' ما عدا الخدمات' : ''} وما تضيفه بعدها`;
+          })()}
           modes={['percent', 'amount']}
           initialMode="percent"
           currency={ctx.currency}

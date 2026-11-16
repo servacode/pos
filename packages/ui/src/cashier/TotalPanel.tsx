@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react';
 import { Button } from '../Button';
 import { cn } from '../cn';
 import { WarningIcon } from '../icons';
-import { Money } from '../Money';
+import { exactDecimals, Money } from '../Money';
 
 /** A breakdown line's colour: the plain ones are muted, a saving reads in its tone. */
 const LINE_TONE = {
@@ -79,7 +79,11 @@ export function TotalPanel({
             >
               <dt>{line.label}</dt>
               <dd>
-                <Money minor={line.minor} currency={currency} />
+                <Money
+                  minor={line.minor}
+                  currency={currency}
+                  decimals={exactDecimals(line.minor, currency)}
+                />
               </dd>
             </div>
           ))}
@@ -98,6 +102,7 @@ export function TotalPanel({
             <Money
               minor={totalMinor}
               currency={currency}
+              decimals={exactDecimals(totalMinor, currency)}
               unitClassName="text-xl font-semibold text-ink-muted"
             />
           </output>
@@ -147,13 +152,18 @@ export function TotalPanel({
                 <kbd
                   aria-hidden="true"
                   dir="ltr"
-                  className="hidden rounded-small bg-on-brand/15 px-1.5 font-sans text-xs/5 font-semibold text-on-brand xl:pointer-fine:inline-block"
+                  className="hidden rounded-small bg-on-brand/15 px-1.5 font-sans text-xs/5 font-semibold text-on-brand 2xl:pointer-fine:inline-block"
                 >
                   {payShortcut}
                 </kbd>
               ) : null}
             </span>
-            <Money minor={totalMinor} currency={currency} />
+            <Money
+              minor={totalMinor}
+              currency={currency}
+              decimals={exactDecimals(totalMinor, currency)}
+              unitClassName="text-base"
+            />
           </Button>
           {payDisabled && onBlockedTap ? (
             // A greyed button takes no tap: this cover lets the tap say what is missing and go there

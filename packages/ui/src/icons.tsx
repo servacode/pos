@@ -81,6 +81,7 @@ import {
   QrCode,
   Receipt,
   RefreshCw,
+  Repeat2,
   Scale,
   Scissors,
   Search,
@@ -177,6 +178,7 @@ export const DeleteIcon = defineIcon(Trash);
 export const MoreIcon = defineIcon(Ellipsis);
 export const PrintIcon = defineIcon(Printer);
 export const RetryIcon = defineIcon(RefreshCw);
+export const RepeatIcon = defineIcon(Repeat2);
 export const ExpandIcon = defineIcon(ChevronDown);
 export const EyeIcon = defineIcon(Eye);
 export const EyeOffIcon = defineIcon(EyeOff);

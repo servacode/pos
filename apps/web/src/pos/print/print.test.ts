@@ -112,6 +112,29 @@ describe('the receipt as printer lines', () => {
     expect(cash.some((l) => l.kind === 'barcode')).toBe(false);
   });
 
+  it('prints the cash rounding of a cash refund and what the drawer paid (round 21)', () => {
+    const rounded = receiptLines({
+      ...data,
+      kind: 'return',
+      doc: {
+        ...data.doc,
+        number: 'SRT-001-002-0000005',
+        payload: {
+          saleNumber: 'INV-001-002-0000007',
+          currency: 'SYP',
+          reason: 'تالف',
+          lines: [{ name: 'جاكيت', qty: 1000, refund: { totalMinor: 71_250 } }],
+          totals: { totalMinor: 71_250, taxMinor: 0 },
+          refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 71_000, roundingMinor: -250 }],
+        } as never,
+      },
+    } as never);
+    expect(rounded).toContainEqual(expect.objectContaining({ kind: 'pair', start: 'تقريب النقد' }));
+    expect(rounded).toContainEqual(
+      expect.objectContaining({ kind: 'pair', start: 'رُدّ نقداً', end: '710 ل.س', bold: true }),
+    );
+  });
+
   describe('a pharmacy receipt as printer lines', () => {
     const withRx = (prescription: unknown, batch = true) => ({
       ...data,

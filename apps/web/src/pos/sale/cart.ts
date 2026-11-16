@@ -63,6 +63,8 @@ export interface CartLine {
   note?: string | null;
   /** The product sells each piece by its serial number or IMEI: one per piece before payment */
   tracksSerial?: boolean;
+  /** A service (alteration fee, rent, maintenance contract): the invoice-level discount skips it */
+  isService?: boolean;
   serials?: readonly string[];
   /** Numbers a manager let through though the store never received them, and who (03 › الإلكترونيات) */
   serialOverrides?: readonly string[];
@@ -253,6 +255,7 @@ export function addItem(
     adjustment: null,
     approval: null,
     categoryPath: item.categoryPath ?? [],
+    ...(item.isService ? { isService: true } : {}),
     ...(choice ? { choices: choice.choices, note: choice.note } : {}),
     ...(item.tracksSerial
       ? {
@@ -455,6 +458,7 @@ export function pricingInput(cart: Cart, ctx: PricingContext): SalePricingInput 
     taxRateId: line.taxRateId,
     taxRateBp: line.taxRateBp,
     discount: lineDiscount(line, ctx),
+    ...(line.isService ? { noInvoiceDiscount: true } : {}),
     ...(line.serials?.length ? { serials: line.serials } : {}),
     ...(line.serials?.length && line.warrantyMonths ? { warrantyMonths: line.warrantyMonths } : {}),
     ...(line.serialOverrides?.length
@@ -519,7 +523,11 @@ export function lineNeed(
 
 export function invoiceNeed(cart: Cart, priced: PricedInvoice, rules: ApprovalRules): ApprovalNeed | null {
   if (!cart.invoiceDiscount || cart.invoiceApproval || rules.overLimitAllowed) return null;
-  const base = priced.totals.grossMinor - priced.totals.lineDiscountMinor;
+  // The discount applies to the goods only: a service's fee is not part of what it is a share of
+  const base = priced.lines.reduce(
+    (sum, l, i) => (cart.lines[i]?.isService ? sum : sum + l.grossMinor - l.lineDiscountMinor),
+    0,
+  );
   return discountOverLimit(priced.totals.invoiceDiscountMinor, base, rules.maxDiscountBp)
     ? 'over_limit'
     : null;

@@ -8,6 +8,7 @@ import type {
   SalePayload,
 } from './contracts/documents';
 import { QTY_SCALE, roundDiv } from './money';
+import { roundCashDue } from './pricing';
 
 /**
  * Returns (08 › مرتجع مبيعات، قواعد ثابتة 5): goods come back at the prices their sale charged,
@@ -15,8 +16,13 @@ import { QTY_SCALE, roundDiv } from './money';
  *
  * A returned line takes its sale line's amounts in proportion to the quantity (half away from
  * zero). The last return of a line takes exactly what is left of it, so a sale returned in pieces
- * pays back, to the qirsh, what it took. Tips and cash rounding stay with the sale: they were not
- * the goods.
+ * pays back, to the qirsh, what it took. Tips and the sale's own cash rounding stay with the sale:
+ * they were not the goods.
+ *
+ * Round 21: a refund paid in cash is rounded to the cash step like a cash sale (the exact amount
+ * stays in `totals`, the drawer pays `refunds[0].amountMinor`, the difference is
+ * `refunds[0].roundingMinor`, posted to 6400). An older till sends no rounding: its refund pays
+ * exactly the total and posts as it always did.
  */
 
 export interface ReturnAmounts {
@@ -151,6 +157,12 @@ export interface ReturnRequest {
   /** The approval code of a card, wallet or transfer refund */
   reference?: string | null;
   approval?: Approval | null;
+  /**
+   * settings.cashRoundingSteps for the sale's currency (0 or missing = none). A cash refund is
+   * rounded to it like a cash sale: the drawer pays the rounded amount and the difference is the
+   * rounding (6400). Other methods are never rounded.
+   */
+  cashStepMinor?: number;
 }
 
 export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
@@ -184,10 +196,18 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
   const method = request.refundMethod ?? defaultRefundMethod(sale);
   if (method === 'account' && !sale.customerId)
     throw new Error('only a sale of a named customer can be refunded to an account');
+  // A cash refund is rounded to the cash step (half away from zero, like a sale). A refund that
+  // would round down to nothing stays exact: a refund of zero is no refund.
+  const rounded =
+    method === 'cash' && (request.cashStepMinor ?? 0) > 0
+      ? roundCashDue(totals.totalMinor, request.cashStepMinor!)
+      : null;
+  const cashRounding = rounded && rounded.dueMinor > 0 ? rounded.roundingMinor : 0;
   const refund: Refund = {
     method,
     currency: sale.currency,
-    amountMinor: totals.totalMinor,
+    amountMinor: totals.totalMinor + cashRounding,
+    ...(cashRounding !== 0 ? { roundingMinor: cashRounding } : {}),
     // A voucher's code is the return's own number, given when it is saved
     reference:
       method === 'cash' || method === 'voucher' || method === 'account' ? null : (request.reference ?? null),

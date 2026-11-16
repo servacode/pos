@@ -384,8 +384,23 @@ export const serialFixInput = z.object({
   serial: z.string().trim().min(3).max(40),
   /** in_stock: back in the branch's stock; sold: sold by its latest sale in the history */
   status: z.enum(['in_stock', 'sold']),
+  /** With status sold: the sale that went out without this piece's number (picked from «بيعات بلا رقم») */
+  saleId: uuidSchema.optional(),
 });
 export type SerialFixInput = z.input<typeof serialFixInput>;
+
+/** A sale of a serial-tracked product that went out with fewer numbers than pieces (flag serial_missing) */
+export interface UnassignedSerialSale {
+  saleId: string;
+  saleNumber: string;
+  soldOn: string;
+  variantId: string;
+  name: string;
+  /** Pieces that left without a number */
+  missing: number;
+  /** The variant's serials still «في المحل», to pick the one that left */
+  candidates: string[];
+}
 
 /** A product sold under its cost in the period (sold net of tax and returns, cost from the ledger) */
 export interface BelowCostItem {

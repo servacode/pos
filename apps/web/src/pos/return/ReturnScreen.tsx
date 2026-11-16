@@ -277,11 +277,12 @@ export function ReturnScreen({
         returned: current.returned,
         refundMethod: method,
         reference: reference.trim() || null,
+        cashStepMinor: settings.cashRoundingSteps[current.sale.currency] ?? 0,
       });
     } catch {
       return null;
     }
-  }, [current, picks, shift.id, session.userId, why, method, reference]);
+  }, [current, picks, shift.id, session.userId, why, method, reference, settings.cashRoundingSteps]);
 
   // A damaged or expired box is never «sealed»: that reason does not ask for the tick
   const damaged = reason === DAMAGED_REASON;
@@ -431,7 +432,7 @@ export function ReturnScreen({
       if (isExchange && doc.number && onExchange)
         onExchange(
           method === 'voucher' ? doc.number : null,
-          method === 'voucher' ? undefined : draft.totals.totalMinor,
+          method === 'voucher' ? undefined : (draft.refunds[0]?.amountMinor ?? draft.totals.totalMinor),
         );
     } catch {
       setError('لم يُسجَّل المرتجع. لم يُحفظ شيء، حاول مرة أخرى.');
@@ -653,12 +654,25 @@ export function ReturnScreen({
                 </bdi>{' '}
                 · رُدّ{' '}
                 <ExactMoney
-                  minor={(saved.payload as unknown as ReturnPayload).totals.totalMinor}
+                  minor={
+                    (saved.payload as unknown as ReturnPayload).refunds[0]?.amountMinor ??
+                    (saved.payload as unknown as ReturnPayload).totals.totalMinor
+                  }
                   currency={(saved.payload as unknown as ReturnPayload).currency}
                   className="font-bold"
                 />{' '}
                 {REFUND_TEXT[savedRefund(saved)]}
               </p>
+              {(saved.payload as unknown as ReturnPayload).refunds[0]?.roundingMinor ? (
+                <p className="text-ink-muted">
+                  قيمة البضاعة{' '}
+                  <ExactMoney
+                    minor={(saved.payload as unknown as ReturnPayload).totals.totalMinor}
+                    currency={(saved.payload as unknown as ReturnPayload).currency}
+                  />{' '}
+                  والفرق تقريب النقد
+                </p>
+              ) : null}
               {savedRefund(saved) === 'voucher' ? (
                 <p className="max-w-md text-ink-muted">
                   القسيمة برقم المرتجع، مطبوعة على الإيصال. تُصرف على أي جهاز في المحل.
@@ -880,11 +894,18 @@ export function ReturnScreen({
                           : 'المبلغ المردود'}
                   </span>
                   <ExactMoney
-                    minor={draft?.totals.totalMinor ?? 0}
+                    minor={draft?.refunds[0]?.amountMinor ?? draft?.totals.totalMinor ?? 0}
                     currency={current.sale.currency}
                     className="text-kpi font-bold tracking-tight text-ink"
                     unitClassName="text-base font-semibold text-ink-subtle"
                   />
+                  {draft?.refunds[0]?.roundingMinor ? (
+                    <span className="text-sm text-ink-muted">
+                      قيمة البضاعة{' '}
+                      <ExactMoney minor={draft.totals.totalMinor} currency={current.sale.currency} /> · تقريب
+                      النقد
+                    </span>
+                  ) : null}
                 </div>
                 {error ? <Alert tone="error">{error}</Alert> : null}
                 {approving ? (

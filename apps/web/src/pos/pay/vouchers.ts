@@ -51,7 +51,11 @@ export function tillVouchers(
         .filter((r) => r.method === 'voucher')
         .reduce((sum, r) => sum + r.amountMinor, 0);
       if (amountMinor > 0) issued.set(doc.number, { currency: ret.currency, amountMinor, redeemedMinor: 0 });
-    } else if (doc.type === 'gift_voucher' && doc.number && !issued.has(doc.number)) {
+    } else if (
+      (doc.type === 'gift_voucher' || doc.type === 'deposit') &&
+      doc.number &&
+      !issued.has(doc.number)
+    ) {
       const g = doc.payload as unknown as GiftVoucherPayload;
       issued.set(doc.number, { currency: g.currency, amountMinor: g.amountMinor, redeemedMinor: 0 });
     } else if (doc.type === 'sale') {

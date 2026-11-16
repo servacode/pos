@@ -47,6 +47,25 @@ function phoneSets(withStock = true) {
 }
 
 describe('serial numbers at the till', () => {
+  it('warns in the dialog when more numbers are in the store than pieces in stock', async () => {
+    const sets = phoneSets();
+    sets.stock_levels = [
+      {
+        id: PRODUCTS.oil.variant.id,
+        branchId: sets.stock_levels[0]?.branchId ?? '0192a3b4-c5d6-7e8f-9a0b-000000000001',
+        variantId: PRODUCTS.oil.variant.id,
+        qty: 1000,
+        reservedQty: 0,
+        version: 1,
+      },
+    ] as typeof sets.stock_levels;
+    const { user } = await saleScreen({ sets });
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    const panel = await screen.findByRole('region', { name: 'الرقم التسلسلي' });
+    expect(within(panel).getByTestId('serial-mismatch')).toHaveTextContent('بيعة سابقة خرجت بلا رقم');
+    expect(within(panel).queryByRole('button', { name: 'لاحقاً' })).toBeNull();
+  });
+
   it('lists the numbers in stock for the product (not sold, not another product) and picks one on a tap', async () => {
     const { user } = await saleScreen({ sets: phoneSets() });
     await scan(user, PRODUCTS.oil.barcode!.code);
@@ -106,14 +125,12 @@ describe('serial numbers at the till', () => {
     expect(plain(cartLines())).toContain('الرقم التسلسلي IMEI351');
     expect(plain(cartLines())).toContain('هاتف A15 · كفالة 12 شهراً');
 
-    // The second phone is a line of its own; «لاحقاً» leaves it without a number and payment waits
+    // The second phone is a line of its own; the dialog has no «لاحقاً» for a serial product
     await scan(user, PRODUCTS.oil.barcode!.code);
     panel = await screen.findByRole('region', { name: 'الرقم التسلسلي' });
-    await user.click(within(panel).getByRole('button', { name: 'لاحقاً' }));
+    expect(within(panel).queryByRole('button', { name: 'لاحقاً' })).toBeNull();
     expect(within(cartLines()).getAllByRole('listitem')).toHaveLength(2);
     expect(screen.getByRole('button', { name: /ادفع/ })).toBeDisabled();
-    await user.click(within(cartLines()).getByRole('button', { name: 'اكتب الرقم التسلسلي' }));
-    panel = await screen.findByRole('region', { name: 'الرقم التسلسلي' });
     await user.type(within(panel).getByLabelText('الرقم التسلسلي للجهاز'), 'IMEI351');
     await user.click(within(panel).getByRole('button', { name: 'احفظ الرقم' }));
     expect(

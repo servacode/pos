@@ -200,6 +200,8 @@ export const SYNC_FLAGS = [
   'serial_sold_twice',
   /** A serial number in stock under another product was sold as this one */
   'serial_other_product',
+  /** A serial-tracked product left with fewer numbers than pieces: accepted, flagged for the owner to pick the serial */
+  'serial_missing',
   /** A sale spent a voucher the server does not know (03 › قسيمة الاستبدال) */
   'unknown_voucher',
   /** A sale spent more than was left on a voucher */

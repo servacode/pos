@@ -227,9 +227,9 @@ describe('best sellers (round 20)', () => {
       doc: { payload: { lines: [{ variantId, baseQty }] } },
     }) as unknown as OutboxEntry;
 
-  it('lists the products sold most, none before there is any history', () => {
+  it('lists the products sold most, from the first piece sold', () => {
     expect(bestSellers(catalog, [])).toEqual([]);
-    expect(bestSellers(catalog, [sale(item.variantId, 1000)])).toEqual([]);
+    expect(bestSellers(catalog, [sale(item.variantId, 1000)])).toEqual([item.productId]);
     expect(bestSellers(catalog, [sale(item.variantId, 2000), sale(item.variantId, 2000)])).toEqual([
       item.productId,
     ]);

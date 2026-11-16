@@ -118,7 +118,7 @@ describe('sale screen', () => {
 
   it('finds names however they are spelled, and Enter adds the only result', async () => {
     const { user } = await saleScreen();
-    await user.type(screen.getByPlaceholderText('ابحث باسم الصنف أو امسح الباركود'), 'شاى احمر');
+    await user.type(screen.getByPlaceholderText('ابحث أو امسح الباركود'), 'شاى احمر');
     const items = screen.getByRole('list', { name: 'الأصناف' });
     expect(within(items).getAllByRole('button')).toHaveLength(1);
     await user.keyboard('{Enter}');
@@ -179,7 +179,7 @@ describe('sale screen', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await user.keyboard(PINS[ids.maryam]!);
     expect(await screen.findByRole('list', { name: 'الأصناف' })).toBeInTheDocument();
-    shows(due(), '593 ل.س');
+    shows(due(), '592.50 ل.س');
 
     await user.keyboard('{F12}');
     const pay = await screen.findByRole('region', { name: 'الدفع' });

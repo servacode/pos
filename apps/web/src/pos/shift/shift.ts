@@ -175,6 +175,8 @@ export interface ShiftActivity {
   returns: { count: number; byMethod: { method: string; currency: Code; amountMinor: number }[] };
   /** Gift vouchers sold in this shift, per currency */
   vouchers: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** Deposits («عربون») taken in this shift, per currency; gift-voucher deposits of older tills stay in `vouchers` */
+  deposits?: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
   /** What the shift's invoices came to and the discounts given on them, per invoice currency */
   salesTotals: { currency: Code; totalMinor: number; discountMinor: number }[];
   /** Per seller (the chosen seller, else the cashier) and invoice currency: invoices and what they came to */
@@ -185,6 +187,7 @@ export interface ShiftActivity {
   cashIn?: {
     receipts: { currency: Code; amountMinor: number }[];
     vouchers: { currency: Code; amountMinor: number }[];
+    deposits?: { currency: Code; amountMinor: number }[];
   };
   /** What cash rounding took off (negative) or added to the invoices of this shift, per currency (display only) */
   cashRounding?: { currency: Code; amountMinor: number }[];
@@ -214,6 +217,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   const refunds = new Map<string, { method: string; currency: Code; amountMinor: number }>();
   let returnCount = 0;
   const gifts = new Map<Code, number>();
+  const deposits = new Map<Code, number>();
+  const depositsCash = new Map<Code, number>();
+  let depositCount = 0;
   let giftCount = 0;
   const movements: ShiftActivity['movements'] = [];
   const receiptsCash = new Map<Code, number>();
@@ -310,6 +316,15 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       }
       giftCount += 1;
       gifts.set(g.currency, (gifts.get(g.currency) ?? 0) + g.amountMinor);
+    } else if (doc.type === 'deposit') {
+      // A deposit taken in cash goes into this drawer exactly like a gift voucher did
+      const g = payload as unknown as GiftVoucherPayload;
+      if (g.method === 'cash') {
+        termsOf(g.currency).receiptsMinor += g.amountMinor;
+        depositsCash.set(g.currency, (depositsCash.get(g.currency) ?? 0) + g.amountMinor);
+      }
+      depositCount += 1;
+      deposits.set(g.currency, (deposits.get(g.currency) ?? 0) + g.amountMinor);
     } else if (doc.type === 'cash_movement') {
       const move = payload as unknown as CashMovementPayload;
       const t = termsOf(move.currency);
@@ -333,12 +348,19 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       count: giftCount,
       byCurrency: [...gifts].map(([currency, amountMinor]) => ({ currency, amountMinor })),
     },
+    deposits: {
+      count: depositCount,
+      byCurrency: [...deposits].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+    },
     salesTotals: [...salesTotals.values()],
     bySeller: [...bySeller.values()],
     movements,
     cashIn: {
       receipts: [...receiptsCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
       vouchers: [...vouchersCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+      deposits: depositsCash.size
+        ? [...depositsCash].map(([currency, amountMinor]) => ({ currency, amountMinor }))
+        : undefined,
     },
     changeBack: [...changeBack.values()],
     ...(rounding.size > 0

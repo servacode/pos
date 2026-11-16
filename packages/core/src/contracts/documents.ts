@@ -217,6 +217,11 @@ export const saleLineSchema = z.object({
   taxRateId: uuidSchema.nullable(),
   taxRateBp: bpSchema,
   discount: documentDiscountSchema.nullable(),
+  /**
+   * Round 21: a service line, which the invoice-level discount skips (its own discount still
+   * applies). Optional and absent from every line priced before, which took its share.
+   */
+  noInvoiceDiscount: z.boolean().optional(),
   priced: pricedLineSchema,
 });
 export type SaleLine = z.output<typeof saleLineSchema>;
@@ -763,6 +768,13 @@ export const refundSchema = z
     currency: currencyCodeSchema,
     amountMinor: positiveMinorSchema,
     reference: z.string().trim().min(1).max(64).nullable(),
+    /**
+     * Round 21: a cash refund is rounded to the cash step like a cash sale. `amountMinor` is what
+     * leaves the drawer; `roundingMinor` = amountMinor − the exact refund (negative when the till
+     * paid out less), posted to 6400. Optional and absent from every refund made before (and from
+     * every non-cash one): there the refund is exactly what the goods came to.
+     */
+    roundingMinor: z.int().optional(),
   })
   .refine(
     (r) => r.method === 'cash' || r.method === 'voucher' || r.method === 'account' || r.reference !== null,
@@ -770,7 +782,11 @@ export const refundSchema = z
       path: ['reference'],
       message: 'a card, wallet or transfer refund needs its reference',
     },
-  );
+  )
+  .refine((r) => r.roundingMinor === undefined || r.roundingMinor === 0 || r.method === 'cash', {
+    path: ['roundingMinor'],
+    message: 'only a cash refund is rounded',
+  });
 export type Refund = z.output<typeof refundSchema>;
 
 /**
@@ -824,7 +840,11 @@ export const returnPayloadSchema = z
       if (f.currency !== r.currency)
         issue(['refunds', i, 'currency'], 'a refund is paid in the invoice currency');
     });
-    if (bigSum(r.refunds.map((f) => f.amountMinor)) !== BigInt(r.totals.totalMinor)) {
+    // What leaves, less the cash rounding, is exactly the goods' total (rounding is 0 / absent on
+    // every refund an older till made, so those still pay back exactly the total)
+    if (
+      bigSum(r.refunds.map((f) => f.amountMinor - (f.roundingMinor ?? 0))) !== BigInt(r.totals.totalMinor)
+    ) {
       issue(['refunds'], 'the refunds must pay back exactly the total');
     }
   });
@@ -886,6 +906,14 @@ export const giftVoucherPayloadSchema = z
   });
 export type GiftVoucherPayload = z.output<typeof giftVoucherPayloadSchema>;
 
+/**
+ * `deposit` (DEP, «عربون»): what a customer pays up front for an alteration, a rental or an order.
+ * The same shape and the same postings as a gift voucher (Dr the drawer, Cr 2310), a document of its
+ * own so the Z and the ledger name it. Gift vouchers already taken as deposits stay as they are.
+ */
+export const depositPayloadSchema = giftVoucherPayloadSchema;
+export type DepositPayload = z.output<typeof depositPayloadSchema>;
+
 // ─── Validation entry point ──────────────────────────────────────────────────
 
 /** The payload schema of each document type that has one in this contract version. */
@@ -897,6 +925,7 @@ export const DOCUMENT_PAYLOAD_SCHEMAS = {
   return: returnPayloadSchema,
   receipt: receiptPayloadSchema,
   gift_voucher: giftVoucherPayloadSchema,
+  deposit: depositPayloadSchema,
   customer: customerPayloadSchema,
 } as const;
 export type PayloadDocType = keyof typeof DOCUMENT_PAYLOAD_SCHEMAS;

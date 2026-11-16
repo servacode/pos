@@ -477,6 +477,13 @@
       "when": 1794746048691,
       "tag": "0067_device_hidden_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794749648691,
+      "tag": "0068_deposit_doc_type",
+      "breakpoints": true
     }
   ]
 }

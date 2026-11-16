@@ -280,7 +280,9 @@ export function StatusBar({
                 <span className="truncate text-xs/tight text-ink-muted max-sm:hidden">{user.detail}</span>
                 {/* A phone has no room beside the name: the store goes under it, so the cashier knows whose till this is */}
                 {device ? (
-                  <span className="truncate text-xs/tight text-ink-muted sm:hidden">{device.storeName}</span>
+                  <span className="line-clamp-2 text-xs/tight text-ink-muted sm:hidden">
+                    {device.storeName}
+                  </span>
                 ) : null}
               </p>
             </div>

@@ -22,6 +22,8 @@ export interface PickedVariant {
   requiresExpiry?: boolean;
   /** «يتتبّع الرقم التسلسلي»: a receipt or a return of it takes one number per piece */
   tracksSerial?: boolean;
+  /** The shelf price of one piece when it is in pounds (minor units), to ask about a cost far above it */
+  priceMinor?: number;
 }
 
 /**
@@ -68,6 +70,7 @@ export function VariantPicker({
         packs: packOptionsOf(v.barcodes),
         ...(detail.requiresExpiry ? { requiresExpiry: true } : {}),
         ...(detail.tracksSerial ? { tracksSerial: true } : {}),
+        ...(v.price?.currency === 'SYP' && v.price.priceMinor > 0 ? { priceMinor: v.price.priceMinor } : {}),
       }));
     if (variants.length === 1) {
       onPick(variants[0]!);

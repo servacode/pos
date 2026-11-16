@@ -242,11 +242,12 @@ async function drawerLedger(tx: Transaction, tenantId: string): Promise<Integrit
   const gifts = (await hasColumn(tx, 'vouchers', 'shift_id'))
     ? sql`union all
       select v.shift_id, v.currency, v.amount_minor
-      from vouchers v where v.tenant_id = ${tenantId} and v.kind = 'gift' and v.method = 'cash'`
+      from vouchers v where v.tenant_id = ${tenantId} and v.kind in ('gift', 'deposit') and v.method = 'cash'`
     : sql``;
   const refunds = (await hasReturns(tx))
     ? sql`union all
-      select r.shift_id, r.currency, -r.total_minor
+      select r.shift_id, r.currency,
+             -coalesce((r.payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, r.total_minor)
       from sale_returns r where r.tenant_id = ${tenantId} and r.refund_method = 'cash'`
     : sql``;
   // What went in and out of each drawer by the documents, and the close's counted amount less the
@@ -356,8 +357,12 @@ async function dayReportLedger(tx: Transaction, tenantId: string): Promise<Integ
       from sale_returns where tenant_id = ${tenantId}
       union all select branch_id, business_date, 'tax', -tax_minor from sale_returns where tenant_id = ${tenantId}
       union all select branch_id, business_date,
-        'pay:' || case when refund_method = 'account' then 'credit' else refund_method end, -total_minor
-      from sale_returns where tenant_id = ${tenantId} and refund_method is not null`
+        'pay:' || case when refund_method = 'account' then 'credit' else refund_method end,
+        -coalesce((payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, total_minor)
+      from sale_returns where tenant_id = ${tenantId} and refund_method is not null
+      union all select branch_id, business_date, 'rounding',
+        -coalesce((payload -> 'refunds' -> 0 ->> 'roundingMinor')::bigint, 0)
+      from sale_returns where tenant_id = ${tenantId} and refund_method = 'cash'`
     : sql``;
   const rows = await tx.execute<{
     branch: string;

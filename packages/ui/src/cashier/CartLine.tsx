@@ -4,7 +4,7 @@ import { IconButton } from '../Button';
 import { cn } from '../cn';
 import { DeleteIcon, WarningIcon } from '../icons';
 import { useDigits } from '../context';
-import { Money } from '../Money';
+import { exactDecimals, Money } from '../Money';
 import { displayNumber } from '../NumberField';
 import { NameText } from './NameText';
 
@@ -109,13 +109,24 @@ export function CartLine({
               {/* One right-to-left isolate: «1.250 كغ × 300» reads quantity, unit, ×, price. */}
               <bdi dir="rtl" className="num">
                 {formatQuantity(qtyThousandths, digits)}
-                {unit ? ` ${unit}` : ''} × <Money minor={unitPriceMinor} currency={currency} symbol={false} />
+                {unit ? ` ${unit}` : ''} ×{' '}
+                <Money
+                  minor={unitPriceMinor}
+                  currency={currency}
+                  decimals={exactDecimals(unitPriceMinor, currency)}
+                  symbol={false}
+                />
               </bdi>
               {/* On its own line, whole items wrapping: no separator dot left stranded at a line's end */}
               {meta ? <span className="block">{meta}</span> : null}
             </span>
           </span>
-          <Money minor={lineTotalMinor} currency={currency} className="text-base/7 font-bold text-ink" />
+          <Money
+            minor={lineTotalMinor}
+            currency={currency}
+            decimals={exactDecimals(lineTotalMinor, currency)}
+            className="text-base/7 font-bold text-ink"
+          />
         </button>
         {onRemove ? (
           <IconButton

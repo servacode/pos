@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
 import type { MeResponse, OnlineOrder } from '@serva/core';
 import {
@@ -344,9 +344,17 @@ function PlanCard({
  * for a section of two pages or more. They stay under the top bar as the page scrolls.
  */
 function SectionTabs({ section, pathname }: { section: NavSection; pathname: string }) {
+  // The open tab comes to the middle of a strip that scrolls (a phone), so its neighbours are in view
+  const nav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const open = nav.current?.querySelector('[aria-current="page"]');
+    if (open && typeof open.scrollIntoView === 'function') {
+      open.scrollIntoView({ inline: 'center', block: 'nearest' });
+    }
+  }, [pathname]);
   return (
     // -mb-px: the open tab's line lies on the header's hairline.
-    <nav aria-label={`صفحات ${section.label}`} className="-mb-px">
+    <nav ref={nav} aria-label={`صفحات ${section.label}`} className="-mb-px">
       <ScrollStrip className="max-sm:snap-x max-sm:snap-proximity">
         <ul className="flex min-w-max gap-1">
           {section.pages.map((page) => {

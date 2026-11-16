@@ -30,7 +30,7 @@ import {
   ItemTile,
   Money,
   ProductsIcon,
-  RetryIcon,
+  RepeatIcon,
   SearchIcon,
   TextField,
   useDigits,
@@ -240,7 +240,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onSearchKey}
-          placeholder="ابحث باسم الصنف أو امسح الباركود"
+          placeholder="ابحث أو امسح الباركود"
           autoComplete="off"
           aria-keyshortcuts="F2"
           className="min-w-0 flex-1"
@@ -288,8 +288,10 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
         {props.hasLastLines ? (
           <Button
             variant="secondary"
-            icon={<RetryIcon size={20} />}
+            icon={<RepeatIcon size={20} />}
             onClick={props.onRepeatLast}
+            aria-label="كرّر آخر طلب"
+            title="كرّر آخر طلب"
             className="max-sm:px-3.5"
           >
             <span className="max-sm:sr-only">كرّر آخر طلب</span>
@@ -511,15 +513,20 @@ const Grid = memo(function Grid({
     // overflow-x hidden: the negative margin and the tiles' shadows must not make a sideways scrollbar
     <div className="-m-1 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1 [scrollbar-width:thin]">
       {best.length > 0 ? (
-        <section aria-label="الأكثر بيعاً" className="mb-3 flex flex-col gap-1.5">
-          <h3 className="text-sm font-semibold text-ink-muted">الأكثر بيعاً</h3>
-          <ul className="-m-1 flex gap-2 overflow-x-auto p-1 scrollbar-none">
+        <section aria-label="الأكثر بيعاً" className="mb-3 flex items-center gap-2">
+          <h3 className="shrink-0 text-sm font-semibold text-ink-muted">الأكثر بيعاً</h3>
+          <ul className="-m-1 flex min-w-0 gap-2 overflow-x-auto p-1 scrollbar-none">
             {best.map((entry) => (
-              <li
-                key={entry.kind === 'model' ? entry.productId : entry.item.variantId}
-                className="w-36 shrink-0"
-              >
-                {tile(entry)}
+              <li key={entry.kind === 'model' ? entry.productId : entry.item.variantId} className="shrink-0">
+                <button
+                  type="button"
+                  className="min-h-10 max-w-40 truncate rounded-full border border-line-control bg-surface px-3 text-sm font-semibold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                  onClick={() =>
+                    entry.kind === 'model' ? onPickModel(entry.productId) : onPickItem(entry.item)
+                  }
+                >
+                  {entry.kind === 'model' ? entry.name : entry.item.name}
+                </button>
               </li>
             ))}
           </ul>

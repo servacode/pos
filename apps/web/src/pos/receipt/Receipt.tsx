@@ -51,7 +51,7 @@ export function methodLabel(method: PaymentMethod, currency: CurrencyCode, base:
 
 export interface ReceiptData {
   /** A sale receipt unless it says return, receipt (a customer's payment) or gift (a gift voucher) */
-  kind?: 'sale' | 'return' | 'receipt' | 'gift';
+  kind?: 'sale' | 'return' | 'receipt' | 'gift' | 'deposit';
   doc: Pick<SyncDocument, 'number' | 'deviceTime' | 'payload'>;
   settings: SettingsRow;
   branch: BranchRow | null;
@@ -151,7 +151,7 @@ function ReceiptHeader({ data, width, copy }: { data: ReceiptData; width: PaperW
 
 /** A receipt is paper: white with dark ink in dark mode too, so the preview looks like what prints */
 /* eslint-disable no-restricted-syntax -- paper is white with dark ink whatever the theme: these are the light theme's own values */
-const PAPER = {
+export const PAPER = {
   '--color-surface': 'oklch(1 0 0)',
   '--color-ink': 'oklch(0.2048 0.019 171.49)',
   '--color-ink-muted': 'oklch(0.4644 0.0198 167.74)',
@@ -276,6 +276,12 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
       </Row>
       {ret.refunds.map((r, i) => (
         <div key={i} className="flex flex-col">
+          {r.roundingMinor ? (
+            <Row label="تقريب النقد">
+              <bdi dir="ltr">{r.roundingMinor < 0 ? '−' : '+'}</bdi>
+              <ExactMoney minor={Math.abs(r.roundingMinor)} currency={r.currency} />
+            </Row>
+          ) : null}
           <Row label={REFUND_LABEL[r.method]}>
             <ExactMoney minor={r.amountMinor} currency={r.currency} />
           </Row>
@@ -320,15 +326,19 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
 
 /** A gift voucher (03 › الألبسة: قسيمة هدية): its amount, who it is for, its bars and its code. */
 function GiftVoucherSlip({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
+  const title = data.kind === 'deposit' ? 'عربون' : 'قسيمة هدية';
   const digits = useDigits();
   const g = data.doc.payload as unknown as GiftVoucherPayload;
   const at = Date.parse(data.doc.deviceTime);
   return (
-    <div dir="rtl" lang="ar" aria-label={`قسيمة هدية ${width} مم`} className={slipClass(width)} style={PAPER}>
+    <div dir="rtl" lang="ar" aria-label={`${title} ${width} مم`} className={slipClass(width)} style={PAPER}>
       <ReceiptHeader data={data} width={width} copy={copy} />
       <Rule />
-      <section aria-label="قسيمة الهدية" className="flex flex-col items-center gap-1 text-center">
-        <span className="text-base font-bold">قسيمة هدية</span>
+      <section
+        aria-label={data.kind === 'deposit' ? 'عربون' : 'قسيمة الهدية'}
+        className="flex flex-col items-center gap-1 text-center"
+      >
+        <span className="text-base font-bold">{title}</span>
         {g.forName ? <span className="font-bold">إلى {g.forName}</span> : null}
         <ExactMoney minor={g.amountMinor} currency={g.currency} className="text-xl font-bold" />
         {data.doc.number ? (
@@ -375,7 +385,8 @@ export function Receipt({
   const digits = useDigits();
   if (data.kind === 'return') return <ReturnReceipt data={data} width={width} copy={copy} />;
   if (data.kind === 'receipt') return <PaymentVoucher data={data} width={width} copy={copy} />;
-  if (data.kind === 'gift') return <GiftVoucherSlip data={data} width={width} copy={copy} />;
+  if (data.kind === 'gift' || data.kind === 'deposit')
+    return <GiftVoucherSlip data={data} width={width} copy={copy} />;
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
   const at = Date.parse(data.doc.deviceTime);

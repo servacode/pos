@@ -1,6 +1,7 @@
 import type {
   SerialFixInput,
   SerialRow,
+  UnassignedSerialSale,
   WarrantyClaim,
   WarrantyClaimInput,
   WarrantyLookup,
@@ -41,3 +42,7 @@ export const fixSerialRow = (input: SerialFixInput) =>
     body: input,
     auth: true,
   });
+
+/** `GET /v1/serials/unassigned` (catalog.manage): sales that left without a number, with the in-stock serials to pick from */
+export const unassignedSerialSales = () =>
+  apiFetch<{ items: UnassignedSerialSale[] }>('/v1/serials/unassigned', { auth: true });

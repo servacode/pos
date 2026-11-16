@@ -189,6 +189,7 @@ export const JOURNAL_SOURCE_TYPES = [
   'return',
   'receipt',
   'gift_voucher',
+  'deposit',
   'purchase',
   'supplier_payment',
   'supplier_return',

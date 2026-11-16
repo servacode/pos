@@ -59,6 +59,7 @@ import { downloadCsv } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
+import { countWord } from '../../lib/plural';
 import { negativePieces, soldOutLabel, soldOutSentence, StockDefinitions } from '../stockWords';
 import { SlimKpis } from '../SlimKpis';
 import { negativeNote } from '../../lib/stockCounts';
@@ -144,7 +145,9 @@ function StockCell({ item, digits }: { item: ProductListItem; digits: 'latn' | '
         className={cn('font-semibold', avail < 0 && 'text-danger-ink', avail === 0 && 'text-warning-ink')}
       >
         {formatQuantity(avail, digits)}
-        {avail > 0 ? <span className="font-normal text-ink-muted"> قطعة</span> : null}
+        {avail > 0 ? (
+          <span className="font-normal text-ink-muted"> {countWord(avail, { one: 'قطعة', few: 'قطع' })}</span>
+        ) : null}
       </span>
       {below ? (
         <span className="text-xs whitespace-nowrap text-danger-ink">{below}</span>
@@ -859,7 +862,7 @@ function ProductsList() {
                 <>
                   <bdi className="num font-semibold text-ink">{`${summary.products}${more}`}</bdi> منتج ·{' '}
                   <bdi className="num font-semibold text-ink">{formatQuantity(summary.pieces, digits)}</bdi>{' '}
-                  قطعة
+                  {countWord(summary.pieces, { one: 'قطعة', few: 'قطع' })}
                   {summary.runOut > 0 ? (
                     <>
                       {' '}
@@ -1257,7 +1260,7 @@ function ProductsList() {
                               >
                                 {availableOf(item) === 0
                                   ? 'نفد'
-                                  : `${formatQuantity(availableOf(item), digits)} قطعة`}
+                                  : `${formatQuantity(availableOf(item), digits)} ${countWord(availableOf(item), { one: 'قطعة', few: 'قطع' })}`}
                               </span>
                               {negativeWords(item, digits) ? (
                                 <span className="shrink-0 text-danger-ink">

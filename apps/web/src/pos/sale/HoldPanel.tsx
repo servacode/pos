@@ -82,7 +82,7 @@ export function HoldPanel({
           forName: `عربون حجز: ${name.trim()}`.slice(0, 80),
         };
         const entry = await pos.save({
-          type: 'gift_voucher',
+          type: 'deposit',
           payload: payload as unknown as Record<string, unknown>,
           businessDate: businessDateOf(pos.now(), timezone, cutoff),
           engineVersion: PRICING_ENGINE_VERSION,

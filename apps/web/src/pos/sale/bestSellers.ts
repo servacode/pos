@@ -3,14 +3,14 @@ import type { OutboxEntry } from '@serva/sync';
 import type { Catalog } from '../catalog';
 
 /** At most this many tiles in the «الأكثر بيعاً» strip */
-export const BEST_SELLERS_MAX = 6;
+export const BEST_SELLERS_MAX = 5;
 /** A product needs at least this many pieces sold on this device to count as a best seller */
-const BEST_SELLERS_MIN_PIECES = 3;
+const BEST_SELLERS_MIN_PIECES = 1;
 
 /**
  * The products this device sold most, from the sales it still holds (the outbox keeps pending ones and
  * those confirmed in the last 30 days): product ids, best first. A product of the catalog only, never
- * a service, and none at all until the till has some history (display only).
+ * a service, and none at all until the till has sold its first piece (display only).
  */
 export function bestSellers(catalog: Catalog, entries: readonly OutboxEntry[]): string[] {
   const sold = new Map<string, number>();

@@ -85,6 +85,15 @@ describe('the Z report (the till’s closing slip)', () => {
     expect(text).toMatch(/20\.00\s?\$ مستلمة − باقي 800 ل\.س/);
   });
 
+  it('names a deposit on its own line, apart from gift vouchers', () => {
+    const text = renderZ([
+      doc('deposit', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 50_000_00 }, 1),
+    ]);
+    expect(text).toContain('عربون');
+    expect(text).toContain('عربون نقداً');
+    expect(text).not.toContain('قسائم الهدية المباعة');
+  });
+
   it('lists the cash that came into the drawer outside a sale instead of «لا حركات»', () => {
     expect(renderZ([])).toContain('لا حركات');
   });
@@ -96,7 +105,7 @@ describe('the Z report (the till’s closing slip)', () => {
     ]);
     expect(text).not.toContain('لا حركات');
     expect(text).toContain('دفعات زبائن نقداً');
-    expect(text).toContain('قسائم وعربون بيعت نقداً');
+    expect(text).toContain('قسائم بيعت نقداً');
   });
 });
 

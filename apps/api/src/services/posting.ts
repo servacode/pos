@@ -409,6 +409,10 @@ export function returnLines(ret: ReturnPayload, taxAccountOf: (taxRateId: string
         rate: null,
         shiftId: ret.shiftId,
       });
+      // Round 21: the drawer paid the rounded amount; the difference to what the goods came to
+      // is cash rounding, on the same account a sale's rounding uses (6400). Absent on a refund
+      // an older till made, which paid exactly the total. Paying less is a gain (a credit).
+      if (r.roundingMinor) lines.push(baseLine({ code: '6400' }, r.roundingMinor, r.currency));
     } else if (r.method === 'account') {
       // The debt comes down by what went back; beyond the debt it is the store's credit to the
       // customer, a credit balance on 1200 exactly as an over-payment by receipt is.
@@ -496,7 +500,7 @@ export async function postReceipt(tx: Transaction, source: SaleSource, r: Receip
 // ─── Gift voucher ────────────────────────────────────────────────────────────
 
 /** A gift voucher sold: the money in (the drawer of its shift, or its method's account), 2310 owed. */
-export function giftVoucherLines(g: GiftVoucherPayload, number: string): DraftLine[] {
+export function giftVoucherLines(g: GiftVoucherPayload, number: string, label = 'قسيمة هدية'): DraftLine[] {
   const money: DraftLine =
     g.method === 'cash'
       ? {
@@ -513,7 +517,7 @@ export function giftVoucherLines(g: GiftVoucherPayload, number: string): DraftLi
           g.currency,
           [methodMemo[g.method], g.reference].filter(Boolean).join(' '),
         );
-  return [money, baseLine({ code: '2310' }, -g.amountMinor, g.currency, `قسيمة هدية ${number}`)];
+  return [money, baseLine({ code: '2310' }, -g.amountMinor, g.currency, `${label} ${number}`)];
 }
 
 export async function postGiftVoucher(
@@ -531,6 +535,24 @@ export async function postGiftVoucher(
     memo: `قسيمة هدية ${source.number}${g.forName ? ` إلى ${g.forName}` : ''}`,
     baseCurrency: g.currency,
     lines: giftVoucherLines(g, source.number),
+  });
+}
+
+/**
+ * A deposit («عربون», D4): the same lines as a gift voucher (the money in, 2310 owed), under its own
+ * source type so the ledger and the reports name it.
+ */
+export async function postDeposit(tx: Transaction, source: SaleSource, g: GiftVoucherPayload): Promise<void> {
+  await postEntry(tx, {
+    tenantId: source.tenantId,
+    branchId: source.branchId,
+    date: source.businessDate,
+    sourceType: 'deposit',
+    sourceId: source.docId,
+    sourceNumber: source.number,
+    memo: `عربون ${source.number}${g.forName ? ` من ${g.forName}` : ''}`,
+    baseCurrency: g.currency,
+    lines: giftVoucherLines(g, source.number, 'عربون'),
   });
 }
 

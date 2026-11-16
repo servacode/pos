@@ -51,6 +51,8 @@ export interface SaleCartLine {
   taxRateId?: string | null;
   taxRateBp: number;
   discount?: SaleDiscount | null;
+  /** A service line: the invoice-level discount skips it (its own discount still applies) */
+  noInvoiceDiscount?: boolean;
   /** Serial numbers or IMEIs of the pieces, one each (left out of a line without them) */
   serials?: readonly string[];
   /** Numbers a manager let through though the store never received them, and who (03 › الإلكترونيات) */
@@ -199,6 +201,7 @@ export function priceSale(input: SalePricingInput): { lines: SaleLine[]; priced:
       qty: line.qty,
       taxRateBp: line.taxRateBp,
       ...(line.discount ? { discount: line.discount } : {}),
+      ...(line.noInvoiceDiscount ? { noInvoiceDiscount: true } : {}),
     })),
     ...(input.invoiceDiscount ? { invoiceDiscount: input.invoiceDiscount } : {}),
     taxInclusive: input.taxInclusive,
@@ -222,6 +225,7 @@ export function priceSale(input: SalePricingInput): { lines: SaleLine[]; priced:
       taxRateId: line.taxRateId ?? null,
       taxRateBp: line.taxRateBp,
       discount: line.discount ?? null,
+      ...(line.noInvoiceDiscount ? { noInvoiceDiscount: true } : {}),
       ...(line.serials?.length ? { serials: [...line.serials] } : {}),
       ...(line.serials?.length && line.warrantyMonths ? { warrantyMonths: line.warrantyMonths } : {}),
       ...(line.serialOverrides?.length

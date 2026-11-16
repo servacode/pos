@@ -30,6 +30,7 @@ const SERIAL_FLAG_TEXT: Record<string, string> = {
   unknown_serial: 'رقم تسلسلي لم يُستلم',
   serial_sold_twice: 'رقم تسلسلي مباع من قبل',
   serial_other_product: 'رقم تسلسلي لصنف آخر',
+  serial_missing: 'بيعة بلا رقم تسلسلي',
 };
 
 export function StatusBadge({ status }: { status: SaleStatus }) {

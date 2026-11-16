@@ -53,6 +53,7 @@ const SOURCE_LABEL: Record<string, string> = {
   manual: 'قيد يدوي',
   return: 'مرتجع',
   expense: 'مصروف',
+  deposit: 'عربون',
   reversal: 'قيد عكسي',
 };
 
@@ -66,6 +67,7 @@ const SERIES_LABEL: Record<string, string> = {
   SRT: 'المرتجعات',
   QUO: 'عروض الأسعار',
   RCV: 'سندات القبض',
+  DEP: 'العربون',
   CSH: 'حركات الدرج',
   SFT: 'الورديات',
   OWN: 'حركات المالك',

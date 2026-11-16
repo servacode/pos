@@ -119,7 +119,8 @@ const CONTROL = 'justify-center rounded-control font-semibold';
  * the end, 72 whatever the density.
  */
 function sizeClass(size: ButtonSize, density: Density): string {
-  if (size === 'pay') return 'min-h-18 w-full justify-between gap-3 rounded-card px-7 text-xl font-bold';
+  if (size === 'pay')
+    return 'min-h-18 w-full justify-between gap-3 rounded-card px-4 sm:px-7 text-xl font-bold';
   const touch = density === 'touch';
   const box = {
     xs: 'gap-1.5 px-3 text-sm',

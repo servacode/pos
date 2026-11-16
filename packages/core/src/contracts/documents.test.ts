@@ -469,6 +469,24 @@ describe('gift_voucher payload', () => {
   });
 });
 
+describe('deposit payload (D4)', () => {
+  it('has the shape of a gift voucher, so a deposit posts what a gift-voucher deposit posted', () => {
+    const body = {
+      shiftId: '0198a0a0-0000-7000-8000-000000000001',
+      cashierId: '0198a0a0-0000-7000-8000-000000000002',
+      currency: 'SYP',
+      amountMinor: 50_000,
+      method: 'cash',
+      reference: null,
+      forName: 'سلمى',
+    };
+    expect(validateDocumentPayload('deposit', body).ok).toBe(true);
+    expect(validateDocumentPayload('gift_voucher', body).ok).toBe(true);
+    expect(validateDocumentPayload('deposit', { ...body, amountMinor: 0 }).ok).toBe(false);
+    expect(validateDocumentPayload('deposit', { ...body, method: 'card' }).ok).toBe(false);
+  });
+});
+
 describe('validateDocumentPayload', () => {
   it('checks the types it knows and passes the others unchecked', () => {
     expect(Object.keys(DOCUMENT_PAYLOAD_SCHEMAS)).toEqual([
@@ -479,6 +497,7 @@ describe('validateDocumentPayload', () => {
       'return',
       'receipt',
       'gift_voucher',
+      'deposit',
       'customer',
     ]);
     expect(hasPayloadSchema('sale')).toBe(true);

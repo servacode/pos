@@ -86,6 +86,21 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       end: money(r.totals.totalMinor, r.currency),
       bold: true,
     });
+    // A cash refund rounded to the cash step: what the drawer paid, and the difference
+    const cashRefund = r.refunds.find((x) => x.method === 'cash' && x.roundingMinor);
+    if (cashRefund) {
+      lines.push({
+        kind: 'pair',
+        start: 'تقريب النقد',
+        end: `${cashRefund.roundingMinor! < 0 ? '−' : '+'}${money(Math.abs(cashRefund.roundingMinor!), r.currency)}`,
+      });
+      lines.push({
+        kind: 'pair',
+        start: 'رُدّ نقداً',
+        end: money(cashRefund.amountMinor, r.currency),
+        bold: true,
+      });
+    }
     lines.push({ kind: 'pair', start: 'السبب', end: r.reason });
     // A cash exchange is two documents: this return in cash, then the sale of the other piece in cash
     if (r.reason === 'تبديل' && r.refunds.length === 1 && r.refunds[0]!.method === 'cash') {
@@ -107,9 +122,9 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     }
     return [...lines, ...footer(data, false)];
   }
-  if (data.kind === 'gift') {
+  if (data.kind === 'gift' || data.kind === 'deposit') {
     const g = data.doc.payload as unknown as GiftVoucherPayload;
-    lines.push(...header(data, 'قسيمة هدية', data.doc.number, at));
+    lines.push(...header(data, data.kind === 'deposit' ? 'عربون' : 'قسيمة هدية', data.doc.number, at));
     if (g.forName) lines.push({ kind: 'center', text: `إلى ${g.forName}`, bold: true });
     lines.push({ kind: 'center', text: money(g.amountMinor, g.currency), bold: true, big: true });
     if (data.doc.number) {

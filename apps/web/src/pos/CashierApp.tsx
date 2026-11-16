@@ -130,7 +130,8 @@ function paidInCash(data: ReceiptData): boolean {
     method?: string;
     refunds?: { method: string }[];
   };
-  if (data.kind === 'receipt' || data.kind === 'gift') return payload.method === 'cash';
+  if (data.kind === 'receipt' || data.kind === 'gift' || data.kind === 'deposit')
+    return payload.method === 'cash';
   if (data.kind === 'return') return (payload.refunds ?? []).some((r) => r.method === 'cash');
   return (payload.payments ?? []).some((p) => p.method === 'cash');
 }
@@ -178,6 +179,7 @@ type View =
   | 'return'
   | 'receipt'
   | 'gift'
+  | 'deposit'
   | 'alterations'
   | 'rentals'
   | 'maintenance'
@@ -1394,7 +1396,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         onNextSale={() => setDone(null)}
         extraShortcuts={extraShortcuts}
         onPrintDeposit={(doc) =>
-          setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'gift' }, copy: false })
+          setPrintJob({ data: { ...receiptData(doc, session.fullName), kind: 'deposit' }, copy: false })
         }
       />
       {openedNote ? (

@@ -145,7 +145,7 @@ export function AlterationsScreen({
     if (!ready || !token) return;
     setSaving(true);
     setError(null);
-    // A deposit is taken as a gift voucher in cash (an existing document); its code goes on the ticket
+    // A deposit is taken in cash as its own document («عربون», DEP); its code goes on the ticket
     let depositVoucher: string | null = null;
     if (depositMinor) {
       try {
@@ -159,7 +159,7 @@ export function AlterationsScreen({
           forName: name.trim(),
         };
         const entry = await pos.save({
-          type: 'gift_voucher',
+          type: 'deposit',
           payload: payload as unknown as Record<string, unknown>,
           businessDate: businessDateOf(pos.now(), settings.timezone, settings.businessDayCutoff),
           engineVersion: PRICING_ENGINE_VERSION,
@@ -304,7 +304,7 @@ export function AlterationsScreen({
           </div>
           <TextField
             label="العربون (اختياري)"
-            hint="يُؤخذ نقداً على قسيمة، ويُخصم من الأجرة عند التسليم"
+            hint="يُؤخذ نقداً كعربون، ويُخصم من الأجرة عند التسليم"
             dir="ltr"
             inputMode="decimal"
             value={deposit}

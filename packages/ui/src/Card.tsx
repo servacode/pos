@@ -224,7 +224,9 @@ export function StatTile({
       <p
         className={cn(
           'col-span-full num font-bold tracking-tight text-ink',
-          hero ? cn('text-total', HERO_UNIT) : cn('text-kpi max-sm:text-base max-sm:leading-6', VALUE_UNIT),
+          hero
+            ? cn('text-total', HERO_UNIT)
+            : cn('text-kpi max-sm:text-base max-sm:leading-6 [&>bdi]:whitespace-normal', VALUE_UNIT),
         )}
       >
         {value}

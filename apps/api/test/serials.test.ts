@@ -329,6 +329,47 @@ describe('serial tracking at the till and on the server', () => {
     ).toBe(404);
   });
 
+  it('accepts a sale that left without its number, flags it, and the owner picks which piece left', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    await received(store, a15, ['MISS-1', 'MISS-2', 'MISS-3']);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const sold = doc(
+      'sale',
+      sale(store, open.id, {
+        lines: [cartLine(1, 2_000_000, { ...a15, qty: 2000, serials: ['MISS-1'] })],
+        payments: [{ method: 'cash' as const, currency: 'SYP' as const, amountMinor: 4_000_000 }],
+      }),
+    );
+    const res = await push(app, store.device, [open, sold]);
+    // Never rejected: accepted and flagged
+    expect(res.results[1]!.status).toBe('accepted');
+    expect(res.results[1]!.flags).toEqual(expect.arrayContaining(['serial_missing']));
+    // A full sale of a tracked product carries no such flag
+    const list = async () =>
+      (await app.inject({ method: 'GET', url: '/v1/serials/unassigned', headers: as(store) })).json<{
+        items: { saleId: string; missing: number; candidates: string[]; saleNumber: string }[];
+      }>().items;
+    const [item] = await list();
+    expect(item).toMatchObject({ saleId: sold.id, missing: 1, saleNumber: sold.number });
+    expect(item!.candidates).toEqual(['MISS-2', 'MISS-3']);
+    const fix = (serial: string, saleId = sold.id) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/serials/fix',
+        headers: as(store),
+        payload: { serial, status: 'sold', saleId },
+      });
+    expect((await fix('MISS-1')).statusCode).toBe(400); // already sold by this sale
+    expect((await fix('MISS-2', '00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
+    const fixed = await fix('MISS-2');
+    expect(fixed.statusCode, fixed.body).toBe(200);
+    expect(await history(store, 'MISS-2')).toMatchObject({ status: 'sold', saleNumber: sold.number });
+    expect(await list()).toEqual([]);
+    expect((await fix('MISS-3')).statusCode).toBe(400); // nothing is missing any more
+  });
+
   it('sends a device to the supplier or another branch with its number, and refuses a number that is not there', async () => {
     const store = await openStore(app);
     const a15 = await phone(store);

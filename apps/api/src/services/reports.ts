@@ -283,7 +283,9 @@ export async function dayReport(
       amount: string;
       n: string;
     }>(sql`
-      select r.refund_method as method, r.currency, sum(r.total_minor)::text as amount, count(*)::text as n
+      select r.refund_method as method, r.currency,
+             sum(coalesce((r.payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, r.total_minor))::text as amount,
+             count(*)::text as n
       from sale_returns r where ${returnsWhere} and r.refund_method is not null
       group by r.refund_method, r.currency
       order by array_position(array['cash', 'card', 'wallet', 'transfer', 'voucher', 'account'], r.refund_method), r.currency`);
@@ -461,11 +463,13 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       select r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
       where r.shift_id = ${id} and r.method = 'cash' group by r.currency
       union all
-      select r.currency, 'refund', sum(r.total_minor)::text from sale_returns r
+      select r.currency, 'refund',
+             sum(coalesce((r.payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, r.total_minor))::text
+      from sale_returns r
       where r.shift_id = ${id} and r.refund_method = 'cash' group by r.currency
       union all
       select v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
-      where v.shift_id = ${id} and v.kind = 'gift' and v.method = 'cash' group by v.currency
+      where v.shift_id = ${id} and v.kind in ('gift', 'deposit') and v.method = 'cash' group by v.currency
       union all
       select m.currency, m.kind, sum(m.amount_minor)::text from cash_movements m
       where m.shift_id = ${id} group by m.currency, m.kind`);

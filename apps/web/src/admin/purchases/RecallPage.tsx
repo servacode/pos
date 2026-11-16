@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import {
   COUNT_NOUNS,
   countNoun,
@@ -281,6 +281,8 @@ export function RecallPage() {
 
   const blocked = found?.batches.some((b) => b.blocked) ?? false;
   const anonymousQty = found ? buyerList(found.sales).anonymous.qty : 0;
+  // «افتح الفاتورة»: the first invoice that names nobody, to find who bought
+  const anonymousInvoice = found?.sales.find((s) => !s.customerName && !s.customerPhone)?.invoiceNumber;
   const batchColumns: DataColumn<RecallBatch>[] = [
     { key: 'name', header: 'الصنف', cell: (b) => b.name },
     {
@@ -556,6 +558,17 @@ export function RecallPage() {
                             : `${formatQuantity(anonymousQty, digits)} قطعة`}
                         </bdi>{' '}
                         من هذه الدفعة ولا يمكن الوصول إلى مشتريها، فاحسبها ضمن المخاطرة.
+                        {anonymousInvoice ? (
+                          <>
+                            {' '}
+                            <Link
+                              to={`/sales/invoices?q=${encodeURIComponent(anonymousInvoice)}`}
+                              className="font-semibold underline"
+                            >
+                              افتح الفاتورة
+                            </Link>
+                          </>
+                        ) : null}
                       </span>
                     </Alert>
                   ) : null}

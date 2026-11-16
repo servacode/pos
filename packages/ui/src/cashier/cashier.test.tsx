@@ -194,6 +194,12 @@ describe('TotalPanel', () => {
     expect(screen.getByText('سعر الصرف 130')).toBeInTheDocument();
   });
 
+  it('shows a half unit exactly, and a whole amount without decimals', () => {
+    renderUi(<TotalPanel totalMinor={617250} currency="SYP" onPay={vi.fn()} />);
+    expect(text(screen.getByRole('status'))).toBe('6,172.50 ل.س');
+    expect(text(screen.getByRole('button', { name: /ادفع/ }))).toContain('6,172.50 ل.س');
+  });
+
   it('says why pay is greyed, and a tap on the reason or on the greyed button goes to what is missing', async () => {
     const onPay = vi.fn();
     const onBlockedTap = vi.fn();

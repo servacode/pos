@@ -473,6 +473,12 @@ export function ShiftCloseScreen({
           // Whole parts that wrap together: never a separator dot left at the end of a line.
           // The summary step says the invoice count once, in its chip
           <span className="flex flex-wrap gap-x-3 gap-y-0.5">
+            {/* The step stays beside the title, where the eye is, not at the far end of a wide screen */}
+            {step === 'done' ? null : (
+              <span className="font-semibold whitespace-nowrap text-ink">
+                {step === 'count' ? 'الخطوة 1 من 2: العدّ' : 'الخطوة 2 من 2: المراجعة'}
+              </span>
+            )}
             <span className="whitespace-nowrap">{shift.openedByName}</span>
             <span className="whitespace-nowrap">
               {step === 'done' && closedAt
@@ -486,13 +492,6 @@ export function ShiftCloseScreen({
               <span className="whitespace-nowrap">{counted(activity.saleCount, INVOICES, digits)}</span>
             ) : null}
           </span>
-        }
-        actions={
-          step === 'done' ? null : (
-            <span className="text-sm font-semibold text-ink-muted">
-              {step === 'count' ? 'الخطوة 1 من 2: العدّ' : 'الخطوة 2 من 2: المراجعة'}
-            </span>
-          )
         }
       />
       {step === 'count' ? (
@@ -586,6 +585,7 @@ export function ShiftCloseScreen({
             {activity &&
             (activity.returns.count > 0 ||
               activity.vouchers.count > 0 ||
+              (activity.deposits?.count ?? 0) > 0 ||
               activity.saleCount > 0 ||
               activity.movements.length > 0 ||
               (activity.cashIn?.receipts.length ?? 0) > 0) ? (
@@ -644,7 +644,7 @@ export function ShiftCloseScreen({
                         {new Set(activity.bySeller.map((s) => s.sellerId)).size > 1 ? (
                           <>{counted(r.count, INVOICES, digits)} · </>
                         ) : null}
-                        <Money minor={r.totalMinor} currency={r.currency} className="text-ink" />
+                        <ExactMoney minor={r.totalMinor} currency={r.currency} className="text-ink" />
                       </span>
                     ))}
                   </li>
@@ -656,7 +656,7 @@ export function ShiftCloseScreen({
                     {[...returnedByCurrency].map(([currency, amountMinor]) => (
                       <span key={currency}>
                         {' · '}
-                        <Money minor={amountMinor} currency={currency as CurrencyCode} />
+                        <ExactMoney minor={amountMinor} currency={currency as CurrencyCode} />
                       </span>
                     ))}
                   </li>
@@ -665,7 +665,7 @@ export function ShiftCloseScreen({
                 {(activity.cashIn?.receipts ?? []).map((r) => (
                   <li key={`rc:${r.currency}`} className="flex flex-wrap items-center gap-x-1">
                     دفعات زبائن نقداً:{' '}
-                    <Money minor={r.amountMinor} currency={r.currency} className="text-ink" />
+                    <ExactMoney minor={r.amountMinor} currency={r.currency} className="text-ink" />
                   </li>
                 ))}
                 {activity.movements.map((m, i) => (
@@ -682,9 +682,23 @@ export function ShiftCloseScreen({
                 ))}
                 {activity.vouchers.count > 0 ? (
                   <li className="flex flex-wrap items-center gap-x-1">
-                    قسائم الهدية المباعة والعربون:{' '}
+                    قسائم الهدية المباعة:{' '}
                     {counted(activity.vouchers.count, ['قسيمة واحدة', 'قسيمتان', 'قسائم', 'قسيمة'], digits)} ·{' '}
                     {activity.vouchers.byCurrency.map((v) => (
+                      <Money key={v.currency} minor={v.amountMinor} currency={v.currency} />
+                    ))}
+                  </li>
+                ) : null}
+                {(activity.deposits?.count ?? 0) > 0 ? (
+                  <li className="flex flex-wrap items-center gap-x-1">
+                    عربون:{' '}
+                    {counted(
+                      activity.deposits!.count,
+                      ['عربون واحد', 'عربونان', 'عرابين', 'عربوناً'],
+                      digits,
+                    )}{' '}
+                    ·{' '}
+                    {activity.deposits!.byCurrency.map((v) => (
                       <Money key={v.currency} minor={v.amountMinor} currency={v.currency} />
                     ))}
                   </li>
