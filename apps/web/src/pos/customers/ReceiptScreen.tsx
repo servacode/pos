@@ -75,6 +75,8 @@ export function ReceiptScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReceipt | null>(null);
+  // What the customer owed when the receipt was saved: the balance read may refresh after the save
+  const [owedBefore, setOwedBefore] = useState<number | null>(null);
 
   const minor = parseAmount(amount, base);
   const ready =
@@ -108,6 +110,7 @@ export function ReceiptScreen({
         deviceTime: entry.doc.deviceTime,
         payload: entry.doc.payload,
       };
+      setOwedBefore(owed);
       setSaved(doc);
       onPrint(doc);
     } catch {
@@ -119,6 +122,7 @@ export function ReceiptScreen({
 
   function again() {
     setSaved(null);
+    setOwedBefore(null);
     setCustomer(null);
     setAmount('');
     setReference('');
@@ -161,13 +165,13 @@ export function ReceiptScreen({
               className="font-bold"
             />
           </p>
-          {owed !== null && owed > 0 ? (
+          {owedBefore !== null && owedBefore > 0 ? (
             <p role="status" className="text-ink-muted">
-              {owed - (saved.payload as unknown as ReceiptPayload).amountMinor > 0 ? (
+              {owedBefore - (saved.payload as unknown as ReceiptPayload).amountMinor > 0 ? (
                 <>
                   بقي عليه{' '}
                   <Money
-                    minor={owed - (saved.payload as unknown as ReceiptPayload).amountMinor}
+                    minor={owedBefore - (saved.payload as unknown as ReceiptPayload).amountMinor}
                     currency={base}
                     className="font-semibold text-ink"
                   />
