@@ -44,18 +44,18 @@ async function sold() {
   return pos;
 }
 
-describe('«أرسل عبر واتساب» on the finished sale', () => {
+describe('«أرسل على واتساب» on the finished sale', () => {
   it('asks for a number when the sale has no customer, then opens the chat with the receipt as text', async () => {
     const { user } = await sold();
-    await user.click(screen.getByRole('button', { name: 'أرسل عبر واتساب' }));
+    await user.click(screen.getByRole('button', { name: 'أرسل على واتساب' }));
     // A wrong number is said, nothing opens
     await user.type(screen.getByLabelText('رقم جوال الزبون'), '123');
-    await user.click(screen.getByRole('button', { name: 'أرسل' }));
+    await user.click(screen.getByRole('button', { name: 'أرسل على واتساب' }));
     expect(window.open).not.toHaveBeenCalled();
     expect(screen.getByText(/رقم الجوال غير صحيح/)).toBeInTheDocument();
     await user.clear(screen.getByLabelText('رقم جوال الزبون'));
     await user.type(screen.getByLabelText('رقم جوال الزبون'), '0933123456');
-    await user.click(screen.getByRole('button', { name: 'أرسل' }));
+    await user.click(screen.getByRole('button', { name: 'أرسل على واتساب' }));
     await waitFor(() => expect(window.open).toHaveBeenCalledOnce());
     const url = vi.mocked(window.open).mock.calls[0]![0] as string;
     expect(url.startsWith('https://wa.me/963933123456?text=')).toBe(true);
@@ -69,9 +69,10 @@ describe('«أرسل عبر واتساب» on the finished sale', () => {
 describe('after the link opened (round 18)', () => {
   it('says «فُتح واتساب ✓» on the button', async () => {
     const { user } = await sold();
-    await user.click(screen.getByRole('button', { name: 'أرسل عبر واتساب' }));
+    await user.click(screen.getByRole('button', { name: 'أرسل على واتساب' }));
+    await user.clear(screen.getByLabelText('رقم جوال الزبون'));
     await user.type(screen.getByLabelText('رقم جوال الزبون'), '0933123456');
-    await user.click(screen.getByRole('button', { name: 'أرسل' }));
+    await user.click(screen.getByRole('button', { name: 'أرسل على واتساب' }));
     expect(await screen.findByRole('button', { name: /فُتح واتساب/ })).toBeInTheDocument();
   });
 });

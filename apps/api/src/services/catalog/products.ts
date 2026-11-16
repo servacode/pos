@@ -411,7 +411,7 @@ export async function listProducts(
                  select 1 from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
                  where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
                    and x.price_minor = 0))::int as zero_price,
-               count(*) filter (where not exists (
+               count(*) filter (where p.type <> 'service' and not exists (
                  select 1 from product_images pi
                  where pi.tenant_id = p.tenant_id and pi.product_id = p.id))::int as no_photo,
                count(*) filter (where exists (

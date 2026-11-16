@@ -133,7 +133,7 @@ describe('shift', () => {
     expect(screen.getAllByRole('button', { name: 'عدّ تفصيلي' }).length).toBeGreaterThan(0);
     expect(screen.queryByText(/الفئة المختارة/)).not.toBeInTheDocument();
     await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '240');
-    await user.click(screen.getByRole('button', { name: 'تابع للمراجعة' }));
+    await user.click(screen.getByRole('button', { name: 'راجع وأغلق' }));
 
     expect(await screen.findByRole('heading', { name: 'ملخّص الوردية' })).toBeInTheDocument();
     expect(screen.getByText('المتوقع والفرق يراهما المدير فقط.')).toBeInTheDocument();
@@ -191,7 +191,7 @@ describe('shift', () => {
     await screen.findByRole('list', { name: 'الأصناف' });
     await user.click(screen.getByRole('button', { name: 'المزيد' }));
     await user.click(screen.getByRole('menuitem', { name: 'أغلق الوردية' }));
-    await user.click(await screen.findByRole('button', { name: 'تابع للمراجعة' }));
+    await user.click(await screen.findByRole('button', { name: 'راجع وأغلق' }));
     await screen.findByRole('heading', { name: 'ملخّص الوردية' });
     expect(plain(document.body)).toContain('المتوقع 0 ل.س · الفرق 0 ل.س');
   });

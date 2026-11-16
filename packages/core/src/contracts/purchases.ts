@@ -387,6 +387,17 @@ export const serialFixInput = z.object({
 });
 export type SerialFixInput = z.input<typeof serialFixInput>;
 
+/** A product sold under its cost in the period (sold net of tax and returns, cost from the ledger) */
+export interface BelowCostItem {
+  productId: string;
+  name: string;
+  /** Base units sold less returned (x1000, like every quantity) */
+  qty: number;
+  soldMinor: number;
+  costMinor: number;
+  lossMinor: number;
+}
+
 /**
  * `serials` pulled to the tills (03 › الإلكترونيات): the branch's in-stock pieces of products that
  * track them, and those sold lately, so the till refuses a number that is not in stock.
@@ -439,6 +450,8 @@ export interface ProfitReport {
   stockLossMinor: number;
   /** Products that sold for less than they cost in the period (net of tax and returns) */
   belowCostCount?: number;
+  /** Those products, the biggest loss first (up to 100): what the margin hint's link lists */
+  belowCost?: BelowCostItem[];
   baseCurrency: CurrencyCode;
 }
 

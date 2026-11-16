@@ -67,18 +67,65 @@ describe('ScrollStrip', () => {
     expect(strip.style.paddingInlineEnd).toBe('');
   });
 
-  it('brings the open tab into view', () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    renderUi(
+  it('centres the open tab on mount, and the new one when the open tab changes', async () => {
+    const scrollTo = vi.fn();
+    Element.prototype.scrollTo = scrollTo as unknown as typeof Element.prototype.scrollTo;
+    const box = (left: number, width: number) =>
+      ({
+        left,
+        width,
+        right: left + width,
+        top: 0,
+        bottom: 0,
+        height: 0,
+        x: left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.getAttribute('data-tab') === 'a') return box(0, 100);
+      if (this.getAttribute('data-tab') === 'b') return box(250, 100);
+      return box(0, 300);
+    });
+    const { container } = renderUi(
       <ScrollStrip>
-        <a href="/a">أ</a>
-        <a href="/b" aria-current="page">
+        <a href="/a" data-tab="a">
+          أ
+        </a>
+        <a href="/b" data-tab="b" aria-current="page">
           ب
         </a>
       </ScrollStrip>,
     );
-    expect(scrollIntoView).toHaveBeenCalledWith({ inline: 'center', block: 'nearest' });
+    // The tab's middle is 300, the strip's 150: 150 to go
+    expect(scrollTo).toHaveBeenCalledWith({ left: 150, behavior: 'auto' });
+    scrollTo.mockClear();
+    const strip = container.firstElementChild!.firstElementChild as HTMLElement;
+    const a = strip.querySelector('[data-tab="a"]')!;
+    const b = strip.querySelector('[data-tab="b"]')!;
+    await act(async () => {
+      b.removeAttribute('aria-current');
+      a.setAttribute('aria-current', 'page');
+      await Promise.resolve();
+    });
+    // Tab a's middle is 50: 100 back
+    expect(scrollTo).toHaveBeenCalledWith({ left: -100, behavior: 'smooth' });
+  });
+
+  it('does not break where scrollTo does not exist', () => {
+    const saved = Element.prototype.scrollTo;
+    // @ts-expect-error jsdom may or may not define it: remove it either way
+    delete Element.prototype.scrollTo;
+    expect(() =>
+      renderUi(
+        <ScrollStrip>
+          <a href="/a" aria-current="page">
+            أ
+          </a>
+        </ScrollStrip>,
+      ),
+    ).not.toThrow();
+    Element.prototype.scrollTo = saved;
   });
 });
 

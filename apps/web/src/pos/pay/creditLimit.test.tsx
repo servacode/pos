@@ -74,6 +74,16 @@ describe('a cashier sells on account', () => {
     expect(await within(pay).findByText('أبو خالد')).toBeInTheDocument();
   });
 
+  it('says on the pay screen’s customer card what the customer owes, when it is above zero (round 20)', async () => {
+    const owing = await toCredit(50_000);
+    await vi.waitFor(() => expect(plain(owing.pay)).toMatch(/عليه\s*500/));
+  });
+
+  it('says nothing about a debt on the card when the customer owes nothing (round 20)', async () => {
+    const clear = await toCredit(0);
+    expect(plain(clear.pay)).not.toMatch(/عليه\s*\d/);
+  });
+
   it('within the customer’s limit with no code, and the done screen says what stays on the account', async () => {
     const { user, pay, outbox } = await toCredit(50_000);
     await user.click(await within(pay).findByRole('button', { name: 'آجل على الحساب' }));

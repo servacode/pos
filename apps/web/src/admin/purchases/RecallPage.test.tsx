@@ -100,6 +100,8 @@ describe('«استدعاء دفعة»', () => {
     );
     // an invoice with no customer is a risk line, and the buyers can be exported
     expect(screen.getByTestId('recall-anonymous')).toHaveTextContent('لا يمكن الوصول إلى مشتريها');
+    // grammar: one piece, not «1 قطعة»
+    expect(screen.getByTestId('recall-anonymous')).toHaveTextContent('قطعة واحدة');
     expect(screen.getByRole('button', { name: 'صدّر الزبائن' })).toBeInTheDocument();
     // one line on top, and «بِيع» is net of the customer's return (3 sold, 1 taken back: 2)
     expect(screen.getByTestId('recall-headline')).toHaveTextContent(
@@ -113,6 +115,15 @@ describe('«استدعاء دفعة»', () => {
     });
     expect(chat.getAttribute('href')).toContain('https://wa.me/963955123456?text=');
     expect(decodeURIComponent(chat.getAttribute('href') ?? '')).toContain('الدفعة C-09');
+    // the whole note sits in an editable box; the edit goes into the link, and the tick shows once it is pressed
+    const box = screen.getByRole('textbox', { name: /الرسالة/ });
+    expect((box as HTMLTextAreaElement).value).toContain('الدفعة C-09');
+    await user.type(box, ' شكراً');
+    expect(screen.queryByText('أُرسلت ✓')).not.toBeInTheDocument();
+    chat.addEventListener('click', (e) => e.preventDefault());
+    expect(decodeURIComponent(chat.getAttribute('href') ?? '')).toContain('شكراً');
+    await user.click(chat);
+    expect(screen.getByText('أُرسلت ✓')).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
 

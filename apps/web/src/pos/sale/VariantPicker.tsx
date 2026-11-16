@@ -204,7 +204,7 @@ export function VariantPicker({
           </Button>
         ) : (
           // Never an empty slot: what is still to choose is said on a disabled button
-          <Button size="lg" fullWidth icon={<AddIcon size={20} />} disabled>
+          <Button size="lg" fullWidth disabled>
             اختر{' '}
             {options
               .filter((o) => !chosen[o.name])

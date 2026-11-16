@@ -1305,18 +1305,35 @@ export async function profitReport(
       join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
       where e.entry_date between ${query.from} and ${query.to}
         ${query.branchId ? sql`and e.branch_id = ${query.branchId}` : sql``}`);
-    // How many products sold for less than they cost in the period (what the margin hint links to)
-    const [below] = await tx.execute<{ n: string }>(sql`
-      select count(*)::text as n from (
-        select l.product_id
-        from movement_costs c
-        join invoice_lines l on l.tenant_id = c.tenant_id and l.invoice_id = c.doc_id and l.line_no = c.line_no
-        where c.business_date between ${query.from} and ${query.to}
-          ${query.branchId ? sql`and c.branch_id = ${query.branchId}` : sql``}
-        group by l.product_id
-        having sum(case when c.kind = 'sale' then l.total_minor - l.tax_minor else l.tax_minor - l.total_minor end)
-               < sum(c.cost_minor)
-      ) t`);
+    // The products that sold for less than they cost in the period: the count is what the margin
+    // hint says, the list (worst first) is what its link shows
+    const belowRows = await tx.execute<{
+      product_id: string;
+      name: string;
+      qty: string;
+      sold: string;
+      cost: string;
+    }>(sql`
+      select l.product_id, min(l.name) as name,
+             sum(case when c.kind = 'sale' then l.base_qty else -l.base_qty end)::text as qty,
+             sum(case when c.kind = 'sale' then l.total_minor - l.tax_minor else l.tax_minor - l.total_minor end)::text as sold,
+             sum(c.cost_minor)::text as cost
+      from movement_costs c
+      join invoice_lines l on l.tenant_id = c.tenant_id and l.invoice_id = c.doc_id and l.line_no = c.line_no
+      where c.business_date between ${query.from} and ${query.to}
+        ${query.branchId ? sql`and c.branch_id = ${query.branchId}` : sql``}
+      group by l.product_id
+      having sum(case when c.kind = 'sale' then l.total_minor - l.tax_minor else l.tax_minor - l.total_minor end)
+             < sum(c.cost_minor)
+      order by sum(c.cost_minor) - sum(case when c.kind = 'sale' then l.total_minor - l.tax_minor else l.tax_minor - l.total_minor end) desc`);
+    const belowCost = belowRows.slice(0, 100).map((r) => ({
+      productId: r.product_id,
+      name: r.name,
+      qty: Number(r.qty),
+      soldMinor: Number(r.sold),
+      costMinor: Number(r.cost),
+      lossMinor: Number(r.cost) - Number(r.sold),
+    }));
     const net = Number(row?.net ?? 0);
     const cost = Number(row?.cost ?? 0);
     return {
@@ -1326,7 +1343,8 @@ export async function profitReport(
       costOfSalesMinor: cost,
       grossProfitMinor: net - cost,
       stockLossMinor: Number(row?.loss ?? 0),
-      belowCostCount: Number(below?.n ?? 0),
+      belowCostCount: belowRows.length,
+      belowCost,
       baseCurrency: await baseCurrency(tx),
     };
   });

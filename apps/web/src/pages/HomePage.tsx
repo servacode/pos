@@ -510,21 +510,41 @@ function KpiBand({
                   ? 'التكلفة غير مكتملة بعد، لذلك لا يُعرض الهامش'
                   : profit.data.netSalesMinor > 0
                     ? (() => {
-                        const note = `هامش ${formatNumber(Math.round((profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100), digits)}% من صافي المبيعات بعد المرتجع وبدون الضريبة (${formatMoney(profit.data.netSalesMinor, profit.data.baseCurrency, { digits })})`;
+                        // The net sales sit in their own isolate (an Arabic sentence must not flip the brackets)
+                        const note = (
+                          <>
+                            هامش{' '}
+                            <bdi dir="ltr" className="num">
+                              {formatNumber(
+                                Math.round((profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100),
+                                digits,
+                              )}
+                              %
+                            </bdi>{' '}
+                            من صافي المبيعات بعد المرتجع وبدون الضريبة{' '}
+                            <bdi dir="rtl">
+                              (<Money minor={profit.data.netSalesMinor} currency={profit.data.baseCurrency} />
+                              )
+                            </bdi>
+                          </>
+                        );
                         const below = profit.data.belowCostCount ?? 0;
                         // A negative margin says why and where to look
                         return profit.data.grossProfitMinor < 0 && below > 0 ? (
                           <>
                             {note}
                             <br />
-                            <Link to="/reports/sales" className="font-semibold text-danger-ink underline">
-                              الهامش سالب: بيع تحت الكلفة في{' '}
+                            <Link
+                              to="/reports/below-cost"
+                              title="الأصناف التي بيعت بأقل من كلفتها اليوم"
+                              className="font-semibold text-danger-ink underline"
+                            >
                               {below === 1
                                 ? 'صنف واحد'
                                 : below === 2
                                   ? 'صنفين'
                                   : `${formatNumber(below, digits)} ${below <= 10 ? 'أصناف' : 'صنفاً'}`}{' '}
-                              — اعرض
+                              تحت الكلفة — اعرض
                             </Link>
                           </>
                         ) : (

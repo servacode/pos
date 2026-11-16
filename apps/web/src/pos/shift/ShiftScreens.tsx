@@ -34,6 +34,7 @@ import type { Catalog } from '../catalog';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { clockText, counted, INVOICES } from '../format';
 import { ChoiceGroup, FlowHeader, OptionTile } from '../FlowParts';
+import { ExactMoney } from '../ExactMoney';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import { ManagerCode } from '../staff/ManagerCode';
@@ -104,10 +105,16 @@ function CountLayout({
 }) {
   const keypad = useCountKeypad(counts, setCounts, till);
   return (
-    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+    <div
+      className={cn(
+        'grid grid-cols-1 items-start gap-6',
+        // One drawer: the count, the keys and the button in one centred column, not split across a wide page
+        counts.length === 1 ? 'mx-auto w-full max-w-md' : 'lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]',
+      )}
+    >
       <div className="flex flex-col gap-4">
         {intro}
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className={cn('grid grid-cols-1 gap-4', counts.length > 1 && 'xl:grid-cols-2')}>
           {counts.map((count, i) => (
             <DrawerCounter
               key={count.currency}
@@ -259,7 +266,7 @@ export function ShiftOpenScreen({
   }
 
   return (
-    <div className="flex w-full max-w-6xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <FlowHeader
         icon={<CashIcon size={24} />}
         title="افتح الوردية"
@@ -532,31 +539,23 @@ export function ShiftCloseScreen({
               ? 'نعم، الدرج فارغ، تابع'
               : odd.length > 0 && askedOdd === oddSignature
                 ? 'نعم، المبلغ صحيح، تابع'
-                : 'تابع للمراجعة'}
+                : 'راجع وأغلق'}
           </Button>
         </CountLayout>
       ) : step === 'done' && activity ? (
-        <section
-          aria-label="تقرير الإغلاق"
-          className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[auto_minmax(0,22rem)] lg:justify-center lg:gap-x-8"
-        >
-          <div className="mx-auto rounded-card border border-line bg-surface p-3 shadow-e1 max-lg:order-2 lg:mx-0">
+        <section aria-label="تقرير الإغلاق" className="mx-auto flex w-full max-w-sm flex-col gap-4">
+          <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع التقرير ثم اضغط «تمّ».</Alert>
+          <div className="mx-auto rounded-card border border-line bg-surface p-3 shadow-e1">
             <ZReport {...zProps(activity)} />
           </div>
-          {/* A wide screen: the slip on one side, this column (the word, then the two buttons) on the other */}
-          <div className="contents lg:flex lg:flex-col lg:gap-4 lg:self-start">
-            <div className="max-lg:order-1">
-              <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع التقرير ثم اضغط «تمّ».</Alert>
-            </div>
-            {/* The actions stay in view: «اطبع» first, then «تمّ» (the one way out) */}
-            <div className="flex flex-col gap-3 max-lg:sticky max-lg:-bottom-6 max-lg:z-10 max-lg:order-3 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
-              <Button size="lg" fullWidth icon={<PrintIcon />} onClick={() => print('80mm')}>
-                اطبع
-              </Button>
-              <Button size="lg" fullWidth variant="secondary" onClick={onClosed}>
-                تمّ
-              </Button>
-            </div>
+          {/* The actions stay in view on a phone: «اطبع» first, then «تمّ» (the one way out); the page ends below them */}
+          <div className="flex flex-col gap-3 max-lg:sticky max-lg:-bottom-6 max-lg:z-10 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
+            <Button size="lg" fullWidth icon={<PrintIcon />} onClick={() => print('80mm')}>
+              اطبع
+            </Button>
+            <Button size="lg" fullWidth variant="secondary" onClick={onClosed}>
+              تمّ
+            </Button>
           </div>
           {paper ? (
             <PrintSheet paper={paper}>
@@ -565,7 +564,7 @@ export function ShiftCloseScreen({
           ) : null}
         </section>
       ) : (
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
           <section aria-label="الملخّص حسب طريقة الدفع" className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
               <IconChip>
@@ -600,17 +599,21 @@ export function ShiftCloseScreen({
                       <Fragment key={t.currency}>
                         <li className="flex flex-wrap items-center gap-x-1">
                           {activity.returns.count > 0 ? 'إجمالي المبيعات قبل المرتجعات' : 'إجمالي المبيعات'}:{' '}
-                          <Money minor={t.totalMinor} currency={t.currency} className="text-ink" />
+                          <ExactMoney minor={t.totalMinor} currency={t.currency} className="text-ink" />
                           {t.discountMinor > 0 ? (
                             <>
-                              {' · '}منها حسم <Money minor={t.discountMinor} currency={t.currency} />
+                              {' · '}منها حسم <ExactMoney minor={t.discountMinor} currency={t.currency} />
                             </>
                           ) : null}
                         </li>
                         {activity.returns.count > 0 && back > 0 ? (
                           <li className="flex flex-wrap items-center gap-x-1">
                             صافي المبيعات بعد المرتجعات:{' '}
-                            <Money minor={t.totalMinor - back} currency={t.currency} className="text-ink" />
+                            <ExactMoney
+                              minor={t.totalMinor - back}
+                              currency={t.currency}
+                              className="text-ink"
+                            />
                           </li>
                         ) : null}
                       </Fragment>
@@ -618,7 +621,7 @@ export function ShiftCloseScreen({
                   })}
                 {(activity.cashRounding ?? []).map((r) => (
                   <li key={`rd:${r.currency}`} className="flex flex-wrap items-center gap-x-1">
-                    تقريب النقد:{' '}
+                    منها تقريب النقد:{' '}
                     <Money
                       minor={r.amountMinor}
                       currency={r.currency}
@@ -689,7 +692,7 @@ export function ShiftCloseScreen({
               </ul>
             ) : null}
           </section>
-          <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 lg:sticky lg:top-0">
+          <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2">
             <h2 className="text-sm font-semibold text-ink-muted">النقد المعدود</h2>
             {cash.map((c) => (
               <div

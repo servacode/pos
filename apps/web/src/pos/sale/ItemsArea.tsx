@@ -72,6 +72,8 @@ export interface ItemsAreaProps {
   catalog: Catalog;
   /** Every model's pieces, by product (models.modelPieces) */
   pieces: ReadonlyMap<string, CatalogItem[]>;
+  /** The products sold most on this device, best first: a strip above the grid while nothing is searched */
+  bestSellers?: readonly string[];
   searchRef: RefObject<HTMLInputElement | null>;
   /** Variants in the cart, for the tiles' selected edge */
   inCart: ReadonlySet<string>;
@@ -132,6 +134,18 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
     const out = (e: GridEntry) => isSoldOut(e.kind === 'model' ? e.pieces : [e.item], today);
     return [...all.filter((e) => !out(e)), ...all.filter(out)];
   }, [results, pieces, today]);
+  // «الأكثر بيعاً»: a short strip of the usual tiles, only while no search or category narrows the grid
+  const best = useMemo(() => {
+    if (query || category !== null || !props.bestSellers?.length) return [];
+    const top = new Set(props.bestSellers);
+    const firstOf = new Map<string, CatalogItem>();
+    for (const item of catalog.items)
+      if (top.has(item.productId) && !firstOf.has(item.productId)) firstOf.set(item.productId, item);
+    const items = props.bestSellers.flatMap((id) => firstOf.get(id) ?? []);
+    return gridEntries(items, pieces).filter(
+      (e) => !isSoldOut(e.kind === 'model' ? e.pieces : [e.item], today),
+    );
+  }, [query, category, props.bestSellers, catalog.items, pieces, today]);
   // Photos in the grid where the products have any; one tap turns them off for a compact grid (kept on this device)
   // …judged on what is in view: a category with no picture at all has nothing to hide
   const anyPhoto = useMemo(() => results.some((i) => Boolean(i.imageUrl)), [results]);
@@ -412,6 +426,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
         <BranchStock.Provider value={(catalog.staff.branches?.length ?? 0) > 1}>
           <Grid
             entries={entries}
+            best={best}
             inCart={inCart}
             pickingProduct={pickingProduct}
             today={today}
@@ -440,6 +455,7 @@ const BranchStock = createContext(false);
 /** The tiles. A tile is memoised on what it shows, so the grid re-renders only what changed. */
 const Grid = memo(function Grid({
   entries,
+  best,
   inCart,
   pickingProduct,
   today,
@@ -457,15 +473,58 @@ const Grid = memo(function Grid({
   fx: TileFx | null;
   iconOf: (item: CatalogItem) => Icon;
   entries: readonly GridEntry[];
+  best: readonly GridEntry[];
   inCart: ReadonlySet<string>;
   pickingProduct: string | null;
   today: string;
   onPickItem: ItemsAreaProps['onPickItem'];
   onPickModel: ItemsAreaProps['onPickModel'];
 }) {
+  const tile = (entry: GridEntry) =>
+    entry.kind === 'model' ? (
+      <ModelTile
+        entry={entry}
+        picking={pickingProduct === entry.productId}
+        inCart={entry.pieces.some((p) => inCart.has(p.variantId))}
+        today={today}
+        photos={photos}
+        compact={compact}
+        stockTracked={stockTracked}
+        fx={fx}
+        Kind={iconOf(entry.lead)}
+        onPick={onPickModel}
+      />
+    ) : (
+      <ItemTileMemo
+        item={entry.item}
+        inCart={inCart.has(entry.item.variantId)}
+        today={today}
+        photos={photos}
+        compact={compact}
+        stockTracked={stockTracked}
+        fx={fx}
+        Kind={iconOf(entry.item)}
+        onPick={onPickItem}
+      />
+    );
   return (
     // overflow-x hidden: the negative margin and the tiles' shadows must not make a sideways scrollbar
     <div className="-m-1 min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-1 [scrollbar-width:thin]">
+      {best.length > 0 ? (
+        <section aria-label="الأكثر بيعاً" className="mb-3 flex flex-col gap-1.5">
+          <h3 className="text-sm font-semibold text-ink-muted">الأكثر بيعاً</h3>
+          <ul className="-m-1 flex gap-2 overflow-x-auto p-1 scrollbar-none">
+            {best.map((entry) => (
+              <li
+                key={entry.kind === 'model' ? entry.productId : entry.item.variantId}
+                className="w-36 shrink-0"
+              >
+                {tile(entry)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <ul
         aria-label="الأصناف"
         className={cn(
@@ -475,38 +534,9 @@ const Grid = memo(function Grid({
             : 'grid-cols-[repeat(auto-fill,minmax(9.5rem,1fr))]',
         )}
       >
-        {entries.map((entry) =>
-          entry.kind === 'model' ? (
-            <li key={entry.productId}>
-              <ModelTile
-                entry={entry}
-                picking={pickingProduct === entry.productId}
-                inCart={entry.pieces.some((p) => inCart.has(p.variantId))}
-                today={today}
-                photos={photos}
-                compact={compact}
-                stockTracked={stockTracked}
-                fx={fx}
-                Kind={iconOf(entry.lead)}
-                onPick={onPickModel}
-              />
-            </li>
-          ) : (
-            <li key={entry.item.variantId}>
-              <ItemTileMemo
-                item={entry.item}
-                inCart={inCart.has(entry.item.variantId)}
-                today={today}
-                photos={photos}
-                compact={compact}
-                stockTracked={stockTracked}
-                fx={fx}
-                Kind={iconOf(entry.item)}
-                onPick={onPickItem}
-              />
-            </li>
-          ),
-        )}
+        {entries.map((entry) => (
+          <li key={entry.kind === 'model' ? entry.productId : entry.item.variantId}>{tile(entry)}</li>
+        ))}
       </ul>
     </div>
   );
@@ -717,7 +747,7 @@ function TileMarks({
     <>
       {onShelf !== null ? (
         <span className={cn('num text-xs font-medium', nothingSellable ? 'text-ink-muted' : 'text-ink')}>
-          {nothingSellable ? 'نفد' : `متوفر ${formatQuantity(onShelf, digits)}${here ? ' هنا' : ''}`}
+          {nothingSellable ? 'نفد' : `المتوفر ${formatQuantity(onShelf, digits)}${here ? ' هنا' : ''}`}
         </span>
       ) : null}
       {/* What is left out of the count (halted, expired): one small «⚠ 3 موقوفة» chip, never a second sentence */}

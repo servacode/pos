@@ -47,6 +47,9 @@ const QuotationPage = lazy(() =>
 const MerchandisePage = lazy(() =>
   import('./reports/MerchandisePage').then((m) => ({ default: m.MerchandisePage })),
 );
+const BelowCostPage = lazy(() =>
+  import('./reports/BelowCostPage').then((m) => ({ default: m.BelowCostPage })),
+);
 const FoodCostPage = lazy(() => import('./reports/FoodCostPage').then((m) => ({ default: m.FoodCostPage })));
 const SuppliersPage = lazy(() =>
   import('./purchases/SuppliersPage').then((m) => ({ default: m.SuppliersPage })),
@@ -214,6 +217,7 @@ export function AdminApp() {
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
           <Route path="/reports" element={page(<ReportsHomePage />)} />
           <Route path="/reports/sales" element={page(<SalesReportPage />)} />
+          <Route path="/reports/below-cost" element={page(<BelowCostPage />)} />
           <Route path="/reports/food-cost" element={page(<FoodCostPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
           <Route

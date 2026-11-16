@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { SERIAL_FLAG_LABELS, serialLabel, type SerialRow } from '@serva/core';
+import { useEffect, useMemo, useState } from 'react';
+import { COUNT_NOUNS, countNoun, SERIAL_FLAG_LABELS, serialLabel, type SerialRow } from '@serva/core';
 import {
   Alert,
   Badge,
@@ -18,6 +18,7 @@ import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { useMe } from '../../auth/useAuth';
 import { fixSerialRow, serialsOf } from '../warranty/api';
+import { getInventory } from './api';
 import { SectionHead } from './parts';
 
 /** A document number over its date, or a dash when there is none. */
@@ -48,6 +49,43 @@ export function SerialsPage() {
   const [error, setError] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
   const [confirming, setConfirming] = useState<string | null>(null);
+  // Read-only check: a device with more numbers «في المحل» than pieces in stock (a sale went out without its number)
+  const [all, setAll] = useState<SerialRow[] | null>(null);
+  const [stock, setStock] = useState<Map<string, number> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([serialsOf({ q: '', flagged: false }), getInventory()]).then(
+      ([serialList, inventory]) => {
+        if (!alive) return;
+        setAll(serialList.items);
+        const byVariant = new Map<string, number>();
+        for (const row of inventory.items)
+          byVariant.set(row.variantId, (byVariant.get(row.variantId) ?? 0) + row.qty);
+        setStock(byVariant);
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [reloads]);
+  const ahead = useMemo(() => {
+    if (!all || !stock) return [];
+    const counts = new Map<string, { name: string; n: number }>();
+    for (const r of all) {
+      if (r.status !== 'in_stock') continue;
+      const c = counts.get(r.variantId) ?? { name: r.name, n: 0 };
+      c.n += 1;
+      counts.set(r.variantId, c);
+    }
+    return [...counts.entries()]
+      .map(([variantId, c]) => ({
+        name: c.name,
+        n: c.n,
+        inStock: Math.max(0, Math.round((stock.get(variantId) ?? 0) / 1000)),
+      }))
+      .filter((x) => x.n > x.inStock);
+  }, [all, stock]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -177,6 +215,19 @@ export function SerialsPage() {
           description="كل جهاز برقمه: في المحل أو مباع، متى استُلم ومتى بيع، والكفالة حتى متى."
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
+        {ahead.length > 0 ? (
+          <Alert tone="warning">
+            <span data-testid="serials-ahead" className="flex flex-col gap-1">
+              {ahead.map((x) => (
+                <span key={x.name}>
+                  {x.name}: {countNoun(x.n, COUNT_NOUNS.piece)} برقم مسجّل · المخزون{' '}
+                  <bdi className="num font-semibold">{x.inStock}</bdi> — في بيعة بلا رقم. صحّح الرقم الزائد
+                  بزر «تصحيح».
+                </span>
+              ))}
+            </span>
+          </Alert>
+        ) : null}
         <section aria-label="الأجهزة" className="flex flex-col gap-3">
           <SectionHead
             title="الأجهزة"

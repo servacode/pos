@@ -3,8 +3,11 @@ import { useState } from 'react';
 import type { ReceiptData } from './Receipt';
 import { whatsappLink } from './whatsapp';
 
+/** The last number a receipt went to on this device, kept while the page stays open: the next customer who has no phone saved often shares it (a family, a clinic) */
+let lastNumber = '';
+
 /**
- * «أرسل عبر واتساب»: opens the customer's chat with the receipt as text, a plain link with no
+ * «أرسل على واتساب»: opens the customer's chat with the receipt as text, a plain link with no
  * server. With the customer's number known it is one tap; without one it asks for the number.
  */
 export function WhatsAppSend({
@@ -20,7 +23,7 @@ export function WhatsAppSend({
   primary?: boolean;
 }) {
   const [typing, setTyping] = useState(false);
-  const [typed, setTyped] = useState('');
+  const [typed, setTyped] = useState(lastNumber);
   const [error, setError] = useState('');
   // After the link opened: «فُتح واتساب ✓» says it happened; the same button can open it again
   const [sent, setSent] = useState(false);
@@ -28,6 +31,7 @@ export function WhatsAppSend({
     const link = whatsappLink(number, data);
     if (!link) return false;
     window.open(link, '_blank', 'noopener,noreferrer');
+    if (number) lastNumber = number;
     setSent(true);
     return true;
   };
@@ -39,7 +43,7 @@ export function WhatsAppSend({
           type="tel"
           inputMode="tel"
           dir="ltr"
-          placeholder="0933 123 456"
+          placeholder="رقم الزبون 09xx"
           value={typed}
           error={error || undefined}
           onChange={(e) => {
@@ -50,12 +54,13 @@ export function WhatsAppSend({
         />
         <Button
           size="lg"
+          icon={<ChatIcon />}
           onClick={() => {
             if (open(typed)) setTyping(false);
             else setError('رقم الجوال غير صحيح. مثال: 0912345678');
           }}
         >
-          أرسل
+          أرسل على واتساب
         </Button>
       </div>
     );
@@ -71,7 +76,7 @@ export function WhatsAppSend({
         setTyping(true);
       }}
     >
-      {sent ? 'فُتح واتساب ✓' : 'أرسل عبر واتساب'}
+      {sent ? 'فُتح واتساب ✓' : 'أرسل على واتساب'}
     </Button>
   );
 }

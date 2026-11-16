@@ -15,6 +15,7 @@ import {
 } from './staff/persist';
 import { staffRoster, type StaffSession } from './staff/staff';
 import { TillBoundary } from './chunks';
+import { useLocalStock } from './localStock';
 import { StatusBar, type OutboxStatus } from './StatusBar';
 import { useOnline } from './useOnline';
 
@@ -80,6 +81,8 @@ export function PosSession({ services, persisted }: { services: PosServices; per
     [services],
   );
   const outbox = useOutboxStatus(pos, tick);
+  // The tiles show what is left after this device's own sales, even before the server counts them
+  const shownCatalog = useLocalStock(pos, catalog, tick);
   const staff = useMemo(
     () => (catalog ? staffRoster(catalog.staff, services.device.branchCode) : []),
     [catalog, services.device.branchCode],
@@ -137,12 +140,12 @@ export function PosSession({ services, persisted }: { services: PosServices; per
   return (
     <PosProvider services={pos}>
       <DigitsProvider digits={digits}>
-        {session && catalog ? (
+        {session && shownCatalog ? (
           <TillBoundary>
             <Suspense fallback={null}>
               <CashierApp
                 session={session}
-                catalog={catalog}
+                catalog={shownCatalog}
                 persisted={persisted}
                 online={online}
                 outbox={outbox}

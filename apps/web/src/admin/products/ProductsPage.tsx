@@ -559,7 +559,8 @@ function ProductsList() {
   const zeroPrice =
     attention?.zeroPrice ??
     (items ?? []).filter((i) => i.type !== 'service' && i.price !== null && i.price.minMinor === 0).length;
-  const noPhoto = attention?.noPhoto ?? (items ?? []).filter((i) => i.hasImage === false).length;
+  const noPhoto =
+    attention?.noPhoto ?? (items ?? []).filter((i) => i.type !== 'service' && i.hasImage === false).length;
   // Products without a category: one press proposes a category for each from its name, then a review
   const uncategorised =
     attention?.uncategorised ?? (items ?? []).filter((i) => !i.categoryId && i.type !== 'service').length;
@@ -886,10 +887,14 @@ function ProductsList() {
                 label: 'المنتجات',
                 value: summary ? <bdi className="num">{`${summary.products}${more}`}</bdi> : '…',
                 note:
-                  summary && summary.variants > 0 && summary.variants !== summary.products ? (
+                  // Only a clothing store counts sizes and colours; elsewhere «15 منتج / 13 صنفاً» only confuses
+                  // (services have no variants), so the tile says the one number the phone summary says
+                  clothingStore &&
+                  summary &&
+                  summary.variants > 0 &&
+                  summary.variants !== summary.products ? (
                     <>
-                      {clothingStore ? 'المقاسات والألوان' : 'عدد الأصناف'}:{' '}
-                      <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
+                      المقاسات والألوان: <bdi className="num font-semibold text-ink">{summary.variants}</bdi>
                     </>
                   ) : undefined,
               },

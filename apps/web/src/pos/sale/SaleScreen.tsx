@@ -60,6 +60,7 @@ import { BatchBanner } from './BatchBanner';
 import { QuoteDialog, type QuoteChoice } from './QuoteDialog';
 import { batchGuard, planBatches } from './batches';
 import { deviceDocuments } from '../shift/shift';
+import { bestSellers } from './bestSellers';
 import { AdjustPanel, NEED_TEXT, type AdjustMode, type AdjustValue } from './AdjustPanel';
 import {
   addItem,
@@ -73,6 +74,8 @@ import {
   setPriceTier,
   applyContractPrices,
   contractSavingMinor,
+  customerPriceKind,
+  shelfPriceOf,
   type ItemChoice,
   EMPTY_CART,
   couponPromotion,
@@ -264,7 +267,8 @@ export function SaleScreen(props: SaleScreenProps) {
     () =>
       planBatches({
         cart,
-        catalog,
+        // The plan takes the unsent sales off the pulled stock itself: it must not see the tiles' lowered one
+        catalog: catalog.original ?? catalog,
         today: businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff),
         pending: unsent,
         pharmacy: settings.pharmacy,
@@ -378,6 +382,18 @@ export function SaleScreen(props: SaleScreenProps) {
   const [phoneView, setPhoneView] = useState<'items' | 'cart'>('items');
   // «البائع» (03 › الملابس: عمولة البائع): the last one picked on this device stays picked
   const pos = usePos();
+  // «الأكثر بيعاً»: the products this device sold most lately, for the strip at the top of the grid
+  const [best, setBest] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void deviceDocuments(pos.store).then(
+      (list) => alive && setBest(bestSellers(catalog, list)),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [pos.store, catalog]);
   const [seller, setSeller] = useState<string>(session.userId);
   useEffect(() => {
     let alive = true;
@@ -1294,10 +1310,10 @@ export function SaleScreen(props: SaleScreenProps) {
                 size="md"
                 icon={<InboxIcon size={20} />}
                 aria-label={`طلبات المتجر (${waitingOnline.length})`}
+                title="طلبات المتجر"
                 onClick={() => setMode({ kind: 'online' })}
                 className="border-brand/40 bg-brand-soft text-brand-ink"
               >
-                طلبات المتجر
                 <span
                   aria-hidden="true"
                   className="num grid h-7 min-w-7 place-items-center rounded-full bg-brand px-2 text-sm font-bold text-on-brand shadow-e1"
@@ -1561,13 +1577,13 @@ export function SaleScreen(props: SaleScreenProps) {
                     <Money minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
                   </span>
                 ) : null,
-                line.contractPriced ? (
+                customerPriceKind(line) !== null ? (
                   <span key="c" className="font-semibold text-info-ink">
-                    {line.shelfPriceMinor !== undefined && line.shelfPriceMinor > line.priceMinor ? (
+                    {shelfPriceOf(line) !== undefined && shelfPriceOf(line)! > line.priceMinor ? (
                       <s className="me-1.5 font-normal text-ink-subtle">
                         <Money
                           minor={unitPriceOf(
-                            { priceCurrency: line.priceCurrency, priceMinor: line.shelfPriceMinor },
+                            { priceCurrency: line.priceCurrency, priceMinor: shelfPriceOf(line)! },
                             ctx,
                           )}
                           currency={ctx.currency}
@@ -1575,7 +1591,7 @@ export function SaleScreen(props: SaleScreenProps) {
                         />
                       </s>
                     ) : null}
-                    سعر العقد
+                    {customerPriceKind(line) === 'contract' ? 'سعر العقد' : 'سعر الجملة'}
                   </span>
                 ) : null,
                 bump === line.lineNo ? (
@@ -1810,9 +1826,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 { label: 'الخصم · وفّر الزبون', minor: totals.discountMinor, tone: 'info' as const },
               ]
             : []),
-          ...(contractSaved > 0
-            ? [{ label: 'وفّرت بسعر العقد', minor: contractSaved, tone: 'info' as const }]
-            : []),
+          ...(contractSaved > 0 ? [{ label: 'وفّرت', minor: contractSaved, tone: 'info' as const }] : []),
           ...(totals && !settings.taxInclusive && totals.taxMinor > 0
             ? [{ label: 'الضريبة', minor: totals.taxMinor }]
             : []),
@@ -1896,6 +1910,7 @@ export function SaleScreen(props: SaleScreenProps) {
     <ItemsArea
       catalog={catalog}
       pieces={pieces}
+      bestSellers={best}
       searchRef={searchRef}
       inCart={inCart}
       pickingProduct={effectiveMode.kind === 'pick' ? effectiveMode.productId : null}
@@ -1938,7 +1953,7 @@ export function SaleScreen(props: SaleScreenProps) {
       statusBar={props.statusBar}
       cart={cartPanel}
       mobileView={phoneView}
-      {...(effectiveMode.kind === 'pay' ? { itemsLabel: 'الدفع', cartLabel: 'ارجع للسلة' } : {})}
+      {...(effectiveMode.kind === 'pay' ? { itemsLabel: 'الدفع', cartLabel: 'السلة' } : {})}
       onMobileView={setPhoneView}
       cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
       miniBar={
@@ -1967,7 +1982,7 @@ export function SaleScreen(props: SaleScreenProps) {
         ? createPortal(
             <p
               role="status"
-              className="pointer-events-none fixed inset-x-4 top-16 z-70 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
+              className="pointer-events-none fixed inset-x-4 bottom-24 z-70 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
             >
               <CheckIcon size={16} className="shrink-0" />
               <span className="truncate">

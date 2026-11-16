@@ -59,7 +59,8 @@ describe('the customers list: what they bought and who went quiet', () => {
     expect(screen.getByRole('columnheader', { name: 'آخر شراء' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'المقاس المفضّل' })).toBeInTheDocument();
     // On a phone the hidden columns are said under the name
-    expect(screen.getByText(/المقاس المفضّل L · آخر شراء/)).toBeInTheDocument();
+    expect(screen.getByText('المقاس المفضّل L')).toBeInTheDocument();
+    expect(screen.getAllByText(/^آخر شراء /).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('checkbox', { name: 'لم يزر منذ 90 يوماً' }));
     expect(screen.getByText('ريم القديمة')).toBeInTheDocument();
     expect(screen.queryByText('نور الجديدة')).not.toBeInTheDocument();

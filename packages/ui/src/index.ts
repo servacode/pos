@@ -115,6 +115,7 @@ export {
 
 export { CartLine, formatQuantity, type CartLineProps } from './cashier/CartLine';
 export { ItemTile, type ItemTileProps } from './cashier/ItemTile';
+export { NameText } from './cashier/NameText';
 export { Keypad, type KeypadProps } from './cashier/Keypad';
 export { TotalPanel, type TotalPanelProps } from './cashier/TotalPanel';
 

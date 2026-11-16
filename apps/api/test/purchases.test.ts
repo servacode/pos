@@ -287,6 +287,16 @@ describe('the cost of what was sold', () => {
     ).json<ProfitReport>();
     expect(profit.grossProfitMinor).toBeLessThan(0);
     expect(profit.belowCostCount).toBe(1);
+    // The list behind the count: the box, sold 2 for 2,000 against a cost of 6,000
+    expect(profit.belowCost).toEqual([
+      expect.objectContaining({
+        name: 'علبة',
+        qty: 2 * PIECE,
+        soldMinor: 2_000_00,
+        costMinor: 6_000_00,
+        lossMinor: 4_000_00,
+      }),
+    ]);
   });
 
   it('is costed once, however often the device sends the sale', async () => {

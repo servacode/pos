@@ -18,6 +18,10 @@ export function totalCount(currency: CurrencyCode): DrawerCount {
   return { currency, notes: null, totalMinor: 0 };
 }
 
+/** «50000» as «50,000»: the typed amount with its thousands, the fraction kept as it is */
+const grouped = (text: string) =>
+  text.replace(/^\d+/, (whole) => whole.replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+
 export const drawerName = (currency: CurrencyCode) =>
   currency === 'SYP'
     ? 'درج الليرة'
@@ -250,7 +254,7 @@ export function DrawerCounter({
             label="المجموع"
             inputMode="decimal"
             dir="ltr"
-            value={count.totalMinor ? amountText(count.totalMinor, currency) : ''}
+            value={count.totalMinor ? grouped(amountText(count.totalMinor, currency)) : ''}
             placeholder="0"
             onFocus={() => onActivate?.('total')}
             onChange={(e) =>

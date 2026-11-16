@@ -3,7 +3,8 @@ import { formatMoney } from '@serva/core/money';
 import { normalizePhone } from '@serva/core/phone';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
-import { methodLabel, type ReceiptData } from './Receipt';
+import { exactDecimals } from '../ExactMoney';
+import { methodLabel, priceTag, type ReceiptData } from './Receipt';
 import { serialText, warrantyText } from './warranty';
 
 /** The wa.me address of a phone typed any common way (Syrian forms go to 963…), or null when it is not a phone */
@@ -16,16 +17,19 @@ export function whatsappNumber(phone: string | null | undefined): string | null 
 export function receiptText(data: ReceiptData): string {
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
-  const money = (minor: number, currency = base) => stripBidiControls(formatMoney(minor, currency));
+  const money = (minor: number, currency = base) =>
+    stripBidiControls(formatMoney(minor, currency, { decimals: exactDecimals(minor, currency) }));
   const out: string[] = [data.settings.storeName || data.storeName];
   out.push(`فاتورة رقم ${data.doc.number ?? ''}`.trim());
   if (sale.customerName) out.push(`الزبون: ${sale.customerName}`);
   out.push('');
   for (const l of sale.lines) {
     out.push(`${l.name} × ${formatQuantity(l.qty)} = ${money(l.priced.totalMinor)}`);
-    if (data.contractVariantIds?.includes(l.variantId)) {
+    const tag = priceTag(data, l);
+    if (tag) {
       const was = data.contractSavings?.[l.lineNo];
-      out.push(was ? `سعر العقد (بدل ${money(l.priced.grossMinor + was)})` : 'سعر العقد');
+      const word = tag === 'wholesale' ? 'سعر الجملة' : 'سعر العقد';
+      out.push(was ? `${word} (بدل ${money(l.priced.grossMinor + was)})` : word);
     }
     const serial = serialText(l, data.settings);
     if (serial) out.push(serial);
@@ -34,7 +38,7 @@ export function receiptText(data: ReceiptData): string {
   }
   out.push('');
   const contractSaved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
-  if (contractSaved > 0) out.push(`وفّرت ${money(contractSaved)} بسعر العقد`);
+  if (contractSaved > 0) out.push(`وفّرت ${money(contractSaved)}`);
   out.push(`الإجمالي: ${money(sale.totals.totalMinor)}`);
   for (const p of sale.payments) {
     out.push(`${methodLabel(p.method, p.currency, base)}: ${money(p.amountMinor, p.currency)}`);

@@ -580,11 +580,17 @@ export function InventoryPage() {
               label: soldOutLabel(clothing),
               value: stock ? soldOut : '…',
               tone: stock && soldOut > 0 ? 'warning' : undefined,
-              note: stock
-                ? soldOut
-                  ? `${soldOutSentence(soldOut, soldOutProducts, clothing)}${belowZero > 0 ? ` · ${negativeNote(belowZero)}` : ''}`
-                  : 'في كل صنف قطع على الرف'
-                : undefined,
+              fullNote: true,
+              note: stock ? (
+                soldOut ? (
+                  <>
+                    {soldOutSentence(soldOut, soldOutProducts, clothing)}
+                    {belowZero > 0 ? <span className="block">{negativeNote(belowZero)}</span> : null}
+                  </>
+                ) : (
+                  'في كل صنف قطع على الرف'
+                )
+              ) : undefined,
             },
           ]}
         />
@@ -622,14 +628,13 @@ export function InventoryPage() {
                         {displayNumber(margin.toFixed(1), digits)}%
                       </bdi>{' '}
                       من صافي المبيعات
-                      {profit.stockLossMinor ? (
-                        <>
-                          {' · '}
-                          {profit.stockLossMinor > 0 ? 'تلف وفقد' : 'زيادة جرد'}:{' '}
-                          <Money minor={Math.abs(profit.stockLossMinor)} currency={base} />
-                        </>
-                      ) : null}
                     </p>
+                    {profit.stockLossMinor ? (
+                      <p className="text-sm text-ink-muted">
+                        {profit.stockLossMinor > 0 ? 'تلف وفقد' : 'زيادة جرد'}:{' '}
+                        <Money minor={Math.abs(profit.stockLossMinor)} currency={base} />
+                      </p>
+                    ) : null}
                   </div>
                 ) : profit.stockLossMinor ? (
                   <p className="mt-4 text-sm text-ink-muted">

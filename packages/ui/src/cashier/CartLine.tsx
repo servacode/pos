@@ -6,6 +6,7 @@ import { DeleteIcon, WarningIcon } from '../icons';
 import { useDigits } from '../context';
 import { Money } from '../Money';
 import { displayNumber } from '../NumberField';
+import { NameText } from './NameText';
 
 /** A quantity in thousandths as shown: 3000 → «3», 1250 → «1.250» (three decimals for weights). */
 export function formatQuantity(qtyThousandths: number, digits: 'latn' | 'arab' = 'latn'): string {
@@ -45,7 +46,7 @@ export interface CartLineProps {
 }
 
 /**
- * One line of the cashier's cart (kit .cart-line; هوية 4): the quantity in a small square, the name
+ * One line of the cashier's cart (kit .cart-line; هوية 4): the name
  * on up to two lines (a size and a colour at its end stay in view), «quantity × price» and the
  * options or discount under it, the line total at the end. The selected line takes the brand tint
  * and opens in place with its actions.
@@ -81,17 +82,8 @@ export function CartLine({
           type="button"
           onClick={onSelect}
           aria-expanded={selected}
-          className="flex min-h-16 min-w-0 flex-1 items-start gap-3 rounded-card px-3 py-2 text-start motion-safe:animate-rise"
+          className="flex min-h-14 min-w-0 flex-1 items-start gap-3 rounded-card px-3 py-1.5 text-start motion-safe:animate-rise"
         >
-          <span
-            aria-hidden="true"
-            className={cn(
-              'num grid h-7 min-w-7 shrink-0 place-items-center rounded-small px-1.5 text-sm font-bold transition-colors duration-120 ease-standard',
-              selected ? 'bg-brand text-on-brand' : 'bg-surface-muted text-ink',
-            )}
-          >
-            {formatQuantity(qtyThousandths, digits)}
-          </span>
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="line-clamp-2 text-base/7 font-semibold text-ink">
               {warning ? (
@@ -105,7 +97,7 @@ export function CartLine({
                   <span className="sr-only">عليه تنبيه</span>
                 </span>
               ) : null}
-              <bdi>{name}</bdi>
+              <NameText name={name} />
             </span>
             <span className="text-sm text-ink-muted">
               {/* The size and colour sit whole on the detail row, never wrapped under a long name */}
@@ -128,15 +120,15 @@ export function CartLine({
         {onRemove ? (
           <IconButton
             label="احذف السطر"
-            size="md"
-            variant="danger-soft"
+            size="sm"
+            variant="ghost"
             icon={<DeleteIcon size={20} />}
             onClick={onRemove}
-            className="mt-2 me-2 shrink-0"
+            className="mt-1 me-1 shrink-0 text-ink-subtle"
           />
         ) : null}
       </div>
-      {extra ? <div className="px-3 pb-2 ps-[3.75rem] text-sm">{extra}</div> : null}
+      {extra ? <div className="px-3 pb-2 text-sm">{extra}</div> : null}
       {selected && children ? (
         <div className="flex flex-wrap items-center gap-2 px-3 pb-3">{children}</div>
       ) : null}

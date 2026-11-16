@@ -59,7 +59,14 @@ import type { Quotation } from '@serva/core/contracts/quotations';
 import { convertQuotation } from './quotations/api';
 import { quotationCart } from './quotations/quotationCart';
 import { useQuotationFromAddress } from './quotations/useQuotationFromAddress';
-import { addItem, contractSavingsOf, EMPTY_CART, type Cart } from './sale/cart';
+import {
+  addItem,
+  contractSavingsOf,
+  customerPriceKind,
+  EMPTY_CART,
+  priceTagsOf,
+  type Cart,
+} from './sale/cart';
 import { cancelSentLines, flushPendingCancels } from './hall/cancelSent';
 import { cartFromOrder, lineIdsOf } from './hall/hallCart';
 import type { HallTools } from './hall/tools';
@@ -160,6 +167,8 @@ interface LastSale {
   contractVariantIds?: string[];
   /** What each of those lines saved against its shelf price, by line number */
   contractSavings?: Record<number, number>;
+  /** Which of the lines were priced by the customer (contract or wholesale), by line number */
+  priceTags?: Record<number, 'contract' | 'wholesale'>;
 }
 
 type View =
@@ -499,6 +508,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     cashierName: string,
     contractVariantIds?: readonly string[],
     contractSavings?: Readonly<Record<number, number>>,
+    priceTags?: Readonly<Record<number, 'contract' | 'wholesale'>>,
   ): ReceiptData => ({
     doc,
     settings,
@@ -511,6 +521,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     serviceVariantIds: [...catalog.byVariant.values()].filter((i) => i.isService).map((i) => i.variantId),
     ...(contractVariantIds?.length ? { contractVariantIds } : {}),
     ...(contractSavings && Object.keys(contractSavings).length > 0 ? { contractSavings } : {}),
+    ...(priceTags && Object.keys(priceTags).length > 0 ? { priceTags } : {}),
   });
 
   /** The salesperson of a sale, when it is named */
@@ -529,10 +540,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         payload: entry.doc.payload,
       },
       cashierName: session.fullName,
-      ...(cartRef.current.lines.some((l) => l.contractPriced)
+      ...(cartRef.current.lines.some((l) => customerPriceKind(l) !== null)
         ? {
             contractVariantIds: cartRef.current.lines.filter((l) => l.contractPriced).map((l) => l.variantId),
             contractSavings: contractSavingsOf(cartRef.current, entry.doc.payload as unknown as SalePayload),
+            priceTags: priceTagsOf(cartRef.current),
           }
         : {}),
     };
@@ -555,7 +567,13 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     // The sale is in the outbox: the kept cart goes now, so a refresh cannot bring it back as a second sale
     writeCart(() => pos.local.remove(CURRENT_CART_KEY));
     setCartState(EMPTY_CART);
-    const data = receiptData(last.doc, session.fullName, last.contractVariantIds, last.contractSavings);
+    const data = receiptData(
+      last.doc,
+      session.fullName,
+      last.contractVariantIds,
+      last.contractSavings,
+      last.priceTags,
+    );
     // A sale paid with a voucher prints what is left on it, counted once the sale is in the outbox
     const paidByVoucher = (last.doc.payload as unknown as SalePayload).payments?.some(
       (p) => p.method === 'voucher',
@@ -861,6 +879,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
         lastSale.cashierName,
         lastSale.contractVariantIds,
         lastSale.contractSavings,
+        lastSale.priceTags,
       ),
       copy: true,
     });
@@ -1002,6 +1021,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                     lastSale.cashierName,
                     lastSale.contractVariantIds,
                     lastSale.contractSavings,
+                    lastSale.priceTags,
                   ),
                 )
               }
@@ -1018,9 +1038,13 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             اقفل الشاشة
           </MenuItem>
           {shift ? (
-            <MenuItem icon={<LogoutIcon />} onSelect={() => setView('close')}>
-              أغلق الوردية
-            </MenuItem>
+            // Alone in its own group, in red: one slip of a finger must not close the shift
+            <>
+              <MenuSeparator />
+              <MenuItem tone="danger" icon={<LogoutIcon />} onSelect={() => setView('close')}>
+                أغلق الوردية
+              </MenuItem>
+            </>
           ) : null}
         </Menu>
       }
@@ -1095,6 +1119,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                   lastSale.cashierName,
                   lastSale.contractVariantIds,
                   lastSale.contractSavings,
+                  lastSale.priceTags,
                 ),
                 copy: true,
               });

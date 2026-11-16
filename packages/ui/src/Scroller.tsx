@@ -17,10 +17,27 @@ import { cn } from './cn';
 /** How much of each edge the fade covers */
 const FADE = 28;
 
+/** The marks of the open item in a strip: a page link, a tab or a segment */
+const OPEN = '[aria-current="page"], [aria-selected="true"], [aria-checked="true"]';
+
+/**
+ * Scrolls the strip itself (never the page) so `item` sits in its middle. Works in both reading
+ * directions (it moves by the gap between the two middles). Where there is no layout or no
+ * `scrollTo` (jsdom) it does nothing.
+ */
+function centre(strip: HTMLElement, item: HTMLElement, smooth: boolean): void {
+  if (typeof strip.scrollTo !== 'function') return;
+  const box = strip.getBoundingClientRect();
+  const at = item.getBoundingClientRect();
+  const gap = at.left + at.width / 2 - (box.left + box.width / 2);
+  if (!Number.isFinite(gap) || Math.abs(gap) < 1) return;
+  strip.scrollTo({ left: strip.scrollLeft + gap, behavior: smooth ? 'smooth' : 'auto' });
+}
+
 /**
  * A row that scrolls sideways (the page's tabs, a line of chips): the edge where more is hidden
  * fades out, so nobody takes the cut-off last item for the end; and the open item (the tab marked
- * `aria-current`, `aria-selected` or `aria-checked`) is brought into view when the strip appears. Without scrolling it is
+ * `aria-current`, `aria-selected` or `aria-checked`) is brought to the middle when the strip appears and whenever it changes. Without scrolling it is
  * only a wrapper.
  */
 export function ScrollStrip({ children, className }: { children: ReactNode; className?: string }) {
@@ -58,18 +75,22 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.querySelector<HTMLElement>(
-      '[aria-current="page"], [aria-selected="true"], [aria-checked="true"]',
-    )?.scrollIntoView?.({
-      inline: 'center',
-      block: 'nearest',
-    });
+    // The open item sits in the middle from the first paint; once more after the padding and fonts settle
+    const first = el.querySelector<HTMLElement>(OPEN);
+    if (first) centre(el, first, false);
     measure();
-    // The open item changes without the strip remounting (a pill tab): bring the new one in
-    let open = el.querySelector('[aria-current="page"], [aria-selected="true"], [aria-checked="true"]');
+    const settle =
+      typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(() => {
+            const now = el.querySelector<HTMLElement>(OPEN);
+            if (now) centre(el, now, false);
+          })
+        : null;
+    // The open item changes without the strip remounting (a tab, a pill): bring the new one to the middle
+    let open = first;
     const follow = new MutationObserver(() => {
-      const now = el.querySelector('[aria-current="page"], [aria-selected="true"], [aria-checked="true"]');
-      if (now && now !== open) now.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
+      const now = el.querySelector<HTMLElement>(OPEN);
+      if (now && now !== open) centre(el, now, true);
       open = now;
     });
     follow.observe(el, {
@@ -85,6 +106,7 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
       el.removeEventListener('scroll', measure);
       observer?.disconnect();
       follow.disconnect();
+      if (settle !== null) cancelAnimationFrame(settle);
     };
   }, [measure]);
 

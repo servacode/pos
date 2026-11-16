@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from 'react';
 import type { CashMovementKind, ShiftCloseCash } from '@serva/core/contracts/documents';
-import { cn, Money, useDigits } from '@serva/ui';
+import { cn, useDigits } from '@serva/ui';
+import { ExactMoney } from '../ExactMoney';
 import { clockText, counted, dateText, INVOICES } from '../format';
 import { netMethodRows, refundVouchers, type OpenShift, type ShiftActivity } from './shift';
 
@@ -114,19 +115,24 @@ export function ZReport({
         {activity.salesTotals.map((t) => (
           <Fragment key={t.currency}>
             <Line label={hasReturns ? 'إجمالي المبيعات قبل المرتجعات' : 'إجمالي المبيعات'} strong>
-              <Money minor={t.totalMinor} currency={t.currency} />
+              <ExactMoney minor={t.totalMinor} currency={t.currency} />
             </Line>
             {t.discountMinor > 0 ? (
               <Line label="منها حسم">
-                <Money minor={t.discountMinor} currency={t.currency} />
+                <ExactMoney minor={t.discountMinor} currency={t.currency} />
               </Line>
             ) : null}
             {hasReturns && returnedIn(t.currency) > 0 ? (
               <Line label="صافي المبيعات بعد المرتجعات" strong>
-                <Money minor={t.totalMinor - returnedIn(t.currency)} currency={t.currency} />
+                <ExactMoney minor={t.totalMinor - returnedIn(t.currency)} currency={t.currency} />
               </Line>
             ) : null}
           </Fragment>
+        ))}
+        {(activity.cashRounding ?? []).map((r) => (
+          <Line key={`rd:${r.currency}`} label="منها تقريب النقد">
+            <ExactMoney minor={r.amountMinor} currency={r.currency} decimals={2} trimZeros />
+          </Line>
         ))}
         {activity.byMethod.map((row) => {
           // 20$ taken and 800 ل.س given back: said on the dollar row itself
@@ -138,25 +144,21 @@ export function ZReport({
             <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
               {back.length > 0 ? (
                 <>
-                  <Money minor={back.reduce((n, c) => n + c.paidMinor, 0)} currency={row.currency} /> مستلمة
+                  <ExactMoney minor={back.reduce((n, c) => n + c.paidMinor, 0)} currency={row.currency} />{' '}
+                  مستلمة
                   {back.map((c) => (
                     <span key={c.change}>
                       {' '}
-                      − باقي <Money minor={c.changeMinor} currency={c.change} />
+                      − باقي <ExactMoney minor={c.changeMinor} currency={c.change} />
                     </span>
                   ))}
                 </>
               ) : (
-                <Money minor={row.amountMinor} currency={row.currency} />
+                <ExactMoney minor={row.amountMinor} currency={row.currency} />
               )}
             </Line>
           );
         })}
-        {(activity.cashRounding ?? []).map((r) => (
-          <Line key={`rd:${r.currency}`} label="تقريب النقد">
-            <Money minor={r.amountMinor} currency={r.currency} decimals={2} trimZeros />
-          </Line>
-        ))}
       </Section>
       {hasReturns ? (
         <Section title="المرتجعات">
@@ -165,12 +167,12 @@ export function ZReport({
             .filter((row) => row.method !== 'voucher')
             .map((row) => (
               <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
-                <Money minor={row.amountMinor} currency={row.currency} />
+                <ExactMoney minor={row.amountMinor} currency={row.currency} />
               </Line>
             ))}
           {refundedVouchers.map((row) => (
             <Line key={`rv:${row.currency}`} label="قسائم مرتجع صادرة">
-              <Money minor={row.amountMinor} currency={row.currency} />
+              <ExactMoney minor={row.amountMinor} currency={row.currency} />
             </Line>
           ))}
         </Section>
@@ -180,7 +182,7 @@ export function ZReport({
         <Section title="الصافي بعد المرتجعات">
           {netMethodRows(activity).map((row) => (
             <Line key={`${row.method}:${row.currency}`} label={methodName(row.method, row.currency)}>
-              <Money minor={row.amountMinor} currency={row.currency} />
+              <ExactMoney minor={row.amountMinor} currency={row.currency} />
             </Line>
           ))}
         </Section>
@@ -196,7 +198,7 @@ export function ZReport({
                 </>
               }
             >
-              <Money minor={r.totalMinor} currency={r.currency} />
+              <ExactMoney minor={r.totalMinor} currency={r.currency} />
             </Line>
           ))}
         </Section>
@@ -206,7 +208,7 @@ export function ZReport({
           <Line label="العدد">{counted(activity.vouchers.count, VOUCHERS, digits)}</Line>
           {activity.vouchers.byCurrency.map((row) => (
             <Line key={row.currency} label="قيمتها">
-              <Money minor={row.amountMinor} currency={row.currency} />
+              <ExactMoney minor={row.amountMinor} currency={row.currency} />
             </Line>
           ))}
         </Section>
@@ -215,17 +217,17 @@ export function ZReport({
         {!hasDrawerLines ? <span>لا حركات.</span> : null}
         {(cashIn?.receipts ?? []).map((r) => (
           <Line key={`rc:${r.currency}`} label="دفعات زبائن نقداً">
-            <Money minor={r.amountMinor} currency={r.currency} />
+            <ExactMoney minor={r.amountMinor} currency={r.currency} />
           </Line>
         ))}
         {(cashIn?.vouchers ?? []).map((r) => (
           <Line key={`gv:${r.currency}`} label="قسائم وعربون بيعت نقداً">
-            <Money minor={r.amountMinor} currency={r.currency} />
+            <ExactMoney minor={r.amountMinor} currency={r.currency} />
           </Line>
         ))}
         {activity.movements.map((m, i) => (
           <Line key={i} label={`${MOVEMENT_NAMES[m.kind]} · ${m.reason}`}>
-            <Money minor={m.amountMinor} currency={m.currency} />
+            <ExactMoney minor={m.amountMinor} currency={m.currency} />
           </Line>
         ))}
       </Section>
@@ -234,18 +236,18 @@ export function ZReport({
         {cash.map((c) => (
           <div key={c.currency} className="flex flex-col gap-0.5">
             <Line label="الافتتاح">
-              <Money minor={c.openingMinor} currency={c.currency} />
+              <ExactMoney minor={c.openingMinor} currency={c.currency} />
             </Line>
             <Line label="المعدود" strong>
-              <Money minor={c.countedMinor} currency={c.currency} />
+              <ExactMoney minor={c.countedMinor} currency={c.currency} />
             </Line>
             {showDifference ? (
               <>
                 <Line label="المتوقع">
-                  <Money minor={c.expectedMinor} currency={c.currency} />
+                  <ExactMoney minor={c.expectedMinor} currency={c.currency} />
                 </Line>
                 <Line label="الفرق" strong>
-                  <Money minor={c.differenceMinor} currency={c.currency} />
+                  <ExactMoney minor={c.differenceMinor} currency={c.currency} />
                 </Line>
               </>
             ) : null}

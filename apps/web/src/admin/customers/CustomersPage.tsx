@@ -233,12 +233,15 @@ export function CustomersPage() {
               </span>
             ) : null}
             {(clothing && c.favouriteSize) || c.lastPurchaseDate ? (
-              // The columns that are hidden on a phone, said on ONE line under the name (the phone is
-              // in the row's «⋯»: call or WhatsApp)
-              <span className="truncate text-xs text-ink-muted md:hidden">
-                {clothing && c.favouriteSize ? `المقاس المفضّل ${c.favouriteSize}` : null}
-                {clothing && c.favouriteSize && c.lastPurchaseDate ? ' · ' : null}
-                {c.lastPurchaseDate ? `آخر شراء ${dayText(c.lastPurchaseDate, digits)}` : null}
+              // The columns that are hidden on a phone, said under the name: two short facts that wrap
+              // to a second line rather than being cut (the phone is in the row's «⋯»: call or WhatsApp)
+              <span className="flex flex-wrap gap-x-3 text-xs text-ink-muted md:hidden">
+                {clothing && c.favouriteSize ? (
+                  <span className="whitespace-nowrap">المقاس المفضّل {c.favouriteSize}</span>
+                ) : null}
+                {c.lastPurchaseDate ? (
+                  <span className="whitespace-nowrap">آخر شراء {dayText(c.lastPurchaseDate, digits)}</span>
+                ) : null}
               </span>
             ) : null}
           </span>

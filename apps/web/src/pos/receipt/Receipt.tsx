@@ -13,7 +13,8 @@ import type {
 } from '@serva/core/contracts/documents';
 import { rateFor } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
-import { cn, displayNumber, formatQuantity, Money, useDigits } from '@serva/ui';
+import { cn, displayNumber, formatQuantity, useDigits } from '@serva/ui';
+import { ExactMoney } from '../ExactMoney';
 import { packPiecesNote } from '../sale/packText';
 import { clockText, dateText } from '../format';
 import { Bars } from '../../lib/Bars';
@@ -66,9 +67,15 @@ export interface ReceiptData {
   serviceVariantIds?: readonly string[];
   /** The items whose price was the customer's contract price: their line says «سعر العقد» (display only) */
   contractVariantIds?: readonly string[];
+  /** The tag of each line priced by the customer (contract or wholesale), by line number (display only) */
+  priceTags?: Readonly<Record<number, 'contract' | 'wholesale'>>;
   /** What each contract-priced line saved against its shelf price, by line number (display only) */
   contractSavings?: Readonly<Record<number, number>>;
 }
+
+/** Why a line's price is the customer's: «سعر العقد» or «سعر الجملة» (null: the shelf price) */
+export const priceTag = (data: ReceiptData, line: { lineNo: number; variantId: string }) =>
+  data.priceTags?.[line.lineNo] ?? (data.contractVariantIds?.includes(line.variantId) ? 'contract' : null);
 
 /** One whole piece at its own price (no unit, no pack): the line's amount is its price, so it is said once */
 export const single = (l: {
@@ -192,7 +199,7 @@ function PaymentVoucher({ data, width, copy }: { data: ReceiptData; width: Paper
       <Rule />
       <Row label="استلمنا من">{r.customerName}</Row>
       <Row label="المبلغ" strong>
-        <Money minor={r.amountMinor} currency={r.currency} />
+        <ExactMoney minor={r.amountMinor} currency={r.currency} />
       </Row>
       <Row label="الطريقة">{methodLabel(r.method, r.currency, r.currency)}</Row>
       {r.reference ? (
@@ -218,7 +225,7 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
   const digits = useDigits();
   const ret = data.doc.payload as unknown as ReturnPayload;
   const at = Date.parse(data.doc.deviceTime);
-  const amount = (minor: number) => <Money minor={minor} currency={ret.currency} symbol={false} />;
+  const amount = (minor: number) => <ExactMoney minor={minor} currency={ret.currency} symbol={false} />;
   const voucher = ret.refunds.find((r) => r.method === 'voucher');
   return (
     <div
@@ -265,12 +272,12 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
       <Rule />
       {ret.totals.taxMinor > 0 ? <Row label="منها ضريبة">{amount(ret.totals.taxMinor)}</Row> : null}
       <Row label="المبلغ المردود" strong>
-        <Money minor={ret.totals.totalMinor} currency={ret.currency} />
+        <ExactMoney minor={ret.totals.totalMinor} currency={ret.currency} />
       </Row>
       {ret.refunds.map((r, i) => (
         <div key={i} className="flex flex-col">
           <Row label={REFUND_LABEL[r.method]}>
-            <Money minor={r.amountMinor} currency={r.currency} />
+            <ExactMoney minor={r.amountMinor} currency={r.currency} />
           </Row>
           {r.reference ? (
             <Row label={<span className="text-xs">المرجع</span>}>
@@ -285,7 +292,11 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
           <Rule />
           <section aria-label="قسيمة الاستبدال" className="flex flex-col items-center gap-1 text-center">
             <span className="text-base font-bold">قسيمة استبدال</span>
-            <Money minor={voucher.amountMinor} currency={voucher.currency} className="text-lg font-bold" />
+            <ExactMoney
+              minor={voucher.amountMinor}
+              currency={voucher.currency}
+              className="text-lg font-bold"
+            />
             <div className="h-12 w-full px-2">
               <Bars code={data.doc.number} height={40} />
             </div>
@@ -319,7 +330,7 @@ function GiftVoucherSlip({ data, width, copy }: { data: ReceiptData; width: Pape
       <section aria-label="قسيمة الهدية" className="flex flex-col items-center gap-1 text-center">
         <span className="text-base font-bold">قسيمة هدية</span>
         {g.forName ? <span className="font-bold">إلى {g.forName}</span> : null}
-        <Money minor={g.amountMinor} currency={g.currency} className="text-xl font-bold" />
+        <ExactMoney minor={g.amountMinor} currency={g.currency} className="text-xl font-bold" />
         {data.doc.number ? (
           <>
             <div className="h-12 w-full px-2">
@@ -369,11 +380,17 @@ export function Receipt({
   const base = sale.currency;
   const at = Date.parse(data.doc.deviceTime);
   const foreignRate = sale.exchangeRates[0];
-  const foreign = foreignRate ? (foreignRate.unit === base ? foreignRate.quote : foreignRate.unit) : null;
+  const foreignCode = foreignRate ? (foreignRate.unit === base ? foreignRate.quote : foreignRate.unit) : null;
+  // The dollar line only while the store still offers that currency (or the sale was paid in it)
+  const offered =
+    foreignCode !== null &&
+    ((data.settings.enabledCurrencies ?? []).includes(foreignCode) ||
+      sale.payments.some((p) => p.currency === foreignCode));
+  const foreign = offered ? foreignCode : null;
   const t = sale.totals;
   // A discount keeps its fraction (37.5, not 38): the lines then add up to the total the same way the kernel did
   const exact = (minor: number) => (
-    <Money
+    <ExactMoney
       minor={minor}
       currency={base}
       symbol={false}
@@ -386,7 +403,7 @@ export function Receipt({
     .filter((l) => !l.name.startsWith(DEPOSIT_BACK_NAME) && !data.serviceVariantIds?.includes(l.variantId))
     .reduce((n, l) => n + (l.unitName ? 1 : Math.round(l.baseQty / 1000)), 0);
   const amount = (minor: number, currency: CurrencyCode = base) => (
-    <Money minor={minor} currency={currency} symbol={currency !== base} />
+    <ExactMoney minor={minor} currency={currency} symbol={currency !== base} />
   );
 
   return (
@@ -410,9 +427,7 @@ export function Receipt({
         <span>
           {dateText(at, digits)} ، {clockText(at, digits)}
         </span>
-        <span>
-          الكاشير: {data.cashierName} · {data.deviceName}
-        </span>
+        <span>الكاشير: {data.cashierName}</span>
         {data.sellerName && data.sellerName !== data.cashierName ? (
           <span>البائع: {data.sellerName}</span>
         ) : null}
@@ -449,7 +464,7 @@ export function Receipt({
                     {formatQuantity(line.qty, digits)}
                     {line.unitName ? ` ${line.unitName}` : ''}
                     {packNote(line, digits)} ×{' '}
-                    <Money minor={line.unitPriceMinor} currency={base} symbol={false} />
+                    <ExactMoney minor={line.unitPriceMinor} currency={base} symbol={false} />
                   </bdi>
                   <span className="num">{amount(line.priced.grossMinor)}</span>
                 </div>
@@ -460,9 +475,9 @@ export function Receipt({
                 <bdi dir="ltr">−{exact(line.priced.lineDiscountMinor)}</bdi>
               </Row>
             ) : null}
-            {data.contractVariantIds?.includes(line.variantId) ? (
+            {priceTag(data, line) ? (
               <span className="text-xs">
-                سعر العقد
+                {priceTag(data, line) === 'wholesale' ? 'سعر الجملة' : 'سعر العقد'}
                 {data.contractSavings?.[line.lineNo] ? (
                   <>
                     {' '}
@@ -527,12 +542,12 @@ export function Receipt({
           ) : null}
         </>
       ) : null}
-      {contractSaved > 0 ? <Row label="وفّرت بسعر العقد">{amount(contractSaved)}</Row> : null}
-      {t.taxMinor > 0 ? (
+      {contractSaved > 0 ? <Row label="وفّرت">{amount(contractSaved)}</Row> : null}
+      {t.taxMinor > 0 && t.taxMinor * 100 >= t.totalMinor ? (
         <Row label={sale.taxInclusive ? 'منها ضريبة' : 'الضريبة'}>{amount(t.taxMinor)}</Row>
       ) : null}
       <Row label="الإجمالي" strong>
-        <Money minor={t.totalMinor} currency={base} />
+        <ExactMoney minor={t.totalMinor} currency={base} />
       </Row>
       {foreign && foreignRate ? (
         <Row
@@ -542,7 +557,7 @@ export function Receipt({
             </span>
           }
         >
-          <Money
+          <ExactMoney
             minor={convert(t.totalMinor, base, foreign, rateFor(sale.exchangeRates, foreign, base))}
             currency={foreign}
           />
@@ -552,7 +567,7 @@ export function Receipt({
       {sale.payments.map((p) => (
         <div key={p.paymentNo} className="flex flex-col">
           <Row label={methodLabel(p.method, p.currency, base)}>
-            <Money minor={p.amountMinor} currency={p.currency} />
+            <ExactMoney minor={p.amountMinor} currency={p.currency} />
           </Row>
           {p.reference ? (
             <Row label={<span className="text-xs">المرجع</span>}>
@@ -565,7 +580,7 @@ export function Receipt({
         <>
           {sale.customerBalanceAfterMinor !== null && sale.customerBalanceAfterMinor !== undefined ? (
             <Row label="رصيد الزبون الجديد" strong>
-              <Money minor={sale.customerBalanceAfterMinor} currency={base} />
+              <ExactMoney minor={sale.customerBalanceAfterMinor} currency={base} />
             </Row>
           ) : null}
           <div className="flex flex-col gap-1 pt-3" aria-label="توقيع المستلم">
@@ -576,17 +591,17 @@ export function Receipt({
       ) : null}
       {data.vouchersAfter?.map((v) => (
         <Row key={v.code} label={<span className="text-xs">الباقي على القسيمة</span>}>
-          <Money minor={v.balanceMinor} currency={v.currency} />
+          <ExactMoney minor={v.balanceMinor} currency={v.currency} />
         </Row>
       ))}
       {sale.cashRounding && sale.cashRounding.roundingMinor !== 0 ? (
         <Row label={<span className="text-xs">تقريب النقد</span>}>
-          <Money minor={sale.cashRounding.roundingMinor} currency={sale.cashRounding.currency} />
+          <ExactMoney minor={sale.cashRounding.roundingMinor} currency={sale.cashRounding.currency} />
         </Row>
       ) : null}
       {sale.change ? (
         <Row label="الباقي للزبون" strong>
-          <Money minor={sale.change.amountMinor} currency={sale.change.currency} />
+          <ExactMoney minor={sale.change.amountMinor} currency={sale.change.currency} />
         </Row>
       ) : null}
       {sale.prescription && (sale.prescription.ref || sale.prescription.doctor) ? (

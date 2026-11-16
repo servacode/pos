@@ -108,6 +108,8 @@ export interface Catalog {
   vouchers: VoucherRow[];
   /** Online shop orders the store accepted, waiting to be sold here (26 › حياة الطلب) */
   onlineOrders: OnlineOrderRow[];
+  /** The catalog as pulled, before this device's own unsent sales were taken off the tiles' stock (localStock.ts): the batch plan counts those itself */
+  original?: Catalog;
   /** This branch's pieces of serial-tracked products, in stock or sold lately (03 › الإلكترونيات) */
   serials: SerialStockRow[];
 }

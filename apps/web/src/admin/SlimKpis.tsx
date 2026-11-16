@@ -9,6 +9,8 @@ export interface SlimKpi {
   /** A short line under the number (kept to one line; a phone shows it small) */
   note?: ReactNode;
   tone?: 'warning';
+  /** Show the whole note (wrapping as it needs) instead of cutting it at two lines */
+  fullNote?: boolean;
 }
 
 /**
@@ -34,7 +36,12 @@ export function SlimKpis({ items, label }: { items: readonly SlimKpi[]; label: s
             {item.value}
           </span>
           {item.note ? (
-            <span className="line-clamp-2 text-[0.6875rem] leading-4 text-ink-muted sm:text-xs">
+            <span
+              className={cn(
+                'text-[0.6875rem] leading-4 text-ink-muted sm:text-xs',
+                !item.fullNote && 'line-clamp-2',
+              )}
+            >
               {item.note}
             </span>
           ) : null}

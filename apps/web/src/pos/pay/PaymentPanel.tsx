@@ -46,6 +46,7 @@ import { warrantyAsksCustomer } from '@serva/core/contracts/till';
 import { CustomerHistory, fetchPurchases } from '../customers/CustomerHistory';
 import { DateField } from '../../lib/DateField';
 import { CustomerPicker, type PickedCustomer } from '../customers/CustomerPicker';
+import { ExactMoney } from '../ExactMoney';
 import { Kbd } from '../sale/Kbd';
 import { nextOrderNo } from '../sale/orders';
 import { digitOf } from '../PinScreen';
@@ -602,15 +603,18 @@ export function PaymentPanel({
       className="@container/pay relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-line bg-surface shadow-e2 motion-safe:animate-sheet-in"
     >
       <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-5 py-2 @max-lg/pay:gap-x-3 @max-lg/pay:px-3">
-        <Button
-          variant="secondary"
-          size="md"
-          icon={<BackIcon size={20} />}
-          aria-keyshortcuts="Escape"
-          onClick={onBack}
-        >
-          ارجع للسلة
-        </Button>
+        {/* On a phone the tab «السلة» goes back: a second button for it is noise */}
+        {phone ? null : (
+          <Button
+            variant="secondary"
+            size="md"
+            icon={<BackIcon size={20} />}
+            aria-keyshortcuts="Escape"
+            onClick={onBack}
+          >
+            ارجع للسلة
+          </Button>
+        )}
         {/* Where the panel is narrow (a 1024 px screen), the methods and the keys say it is the payment */}
         <h2 className="sr-only text-lg font-semibold text-ink @3xl/pay:not-sr-only">
           {split ? 'الدفع · مقسّم' : 'الدفع'}
@@ -618,7 +622,7 @@ export function PaymentPanel({
         <span className="flex-1" />
         <div className="flex items-baseline gap-3">
           <span className="text-sm font-semibold text-ink-muted">المطلوب</span>
-          <Money
+          <ExactMoney
             minor={totalMinor}
             currency={base}
             className="text-kpi font-bold tracking-tight text-ink @max-lg/pay:text-2xl"
@@ -716,8 +720,8 @@ export function PaymentPanel({
             </div>
             {option.method === 'cash' && option.currency === base && dueHere !== remainingBase ? (
               <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
-                قُرّب المبلغ إلى <Money minor={dueHere} currency={base} className="font-semibold text-ink" />{' '}
-                (فرق{' '}
+                قُرّب المبلغ إلى{' '}
+                <ExactMoney minor={dueHere} currency={base} className="font-semibold text-ink" /> (فرق{' '}
                 <Money
                   minor={Math.abs(dueHere - remainingBase)}
                   currency={base}
@@ -902,9 +906,9 @@ export function PaymentPanel({
             className={cn(
               '@container flex min-w-0 flex-col gap-3 @lg/pay:col-start-1',
               // A required customer comes first: the picker sits at the top, not under the methods and keys
-              needsCustomer && !customer
-                ? cn(collapsedPicker ? '' : '@max-lg/pay:order-first', '@lg/pay:row-start-1')
-                : '@lg/pay:row-start-2',
+              // On a phone the customer row is the first thing under the total, ahead of the methods
+              '@max-lg/pay:order-first',
+              needsCustomer && !customer ? '@lg/pay:row-start-1' : '@lg/pay:row-start-2',
             )}
           >
             {picking && collapsedPicker ? (
@@ -941,6 +945,11 @@ export function PaymentPanel({
                   <span className="flex min-w-40 flex-1 flex-col">
                     <span className="text-xs text-ink-muted">الزبون</span>
                     <span className="font-semibold break-words text-ink">{customer.name}</span>
+                    {owed !== null && owed > 0 ? (
+                      <span className="text-sm font-semibold text-danger-ink">
+                        عليه <Money minor={owed} currency={base} />
+                      </span>
+                    ) : null}
                   </span>
                   <Button
                     variant="ghost"

@@ -118,7 +118,7 @@ describe('«قبض من زبون»', () => {
     await user.click(screen.getByRole('menuitem', { name: 'أغلق الوردية' }));
     await screen.findAllByRole('textbox', { name: 'المجموع' });
     await user.type(screen.getAllByRole('textbox', { name: 'المجموع' })[0]!, '100');
-    await user.click(screen.getByRole('button', { name: 'تابع للمراجعة' }));
+    await user.click(screen.getByRole('button', { name: 'راجع وأغلق' }));
     await user.click(await screen.findByRole('button', { name: 'أغلق الوردية' }));
     await user.click(await screen.findByRole('button', { name: 'نعم، أغلق الوردية' }));
     await user.click(await screen.findByRole('button', { name: 'تمّ' }));

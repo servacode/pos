@@ -130,7 +130,8 @@ describe('the unit of an item sold by the piece and by the box (round 14)', () =
     await new Promise((resolve) => setTimeout(resolve, 400));
     await user.click(tile());
     expect(screen.queryByRole('region', { name: 'اختر الوحدة' })).not.toBeInTheDocument();
-    expect(within(cartLines()).getAllByText('2').length).toBeGreaterThan(0);
+    // The line says its quantity once, in «2 × price»
+    expect(plain(cartLines())).toMatch(/2\s*×/);
     // The chip on the line opens the sheet; the box replaces the line at the same quantity
     await user.click(within(cartLines()).getByRole('button', { name: 'غيّر الوحدة' }));
     const again = await screen.findByRole('region', { name: 'اختر الوحدة' });

@@ -47,7 +47,7 @@ export function SalePanel({
         {media ?? (icon ? <IconChip size="md">{icon}</IconChip> : null)}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h2 className="line-clamp-2 text-lg font-semibold break-words text-ink">{title}</h2>
-          {subtitle ? <p className="line-clamp-2 text-sm text-ink-muted">{subtitle}</p> : null}
+          {subtitle ? <p className="text-sm text-ink-muted">{subtitle}</p> : null}
         </div>
         {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
       </header>

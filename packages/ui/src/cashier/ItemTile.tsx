@@ -3,6 +3,7 @@ import type { CurrencyId } from '@serva/core';
 import { cn } from '../cn';
 import { OfferIcon, WeighedIcon } from '../icons';
 import { Money } from '../Money';
+import { NameText } from './NameText';
 
 export interface ItemTileProps {
   name: string;
@@ -186,7 +187,7 @@ export function ItemTile({
               inlineIcon && (compact ? 'flex-1' : 'min-h-[2.75rem] flex-1'),
             )}
           >
-            <bdi>{name}</bdi>
+            <NameText name={name} />
           </span>
           {detail && !monogram && !inlineIcon ? (
             <span className="text-sm text-ink-muted">{detail}</span>

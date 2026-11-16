@@ -15,6 +15,7 @@ import {
   Card,
   CardHeader,
   DataTable,
+  ChatIcon,
   Dialog,
   EmptyState,
   formatQuantity,
@@ -28,6 +29,7 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { dayText } from '../../lib/dates';
 import { registeredAdjective } from '../../lib/plural';
 import { whatsappNumber } from '../../pos/receipt/whatsapp';
@@ -130,6 +132,10 @@ export function RecallPage() {
   const [confirming, setConfirming] = useState(false);
   const [lifting, setLifting] = useState(false);
   const [messaging, setMessaging] = useState(false);
+  // The note the buyers get, editable before it goes; and who was already sent it in this session
+  const [draft, setDraft] = useState('');
+  const [sentTo, setSentTo] = useState<Set<string>>(() => new Set());
+  const phone = useIsPhone();
   const [onShelf, setOnShelf] = useState<ExpiryRow[]>([]);
   // Which batches the picker offers: all, the stopped ones, those ending within three months, or those already past their date
   const [shelfFilter, setShelfFilter] = useState<'urgent' | 'all' | 'blocked' | 'soon' | 'expired'>('urgent');
@@ -471,7 +477,11 @@ export function RecallPage() {
               <>
                 <section aria-label="الدفعة" className="flex flex-col gap-3">
                   <SectionHead
-                    title={`الدفعة ${found.batchNo}`}
+                    title={
+                      <>
+                        الدفعة <BatchNo no={found.batchNo} />
+                      </>
+                    }
                     description="المنتج وأصل الدفعة وما بقي منها."
                   >
                     <span className="flex flex-wrap items-center gap-2 print:hidden">
@@ -513,7 +523,16 @@ export function RecallPage() {
                         {buyersSummary(found.sales)}
                       </p>
                       {buyerList(found.sales).people.some((x) => x.phone) ? (
-                        <Button onClick={() => setMessaging(true)}>راسل الزبائن</Button>
+                        <Button
+                          onClick={() => {
+                            setDraft(
+                              recallMessage(found.batchNo, found.batches[0]?.name ?? '', me.tenant.name),
+                            );
+                            setMessaging(true);
+                          }}
+                        >
+                          راسل الزبائن
+                        </Button>
                       ) : (
                         <span className="flex flex-col items-start gap-0.5">
                           <Button disabled>راسل الزبائن</Button>
@@ -531,24 +550,64 @@ export function RecallPage() {
                     <Alert tone="warning">
                       <span data-testid="recall-anonymous">
                         فواتير بلا زبون: خرج منها{' '}
-                        <bdi className="num font-semibold">{formatQuantity(anonymousQty, digits)}</bdi> قطعة
+                        <bdi className="num font-semibold">
+                          {Number.isInteger(anonymousQty / 1000)
+                            ? countNoun(anonymousQty / 1000, COUNT_NOUNS.piece)
+                            : `${formatQuantity(anonymousQty, digits)} قطعة`}
+                        </bdi>{' '}
                         من هذه الدفعة ولا يمكن الوصول إلى مشتريها، فاحسبها ضمن المخاطرة.
                       </span>
                     </Alert>
                   ) : null}
-                  <DataTable
-                    caption="فواتير الدفعة"
-                    columns={saleColumns}
-                    rows={found.sales}
-                    rowKey={(s) => `${s.invoiceId}|${s.variantId}`}
-                    empty={
-                      <EmptyState
-                        icon={SearchIcon}
-                        title="لم تُبَع هذه الدفعة بعد."
-                        description="لا فاتورة تحمل رقمها."
-                      />
-                    }
-                  />
+                  {phone && found.sales.length > 0 ? (
+                    <ul aria-label="فواتير الدفعة" className="flex flex-col gap-2">
+                      {found.sales.map((s) => (
+                        <li
+                          key={`${s.invoiceId}|${s.variantId}`}
+                          className="flex flex-col gap-1 rounded-card border border-line bg-surface p-3 shadow-e1"
+                        >
+                          <span className="flex items-center justify-between gap-3 text-sm">
+                            <bdi dir="ltr" className="num font-semibold">
+                              {s.invoiceNumber}
+                            </bdi>
+                            <span className="num text-ink-muted">{dayText(s.date, digits)}</span>
+                          </span>
+                          <span className="text-sm text-ink">
+                            {s.name} · <span className="num">{formatQuantity(s.qty, digits)}</span>
+                          </span>
+                          <span className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 truncate font-semibold text-ink">
+                              {s.customerName ?? <span className="text-ink-subtle">بلا زبون</span>}
+                            </span>
+                            {s.customerPhone ? (
+                              <a
+                                href={`tel:${s.customerPhone}`}
+                                className="inline-flex min-h-11 items-center px-2 text-sm font-semibold text-brand-ink hover:underline"
+                              >
+                                <bdi dir="ltr" className="num">
+                                  {s.customerPhone}
+                                </bdi>
+                              </a>
+                            ) : null}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <DataTable
+                      caption="فواتير الدفعة"
+                      columns={saleColumns}
+                      rows={found.sales}
+                      rowKey={(s) => `${s.invoiceId}|${s.variantId}`}
+                      empty={
+                        <EmptyState
+                          icon={SearchIcon}
+                          title="لم تُبَع هذه الدفعة بعد."
+                          description="لا فاتورة تحمل رقمها."
+                        />
+                      }
+                    />
+                  )}
                 </section>
               </>
             )
@@ -572,9 +631,18 @@ export function RecallPage() {
       >
         {found ? (
           <div className="flex flex-col gap-3">
+            <label htmlFor="recall-text" className="text-sm font-semibold text-ink-muted">
+              الرسالة (يمكنك تعديلها قبل الإرسال)
+            </label>
+            <textarea
+              id="recall-text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value.slice(0, 700))}
+              rows={5}
+              className="w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base"
+            />
             <p className="text-sm text-ink-muted">
-              اضغط «واتساب» أمام الزبون لتفتح محادثة جاهزة برسالة سحب الدفعة {found.batchNo}. تُرسل كل رسالة
-              منك.
+              اضغط «واتساب» أمام الزبون لتفتح محادثة جاهزة بهذه الرسالة. تُرسل كل رسالة منك.
             </p>
             <ul
               aria-label="زبائن الدفعة"
@@ -582,9 +650,9 @@ export function RecallPage() {
             >
               {buyerList(found.sales).people.map((x) => {
                 const number = whatsappNumber(x.phone);
-                const text = recallMessage(found.batchNo, found.batches[0]?.name ?? '', me.tenant.name);
+                const key = x.phone || x.name;
                 return (
-                  <li key={x.phone || x.name} className="flex items-center justify-between gap-3 py-2.5">
+                  <li key={key} className="flex items-center justify-between gap-3 py-2.5">
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate font-semibold text-ink">{x.name || x.phone}</span>
                       {x.phone ? (
@@ -594,14 +662,21 @@ export function RecallPage() {
                       ) : null}
                     </span>
                     {number ? (
-                      <a
-                        href={`https://wa.me/${number}?text=${encodeURIComponent(text)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex min-h-11 items-center rounded-control px-3 text-sm font-semibold text-brand-ink hover:underline"
-                      >
-                        واتساب
-                      </a>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {sentTo.has(key) ? (
+                          <span className="text-sm font-semibold text-success-ink">أُرسلت ✓</span>
+                        ) : null}
+                        <a
+                          href={`https://wa.me/${number}?text=${encodeURIComponent(draft)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => setSentTo((prev) => new Set(prev).add(key))}
+                          className="inline-flex min-h-11 items-center gap-1.5 rounded-control bg-brand px-3 text-sm font-semibold text-on-brand"
+                        >
+                          <ChatIcon />
+                          واتساب
+                        </a>
+                      </span>
                     ) : (
                       <span className="text-xs text-ink-subtle">بلا رقم</span>
                     )}
@@ -661,5 +736,14 @@ export function RecallPage() {
         </p>
       </Dialog>
     </AppShell>
+  );
+}
+
+/** A batch number kept in one piece, read left to right inside Arabic text («QA15-M1» never breaks at the dash) */
+function BatchNo({ no }: { no: string }) {
+  return (
+    <bdi dir="ltr" className="num whitespace-nowrap">
+      {no}
+    </bdi>
   );
 }

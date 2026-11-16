@@ -308,20 +308,37 @@ export function unitPriceOf(
   );
 }
 
-/** What a line's contract price saved the customer against the price it replaced, in the invoice currency (0 when none) */
+/** Why a line's price is not the shelf price: the customer's contract, or the wholesale tier (null: it is) */
+export function customerPriceKind(line: CartLine): 'contract' | 'wholesale' | null {
+  if (line.contractPriced) return 'contract';
+  if (
+    !line.priceTyped &&
+    line.retailPriceMinor !== undefined &&
+    line.retailPriceMinor > line.priceMinor &&
+    (line.wholesalePriceMinor ?? null) === line.priceMinor
+  )
+    return 'wholesale';
+  return null;
+}
+
+/** The shelf price a customer's price replaced, per pack (undefined when the line is at the shelf price) */
+export function shelfPriceOf(line: CartLine): number | undefined {
+  const kind = customerPriceKind(line);
+  if (kind === 'contract') return line.shelfPriceMinor;
+  return kind === 'wholesale' ? line.retailPriceMinor : undefined;
+}
+
+/** What a line's customer price (contract or wholesale) saved against the shelf price, in the invoice currency (0 when none) */
 export function contractSavingMinor(line: CartLine, ctx: PricingContext): number {
-  if (!line.contractPriced || line.shelfPriceMinor === undefined || line.shelfPriceMinor <= line.priceMinor)
-    return 0;
-  const was = lineGross(
-    unitPriceOf({ priceCurrency: line.priceCurrency, priceMinor: line.shelfPriceMinor }, ctx),
-    line.qty,
-  );
+  const shelf = shelfPriceOf(line);
+  if (shelf === undefined || shelf <= line.priceMinor) return 0;
+  const was = lineGross(unitPriceOf({ priceCurrency: line.priceCurrency, priceMinor: shelf }, ctx), line.qty);
   return Math.max(0, was - lineGross(unitPriceOf(line, ctx), line.qty));
 }
 
 /**
- * What each contract-priced line of a finished sale saved, by line number, from the sale's own gross
- * (display only): the gross at the shelf price less the gross at the contract price.
+ * What each customer-priced line (contract or wholesale) of a finished sale saved, by line number, from
+ * the sale's own gross (display only): the gross at the shelf price less the gross at the price charged.
  */
 export function contractSavingsOf(
   cart: Cart,
@@ -329,12 +346,22 @@ export function contractSavingsOf(
 ): Record<number, number> {
   const out: Record<number, number> = {};
   for (const line of cart.lines) {
-    if (!line.contractPriced || line.shelfPriceMinor === undefined || line.priceMinor <= 0) continue;
+    const shelf = shelfPriceOf(line);
+    if (shelf === undefined || line.priceMinor <= 0) continue;
     const sold = sale.lines.find((l) => l.lineNo === line.lineNo);
     if (!sold) continue;
-    const saving =
-      Math.round((sold.priced.grossMinor * line.shelfPriceMinor) / line.priceMinor) - sold.priced.grossMinor;
+    const saving = Math.round((sold.priced.grossMinor * shelf) / line.priceMinor) - sold.priced.grossMinor;
     if (saving > 0) out[line.lineNo] = saving;
+  }
+  return out;
+}
+
+/** The tag each customer-priced line of a cart carries on the receipt, by line number */
+export function priceTagsOf(cart: Cart): Record<number, 'contract' | 'wholesale'> {
+  const out: Record<number, 'contract' | 'wholesale'> = {};
+  for (const line of cart.lines) {
+    const kind = customerPriceKind(line);
+    if (kind) out[line.lineNo] = kind;
   }
   return out;
 }
@@ -561,7 +588,12 @@ export function applyContractPrices(
       const price = packPrice(contract.priceMinor, line.packQty, null);
       return {
         ...line,
-        ...(line.contractPriced ? {} : price < line.priceMinor ? { shelfPriceMinor: line.priceMinor } : {}),
+        // The shelf price is the retail one, even when a wholesale tier had already lowered the line
+        ...(line.contractPriced
+          ? {}
+          : price < (line.retailPriceMinor ?? line.priceMinor)
+            ? { shelfPriceMinor: line.retailPriceMinor ?? line.priceMinor }
+            : {}),
         priceMinor: price,
         retailPriceMinor: price,
         wholesalePriceMinor: price,

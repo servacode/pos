@@ -156,8 +156,8 @@ describe('HomePage', () => {
         },
       });
       renderApp('/');
-      const link = await screen.findByRole('link', { name: /الهامش سالب: بيع تحت الكلفة في 3 أصناف/ });
-      expect(link).toHaveAttribute('href', '/reports/sales');
+      const link = await screen.findByRole('link', { name: /3 أصناف تحت الكلفة/ });
+      expect(link).toHaveAttribute('href', '/reports/below-cost');
     });
 
     it('a clothing store sees the week’s top five and which size ran out', async () => {
