@@ -29,3 +29,4 @@ apps/api/src/services/batches.ts
 apps/api/src/services/expiry.ts
 apps/api/src/services/serials.ts
 apps/api/src/services/subscription-gate.ts
+apps/api/src/services/purchase-order-receipt.ts

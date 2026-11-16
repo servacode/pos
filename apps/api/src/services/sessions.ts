@@ -99,7 +99,7 @@ export type RotateResult =
 
 /**
  * Exchanges a refresh token for a new one in the same family. A token reused after the grace
- * window means it was stolen, so every session of that user is ended. Expired families,
+ * window means it may be stolen, so that session family is ended (the user's other devices stay). Expired families,
  * disabled users and suspended stores get nothing.
  */
 export async function rotateSession(
@@ -115,7 +115,7 @@ export async function rotateSession(
   if (current.revoked_at) {
     if (!current.replaced_by) return { status: 'invalid' }; // signed out or revoked
     if (now.getTime() - time(current.revoked_at) <= REUSE_GRACE_MS) return { status: 'race' };
-    await revokeAllForUser(db, current.tenant_id, current.user_id, now);
+    await revokeFamily(db, current.tenant_id, current.family_id, now);
     return { status: 'invalid' };
   }
   if (time(current.expires_at) <= now.getTime() || time(current.absolute_expires_at) <= now.getTime()) {
@@ -171,12 +171,13 @@ export async function revokeSession(db: Database, refreshToken: string, now: Dat
   return current.family_id;
 }
 
-async function revokeAllForUser(db: Database, tenantId: string, userId: string, now: Date): Promise<void> {
+/** Ends one session family only: the user's other devices stay signed in. */
+async function revokeFamily(db: Database, tenantId: string, familyId: string, now: Date): Promise<void> {
   await withTenant(db, tenantId, (tx) =>
     tx
       .update(sessions)
       .set({ revokedAt: now })
-      .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt))),
+      .where(and(eq(sessions.familyId, familyId), isNull(sessions.revokedAt))),
   );
 }
 

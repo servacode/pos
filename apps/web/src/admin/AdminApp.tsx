@@ -66,6 +66,15 @@ const CancellationsPage = lazy(() =>
 const SupplierReturnsPage = lazy(() =>
   import('./purchases/SupplierReturnsPage').then((m) => ({ default: m.SupplierReturnsPage })),
 );
+const PurchaseOrdersPage = lazy(() =>
+  import('./purchases/PurchaseOrdersPage').then((m) => ({ default: m.PurchaseOrdersPage })),
+);
+const PurchaseOrderFormPage = lazy(() =>
+  import('./purchases/PurchaseOrderFormPage').then((m) => ({ default: m.PurchaseOrderFormPage })),
+);
+const PurchaseOrderPage = lazy(() =>
+  import('./purchases/PurchaseOrderPage').then((m) => ({ default: m.PurchaseOrderPage })),
+);
 const TransfersPage = lazy(() =>
   import('./purchases/TransfersPage').then((m) => ({ default: m.TransfersPage })),
 );
@@ -214,6 +223,10 @@ export function AdminApp() {
           <Route path="/price-list" element={page(<PriceListPage />)} />
           <Route path="/import" element={page(<ImportPage />)} />
           <Route path="/transfers" element={page(<TransfersPage />)} />
+          <Route path="/purchase-orders" element={page(<PurchaseOrdersPage />)} />
+          <Route path="/purchase-orders/new" element={page(<PurchaseOrderFormPage />)} />
+          <Route path="/purchase-orders/:id" element={page(<PurchaseOrderPage />)} />
+          <Route path="/purchase-orders/:id/edit" element={page(<PurchaseOrderFormPage />)} />
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
           <Route path="/reports" element={page(<ReportsHomePage />)} />
           <Route path="/reports/sales" element={page(<SalesReportPage />)} />

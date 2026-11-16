@@ -100,6 +100,8 @@ export const purchaseInput = z
     reference: optionalText(64, 'الرقم طويل'),
     notes: optionalText(500, 'الملاحظات طويلة'),
     lines: z.array(purchaseLineInput).min(1, 'أضف صنفاً واحداً على الأقل').max(500),
+    /** The purchase order this receives (طلبية شراء): its received quantities grow by these lines */
+    purchaseOrderId: uuidSchema.optional(),
   })
   .refine((p) => new Set(p.lines.map(batchKey)).size === p.lines.length, {
     path: ['lines'],

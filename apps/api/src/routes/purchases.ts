@@ -6,6 +6,11 @@ import {
   profitQuery,
   purchaseInput,
   purchaseListQuery,
+  purchaseOrderInput,
+  purchaseOrderListQuery,
+  purchaseOrderStatusInput,
+  purchaseOrderSuggestQuery,
+  purchaseOrderUpdateInput,
   recallQuery,
   stocktakeInput,
   supplierInput,
@@ -32,6 +37,14 @@ import {
   readPurchase,
   saveSupplier,
 } from '../services/purchases';
+import {
+  createPurchaseOrder,
+  listPurchaseOrders,
+  movePurchaseOrder,
+  readPurchaseOrder,
+  suggestPurchaseOrder,
+  updatePurchaseOrder,
+} from '../services/purchase-orders';
 import { expiryReport } from '../services/expiry';
 import { recall, setBatchBlocked } from '../services/batches';
 import { parseBody } from './validation';
@@ -94,6 +107,53 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/purchases/:id', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return readPurchase(app.db, request.auth, idOf(request.params, 'هذه الفاتورة'));
+  });
+
+  // Purchase orders (طلبية شراء): a promise to a supplier; nothing posts, nothing moves
+  app.get('/v1/purchase-orders', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listPurchaseOrders(app.db, request.auth, parseBody(purchaseOrderListQuery, request.query));
+  });
+  app.get('/v1/purchase-orders/suggest', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const q = parseBody(purchaseOrderSuggestQuery, request.query);
+    return suggestPurchaseOrder(app.db, request.auth, { supplierId: q.supplierId, all: q.all === '1' });
+  });
+  app.post('/v1/purchase-orders', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const made = await createPurchaseOrder(
+      app.db,
+      request.auth,
+      parseBody(purchaseOrderInput, request.body),
+      meta(request),
+    );
+    return reply.code(201).send(made);
+  });
+  app.get('/v1/purchase-orders/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return readPurchaseOrder(app.db, request.auth, idOf(request.params, 'هذه الطلبية'));
+  });
+  app.put('/v1/purchase-orders/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updatePurchaseOrder(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الطلبية'),
+      parseBody(purchaseOrderUpdateInput, request.body),
+      meta(request),
+    );
+  });
+  app.post('/v1/purchase-orders/:id/status', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const body = parseBody(purchaseOrderStatusInput, request.body);
+    return movePurchaseOrder(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الطلبية'),
+      body.status,
+      body.version,
+      meta(request),
+    );
   });
 
   app.post('/v1/supplier-payments', opts, async (request, reply) => {

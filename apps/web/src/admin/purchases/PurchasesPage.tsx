@@ -2,6 +2,9 @@ import { Link, useSearchParams } from 'react-router';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   contactPhoneSchema,
+  orderLineRemaining,
+  packOptionsOf,
+  type PurchaseOrderDetail,
   type PurchasePayment,
   type PurchaseRow,
   type SupplierListResponse,
@@ -71,6 +74,8 @@ import { PurchaseDetailDialog } from './PurchaseDetailDialog';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
 import { purchaseWarnings, referenceCosts, type CostReference } from './purchaseSanity';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
+import { getProduct } from '../catalog/api';
+import { getOrder } from './orderApi';
 import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRules';
 import { downloadCsv } from '../exportCsv';
 
@@ -119,6 +124,9 @@ export function PurchasesPage() {
   const [params] = useSearchParams();
   const [query, setQuery] = useState(params.get('q') ?? '');
   const [opened, setOpened] = useState<PurchaseRow | null>(null);
+  // «استلم البضاعة» on a purchase order sends the order's number here as ?order=…
+  const orderId = params.get('order');
+  const [order, setOrder] = useState<PurchaseOrderDetail | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -130,6 +138,15 @@ export function PurchasesPage() {
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    if (!orderId) return;
+    getOrder(orderId)
+      .then((o) => {
+        setOrder(o);
+        setMode('buy');
+      })
+      .catch((e: unknown) => setError(errorMessage(e)));
+  }, [orderId]);
 
   const base = suppliers?.baseCurrency ?? 'SYP';
   // After a save the form closes and the page is left scrolled down: bring the success message into view
@@ -140,6 +157,7 @@ export function PurchasesPage() {
   const done = (message: string) => {
     setNotice(message);
     setMode('list');
+    setOrder(null);
     load();
   };
 
@@ -280,8 +298,12 @@ export function PurchasesPage() {
         {mode === 'buy' && suppliers ? (
           <PurchaseForm
             suppliers={suppliers.items}
+            order={order}
             onSaved={(n) => done(`سُجّلت الفاتورة ${n} ودخلت البضاعة المخزون.`)}
-            onCancel={() => setMode('list')}
+            onCancel={() => {
+              setOrder(null);
+              setMode('list');
+            }}
           />
         ) : (
           <>
@@ -611,25 +633,72 @@ export function SupplierForm({
   );
 }
 
+/** What a purchase order is still owed, as the lines of a purchase: the rest of each quantity at its expected price */
+function linesOfOrder(order: PurchaseOrderDetail): Line[] {
+  return order.lines
+    .filter((l) => orderLineRemaining(l) > 0)
+    .map((l) => {
+      const left = orderLineRemaining(l);
+      return {
+        variantId: l.variantId,
+        name: l.name,
+        qty: String(left / 1000),
+        packQty: 1000,
+        cost: String(Math.round((l.costMinor * left) / l.qty) / 100),
+      };
+    });
+}
+
 /** The grid of a purchase line: the item, its quantity, its cost and the bin. */
 const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_14rem_8rem_9rem_2.5rem]';
 
 function PurchaseForm({
   suppliers,
+  order,
   onSaved,
   onCancel,
 }: {
   suppliers: SupplierRow[];
+  /** The purchase order being received: its supplier and what is still owed fill the form */
+  order?: PurchaseOrderDetail | null;
   onSaved: (number: string) => void;
   onCancel: () => void;
 }) {
   const me = useMe();
   const digits = useDigits();
-  const [supplierId, setSupplierId] = useState(suppliers[0]?.id ?? '');
+  const [supplierId, setSupplierId] = useState(order?.supplierId ?? suppliers[0]?.id ?? '');
   const [date, setDate] = useState(today());
   const [payment, setPayment] = useState<PurchasePayment>('credit');
   const [reference, setReference] = useState('');
-  const [lines, setLines] = useState<Line[]>([]);
+  const [lines, setLines] = useState<Line[]>(() => (order ? linesOfOrder(order) : []));
+  // The items' flags (expiry, serial numbers, packs) come from their products, read after the form opens
+  useEffect(() => {
+    if (!order) return;
+    let alive = true;
+    for (const productId of new Set(order.lines.map((l) => l.productId))) {
+      getProduct(productId)
+        .then((d) => {
+          if (!alive) return;
+          setLines((all) =>
+            all.map((l) => {
+              const v = d.variants.find((x) => x.id === l.variantId);
+              return v
+                ? {
+                    ...l,
+                    packs: packOptionsOf(v.barcodes),
+                    ...(d.requiresExpiry ? { requiresExpiry: true } : {}),
+                    ...(d.tracksSerial ? { tracksSerial: true } : {}),
+                  }
+                : l;
+            }),
+          );
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [order]);
   // The batch, expiry and serial fields of a trade that does not use them, shown on demand (هوية 2:
   // a clothing shop sees no expiry dates or IMEI).
   const [allFields, setAllFields] = useState(false);
@@ -689,6 +758,7 @@ function PurchaseForm({
           payment,
           reference: reference || null,
           notes: null,
+          ...(order ? { purchaseOrderId: order.id } : {}),
           lines: lines.map((l, i) => ({
             variantId: l.variantId,
             qty: parsed[i]!.qty!,
@@ -767,6 +837,15 @@ function PurchaseForm({
       ) : null}
       <div className="flex min-w-0 flex-col gap-6">
         {s.error ? <Alert tone="error">{s.error}</Alert> : null}
+        {order ? (
+          <Alert tone="info">
+            استلام من الطلبية{' '}
+            <bdi dir="ltr" className="num font-semibold">
+              {order.number}
+            </bdi>
+            : وضعنا الباقي منها فقط. عدّل الكمية والكلفة بما وصل فعلاً، وما لم يصل يبقى على الطلبية.
+          </Alert>
+        ) : null}
         <Card>
           <CardHeader
             icon={<TruckIcon />}
@@ -774,7 +853,12 @@ function PurchaseForm({
             description="من أين جاءت البضاعة، ومتى، وبأي رقم كتبها المورد."
           />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Select label="المورد" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+            <Select
+              label="المورد"
+              value={supplierId}
+              disabled={Boolean(order)}
+              onChange={(e) => setSupplierId(e.target.value)}
+            >
               {suppliers.map((sup) => (
                 <option key={sup.id} value={sup.id}>
                   {sup.name}

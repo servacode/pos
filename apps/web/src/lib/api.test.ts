@@ -149,6 +149,32 @@ describe('apiFetch', () => {
     unsubscribe();
   });
 
+  it('keeps asking for about five seconds while the refresh answers 409, then gives up without signing out', async () => {
+    vi.useFakeTimers();
+    try {
+      setAccessToken('stale');
+      const { requestsTo } = mockFetch({
+        'GET /v1/me': unauthorized,
+        'POST /v1/auth/refresh': apiError(409, 'conflict', 'busy'),
+      });
+      const signOut = vi.fn();
+      const unsubscribe = onSessionExpired(signOut);
+
+      const result = apiFetch('/v1/me', { auth: true }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      await vi.advanceTimersByTimeAsync(5_300);
+
+      expect(await result).toMatchObject({ status: 409 });
+      expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(6);
+      expect(signOut).not.toHaveBeenCalled();
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not sign out when the server is busy or rate limits the refresh', async () => {
     for (const status of [429, 500, 503]) {
       setAccessToken('stale');

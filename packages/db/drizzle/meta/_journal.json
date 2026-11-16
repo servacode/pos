@@ -484,6 +484,13 @@
       "when": 1794749648691,
       "tag": "0068_deposit_doc_type",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794857166346,
+      "tag": "0069_purchase_orders",
+      "breakpoints": true
     }
   ]
 }

@@ -183,10 +183,9 @@ describe('refresh token rotation', () => {
     expect((await refresh(rotated)).statusCode).toBe(200);
   });
 
-  it('reusing a rotated token after the grace window ends every session of the user', async () => {
+  it('reusing a rotated token after the grace window ends only that session family', async () => {
     const { body, cookie } = await registerStore(app);
     const rotated = refreshCookie(await refresh(cookie))!;
-    const otherDevice = refreshCookie(await login())!;
 
     clock.advance(31 * SECOND_MS);
     const stolen = await refresh(cookie);
@@ -194,7 +193,21 @@ describe('refresh token rotation', () => {
     expect(stolen.cookies.find((c) => c.name === REFRESH_COOKIE)?.value).toBe('');
 
     expect((await refresh(rotated)).statusCode).toBe(401);
-    expect((await refresh(otherDevice)).statusCode).toBe(401);
     expect((await me(body.accessToken)).statusCode).toBe(401);
+  });
+
+  it('reusing a rotated token keeps the other devices of the same user signed in', async () => {
+    const { cookie } = await registerStore(app);
+    const rotated = refreshCookie(await refresh(cookie))!;
+    const otherLogin = await login();
+    const otherDevice = refreshCookie(otherLogin)!;
+    const otherAccess = otherLogin.json().accessToken as string;
+
+    clock.advance(31 * SECOND_MS);
+    expect((await refresh(cookie)).statusCode).toBe(401);
+
+    expect((await refresh(rotated)).statusCode).toBe(401);
+    expect((await me(otherAccess)).statusCode).toBe(200);
+    expect((await refresh(otherDevice)).statusCode).toBe(200);
   });
 });

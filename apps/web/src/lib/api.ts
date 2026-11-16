@@ -176,16 +176,16 @@ async function parse<T>(res: Response): Promise<T> {
 }
 
 /** The server answers 409 when another tab rotated the same refresh cookie a moment ago. */
-const REFRESH_RACE_RETRIES = 3;
-const REFRESH_RACE_WAIT_MS = 250;
+// Waits before each retry: about 5 s in all, so a lost response or a slow tab still finds the new cookie.
+const REFRESH_RACE_WAITS_MS = [250, 500, 1000, 1500, 2000];
 
 async function refreshOnce(): Promise<string | null> {
   for (let attempt = 0; ; attempt += 1) {
     const res = await send(REFRESH_PATH, 'POST', undefined, null);
     // 409: another tab refreshed with this cookie and already holds the new one. Not a lost
     // session: wait a moment and ask again, now with the cookie it set.
-    if (res.status === 409 && attempt < REFRESH_RACE_RETRIES) {
-      await new Promise((resolve) => setTimeout(resolve, REFRESH_RACE_WAIT_MS * (attempt + 1)));
+    if (res.status === 409 && attempt < REFRESH_RACE_WAITS_MS.length) {
+      await new Promise((resolve) => setTimeout(resolve, REFRESH_RACE_WAITS_MS[attempt]!));
       continue;
     }
     // Only a real «no» (no cookie, expired or revoked session) ends the session. A busy server, a

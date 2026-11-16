@@ -3111,3 +3111,45 @@ export const quotations = pgTable(
     tenantIsolation(),
   ],
 );
+
+/**
+ * «طلبيات الشراء»: an order to a supplier, numbered per store and year (PO-2026-000001). A promise,
+ * not a posting: nothing reaches the books or the stock. The lines are kept as ordered with what came
+ * of each so far (jsonb); each receipt is an ordinary purchase (`receipts` lists them), which posts
+ * on its own as every purchase does.
+ */
+export const purchaseOrders = pgTable(
+  'purchase_orders',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    /** draft | sent | partial | received | cancelled */
+    status: text('status').notNull().default('draft'),
+    supplierId: uuid('supplier_id').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    /** The day the supplier is expected to deliver */
+    expectedDate: date('expected_date'),
+    notes: text('notes'),
+    /** [{ lineNo, variantId, productId, name, qty, costMinor, receivedQty }] */
+    lines: jsonb('lines').notNull(),
+    /** [{ purchaseId, number, date }]: the purchases made from it */
+    receipts: jsonb('receipts').notNull().default([]),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'purchase_orders_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    unique('purchase_orders_number_unique').on(t.tenantId, t.number),
+    index('purchase_orders_status_idx').on(t.tenantId, t.status, t.createdAt),
+    index('purchase_orders_supplier_idx').on(t.tenantId, t.supplierId),
+    tenantIsolation(),
+  ],
+);

@@ -69,6 +69,7 @@ import {
   takeBatches,
   trackedVariants,
 } from './batches';
+import { applyReceipt } from './purchase-order-receipt';
 import { outgoingSerials, receiveSerials, relocateSerials, returnSerialsToSupplier } from './serials';
 
 /**
@@ -492,6 +493,16 @@ export async function createPurchase(
       },
       meta,
     );
+    // A purchase made from a purchase order counts toward what the order is waiting for
+    if (input.purchaseOrderId) {
+      await applyReceipt(
+        tx,
+        input.purchaseOrderId,
+        supplier.id,
+        { id, number, date: input.date },
+        input.lines,
+      );
+    }
     return purchaseDetail(tx, id);
   });
 }

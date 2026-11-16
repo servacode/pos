@@ -19,6 +19,7 @@ export * from './contracts/accounting';
 export * from './contracts/sales';
 export * from './contracts/customers';
 export * from './contracts/purchases';
+export * from './contracts/purchase-orders';
 export * from './contracts/billing';
 export * from './contracts/legal';
 export * from './contracts/promotions';

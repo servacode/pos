@@ -271,6 +271,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'purchases',
+    to: '/purchase-orders',
+    label: 'طلبيات الشراء',
+    icon: ListIcon,
+    permission: ['purchases.manage'],
+  },
+  {
+    section: 'purchases',
     to: '/suppliers',
     label: 'الموردون',
     icon: UserIcon,

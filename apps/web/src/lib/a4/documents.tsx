@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { addMonthsIso } from '@serva/core/contracts/warranty';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import type { Quotation } from '@serva/core/contracts/quotations';
+import type { PurchaseOrderDetail } from '@serva/core/contracts/purchase-orders';
 import { formatQuantity, Money, useDigits } from '@serva/ui';
 import { METHOD_TEXT } from '../../admin/sales/labels';
 import { dayText, zonedClock } from '../dates';
@@ -486,6 +487,69 @@ export function QuotationA4({ quotation, store }: { quotation: Quotation; store:
       ) : null}
       <p className="text-xs">هذا عرض سعر وليس فاتورة، والأسعار صالحة حتى التاريخ المذكور أعلاه.</p>
       <Signatures left="عن المحل" right="موافقة الزبون" />
+      <p className="text-center text-xs">سيرفا · Serva</p>
+    </div>
+  );
+}
+
+/** «طلبية شراء»: what the store asks a supplier to send, with the expected cost and the day wanted. */
+export function PurchaseOrderA4({ order, store }: { order: PurchaseOrderDetail; store: A4Store }) {
+  const digits = useDigits();
+  const base = order.baseCurrency;
+  return (
+    <div dir="rtl" lang="ar" aria-label="طلبية شراء A4" className="flex flex-col gap-3 p-2 text-sm text-ink">
+      <Heading
+        store={store}
+        title="طلبية شراء"
+        number={order.number}
+        when={`التاريخ ${dayText(order.date, digits)}`}
+        extra={
+          order.expectedDate ? (
+            <p className="font-bold">التسليم المطلوب {dayText(order.expectedDate, digits)}</p>
+          ) : null
+        }
+      />
+      <CustomerBlock
+        customer={{ name: order.supplierName, phone: order.supplierPhone }}
+        label="السادة المورّدون"
+      />
+      <table className="w-full border-collapse" aria-label="أصناف الطلبية">
+        <thead>
+          <tr className="bg-surface-muted">
+            <th className={`${cell} w-8 text-center`}>#</th>
+            <th className={`${cell} text-start`}>الصنف</th>
+            <th className={`${cell} text-end`}>الكمية</th>
+            <th className={`${cell} text-end`}>الكلفة المتوقعة</th>
+          </tr>
+        </thead>
+        <tbody>
+          {order.lines.map((line, idx) => (
+            <tr key={line.lineNo} className="break-inside-avoid">
+              <td className={`${cell} num text-center`}>{idx + 1}</td>
+              <td className={cell}>{line.name}</td>
+              <td className={`${cell} num text-end`}>{formatQuantity(line.qty, digits)}</td>
+              <td className={`${cell} text-end`}>
+                <Money minor={line.costMinor} currency={base} symbol={false} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <dl className="ms-auto flex w-64 flex-col gap-1 break-inside-avoid">
+        <div className="flex justify-between border-t-2 border-ink pt-1 text-base font-bold">
+          <dt>الإجمالي المتوقع</dt>
+          <dd>
+            <Money minor={order.totalMinor} currency={base} />
+          </dd>
+        </div>
+      </dl>
+      {order.notes ? (
+        <p className="whitespace-pre-line">
+          <strong>ملاحظات:</strong> {order.notes}
+        </p>
+      ) : null}
+      <p className="text-xs">هذه طلبية شراء وليست فاتورة، والكلفة المذكورة متوقّعة وتُعتمد بفاتورة المورد.</p>
+      <Signatures left="عن المحل" right="تأكيد المورد" />
       <p className="text-center text-xs">سيرفا · Serva</p>
     </div>
   );

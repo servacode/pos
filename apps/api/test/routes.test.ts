@@ -42,6 +42,12 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/purchases': 'signed-in',
   'POST /v1/purchases': 'signed-in',
   'GET /v1/purchases/:id': 'signed-in',
+  'GET /v1/purchase-orders': 'signed-in',
+  'GET /v1/purchase-orders/suggest': 'signed-in',
+  'POST /v1/purchase-orders': 'signed-in',
+  'GET /v1/purchase-orders/:id': 'signed-in',
+  'PUT /v1/purchase-orders/:id': 'signed-in',
+  'POST /v1/purchase-orders/:id/status': 'signed-in',
   'POST /v1/supplier-payments': 'signed-in',
   'GET /v1/inventory': 'signed-in',
   'GET /v1/inventory/expiry': 'signed-in',
@@ -411,6 +417,23 @@ function staffIdor(method: 'PATCH' | 'POST', suffix: string, payload?: Record<st
     expect(res.statusCode, `${method} /v1/staff/:id${suffix}`).toBe(404);
     expect(await read()).toEqual(before);
   };
+}
+
+/** A draft purchase order in store A, for another store's owner to go after */
+async function orderOf(app: FastifyInstance, a: Stores['a']) {
+  const product = await productOf(app, a);
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/purchase-orders',
+    headers: owner(a),
+    payload: {
+      supplierId: await supplierOf(app, a),
+      notes: 'طلبية أ',
+      lines: [{ variantId: product.variants[0]!.id, qty: 1000, costMinor: 100 }],
+    },
+  });
+  expect(made.statusCode, made.body).toBe(201);
+  return made.json<{ id: string }>().id;
 }
 
 /** Store B's owner on store A's supplier and purchase: 404, nothing changed. */
@@ -926,6 +949,42 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       headers: owner(b),
     });
     expect(res.statusCode).toBe(404);
+  },
+  // Another store's purchase order answers 404 for reading, editing and moving on, and stays as it was
+  'GET /v1/purchase-orders/:id': async (app, { a, b }) => {
+    const id = await orderOf(app, a);
+    const res = await app.inject({ method: 'GET', url: `/v1/purchase-orders/${id}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+  },
+  'PUT /v1/purchase-orders/:id': async (app, { a, b }) => {
+    const id = await orderOf(app, a);
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/v1/purchase-orders/${id}`,
+      headers: owner(b),
+      payload: {
+        supplierId: await supplierOf(app, b),
+        version: 1,
+        lines: [{ variantId: createUuidV7()(), qty: 1000, costMinor: 1 }],
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { notes: string | null }[]
+    >`select notes from purchase_orders where id = ${id}`;
+    expect(row!.notes).toBe('طلبية أ');
+  },
+  'POST /v1/purchase-orders/:id/status': async (app, { a, b }) => {
+    const id = await orderOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/purchase-orders/${id}/status`,
+      headers: owner(b),
+      payload: { status: 'cancelled', version: 1 },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<{ status: string }[]>`select status from purchase_orders where id = ${id}`;
+    expect(row!.status).toBe('draft');
   },
   'GET /v1/customers/:id': customerIdor('GET'),
   // Store B's owner on store A's customer, supplier, expense and entry: 404, nothing of A's in the answer.
