@@ -35,6 +35,7 @@
 /apps/api/src/services/expiry.ts @servacode
 /apps/api/src/services/serials.ts @servacode
 /apps/api/src/services/purchases.ts @servacode
+/apps/api/src/services/purchase-order-receipt.ts @servacode
 
 # Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator
 /packages/db/drizzle/ @servacode
