@@ -577,7 +577,7 @@ export function InventoryPage() {
             },
             {
               key: 'out',
-              label: soldOutLabel(),
+              label: soldOutLabel(clothing),
               value: stock ? soldOut : '…',
               tone: stock && soldOut > 0 ? 'warning' : undefined,
               note: stock

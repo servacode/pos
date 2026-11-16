@@ -512,9 +512,16 @@ export function RecallPage() {
                       >
                         {buyersSummary(found.sales)}
                       </p>
-                      {buyerList(found.sales).people.length > 0 ? (
+                      {buyerList(found.sales).people.some((x) => x.phone) ? (
                         <Button onClick={() => setMessaging(true)}>راسل الزبائن</Button>
-                      ) : null}
+                      ) : (
+                        <span className="flex flex-col items-start gap-0.5">
+                          <Button disabled>راسل الزبائن</Button>
+                          <span className="text-xs text-ink-muted" data-testid="recall-no-phones">
+                            لا رقم هاتف لأي مشترٍ، أضف رقمه من صفحة الزبون.
+                          </span>
+                        </span>
+                      )}
                       <Button variant="secondary" onClick={exportBuyers}>
                         صدّر الزبائن
                       </Button>

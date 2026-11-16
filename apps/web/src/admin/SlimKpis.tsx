@@ -27,14 +27,16 @@ export function SlimKpis({ items, label }: { items: readonly SlimKpi[]; label: s
           <span className="truncate text-xs text-ink-muted sm:text-sm">{item.label}</span>
           <span
             className={cn(
-              'num text-base leading-6 font-bold text-ink sm:text-xl',
+              'num text-base leading-6 font-bold text-ink max-sm:*:whitespace-normal sm:text-xl',
               item.tone === 'warning' && 'text-warning-ink',
             )}
           >
             {item.value}
           </span>
           {item.note ? (
-            <span className="text-[0.6875rem] leading-4 text-ink-muted sm:text-xs">{item.note}</span>
+            <span className="line-clamp-2 text-[0.6875rem] leading-4 text-ink-muted sm:text-xs">
+              {item.note}
+            </span>
           ) : null}
         </div>
       ))}

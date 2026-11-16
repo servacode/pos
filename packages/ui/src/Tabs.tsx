@@ -58,7 +58,7 @@ export function Tabs<V extends string>({
       className={
         underline
           ? 'flex min-w-max gap-1 border-b border-line'
-          : cn(segmentTrackClass(density), 'scrollbar-none flex max-w-full self-start overflow-x-auto')
+          : cn(segmentTrackClass(density), 'flex min-w-max')
       }
     >
       {items.map((item, index) => {
@@ -121,7 +121,11 @@ export function Tabs<V extends string>({
 
   return (
     <div className={cn('flex flex-col gap-4', className)}>
-      {underline ? <ScrollStrip>{list}</ScrollStrip> : list}
+      {underline ? (
+        <ScrollStrip>{list}</ScrollStrip>
+      ) : (
+        <ScrollStrip className="w-fit max-w-full self-start">{list}</ScrollStrip>
+      )}
       {active ? (
         <div
           role="tabpanel"

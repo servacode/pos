@@ -124,7 +124,7 @@ function CountLayout({
       <aside className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e2 max-lg:contents lg:sticky lg:top-0">
         <div
           className={cn(
-            'flex flex-col gap-1 rounded-control bg-surface-total px-4 py-3',
+            'flex flex-col gap-1 rounded-control bg-surface-total px-4 py-3 max-lg:hidden',
             // One drawer: its own total (the field or the header) already says it
             counts.length === 1 && 'sr-only',
           )}
@@ -144,7 +144,24 @@ function CountLayout({
         <div className="flex flex-col gap-2 max-lg:hidden">
           <Keypad label="لوحة العدّ" {...keypad.keypad} />
         </div>
-        <div className="flex flex-col gap-4 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
+        <div className="flex flex-col gap-4 max-lg:sticky max-lg:-bottom-6 max-lg:z-10 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
+          {/* A phone: the live total rides in the sticky bar, so the button never hides it */}
+          {counts.length > 1 ? (
+            <p
+              aria-hidden="true"
+              className="flex flex-wrap items-baseline gap-x-3 text-sm text-ink-muted lg:hidden"
+            >
+              المجموع الحي
+              {counts.map((c) => (
+                <Money
+                  key={c.currency}
+                  minor={countTotal(c)}
+                  currency={c.currency}
+                  className="font-bold text-ink"
+                />
+              ))}
+            </p>
+          ) : null}
           {children}
         </div>
       </aside>
@@ -438,7 +455,7 @@ export function ShiftCloseScreen({
   ];
 
   return (
-    <div ref={topRef} className="flex w-full max-w-6xl scroll-mt-4 flex-col gap-6">
+    <div ref={topRef} className="mx-auto flex w-full max-w-6xl scroll-mt-4 flex-col gap-6">
       <FlowHeader
         // Once closed the only way out is «تمّ» beside the slip: one exit, never two
         onBack={step === 'count' ? onBack : step === 'done' ? undefined : () => setStep('count')}
@@ -465,7 +482,9 @@ export function ShiftCloseScreen({
         }
         actions={
           step === 'done' ? null : (
-            <Badge tone="brand">{step === 'count' ? 'الخطوة 1 من 2: العدّ' : 'الخطوة 2 من 2: الملخّص'}</Badge>
+            <span className="text-sm font-semibold text-ink-muted">
+              {step === 'count' ? 'الخطوة 1 من 2: العدّ' : 'الخطوة 2 من 2: المراجعة'}
+            </span>
           )
         }
       />
@@ -513,7 +532,7 @@ export function ShiftCloseScreen({
               ? 'نعم، الدرج فارغ، تابع'
               : odd.length > 0 && askedOdd === oddSignature
                 ? 'نعم، المبلغ صحيح، تابع'
-                : 'تابع للملخّص'}
+                : 'تابع للمراجعة'}
           </Button>
         </CountLayout>
       ) : step === 'done' && activity ? (
@@ -530,7 +549,7 @@ export function ShiftCloseScreen({
               <Alert tone="success">أُغلقت الوردية وحُفظ إغلاقها. اطبع التقرير ثم اضغط «تمّ».</Alert>
             </div>
             {/* The actions stay in view: «اطبع» first, then «تمّ» (the one way out) */}
-            <div className="flex flex-col gap-3 max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:order-3 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
+            <div className="flex flex-col gap-3 max-lg:sticky max-lg:-bottom-6 max-lg:z-10 max-lg:order-3 max-lg:-mx-2 max-lg:border-t max-lg:border-line max-lg:bg-canvas max-lg:p-3">
               <Button size="lg" fullWidth icon={<PrintIcon />} onClick={() => print('80mm')}>
                 اطبع
               </Button>
@@ -597,6 +616,18 @@ export function ShiftCloseScreen({
                       </Fragment>
                     );
                   })}
+                {(activity.cashRounding ?? []).map((r) => (
+                  <li key={`rd:${r.currency}`} className="flex flex-wrap items-center gap-x-1">
+                    تقريب النقد:{' '}
+                    <Money
+                      minor={r.amountMinor}
+                      currency={r.currency}
+                      decimals={2}
+                      trimZeros
+                      className="text-ink"
+                    />
+                  </li>
+                ))}
                 {activity.bySeller.length > 0 ? (
                   <li className="flex flex-col gap-0.5">
                     <span className="font-semibold text-ink">البائعون</span>

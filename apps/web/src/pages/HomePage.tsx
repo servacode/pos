@@ -421,6 +421,7 @@ function KpiBand({
     grossProfitMinor: number;
     netSalesMinor: number;
     costOfSalesMinor?: number;
+    belowCostCount?: number;
     baseCurrency: CurrencyCode;
   }>;
   seesProfit: boolean;
@@ -508,7 +509,28 @@ function KpiBand({
                 profit.data.costOfSalesMinor < profit.data.netSalesMinor / 50
                   ? 'التكلفة غير مكتملة بعد، لذلك لا يُعرض الهامش'
                   : profit.data.netSalesMinor > 0
-                    ? `هامش ${formatNumber(Math.round((profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100), digits)}% من صافي المبيعات بعد المرتجع وبدون الضريبة (${formatMoney(profit.data.netSalesMinor, profit.data.baseCurrency, { digits })})`
+                    ? (() => {
+                        const note = `هامش ${formatNumber(Math.round((profit.data.grossProfitMinor / profit.data.netSalesMinor) * 100), digits)}% من صافي المبيعات بعد المرتجع وبدون الضريبة (${formatMoney(profit.data.netSalesMinor, profit.data.baseCurrency, { digits })})`;
+                        const below = profit.data.belowCostCount ?? 0;
+                        // A negative margin says why and where to look
+                        return profit.data.grossProfitMinor < 0 && below > 0 ? (
+                          <>
+                            {note}
+                            <br />
+                            <Link to="/reports/sales" className="font-semibold text-danger-ink underline">
+                              الهامش سالب: بيع تحت الكلفة في{' '}
+                              {below === 1
+                                ? 'صنف واحد'
+                                : below === 2
+                                  ? 'صنفين'
+                                  : `${formatNumber(below, digits)} ${below <= 10 ? 'أصناف' : 'صنفاً'}`}{' '}
+                              — اعرض
+                            </Link>
+                          </>
+                        ) : (
+                          note
+                        );
+                      })()
                     : undefined
               }
             />
@@ -1255,8 +1277,11 @@ function MoneyRows(args: MoneyArgs) {
           {f.overOne && f.overOne.creditLimitMinor !== null && f.customersBase ? (
             <>
               {f.overOne.name}: فوق الحدّ{' '}
-              <Money minor={f.overOne.balanceMinor} currency={f.customersBase} className="font-bold" /> (الحدّ{' '}
-              <Money minor={f.overOne.creditLimitMinor} currency={f.customersBase} />)
+              <Money minor={f.overOne.balanceMinor} currency={f.customersBase} className="font-bold" />
+              {/* The limit on its own line when the row is narrow, its words and amount kept together */}
+              <span className="block text-sm font-normal">
+                الحدّ <Money minor={f.overOne.creditLimitMinor} currency={f.customersBase} />
+              </span>
             </>
           ) : f.overLimit === 1 ? (
             'زبون تجاوز حدّ الدين'

@@ -10,6 +10,9 @@ export interface BatchChoice {
   expiryDate: string | null;
 }
 
+/** A batch that came in on a purchase: `from` is that purchase's number, told as the reason it was chosen */
+export type BatchSuggestion = BatchChoice & { from?: string | undefined };
+
 const keyOf = (b: BatchChoice) => `${b.batchNo ?? ''}|${b.expiryDate ?? ''}`;
 
 /**
@@ -31,7 +34,7 @@ export function BatchSelect({
   onChange: (batch: BatchChoice | null) => void;
   error?: string | undefined;
   /** The batch of the purchase being returned, when it is known: chosen once, if the branch still holds it */
-  suggest?: BatchChoice | null | undefined;
+  suggest?: BatchSuggestion | BatchSuggestion[] | null | undefined;
 }) {
   const digits = useDigits();
   const [rows, setRows] = useState<ExpiryRow[] | null>(null);
@@ -47,11 +50,17 @@ export function BatchSelect({
   const suggested = useRef(false);
   useEffect(() => {
     if (suggested.current || !rows || !suggest || value) return;
-    const held = rows.find((r) => r.qty > 0 && keyOf(r) === keyOf(suggest));
+    // Newest purchase first: the first one whose batch is still in stock wins
+    const held = [suggest]
+      .flat()
+      .flatMap((c) => rows.filter((r) => r.qty > 0 && keyOf(r) === keyOf(c)))
+      .at(0);
     suggested.current = true;
     if (held) onChange({ batchNo: held.batchNo, expiryDate: held.expiryDate });
   }, [rows, suggest, value, onChange]);
   if (!rows || rows.length === 0) return null;
+  const reason =
+    value && suggest ? [suggest].flat().find((c) => c.from && keyOf(c) === keyOf(value))?.from : undefined;
   // The no-batch row below zero is shown so the batches add up to the stock, but nothing can be returned from it
   const isNegativeNoBatch = (r: ExpiryRow) => !r.batchNo && !r.expiryDate && r.qty <= 0;
   const unbatched = rows.filter(isNegativeNoBatch);
@@ -84,6 +93,7 @@ export function BatchSelect({
           </option>
         ))}
       </Select>
+      {reason ? <p className="text-xs text-ink-muted">من آخر شراء {reason}</p> : null}
       {unbatched.map((r) => (
         <p key="note" className="text-xs text-ink-muted">
           بلا دفعة: <bdi className="num">{formatQuantity(r.qty, digits)}</bdi>، فلا تُرجَع من هنا، لكنها داخلة

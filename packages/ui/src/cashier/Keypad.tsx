@@ -13,8 +13,11 @@ const KEY_ROWS = ['7', '8', '9', '4', '5', '6', '1', '2', '3'] as const;
 const KEY =
   'num grid h-16 place-items-center rounded-control border border-line-control/50 bg-surface text-2xl font-semibold text-ink shadow-e1 transition-[background-color,box-shadow,scale] duration-80 ease-standard select-none touch-manipulation hover:bg-surface-muted active:bg-surface-muted active:shadow-none motion-safe:active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50';
 
-function Key({ className, ...props }: ComponentProps<'button'>) {
-  return <button type="button" className={cn(KEY, className)} {...props} />;
+/** The same key, 48 high and a size smaller: a phone's pay screen, where the methods and the notes must stay in view */
+const KEY_COMPACT = KEY.replace('h-16', 'h-12').replace('text-2xl', 'text-xl');
+
+function Key({ className, compact, ...props }: ComponentProps<'button'> & { compact?: boolean }) {
+  return <button type="button" className={cn(compact ? KEY_COMPACT : KEY, className)} {...props} />;
 }
 
 export interface KeypadProps {
@@ -29,6 +32,8 @@ export interface KeypadProps {
   /** Quick cash notes under the keys (tab 14 › لوحة الأرقام), e.g. <Button>s for 5,000 and 10,000. */
   quickAmounts?: ReactNode;
   disabled?: boolean;
+  /** Keys of 48 instead of 64, for a phone's pay screen */
+  compact?: boolean;
   className?: string;
 }
 
@@ -45,27 +50,28 @@ export function Keypad({
   backspaceLabel = 'امسح رقماً',
   quickAmounts,
   disabled = false,
+  compact = false,
   className,
 }: KeypadProps) {
   return (
     <div className={cn('flex w-full flex-col gap-2', className)}>
       <div role="group" aria-label={label} dir="ltr" className="grid w-full grid-cols-3 gap-2">
         {KEY_ROWS.map((digit) => (
-          <Key key={digit} disabled={disabled} onClick={() => onDigit(digit)}>
+          <Key key={digit} compact={compact} disabled={disabled} onClick={() => onDigit(digit)}>
             {digit}
           </Key>
         ))}
         {extraKey ? (
-          <Key disabled={disabled} onClick={onExtraKey}>
+          <Key compact={compact} disabled={disabled} onClick={onExtraKey}>
             {extraKey}
           </Key>
         ) : (
           <span aria-hidden="true" />
         )}
-        <Key disabled={disabled} onClick={() => onDigit('0')}>
+        <Key compact={compact} disabled={disabled} onClick={() => onDigit('0')}>
           0
         </Key>
-        <Key disabled={disabled} onClick={onBackspace} aria-label={backspaceLabel}>
+        <Key compact={compact} disabled={disabled} onClick={onBackspace} aria-label={backspaceLabel}>
           <BackspaceIcon size={24} className="text-ink-muted" />
         </Key>
       </div>

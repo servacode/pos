@@ -20,7 +20,7 @@ const FADE = 28;
 /**
  * A row that scrolls sideways (the page's tabs, a line of chips): the edge where more is hidden
  * fades out, so nobody takes the cut-off last item for the end; and the open item (the tab marked
- * `aria-current` or `aria-selected`) is brought into view when the strip appears. Without scrolling it is
+ * `aria-current`, `aria-selected` or `aria-checked`) is brought into view when the strip appears. Without scrolling it is
  * only a wrapper.
  */
 export function ScrollStrip({ children, className }: { children: ReactNode; className?: string }) {
@@ -58,15 +58,17 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.querySelector<HTMLElement>('[aria-current="page"], [aria-selected="true"]')?.scrollIntoView?.({
+    el.querySelector<HTMLElement>(
+      '[aria-current="page"], [aria-selected="true"], [aria-checked="true"]',
+    )?.scrollIntoView?.({
       inline: 'center',
       block: 'nearest',
     });
     measure();
     // The open item changes without the strip remounting (a pill tab): bring the new one in
-    let open = el.querySelector('[aria-current="page"], [aria-selected="true"]');
+    let open = el.querySelector('[aria-current="page"], [aria-selected="true"], [aria-checked="true"]');
     const follow = new MutationObserver(() => {
-      const now = el.querySelector('[aria-current="page"], [aria-selected="true"]');
+      const now = el.querySelector('[aria-current="page"], [aria-selected="true"], [aria-checked="true"]');
       if (now && now !== open) now.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
       open = now;
     });

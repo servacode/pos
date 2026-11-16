@@ -1305,6 +1305,18 @@ export async function profitReport(
       join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
       where e.entry_date between ${query.from} and ${query.to}
         ${query.branchId ? sql`and e.branch_id = ${query.branchId}` : sql``}`);
+    // How many products sold for less than they cost in the period (what the margin hint links to)
+    const [below] = await tx.execute<{ n: string }>(sql`
+      select count(*)::text as n from (
+        select l.product_id
+        from movement_costs c
+        join invoice_lines l on l.tenant_id = c.tenant_id and l.invoice_id = c.doc_id and l.line_no = c.line_no
+        where c.business_date between ${query.from} and ${query.to}
+          ${query.branchId ? sql`and c.branch_id = ${query.branchId}` : sql``}
+        group by l.product_id
+        having sum(case when c.kind = 'sale' then l.total_minor - l.tax_minor else l.tax_minor - l.total_minor end)
+               < sum(c.cost_minor)
+      ) t`);
     const net = Number(row?.net ?? 0);
     const cost = Number(row?.cost ?? 0);
     return {
@@ -1314,6 +1326,7 @@ export async function profitReport(
       costOfSalesMinor: cost,
       grossProfitMinor: net - cost,
       stockLossMinor: Number(row?.loss ?? 0),
+      belowCostCount: Number(below?.n ?? 0),
       baseCurrency: await baseCurrency(tx),
     };
   });

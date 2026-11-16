@@ -168,6 +168,13 @@ export function ReturnScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReturn | null>(null);
+  // On a phone the picked invoice and the result sit under the long list: bring them to the top when they appear
+  const resultTop = useRef<HTMLSpanElement>(null);
+  const pickedId = picked?.id ?? null;
+  const savedId = saved?.id ?? null;
+  useEffect(() => {
+    if (pickedId || savedId) resultTop.current?.scrollIntoView?.({ block: 'start' });
+  }, [pickedId, savedId]);
 
   useEffect(() => {
     let alive = true;
@@ -602,6 +609,7 @@ export function ReturnScreen({
             </ul>
           ) : null}
         </section>
+        <span ref={resultTop} className="sr-only scroll-mt-4" />
         {!current ? (
           <EmptyState
             icon={UndoIcon}

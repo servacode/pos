@@ -99,3 +99,24 @@ describe('the Z report (the till’s closing slip)', () => {
     expect(text).toContain('قسائم وعربون بيعت نقداً');
   });
 });
+
+describe('cash rounding on the Z (round 19)', () => {
+  it('says what rounding took off the shift’s invoices, with its fraction', () => {
+    const sale = (roundingMinor: number, seq: number) =>
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 726_350, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 726_000 }],
+          change: null,
+          cashRounding: { currency: 'SYP', roundingMinor },
+        },
+        seq,
+      );
+    const text = renderZ([sale(-350, 1)]);
+    expect(text).toContain('تقريب النقد');
+    expect(text).toContain('−3.5');
+  });
+});

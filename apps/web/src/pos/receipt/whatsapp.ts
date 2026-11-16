@@ -23,13 +23,18 @@ export function receiptText(data: ReceiptData): string {
   out.push('');
   for (const l of sale.lines) {
     out.push(`${l.name} × ${formatQuantity(l.qty)} = ${money(l.priced.totalMinor)}`);
-    if (data.contractVariantIds?.includes(l.variantId)) out.push('سعر العقد');
+    if (data.contractVariantIds?.includes(l.variantId)) {
+      const was = data.contractSavings?.[l.lineNo];
+      out.push(was ? `سعر العقد (بدل ${money(l.priced.grossMinor + was)})` : 'سعر العقد');
+    }
     const serial = serialText(l, data.settings);
     if (serial) out.push(serial);
     const warranty = warrantyText(l, data.doc.deviceTime, data.settings);
     if (warranty) out.push(warranty);
   }
   out.push('');
+  const contractSaved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
+  if (contractSaved > 0) out.push(`وفّرت ${money(contractSaved)} بسعر العقد`);
   out.push(`الإجمالي: ${money(sale.totals.totalMinor)}`);
   for (const p of sale.payments) {
     out.push(`${methodLabel(p.method, p.currency, base)}: ${money(p.amountMinor, p.currency)}`);
@@ -37,7 +42,7 @@ export function receiptText(data: ReceiptData): string {
   if (sale.cashRounding && sale.cashRounding.roundingMinor !== 0) {
     const r = sale.cashRounding;
     out.push(
-      `قُرّب المبلغ إلى ${money(r.dueMinor, r.currency)} (فرق ${money(Math.abs(r.roundingMinor), r.currency)})`,
+      `قُرّب المبلغ إلى ${money(r.dueMinor, r.currency)} (فرق ${stripBidiControls(formatMoney(Math.abs(r.roundingMinor), r.currency, { decimals: 2, trimZeros: true }))})`,
     );
   }
   if (sale.change) out.push(`الباقي للزبون: ${money(sale.change.amountMinor, sale.change.currency)}`);

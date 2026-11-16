@@ -164,7 +164,7 @@ function StatusChip({
         <div
           role="group"
           aria-label="تفاصيل الحالة"
-          className="absolute end-0 top-full z-70 mt-2 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-card border border-line bg-surface p-3 text-sm shadow-e3"
+          className="absolute end-0 top-full z-70 mt-2 flex w-60 flex-col gap-2 rounded-card border border-line bg-surface p-3 text-sm shadow-e3"
         >
           <p className="font-semibold text-ink">{online ? 'متصل بالإنترنت' : 'دون إنترنت: البيع مستمر'}</p>
           <p className="text-ink-muted">{pending > 0 ? `${pending} بانتظار الإرسال` : 'كل شيء أُرسل'}</p>
@@ -268,9 +268,14 @@ export function StatusBar({
         {user ? (
           <>
             <Divider />
-            <div className="flex min-w-28 max-sm:min-w-20 shrink-[2] items-center gap-2.5">
-              <Avatar name={user.name} size="sm" />
-              <p className="flex min-w-0 flex-col">
+            <div className="flex min-w-28 shrink-[2] items-center gap-2.5">
+              <span className="max-sm:hidden">
+                <Avatar name={user.name} size="sm" />
+              </span>
+              <p
+                className="flex min-w-0 flex-col"
+                title={[user.name, device?.storeName].filter(Boolean).join(' · ')}
+              >
                 <span className="truncate text-sm/tight font-semibold text-ink">{user.name}</span>
                 <span className="truncate text-xs/tight text-ink-muted max-sm:hidden">{user.detail}</span>
                 {/* A phone has no room beside the name: the store goes under it, so the cashier knows whose till this is */}

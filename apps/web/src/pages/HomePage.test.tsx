@@ -136,6 +136,30 @@ describe('HomePage', () => {
       expect(screen.getByRole('link', { name: 'افتح الكاشير' })).toHaveAttribute('href', '/pos');
     });
 
+    it('explains a negative margin with a link to the products sold under their cost', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'reports.financial']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({}) },
+        [`GET /v1/reports/profit?from=${TODAY}&to=${TODAY}`]: {
+          status: 200,
+          body: {
+            from: TODAY,
+            to: TODAY,
+            netSalesMinor: 1_000_000,
+            costOfSalesMinor: 1_200_000,
+            grossProfitMinor: -200_000,
+            stockLossMinor: 0,
+            belowCostCount: 3,
+            baseCurrency: 'SYP',
+          },
+        },
+      });
+      renderApp('/');
+      const link = await screen.findByRole('link', { name: /الهامش سالب: بيع تحت الكلفة في 3 أصناف/ });
+      expect(link).toHaveAttribute('href', '/reports/sales');
+    });
+
     it('a clothing store sees the week’s top five and which size ran out', async () => {
       const me = meWith([...OWNER_KEYS, 'catalog.manage']);
       const row = (key: string, name: string, totalMinor: number) => ({

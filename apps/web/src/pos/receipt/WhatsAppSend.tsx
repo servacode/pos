@@ -11,10 +11,13 @@ export function WhatsAppSend({
   data,
   phone,
   className,
+  primary = false,
 }: {
   data: ReceiptData;
   phone: string | null;
   className?: string;
+  /** The filled green button: first on the done screen */
+  primary?: boolean;
 }) {
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState('');
@@ -59,9 +62,9 @@ export function WhatsAppSend({
   }
   return (
     <Button
-      variant="secondary"
+      variant={primary ? 'primary' : 'secondary'}
       size="lg"
-      icon={<ChatIcon className="text-success-ink" />}
+      icon={<ChatIcon className={primary ? undefined : 'text-success-ink'} />}
       className={className}
       onClick={() => {
         if (phone && open(phone)) return;

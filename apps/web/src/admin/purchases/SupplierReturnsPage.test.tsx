@@ -267,6 +267,7 @@ describe('«مرتجع إلى المورد»', () => {
     await user.click(await screen.findByRole('button', { name: 'مصل' }));
     await user.type(await screen.findByLabelText('كمية مصل'), '5');
     await waitFor(() => expect(screen.getByLabelText('الدفعة')).toHaveValue('SY-118|2027-02-01'));
+    expect(screen.getByText('من آخر شراء PUR-2')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
     await screen.findByText(/سُجّل المرتجع PRT-1/);
     expect(requestsTo('POST', '/v1/supplier-returns')[0]?.body).toMatchObject({

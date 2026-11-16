@@ -43,7 +43,12 @@ async function sold() {
 describe('A4 from the finished sale', () => {
   it('prints a tax invoice with the store’s tax number, the customer block, payment terms, signatures and a stamp area', async () => {
     const { user } = await sold();
-    await user.click(screen.getByRole('button', { name: 'اطبع A4' }));
+    await user.click(
+      within(screen.getByRole('region', { name: 'تمت البيعة' })).getByRole('button', {
+        name: 'المزيد من الطباعة',
+      }),
+    );
+    await user.click(await screen.findByRole('menuitem', { name: 'اطبع A4' }));
     await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
     for (const part of [
       'فاتورة ضريبية',
@@ -67,7 +72,12 @@ describe('A4 from the finished sale', () => {
 
   it('prints the delivery note without prices', async () => {
     const { user } = await sold();
-    await user.click(screen.getByRole('button', { name: 'إشعار تسليم' }));
+    await user.click(
+      within(screen.getByRole('region', { name: 'تمت البيعة' })).getByRole('button', {
+        name: 'المزيد من الطباعة',
+      }),
+    );
+    await user.click(await screen.findByRole('menuitem', { name: 'إشعار تسليم' }));
     await waitFor(() => expect(window.print).toHaveBeenCalledOnce());
     expect(sheet).toContain('إشعار تسليم');
     expect(sheet).toContain('سكر أبيض 1 كغ');

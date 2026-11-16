@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { CurrencyCode } from '@serva/core/currencies';
+import { CURRENCIES } from '@serva/core/currencies';
 import { convert } from '@serva/core/money';
 import type { BranchRow, SettingsRow } from '@serva/core/contracts/catalog';
 import type {
@@ -65,6 +66,8 @@ export interface ReceiptData {
   serviceVariantIds?: readonly string[];
   /** The items whose price was the customer's contract price: their line says «سعر العقد» (display only) */
   contractVariantIds?: readonly string[];
+  /** What each contract-priced line saved against its shelf price, by line number (display only) */
+  contractSavings?: Readonly<Record<number, number>>;
 }
 
 /** One whole piece at its own price (no unit, no pack): the line's amount is its price, so it is said once */
@@ -368,6 +371,16 @@ export function Receipt({
   const foreignRate = sale.exchangeRates[0];
   const foreign = foreignRate ? (foreignRate.unit === base ? foreignRate.quote : foreignRate.unit) : null;
   const t = sale.totals;
+  // A discount keeps its fraction (37.5, not 38): the lines then add up to the total the same way the kernel did
+  const exact = (minor: number) => (
+    <Money
+      minor={minor}
+      currency={base}
+      symbol={false}
+      {...(minor % 10 ** CURRENCIES[base].decimals !== 0 ? { decimals: CURRENCIES[base].decimals } : {})}
+    />
+  );
+  const contractSaved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
   // The deposit handed back on a rental is money, not a piece sold
   const pieces = sale.lines
     .filter((l) => !l.name.startsWith(DEPOSIT_BACK_NAME) && !data.serviceVariantIds?.includes(l.variantId))
@@ -444,11 +457,19 @@ export function Receipt({
             )}
             {line.priced.lineDiscountMinor > 0 ? (
               <Row label={discountLabel(line.discount)}>
-                <bdi dir="ltr">−{amount(line.priced.lineDiscountMinor)}</bdi>
+                <bdi dir="ltr">−{exact(line.priced.lineDiscountMinor)}</bdi>
               </Row>
             ) : null}
             {data.contractVariantIds?.includes(line.variantId) ? (
-              <span className="text-xs">سعر العقد</span>
+              <span className="text-xs">
+                سعر العقد
+                {data.contractSavings?.[line.lineNo] ? (
+                  <>
+                    {' '}
+                    · بدل <s>{amount(line.priced.grossMinor + data.contractSavings[line.lineNo]!)}</s>
+                  </>
+                ) : null}
+              </span>
             ) : null}
             {line.serials?.length ? (
               <span className="text-start">
@@ -498,14 +519,15 @@ export function Receipt({
       <Rule />
       {t.discountMinor > 0 ? (
         <>
-          <Row label="المجموع">{amount(t.grossMinor - t.lineDiscountMinor)}</Row>
+          <Row label="المجموع">{exact(t.grossMinor - t.lineDiscountMinor)}</Row>
           {t.invoiceDiscountMinor > 0 ? (
             <Row label="خصم الفاتورة">
-              <bdi dir="ltr">−{amount(t.invoiceDiscountMinor)}</bdi>
+              <bdi dir="ltr">−{exact(t.invoiceDiscountMinor)}</bdi>
             </Row>
           ) : null}
         </>
       ) : null}
+      {contractSaved > 0 ? <Row label="وفّرت بسعر العقد">{amount(contractSaved)}</Row> : null}
       {t.taxMinor > 0 ? (
         <Row label={sale.taxInclusive ? 'منها ضريبة' : 'الضريبة'}>{amount(t.taxMinor)}</Row>
       ) : null}

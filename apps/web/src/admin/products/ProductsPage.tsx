@@ -129,38 +129,28 @@ export function availableOf(item: Pick<ProductListItem, 'stockQty' | 'sellableQt
   return item.sellableQty ?? item.stockQty;
 }
 
-/** Some combination runs below zero: the available count is more than the plain sum */
-function hasNegative(item: Pick<ProductListItem, 'stockQty' | 'sellableQty'>): boolean {
-  return item.stockQty < 0 || (item.sellableQty !== undefined && item.sellableQty > item.stockQty);
+/** «سالب 8 قطع»: the pieces some combination sold beyond what was recorded (empty when the figure itself is below zero) */
+function negativeWords(item: Pick<ProductListItem, 'stockQty' | 'sellableQty'>, digits: 'latn' | 'arab') {
+  const gap = (item.sellableQty ?? item.stockQty) - item.stockQty;
+  return gap > 0 ? negativePieces(gap / 1000, formatQuantity(gap, digits)) : null;
 }
 
 function StockCell({ item, digits }: { item: ProductListItem; digits: 'latn' | 'arab' }) {
   const avail = availableOf(item);
-  const below = hasNegative(item);
+  const below = negativeWords(item, digits);
   return (
     <span className="flex flex-col items-end">
-      <span className="inline-flex items-center gap-1.5">
-        {below ? <Badge tone="danger">سالب</Badge> : null}
-        <span
-          className={cn('font-semibold', avail < 0 && 'text-danger-ink', avail === 0 && 'text-warning-ink')}
-        >
-          {formatQuantity(avail, digits)}
-        </span>
+      <span
+        className={cn('font-semibold', avail < 0 && 'text-danger-ink', avail === 0 && 'text-warning-ink')}
+      >
+        {formatQuantity(avail, digits)}
+        {avail > 0 ? <span className="font-normal text-ink-muted"> قطعة</span> : null}
       </span>
-      {item.sellableQty !== undefined && item.sellableQty !== item.stockQty ? (
+      {below ? (
+        <span className="text-xs whitespace-nowrap text-danger-ink">{below}</span>
+      ) : item.sellableQty !== undefined && item.sellableQty !== item.stockQty ? (
         <span className="text-xs whitespace-nowrap text-ink-muted">
-          {below ? (
-            <bdi className="text-danger-ink">
-              {negativePieces(
-                (item.sellableQty - item.stockQty) / 1000,
-                formatQuantity(item.sellableQty - item.stockQty, digits),
-              )}
-            </bdi>
-          ) : (
-            <>
-              في المخزن <bdi className="num">{formatQuantity(item.stockQty, digits)}</bdi>
-            </>
-          )}
+          في المخزن <bdi className="num">{formatQuantity(item.stockQty, digits)}</bdi>
         </span>
       ) : null}
     </span>
@@ -872,7 +862,8 @@ function ProductsList() {
                   {summary.runOut > 0 ? (
                     <>
                       {' '}
-                      · <bdi className="num font-semibold text-warning-ink">{summary.runOut}</bdi> نفد
+                      · <bdi className="num font-semibold text-warning-ink">{summary.runOut}</bdi>{' '}
+                      {clothingStore ? 'مقاساً نفد' : 'نفد'}
                     </>
                   ) : null}
                 </>
@@ -913,7 +904,7 @@ function ProductsList() {
               },
               {
                 key: 'out',
-                label: soldOutLabel(),
+                label: soldOutLabel(clothingStore),
                 value: summary ? <bdi className="num">{`${summary.runOut}${more}`}</bdi> : '…',
                 tone: summary && summary.runOut > 0 ? 'warning' : undefined,
                 note: !summary?.lowest ? undefined : summary.runOut > 0 ? (
@@ -1253,15 +1244,21 @@ function ProductsList() {
                             <span>خدمة</span>
                           ) : (
                             <>
-                              {hasNegative(item) ? <Badge tone="danger">سالب</Badge> : null}
                               <span
                                 className={cn(
                                   'shrink-0 font-semibold',
                                   availableOf(item) === 0 && 'text-warning-ink',
                                 )}
                               >
-                                {availableOf(item) === 0 ? 'نفد' : formatQuantity(availableOf(item), digits)}
+                                {availableOf(item) === 0
+                                  ? 'نفد'
+                                  : `${formatQuantity(availableOf(item), digits)} قطعة`}
                               </span>
+                              {negativeWords(item, digits) ? (
+                                <span className="shrink-0 text-danger-ink">
+                                  · {negativeWords(item, digits)}
+                                </span>
+                              ) : null}
                             </>
                           )}
                           {item.categoryName && item.type !== 'service' ? (

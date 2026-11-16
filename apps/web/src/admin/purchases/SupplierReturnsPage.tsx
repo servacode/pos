@@ -39,7 +39,7 @@ import { getPurchase, listPurchases, listSuppliers, moneyOf, qtyOf, today } from
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } from './parts';
 import { PackQty } from './PackQty';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
-import { BatchSelect, type BatchChoice } from './BatchSelect';
+import { BatchSelect, type BatchChoice, type BatchSuggestion } from './BatchSelect';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 
 const listReturns = () => apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true });
@@ -123,7 +123,7 @@ export function SupplierReturnsPage() {
   }, []);
 
   // The batch each item came in on the latest purchases from this supplier: the box starts on it
-  const [lastBatch, setLastBatch] = useState<Map<string, BatchChoice>>(new Map());
+  const [lastBatch, setLastBatch] = useState<Map<string, BatchSuggestion[]>>(new Map());
   useEffect(() => {
     if (!supplierId) return;
     let alive = true;
@@ -131,14 +131,18 @@ export function SupplierReturnsPage() {
       .then(async (all) => {
         const recent = all.items
           .filter((p) => p.supplierId === supplierId)
-          .sort((a, b) => (a.date < b.date ? 1 : -1))
-          .slice(0, 3);
-        const found = new Map<string, BatchChoice>();
+          // Newest first; two on the same day: the later number
+          .sort((a, b) => (a.date === b.date ? (a.number < b.number ? 1 : -1) : a.date < b.date ? 1 : -1))
+          .slice(0, 5);
+        const found = new Map<string, BatchSuggestion[]>();
         for (const p of recent) {
           const detail = await getPurchase(p.id);
           for (const l of detail.lines) {
-            if ((l.batchNo || l.expiryDate) && !found.has(l.variantId)) {
-              found.set(l.variantId, { batchNo: l.batchNo, expiryDate: l.expiryDate });
+            if (l.batchNo || l.expiryDate) {
+              found.set(l.variantId, [
+                ...(found.get(l.variantId) ?? []),
+                { batchNo: l.batchNo, expiryDate: l.expiryDate, from: p.number },
+              ]);
             }
           }
         }

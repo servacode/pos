@@ -186,6 +186,8 @@ export interface ShiftActivity {
     receipts: { currency: Code; amountMinor: number }[];
     vouchers: { currency: Code; amountMinor: number }[];
   };
+  /** What cash rounding took off (negative) or added to the invoices of this shift, per currency (display only) */
+  cashRounding?: { currency: Code; amountMinor: number }[];
   /** A foreign cash payment (20$) given back in another currency (800 ل.س): what was paid in, what came back */
   changeBack?: { paid: Code; change: Code; paidMinor: number; changeMinor: number }[];
 }
@@ -206,6 +208,7 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     { method: PaymentMethod; currency: Code; count: number; amountMinor: number }
   >();
   let saleCount = 0;
+  const rounding = new Map<Code, number>();
   const salesTotals = new Map<Code, { currency: Code; totalMinor: number; discountMinor: number }>();
   const bySeller = new Map<string, { sellerId: string; currency: Code; count: number; totalMinor: number }>();
   const refunds = new Map<string, { method: string; currency: Code; amountMinor: number }>();
@@ -222,6 +225,10 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     if (doc.type === 'sale') {
       const sale = payload as unknown as SalePayload;
       saleCount += 1;
+      if (sale.cashRounding && sale.cashRounding.roundingMinor !== 0) {
+        const r = sale.cashRounding;
+        rounding.set(r.currency, (rounding.get(r.currency) ?? 0) + r.roundingMinor);
+      }
       const totals = salesTotals.get(sale.currency) ?? {
         currency: sale.currency,
         totalMinor: 0,
@@ -334,6 +341,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       vouchers: [...vouchersCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
     },
     changeBack: [...changeBack.values()],
+    ...(rounding.size > 0
+      ? { cashRounding: [...rounding].map(([currency, amountMinor]) => ({ currency, amountMinor })) }
+      : {}),
   };
 }
 

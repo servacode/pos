@@ -59,7 +59,7 @@ import type { Quotation } from '@serva/core/contracts/quotations';
 import { convertQuotation } from './quotations/api';
 import { quotationCart } from './quotations/quotationCart';
 import { useQuotationFromAddress } from './quotations/useQuotationFromAddress';
-import { addItem, EMPTY_CART, type Cart } from './sale/cart';
+import { addItem, contractSavingsOf, EMPTY_CART, type Cart } from './sale/cart';
 import { cancelSentLines, flushPendingCancels } from './hall/cancelSent';
 import { cartFromOrder, lineIdsOf } from './hall/hallCart';
 import type { HallTools } from './hall/tools';
@@ -158,6 +158,8 @@ interface LastSale {
   cashierName: string;
   /** The items sold at the customer's contract price: the receipt's line says «سعر العقد» (display only) */
   contractVariantIds?: string[];
+  /** What each of those lines saved against its shelf price, by line number */
+  contractSavings?: Record<number, number>;
 }
 
 type View =
@@ -496,6 +498,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     doc: LastSale['doc'],
     cashierName: string,
     contractVariantIds?: readonly string[],
+    contractSavings?: Readonly<Record<number, number>>,
   ): ReceiptData => ({
     doc,
     settings,
@@ -507,6 +510,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     sellerName: sellerOf(doc),
     serviceVariantIds: [...catalog.byVariant.values()].filter((i) => i.isService).map((i) => i.variantId),
     ...(contractVariantIds?.length ? { contractVariantIds } : {}),
+    ...(contractSavings && Object.keys(contractSavings).length > 0 ? { contractSavings } : {}),
   });
 
   /** The salesperson of a sale, when it is named */
@@ -528,6 +532,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       ...(cartRef.current.lines.some((l) => l.contractPriced)
         ? {
             contractVariantIds: cartRef.current.lines.filter((l) => l.contractPriced).map((l) => l.variantId),
+            contractSavings: contractSavingsOf(cartRef.current, entry.doc.payload as unknown as SalePayload),
           }
         : {}),
     };
@@ -550,7 +555,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     // The sale is in the outbox: the kept cart goes now, so a refresh cannot bring it back as a second sale
     writeCart(() => pos.local.remove(CURRENT_CART_KEY));
     setCartState(EMPTY_CART);
-    const data = receiptData(last.doc, session.fullName, last.contractVariantIds);
+    const data = receiptData(last.doc, session.fullName, last.contractVariantIds, last.contractSavings);
     // A sale paid with a voucher prints what is left on it, counted once the sale is in the outbox
     const paidByVoucher = (last.doc.payload as unknown as SalePayload).payments?.some(
       (p) => p.method === 'voucher',
@@ -851,7 +856,12 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   function reprint() {
     if (!lastSale) return;
     setPrintJob({
-      data: receiptData(lastSale.doc, lastSale.cashierName, lastSale.contractVariantIds),
+      data: receiptData(
+        lastSale.doc,
+        lastSale.cashierName,
+        lastSale.contractVariantIds,
+        lastSale.contractSavings,
+      ),
       copy: true,
     });
   }
@@ -986,7 +996,14 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             <MenuItem
               icon={<ChatIcon />}
               onSelect={() =>
-                setWaJob(receiptData(lastSale.doc, lastSale.cashierName, lastSale.contractVariantIds))
+                setWaJob(
+                  receiptData(
+                    lastSale.doc,
+                    lastSale.cashierName,
+                    lastSale.contractVariantIds,
+                    lastSale.contractSavings,
+                  ),
+                )
               }
             >
               أرسل آخر فاتورة عبر واتساب
@@ -1073,7 +1090,12 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           onTest={() => {
             if (lastSale)
               setPrintJob({
-                data: receiptData(lastSale.doc, lastSale.cashierName, lastSale.contractVariantIds),
+                data: receiptData(
+                  lastSale.doc,
+                  lastSale.cashierName,
+                  lastSale.contractVariantIds,
+                  lastSale.contractSavings,
+                ),
                 copy: true,
               });
             else window.print();

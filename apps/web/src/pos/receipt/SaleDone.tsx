@@ -1,5 +1,16 @@
 import type { SalePayload } from '@serva/core/contracts/documents';
-import { Button, CartIcon, CheckIcon, cn, Money, OfflineIcon, PrintIcon } from '@serva/ui';
+import {
+  Button,
+  CartIcon,
+  CheckIcon,
+  cn,
+  Menu,
+  MenuItem,
+  Money,
+  MoreIcon,
+  OfflineIcon,
+  PrintIcon,
+} from '@serva/ui';
 import { notesFor } from '../shift/shift';
 import { changeNotes } from '../pay/payment';
 import { methodLabel, Receipt, type PaperWidth, type ReceiptData } from './Receipt';
@@ -140,6 +151,8 @@ export function SaleDone({
               minor={Math.abs(sale.cashRounding.roundingMinor)}
               currency={sale.cashRounding.currency}
               symbol={false}
+              decimals={2}
+              trimZeros
             />
             )
           </p>
@@ -155,6 +168,8 @@ export function SaleDone({
         ) : null}
         {/* The buttons follow the figures directly: no tall gap pushing them to the panel's floor */}
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          {/* WhatsApp is first and filled, with the customer's number ready: the main way to hand the receipt over */}
+          <WhatsAppSend data={data} phone={customerPhone} primary />
           <Button
             variant="secondary"
             size="lg"
@@ -164,17 +179,23 @@ export function SaleDone({
           >
             اطبع
           </Button>
-          {/* WhatsApp follows print: a main way to hand over the receipt, not a fourth plain button */}
-          <WhatsAppSend data={data} phone={customerPhone} />
           {onPrintA4 ? (
-            <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={() => onPrintA4('invoice')}>
-              اطبع A4
-            </Button>
-          ) : null}
-          {onPrintA4 ? (
-            <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={() => onPrintA4('delivery')}>
-              إشعار تسليم
-            </Button>
+            <Menu
+              label="المزيد"
+              align="start"
+              trigger={
+                <Button variant="ghost" size="lg" icon={<MoreIcon />} aria-label="المزيد من الطباعة">
+                  المزيد
+                </Button>
+              }
+            >
+              <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('invoice')}>
+                اطبع A4
+              </MenuItem>
+              <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('delivery')}>
+                إشعار تسليم
+              </MenuItem>
+            </Menu>
           ) : null}
           {onPrintWarranty ? (
             <Button variant="secondary" size="lg" icon={<PrintIcon />} onClick={onPrintWarranty}>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { CURRENCIES } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import { PRICING_ENGINE_VERSION, roundCashDue } from '@serva/core/pricing';
@@ -164,6 +165,10 @@ export function PaymentPanel({
   // A device with a warranty is sold to a known customer (the store's setting): the picker opens first
   const needsCustomer = warrantyAsksCustomer(settings.till, settings.sectors) && hasWarrantyDevice(cart);
   const [picking, setPicking] = useState(needsCustomer);
+  // On a phone the required customer is a one-line banner under the methods; tapping it opens the picker, so the methods stay in view
+  const phone = useIsPhone();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const collapsedPicker = phone && needsCustomer && !customer && !pickerOpen;
   // This till's own documents, for the vouchers it issued or spent that the server has not sent back
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
   useEffect(() => {
@@ -245,6 +250,15 @@ export function PaymentPanel({
   const [costGrant, setCostGrant] = useState<Approval | null>(null);
   const [split, setSplit] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
+  // A customer named before the pay screen (a held sale, a ticket): their contract prices apply here too, once
+  const contractAsked = useRef(false);
+  useEffect(() => {
+    if (contractAsked.current || !customer || !onContractPrices) return;
+    if (cart.contractPriced || cart.quotation || cart.rental || cart.maintenance || cart.alteration) return;
+    contractAsked.current = true;
+    setTotalAtPick((at) => at ?? totalMinor);
+    void onContractPrices(customer.id).then((applied) => applied && setParts([]));
+  }, [customer, cart, onContractPrices, totalMinor]);
   const [text, setText] = useState('');
   const [reference, setReference] = useState(cart.voucher ?? '');
   // A cheque's details: bank, number, due day, and whose it is when not the customer's
@@ -300,7 +314,10 @@ export function PaymentPanel({
           : // Cash in the sale's currency starts at the exact due (to the cash step): typing replaces it; a split types its parts
             !split && option.currency === base
             ? roundCashDue(remainingBase, cashSteps[base] ?? 0).dueMinor
-            : null);
+            : // Cash in a foreign currency starts at the due converted to it, so the box and «المتبقي» agree
+              !split && option.method === 'cash'
+              ? dueIn(option.currency, base, remainingBase, ctx.rates)
+              : null);
   const chequeDetails =
     option.method === 'cheque' && chequeBank.trim() && chequeNo.trim() && chequeDue
       ? {
@@ -400,8 +417,10 @@ export function PaymentPanel({
 
   const extrasRef = useRef<HTMLDivElement>(null);
   const goToMissing = () => {
-    if (needsCustomer && !customer) setPicking(true);
-    else if (needsReference) referenceRef.current?.focus();
+    if (needsCustomer && !customer) {
+      setPicking(true);
+      setPickerOpen(true);
+    } else if (needsReference) referenceRef.current?.focus();
     extrasRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
   };
 
@@ -568,11 +587,11 @@ export function PaymentPanel({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onBack, option.currency]);
 
-  const foreign = catalog.rates[0]
-    ? catalog.rates[0].unit === base
-      ? catalog.rates[0].quote
-      : catalog.rates[0].unit
-    : null;
+  // Shown only while the latest settings still offer that currency
+  const shownRate = catalog.rates.find((r) =>
+    settings.enabledCurrencies.includes(r.unit === base ? r.quote : r.unit),
+  );
+  const foreign = shownRate ? (shownRate.unit === base ? shownRate.quote : shownRate.unit) : null;
   const changeMinor = 'error' in settlement ? 0 : (settlement.change?.amountMinor ?? 0);
   const short = 'error' in settlement || !settlement.covered;
   const shortCash = 'error' in settlement ? 0 : settlement.remainingCashMinor;
@@ -698,7 +717,15 @@ export function PaymentPanel({
             {option.method === 'cash' && option.currency === base && dueHere !== remainingBase ? (
               <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
                 قُرّب المبلغ إلى <Money minor={dueHere} currency={base} className="font-semibold text-ink" />{' '}
-                (فرق <Money minor={Math.abs(dueHere - remainingBase)} currency={base} symbol={false} />)
+                (فرق{' '}
+                <Money
+                  minor={Math.abs(dueHere - remainingBase)}
+                  currency={base}
+                  symbol={false}
+                  decimals={2}
+                  trimZeros
+                />
+                )
               </p>
             ) : null}
             {option.method === 'credit' ? (
@@ -851,6 +878,7 @@ export function PaymentPanel({
               </p>
             ) : null}
             <Keypad
+              compact={phone}
               onDigit={(d) => setText((t) => (t === '0' ? d : (t + d).slice(0, 12)))}
               onBackspace={() => setText((t) => t.slice(0, -1))}
               extraKey={CURRENCIES[option.currency].displayDecimals > 0 ? '.' : '00'}
@@ -875,11 +903,20 @@ export function PaymentPanel({
               '@container flex min-w-0 flex-col gap-3 @lg/pay:col-start-1',
               // A required customer comes first: the picker sits at the top, not under the methods and keys
               needsCustomer && !customer
-                ? '@max-lg/pay:order-first @lg/pay:row-start-1'
+                ? cn(collapsedPicker ? '' : '@max-lg/pay:order-first', '@lg/pay:row-start-1')
                 : '@lg/pay:row-start-2',
             )}
           >
-            {picking ? (
+            {picking && collapsedPicker ? (
+              <Button
+                variant="secondary"
+                size="md"
+                icon={<UserIcon size={20} />}
+                onClick={() => setPickerOpen(true)}
+              >
+                اختر الزبون (مطلوب)
+              </Button>
+            ) : picking ? (
               <CustomerPicker
                 catalog={catalog}
                 createdBy={cashierId}

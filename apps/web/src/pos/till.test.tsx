@@ -491,7 +491,7 @@ describe('closing the shift', () => {
     expect(first()).toHaveValue('');
     await user.keyboard('٤');
     expect(first()).toHaveValue('4');
-    await user.click(screen.getByRole('button', { name: 'تابع للملخّص' }));
+    await user.click(screen.getByRole('button', { name: 'تابع للمراجعة' }));
     await user.click(await screen.findByRole('button', { name: 'أغلق الوردية' }));
     await user.click(screen.getByRole('button', { name: 'لا، ارجع' }));
     expect(outbox.some((e) => e.type === 'shift_close')).toBe(false);

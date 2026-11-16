@@ -152,6 +152,11 @@ export function ZReport({
             </Line>
           );
         })}
+        {(activity.cashRounding ?? []).map((r) => (
+          <Line key={`rd:${r.currency}`} label="تقريب النقد">
+            <Money minor={r.amountMinor} currency={r.currency} decimals={2} trimZeros />
+          </Line>
+        ))}
       </Section>
       {hasReturns ? (
         <Section title="المرتجعات">

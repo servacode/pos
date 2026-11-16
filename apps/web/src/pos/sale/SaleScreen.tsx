@@ -72,6 +72,7 @@ import {
   priceCart,
   setPriceTier,
   applyContractPrices,
+  contractSavingMinor,
   type ItemChoice,
   EMPTY_CART,
   couponPromotion,
@@ -459,6 +460,7 @@ export function SaleScreen(props: SaleScreenProps) {
   }, [cart, priced, ctx, rules]);
   const invoiceNeeds = priced ? invoiceNeed(cart, priced.priced, rules) : null;
   const totalMinor = priced?.priced.totals.totalMinor ?? 0;
+  const contractSaved = cart.lines.reduce((sum, l) => sum + contractSavingMinor(l, ctx), 0);
   const unnumbered = missingSerials(cart);
   const blocked =
     needs.size > 0 ||
@@ -1113,11 +1115,11 @@ export function SaleScreen(props: SaleScreenProps) {
   }, []);
 
   // ── Rendering ───────────────────────────────────────────────────────────────────────────────
-  const foreign = catalog.rates[0]
-    ? catalog.rates[0].unit === ctx.currency
-      ? catalog.rates[0].quote
-      : catalog.rates[0].unit
-    : null;
+  // The dollar line shows only while the latest settings still offer that currency
+  const shownRate = catalog.rates.find((r) =>
+    settings.enabledCurrencies.includes(r.unit === ctx.currency ? r.quote : r.unit),
+  );
+  const foreign = shownRate ? (shownRate.unit === ctx.currency ? shownRate.quote : shownRate.unit) : null;
   const totals = priced?.priced.totals;
   const lineCount = cart.lines.length;
   const wholesaleOn = cart.priceTier === 'wholesale';
@@ -1561,6 +1563,18 @@ export function SaleScreen(props: SaleScreenProps) {
                 ) : null,
                 line.contractPriced ? (
                   <span key="c" className="font-semibold text-info-ink">
+                    {line.shelfPriceMinor !== undefined && line.shelfPriceMinor > line.priceMinor ? (
+                      <s className="me-1.5 font-normal text-ink-subtle">
+                        <Money
+                          minor={unitPriceOf(
+                            { priceCurrency: line.priceCurrency, priceMinor: line.shelfPriceMinor },
+                            ctx,
+                          )}
+                          currency={ctx.currency}
+                          symbol={false}
+                        />
+                      </s>
+                    ) : null}
                     سعر العقد
                   </span>
                 ) : null,
@@ -1796,6 +1810,9 @@ export function SaleScreen(props: SaleScreenProps) {
                 { label: 'الخصم · وفّر الزبون', minor: totals.discountMinor, tone: 'info' as const },
               ]
             : []),
+          ...(contractSaved > 0
+            ? [{ label: 'وفّرت بسعر العقد', minor: contractSaved, tone: 'info' as const }]
+            : []),
           ...(totals && !settings.taxInclusive && totals.taxMinor > 0
             ? [{ label: 'الضريبة', minor: totals.taxMinor }]
             : []),
@@ -1808,7 +1825,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 minor={convert(totalMinor, ctx.currency, foreign, rateFor(ctx.rates, foreign, ctx.currency))}
                 currency={foreign}
               />{' '}
-              · سعر الصرف <bdi className="num">{displayNumber(catalog.rates[0]!.rate, digits)}</bdi>
+              · سعر الصرف <bdi className="num">{displayNumber(shownRate!.rate, digits)}</bdi>
             </>
           ) : undefined
         }
@@ -1921,7 +1938,7 @@ export function SaleScreen(props: SaleScreenProps) {
       statusBar={props.statusBar}
       cart={cartPanel}
       mobileView={phoneView}
-      {...(effectiveMode.kind === 'pay' ? { itemsLabel: 'الدفع' } : {})}
+      {...(effectiveMode.kind === 'pay' ? { itemsLabel: 'الدفع', cartLabel: 'ارجع للسلة' } : {})}
       onMobileView={setPhoneView}
       cartBadge={lineCount > 0 ? displayNumber(String(lineCount), digits) : undefined}
       miniBar={
@@ -1950,7 +1967,7 @@ export function SaleScreen(props: SaleScreenProps) {
         ? createPortal(
             <p
               role="status"
-              className="pointer-events-none fixed inset-x-4 bottom-24 z-70 md:bottom-4 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
+              className="pointer-events-none fixed inset-x-4 top-16 z-70 mx-auto flex w-fit max-w-full items-center gap-2 rounded-full bg-success-soft px-4 py-2 text-sm font-semibold text-success-ink shadow-e2 motion-safe:animate-rise"
             >
               <CheckIcon size={16} className="shrink-0" />
               <span className="truncate">
@@ -2311,7 +2328,15 @@ export function SaleScreen(props: SaleScreenProps) {
           <VariantPicker
             key={effectiveMode.productId}
             {...(effectiveMode.initial ? { initial: effectiveMode.initial } : {})}
-            {...(effectiveMode.replaceLine !== undefined ? { actionLabel: 'بدّل في السلة', swap: true } : {})}
+            {...(effectiveMode.replaceLine !== undefined
+              ? {
+                  actionLabel: 'بدّل في السلة',
+                  swap: true,
+                  ...(cart.lines.find((l) => l.lineNo === effectiveMode.replaceLine)
+                    ? { fixedQty: cart.lines.find((l) => l.lineNo === effectiveMode.replaceLine)!.qty }
+                    : {}),
+                }
+              : {})}
             name={pieces.get(effectiveMode.productId)![0]!.productName ?? ''}
             pieces={pieces.get(effectiveMode.productId)!}
             inCart={inCartQty}

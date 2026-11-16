@@ -262,8 +262,31 @@ describe('the cost of what was sold', () => {
       netSalesMinor: 18_000_00,
       costOfSalesMinor: 13_200_00,
       grossProfitMinor: 4_800_00,
+      belowCostCount: 0,
     });
     expect(await integrity(store)).toEqual([]);
+  });
+
+  it('counts the products sold for less than they cost', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const box = await makeProduct(app, store, 'علبة', 1_000_00);
+    await buy(store, {
+      supplierId: s.id,
+      date: '2026-10-30',
+      payment: 'credit',
+      lines: [{ variantId: box.variantId, qty: 10 * PIECE, costMinor: 30_000_00 }],
+    });
+    await sell(store, box, 2, 1_000_00);
+    const profit = (
+      await app.inject({
+        method: 'GET',
+        url: '/v1/reports/profit?from=2026-10-01&to=2026-10-31',
+        headers: as(store),
+      })
+    ).json<ProfitReport>();
+    expect(profit.grossProfitMinor).toBeLessThan(0);
+    expect(profit.belowCostCount).toBe(1);
   });
 
   it('is costed once, however often the device sends the sale', async () => {

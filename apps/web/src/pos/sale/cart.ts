@@ -77,6 +77,8 @@ export interface CartLine {
   wholesalePriceMinor?: number | null;
   /** The customer's contract price was applied to this line (03 › أسعار العقود): the receipt says «سعر العقد» */
   contractPriced?: boolean;
+  /** The price the line had before the contract price replaced it (same unit as priceMinor): shown struck through */
+  shelfPriceMinor?: number;
   /** The price was typed by hand (a service's fee): no price list, wholesale tier or contract ever re-prices it */
   priceTyped?: boolean;
   /** The average cost of one unit in priceCurrency, when the till knows it («أقل من التكلفة») */
@@ -306,6 +308,37 @@ export function unitPriceOf(
   );
 }
 
+/** What a line's contract price saved the customer against the price it replaced, in the invoice currency (0 when none) */
+export function contractSavingMinor(line: CartLine, ctx: PricingContext): number {
+  if (!line.contractPriced || line.shelfPriceMinor === undefined || line.shelfPriceMinor <= line.priceMinor)
+    return 0;
+  const was = lineGross(
+    unitPriceOf({ priceCurrency: line.priceCurrency, priceMinor: line.shelfPriceMinor }, ctx),
+    line.qty,
+  );
+  return Math.max(0, was - lineGross(unitPriceOf(line, ctx), line.qty));
+}
+
+/**
+ * What each contract-priced line of a finished sale saved, by line number, from the sale's own gross
+ * (display only): the gross at the shelf price less the gross at the contract price.
+ */
+export function contractSavingsOf(
+  cart: Cart,
+  sale: { lines: readonly { lineNo: number; priced: { grossMinor: number } }[] },
+): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const line of cart.lines) {
+    if (!line.contractPriced || line.shelfPriceMinor === undefined || line.priceMinor <= 0) continue;
+    const sold = sale.lines.find((l) => l.lineNo === line.lineNo);
+    if (!sold) continue;
+    const saving =
+      Math.round((sold.priced.grossMinor * line.shelfPriceMinor) / line.priceMinor) - sold.priced.grossMinor;
+    if (saving > 0) out[line.lineNo] = saving;
+  }
+  return out;
+}
+
 /** The best promotion running for a line, or null. A discount the cashier typed replaces it. */
 /** The offer a shop order's coupon opened, as a promotion running for this sale only */
 export function couponPromotion(rule: OrderCouponRule): PromotionRule {
@@ -528,6 +561,7 @@ export function applyContractPrices(
       const price = packPrice(contract.priceMinor, line.packQty, null);
       return {
         ...line,
+        ...(line.contractPriced ? {} : price < line.priceMinor ? { shelfPriceMinor: line.priceMinor } : {}),
         priceMinor: price,
         retailPriceMinor: price,
         wholesalePriceMinor: price,

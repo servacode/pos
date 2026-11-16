@@ -437,6 +437,8 @@ export interface ProfitReport {
   grossProfitMinor: number;
   /** 6300: what counts found missing, less what they found over */
   stockLossMinor: number;
+  /** Products that sold for less than they cost in the period (net of tax and returns) */
+  belowCostCount?: number;
   baseCurrency: CurrencyCode;
 }
 

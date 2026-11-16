@@ -72,7 +72,7 @@ function BalanceCell({ customer, currency }: { customer: CustomerListItem; curre
   }
   if (overLimit(customer)) {
     return (
-      <span className="inline-flex items-center gap-2">
+      <span className="inline-flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
         <Badge tone="danger">فوق الحد</Badge>
         <Money minor={balanceMinor} currency={currency} className="font-bold text-danger-ink" />
       </span>
@@ -207,6 +207,9 @@ export function CustomersPage() {
     {
       key: 'name',
       header: 'الزبون',
+      // On a phone the name takes what the balance leaves (long lines cut with «…»), so the balance
+      // is never pushed out of the screen
+      className: 'w-full max-w-0 md:max-w-none',
       cell: (c) => (
         <span className="flex min-w-0 items-center gap-3 py-2">
           <Avatar name={c.name} size="sm" />

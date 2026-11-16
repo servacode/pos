@@ -8,6 +8,7 @@ import {
   IconButton,
   Money,
   RemoveIcon,
+  TransferIcon,
   useDigits,
   type Icon,
 } from '@serva/ui';
@@ -32,6 +33,7 @@ export function VariantPicker({
   initial,
   actionLabel = 'أضف إلى السلة',
   swap = false,
+  fixedQty,
   onAdd,
   onCancel,
 }: {
@@ -49,6 +51,8 @@ export function VariantPicker({
   actionLabel?: string;
   /** A line's size or colour is being swapped: a combination with nothing left cannot be chosen at all */
   swap?: boolean;
+  /** A swap moves the whole line: its quantity (thousandths) shows as it is, with no stepper */
+  fixedQty?: number;
   onAdd: (piece: CatalogItem, qty: number) => void;
   onCancel: () => void;
 }) {
@@ -56,12 +60,20 @@ export function VariantPicker({
   const idBase = useId();
   const options = optionsOf(pieces);
   // An option with one value left (a colour the chosen size comes in alone) is chosen for the cashier
+  // …and so is the only one that still has stock (the others are sold out): no dead end with no add button
   const settle = (picked: Record<string, string>): Record<string, string> => {
     const next = { ...picked };
     for (const other of options) {
       if (next[other.name]) continue;
       const open = other.values.filter((v) => canChoose(pieces, next, other.name, v));
       if (open.length === 1) next[other.name] = open[0]!;
+      else if (open.length > 1 && options.length > 1) {
+        const inStock = open.filter((v) => {
+          const left = stockFor(pieces, next, other.name, v, inCart);
+          return left === null || left > 0;
+        });
+        if (inStock.length === 1) next[other.name] = inStock[0]!;
+      }
     }
     return next;
   };
@@ -85,7 +97,9 @@ export function VariantPicker({
   );
   const narrowFrom = lowestPrice(narrowed.length > 0 ? narrowed : pieces);
   const samePrice = narrowed.every((p) => p.price.priceMinor === narrowFrom.priceMinor);
-  const [qty, setQty] = useState(1);
+  const [typedQty, setQty] = useState(1);
+  const fixed = fixedQty !== undefined;
+  const qty = fixed ? fixedQty / 1000 : typedQty;
   const [qtyTouched, setQtyTouched] = useState(false);
   const stepQty = (delta: number) => {
     setQtyTouched(true);
@@ -166,7 +180,7 @@ export function VariantPicker({
           <Button
             size="lg"
             fullWidth
-            icon={<AddIcon size={20} />}
+            icon={swap ? <TransferIcon size={20} /> : <AddIcon size={20} />}
             onClick={() => onAdd(piece, qty)}
             disabled={swap && outOfStock}
             className="h-auto py-2 whitespace-normal"
@@ -182,12 +196,22 @@ export function VariantPicker({
                 <span>{actionLabel}</span>
                 <span className="whitespace-nowrap">
                   {(piece.attributes ?? []).map((a) => a.value).join(' ')} ·{' '}
-                  <Money minor={piece.price.priceMinor * qty} currency={piece.price.currency} />
+                  {fixed ? <>{formatQuantity(fixedQty, digits)} × </> : null}
+                  <Money minor={Math.round(piece.price.priceMinor * qty)} currency={piece.price.currency} />
                 </span>
               </span>
             )}
           </Button>
-        ) : undefined
+        ) : (
+          // Never an empty slot: what is still to choose is said on a disabled button
+          <Button size="lg" fullWidth icon={<AddIcon size={20} />} disabled>
+            اختر{' '}
+            {options
+              .filter((o) => !chosen[o.name])
+              .map((o) => o.name)
+              .join(' و') || actionLabel}
+          </Button>
+        )
       }
     >
       {options.map((option) => {
@@ -282,10 +306,16 @@ export function VariantPicker({
             <>
               <span className="flex flex-wrap items-baseline gap-2">
                 <Money
-                  minor={piece.price.priceMinor}
+                  minor={Math.round(piece.price.priceMinor * qty)}
                   currency={piece.price.currency}
                   className="text-lg font-bold text-ink"
                 />
+                {fixed ? (
+                  <span className="num text-ink-muted">
+                    {formatQuantity(fixedQty, digits)} ×{' '}
+                    <Money minor={piece.price.priceMinor} currency={piece.price.currency} />
+                  </span>
+                ) : null}
                 {priceNote?.(piece.price.priceMinor, piece.price.currency)}
               </span>
               {outOfStock ? <span className="font-semibold text-danger-ink">نفد هذا الاختيار</span> : null}
@@ -305,14 +335,20 @@ export function VariantPicker({
           )}
         </p>
         {/* − 1 + from the left, as on every keypad and number box, whatever the page's direction */}
-        <div dir="ltr" className="flex items-center gap-1" role="group" aria-label="الكمية">
-          {/* Never dimmed: at one piece it simply stays at one */}
-          <IconButton label="أنقص الكمية" icon={<RemoveIcon size={20} />} onClick={() => stepQty(-1)} />
-          <output aria-label="عدد القطع" className="num min-w-8 text-center text-lg font-bold text-ink">
-            {formatQuantity(qty * 1000, digits)}
+        {fixed ? (
+          <output aria-label="عدد القطع" className="num text-lg font-bold text-ink">
+            {formatQuantity(fixedQty, digits)} قطع
           </output>
-          <IconButton label="زد الكمية" icon={<AddIcon size={20} />} onClick={() => stepQty(1)} />
-        </div>
+        ) : (
+          <div dir="ltr" className="flex items-center gap-1" role="group" aria-label="الكمية">
+            {/* Never dimmed: at one piece it simply stays at one */}
+            <IconButton label="أنقص الكمية" icon={<RemoveIcon size={20} />} onClick={() => stepQty(-1)} />
+            <output aria-label="عدد القطع" className="num min-w-8 text-center text-lg font-bold text-ink">
+              {formatQuantity(qty * 1000, digits)}
+            </output>
+            <IconButton label="زد الكمية" icon={<AddIcon size={20} />} onClick={() => stepQty(1)} />
+          </div>
+        )}
       </div>
     </SalePanel>
   );

@@ -33,6 +33,8 @@ export interface CashierShellProps {
   onMobileView?: (view: 'items' | 'cart') => void;
   /** The items tab's name when that tab holds something else, e.g. «الدفع» while paying */
   itemsLabel?: string;
+  /** The cart tab's name when it is the way back from another step, e.g. «ارجع للسلة» while paying */
+  cartLabel?: string;
   /** The cart tab's count (pieces in the cart), shown beside its name on a phone */
   cartBadge?: ReactNode;
   /** A phone's items view: a sticky bar under the grid (count, total, «عرض السلة»); hidden from a tablet up */
@@ -52,6 +54,7 @@ export function CashierShell({
   mobileView,
   onMobileView,
   itemsLabel,
+  cartLabel,
   cartBadge,
   miniBar,
 }: CashierShellProps) {
@@ -78,7 +81,7 @@ export function CashierShell({
               {(
                 [
                   ['items', itemsLabel ?? 'عرض الأصناف'],
-                  ['cart', 'عرض السلة'],
+                  ['cart', cartLabel ?? 'عرض السلة'],
                 ] as const
               ).map(([id, label]) => (
                 <button

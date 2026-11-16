@@ -3,6 +3,7 @@ import { useRef, type ReactNode } from 'react';
 import { cn } from './cn';
 import { CONTROL_HEIGHT, useDensity, type Density } from './context';
 import { nextIndex } from './rovingFocus';
+import { ScrollStrip } from './Scroller';
 
 /** Padding and type of one segment per density. Shared with the pill tabs. */
 export const SEGMENT_SIZE: Record<Density, string> = {
@@ -77,41 +78,44 @@ export function SegmentedControl<V extends string>({
   }
 
   return (
-    <div
-      role="radiogroup"
-      aria-label={label}
-      className={cn(
-        segmentTrackClass(density),
-        fullWidth ? 'grid auto-cols-fr grid-flow-col' : 'inline-flex',
-        className,
-      )}
-    >
-      {options.map((option, index) => {
-        const on = index === selected;
-        return (
-          <button
-            key={option.value}
-            ref={(element) => {
-              buttons.current[index] = element;
-            }}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            tabIndex={on ? 0 : -1}
-            disabled={option.disabled}
-            onClick={() => onValueChange(option.value)}
-            onKeyDown={(event) => {
-              const next = nextIndex(event, index, options.length, direction);
-              if (next === null) return;
-              event.preventDefault();
-              move(next);
-            }}
-            className={cn(SEGMENT_SIZE[density], segmentClass(on))}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
+    // A track wider than its room scrolls, its hidden side fading (no half-cut segment at the edge)
+    <ScrollStrip className={fullWidth ? 'w-full' : 'w-fit max-w-full'}>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className={cn(
+          segmentTrackClass(density),
+          fullWidth ? 'grid min-w-full auto-cols-fr grid-flow-col' : 'inline-flex min-w-max',
+          className,
+        )}
+      >
+        {options.map((option, index) => {
+          const on = index === selected;
+          return (
+            <button
+              key={option.value}
+              ref={(element) => {
+                buttons.current[index] = element;
+              }}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              tabIndex={on ? 0 : -1}
+              disabled={option.disabled}
+              onClick={() => onValueChange(option.value)}
+              onKeyDown={(event) => {
+                const next = nextIndex(event, index, options.length, direction);
+                if (next === null) return;
+                event.preventDefault();
+                move(next);
+              }}
+              className={cn(SEGMENT_SIZE[density], segmentClass(on))}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </ScrollStrip>
   );
 }

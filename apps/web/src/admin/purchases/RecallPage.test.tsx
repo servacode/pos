@@ -126,6 +126,21 @@ describe('«استدعاء دفعة»', () => {
     expect(await screen.findByRole('button', { name: 'ارفع الإيقاف' })).toBeInTheDocument();
   });
 
+  it('disables «راسل الزبائن» with the reason when no buyer has a phone', async () => {
+    const noPhones = found(false);
+    noPhones.sales = noPhones.sales.map((x) => ({ ...x, customerPhone: null }));
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/batches/recall?batchNo=C-09': () => ({ status: 200, body: noPhones }),
+    });
+    const { user } = renderApp('/recall');
+    await user.type(await screen.findByLabelText('رقم الدفعة'), 'C-09');
+    await user.click(screen.getByRole('button', { name: 'ابحث' }));
+    expect(await screen.findByRole('button', { name: 'راسل الزبائن' })).toBeDisabled();
+    expect(screen.getByTestId('recall-no-phones')).toHaveTextContent('لا رقم هاتف');
+  });
+
   it('offers the batches the stores hold to pick from, and asks before lifting a stop without resetting the page', async () => {
     let blocked = true;
     const { requestsTo } = mockFetch({
