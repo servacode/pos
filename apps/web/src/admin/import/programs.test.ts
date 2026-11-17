@@ -8,7 +8,8 @@ import { exportSteps, openReport, presetFor, reportTable, withBalanceColumn } fr
 beforeEach(() => localStorage.clear());
 
 const branches = [{ id: 'b1', name: 'الرئيسي' }];
-const SAMPLES = 'D:/serva-work/mig27/samples/';
+// Rashid exports saved in Windows-1256, kept byte for byte (see fixtures/.gitattributes)
+const SAMPLES = 'src/admin/import/fixtures/'; // relative to apps/web, where vitest runs
 const csv = (name: string): FileCell[][] => {
   const bytes = readFileSync(SAMPLES + name);
   const text = decodeText(
@@ -64,7 +65,7 @@ describe('opening a report of an old program', () => {
       branches,
     );
     expect(mizan.mapping).toEqual(ALL);
-    const rashid = openReport('rashid', 'products', csv('الرشيد-قائمة-المواد.csv'), branches);
+    const rashid = openReport('rashid', 'products', csv('rashid-products.csv'), branches);
     expect(rashid.mapping).toEqual(ALL);
   });
 
@@ -132,9 +133,9 @@ describe('opening a report of an old program', () => {
   });
 
   it('reads the sample Rashid files saved in Windows-1256', () => {
-    const c = openReport('rashid', 'customers', csv('الرشيد-أرصدة-الزبائن.csv'), branches);
+    const c = openReport('rashid', 'customers', csv('rashid-customers.csv'), branches);
     expect(c.mapping).toEqual(['name', 'phone', 'balance']);
-    const s = openReport('rashid', 'suppliers', csv('الرشيد-أرصدة-الموردين.csv'), branches);
+    const s = openReport('rashid', 'suppliers', csv('rashid-suppliers.csv'), branches);
     expect(s.mapping).toEqual(['name', 'phone', 'balance']);
   });
 });
