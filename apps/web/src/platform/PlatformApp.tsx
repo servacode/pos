@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import type {
   PaymentMethodInfo,
   PlanRow,
@@ -46,6 +46,7 @@ import {
   StoreIcon,
   TextField,
   ThemeToggle,
+  UserIcon,
   useDensity,
   type BadgeTone,
   type DataColumn,
@@ -56,6 +57,11 @@ import { counted } from '../pos/format';
 import { PlatformLegal } from './PlatformLegal';
 import { PlatformLogin } from './PlatformLogin';
 import { PlatformSecurity } from './PlatformSecurity';
+
+// The agents pages are a chunk of their own: the panel's first screen does not carry them
+const PlatformAgents = lazy(() =>
+  import('./agents/PlatformAgents').then((m) => ({ default: m.PlatformAgents })),
+);
 
 /**
  * The platform panel (07 › لوحة مدير المنصة), apart from the stores: its own sign-in (email and
@@ -166,6 +172,12 @@ const SECTIONS: readonly PanelSection[] = [
     description: 'كل متجر على المنصة، وباقته، وحالة اشتراكه، وآخر بيع فيه.',
   },
   {
+    value: 'agents',
+    label: 'الوكلاء',
+    icon: UserIcon,
+    description: 'من يجلب المتاجر: أرصدتهم المدفوعة مسبقاً، وأسعار الجملة، ومتاجر كل وكيل.',
+  },
+  {
     value: 'plans',
     label: 'الباقات والأسعار',
     icon: SparklesIcon,
@@ -252,6 +264,10 @@ function Panel({ token, onSignOut }: { token: string; onSignOut: () => void }) {
           <PageHeader title={section.title ?? section.label} description={section.description} />
           {tab === 'stores' ? (
             <Stores call={call} />
+          ) : tab === 'agents' ? (
+            <Suspense fallback={<Skeleton className="h-40 w-full" />}>
+              <PlatformAgents call={call} />
+            </Suspense>
           ) : tab === 'plans' ? (
             <Plans call={call} />
           ) : tab === 'settings' ? (
@@ -531,6 +547,11 @@ function Stores({ call }: { call: Call }) {
       key: 'plan',
       header: 'الباقة',
       cell: (s) => <span className="whitespace-nowrap">{s.planName ?? '—'}</span>,
+    },
+    {
+      key: 'agent',
+      header: 'الوكيل',
+      cell: (s) => <span className="whitespace-nowrap">{s.agent?.fullName ?? '—'}</span>,
     },
     {
       key: 'status',

@@ -84,6 +84,20 @@ const STEP =
 
 export type SavedReturn = Pick<SyncDocument, 'id' | 'number' | 'deviceTime' | 'payload'>;
 
+/** What a return on account of an instalment sale does to its plan, said before the cashier confirms */
+function instalmentReturnNote(
+  plan: { notesMode?: 'none' | 'each' | 'single' | undefined; count: number } | null | undefined,
+): string {
+  if (!plan) return '';
+  const notes =
+    plan.notesMode === 'each'
+      ? ` و${String(plan.count)} كمبيالات`
+      : plan.notesMode === 'single'
+        ? ' وكمبيالتها'
+        : '';
+  return `هذه الفاتورة بالتقسيط: تُلغى خطة التقسيط${notes}، وما دفعه الزبون يبقى رصيداً له على حسابه. إن أردت إعادته نقداً فاختر «نقداً» بدل «على الحساب». `;
+}
+
 /** Every piece of the invoice has come back (display only: the server counts what is left again) */
 const allBack = (s: Pick<ReturnableSale, 'sale' | 'returned'>): boolean =>
   returnableLines(s.sale, s.returned).every((l) => l.remainingQty === 0);
@@ -952,7 +966,7 @@ export function ReturnScreen({
                           current?.sale.payments.some((p) => p.method === 'cheque')
                             ? 'الشيك نفسه يبقى كما هو. '
                             : ''
-                        }اضغط «نعم، سجّل» للتأكيد.`}
+                        }${instalmentReturnNote(current?.sale.installmentPlan)}اضغط «نعم، سجّل» للتأكيد.`}
                       </Alert>
                     ) : null}
                     <Button

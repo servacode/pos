@@ -54,7 +54,7 @@ export function receiptText(data: ReceiptData): string {
   if (sale.cashRounding && sale.cashRounding.roundingMinor !== 0) {
     const r = sale.cashRounding;
     out.push(
-      `قُرّب المبلغ إلى ${money(r.dueMinor, r.currency)} (فرق ${stripBidiControls(formatMoney(Math.abs(r.roundingMinor), r.currency, { decimals: 2, trimZeros: true }))})`,
+      `قُرّب المبلغ إلى ${money(r.dueMinor, r.currency)} (فرق ${r.roundingMinor < 0 ? '−' : '+'}${stripBidiControls(formatMoney(Math.abs(r.roundingMinor), r.currency, { decimals: 2, trimZeros: true }))})`,
     );
   }
   if (sale.change) out.push(`الباقي للزبون: ${money(sale.change.amountMinor, sale.change.currency)}`);

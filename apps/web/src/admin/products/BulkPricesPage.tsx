@@ -65,7 +65,7 @@ export function groupByModel(items: readonly Item[]): Row[] {
   return out;
 }
 
-const ROUNDING = [1, 100, 500, 1000, 5000] as const;
+const ROUNDING = [1, 5, 10, 25, 50, 100, 500, 1000] as const;
 
 const runBulk = (body: {
   categoryId: string;
@@ -111,7 +111,7 @@ function BulkPrices() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState('');
   const [percent, setPercent] = useState('-30');
-  const [round, setRound] = useState<(typeof ROUNDING)[number]>(500);
+  const [round, setRound] = useState<(typeof ROUNDING)[number]>(5);
   const [mode, setMode] = useState<'move' | 'restore'>('move');
   const [markWas, setMarkWas] = useState(true);
   const [result, setResult] = useState<BulkPriceResult | null>(null);

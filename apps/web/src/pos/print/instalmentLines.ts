@@ -1,3 +1,4 @@
+import { dayText } from '../../lib/dates';
 import type { InstalmentPlanInput } from '@serva/core/contracts/installments';
 
 /** One «label · value» row of the instalment block on a receipt */
@@ -32,5 +33,5 @@ export function instalmentRows(plan: InstalmentPlanInput, money: (minor: number)
 
 export const INSTALMENT_TITLE = 'خطة التقسيط';
 
-/** A row's label as plain text: «القسط 1 من 6 · 2026-12-17» */
-export const rowLabel = (r: InstalmentRow) => (r.date ? `${r.label} · ${r.date}` : r.label);
+/** A row's label as plain text: «القسط 1 من 6 · 17 كانون الأول 2026» */
+export const rowLabel = (r: InstalmentRow) => (r.date ? `${r.label} · ${dayText(r.date)}` : r.label);

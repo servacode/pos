@@ -1,4 +1,5 @@
 import { formatMoney, normalizePhone, reminderText, stripBidiControls, type CurrencyCode } from '@serva/core';
+import { dayText } from '../../lib/dates';
 
 /** The wa.me address of a phone typed any common way, or null when it is not a phone */
 export function whatsappAddress(phone: string | null | undefined): string | null {
@@ -26,7 +27,7 @@ export function reminderLink(
   const text = reminderText(v.kind, {
     name: v.name,
     amount: stripBidiControls(formatMoney(v.amountMinor, v.currency)),
-    due: v.due,
+    due: dayText(v.due),
     no: v.no,
     of: v.of,
     store: v.store,

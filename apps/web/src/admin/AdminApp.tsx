@@ -153,24 +153,12 @@ const ShiftReportPage = lazy(() =>
   import('./reports/ShiftReportPage').then((m) => ({ default: m.ShiftReportPage })),
 );
 const EvidencePage = lazy(() => import('./reports/EvidencePage').then((m) => ({ default: m.EvidencePage })));
-const ChartOfAccountsPage = lazy(() =>
-  import('./accounting/ChartOfAccountsPage').then((m) => ({ default: m.ChartOfAccountsPage })),
-);
-const JournalPage = lazy(() => import('./accounting/JournalPage').then((m) => ({ default: m.JournalPage })));
-const TrialBalancePage = lazy(() =>
-  import('./accounting/TrialBalancePage').then((m) => ({ default: m.TrialBalancePage })),
-);
 // Statements, expenses and the profit and loss (29).
-const CustomerStatementPage = lazy(() =>
-  import('./ledger/StatementPage').then((m) => ({ default: () => <m.StatementPage type="customer" /> })),
-);
-const SupplierStatementPage = lazy(() =>
-  import('./ledger/StatementPage').then((m) => ({ default: () => <m.StatementPage type="supplier" /> })),
+const StatementPage = lazy(() =>
+  import('./ledger/StatementPage').then((m) => ({ default: m.StatementPage })),
 );
 const ExpensesPage = lazy(() => import('./ledger/ExpensesPage').then((m) => ({ default: m.ExpensesPage })));
-const ProfitLossPage = lazy(() =>
-  import('./ledger/ProfitLossPage').then((m) => ({ default: m.ProfitLossPage })),
-);
+const Accounting = lazy(() => import('./accounting/AccountingRoutes'));
 
 /** The root: the home page for a signed-in user, the landing page for a visitor (the session is restored first) */
 function Front() {
@@ -321,8 +309,8 @@ export function AdminApp() {
           <Route path="/quotations" element={page(<QuotationsPage />)} />
           <Route path="/quotations/:id" element={page(<QuotationPage />)} />
           <Route path="/customers/:id" element={page(<CustomerPage />)} />
-          <Route path="/customers/:id/statement" element={page(<CustomerStatementPage />)} />
-          <Route path="/suppliers/:id/statement" element={page(<SupplierStatementPage />)} />
+          <Route path="/customers/:id/statement" element={page(<StatementPage type="customer" />)} />
+          <Route path="/suppliers/:id/statement" element={page(<StatementPage type="supplier" />)} />
           <Route path="/expenses" element={page(<ExpensesPage />)} />
           <Route path="/branches" element={page(<BranchesPage />)} />
           <Route path="/staff" element={page(<StaffPage />)} />
@@ -338,11 +326,7 @@ export function AdminApp() {
           <Route path="/shifts" element={page(<ShiftsPage />)} />
           <Route path="/shifts/:id" element={page(<ShiftReportPage />)} />
           <Route path="/evidence" element={page(<EvidencePage />)} />
-          <Route path="/accounting" element={<Navigate to="/accounting/accounts" replace />} />
-          <Route path="/accounting/accounts" element={page(<ChartOfAccountsPage />)} />
-          <Route path="/accounting/journal" element={page(<JournalPage />)} />
-          <Route path="/accounting/trial-balance" element={page(<TrialBalancePage />)} />
-          <Route path="/accounting/profit-loss" element={page(<ProfitLossPage />)} />
+          <Route path="/accounting/*" element={page(<Accounting />)} />
         </Route>
         <Route element={<RequireAuth />}>
           <Route path="*" element={<NotFoundPage />} />

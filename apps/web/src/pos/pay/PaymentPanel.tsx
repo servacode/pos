@@ -69,7 +69,14 @@ import {
 } from './payment';
 import { findVoucher, tillVouchers } from './vouchers';
 import { InstalmentSheet } from './InstalmentSheet';
+import { dayText } from '../../lib/dates';
 import { feeLine, type PlanDraft } from './instalments';
+
+const PLAN_KEY = 'pending-instalment-plan';
+interface SavedPlan {
+  customerId: string;
+  draft: PlanDraft;
+}
 
 export interface PaymentPanelProps {
   cart: Cart;
@@ -292,10 +299,45 @@ export function PaymentPanel({
     customer !== null &&
     plan.goodsTotalMinor === goodsTotalMinor &&
     parts.some((p) => p.tender.method === 'credit' && p.tender.amountMinor === plan.financedMinor);
+  // A plan half-built stays on the device with the cart: a reload of the till brings it back when the
+  // same customer and the same goods are still on the cart. When it cannot come back (or was dropped
+  // by a change of the cart), paying without it asks first, so nobody finishes it as a cash sale by mistake
+  const [planLost, setPlanLost] = useState(false);
+  const [askNoPlan, setAskNoPlan] = useState(false);
+  const [planRestored, setPlanRestored] = useState(false);
+  const planChecked = useRef(false);
   useEffect(() => {
-    if (plan && !planStands) setPlan(null);
+    if (plan && !planStands) {
+      setPlan(null);
+      setPlanLost(true);
+    }
   }, [plan, planStands]);
+  useEffect(() => {
+    if (planChecked.current || !customer) return;
+    planChecked.current = true;
+    void pos.local.get<SavedPlan>(PLAN_KEY).then((saved) => {
+      if (!saved) return;
+      if (saved.customerId === customer.id && saved.draft.goodsTotalMinor === goodsTotalMinor) {
+        applyPlan(saved.draft);
+        setPlanRestored(true);
+      } else {
+        void pos.local.remove(PLAN_KEY);
+      }
+    });
+    // once, when the panel opens
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer]);
+  useEffect(() => {
+    if (plan && planStands && customer) {
+      void pos.local.set(PLAN_KEY, {
+        customerId: customer.id,
+        draft: plan,
+      } satisfies SavedPlan);
+    }
+  }, [plan, planStands, customer, pos.local]);
   function applyPlan(draft: PlanDraft) {
+    setPlanLost(false);
+    setAskNoPlan(false);
     setPlan(draft);
     setPlanning(false);
     setSplit(true);
@@ -309,6 +351,8 @@ export function PaymentPanel({
     setError(null);
   }
   function cancelPlan() {
+    void pos.local.remove(PLAN_KEY);
+    setPlanRestored(false);
     setPlan(null);
     setParts((list) => list.filter((p) => p.tender.method !== 'credit'));
     setRestPrefill(false);
@@ -535,7 +579,7 @@ export function PaymentPanel({
     clearCheque();
   }
 
-  async function complete(grant: { credit?: Approval; cost?: Approval } = {}) {
+  async function complete(grant: { credit?: Approval; cost?: Approval } = {}, skipPlanAsk = false) {
     if (!canComplete) {
       if ('error' in settlement) setError(settlement.error);
       else if (blockedOver) setError('هذا الزبون يتجاوز حد الدين، ولا يُباع له بالآجل فوق الحد.');
@@ -563,6 +607,10 @@ export function PaymentPanel({
     const costApproved = grant.cost ?? costGrant;
     if (belowCost.length > 0 && settings.till?.belowCostApproval && !costApproved) {
       setApproving('cost');
+      return;
+    }
+    if (planLost && !(plan && planStands) && !skipPlanAsk) {
+      setAskNoPlan(true);
       return;
     }
     setSaving(true);
@@ -605,6 +653,7 @@ export function PaymentPanel({
         businessDate,
         engineVersion: PRICING_ENGINE_VERSION,
       });
+      void pos.local.remove(PLAN_KEY);
       onCompleted(entry);
     } catch {
       setSaving(false);
@@ -677,7 +726,9 @@ export function PaymentPanel({
         </h2>
         <span className="flex-1" />
         <div className="flex items-baseline gap-3">
-          <span className="text-sm font-semibold text-ink-muted">المطلوب</span>
+          <span className="text-sm font-semibold text-ink-muted">
+            {plan ? 'المطلوب مع رسم التقسيط' : 'المطلوب'}
+          </span>
           <ExactMoney
             minor={totalMinor}
             currency={base}
@@ -778,13 +829,16 @@ export function PaymentPanel({
               <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
                 قُرّب المبلغ إلى{' '}
                 <ExactMoney minor={dueHere} currency={base} className="font-semibold text-ink" /> (فرق{' '}
-                <Money
-                  minor={Math.abs(dueHere - remainingBase)}
-                  currency={base}
-                  symbol={false}
-                  decimals={2}
-                  trimZeros
-                />
+                <bdi dir="ltr" className="num">
+                  {dueHere < remainingBase ? '−' : '+'}
+                  <Money
+                    minor={Math.abs(dueHere - remainingBase)}
+                    currency={base}
+                    symbol={false}
+                    decimals={2}
+                    trimZeros
+                  />
+                </bdi>
                 )
               </p>
             ) : null}
@@ -1050,6 +1104,39 @@ export function PaymentPanel({
                 بيع بالتقسيط
               </Button>
             ) : null}
+            {planRestored && plan ? (
+              <Alert tone="info">رجّعنا خطة التقسيط التي بدأتها قبل إعادة التحميل.</Alert>
+            ) : null}
+            {askNoPlan && !plan ? (
+              <Alert tone="warning" title="بدأت خطة تقسيط ولم تكتمل">
+                <span className="flex flex-col gap-2">
+                  <span>تُتمّ البيعة الآن بدون تقسيط، والمبلغ كله يُدفع هنا. هل هذا ما تريده؟</span>
+                  <span className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      onClick={() => {
+                        setAskNoPlan(false);
+                        setPlanLost(false);
+                        void pos.local.remove(PLAN_KEY);
+                        void complete({}, true);
+                      }}
+                    >
+                      نعم، بدون تقسيط
+                    </Button>
+                    <Button
+                      size="md"
+                      onClick={() => {
+                        setAskNoPlan(false);
+                        setPlanning(true);
+                      }}
+                    >
+                      ارجع للتقسيط
+                    </Button>
+                  </span>
+                </span>
+              </Alert>
+            ) : null}
             {plan ? (
               <div
                 role="status"
@@ -1058,7 +1145,7 @@ export function PaymentPanel({
               >
                 <span className="font-semibold text-ink">
                   تقسيط: <bdi className="num">{plan.plan.count}</bdi> أقساط · أول قسط{' '}
-                  <bdi className="num">{plan.plan.firstDueDate}</bdi>
+                  {dayText(plan.plan.firstDueDate, digits)}
                 </span>
                 <span className="text-ink-muted">
                   رسم التقسيط <Money minor={plan.markupMinor} currency={base} /> · على الحساب{' '}

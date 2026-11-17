@@ -170,6 +170,26 @@ export function ZReport({
           );
         })}
       </Section>
+      {(activity.instalments?.sales.length ?? 0) > 0 || (activity.instalments?.collected.length ?? 0) > 0 ? (
+        <Section title="التقسيط">
+          {(activity.instalments?.sales ?? []).map((r) => (
+            <Fragment key={`is:${r.currency}`}>
+              <Line label="مبيعات بالتقسيط">{counted(r.count, INVOICES, digits)}</Line>
+              <Line label="دفعات أولى">
+                <ExactMoney minor={r.downMinor} currency={r.currency} />
+              </Line>
+              <Line label="المقسَّط على الحساب">
+                <ExactMoney minor={r.financedMinor} currency={r.currency} />
+              </Line>
+            </Fragment>
+          ))}
+          {(activity.instalments?.collected ?? []).map((r) => (
+            <Line key={`ic:${r.currency}`} label="أقساط مقبوضة">
+              <ExactMoney minor={r.amountMinor} currency={r.currency} />
+            </Line>
+          ))}
+        </Section>
+      ) : null}
       {hasReturns ? (
         <Section title="المرتجعات">
           <Line label="العدد">{counted(activity.returns.count, RETURNS, digits)}</Line>

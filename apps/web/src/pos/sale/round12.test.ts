@@ -11,7 +11,7 @@ import type { Cart, CartLine } from './cart';
 const item = (over: Partial<CatalogItem>) => over as CatalogItem;
 
 describe('the one stock rule at the till', () => {
-  it('counts a combination below zero as nothing, so it never hides the others', () => {
+  it('counts a combination below zero as nothing on its own, and against its size in the size total', () => {
     expect(sellableOnHand(-1000)).toBe(0);
     expect(sellableOnHand(5000)).toBe(5000);
     expect(shortfallOf([2000, -1000, -3000])).toBe(4000);
@@ -24,7 +24,8 @@ describe('the one stock rule at the till', () => {
       item({ variantId: 'a', attributes: [{ name: 'المقاس', value: 'M' }], stockQty: 3000 }),
       item({ variantId: 'b', attributes: [{ name: 'المقاس', value: 'M' }], stockQty: -2000 }),
     ];
-    expect(stockFor(pieces, {}, 'المقاس', 'M')).toBe(3000);
+    // A size counts a colour below zero against the others: the true total (3 − 2), never an overstated 3
+    expect(stockFor(pieces, {}, 'المقاس', 'M')).toBe(1000);
   });
 
   it('says how many numbered units are out on rent', () => {
@@ -50,6 +51,18 @@ describe('sizes on a model tile', () => {
       { option: 'المقاس', value: 'M', inStock: true, left: 1000 },
       { option: 'المقاس', value: 'L', inStock: false, left: 0 },
     ]);
+  });
+  it('counts a negative colour against its size, as the true total', () => {
+    const sizes = sizeStock([
+      p('S', 5000, 'أحمر'),
+      p('S', 6000, 'أزرق'),
+      p('S', -8000, 'أبيض'),
+      p('M', -2000),
+      p('L', null),
+    ]);
+    expect(sizes?.find((x) => x.value === 'S')).toMatchObject({ inStock: true, left: 3000 });
+    expect(sizes?.find((x) => x.value === 'M')).toMatchObject({ inStock: false, left: 0 });
+    expect(sizes?.find((x) => x.value === 'L')).toMatchObject({ inStock: true, left: null });
   });
   it('has nothing to say for a colour-only model', () => {
     const colour = item({ attributes: [{ name: 'اللون', value: 'أحمر' }], stockQty: 1000 });

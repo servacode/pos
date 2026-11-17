@@ -505,6 +505,13 @@
       "when": 1794880541967,
       "tag": "0071_installment_plan_id_default",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794888976197,
+      "tag": "0072_agents_program",
+      "breakpoints": true
     }
   ]
 }

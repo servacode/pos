@@ -154,10 +154,57 @@ export const agents = pgTable('agents', {
   fullName: text('full_name').notNull(),
   phone: text('phone'),
   status: agentStatus('status').notNull().default('active'),
+  /** Area he works in, for the owner's list */
+  region: text('region'),
+  /** His own sign-in to the agent portal (apart from stores and the platform team); null = none yet */
+  email: text('email').unique(),
+  passwordHash: text('password_hash'),
+  mustChangePassword: boolean('must_change_password').notNull().default(false),
+  /** Wholesale discount off the plan's list price, in basis points (2000 = 20%) */
+  discountBp: integer('discount_bp').notNull().default(2000),
+  /** Wholesale price per plan and cycle in USD minor, replacing the discount: { basic: { monthly, yearly } } */
+  priceOverrides: jsonb('price_overrides')
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+  /** Prepaid balance in USD minor; never below zero (the check and every function agree) */
+  balanceMinor: bigint('balance_minor', { mode: 'number' }).notNull().default(0),
+  note: text('note'),
   version: version(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * The platform's record of every agent's prepaid balance (top-ups, deductions and the activations
+ * he paid for). Platform side only: never a store's books. Append-only; reached through
+ * platform_agent_* and agent_* functions. The store of an activation is `store_id` (no tenant_id,
+ * so no row of it belongs to a store's isolation).
+ */
+export const agentLedger = pgTable(
+  'agent_ledger',
+  {
+    id: platformId(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id),
+    /** topup | adjust (a deduction by the owner) | activation */
+    kind: text('kind').notNull(),
+    /** Signed: plus adds to the balance, minus takes from it */
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    balanceAfterMinor: bigint('balance_after_minor', { mode: 'number' }).notNull(),
+    storeId: uuid('store_id'),
+    planCode: text('plan_code'),
+    billingCycle: text('billing_cycle'),
+    /** The plan's list price at the time, to see what the wholesale price saved */
+    listPriceMinor: bigint('list_price_minor', { mode: 'number' }),
+    /** One request, one effect: a repeated key answers the first result */
+    requestKey: text('request_key').notNull(),
+    byPlatformUser: uuid('by_platform_user'),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  (t) => [unique('agent_ledger_request_unique').on(t.agentId, t.requestKey)],
+);
 
 /**
  * One-time codes sent to a phone (09 otp_challenges). For sign-up, the pending registration waits

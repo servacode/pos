@@ -424,10 +424,13 @@ export async function listShifts(
   return withTenant(db, auth.tenantId, async (tx) => {
     const filter = await branchFilter(tx, auth, 'report.view', query.branchId);
     // A shift's day is its opening's business day; a close that came alone, its closing day.
-    const day = query.date
-      ? sql`coalesce(s.business_date,
+    const day =
+      query.status === 'open'
+        ? sql`s.status = 'open'`
+        : query.date
+          ? sql`coalesce(s.business_date,
           (select (s.closed_at at time zone t.timezone)::date from tenants t where t.id = s.tenant_id)) = ${query.date}`
-      : sql`true`;
+          : sql`true`;
     const rows = await shiftRows(tx, sql`${inBranches(sql`s.branch_id`, filter)} and ${day}`);
     return { items: rows.map(summaryOf) };
   });

@@ -194,6 +194,11 @@ export interface ShiftActivity {
     deposits?: { currency: Code; amountMinor: number }[];
     rentals?: { currency: Code; amountMinor: number }[];
   };
+  /** Instalments (display only, from the documents): sales on a plan and the instalments collected */
+  instalments?: {
+    sales: { currency: Code; count: number; downMinor: number; financedMinor: number }[];
+    collected: { currency: Code; amountMinor: number }[];
+  };
   /** What cash rounding took off (negative) or added (positive) on this shift's invoices and cash refunds, per currency (display only) */
   cashRounding?: { currency: Code; amountMinor: number }[];
   /** A foreign cash payment (20$) given back in another currency (800 ل.س): what was paid in, what came back */
@@ -233,6 +238,11 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   const rentalsCash = new Map<Code, number>();
   let rentalCount = 0;
   let giftCount = 0;
+  const plansSold = new Map<
+    Code,
+    { currency: Code; count: number; downMinor: number; financedMinor: number }
+  >();
+  const plansPaid = new Map<Code, number>();
   const movements: ShiftActivity['movements'] = [];
   const receiptsCash = new Map<Code, number>();
   const vouchersCash = new Map<Code, number>();
@@ -255,6 +265,18 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       totals.totalMinor += sale.totals?.totalMinor ?? 0;
       totals.discountMinor += sale.totals?.discountMinor ?? 0;
       salesTotals.set(sale.currency, totals);
+      if (sale.installmentPlan) {
+        const row = plansSold.get(sale.currency) ?? {
+          currency: sale.currency,
+          count: 0,
+          downMinor: 0,
+          financedMinor: 0,
+        };
+        row.count += 1;
+        row.downMinor += sale.installmentPlan.downPaymentMinor;
+        row.financedMinor += sale.installmentPlan.financedMinor;
+        plansSold.set(sale.currency, row);
+      }
       const sellerId = sale.salespersonId ?? sale.cashierId;
       const sellerKey = `${sellerId}:${sale.currency}`;
       const seller = bySeller.get(sellerKey) ?? {
@@ -320,6 +342,8 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     } else if (doc.type === 'receipt') {
       // A customer's payment in cash goes into this drawer
       const r = payload as unknown as ReceiptPayload;
+      const toPlans = (r.allocations ?? []).reduce((n, a) => n + a.amountMinor, 0);
+      if (toPlans > 0) plansPaid.set(r.currency, (plansPaid.get(r.currency) ?? 0) + toPlans);
       if (r.method === 'cash') {
         termsOf(r.currency).receiptsMinor += r.amountMinor;
         receiptsCash.set(r.currency, (receiptsCash.get(r.currency) ?? 0) + r.amountMinor);
@@ -402,6 +426,14 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
         : undefined,
     },
     changeBack: [...changeBack.values()],
+    ...(plansSold.size > 0 || plansPaid.size > 0
+      ? {
+          instalments: {
+            sales: [...plansSold.values()],
+            collected: [...plansPaid].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+          },
+        }
+      : {}),
     ...([...rounding].some(([, n]) => n !== 0)
       ? {
           cashRounding: [...rounding]

@@ -17,6 +17,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { dayText } from '../../lib/dates';
 import { errorMessage } from '../../lib/api';
 import { getWorklist, logReminder } from './api';
@@ -70,7 +71,54 @@ export function WorklistPage() {
   }, [bucket]);
   useEffect(load, [load]);
 
+  const phone = useIsPhone();
+  const hasRows = !!items && items.length > 0;
   const kindOf = (r: WorklistRow) => (r.daysLate > 0 ? 'late' : r.dueDate === today ? 'due' : 'before');
+
+  const actions = (r: WorklistRow) => {
+    const link = reminderLink(r.phone, {
+      kind: kindOf(r),
+      name: r.customerName,
+      amountMinor: r.remainingMinor,
+      currency: base,
+      due: r.dueDate,
+      no: r.no,
+      of: r.of,
+      store: me.tenant.name,
+      daysLate: r.daysLate,
+    });
+    const said = lastReminder(r.lastReminderAt);
+    return (
+      <span className="flex flex-wrap items-center gap-2 py-1.5">
+        {link ? (
+          <a
+            href={link}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => {
+              void logReminder(r.planId, r.no, kindOf(r))
+                .then(load)
+                .catch(() => undefined);
+            }}
+            className="inline-flex min-h-9 items-center gap-1 rounded-control border border-line px-3 text-sm font-semibold text-brand-ink hover:bg-surface-muted"
+          >
+            <ChatIcon size={16} /> واتساب
+          </a>
+        ) : (
+          <span className="text-xs text-ink-subtle">لا رقم هاتف</span>
+        )}
+        {r.phone ? (
+          <a
+            href={`tel:${r.phone}`}
+            className="inline-flex min-h-9 items-center gap-1 rounded-control border border-line px-3 text-sm font-semibold hover:bg-surface-muted"
+          >
+            <PhoneIcon size={16} /> اتصال
+          </a>
+        ) : null}
+        {said ? <span className="text-xs text-ink-subtle">{said}</span> : null}
+      </span>
+    );
+  };
 
   const columns: DataColumn<WorklistRow>[] = [
     {
@@ -107,50 +155,7 @@ export function WorklistPage() {
     {
       key: 'actions',
       header: '',
-      cell: (r) => {
-        const link = reminderLink(r.phone, {
-          kind: kindOf(r),
-          name: r.customerName,
-          amountMinor: r.remainingMinor,
-          currency: base,
-          due: r.dueDate,
-          no: r.no,
-          of: r.of,
-          store: me.tenant.name,
-          daysLate: r.daysLate,
-        });
-        const said = lastReminder(r.lastReminderAt);
-        return (
-          <span className="flex flex-wrap items-center gap-2 py-1.5">
-            {link ? (
-              <a
-                href={link}
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => {
-                  void logReminder(r.planId, r.no, kindOf(r))
-                    .then(load)
-                    .catch(() => undefined);
-                }}
-                className="inline-flex min-h-9 items-center gap-1 rounded-control border border-line px-3 text-sm font-semibold text-brand-ink hover:bg-surface-muted"
-              >
-                <ChatIcon size={16} /> واتساب
-              </a>
-            ) : (
-              <span className="text-xs text-ink-subtle">لا رقم هاتف</span>
-            )}
-            {r.phone ? (
-              <a
-                href={`tel:${r.phone}`}
-                className="inline-flex min-h-9 items-center gap-1 rounded-control border border-line px-3 text-sm font-semibold hover:bg-surface-muted"
-              >
-                <PhoneIcon size={16} /> اتصال
-              </a>
-            ) : null}
-            {said ? <span className="text-xs text-ink-subtle">{said}</span> : null}
-          </span>
-        );
-      },
+      cell: (r) => actions(r),
     },
   ];
 
@@ -177,15 +182,47 @@ export function WorklistPage() {
           }))}
         />
         {error && items ? <Alert tone="error">{error}</Alert> : null}
-        <DataTable
-          caption="الأقساط المستحقة"
-          columns={columns}
-          rows={items ?? []}
-          rowKey={(r) => `${r.planId}-${r.no}`}
-          loading={!items && !error}
-          {...(error && !items ? { error, onRetry: load } : {})}
-          empty={<EmptyState icon={CalendarIcon} title={EMPTY_TEXT[bucket]} />}
-        />
+        {hasRows && phone ? (
+          <ul className="flex flex-col gap-3" aria-label="الأقساط المستحقة">
+            {(items ?? []).map((r) => (
+              <li
+                key={`${r.planId}-${r.no}`}
+                className="flex flex-col gap-2 rounded-card border border-line bg-surface p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <Link to={`/installments/${r.planId}`} className="flex min-w-0 flex-col hover:underline">
+                    <span className="font-semibold">{r.customerName}</span>
+                    <span className="text-xs text-ink-muted">
+                      القسط <bdi className="num">{r.no}</bdi> من <bdi className="num">{r.of}</bdi> ·{' '}
+                      <bdi dir="ltr" className="num">
+                        {r.planNumber}
+                      </bdi>
+                    </span>
+                  </Link>
+                  <Money minor={r.remainingMinor} currency={base} className="shrink-0 font-semibold" />
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span>{dayText(r.dueDate, digits)}</span>
+                  {r.daysLate > 0 ? <Badge tone="danger">متأخر {r.daysLate} يوماً</Badge> : null}
+                </div>
+                {actions(r)}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <div>
+          {hasRows && phone ? null : (
+            <DataTable
+              caption="الأقساط المستحقة"
+              columns={columns}
+              rows={items ?? []}
+              rowKey={(r) => `${r.planId}-${r.no}`}
+              loading={!items && !error}
+              {...(error && !items ? { error, onRetry: load } : {})}
+              empty={<EmptyState icon={CalendarIcon} title={EMPTY_TEXT[bucket]} />}
+            />
+          )}
+        </div>
       </div>
     </AppShell>
   );

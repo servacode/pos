@@ -5,6 +5,7 @@ import { allocatePayment } from '@serva/core/installments';
 import type { ReceiptAllocation } from '@serva/core/contracts/installments';
 import { Badge, Button, CalendarIcon, Money, Switch, type BadgeTone } from '@serva/ui';
 import { APP_VERSION } from '../../offline/sync';
+import { dayText } from '../../lib/dates';
 import { usePos } from '../services';
 
 /** GET /v1/device/installments/customer/{id} (`Authorization: Device <token>`); null without an answer */
@@ -143,9 +144,7 @@ export function InstalmentPick({
         {open.map((i) => (
           <li key={i.no} className="flex items-center gap-3 px-3 py-2">
             <span className="num w-6 shrink-0 text-sm text-ink-muted">{i.no}</span>
-            <bdi dir="ltr" className="num flex-1 whitespace-nowrap">
-              {i.dueDate}
-            </bdi>
+            <bdi className="flex-1 whitespace-nowrap">{dayText(i.dueDate)}</bdi>
             <Badge tone={TONE[i.state] ?? 'neutral'}>{TEXT[i.state] ?? ''}</Badge>
             <Money minor={i.amountMinor - i.paidMinor} currency={base} className="font-semibold" />
           </li>

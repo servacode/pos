@@ -183,4 +183,48 @@ describe('«الصندوق» in the settings', () => {
     expect(within(form).getByText('أبقِ فئة واحدة على الأقل.')).toBeInTheDocument();
     expect(within(form).getByRole('button', { name: 'احفظ' })).toBeDisabled();
   });
+
+  it('offers old-pound stores one tap to the new notes, and writes only after the tap', async () => {
+    const current = {
+      ...store(['clothing']),
+      till: {
+        returnWindowDays: null,
+        cardApprovalRequired: false,
+        cashNotes: { SYP: [5000, 2000, 1000, 500, 200, 100, 50, 25, 10] },
+      },
+    } as StoreResponse;
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    expect(requestsTo('PUT', '/v1/store/till')).toHaveLength(0);
+    await user.click(within(form).getByRole('button', { name: 'حدّث الفئات للعملة الجديدة' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    const sent = requestsTo('PUT', '/v1/store/till').at(-1)?.body as { cashNotes?: unknown };
+    expect(sent.cashNotes).toBeUndefined();
+    expect(
+      within(form).queryByRole('button', { name: 'حدّث الفئات للعملة الجديدة' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('says «عندك تعديلات غير محفوظة» after a switch is toggled, until it is saved', async () => {
+    const current = store(['supermarket']);
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    await user.click(within(form).getByRole('switch', { name: /صوت عند مسح الباركود/ }));
+    expect(within(form).getByText('عندك تعديلات غير محفوظة')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(within(form).queryByText('عندك تعديلات غير محفوظة')).not.toBeInTheDocument();
+  });
 });

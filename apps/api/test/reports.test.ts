@@ -322,6 +322,11 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
     expect(
       (await get(store.accessToken, '/v1/shifts?date=2026-10-29')).json<ShiftListResponse>().items,
     ).toEqual([]);
+    // Only shifts still open, of any day: this day's is closed, so none; a wrong status is refused
+    const stillOpen = await get(store.accessToken, '/v1/shifts?status=open');
+    expect(stillOpen.statusCode, stillOpen.body).toBe(200);
+    expect(stillOpen.json<ShiftListResponse>().items).toEqual([]);
+    expect((await get(store.accessToken, '/v1/shifts?status=closed')).statusCode).toBe(400);
   });
 
   it('reports each drawer by the formula of tab 10, the methods and the movements with their approver', async () => {

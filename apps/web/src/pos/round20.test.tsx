@@ -151,12 +151,35 @@ describe('the receipt shows half units and drops noise (round 20)', () => {
     expect(screen.getByText('منها ضريبة')).toBeInTheDocument();
   });
 
-  it('hides the dollar equivalent while the store does not offer dollars', () => {
-    const { unmount } = view(receipt({}));
+  it('shows the dollar equivalent only when a payment or the change was in dollars', () => {
+    const offered = { settings: { ...settings, enabledCurrencies: ['SYP', 'USD'] } as SettingsRow };
+    const first = view(receipt({}));
     expect(screen.queryByText(/يعادل/)).not.toBeInTheDocument();
-    unmount();
-    view(receipt({}, { settings: { ...settings, enabledCurrencies: ['SYP', 'USD'] } as SettingsRow }));
+    first.unmount();
+    // The store offers dollars, but this sale was paid in pounds only: no rate line
+    const second = view(receipt({}, offered));
+    expect(screen.queryByText(/يعادل/)).not.toBeInTheDocument();
+    second.unmount();
+    // Paid with dollars: the line is there
+    const usd = receipt({}, offered);
+    (usd.doc.payload as unknown as { payments: unknown[] }).payments = [
+      { paymentNo: 1, method: 'cash', currency: 'USD', amountMinor: 550 },
+    ];
+    view(usd);
     expect(screen.getByText(/يعادل/)).toBeInTheDocument();
+  });
+
+  it('does not count the instalment fee as a piece', () => {
+    const data = receipt({});
+    const lines = (data.doc.payload as unknown as { lines: Record<string, unknown>[] }).lines;
+    lines.push({
+      ...lines[0]!,
+      lineNo: 2,
+      variantId: '00000000-0000-7000-8000-0000000f1ee1',
+      name: 'رسم التقسيط',
+    });
+    view(data);
+    expect(screen.getByLabelText(/إيصال/).textContent).toMatch(/عدد القطع1(?!\d)/);
   });
 
   it('tags a wholesale line and says «وفّرت» once on paper and in the WhatsApp text', () => {

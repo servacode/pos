@@ -1,5 +1,5 @@
-import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import {
   INSTALMENT_FEE_NAME,
   INSTALMENT_FEE_PRODUCT_ID,
@@ -87,10 +87,13 @@ describe('the plan of a sale', () => {
   });
 });
 
-async function toPay(installments: Record<string, unknown> | null) {
+async function toPay(
+  installments: Record<string, unknown> | null,
+  keep: ReturnType<typeof memoryLocal> | null = null,
+) {
   const sets = posSets();
   const withSettings = { ...sets, settings: [{ ...sets.settings[0]!, installments }] };
-  const local = memoryLocal();
+  const local = keep ?? memoryLocal();
   await openShift(local);
   const staff = staffServer(withSettings as typeof sets);
   // What the customer owes now: nothing, so the plan's account part is within the customer's limit
@@ -115,12 +118,16 @@ async function toPay(installments: Record<string, unknown> | null) {
   await pos.user.click(within(list).getByRole('button', { name: /سامر/ }));
   await pos.user.keyboard(PINS[ids.samer]!);
   await screen.findByRole('list', { name: 'الأصناف' });
-  await scan(pos.user, PRODUCTS.oil.barcode!.code);
+  // After a reload the cart (and its customer) come back from the device, so nothing is scanned again
+  if (!keep) await scan(pos.user, PRODUCTS.oil.barcode!.code);
+  else await screen.findAllByText(/زيت/);
   await pos.user.keyboard('{F12}');
   const pay = await screen.findByRole('region', { name: 'الدفع' });
-  await pos.user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
-  await pos.user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
-  return { ...pos, pay };
+  if (!keep) {
+    await pos.user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
+    await pos.user.click(within(pay).getByRole('button', { name: /أبو خالد/ }));
+  }
+  return { ...pos, pay, local };
 }
 
 describe('the receipt rows', () => {
@@ -145,9 +152,9 @@ describe('the receipt rows', () => {
       ['الدفعة الأولى', '200'],
       ['رسم التقسيط', '40'],
       ['المقسَّط على الحساب', '840'],
-      ['القسط 1 من 3 · 2026-12-01', '280'],
-      ['القسط 2 من 3 · 2027-01-01', '280'],
-      ['القسط 3 من 3 · 2027-02-01', '280'],
+      ['القسط 1 من 3 · 1 كانون الأول 2026', '280'],
+      ['القسط 2 من 3 · 1 كانون الثاني 2027', '280'],
+      ['القسط 3 من 3 · 1 شباط 2027', '280'],
     ]);
     // A plan with no fee leaves that row out
     const free = { ...r.draft.plan, markupMinor: 0 };
@@ -205,5 +212,35 @@ describe('the pay screen', () => {
     expect(within(pay).getByRole('button', { name: 'بيع بالتقسيط' })).toBeInTheDocument();
     expect(within(pay).queryByRole('list', { name: 'الأجزاء المدفوعة' })).not.toBeInTheDocument();
     expect(plain(pay)).toContain(before.includes('المطلوب') ? 'المطلوب' : '');
+  });
+
+  it('keeps a half-built plan on the device and brings it back after a reload', async () => {
+    const first = await toPay({ enabled: true });
+    await first.user.click(await within(first.pay).findByRole('button', { name: 'بيع بالتقسيط' }));
+    const sheet = await within(first.pay).findByRole('region', { name: 'خطة التقسيط' });
+    await first.user.click(within(sheet).getByRole('button', { name: 'اعتمد الخطة' }));
+    await within(first.pay).findByRole('status', { name: 'خطة التقسيط' });
+    await vi.waitFor(async () => expect(await first.local.get('pending-instalment-plan')).not.toBeNull());
+    // The till reloads: a new screen on the same device storage
+    cleanup();
+    const again = await toPay({ enabled: true }, first.local);
+    await within(again.pay).findByRole('status', { name: 'خطة التقسيط' });
+    expect(plain(again.pay)).toContain('رجّعنا خطة التقسيط');
+    // Cancelling it forgets it
+    await again.user.click(within(again.pay).getByRole('button', { name: 'ألغِ التقسيط' }));
+    expect(await again.local.get('pending-instalment-plan')).toBeNull();
+  });
+
+  it('asks before finishing as an ordinary sale once the plan was dropped', async () => {
+    const { user, pay, outbox } = await toPay({ enabled: true });
+    await user.click(await within(pay).findByRole('button', { name: 'بيع بالتقسيط' }));
+    const sheet = await within(pay).findByRole('region', { name: 'خطة التقسيط' });
+    await user.click(within(sheet).getByRole('button', { name: 'اعتمد الخطة' }));
+    // Removing the account part by hand drops the plan; paying all in cash must be confirmed
+    const parts = within(pay).getByRole('list', { name: 'الأجزاء المدفوعة' });
+    await user.click(within(parts).getAllByRole('button')[0]!);
+    await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
+    expect(await within(pay).findByText('بدأت خطة تقسيط ولم تكتمل')).toBeInTheDocument();
+    expect(outbox.find((e) => e.type === 'sale')).toBeUndefined();
   });
 });

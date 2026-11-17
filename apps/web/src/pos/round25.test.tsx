@@ -69,6 +69,20 @@ describe('round 25 till', () => {
     expect(lines.join('|')).not.toMatch(/180|نقداً|الإجمالي/);
   });
 
+  it('takes the gift receipt return days from the return-window setting', () => {
+    const seven = {
+      ...gift,
+      settings: { ...settings, till: { returnWindowDays: 7, cardApprovalRequired: false } },
+    } as ReceiptData;
+    render(<Receipt data={seven} />);
+    expect(screen.getByLabelText('إيصال هدية 80 مم').textContent).toContain('خلال 7 يوماً');
+    expect(
+      receiptLines(seven)
+        .map((l) => ('text' in l ? l.text : ''))
+        .join('|'),
+    ).toContain('خلال 7 يوماً');
+  });
+
   it('names a rental deposit on its own line and keeps it out of the gift vouchers', () => {
     const entry = (reference: string | null) =>
       ({

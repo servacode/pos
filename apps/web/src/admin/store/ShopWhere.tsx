@@ -83,7 +83,8 @@ export function ShopWhere({ currencies }: { currencies: readonly CurrencyCode[] 
                   )}
                 </span>
               ))}
-              . فرق التقريب يظهر في تقرير إغلاق الوردية.
+              . فرق التقريب يظهر في تقرير إغلاق الوردية. الخطوة ثابتة لكل عملة في النظام ولا تُعدَّل من
+              الإعدادات.
             </dd>
           </div>
           <div className="flex flex-col gap-1 py-3">

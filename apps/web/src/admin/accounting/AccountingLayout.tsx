@@ -10,6 +10,11 @@ const TABS = [
   { to: '/accounting/journal', label: 'القيود' },
   { to: '/accounting/trial-balance', label: 'ميزان المراجعة' },
   { to: '/accounting/profit-loss', label: 'قائمة الدخل' },
+  { to: '/accounting/reports/balance-sheet', label: 'الميزانية' },
+  { to: '/accounting/reports/cash-flow', label: 'التدفق النقدي' },
+  { to: '/accounting/reports/ledger', label: 'دفتر الأستاذ' },
+  { to: '/accounting/reports/tax', label: 'الضريبة' },
+  { to: '/accounting/reports/payables', label: 'ذمم الموردين' },
 ] as const;
 
 /**

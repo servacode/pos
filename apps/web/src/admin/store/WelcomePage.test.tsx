@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { MeResponse, StoreResponse } from '@serva/core';
-import { apiError, mockFetch, type MockRequest } from '../../test/fetchMock';
+import { apiError, mockFetch, type MockReply, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
@@ -37,7 +37,12 @@ function store(overrides: Partial<StoreResponse> = {}): StoreResponse {
 }
 
 /** A fake server keeping the store between requests, as the real one would. */
-function openWizard(me: MeResponse, initial: StoreResponse, path = '/') {
+function openWizard(
+  me: MeResponse,
+  initial: StoreResponse,
+  path = '/',
+  extra: Record<string, MockReply | (() => MockReply)> = {},
+) {
   let current = initial;
   let meNow = me;
   const routes = {
@@ -66,7 +71,7 @@ function openWizard(me: MeResponse, initial: StoreResponse, path = '/') {
       return { status: 200, body: current };
     },
   };
-  const mock = mockFetch(routes);
+  const mock = mockFetch({ ...routes, ...extra });
   return { ...mock, ...renderApp(path), store: () => current };
 }
 
@@ -125,6 +130,22 @@ describe('the start wizard', () => {
       { step: 3 },
       { step: 4, done: true },
     ]);
+  });
+
+  it('ticks the first tasks the store has already done', async () => {
+    openWizard(owner(3), store({ onboarding: { step: 3, done: false } }), '/', {
+      'GET /v1/products?limit=1': { status: 200, body: { items: [{ id: 'p1' }], nextCursor: null } },
+      'GET /v1/devices': { status: 200, body: { devices: [{ id: 'd1', status: 'active' }] } },
+      'GET /v1/staff': {
+        status: 200,
+        body: { staff: [{ id: 'u1', isOwner: true, hasPin: true }], roles: [], branches: [] },
+      },
+    });
+    const products = await screen.findByRole('link', { name: /أضف أصنافك/ });
+    await waitFor(() => expect(products).toHaveTextContent('تمّ'));
+    expect(screen.getByRole('link', { name: /اربط جهاز الكاشير/ })).toHaveTextContent('تمّ');
+    expect(screen.getByRole('link', { name: /اختر رمز الدخول للكاشير/ })).not.toHaveTextContent('تمّ');
+    expect(screen.getByRole('link', { name: /أول عملية بيع/ })).not.toHaveTextContent('تمّ');
   });
 
   it('resumes at the step the owner left', async () => {

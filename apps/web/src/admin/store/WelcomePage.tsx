@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { ONBOARDING_STEPS, type SectorKey, type StoreResponse } from '@serva/core';
+import { ONBOARDING_STEPS, type SaleListPage, type SectorKey, type StoreResponse } from '@serva/core';
 import {
   Alert,
   Button,
   Card,
+  CashIcon,
   CheckIcon,
   cn,
   DeviceIcon,
@@ -18,7 +19,10 @@ import {
 } from '@serva/ui';
 import { useAuth } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
-import { errorMessage } from '../../lib/api';
+import { apiFetch, errorMessage } from '../../lib/api';
+import { listProducts } from '../catalog/api';
+import { listDevices } from '../devices/api';
+import { listStaff } from '../staff/api';
 import { getStore, saveOnboarding, saveProfile } from './api';
 import { CardBar } from './parts';
 import { CurrencyForm, ProfileForm, SectorPicker } from './StoreForms';
@@ -86,6 +90,41 @@ function WizardSteps({ current }: { current: number }) {
   );
 }
 
+type DoneKey = 'products' | 'staff' | 'device' | 'sale';
+
+/**
+ * Which first tasks the store has already done, read from what exists (products, a staff member with a
+ * till code, an approved device, a first invoice). A task that cannot be read (no permission, offline)
+ * stays unticked. Display only.
+ */
+function useDone(active: boolean): ReadonlySet<DoneKey> {
+  const [done, setDone] = useState<ReadonlySet<DoneKey>>(new Set());
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    const checks: [DoneKey, () => Promise<boolean>][] = [
+      ['products', async () => (await listProducts({ limit: 1 })).items.length > 0],
+      ['staff', async () => (await listStaff()).staff.some((m) => m.hasPin && !m.isOwner)],
+      ['device', async () => (await listDevices()).devices.some((d) => d.status === 'active')],
+      [
+        'sale',
+        async () => (await apiFetch<SaleListPage>('/v1/sales?limit=1', { auth: true })).items.length > 0,
+      ],
+    ];
+    for (const [key, check] of checks) {
+      check()
+        .then((yes) => {
+          if (alive && yes) setDone((all) => new Set(all).add(key));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [active]);
+  return done;
+}
+
 /** The wizard's frame while the store loads: the step list and a card of grey lines. */
 function WizardLoading() {
   return (
@@ -116,6 +155,7 @@ export function WelcomePage() {
   const [error, setError] = useState<string | null>(null);
   const [sectors, setSectors] = useState<SectorKey[]>([]);
   const [busy, setBusy] = useState(false);
+  const done = useDone(step === 3);
 
   useEffect(() => {
     let alive = true;
@@ -257,19 +297,34 @@ export function WelcomePage() {
 
         {step === 3 ? (
           <div className="flex flex-col gap-6">
-            <ul className="grid gap-4 md:grid-cols-3">
+            <ul className="grid gap-4 md:grid-cols-2">
               <NextStep
                 icon={ProductsIcon}
                 to="/products"
                 title="أضف أصنافك"
                 text="بالاسم والسعر والباركود"
+                done={done.has('products')}
               />
-              <NextStep icon={KeyIcon} to="/me/pin" title="اختر رمز الدخول للكاشير" text="4 أو 6 أرقام" />
+              <NextStep
+                icon={KeyIcon}
+                to="/me/pin"
+                title="اختر رمز الدخول للكاشير"
+                text="4 أو 6 أرقام"
+                done={done.has('staff')}
+              />
               <NextStep
                 icon={DeviceIcon}
                 to="/devices"
                 title="اربط جهاز الكاشير"
                 text="جوال أو تابلت أو كمبيوتر متصل بالإنترنت"
+                done={done.has('device')}
+              />
+              <NextStep
+                icon={CashIcon}
+                to="/sales/invoices"
+                title="أول عملية بيع"
+                text="بعها من الكاشير وتراها هنا في الفواتير"
+                done={done.has('sale')}
               />
             </ul>
             <Card className="flex flex-wrap items-center justify-between gap-4">
@@ -302,11 +357,14 @@ function NextStep({
   to,
   title,
   text,
+  done = false,
 }: {
   icon: Icon;
   to: string;
   title: string;
   text: string;
+  /** The task is already done: ticked, and the card stays a link back to it */
+  done?: boolean;
 }) {
   return (
     <li className="flex">
@@ -315,14 +373,17 @@ function NextStep({
         className="group/next flex w-full flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5 sm:p-6"
       >
         <span className="flex items-center justify-between gap-3">
-          <IconChip size="lg">
-            <StepIcon size={24} />
+          <IconChip size="lg" tone={done ? 'success' : undefined}>
+            {done ? <CheckIcon size={24} /> : <StepIcon size={24} />}
           </IconChip>
           {/* A chevron toward the reading end: down, turned a quarter toward it. */}
           <ExpandIcon className="-rotate-90 text-ink-subtle transition-colors duration-120 ease-standard group-hover/next:text-brand-ink rtl:rotate-90" />
         </span>
         <span className="flex flex-col gap-1">
-          <span className="font-semibold text-ink">{title}</span>
+          <span className="font-semibold text-ink">
+            {title}
+            {done ? <span className="ms-2 text-sm font-semibold text-success-ink">تمّ</span> : null}
+          </span>
           <span className="text-sm text-ink-muted">{text}</span>
         </span>
       </Link>

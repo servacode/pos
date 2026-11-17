@@ -131,6 +131,9 @@ async function storePage(tx: Transaction): Promise<SubscriptionPage> {
     select id, number, invoice_id, method, transaction_ref, amount_minor::text, currency, status, submitted_at, reason
     from subscription_payments order by submitted_at desc limit 50`);
   const { methods, rate } = await settings(tx);
+  const [agent] = await tx.execute<{ full_name: string; phone: string | null }>(
+    sql`select full_name, phone from store_agent_info()`,
+  );
   return {
     status: sub.status,
     planCode: sub.code,
@@ -165,6 +168,7 @@ async function storePage(tx: Transaction): Promise<SubscriptionPage> {
     })),
     paymentMethods: methods.filter((m) => m.enabled),
     sypPerUsd: rate,
+    agent: agent ? { fullName: agent.full_name, phone: agent.phone } : null,
   };
 }
 
@@ -254,7 +258,7 @@ export async function platformLogin(
  * a store to past_due or suspended in the background). The list shows the truth: a store past its
  * period but inside its grace is «past_due», one beyond it is «suspended» (read-only).
  */
-function effectiveStatus(
+export function effectiveStatus(
   r: {
     status: PlatformStore['status'];
     trial_ends_at: string | null;
@@ -281,6 +285,19 @@ function effectiveStatus(
   if (life.readOnly) return r.status === 'cancelled' ? 'cancelled' : 'suspended';
   if (life.state === 'grace') return 'past_due';
   return r.status === 'past_due' ? 'active' : r.status;
+}
+
+/** Which agent each store belongs to (migration 0072), for the platform's stores list. */
+async function storeAgentMap(db: Database): Promise<Map<string, NonNullable<PlatformStore['agent']>>> {
+  const rows = await db.execute<{
+    tenant_id: string;
+    agent_id: string;
+    agent_code: string;
+    agent_name: string;
+  }>(sql`select tenant_id, agent_id, agent_code, agent_name from platform_store_agents()`);
+  return new Map(
+    rows.map((r) => [r.tenant_id, { id: r.agent_id, code: r.agent_code, fullName: r.agent_name }]),
+  );
 }
 
 export async function platformStores(
@@ -310,8 +327,10 @@ export async function platformStores(
     from platform_stores() s
     left join subscriptions sub on sub.tenant_id = s.tenant_id
     left join plans p on p.id = sub.plan_id`);
+  const agents = await storeAgentMap(db);
   return {
     items: rows.map((r) => ({
+      agent: agents.get(r.tenant_id) ?? null,
       tenantId: r.tenant_id,
       name: r.name,
       storeCode: r.store_code,

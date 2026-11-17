@@ -33,6 +33,7 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { formatDays } from '../../lib/format';
+import { whatsappLink } from '../../lib/phoneLinks';
 import { limitLines } from './planLimits';
 
 const STATUS_TEXT: Record<Page['status'], string> = {
@@ -157,6 +158,31 @@ function CurrentPlan({ page }: { page: Page }) {
           )}
         </Fact>
       </dl>
+      {page.agent ? (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line pt-4 text-sm text-ink-muted">
+          <span>
+            وكيلك: <span className="font-semibold text-ink">{page.agent.fullName}</span>
+          </span>
+          {page.agent.phone ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <bdi dir="ltr" className="num">
+                {page.agent.phone}
+              </bdi>
+              {whatsappLink(page.agent.phone) ? (
+                <a
+                  className="font-semibold text-brand hover:underline"
+                  href={whatsappLink(page.agent.phone)!}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  راسله على واتساب
+                </a>
+              ) : null}
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </Card>
   );
 }

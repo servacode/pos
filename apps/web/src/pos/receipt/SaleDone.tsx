@@ -157,13 +157,16 @@ export function SaleDone({
                 className="font-semibold text-ink"
               />{' '}
               (فرق{' '}
-              <ExactMoney
-                minor={Math.abs(sale.cashRounding.roundingMinor)}
-                currency={sale.cashRounding.currency}
-                symbol={false}
-                decimals={2}
-                trimZeros
-              />
+              <bdi dir="ltr" className="num">
+                {sale.cashRounding.roundingMinor < 0 ? '−' : '+'}
+                <ExactMoney
+                  minor={Math.abs(sale.cashRounding.roundingMinor)}
+                  currency={sale.cashRounding.currency}
+                  symbol={false}
+                  decimals={2}
+                  trimZeros
+                />
+              </bdi>
               )
             </p>
           ) : null}

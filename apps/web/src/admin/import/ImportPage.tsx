@@ -55,14 +55,22 @@ import {
   type Table,
 } from './mapping';
 import { DateField } from '../../lib/DateField';
+import { ExportSteps, ProgramPicker, RecognisedNote } from './MigrationGuide';
+import { openReport, PROGRAM_IDS, type ProgramId } from './programs';
 
-type Step = 'file' | 'columns' | 'review';
+type Step = 'program' | 'file' | 'columns' | 'review';
 type Phase = 'idle' | 'checking' | 'checked' | 'importing' | 'done';
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'file', label: '1. الملف' },
   { key: 'columns', label: '2. الأعمدة' },
   { key: 'review', label: '3. المراجعة والاستيراد' },
+];
+const MOVE_STEPS: { key: Step; label: string }[] = [
+  { key: 'program', label: '1. البرنامج' },
+  { key: 'file', label: '2. الملف' },
+  { key: 'columns', label: '3. الأعمدة' },
+  { key: 'review', label: '4. المراجعة والاستيراد' },
 ];
 
 const TONE: Record<ImportRowResult['status'], BadgeTone> = {
@@ -106,7 +114,11 @@ function Import() {
   );
   const asked = params.get('type');
   const [type, setType] = useState<ImportType>(allowed.find((t) => t === asked) ?? allowed[0] ?? 'products');
-  const [step, setStep] = useState<Step>('file');
+  const fromParam = params.get('from');
+  const [program, setProgram] = useState<ProgramId | null>(PROGRAM_IDS.find((p) => p === fromParam) ?? null);
+  const [step, setStep] = useState<Step>(fromParam === 'start' ? 'program' : 'file');
+  const [movedTypes, setMovedTypes] = useState<ImportType[]>([]);
+  const [recognised, setRecognised] = useState<{ count: number; derived: boolean } | null>(null);
   const [fileName, setFileName] = useState('');
   const [sheets, setSheets] = useState<Sheet[]>([]);
   const [sheetIndex, setSheetIndex] = useState(0);
@@ -133,6 +145,16 @@ function Import() {
   const byLine = useMemo(() => new Map(prepared.map((r) => [r.line, r])), [prepared]);
   const missing = missingRequired(type, mapping);
   const busy = phase === 'checking' || phase === 'importing';
+  // Opening balances in the file: posted by the server against 3900 with the import, shown here first
+  const balances = useMemo(() => {
+    const nums =
+      type === 'products'
+        ? []
+        : prepared
+            .map((r) => Number(String(r.values.balance ?? '').replace(/,/g, '')))
+            .filter((n) => Number.isFinite(n) && n !== 0);
+    return { count: nums.length, sum: nums.reduce((a, b) => a + b, 0) };
+  }, [prepared, type]);
 
   const totals: ImportTotals = useMemo(() => {
     const t = emptyImportTotals();
@@ -161,10 +183,20 @@ function Import() {
   };
 
   const openSheet = (sheet: Sheet, index: number) => {
-    const t = tableOf(sheet.rows);
     setSheetIndex(index);
+    if (program) {
+      const opened = openReport(program, type, sheet.rows, branches, me.tenant.id);
+      setTable(opened.table);
+      setMapping(opened.mapping);
+      setRecognised({ count: opened.recognised, derived: opened.derivedBalance });
+      setResults(new Map());
+      setPhase('idle');
+      return;
+    }
+    const t = tableOf(sheet.rows);
     setTable(t);
-    setMapping(initialMapping(type, t.headers, branches));
+    setMapping(initialMapping(type, t.headers, branches, undefined, me.tenant.id));
+    setRecognised(null);
     setResults(new Map());
     setPhase('idle');
   };
@@ -174,7 +206,7 @@ function Import() {
     setError(null);
     setReading(true);
     try {
-      const read = await readSpreadsheet(file);
+      const read = await readSpreadsheet(file, program !== null);
       setFileName(file.name);
       setSheets(read);
       openSheet(read[0]!, 0);
@@ -241,6 +273,7 @@ function Import() {
         return;
       }
       setPhase(mode === 'dry_run' ? 'checked' : 'done');
+      if (mode === 'commit') setMovedTypes((m) => (m.includes(type) ? m : [...m, type]));
     } catch (e) {
       setError(errorMessage(e));
       setPhase(mode === 'dry_run' ? 'idle' : 'done');
@@ -324,7 +357,7 @@ function Import() {
           description="انقل المنتجات والزبائن والموردين من ملف إكسل أو ملف نصي مفصول بفواصل. يُفحص الملف كله قبل أن يتغيّر شيء."
         />
         <ol className="flex flex-wrap gap-2" aria-label="خطوات الاستيراد">
-          {STEPS.map((s) => (
+          {(program || step === 'program' ? MOVE_STEPS : STEPS).map((s) => (
             <li key={s.key}>
               <Badge tone={s.key === step ? 'brand' : 'neutral'} dot={false}>
                 <span aria-current={s.key === step ? 'step' : undefined}>{s.label}</span>
@@ -334,6 +367,16 @@ function Import() {
         </ol>
         {error ? <Alert tone="error">{error}</Alert> : null}
 
+        {step === 'program' ? (
+          <ProgramPicker
+            onPick={(p) => {
+              setProgram(p);
+              setStep('file');
+            }}
+            onBack={() => setStep('file')}
+          />
+        ) : null}
+
         {step === 'file' ? (
           <Card className="flex flex-col gap-5">
             <SegmentedControl
@@ -342,27 +385,46 @@ function Import() {
               options={allowed.map((t) => ({ value: t, label: IMPORT_TYPE_LABELS[t] }))}
               onValueChange={(t) => reset(t)}
             />
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="secondary"
-                onClick={() => downloadText(templateName(type), templateCsv(type, me.tenant.sectors))}
-              >
-                نزّل القالب الجاهز
-              </Button>
-              <p className="text-sm text-ink-muted">
-                أعمدة {IMPORT_TYPE_LABELS[type]}: {chosen.map((f) => f.label).join('، ')}.
-              </p>
-            </div>
-            <ul className="list-disc ps-5 text-sm text-ink-muted">
-              {chosen
-                .filter((f) => f.hint)
-                .slice(0, 6)
-                .map((f) => (
-                  <li key={f.key}>
-                    <b className="text-ink">{f.label}:</b> {f.hint}
-                  </li>
-                ))}
-            </ul>
+            {program ? (
+              <ExportSteps
+                program={program}
+                type={type}
+                done={movedTypes}
+                onChange={() => setStep('program')}
+              />
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button variant="secondary" onClick={() => setStep('program')}>
+                  انقل من برنامجك القديم
+                </Button>
+                <p className="text-sm text-ink-muted">الأمين، الميزان، الرشيد أو أي برنامج يصدّر إلى إكسل.</p>
+              </div>
+            )}
+            {program ? null : (
+              <>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="secondary"
+                    onClick={() => downloadText(templateName(type), templateCsv(type, me.tenant.sectors))}
+                  >
+                    نزّل القالب الجاهز
+                  </Button>
+                  <p className="text-sm text-ink-muted">
+                    أعمدة {IMPORT_TYPE_LABELS[type]}: {chosen.map((f) => f.label).join('، ')}.
+                  </p>
+                </div>
+                <ul className="list-disc ps-5 text-sm text-ink-muted">
+                  {chosen
+                    .filter((f) => f.hint)
+                    .slice(0, 6)
+                    .map((f) => (
+                      <li key={f.key}>
+                        <b className="text-ink">{f.label}:</b> {f.hint}
+                      </li>
+                    ))}
+                </ul>
+              </>
+            )}
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-control/60 px-6 py-10 text-center hover:bg-surface-muted">
               <span className="font-semibold text-ink">اختر ملف إكسل أو ملفاً نصياً مفصولاً بفواصل</span>
               <span className="text-sm text-ink-muted">حتى 15 ميغابايت و20 ألف صف</span>
@@ -406,6 +468,14 @@ function Import() {
                 </Select>
               ) : null}
             </div>
+            {program && recognised ? (
+              <RecognisedNote
+                program={program}
+                recognised={recognised.count}
+                total={table.headers.length}
+                derivedBalance={recognised.derived}
+              />
+            ) : null}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[34rem] text-sm">
                 <caption className="sr-only">ربط أعمدة الملف بحقول {IMPORT_TYPE_LABELS[type]}</caption>
@@ -462,7 +532,7 @@ function Import() {
               <Button
                 disabled={missing.length > 0 || prepared.length === 0}
                 onClick={() => {
-                  saveMapping(type, table.headers, mapping);
+                  saveMapping(type, table.headers, mapping, me.tenant.id);
                   setResults(new Map());
                   setPhase('idle');
                   setStep('review');
@@ -571,6 +641,15 @@ function Import() {
               </div>
             </Card>
 
+            {balances.count > 0 ? (
+              <Alert tone="info">
+                في الملف <bdi className="num">{balances.count}</bdi> رصيد افتتاحي، مجموعها{' '}
+                <bdi className="num">{balances.sum.toLocaleString('en-US')}</bdi>. تُقيَّد بتاريخ{' '}
+                {arabicDate(date) ?? date} مقابل حساب «الأرصدة الافتتاحية» (3900)، ولا يُقيَّد شيء قبل أن تضغط
+                «ابدأ الاستيراد». هذا للمالك فقط.
+              </Alert>
+            ) : null}
+
             {busy ? (
               <Card className="flex flex-col gap-3">
                 <ProgressBar
@@ -664,8 +743,10 @@ function Import() {
                   empty={<EmptyState icon={PackageOpenIcon} title="لا صفوف" />}
                 />
                 <p className="text-sm text-ink-muted">
-                  رقم السطر هو رقمه في الملف كما يظهر في برنامج الجداول. السطر 1 هو صف العناوين، فأول صنف في
-                  السطر 2.
+                  رقم السطر هو رقمه في الملف كما يظهر في برنامج الجداول.
+                  {program
+                    ? ' الأسطر فوق صف العناوين (عنوان التقرير) محسوبة أيضاً.'
+                    : ' السطر 1 هو صف العناوين، فأول صنف في السطر 2.'}
                 </p>
                 {results.size > SHOWN_ROWS ? (
                   <p className="text-sm text-ink-muted">

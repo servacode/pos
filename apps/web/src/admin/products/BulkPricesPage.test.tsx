@@ -32,7 +32,7 @@ const items = (applied: boolean): BulkPriceResult => ({
 });
 
 describe('«تغيير الأسعار»', () => {
-  it('shows 30% off a category rounded to 500, applies it, and offers the new labels', async () => {
+  it('shows 30% off a category rounded to 5, applies it, and offers the new labels', async () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: catalogMe() },
@@ -67,7 +67,7 @@ describe('«تغيير الأسعار»', () => {
       categoryId: 'c-shirts',
       mode: 'move',
       percentBp: -3000,
-      roundToMinor: 50_000,
+      roundToMinor: 500,
       markWas: true,
       apply: false,
     });

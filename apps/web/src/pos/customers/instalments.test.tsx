@@ -120,4 +120,17 @@ describe('«قبض من زبون» with an instalment plan', () => {
     await screen.findByLabelText('المبلغ');
     expect(screen.queryByRole('region', { name: 'أقساط الزبون' })).not.toBeInTheDocument();
   });
+
+  it('asks before taking more than the customer owes, then records it once confirmed', async () => {
+    const { user, outbox } = await toReceipt(plans());
+    await screen.findByRole('region', { name: 'أقساط الزبون' });
+    await vi.waitFor(() => expect(screen.getByText(/840/)).toBeInTheDocument());
+    await user.type(screen.getByLabelText('المبلغ'), '9000');
+    await user.click(screen.getByRole('button', { name: /سجّل القبض/ }));
+    expect(await screen.findByText(/المبلغ أكبر من المستحق/)).toBeInTheDocument();
+    expect(outbox.find((e) => e.type === 'receipt')).toBeUndefined();
+    await user.click(screen.getByRole('button', { name: /نعم، سجّل والباقي رصيد/ }));
+    await screen.findByRole('heading', { name: 'سُجّل القبض' });
+    expect(outbox.find((e) => e.type === 'receipt')).toBeDefined();
+  });
 });

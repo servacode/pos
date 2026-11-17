@@ -38,3 +38,18 @@ describe('MoneyField', () => {
     expect(Number(screen.getByTestId('minor').textContent)).toBeLessThan(1e13);
   });
 });
+
+describe('MoneyField letters', () => {
+  it('refuses letters with a message and keeps the number as it was', async () => {
+    const user = userEvent.setup();
+    render(<Harness currency="SYP" />);
+    const field = screen.getByLabelText('السعر');
+    await user.type(field, '4');
+    await user.type(field, 'W');
+    expect(screen.getByText('اكتب أرقاماً فقط')).toBeInTheDocument();
+    expect(screen.getByTestId('minor')).toHaveTextContent('400');
+    await user.type(field, '5');
+    expect(screen.queryByText('اكتب أرقاماً فقط')).not.toBeInTheDocument();
+    expect(screen.getByTestId('minor')).toHaveTextContent('4500');
+  });
+});

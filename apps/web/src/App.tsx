@@ -14,6 +14,8 @@ const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m
 const ShopApp = lazy(() => import('./shop/ShopApp').then((m) => ({ default: m.ShopApp })));
 const LegalPage = lazy(() => import('./legal/LegalPage').then((m) => ({ default: m.LegalPage })));
 const PlatformApp = lazy(() => import('./platform/PlatformApp').then((m) => ({ default: m.PlatformApp })));
+// The agents' own portal (07 › برنامج الوكلاء): a phone-first page, a chunk of its own
+const AgentApp = lazy(() => import('./agent/AgentApp').then((m) => ({ default: m.AgentApp })));
 
 // The component gallery (tab 14 › معرض المكوّنات) exists in dev builds only: in a production build
 // import.meta.env.DEV is false, so this import is dead code and no chunk is emitted for it.
@@ -52,6 +54,7 @@ export function App() {
           <Route path="/waiter" element={<WaiterApp />} />
           <Route path="/link" element={<PairingLink />} />
           <Route path="/platform/*" element={<PlatformApp />} />
+          <Route path="/agent/*" element={<AgentApp />} />
           {/* A store's online shop: public, no sign-in (26 › المتجر الإلكتروني) */}
           <Route path="/shop/:slug/*" element={<ShopApp />} />
           <Route path="*" element={<AdminApp />} />

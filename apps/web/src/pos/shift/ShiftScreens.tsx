@@ -675,6 +675,19 @@ export function ShiftCloseScreen({
                     <ExactMoney minor={r.amountMinor} currency={r.currency} className="text-ink" />
                   </li>
                 ))}
+                {(activity.instalments?.sales ?? []).map((r) => (
+                  <li key={`is:${r.currency}`} className="flex flex-wrap items-center gap-x-1">
+                    مبيعات بالتقسيط: {counted(r.count, INVOICES, digits)} · دفعات أولى{' '}
+                    <ExactMoney minor={r.downMinor} currency={r.currency} className="text-ink" /> · مقسَّط{' '}
+                    <ExactMoney minor={r.financedMinor} currency={r.currency} className="text-ink" />
+                  </li>
+                ))}
+                {(activity.instalments?.collected ?? []).map((r) => (
+                  <li key={`ic:${r.currency}`} className="flex flex-wrap items-center gap-x-1">
+                    أقساط مقبوضة:{' '}
+                    <ExactMoney minor={r.amountMinor} currency={r.currency} className="text-ink" />
+                  </li>
+                ))}
                 {activity.movements.map((m, i) => (
                   <li key={`mv:${i}`} className="flex flex-wrap items-center gap-x-1">
                     {MOVEMENT_NAMES[m.kind]} · <bdi>{m.reason}</bdi>:{' '}

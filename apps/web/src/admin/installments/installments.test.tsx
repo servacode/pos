@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   InstalmentSettings,
   InstalmentSummary,
@@ -108,7 +108,7 @@ describe('the reminder', () => {
       reminderLink('0944555222', { ...base, kind: 'before' })!.split('text=')[1]!,
     );
     expect(before).toContain('القسط رقم 2 من 6');
-    expect(before).toContain('يستحق بتاريخ 2026-12-01');
+    expect(before).toContain('يستحق بتاريخ 1 كانون الأول 2026');
     const late = decodeURIComponent(
       reminderLink('0944555222', { ...base, kind: 'late', daysLate: 4 })!.split('text=')[1]!,
     );
@@ -269,5 +269,45 @@ describe('«الأقساط»', () => {
         { upToCount: 12, bp: 2000 },
       ],
     });
+  });
+
+  it('puts a wrong value next to its field and sends nothing', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store/installments-settings': () => ({ status: 200, body: DEFAULT_INSTALMENT_SETTINGS }),
+      'PUT /v1/store/installments-settings': () => ({ status: 200, body: DEFAULT_INSTALMENT_SETTINGS }),
+    });
+    const { user } = renderApp('/installments/settings');
+    const down = await screen.findByLabelText(/أقل دفعة أولى/);
+    await user.clear(down);
+    await user.type(down, '150');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText('اكتب نسبة من 0 إلى 100.')).toBeInTheDocument();
+    expect(down).toHaveAttribute('aria-invalid', 'true');
+    expect(requestsTo('PUT', '/v1/store/installments-settings')).toHaveLength(0);
+  });
+});
+
+describe('collecting more than is due', () => {
+  it('asks before the rest becomes customer credit, and records only after the yes', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/installment-plans/p-1': () => ({ status: 200, body: detail() }),
+      'POST /v1/installment-plans/p-1/collect': () => ({ status: 200, body: detail() }),
+    });
+    const { user } = renderApp('/installments/p-1');
+    await screen.findByRole('table', { name: 'الأقساط' });
+    await user.click(screen.getByRole('button', { name: 'قبض قسط' }));
+    const dialog = await screen.findByRole('dialog');
+    const amount = within(dialog).getByLabelText(/المبلغ/);
+    await user.clear(amount);
+    await user.type(amount, '100000');
+    await user.click(within(dialog).getByRole('button', { name: 'سجّل القبض' }));
+    expect(await within(dialog).findByText(/المبلغ أكبر من المستحق/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/installment-plans/p-1/collect')).toHaveLength(0);
+    await user.click(within(dialog).getByRole('button', { name: 'نعم، سجّل والباقي رصيد' }));
+    await vi.waitFor(() => expect(requestsTo('POST', '/v1/installment-plans/p-1/collect')).toHaveLength(1));
   });
 });

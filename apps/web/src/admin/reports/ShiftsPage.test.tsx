@@ -88,6 +88,47 @@ describe('«الورديات»', () => {
     expect(within(table).getByText('عجز')).toHaveClass('text-danger-ink');
   });
 
+  it('shows a half unit in the total as the close report does, never rounded up', async () => {
+    signIn(
+      MANAGER_KEYS,
+      {
+        [`GET /v1/shifts?date=${TODAY}`]: {
+          status: 200,
+          body: { items: [shiftSummary({ salesTotalMinor: 2_837_250 })] },
+        },
+      },
+      '/shifts',
+    );
+    const table = await screen.findByRole('table', { name: 'ورديات 31 تشرين الأول 2026' });
+    await within(table).findByText('SFT-001-002-0000231');
+    expect(text(within(table).getAllByRole('row')[1]!)).toContain('28,372.50 ل.س');
+  });
+
+  it('lists shifts left open for over 24 hours on top, with the device and who opened them', async () => {
+    const stale = shiftSummary({
+      id: 'old-1',
+      number: 'SFT-001-001-0000100',
+      deviceCode: '007',
+      openedBy: { id: 'u-3', fullName: 'هبة' },
+      openedAt: '2026-10-28T06:15:00.000Z',
+      closedAt: null,
+      status: 'open',
+    });
+    signIn(
+      MANAGER_KEYS,
+      {
+        [`GET /v1/shifts?date=${TODAY}`]: { status: 200, body: { items: [open] } },
+        'GET /v1/shifts?status=open': { status: 200, body: { items: [stale, open] } },
+      },
+      '/shifts',
+    );
+    const box = await screen.findByRole('region', { name: /ورديات مفتوحة منذ أكثر من 24 ساعة/ });
+    expect(text(box)).toContain('SFT-001-001-0000100');
+    expect(text(box)).toContain('007');
+    expect(text(box)).toContain('فتحها هبة');
+    expect(text(box)).not.toContain('SFT-001-001-0000232');
+  });
+
   it('says when there is no shift that day, and shows a failed load with a retry', async () => {
     let calls = 0;
     signIn(

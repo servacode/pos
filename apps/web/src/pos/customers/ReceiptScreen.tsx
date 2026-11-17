@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import type { ReceiptMethod, ReceiptPayload } from '@serva/core/contracts/documents';
 import { CURRENCIES } from '@serva/core/currencies';
+import { formatMoney } from '@serva/core/money';
+import { stripBidiControls } from '@serva/core/text';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
 import type { SyncDocument } from '@serva/sync';
@@ -85,6 +87,8 @@ export function ReceiptScreen({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedReceipt | null>(null);
+  // The amount is above what the customer owes: the cashier confirms the rest becomes customer credit
+  const [askOver, setAskOver] = useState(false);
   // What the customer owed when the receipt was saved: the balance read may refresh after the save
   const [owedBefore, setOwedBefore] = useState<number | null>(null);
 
@@ -94,6 +98,10 @@ export function ReceiptScreen({
 
   async function record() {
     if (!ready || !customer) return;
+    if (owed !== null && minor! > Math.max(owed, 0) && !askOver) {
+      setAskOver(true);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -133,6 +141,7 @@ export function ReceiptScreen({
   }
 
   function again() {
+    setAskOver(false);
     setSaved(null);
     setOwedBefore(null);
     setCustomer(null);
@@ -229,6 +238,7 @@ export function ReceiptScreen({
                 planId={planId}
                 onPlan={setPickedPlan}
                 onFill={(m) => {
+                  setAskOver(false);
                   setOnInstalment(true);
                   setAmount(amountText(m, base));
                 }}
@@ -239,14 +249,15 @@ export function ReceiptScreen({
               inputMode="decimal"
               dir="ltr"
               value={amount}
-              onChange={(e) =>
+              onChange={(e) => {
+                setAskOver(false);
                 setAmount(
                   e.target.value
                     .replace(/[^\d.٠-٩٫]/g, '')
                     .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
                     .replace('٫', '.'),
-                )
-              }
+                );
+              }}
               inputClassName="num text-2xl font-bold"
               endAdornment={<span className="me-4 shrink-0 text-base">{CURRENCIES[base].symbolAr}</span>}
             />
@@ -290,6 +301,12 @@ export function ReceiptScreen({
               <SummaryRow label="الطريقة">{METHOD_TEXT[method]}</SummaryRow>
             </dl>
             {error ? <Alert tone="error">{error}</Alert> : null}
+            {askOver && owed !== null ? (
+              <Alert tone="warning">
+                المبلغ أكبر من المستحق ({stripBidiControls(formatMoney(Math.max(owed, 0), base))}). الباقي
+                يصير رصيداً للزبون؟
+              </Alert>
+            ) : null}
             <Button
               size="lg"
               fullWidth
@@ -297,7 +314,8 @@ export function ReceiptScreen({
               loading={saving}
               onClick={() => void record()}
             >
-              سجّل القبض{minor ? ' · ' : ''}
+              {askOver ? 'نعم، سجّل والباقي رصيد' : 'سجّل القبض'}
+              {minor ? ' · ' : ''}
               {minor ? <Money minor={minor} currency={base} /> : null}
             </Button>
           </aside>

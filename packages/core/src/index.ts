@@ -39,6 +39,8 @@ export * from './contracts/recipes';
 export * from './contracts/hall';
 export * from './contracts/broadcasts';
 export * from './contracts/ledger-docs';
+export * from './contracts/financial-reports';
+export * from './contracts/agents';
 export * from './contracts/import';
 export * from './contracts/price-list';
 export * from './contracts/pharmacy';

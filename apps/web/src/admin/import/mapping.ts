@@ -50,6 +50,8 @@ export interface Branch {
 export interface Table {
   headers: string[];
   body: FileCell[][];
+  /** Rows of the file above the header row (a report's title lines), so a row's line stays its place in the file */
+  offset?: number;
 }
 
 export function tableOf(rows: FileCell[][]): Table {
@@ -89,13 +91,15 @@ export function targetsOf(
 
 // ─── Remembering the mapping ─────────────────────────────────────────────────
 
-const STORAGE_KEY = (type: ImportType) => `serva.import.mapping.${type}`;
+/** The remembered choices are per store (and per type), so two shops on one computer never mix. */
+const STORAGE_KEY = (type: ImportType, store = '') =>
+  `serva.import.mapping.${store ? `${store}.` : ''}${type}`;
 
 type Saved = Record<string, string>;
 
-function readSaved(type: ImportType): Saved {
+function readSaved(type: ImportType, store?: string): Saved {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY(type));
+    const raw = localStorage.getItem(STORAGE_KEY(type, store));
     const parsed: unknown = raw ? JSON.parse(raw) : {};
     return parsed && typeof parsed === 'object' ? (parsed as Saved) : {};
   } catch {
@@ -104,14 +108,19 @@ function readSaved(type: ImportType): Saved {
 }
 
 /** Remembers which field each header meant, per type, in this browser only. */
-export function saveMapping(type: ImportType, headers: readonly string[], mapping: Mapping): void {
+export function saveMapping(
+  type: ImportType,
+  headers: readonly string[],
+  mapping: Mapping,
+  store?: string,
+): void {
   const saved: Saved = {};
   headers.forEach((header, i) => {
     const key = mapping[i];
     if (key) saved[normalizeArabic(header)] = key;
   });
   try {
-    localStorage.setItem(STORAGE_KEY(type), JSON.stringify(saved));
+    localStorage.setItem(STORAGE_KEY(type, store), JSON.stringify(saved));
   } catch {
     // Private windows and full storage just forget it
   }
@@ -125,9 +134,12 @@ export function initialMapping(
   type: ImportType,
   headers: readonly string[],
   branches: readonly Branch[],
+  /** What a known program calls its columns: header (normalised) → field. Beats the guess, not the owner's own choice. */
+  preset: ReadonlyMap<string, string> = new Map(),
+  store?: string,
 ): Mapping {
   const allowed = new Set(targetsOf(type, branches).map((t) => t.key));
-  const saved = readSaved(type);
+  const saved = readSaved(type, store);
   const guessed = guessImportFields(type, headers);
   const used = new Set<string>();
   const mapping: Mapping = headers.map((header) => {
@@ -139,7 +151,16 @@ export function initialMapping(
     }
     return null;
   });
-  return mapping.map((key, i) => {
+  const preseted = mapping.map((key, i) => {
+    if (key) return key;
+    const known = preset.get(normalizeArabic(headers[i] ?? ''));
+    if (known && allowed.has(known) && !used.has(known)) {
+      used.add(known);
+      return known;
+    }
+    return null;
+  });
+  return preseted.map((key, i) => {
     if (key) return key;
     const guess = guessed[i];
     if (guess && allowed.has(guess) && !used.has(guess)) {
@@ -199,7 +220,7 @@ export function prepareRows(type: ImportType, table: Table, mapping: Mapping): P
       if (cell !== null && cell !== undefined && String(cell).trim() !== '') values[key] = cell;
     });
     if (Object.keys(values).length === 0) return;
-    rows.push({ line: index + 2, values });
+    rows.push({ line: index + 2 + (table.offset ?? 0), values });
   });
   const firstSeen = new Map<string, number>();
   for (const row of rows) {

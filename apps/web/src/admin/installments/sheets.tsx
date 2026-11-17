@@ -6,6 +6,7 @@ import {
   type CurrencyCode,
   type PlanDetail,
 } from '@serva/core';
+import { dayText } from '../../lib/dates';
 
 /** «28,000 ل.س» as plain text for the paper */
 const money = (minor: number, currency: CurrencyCode) => stripBidiControls(formatMoney(minor, currency));
@@ -53,7 +54,14 @@ export function ScheduleSheet({ plan, currency }: { plan: PlanDetail; currency: 
             <dt className="font-semibold">الكفيل</dt>
             <dd>
               {plan.guarantor.name}
-              {plan.guarantor.phone ? ` · ${plan.guarantor.phone}` : ''}
+              {plan.guarantor.phone ? (
+                <>
+                  {' · '}
+                  <bdi className="num" dir="ltr">
+                    {plan.guarantor.phone}
+                  </bdi>
+                </>
+              ) : null}
             </dd>
           </>
         ) : null}
@@ -83,7 +91,7 @@ export function ScheduleSheet({ plan, currency }: { plan: PlanDetail; currency: 
                 <td className="num py-1">
                   {i.no} من {plan.count}
                 </td>
-                <td className="num py-1">{i.dueDate}</td>
+                <td className="py-1">{dayText(i.dueDate)}</td>
                 <td className="py-1">{money(i.amountMinor, currency)}</td>
                 <td className="py-1">{i.paidMinor > 0 ? money(i.paidMinor, currency) : '—'}</td>
               </tr>
@@ -125,9 +133,8 @@ export function NotesSheet({ plan, currency }: { plan: PlanDetail; currency: Cur
             </p>
           </div>
           <p>
-            صدرت في {plan.notePlace ? `${plan.notePlace} ` : ''}بتاريخ{' '}
-            <bdi className="num">{n.issueDate}</bdi> · تُستحق بتاريخ{' '}
-            <bdi className="num font-bold">{n.dueDate}</bdi>
+            صدرت في {plan.notePlace ? `${plan.notePlace} ` : ''}بتاريخ <bdi>{dayText(n.issueDate)}</bdi> ·
+            تُستحق بتاريخ <bdi className="font-bold">{dayText(n.dueDate)}</bdi>
           </p>
           <p className="text-base font-bold">
             المبلغ: {money(n.amountMinor, currency)}{' '}
@@ -142,13 +149,27 @@ export function NotesSheet({ plan, currency }: { plan: PlanDetail; currency: Cur
               <p className="font-semibold">المدين: {plan.customerName}</p>
               {plan.borrower?.nationalId ? <p>الرقم الوطني: {plan.borrower.nationalId}</p> : null}
               {plan.borrower?.address ? <p>العنوان: {plan.borrower.address}</p> : null}
-              {plan.customerPhone ? <p>الهاتف: {plan.customerPhone}</p> : null}
+              {plan.customerPhone ? (
+                <p>
+                  الهاتف:{' '}
+                  <bdi className="num" dir="ltr">
+                    {plan.customerPhone}
+                  </bdi>
+                </p>
+              ) : null}
               <p className="mt-6 border-t border-ink pt-1">التوقيع</p>
             </div>
             <div className="flex flex-col gap-0.5">
               <p className="font-semibold">الضامن الاحتياطي: {plan.guarantor?.name ?? '................'}</p>
               {plan.guarantor?.nationalId ? <p>الرقم الوطني: {plan.guarantor.nationalId}</p> : null}
-              {plan.guarantor?.phone ? <p>الهاتف: {plan.guarantor.phone}</p> : null}
+              {plan.guarantor?.phone ? (
+                <p>
+                  الهاتف:{' '}
+                  <bdi className="num" dir="ltr">
+                    {plan.guarantor.phone}
+                  </bdi>
+                </p>
+              ) : null}
               <p className="mt-6 border-t border-ink pt-1">التوقيع</p>
             </div>
           </div>

@@ -39,7 +39,7 @@ export function getDayTotals(query: { from: string; to: string }) {
   return apiFetch<{ items: DayTotal[] }>(withQuery('/v1/reports/days', query), { auth: true });
 }
 
-export function listShifts(query: { branchId: string | null; date: string }) {
+export function listShifts(query: { branchId: string | null; date?: string; status?: 'open' }) {
   return apiFetch<ShiftListResponse>(withQuery('/v1/shifts', query), { auth: true });
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { returnWindowDays, warrantyAsksCustomer, type StoreResponse } from '@serva/core';
 import type { CurrencyCode } from '@serva/core/currencies';
-import { Button, Switch, TextField } from '@serva/ui';
+import { Alert, Button, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { saveTill } from './api';
 import { CashNotesField, defaultNotes, noteCurrencies, sameNotes } from './CashNotesField';
@@ -38,8 +38,28 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   const typed = days.trim() === '' ? null : Number(days);
   const daysBad = typed !== null && (!/^\d+$/.test(days.trim()) || typed < 1 || typed > 365);
   const bad = daysBad || emptyNotes;
+  // A store opened before the new pound still counts cash by old notes: one tap moves it to the built-in list
+  const oldNotes = (notes.SYP ?? []).some((v) => v >= 1000);
+  // What the form holds now against what was last saved: while they differ the bar says so
+  const snap = (n: Record<string, number[]>) =>
+    JSON.stringify([
+      days,
+      cardRequired,
+      blockNegative,
+      blockOverLimit,
+      belowCost,
+      oldPound,
+      beep,
+      lock,
+      askCustomer,
+      terms,
+      n,
+    ]);
+  const now = snap(notes);
+  const [savedSnap, setSavedSnap] = useState(now);
+  const unsaved = now !== savedSnap;
 
-  async function save() {
+  async function save(notesNow: Record<string, number[]> = notes) {
     if (bad) return;
     setSaving(true);
     setError(null);
@@ -47,7 +67,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
     try {
       // Only a list that differs from the built-in one is stored: the rest follows the till's default
       const custom = Object.fromEntries(
-        currencies.filter((c) => !sameNotes(notes[c]!, defaultNotes(c))).map((c) => [c, notes[c]!]),
+        currencies.filter((c) => !sameNotes(notesNow[c]!, defaultNotes(c))).map((c) => [c, notesNow[c]!]),
       );
       const { cashNotes: _old, ...rest } = store.till ?? {
         returnWindowDays: null,
@@ -71,6 +91,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
           warrantyTerms: terms.trim() || null,
         }),
       );
+      setSavedSnap(snap(notesNow));
       setSaved(true);
     } catch (e) {
       setError(e instanceof ApiError && e.fields ? Object.values(e.fields)[0]! : errorMessage(e));
@@ -86,10 +107,16 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
         e.preventDefault();
         void save();
       }}
+      stickyBar
       footer={
         <>
           {error ? <FailedNote>{error}</FailedNote> : null}
-          {saved ? <SavedNote>حُفظ، ويصل إلى أجهزة الكاشير مع أول اتصال.</SavedNote> : null}
+          {unsaved && !error ? (
+            <p role="status" className="me-auto text-sm font-semibold text-warning-ink">
+              عندك تعديلات غير محفوظة
+            </p>
+          ) : null}
+          {saved && !unsaved ? <SavedNote>حُفظ، ويصل إلى أجهزة الكاشير مع أول اتصال.</SavedNote> : null}
           <Button type="submit" loading={saving} disabled={bad} className="max-sm:w-full">
             احفظ
           </Button>
@@ -168,6 +195,28 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
               الأوراق التي يعدّها الكاشير عند فتح الوردية وإغلاقها. أضف فئة جديدة أو احذف فئة لم تعد تُتداول.
             </p>
           </div>
+          {oldNotes ? (
+            <Alert tone="info" title="فئات الليرة من العملة القديمة">
+              <span className="flex flex-col items-start gap-2">
+                <span>
+                  عندك فئات مثل 1000 و5000. فئات الليرة الجديدة هي {defaultNotes('SYP').join('، ')}. لا يتغيّر
+                  شيء حتى تضغط الزر.
+                </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  loading={saving}
+                  onClick={() => {
+                    const next = { ...notes, SYP: defaultNotes('SYP') };
+                    setNotes(next);
+                    void save(next);
+                  }}
+                >
+                  حدّث الفئات للعملة الجديدة
+                </Button>
+              </span>
+            </Alert>
+          ) : null}
           {currencies.map((c) => (
             <CashNotesField
               key={c}

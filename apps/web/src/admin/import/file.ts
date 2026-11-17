@@ -93,9 +93,16 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
   return rows;
 }
 
-/** Drops fully empty rows and the empty columns at the end of every row. */
-export function tidy(rows: FileCell[][]): FileCell[][] {
-  const kept = rows.filter((r) => r.some((c) => c !== null && String(c).trim() !== ''));
+/**
+ * Drops fully empty rows and the empty columns at the end of every row. With `keepGaps` the empty
+ * rows inside the sheet stay (empty), so a row keeps the line it has in the file: a report of an old
+ * program has title lines and a blank line above its columns, and the owner is told lines by Excel.
+ */
+export function tidy(rows: FileCell[][], keepGaps = false): FileCell[][] {
+  const filled = (r: FileCell[]) => r.some((c) => c !== null && String(c).trim() !== '');
+  let last = rows.length;
+  while (last > 0 && !filled(rows[last - 1]!)) last--;
+  const kept = keepGaps ? rows.slice(0, last) : rows.filter(filled);
   return kept.map((r) => {
     let end = r.length;
     while (end > 0 && (r[end - 1] === null || String(r[end - 1]).trim() === '')) end--;
@@ -124,7 +131,7 @@ function cellOf(value: unknown): FileCell {
  * Reads a .xlsx or .csv file into sheets. The xlsx reader is loaded only now, so the rest of the
  * app never pays for it.
  */
-export async function readSpreadsheet(file: File): Promise<Sheet[]> {
+export async function readSpreadsheet(file: File, keepGaps = false): Promise<Sheet[]> {
   if (file.size > MAX_FILE_BYTES) throw new FileProblem('الملف أكبر من 15 ميغابايت. قسّمه إلى ملفات أصغر.');
   const name = file.name.toLowerCase();
   if (name.endsWith('.xls')) {
@@ -139,7 +146,13 @@ export async function readSpreadsheet(file: File): Promise<Sheet[]> {
       throw new FileProblem('تعذّر فتح الملف. تأكد أنه xlsx سليم غير محمي بكلمة سر.');
     }
     const out = sheets
-      .map((s) => ({ name: s.sheet, rows: tidy(s.data.map((row) => row.map(cellOf))) }))
+      .map((s) => ({
+        name: s.sheet,
+        rows: tidy(
+          s.data.map((row) => row.map(cellOf)),
+          keepGaps,
+        ),
+      }))
       .filter((s) => s.rows.length > 0);
     for (const s of out) tooBig(s.rows, s.name);
     if (out.length === 0) throw new FileProblem('الملف فارغ.');
@@ -147,7 +160,7 @@ export async function readSpreadsheet(file: File): Promise<Sheet[]> {
   }
   if (name.endsWith('.csv') || name.endsWith('.txt') || name.endsWith('.tsv')) {
     const text = decodeText(await bytesOf(file));
-    const rows = tidy(parseDelimited(text, detectDelimiter(text)));
+    const rows = tidy(parseDelimited(text, detectDelimiter(text)), keepGaps);
     if (rows.length === 0) throw new FileProblem('الملف فارغ.');
     tooBig(rows, 'CSV');
     return [{ name: 'CSV', rows }];

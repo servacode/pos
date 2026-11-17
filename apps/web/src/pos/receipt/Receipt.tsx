@@ -20,6 +20,7 @@ import { packPiecesNote } from '../sale/packText';
 import { clockText, dateText, isolateSizes } from '../format';
 import { Bars } from '../../lib/Bars';
 import { dayText } from '../../lib/dates';
+import { INSTALMENT_FEE_VARIANT_ID } from '@serva/core/installments';
 import { discountLabel, VOUCHER_NOTE } from '../print/lines';
 import { INSTALMENT_TITLE, instalmentRows } from '../print/instalmentLines';
 import { DEPOSIT_BACK_NAME } from '../rentals/api';
@@ -474,11 +475,11 @@ export function Receipt({
   const at = Date.parse(data.doc.deviceTime);
   const foreignRate = sale.exchangeRates[0];
   const foreignCode = foreignRate ? (foreignRate.unit === base ? foreignRate.quote : foreignRate.unit) : null;
-  // The dollar line only while the store still offers that currency (or the sale was paid in it)
+  // The dollar line only when that currency was involved: a payment or the change in it (a pound-only
+  // sale carries no rate line, even while the store offers the dollar)
   const offered =
     foreignCode !== null &&
-    ((data.settings.enabledCurrencies ?? []).includes(foreignCode) ||
-      sale.payments.some((p) => p.currency === foreignCode));
+    (sale.payments.some((p) => p.currency === foreignCode) || sale.change?.currency === foreignCode);
   const foreign = offered ? foreignCode : null;
   const t = sale.totals;
   const oldPound = data.settings.till?.showOldPound === true && base === 'SYP';
@@ -494,7 +495,12 @@ export function Receipt({
   const contractSaved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
   // The deposit handed back on a rental is money, not a piece sold
   const pieces = sale.lines
-    .filter((l) => !l.name.startsWith(DEPOSIT_BACK_NAME) && !data.serviceVariantIds?.includes(l.variantId))
+    .filter(
+      (l) =>
+        !l.name.startsWith(DEPOSIT_BACK_NAME) &&
+        !data.serviceVariantIds?.includes(l.variantId) &&
+        l.variantId !== INSTALMENT_FEE_VARIANT_ID,
+    )
     .reduce((n, l) => n + (l.unitName ? 1 : Math.round(l.baseQty / 1000)), 0);
   const amount = (minor: number, currency: CurrencyCode = base) => (
     <ExactMoney minor={minor} currency={currency} symbol={currency !== base} />
@@ -691,7 +697,7 @@ export function Receipt({
                   label={
                     r.date ? (
                       <>
-                        {r.label} · <bdi dir="ltr">{r.date}</bdi>
+                        {r.label} · <bdi>{dayText(r.date, digits)}</bdi>
                       </>
                     ) : (
                       r.label

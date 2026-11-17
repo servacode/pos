@@ -188,4 +188,36 @@ describe('cash rounding on the Z (round 19)', () => {
     expect(text).toContain('منها تقريب النقد (بيع ومرتجع)');
     expect(text).toContain('5');
   });
+
+  it('shows sales on instalments and instalments collected as their own lines', () => {
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 260_000_00, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 50_000_00 }],
+          change: null,
+          installmentPlan: { downPaymentMinor: 50_000_00, financedMinor: 210_000_00 },
+        },
+        1,
+      ),
+      doc(
+        'receipt',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          method: 'cash',
+          amountMinor: 35_000_00,
+          allocations: [{ planId: 'p', no: 1, amountMinor: 35_000_00 }],
+        },
+        2,
+      ),
+    ]);
+    expect(text).toContain('مبيعات بالتقسيط');
+    expect(text).toContain('دفعات أولى');
+    expect(text).toContain('أقساط مقبوضة');
+    expect(text).toContain('35,000');
+  });
 });

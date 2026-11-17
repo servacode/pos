@@ -3,8 +3,10 @@ import { Link, useParams } from 'react-router';
 import {
   CUSTOMER_PAYMENT_LABEL,
   CUSTOMER_PAYMENT_METHODS,
+  formatMoney,
   NOTE_STATUS_LABELS,
   PLAN_STATUS_LABELS,
+  stripBidiControls,
   type Permission,
   toMinor,
   type CustomerPaymentMethod,
@@ -462,6 +464,7 @@ function CollectDialog({
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [askOver, setAskOver] = useState(false);
 
   let minor: number | null = null;
   try {
@@ -473,6 +476,10 @@ function CollectDialog({
 
   async function submit() {
     if (!ready || minor === null) return;
+    if (minor > plan.remainingMinor && !askOver) {
+      setAskOver(true);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -512,9 +519,18 @@ function CollectDialog({
           dir="ltr"
           autoFocus
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setAskOver(false);
+          }}
           error={amount.trim() && minor === null ? 'مبلغ غير صالح' : undefined}
         />
+        {askOver ? (
+          <Alert tone="warning">
+            المبلغ أكبر من المستحق ({stripBidiControls(formatMoney(plan.remainingMinor, base))}). الباقي يصير
+            رصيداً للزبون؟
+          </Alert>
+        ) : null}
         <Select
           label="طريقة الدفع"
           value={method}
@@ -547,7 +563,7 @@ function CollectDialog({
             إلغاء
           </Button>
           <Button type="submit" loading={saving} disabled={!ready}>
-            سجّل القبض
+            {askOver ? 'نعم، سجّل والباقي رصيد' : 'سجّل القبض'}
           </Button>
         </div>
       </form>

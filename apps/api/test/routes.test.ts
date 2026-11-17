@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { createUuidV7, parseSnapshot, payloadHash, type SyncDocumentBody } from '@serva/sync';
 import { cartLine, documents, openStore, push, sale, shiftOpen } from './accounting-fixtures';
 import { createDevice, deviceFields, firstBranch } from './devices';
+import { hashSecret } from '../src/auth/passwords';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
 
 /**
@@ -13,7 +14,7 @@ import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabas
  * Device routes take no id: the store comes from the device token alone, and each gets a probe
  * that another store's device can neither see nor touch this store's data.
  */
-const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 'platform'> = {
+const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 'platform' | 'agent'> = {
   'GET /health': 'public',
   'GET /v1/meta': 'public',
   'POST /v1/auth/register': 'public',
@@ -111,6 +112,18 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/platform/settings': 'platform',
   'GET /v1/platform/legal': 'platform',
   'PUT /v1/platform/legal': 'platform',
+  'GET /v1/platform/agents': 'platform',
+  'POST /v1/platform/agents': 'platform',
+  'GET /v1/platform/agents/:id': 'platform',
+  'PUT /v1/platform/agents/:id': 'platform',
+  'POST /v1/platform/agents/:id/balance': 'platform',
+  'PUT /v1/platform/stores/:id/agent': 'platform',
+  'POST /v1/agent/login': 'public',
+  'PUT /v1/agent/password': 'agent',
+  'GET /v1/agent/me': 'agent',
+  'GET /v1/agent/stores': 'agent',
+  'GET /v1/agent/ledger': 'agent',
+  'POST /v1/agent/stores/:id/activate': 'agent',
   'GET /v1/legal': 'public',
   'GET /v1/plans': 'public',
   'PUT /v1/store/profile': 'signed-in',
@@ -262,6 +275,11 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/journal/manual': 'signed-in',
   'POST /v1/journal/:id/reverse': 'signed-in',
   'GET /v1/reports/profit-loss': 'signed-in',
+  'GET /v1/reports/balance-sheet': 'signed-in',
+  'GET /v1/reports/cash-flow': 'signed-in',
+  'GET /v1/reports/account-ledger': 'signed-in',
+  'GET /v1/reports/tax': 'signed-in',
+  'GET /v1/reports/supplier-ageing': 'signed-in',
   'GET /v1/sync/evidence': 'signed-in',
 };
 
@@ -1574,6 +1592,44 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     });
     expect(res.statusCode).toBe(404);
   },
+  // An agent pays only for his own stores: agent 1 cannot activate (or find) agent 2's store
+  'POST /v1/agent/stores/:id/activate': async (app, { a, b }) => {
+    const hash = await hashSecret('agent-pass-123');
+    const ids: string[] = [];
+    for (const [n, tenantId] of [
+      ['1', a.tenantId],
+      ['2', b.tenantId],
+    ] as const) {
+      const [agent] = await ownerDb()<{ id: string }[]>`
+        insert into agents (code, full_name, email, password_hash, balance_minor)
+        values (${'AG-' + n}, ${'وكيل ' + n}, ${`agent${n}@agents.test`}, ${hash}, 5000) returning id`;
+      await ownerDb()`update tenants set agent_id = ${agent!.id} where id = ${tenantId}`;
+      await ownerDb()`update subscriptions set trial_ends_at = '2026-10-01T00:00:00Z' where tenant_id = ${tenantId}`;
+      ids.push(agent!.id);
+    }
+    const login = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/login',
+      payload: { email: 'agent1@agents.test', password: 'agent-pass-123' },
+    });
+    const headers = { authorization: `Bearer ${login.json<{ token: string }>().token}` };
+    const go = (tenantId: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/agent/stores/${tenantId}/activate`,
+        headers,
+        payload: { planCode: 'basic', billingCycle: 'monthly', requestKey: `idor-probe-${tenantId}` },
+      });
+    for (const tenantId of [b.tenantId, '0192a000-0000-7000-8000-000000000001']) {
+      expect((await go(tenantId)).statusCode, tenantId).toBe(404);
+    }
+    const [theirs] = await ownerDb()<{ status: string; balance: string }[]>`
+      select s.status, (select balance_minor::text from agents where id = ${ids[1]!}) as balance
+      from subscriptions s where s.tenant_id = ${b.tenantId}`;
+    expect(theirs).toEqual({ status: 'trialing', balance: '5000' });
+    // His own store does pay, so the 404 above is the guard, not a broken route
+    expect((await go(a.tenantId)).statusCode).toBe(200);
+  },
 };
 
 /** Device routes: store B's device acting on store A's ids gets nothing of store A. */
@@ -2165,6 +2221,32 @@ describe('route registry', () => {
       for (const authorization of [undefined, 'Bearer forged', `Bearer ${body.accessToken}`]) {
         const res = await app.inject({ method, url, headers: authorization ? { authorization } : {} });
         expect(res.statusCode, `${route} ${authorization ?? 'no token'}`).toBe(401);
+      }
+    }
+  });
+
+  it('agent routes refuse a missing token, a forged one, a store owner’s and a platform member’s', async () => {
+    const { body } = await registerStore(app);
+    const admin = await hashSecret('platform-pass-1');
+    await ownerDb()`insert into platform_users (full_name, email, password_hash, role)
+      values ('مدير', 'routes-admin@serva.test', ${admin}, 'super_admin')`;
+    const login = await app.inject({
+      method: 'POST',
+      url: '/v1/platform/login',
+      payload: { email: 'routes-admin@serva.test', password: 'platform-pass-1' },
+    });
+    for (const [route, access] of Object.entries(ROUTES)) {
+      if (access !== 'agent') continue;
+      const [method, rawUrl] = route.split(' ') as ['GET', string];
+      const url = rawUrl.replace(':id', '0192a000-0000-7000-8000-000000000001');
+      for (const authorization of [
+        undefined,
+        'Bearer forged',
+        `Bearer ${body.accessToken}`,
+        `Bearer ${login.json<{ token: string }>().token}`,
+      ]) {
+        const res = await app.inject({ method, url, headers: authorization ? { authorization } : {} });
+        expect(res.statusCode, `${route} ${authorization?.slice(0, 20) ?? 'no token'}`).toBe(401);
       }
     }
   });

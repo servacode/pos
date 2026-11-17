@@ -46,6 +46,8 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // what is wrong in each field, shown next to it (key: the field's name)
+  const [bad, setBad] = useState<Record<string, string>>({});
 
   useEffect(() => {
     getInstalmentSettings()
@@ -70,21 +72,44 @@ export function SettingsPage() {
     setSaving(true);
     setError(null);
     setSaved(false);
+    const found: Record<string, string> = {};
+    const parsed: MarkupBand[] = [];
+    bands.forEach((b, i) => {
+      const bp = percentBp(b.percent);
+      const count = Number(b.upToCount);
+      if (!Number.isInteger(count) || count < 1 || count > 60) found[`band-count-${i}`] = 'من 1 إلى 60';
+      if (bp === null) found[`band-percent-${i}`] = 'نسبة من 0 إلى 100';
+      if (bp !== null && Number.isInteger(count) && count >= 1) parsed.push({ upToCount: count, bp });
+    });
+    const down = percentBp(minDown);
+    if (down === null) found.minDown = 'اكتب نسبة من 0 إلى 100.';
+    const whole = (t: string, min: number, max: number) => {
+      const n = Number(t.trim());
+      return t.trim() !== '' && Number.isInteger(n) && n >= min && n <= max;
+    };
+    if (!whole(maxCount, 1, 60)) found.maxCount = 'اكتب عدداً من 1 إلى 60.';
+    if (!whole(before, 0, 30)) found.before = 'اكتب عدداً من 0 إلى 30.';
+    if (!whole(after, 0, 60)) found.after = 'اكتب عدداً من 0 إلى 60.';
+    const money = (t: string) => Number.isFinite(Number(t.trim() || '0')) && Number(t.trim() || '0') >= 0;
+    if (!money(step)) found.step = 'اكتب مبلغاً صحيحاً (0 أو أكثر).';
+    if (guarantorOver.trim() && !money(guarantorOver))
+      found.guarantorOver = 'اكتب مبلغاً صحيحاً (0 أو أكثر).';
+    if (new Set(bands.map((b) => b.upToCount.trim())).size !== bands.length)
+      found['band-count-0'] = found['band-count-0'] ?? 'عدد أقساط مكرر في النسب';
+    setBad(found);
+    if (Object.keys(found).length > 0) {
+      setSaving(false);
+      setError('راجع الحقول المعلّمة بالأحمر.');
+      requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>('[aria-invalid="true"]')?.scrollIntoView?.({ block: 'center' }),
+      );
+      return;
+    }
     try {
-      const parsed: MarkupBand[] = [];
-      for (const b of bands) {
-        const bp = percentBp(b.percent);
-        const count = Number(b.upToCount);
-        if (bp === null || !Number.isInteger(count) || count < 1)
-          throw new Error('راجع نسب الرسم: عدد الأقساط ونسبته.');
-        parsed.push({ upToCount: count, bp });
-      }
-      const down = percentBp(minDown);
-      if (down === null) throw new Error('الدفعة الأولى نسبة من 0 إلى 100.');
       const overMinor = guarantorOver.trim() ? Math.round(Number(guarantorOver) * 100) : null;
       const next = await saveInstalmentSettings({
         enabled,
-        minDownBp: down,
+        minDownBp: down!,
         maxCount: Number(maxCount),
         markupBands: parsed,
         roundingStepMinor: Math.round(Number(step || '0') * 100),
@@ -117,7 +142,7 @@ export function SettingsPage() {
             </Link>
           }
         />
-        {error ? <Alert tone="error">{error}</Alert> : null}
+        {error && !loaded ? <Alert tone="error">{error}</Alert> : null}
         {saved ? <Alert tone="success">حُفظت الإعدادات. تصل الكاشير مع أول مزامنة.</Alert> : null}
         {!loaded && !error ? (
           <Skeleton className="h-64 w-full" />
@@ -143,6 +168,7 @@ export function SettingsPage() {
                 dir="ltr"
                 value={minDown}
                 onChange={(e) => setMinDown(e.target.value)}
+                error={bad.minDown}
               />
               <TextField
                 label="أكثر عدد للأقساط"
@@ -150,6 +176,7 @@ export function SettingsPage() {
                 dir="ltr"
                 value={maxCount}
                 onChange={(e) => setMaxCount(e.target.value)}
+                error={bad.maxCount}
               />
               <TextField
                 label={`تقريب القسط (${unit})`}
@@ -158,6 +185,7 @@ export function SettingsPage() {
                 dir="ltr"
                 value={step}
                 onChange={(e) => setStep(e.target.value)}
+                error={bad.step}
               />
               <TextField
                 label={`كفيل إجباري فوق (${unit})`}
@@ -166,6 +194,7 @@ export function SettingsPage() {
                 dir="ltr"
                 value={guarantorOver}
                 onChange={(e) => setGuarantorOver(e.target.value)}
+                error={bad.guarantorOver}
               />
             </section>
             <section className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4">
@@ -181,6 +210,7 @@ export function SettingsPage() {
                     inputMode="numeric"
                     dir="ltr"
                     value={b.upToCount}
+                    error={bad[`band-count-${i}`]}
                     onChange={(e) =>
                       setBands((list) =>
                         list.map((x, j) => (j === i ? { ...x, upToCount: e.target.value } : x)),
@@ -192,6 +222,7 @@ export function SettingsPage() {
                     inputMode="decimal"
                     dir="ltr"
                     value={b.percent}
+                    error={bad[`band-percent-${i}`]}
                     onChange={(e) =>
                       setBands((list) =>
                         list.map((x, j) => (j === i ? { ...x, percent: e.target.value } : x)),
@@ -219,6 +250,7 @@ export function SettingsPage() {
                 dir="ltr"
                 value={before}
                 onChange={(e) => setBefore(e.target.value)}
+                error={bad.before}
               />
               <TextField
                 label="التذكير بعد الاستحقاق (أيام)"
@@ -226,6 +258,7 @@ export function SettingsPage() {
                 dir="ltr"
                 value={after}
                 onChange={(e) => setAfter(e.target.value)}
+                error={bad.after}
               />
             </section>
             <section className="grid gap-4 rounded-card border border-line bg-surface p-4">
@@ -254,10 +287,13 @@ export function SettingsPage() {
                 maxLength={600}
               />
             </section>
-            <div>
-              <Button type="submit" loading={saving}>
-                احفظ
-              </Button>
+            <div className="sticky bottom-0 -mx-1 flex flex-col gap-2 border-t border-line bg-surface px-1 py-3">
+              {error && loaded ? <Alert tone="error">{error}</Alert> : null}
+              <div>
+                <Button type="submit" loading={saving}>
+                  احفظ
+                </Button>
+              </div>
             </div>
           </form>
         )}

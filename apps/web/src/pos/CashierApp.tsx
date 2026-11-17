@@ -408,6 +408,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       writeCart(() => pos.local.set(CURRENT_CART_KEY, { userId: session.userId, cart, savedAt: Date.now() }));
     } else {
       writeCart(() => pos.local.remove(CURRENT_CART_KEY));
+      // a half-built instalment plan belongs to the cart: it goes with it (the key is PaymentPanel's)
+      writeCart(() => pos.local.remove('pending-instalment-plan'));
     }
   }, [cart, cartRestored, pos.local, session.userId, writeCart]);
 

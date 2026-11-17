@@ -116,6 +116,8 @@ export interface DayReport {
 export const shiftListQuery = z.object({
   branchId: uuidSchema.optional(),
   date: isoDateSchema.optional(),
+  /** 'open': the shifts still open, of any day (the list's «ورديات قديمة مفتوحة») */
+  status: z.enum(['open']).optional(),
 });
 
 export interface ShiftSummary {

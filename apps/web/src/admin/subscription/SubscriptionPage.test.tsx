@@ -57,6 +57,7 @@ function page(over: Partial<SubscriptionPage> = {}): SubscriptionPage {
       },
     ],
     sypPerUsd: '13000',
+    agent: null,
     ...over,
   };
 }

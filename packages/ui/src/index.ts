@@ -93,7 +93,7 @@ export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { Skeleton, SkeletonText } from './Skeleton';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Avatar, initialsOf, type AvatarProps } from './Avatar';
-export { Money, type MoneyProps } from './Money';
+export { Money, exactDecimals, type MoneyProps } from './Money';
 export { Balance, type BalanceProps } from './Balance';
 
 export {

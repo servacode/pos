@@ -151,4 +151,39 @@ describe('«استيراد البيانات»', () => {
     await waitFor(() => expect(click).toHaveBeenCalled());
     expect(create).toHaveBeenCalled();
   });
+
+  it('moves a shop from its old program: the steps, the title lines skipped, مدين and دائن made one balance, the balance said before posting', async () => {
+    const { user, requestsTo } = open(undefined, '/import?type=customers');
+    await screen.findByRole('heading', { name: 'استيراد البيانات' });
+    await user.click(screen.getByRole('button', { name: 'انقل من برنامجك القديم' }));
+    await screen.findByRole('heading', { name: 'ما البرنامج الذي تنقل منه؟' });
+    await user.click(screen.getByRole('button', { name: /الأمين/ }));
+    expect(await screen.findByText(/أرصدة الزبائن/, { selector: 'li' })).toBeInTheDocument();
+    expect(screen.getByText(/لم نجرّبه على نسخة حقيقية/)).toBeInTheDocument();
+
+    const csv = [
+      'أرصدة الزبائن',
+      '',
+      'رقم الحساب,اسم الحساب,الموبايل,مدين,دائن',
+      '1,أحمد,0933111222,500,100',
+      '2,سامر,0944111222,0,40',
+      'المجموع,,,500,140',
+    ].join('\r\n');
+    await upload(user, csv, 'أرصدة.csv');
+    await screen.findByRole('heading', { name: 'أعمدة الملف' });
+    expect(screen.getByText(/جمعناهما في عمود رصيد واحد/)).toBeInTheDocument();
+    expect(screen.getByLabelText('حقل العمود اسم الحساب')).toHaveValue('name');
+    expect(screen.getByLabelText('حقل العمود الرصيد (مدين − دائن)')).toHaveValue('balance');
+    expect(screen.getByLabelText('حقل العمود مدين')).toHaveValue('');
+    await user.click(screen.getByRole('button', { name: 'التالي: راجع الملف' }));
+    expect(await screen.findByText(/رصيد افتتاحي، مجموعها/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'افحص الملف' }));
+    await screen.findByRole('heading', { name: 'ما سيحدث عند الاستيراد' });
+    const sent = (requestsTo('POST', '/v1/import')[0]!.body as ImportInput).rows;
+    expect(sent.map((r) => [r.line, r.values.balance])).toEqual([
+      [4, 400],
+      [5, -40],
+    ]);
+    expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
+  });
 });

@@ -123,10 +123,10 @@ export function stockFor(
     );
     if (!fits || !attrs.some((a) => a.name === name && a.value === value)) continue;
     if (piece.stockQty === null || piece.stockQty === undefined) continue;
-    // A combination below zero adds nothing: the same rule as the list's «متاح للبيع» (lib/sellable)
-    total = (total ?? 0) + sellableOnHand(piece.stockQty - (inCart.get(piece.variantId) ?? 0));
+    // A colour below zero takes from the others of the same size: the true total, never shown below none
+    total = (total ?? 0) + (piece.stockQty - (inCart.get(piece.variantId) ?? 0));
   }
-  return total;
+  return total === null ? null : sellableOnHand(total);
 }
 
 /** The piece with exactly these values, once every option has one. */
@@ -181,11 +181,14 @@ export function sizeStock(
       (p.attributes ?? []).some((a) => a.name === size.name && a.value === value),
     );
     // Unknown stock counts as available: only a known empty size is struck
-    const inStock = mine.some((p) => p.stockQty === null || p.stockQty === undefined || p.stockQty > 0);
-    // What is left of the size, thousandths (negative stock counts as none); null when any piece's stock is unknown
+    // What is left of the size, thousandths: the true total over its colours (a negative colour counted, never shown below none); null when any piece's stock is unknown
     const left = mine.every((p) => typeof p.stockQty === 'number')
-      ? mine.reduce((sum, p) => sum + Math.max(0, p.stockQty as number), 0)
+      ? Math.max(
+          0,
+          mine.reduce((sum, p) => sum + (p.stockQty as number), 0),
+        )
       : null;
+    const inStock = left === null || left > 0;
     return { option: size.name, value, inStock, left };
   });
 }

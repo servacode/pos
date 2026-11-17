@@ -23,6 +23,9 @@ export function canonicalNumber(raw: string, decimals: number, allowNegative = f
   return `${negative ? '-' : ''}${text}`;
 }
 
+/** Anything but a digit, a separator, a minus, a space or a bidi mark: a letter or a symbol typed into a number */
+const NOT_NUMERIC = /[^0-9\u0660-\u0669.,\u066b\u066c\-\u2212\s\u200e\u200f\u061c\u202a-\u202e\u2066-\u2069]/;
+
 const LRI = '\u2066';
 const PDI = '\u2069';
 
@@ -110,6 +113,7 @@ export function NumberField({
   const density = useDensity();
   const inputRef = useRef<HTMLInputElement>(null);
   const caret = useRef<number | null>(null);
+  const [junk, setJunk] = useState(false);
   const shown = groupedNumber(value, digits);
 
   useLayoutEffect(() => {
@@ -122,6 +126,12 @@ export function NumberField({
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     const { value: typed, selectionStart } = event.target;
+    // Letters and symbols are refused with a message (the number stays as it was), never silently stripped
+    if (NOT_NUMERIC.test(typed)) {
+      setJunk(true);
+      return;
+    }
+    setJunk(false);
     caret.current = significantBefore(typed, selectionStart ?? typed.length);
     if (onFractionDropped && decimals === 0 && /[.٫]/.test(typed)) onFractionDropped();
     onValueChange(canonicalNumber(typed, decimals, allowNegative));
@@ -130,6 +140,11 @@ export function NumberField({
   return (
     <TextField
       {...rest}
+      error={junk ? 'اكتب أرقاماً فقط' : rest.error}
+      onBlur={(e) => {
+        setJunk(false);
+        rest.onBlur?.(e);
+      }}
       ref={inputRef}
       type="text"
       inputMode="decimal"
