@@ -24,6 +24,8 @@ export interface PickedVariant {
   tracksSerial?: boolean;
   /** The shelf price of one piece when it is in pounds (minor units), to ask about a cost far above it */
   priceMinor?: number;
+  /** The least the shop wants on the shelf (thousandths), when set */
+  minStockQty?: number;
 }
 
 /**
@@ -71,6 +73,7 @@ export function VariantPicker({
         ...(detail.requiresExpiry ? { requiresExpiry: true } : {}),
         ...(detail.tracksSerial ? { tracksSerial: true } : {}),
         ...(v.price?.currency === 'SYP' && v.price.priceMinor > 0 ? { priceMinor: v.price.priceMinor } : {}),
+        ...(v.minStockQty ? { minStockQty: v.minStockQty } : {}),
       }));
     if (variants.length === 1) {
       onPick(variants[0]!);

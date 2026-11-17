@@ -798,6 +798,9 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
 
 const getPendingOrders = () =>
   apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders?status=pending', { auth: true });
+// The orders already accepted and waiting to be sold on a till: the number the till's «طلبات المتجر» chip shows
+const getAcceptedOrders = () =>
+  apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders?status=accepted', { auth: true });
 
 type WaitingTone = 'warning' | 'brand' | 'danger';
 
@@ -930,6 +933,8 @@ type ChequesState = ReportState<Awaited<ReturnType<typeof listCheques>>>;
 
 interface WaitingArgs {
   orders: OrdersState;
+  /** Accepted orders not sold yet (what the till counts under «طلبات المتجر») */
+  toSell?: OrdersState | null;
   merch: MerchState;
   expiry: ExpiryState;
   seesOrders: boolean;
@@ -943,6 +948,7 @@ interface WaitingArgs {
 /** What «ما ينتظرك» counts, shared by its list and by the tab that carries its total */
 function waitingFigures({
   orders,
+  toSell,
   merch,
   expiry,
   seesOrders,
@@ -953,6 +959,7 @@ function waitingFigures({
   const count = orders.data?.items.length ?? 0;
   const holds = orders.data?.items.filter((order) => order.source === 'hold').length ?? 0;
   const online = count - holds;
+  const accepted = toSell?.data?.items.length ?? 0;
   // Every low product is one group, whatever the store sells; a piece below zero is named once, in
   // «المخزون», where its chip opens the count
   const stock = lowGroups(merch.data?.lowStock ?? []);
@@ -967,6 +974,7 @@ function waitingFigures({
   // The tab counts rows, as the list shows them; «بلا صورة» is a suggestion, shown but not counted
   const total =
     (online > 0 ? 1 : 0) +
+    (accepted > 0 ? 1 : 0) +
     (holds > 0 ? 1 : 0) +
     stock.length +
     (expiring > 0 ? 1 : 0) +
@@ -975,6 +983,7 @@ function waitingFigures({
   return {
     holds,
     online,
+    accepted,
     stock,
     expiring,
     expired,
@@ -1000,7 +1009,8 @@ const WAITING_ROWS = 3;
 
 function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   const [all, setAll] = useState(false);
-  const { holds, online, stock, expiring, expired, recalled, loading, noPhoto, empty } = waitingFigures(args);
+  const { holds, online, accepted, stock, expiring, expired, recalled, loading, noPhoto, empty } =
+    waitingFigures(args);
   const batches = args.expiry.data?.items ?? [];
   const recalledRows = batches.filter((row) => row.blocked);
   const expiredRows = batches.filter((row) => !row.blocked && row.daysLeft !== null && row.daysLeft < 0);
@@ -1062,6 +1072,12 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
     rows.push(
       <WaitingRow key="online" to="/online-store" count={online} tone="brand" icon={<StoreIcon />}>
         {online === 1 ? 'طلب جديد من المتجر الإلكتروني' : 'طلبات جديدة من المتجر الإلكتروني'}
+      </WaitingRow>,
+    );
+  if (accepted > 0)
+    rows.push(
+      <WaitingRow key="accepted" to="/online-store" count={accepted} tone="brand" icon={<StoreIcon />}>
+        {accepted === 1 ? 'طلب مقبول ينتظر البيع على الكاشير' : 'طلبات مقبولة تنتظر البيع على الكاشير'}
       </WaitingRow>,
     );
   if (holds > 0)
@@ -1492,6 +1508,7 @@ export function HomePage() {
     },
   );
   const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrders, { cache: 'home' });
+  const toSell = useReport(seesOrders ? 'orders:accepted' : null, getAcceptedOrders, { cache: 'home' });
   const merch = useReport(seesStock ? 'home:low' : null, () => getMerchandise(daysAgo(30), daysAgo(0), 60), {
     cache: 'home',
   });
@@ -1673,6 +1690,7 @@ export function HomePage() {
                 <AttentionPanel
                   waiting={{
                     orders,
+                    toSell,
                     merch,
                     expiry,
                     seesOrders,

@@ -233,12 +233,13 @@ export function lookupSerials(
     const history = rows.length
       ? await tx.execute<{
           serial: string;
+          sale_id: string | null;
           sale_number: string | null;
           sold_on: string;
           flag: SerialFlag | null;
           customer_name: string | null;
         }>(sql`
-          select ss.serial, i.number as sale_number, ss.sold_on::text as sold_on, ss.flag,
+          select ss.serial, ss.sale_id, i.number as sale_number, ss.sold_on::text as sold_on, ss.flag,
                  coalesce(i.customer_name, c.name) as customer_name
           from serial_sales ss
           left join invoices i on i.tenant_id = ss.tenant_id and i.id = ss.sale_id
@@ -254,6 +255,7 @@ export function lookupSerials(
         const sales = history
           .filter((h) => h.serial === r.serial)
           .map((h) => ({
+            saleId: h.sale_id,
             saleNumber: h.sale_number,
             soldOn: h.sold_on,
             flag: h.flag,
@@ -370,10 +372,24 @@ export function fixSerial(
     const serial = normalized(input.serial);
     const [row] = await tx.select().from(serials).where(eq(serials.serial, serial));
     if (!row) throw new AppError(404, 'not_found', 'هذا الرقم التسلسلي غير موجود في المحل.');
-    if (row.status === input.status) {
+    if (input.keepSaleId) {
+      // A number two sales took: it stays with the one the owner picks; the other keeps its flagged line in the history
+      if (row.status !== 'sold' || input.status !== 'sold') {
+        throw invalid({ status: 'الرقم ليس مباعاً' });
+      }
+      if (row.saleId === input.keepSaleId) throw invalid({ keepSaleId: 'الرقم عند هذه البيعة أصلاً' });
+      const [kept] = await tx.execute<{ sold_on: string }>(sql`
+        select sold_on::text as sold_on from serial_sales
+        where serial = ${serial} and sale_id = ${input.keepSaleId}`);
+      if (!kept) throw invalid({ keepSaleId: 'هذه البيعة لم تبع هذا الرقم' });
+      const [prod] = await tracking(tx, [row.variantId]).then((m) => [m.get(row.variantId)]);
+      const until = prod?.warranty ? addMonthsIso(kept.sold_on, prod.warranty) : null;
+      await tx.execute(sql`
+        update serials set sale_id = ${input.keepSaleId}, sold_on = ${kept.sold_on}, warranty_until = ${until}
+        where id = ${row.id}`);
+    } else if (row.status === input.status) {
       throw invalid({ status: 'الرقم في هذه الحالة أصلاً' });
-    }
-    if (input.status === 'in_stock') {
+    } else if (input.status === 'in_stock') {
       await tx.execute(sql`
         update serials set status = 'in_stock', sale_id = null, sold_on = null, warranty_until = null
         where id = ${row.id}`);
@@ -401,6 +417,7 @@ export function fixSerial(
         changes: {
           status: [row.status, input.status],
           ...(input.saleId ? { saleId: [null, input.saleId] as [unknown, unknown] } : {}),
+          ...(input.keepSaleId ? { saleId: [row.saleId, input.keepSaleId] as [unknown, unknown] } : {}),
         },
       },
       meta,

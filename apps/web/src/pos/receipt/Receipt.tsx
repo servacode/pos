@@ -175,6 +175,21 @@ const REFUND_LABEL: Record<ReturnPayload['refunds'][number]['method'], string> =
   account: 'حُسم من حساب الزبون',
 };
 
+/** A deposit document's code («DEP-…»): paid with, it reads «عربون», never «قسيمة» */
+export function isDepositCode(code: string | null | undefined): boolean {
+  return /^DEP-/i.test(code ?? '');
+}
+
+/** What a payment is called on a receipt: a deposit paid with is «عربون», the rest by method */
+export function paymentLabel(
+  p: { method: PaymentMethod; currency: CurrencyCode; reference?: string | null },
+  base: CurrencyCode,
+): string {
+  return p.method === 'voucher' && isDepositCode(p.reference)
+    ? 'عربون'
+    : methodLabel(p.method, p.currency, base);
+}
+
 /** The payment voucher (08 › سند قبض): who paid, how much and how, toward their account. */
 function PaymentVoucher({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
   const digits = useDigits();
@@ -577,7 +592,7 @@ export function Receipt({
       <Rule />
       {sale.payments.map((p) => (
         <div key={p.paymentNo} className="flex flex-col">
-          <Row label={methodLabel(p.method, p.currency, base)}>
+          <Row label={paymentLabel(p, base)}>
             <ExactMoney minor={p.amountMinor} currency={p.currency} />
           </Row>
           {p.reference ? (
@@ -600,11 +615,20 @@ export function Receipt({
           </div>
         </>
       ) : null}
-      {data.vouchersAfter?.map((v) => (
-        <Row key={v.code} label={<span className="text-xs">الباقي على القسيمة</span>}>
-          <ExactMoney minor={v.balanceMinor} currency={v.currency} />
-        </Row>
-      ))}
+      {data.vouchersAfter
+        ?.filter((v) => !isDepositCode(v.code) || v.balanceMinor > 0)
+        .map((v) => (
+          <Row
+            key={v.code}
+            label={
+              <span className="text-xs">
+                {isDepositCode(v.code) ? 'الباقي من العربون' : 'الباقي على القسيمة'}
+              </span>
+            }
+          >
+            <ExactMoney minor={v.balanceMinor} currency={v.currency} />
+          </Row>
+        ))}
       {sale.cashRounding && sale.cashRounding.roundingMinor !== 0 ? (
         <Row label={<span className="text-xs">تقريب النقد</span>}>
           <ExactMoney minor={sale.cashRounding.roundingMinor} currency={sale.cashRounding.currency} />
@@ -628,7 +652,7 @@ export function Receipt({
         </>
       ) : null}
       <Rule />
-      <Row label="عدد القطع">{displayNumber(String(pieces), digits)}</Row>
+      {pieces > 0 ? <Row label="عدد القطع">{displayNumber(String(pieces), digits)}</Row> : null}
       {data.settings.receiptFooter ? (
         <p className="text-center text-xs whitespace-pre-line">{data.settings.receiptFooter}</p>
       ) : null}

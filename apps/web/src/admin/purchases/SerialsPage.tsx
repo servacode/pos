@@ -55,7 +55,8 @@ export function SerialsPage() {
   const [items, setItems] = useState<SerialRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloads, setReloads] = useState(0);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  // The row being put right (and, for a number two sales took, the sale picked to keep it)
+  const [confirming, setConfirming] = useState<{ serial: string; keep?: string } | null>(null);
   // Read-only check: a device with more numbers «في المحل» than pieces in stock (a sale went out without its number)
   const [all, setAll] = useState<SerialRow[] | null>(null);
   const [stock, setStock] = useState<Map<string, number> | null>(null);
@@ -118,10 +119,14 @@ export function SerialsPage() {
   }, [q, view, reloads]);
 
   /** «تصحيح»: a sold number back in stock, or an in-stock one that was sold, by its history */
-  async function fix(r: SerialRow) {
+  async function fix(r: SerialRow, keepSaleId?: string) {
     setConfirming(null);
     try {
-      await fixSerialRow({ serial: r.serial, status: r.status === 'sold' ? 'in_stock' : 'sold' });
+      await fixSerialRow(
+        keepSaleId
+          ? { serial: r.serial, status: 'sold', keepSaleId }
+          : { serial: r.serial, status: r.status === 'sold' ? 'in_stock' : 'sold' },
+      );
       setReloads((n) => n + 1);
     } catch (e) {
       setError(errorMessage(e));
@@ -139,6 +144,102 @@ export function SerialsPage() {
     }
   }
 
+  function statusBadge(r: SerialRow) {
+    return r.status === 'sold' ? (
+      <Badge tone="neutral">مباع</Badge>
+    ) : r.status === 'returned' ? (
+      <Badge tone="neutral">أُعيد للمورد</Badge>
+    ) : r.status === 'rented' ? (
+      <Badge tone="warning">مؤجَّر</Badge>
+    ) : (
+      <Badge tone="success">في المحل</Badge>
+    );
+  }
+
+  function flagsCell(r: SerialRow) {
+    if (r.flags.length === 0 && r.sales.length <= 1) return <span className="text-ink-subtle">—</span>;
+    return (
+      <span className="flex flex-col items-start gap-1">
+        {r.flags.map((f) => (
+          <Badge key={f} tone={f === 'override' ? 'info' : 'warning'}>
+            {SERIAL_FLAG_LABELS[f]}
+          </Badge>
+        ))}
+        <span className="text-xs text-ink-muted">
+          {r.sales.map((s, i) => (
+            <span key={i} className="block">
+              <bdi dir="ltr" className="num">
+                {s.saleNumber ?? '—'}
+              </bdi>
+              {s.customerName ? ` · ${s.customerName}` : ' · بدون زبون'}
+            </span>
+          ))}
+        </span>
+      </span>
+    );
+  }
+
+  /** «تصحيح»: says what it does, then asks; «لا» leaves the row as it is */
+  function fixCell(r: SerialRow) {
+    const twice = r.status === 'sold' && r.sales.filter((x) => x.saleId).length > 1;
+    if (r.flags.length === 0 && r.status === 'in_stock') return null;
+    if (confirming?.serial !== r.serial) {
+      return (
+        <Button size="sm" variant="secondary" onClick={() => setConfirming({ serial: r.serial })}>
+          تصحيح
+        </Button>
+      );
+    }
+    if (twice && !confirming.keep) {
+      return (
+        <span className="flex flex-col items-start gap-2 text-sm" data-testid="serial-keep">
+          <span>
+            هذا الرقم خرج مع أكثر من بيعة. اختر البيعة التي يبقى معها، وتبقى الأخرى في السجل بعلامة «بيع أكثر
+            من مرة»:
+          </span>
+          {r.sales.map((s) =>
+            s.saleId ? (
+              <Button
+                key={s.saleId}
+                size="sm"
+                variant="secondary"
+                className="w-full"
+                onClick={() => setConfirming({ serial: r.serial, keep: s.saleId! })}
+              >
+                <bdi dir="ltr" className="num">
+                  {s.saleNumber ?? '—'}
+                </bdi>
+                {s.customerName ? ` · ${s.customerName}` : ' · بدون زبون'}
+              </Button>
+            ) : null,
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+            لا
+          </Button>
+        </span>
+      );
+    }
+    const keep = confirming.keep;
+    const what = keep
+      ? 'يبقى الرقم مع البيعة التي اخترتها، وتنتقل كفالته إلى تاريخها.'
+      : r.status === 'sold'
+        ? 'يعود الرقم «في المحل» ويُفكّ عن فاتورته وكفالته.'
+        : 'يُسجَّل الرقم «مباعاً» بآخر بيعة له في السجل، وتبدأ كفالته منها.';
+    return (
+      <span className="flex flex-col items-start gap-2 text-sm">
+        <span>{what} لا يغيّر المخزون ولا الحسابات، ويُسجَّل باسمك.</span>
+        <span className="flex w-full flex-wrap gap-2">
+          <Button size="sm" onClick={() => void fix(r, keep)}>
+            {keep ? 'نعم، يبقى معها' : r.status === 'sold' ? 'نعم، أرجعه للمخزون' : 'نعم، اعتبره مباعاً'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+            لا
+          </Button>
+        </span>
+      </span>
+    );
+  }
+
   const columns: DataColumn<SerialRow>[] = [
     {
       key: 'serial',
@@ -153,16 +254,7 @@ export function SerialsPage() {
     {
       key: 'status',
       header: 'الحالة',
-      cell: (r) =>
-        r.status === 'sold' ? (
-          <Badge tone="neutral">مباع</Badge>
-        ) : r.status === 'returned' ? (
-          <Badge tone="neutral">أُعيد للمورد</Badge>
-        ) : r.status === 'rented' ? (
-          <Badge tone="warning">مؤجَّر</Badge>
-        ) : (
-          <Badge tone="success">في المحل</Badge>
-        ),
+      cell: (r) => statusBadge(r),
     },
     { key: 'name', className: 'whitespace-nowrap', header: 'الجهاز', cell: (r) => r.name },
     {
@@ -191,49 +283,12 @@ export function SerialsPage() {
     {
       key: 'flags',
       header: 'للمراجعة',
-      cell: (r) =>
-        r.flags.length > 0 || r.sales.length > 1 ? (
-          <span className="flex flex-col items-start gap-1">
-            {r.flags.map((f) => (
-              <Badge key={f} tone={f === 'override' ? 'info' : 'warning'}>
-                {SERIAL_FLAG_LABELS[f]}
-              </Badge>
-            ))}
-            {r.sales.length > 1 || r.flags.length > 0 ? (
-              <span className="text-xs text-ink-muted">
-                {r.sales.map((s, i) => (
-                  <span key={i} className="block">
-                    <bdi dir="ltr" className="num">
-                      {s.saleNumber ?? '—'}
-                    </bdi>
-                    {s.customerName ? ` · ${s.customerName}` : ' · بدون زبون'}
-                  </span>
-                ))}
-              </span>
-            ) : null}
-          </span>
-        ) : (
-          <span className="text-ink-subtle">—</span>
-        ),
+      cell: (r) => flagsCell(r),
     },
     {
       key: 'fix',
       header: '',
-      cell: (r) =>
-        r.flags.length === 0 && r.status === 'in_stock' ? null : confirming === r.serial ? (
-          <span className="flex gap-2">
-            <Button size="sm" onClick={() => void fix(r)}>
-              {r.status === 'sold' ? 'نعم، أرجعه للمخزون' : 'نعم، اعتبره مباعاً'}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
-              لا
-            </Button>
-          </span>
-        ) : (
-          <Button size="sm" variant="secondary" onClick={() => setConfirming(r.serial)}>
-            تصحيح
-          </Button>
-        ),
+      cell: (r) => fixCell(r),
     },
   ];
 
@@ -302,8 +357,8 @@ export function SerialsPage() {
               {ahead.map((x) => (
                 <span key={x.name}>
                   {x.name}: {countNoun(x.n, COUNT_NOUNS.piece)} برقم مسجّل · المخزون{' '}
-                  <bdi className="num font-semibold">{x.inStock}</bdi> — في بيعة بلا رقم. اختر الرقم الذي خرج
-                  من قائمة «بيعات خرجت بلا رقم» إن ظهرت.
+                  <bdi className="num font-semibold">{x.inStock}</bdi> — في بيعة بلا رقم.
+                  {unassigned.length > 0 ? ' اختر الرقم الذي خرج من قائمة «بيعات خرجت بلا رقم» أعلاه.' : ''}
                 </span>
               ))}
             </span>
@@ -330,20 +385,62 @@ export function SerialsPage() {
               className="w-full sm:w-80"
             />
           </SectionHead>
-          <DataTable
-            caption="الأجهزة بأرقامها"
-            columns={columns}
-            rows={items ?? []}
-            rowKey={(r) => r.serial}
-            loading={!items && !error}
-            empty={
-              <EmptyState
-                icon={BarcodeIcon}
-                title="لا رقم مطابق."
-                description="الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
-              />
-            }
-          />
+          <ul className="flex flex-col gap-3 sm:hidden" aria-label="الأجهزة بأرقامها">
+            {(items ?? []).map((r) => (
+              <li
+                key={r.serial}
+                className="flex flex-col gap-2 rounded-card border border-line bg-surface p-4 shadow-e1"
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <bdi dir="ltr" className="num font-semibold">
+                    {r.serial}
+                  </bdi>
+                  {statusBadge(r)}
+                </span>
+                <span className="text-sm">{r.name}</span>
+                <span className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-muted">
+                  {r.purchaseNumber ? (
+                    <span className="flex items-center gap-1">
+                      استُلم <DocCell number={r.purchaseNumber} date={r.receivedOn} />
+                    </span>
+                  ) : null}
+                  {r.saleNumber ? (
+                    <span className="flex items-center gap-1">
+                      بيع <DocCell number={r.saleNumber} date={r.soldOn} />
+                    </span>
+                  ) : null}
+                  {r.warrantyUntil ? <span>الكفالة حتى {dayText(r.warrantyUntil, digits)}</span> : null}
+                </span>
+                {r.flags.length > 0 ? flagsCell(r) : null}
+                {fixCell(r) ? <div className="border-t border-line pt-2">{fixCell(r)}</div> : null}
+              </li>
+            ))}
+            {items && items.length === 0 ? (
+              <li>
+                <EmptyState
+                  icon={BarcodeIcon}
+                  title="لا رقم مطابق."
+                  description="الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
+                />
+              </li>
+            ) : null}
+          </ul>
+          <div className="hidden sm:block">
+            <DataTable
+              caption="الأجهزة بأرقامها"
+              columns={columns}
+              rows={items ?? []}
+              rowKey={(r) => r.serial}
+              loading={!items && !error}
+              empty={
+                <EmptyState
+                  icon={BarcodeIcon}
+                  title="لا رقم مطابق."
+                  description="الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
+                />
+              }
+            />
+          </div>
         </section>
       </div>
     </AppShell>

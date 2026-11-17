@@ -631,6 +631,13 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     setDone(null);
   }
 
+  /** A ticket, rental or contract about to take the cart: a sale in progress is put aside, never dropped (ask: «المعلّقة») */
+  function parkCurrent() {
+    if (cart.lines.length === 0) return;
+    hold();
+    setOpenedNote('كانت عندك فاتورة جارية، فعلّقناها. تجدها في «المعلّقة».');
+  }
+
   /** Brings a held cart back (the last one when no index is given); a cart being taken is held first. */
   function resume(index: number = held.length - 1) {
     const picked = held[index];
@@ -1198,6 +1205,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                   // pays it all and that line is returned for cash once the sale is saved
                   const service = catalog.items.find((i) => i.name.includes('إيجار'));
                   if (!service) return false;
+                  parkCurrent();
                   const line = addItem(EMPTY_CART, service);
                   const left = cashBack ? depositLeft(rental) : 0;
                   const priced = line.lines.map((l) => ({
@@ -1237,6 +1245,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 onBill={(contract) => {
                   const service = catalog.items.find((i) => i.name.includes('عقد صيانة'));
                   if (!service) return false;
+                  parkCurrent();
                   const line = addItem(EMPTY_CART, service);
                   setCart(() => ({
                     ...line,
@@ -1269,12 +1278,14 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                   const service = catalog.items.find((i) => i.name.includes('تقصير'));
                   if (!service) return false;
                   const fee = ticket.priceMinor;
+                  parkCurrent();
                   const line = addItem(EMPTY_CART, service);
                   setCart(() => ({
                     ...line,
                     lines: line.lines.map((l) => ({
                       ...l,
-                      name: `${l.name} · ${ticket.number}`,
+                      // The customer shows on the line, so the receipt names who the work is for
+                      name: [l.name, ticket.number, ticket.customerName].filter(Boolean).join(' · '),
                       priceMinor: fee,
                       retailPriceMinor: fee,
                       wholesalePriceMinor: null,

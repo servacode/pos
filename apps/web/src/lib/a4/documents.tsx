@@ -519,7 +519,8 @@ export function PurchaseOrderA4({ order, store }: { order: PurchaseOrderDetail; 
             <th className={`${cell} w-8 text-center`}>#</th>
             <th className={`${cell} text-start`}>الصنف</th>
             <th className={`${cell} text-end`}>الكمية</th>
-            <th className={`${cell} text-end`}>الكلفة المتوقعة</th>
+            <th className={`${cell} text-end`}>سعر الوحدة</th>
+            <th className={`${cell} text-end`}>المجموع</th>
           </tr>
         </thead>
         <tbody>
@@ -528,6 +529,9 @@ export function PurchaseOrderA4({ order, store }: { order: PurchaseOrderDetail; 
               <td className={`${cell} num text-center`}>{idx + 1}</td>
               <td className={cell}>{line.name}</td>
               <td className={`${cell} num text-end`}>{formatQuantity(line.qty, digits)}</td>
+              <td className={`${cell} text-end`}>
+                <Money minor={line.unitCostMinor} currency={base} symbol={false} />
+              </td>
               <td className={`${cell} text-end`}>
                 <Money minor={line.costMinor} currency={base} symbol={false} />
               </td>

@@ -94,6 +94,25 @@ async function counts() {
   return { stock: stock!.n, entries: entries!.n, buys: buys!.n };
 }
 
+describe('purchase order unit cost', () => {
+  it('keeps the unit cost, works the line total from it, and derives it for a line sent with a total only', async () => {
+    const s = await openStore(app);
+    const sup = await supplier(s);
+    const a = await product(s, 'قفازات');
+    const b = await product(s, 'كمامات');
+    const o = await made(s, {
+      supplierId: sup.id,
+      lines: [
+        { variantId: a, qty: 4 * PIECE, costMinor: 1, unitCostMinor: 2_500 },
+        { variantId: b, qty: 5 * PIECE, costMinor: 12_400 },
+      ],
+    });
+    expect(o.lines[0]).toMatchObject({ unitCostMinor: 2_500, costMinor: 10_000 });
+    expect(o.lines[1]).toMatchObject({ unitCostMinor: 2_480, costMinor: 12_400 });
+    expect(o.totalMinor).toBe(22_400);
+  });
+});
+
 describe('purchase orders', () => {
   it('numbers a draft per store and year, and posts nothing and moves no stock', async () => {
     const s = await openStore(app);
@@ -359,6 +378,8 @@ describe('purchase order suggestion', () => {
       minStockQty: 5 * PIECE,
       suggestedQty: 3 * PIECE,
       costMinor: 30_000,
+      unitCostMinor: 10_000,
+      costDoubtful: false,
       reason: 'below_min',
       lastSupplierId: sup.id,
     });
@@ -378,8 +399,12 @@ describe('purchase order suggestion', () => {
     });
     expect((await suggest(s, sup.id)).items[0]!.suggestedQty).toBe(3 * PIECE);
     await move(s, o, 'sent');
-    // Sent, the three on order cover the shortage
-    expect((await suggest(s, sup.id)).items).toEqual([]);
+    // Sent, the three on order cover the shortage, and the answer says which order owes it
+    const covered = await suggest(s, sup.id);
+    expect(covered.items).toEqual([]);
+    expect(covered.alreadyOrdered).toEqual([
+      expect.objectContaining({ variantId: low, onOrderQty: 3 * PIECE, orderNumbers: [o.number] }),
+    ]);
     const stranger = await app.inject({
       method: 'GET',
       url: `/v1/purchase-orders/suggest?supplierId=${sup.id}`,

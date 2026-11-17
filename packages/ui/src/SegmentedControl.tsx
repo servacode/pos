@@ -79,7 +79,7 @@ export function SegmentedControl<V extends string>({
 
   return (
     // A track wider than its room scrolls, its hidden side fading (no half-cut segment at the edge)
-    <ScrollStrip className={fullWidth ? 'w-full' : 'w-fit max-w-full'}>
+    <ScrollStrip wrapClassName={fullWidth ? 'w-full' : 'w-fit max-w-full'}>
       <div
         role="radiogroup"
         aria-label={label}

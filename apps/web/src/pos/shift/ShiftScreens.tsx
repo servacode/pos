@@ -457,7 +457,7 @@ export function ShiftCloseScreen({
       key: 'amount',
       header: 'الصافي بعد المرتجعات',
       numeric: true,
-      cell: (row) => <Money minor={row.amountMinor} currency={row.currency} className="font-semibold" />,
+      cell: (row) => <ExactMoney minor={row.amountMinor} currency={row.currency} className="font-semibold" />,
     },
   ];
 
@@ -586,6 +586,7 @@ export function ShiftCloseScreen({
             (activity.returns.count > 0 ||
               activity.vouchers.count > 0 ||
               (activity.deposits?.count ?? 0) > 0 ||
+              (activity.depositsUsed?.length ?? 0) > 0 ||
               activity.saleCount > 0 ||
               activity.movements.length > 0 ||
               (activity.cashIn?.receipts.length ?? 0) > 0) ? (
@@ -621,7 +622,7 @@ export function ShiftCloseScreen({
                   })}
                 {(activity.cashRounding ?? []).map((r) => (
                   <li key={`rd:${r.currency}`} className="flex flex-wrap items-center gap-x-1">
-                    منها تقريب النقد:{' '}
+                    {activity.returns.count > 0 ? 'منها تقريب النقد (بيع ومرتجع)' : 'منها تقريب النقد'}:{' '}
                     <Money
                       minor={r.amountMinor}
                       currency={r.currency}
@@ -671,13 +672,13 @@ export function ShiftCloseScreen({
                 {activity.movements.map((m, i) => (
                   <li key={`mv:${i}`} className="flex flex-wrap items-center gap-x-1">
                     {MOVEMENT_NAMES[m.kind]} · <bdi>{m.reason}</bdi>:{' '}
-                    <Money minor={m.amountMinor} currency={m.currency} className="text-ink" />
+                    <ExactMoney minor={m.amountMinor} currency={m.currency} className="text-ink" />
                   </li>
                 ))}
                 {refundVouchers(activity).map((v) => (
                   <li key={v.currency} className="flex flex-wrap items-center gap-x-1">
                     قسائم مرتجع صادرة:{' '}
-                    <Money minor={v.amountMinor} currency={v.currency} className="text-ink" />
+                    <ExactMoney minor={v.amountMinor} currency={v.currency} className="text-ink" />
                   </li>
                 ))}
                 {activity.vouchers.count > 0 ? (
@@ -685,24 +686,22 @@ export function ShiftCloseScreen({
                     قسائم الهدية المباعة:{' '}
                     {counted(activity.vouchers.count, ['قسيمة واحدة', 'قسيمتان', 'قسائم', 'قسيمة'], digits)} ·{' '}
                     {activity.vouchers.byCurrency.map((v) => (
-                      <Money key={v.currency} minor={v.amountMinor} currency={v.currency} />
+                      <ExactMoney key={v.currency} minor={v.amountMinor} currency={v.currency} />
                     ))}
                   </li>
                 ) : null}
-                {(activity.deposits?.count ?? 0) > 0 ? (
-                  <li className="flex flex-wrap items-center gap-x-1">
-                    عربون:{' '}
-                    {counted(
-                      activity.deposits!.count,
-                      ['عربون واحد', 'عربونان', 'عرابين', 'عربوناً'],
-                      digits,
-                    )}{' '}
-                    ·{' '}
-                    {activity.deposits!.byCurrency.map((v) => (
-                      <Money key={v.currency} minor={v.amountMinor} currency={v.currency} />
-                    ))}
+                {(activity.deposits?.byCurrency ?? []).map((v) => (
+                  <li key={`di:${v.currency}`} className="flex flex-wrap items-center gap-x-1">
+                    عربون مقبوض:{' '}
+                    <ExactMoney minor={v.amountMinor} currency={v.currency} className="text-ink" />
                   </li>
-                ) : null}
+                ))}
+                {(activity.depositsUsed ?? []).map((v) => (
+                  <li key={`do:${v.currency}`} className="flex flex-wrap items-center gap-x-1">
+                    عربون مستعمل:{' '}
+                    <ExactMoney minor={v.amountMinor} currency={v.currency} className="text-ink" />
+                  </li>
+                ))}
               </ul>
             ) : null}
           </section>

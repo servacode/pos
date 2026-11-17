@@ -3,7 +3,7 @@ import { Button, CartIcon, CheckIcon, cn, Menu, MenuItem, MoreIcon, OfflineIcon,
 import { ExactMoney } from '../ExactMoney';
 import { notesFor } from '../shift/shift';
 import { changeNotes } from '../pay/payment';
-import { methodLabel, Receipt, type PaperWidth, type ReceiptData } from './Receipt';
+import { paymentLabel, Receipt, type PaperWidth, type ReceiptData } from './Receipt';
 import { WhatsAppSend } from './WhatsAppSend';
 
 /**
@@ -48,7 +48,7 @@ export function SaleDone({
       : [];
   });
   const saved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
-  const methods = [...new Set(sale.payments.map((p) => methodLabel(p.method, p.currency, sale.currency)))];
+  const methods = [...new Set(sale.payments.map((p) => paymentLabel(p, sale.currency)))];
 
   return (
     <section

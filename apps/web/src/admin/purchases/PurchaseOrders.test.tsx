@@ -46,6 +46,7 @@ const ORDER: PurchaseOrderDetail = {
       name: 'قفازات',
       qty: 10_000,
       costMinor: 100_000,
+      unitCostMinor: 10_000,
       receivedQty: 6_000,
     },
     {
@@ -55,6 +56,7 @@ const ORDER: PurchaseOrderDetail = {
       name: 'كمامات',
       qty: 4_000,
       costMinor: 40_000,
+      unitCostMinor: 10_000,
       receivedQty: 0,
     },
   ],
@@ -79,6 +81,7 @@ describe('«طلبيات الشراء»', () => {
       periodDays: 30,
       coverDays: 14,
       baseCurrency: 'SYP',
+      alreadyOrdered: [],
       items: [
         {
           variantId: 'v-1',
@@ -90,6 +93,11 @@ describe('«طلبيات الشراء»', () => {
           onOrderQty: 0,
           suggestedQty: 3000,
           costMinor: 30_000,
+          unitCostMinor: 10_000,
+          costDoubtful: false,
+          priceMinor: null,
+          productName: 'قفازات',
+          attributes: [],
           reason: 'below_min',
           lastSupplierId: 's-1',
         },
@@ -103,7 +111,7 @@ describe('«طلبيات الشراء»', () => {
       'POST /v1/purchase-orders': (r: MockRequest) => {
         expect(r.body).toMatchObject({
           supplierId: 's-1',
-          lines: [{ variantId: 'v-1', qty: 5000, costMinor: 30_000 }],
+          lines: [{ variantId: 'v-1', qty: 5000, costMinor: 50_000, unitCostMinor: 10_000 }],
         });
         return { status: 201, body: ORDER };
       },
@@ -140,6 +148,10 @@ describe('«طلبيات الشراء»', () => {
     const { user } = renderApp('/purchase-orders/o-1');
     await user.click(await screen.findByRole('button', { name: 'أرسلها على واتساب' }));
     expect(open).toHaveBeenCalledTimes(1);
+    // Marked sent only after the owner says the message went
+    expect(await screen.findByText('هل أُرسلت الطلبية؟')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/purchase-orders/o-1/status')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'نعم، أُرسلت' }));
     const link = String(open.mock.calls[0]![0]);
     expect(link).toMatch(/^https:\/\/wa\.me\/963944111222\?text=/);
     expect(decodeURIComponent(link)).toContain('PO-2026-000001');
@@ -159,11 +171,23 @@ describe('«طلبيات الشراء»', () => {
       'GET /v1/inventory': { status: 200, body: { items: [], totals: [] } },
       'GET /v1/products/p-1': {
         status: 200,
-        body: { id: 'p-1', nameAr: 'قفازات', variants: [{ id: 'v-1', label: null, barcodes: [] }] },
+        body: {
+          id: 'p-1',
+          nameAr: 'قفازات',
+          variants: [
+            { id: 'v-1', label: null, barcodes: [], price: { currency: 'SYP', priceMinor: 12_000 } },
+          ],
+        },
       },
       'GET /v1/products/p-2': {
         status: 200,
-        body: { id: 'p-2', nameAr: 'كمامات', variants: [{ id: 'v-2', label: null, barcodes: [] }] },
+        body: {
+          id: 'p-2',
+          nameAr: 'كمامات',
+          variants: [
+            { id: 'v-2', label: null, barcodes: [], price: { currency: 'SYP', priceMinor: 12_000 } },
+          ],
+        },
       },
       'POST /v1/purchases': (r: MockRequest) => {
         expect(r.body).toMatchObject({
@@ -201,6 +225,112 @@ describe('«طلبيات الشراء»', () => {
     expect(screen.getByLabelText('كمية كمامات')).toHaveValue('4');
     await user.click(screen.getByRole('button', { name: /سجّل الفاتورة/ }));
     expect(await screen.findByText(/سُجّلت الفاتورة PUR-2026-000010/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/purchases')).toHaveLength(1);
+  });
+
+  it('does not mark a draft sent when the owner says the message did not go', async () => {
+    vi.stubGlobal('open', vi.fn());
+    const draft = { ...ORDER, status: 'draft' as const, receivedQty: 0, receipts: [] };
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/purchase-orders/o-1': { status: 200, body: draft },
+      'GET /v1/store': { status: 200, body: { name: 'متجري', taxNumber: null, address: null, phone: null } },
+    });
+    const { user } = renderApp('/purchase-orders/o-1');
+    await user.click(await screen.findByRole('button', { name: 'أرسلها على واتساب' }));
+    await user.click(await screen.findByRole('button', { name: 'لا' }));
+    expect(requestsTo('POST', '/v1/purchase-orders/o-1/status')).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
+  it('asks before closing an order with what arrived, and counts the lines received', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/purchase-orders/o-1': { status: 200, body: { ...ORDER, status: 'partial' } },
+      'GET /v1/store': { status: 200, body: { name: 'متجري', taxNumber: null, address: null, phone: null } },
+      'POST /v1/purchase-orders/o-1/status': {
+        status: 200,
+        body: { ...ORDER, status: 'received', version: 3 },
+      },
+    });
+    const { user } = renderApp('/purchase-orders/o-1');
+    expect(await screen.findByText(/أسطر/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'أغلقها بما وصل' }));
+    expect(requestsTo('POST', '/v1/purchase-orders/o-1/status')).toHaveLength(0);
+    await user.click(await screen.findByRole('button', { name: 'نعم، أغلقها' }));
+    await waitFor(() => expect(requestsTo('POST', '/v1/purchase-orders/o-1/status')).toHaveLength(1));
+    expect(await screen.findByText('أُغلقت الطلبية ناقصة بما وصل.')).toBeInTheDocument();
+  });
+
+  it('tells which waiting order already owes the short items', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/suppliers': SUPPLIERS,
+      'GET /v1/purchase-orders/suggest?supplierId=s-1': {
+        status: 200,
+        body: {
+          periodDays: 30,
+          coverDays: 14,
+          baseCurrency: 'SYP',
+          items: [],
+          alreadyOrdered: [
+            { variantId: 'v-1', name: 'قفازات', onOrderQty: 5000, orderNumbers: ['PO-2026-000001'] },
+            { variantId: 'v-2', name: 'كمامات', onOrderQty: 2000, orderNumbers: ['PO-2026-000001'] },
+          ],
+        },
+      },
+    });
+    const { user } = renderApp('/purchase-orders/new');
+    await screen.findByRole('option', { name: 'معمل الأمل' });
+    await user.click(screen.getByRole('button', { name: 'اقترح طلبية' }));
+    expect(await screen.findByText(/أصناف مطلوبة أصلاً في PO-2026-000001/)).toBeInTheDocument();
+  });
+
+  it('keeps the order unit cost when receiving: a changed quantity moves the total, a zero line is dropped', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/purchase-orders/o-1': { status: 200, body: ORDER },
+      'GET /v1/store': { status: 200, body: { name: 'متجري', taxNumber: null, address: null, phone: null } },
+      'GET /v1/suppliers': SUPPLIERS,
+      'GET /v1/purchases': { status: 200, body: { items: [] } },
+      'GET /v1/inventory': { status: 200, body: { items: [], totals: [] } },
+      'POST /v1/purchases': (r: MockRequest) => {
+        expect(r.body).toMatchObject({ lines: [{ variantId: 'v-1', qty: 2500, costMinor: 25_000 }] });
+        expect((r.body as { lines: unknown[] }).lines).toHaveLength(1);
+        return {
+          status: 201,
+          body: {
+            id: 'p-11',
+            number: 'PUR-2026-000011',
+            date: '2026-11-16',
+            supplierId: 's-1',
+            supplierName: 'معمل الأمل',
+            payment: 'credit',
+            reference: null,
+            totalMinor: 25_000,
+            branchId: 'b-1',
+            notes: null,
+            lines: [],
+            baseCurrency: 'SYP',
+          },
+        };
+      },
+    });
+    const { user } = renderApp('/purchase-orders/o-1');
+    await user.click(await screen.findByRole('button', { name: 'استلم البضاعة' }));
+    const qty = await screen.findByLabelText('كمية قفازات');
+    await user.clear(qty);
+    await user.type(qty, '2.5');
+    expect(screen.getByLabelText('كلفة قفازات')).toHaveValue('250');
+    const masks = screen.getByLabelText('كمية كمامات');
+    await user.clear(masks);
+    await user.type(masks, '0');
+    await user.click(screen.getByRole('button', { name: /سجّل الفاتورة/ }));
+    expect(await screen.findByText(/سُجّلت الفاتورة PUR-2026-000011/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/purchases')).toHaveLength(1);
   });
 });

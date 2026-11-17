@@ -10,7 +10,14 @@ import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { clockText, dateText } from '../format';
 import { dayText } from '../../lib/dates';
-import { methodLabel, needsThanks, single, type ReceiptData } from '../receipt/Receipt';
+import {
+  isDepositCode,
+  methodLabel,
+  needsThanks,
+  paymentLabel,
+  single,
+  type ReceiptData,
+} from '../receipt/Receipt';
 import { serialText, warrantyText } from '../receipt/warranty';
 import { packPiecesNote } from '../sale/packText';
 
@@ -208,13 +215,18 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
   for (const p of sale.payments) {
     lines.push({
       kind: 'pair',
-      start: methodLabel(p.method, p.currency, base),
+      start: paymentLabel(p, base),
       end: money(p.amountMinor, p.currency),
     });
     if (p.reference) lines.push({ kind: 'pair', start: 'المرجع', end: p.reference });
   }
   for (const v of data.vouchersAfter ?? []) {
-    lines.push({ kind: 'pair', start: 'الباقي على القسيمة', end: money(v.balanceMinor, v.currency) });
+    if (isDepositCode(v.code) && v.balanceMinor <= 0) continue;
+    lines.push({
+      kind: 'pair',
+      start: isDepositCode(v.code) ? 'الباقي من العربون' : 'الباقي على القسيمة',
+      end: money(v.balanceMinor, v.currency),
+    });
   }
   if (sale.change) {
     lines.push({

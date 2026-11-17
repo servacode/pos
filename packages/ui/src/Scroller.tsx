@@ -15,7 +15,7 @@ import { cn } from './cn';
  */
 
 /** How much of each edge the fade covers */
-const FADE = 28;
+const FADE = 40;
 
 /** The marks of the open item in a strip: a page link, a tab or a segment */
 const OPEN = '[aria-current="page"], [aria-selected="true"], [aria-checked="true"]';
@@ -40,7 +40,16 @@ function centre(strip: HTMLElement, item: HTMLElement, smooth: boolean): void {
  * `aria-current`, `aria-selected` or `aria-checked`) is brought to the middle when the strip appears and whenever it changes. Without scrolling it is
  * only a wrapper.
  */
-export function ScrollStrip({ children, className }: { children: ReactNode; className?: string }) {
+export function ScrollStrip({
+  children,
+  className,
+  wrapClassName,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Classes for the box around the strip (its width), where the strip's own are for its scrolling */
+  wrapClassName?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   // Which physical edges have more behind them
   const [hidden, setHidden] = useState({ left: false, right: false });
@@ -120,15 +129,46 @@ export function ScrollStrip({ children, className }: { children: ReactNode; clas
       : undefined;
 
   return (
-    <div
-      ref={ref}
-      data-fade-left={hidden.left || undefined}
-      data-fade-right={hidden.right || undefined}
-      style={pad ? { ...mask, paddingInlineEnd: FADE } : mask}
-      className={cn('scrollbar-none overflow-x-auto', className)}
-    >
-      {children}
+    <div className={cn('relative', wrapClassName)}>
+      <div
+        ref={ref}
+        data-fade-left={hidden.left || undefined}
+        data-fade-right={hidden.right || undefined}
+        style={pad ? { ...mask, paddingInlineEnd: FADE } : mask}
+        className={cn('scrollbar-none overflow-x-auto', className)}
+      >
+        {children}
+      </div>
+      {/* A small arrow in the fade says there is more on that side (it is a cue, not a button) */}
+      {hidden.left ? <MoreMark side="left" /> : null}
+      {hidden.right ? <MoreMark side="right" /> : null}
     </div>
+  );
+}
+
+function MoreMark({ side }: { side: 'left' | 'right' }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="text-ink-muted"
+      style={{
+        position: 'absolute',
+        top: '50%',
+        marginTop: -8,
+        pointerEvents: 'none',
+        [side]: 2,
+      }}
+    >
+      <path d={side === 'left' ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7'} />
+    </svg>
   );
 }
 

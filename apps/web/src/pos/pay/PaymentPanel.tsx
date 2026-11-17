@@ -250,6 +250,8 @@ export function PaymentPanel({
   const [creditGrant, setCreditGrant] = useState<Approval | null>(null);
   const [costGrant, setCostGrant] = useState<Approval | null>(null);
   const [split, setSplit] = useState(false);
+  // A voucher or deposit took its part: the next part starts at what is left, until the cashier changes it
+  const [restPrefill, setRestPrefill] = useState(false);
   const [parts, setParts] = useState<Part[]>([]);
   // A customer named before the pay screen (a held sale, a ticket): their contract prices apply here too, once
   const contractAsked = useRef(false);
@@ -313,10 +315,10 @@ export function PaymentPanel({
         : nonCash
           ? remainingBase
           : // Cash in the sale's currency starts at the exact due (to the cash step): typing replaces it; a split types its parts
-            !split && option.currency === base
+            (!split || restPrefill) && option.currency === base
             ? roundCashDue(remainingBase, cashSteps[base] ?? 0).dueMinor
             : // Cash in a foreign currency starts at the due converted to it, so the box and «المتبقي» agree
-              !split && option.method === 'cash'
+              (!split || restPrefill) && option.method === 'cash'
               ? dueIn(option.currency, base, remainingBase, ctx.rates)
               : null);
   const chequeDetails =
@@ -442,6 +444,7 @@ export function PaymentPanel({
     if (!found || found.balanceMinor <= 0 || found.balanceMinor >= totalMinor) return;
     const voucherOption = VOUCHER_OPTION(base);
     setSplit(true);
+    setRestPrefill(true);
     setParts([{ option: voucherOption, tender: tenderOf(voucherOption, found.balanceMinor, found.code) }]);
     setOption(options[0]!);
     setReference('');
@@ -475,6 +478,7 @@ export function PaymentPanel({
   function addPart() {
     if (!current || voucherProblem) return;
     setParts((list) => [...list, { option, tender: current }]);
+    setRestPrefill(false);
     setText('');
     setReference('');
     clearCheque();
@@ -997,6 +1001,7 @@ export function PaymentPanel({
                   aria-pressed={split === on}
                   onClick={() => {
                     setSplit(on);
+                    setRestPrefill(false);
                     if (!on) setParts([]);
                   }}
                   className={cn(

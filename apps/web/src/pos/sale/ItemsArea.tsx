@@ -292,9 +292,11 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
             onClick={props.onRepeatLast}
             aria-label="كرّر آخر طلب"
             title="كرّر آخر طلب"
-            className="max-sm:px-3.5"
+            className="max-sm:px-3"
           >
-            <span className="max-sm:sr-only">كرّر آخر طلب</span>
+            {/* A phone: the short word beside the icon, so it never reads as «تحديث» */}
+            <span className="sm:hidden">كرّر</span>
+            <span className="max-sm:hidden">كرّر آخر طلب</span>
           </Button>
         ) : null}
       </div>

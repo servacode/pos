@@ -375,6 +375,7 @@ export type SerialFlag = keyof typeof SERIAL_FLAG_LABELS;
 
 /** One sale of a serial (the latest is on the row; the rest are its history) */
 export interface SerialSaleRow {
+  saleId?: string | null;
   saleNumber: string | null;
   soldOn: string;
   flag: SerialFlag | null;
@@ -388,6 +389,8 @@ export const serialFixInput = z.object({
   status: z.enum(['in_stock', 'sold']),
   /** With status sold: the sale that went out without this piece's number (picked from «بيعات بلا رقم») */
   saleId: uuidSchema.optional(),
+  /** A number sold by two sales: the sale that keeps it (the other stays in the history, flagged) */
+  keepSaleId: uuidSchema.optional(),
 });
 export type SerialFixInput = z.input<typeof serialFixInput>;
 

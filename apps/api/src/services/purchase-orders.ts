@@ -2,6 +2,9 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import {
   addDays,
   businessDateOf,
+  orderLineCost,
+  orderUnitCost,
+  type PurchaseOrderAlreadyOrdered,
   PURCHASE_ORDER_NEXT,
   type CurrencyCode,
   type PurchaseOrderDetail,
@@ -34,6 +37,8 @@ const invalid = (fields: Record<string, string>) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', fields);
 
 type Row = typeof purchaseOrders.$inferSelect;
+/** A line as stored: one written before the unit cost was kept has none */
+type StoredLine = Omit<PurchaseOrderLine, 'unitCostMinor'> & { unitCostMinor?: number };
 
 /** Sales of the last month set the pace; the suggestion covers two weeks of it above the minimum */
 const PERIOD_DAYS = 30;
@@ -89,7 +94,11 @@ async function detailOf(tx: Transaction, r: Row): Promise<PurchaseOrderDetail> {
     ...rowOf(r, s ?? { name: '', phone: null }, await zoneOf(tx)),
     branchId: r.branchId,
     notes: r.notes,
-    lines: r.lines as PurchaseOrderLine[],
+    lines: (r.lines as StoredLine[]).map((l) => ({
+      ...l,
+      // An order written before the unit cost was kept has it worked out from the line's cost
+      unitCostMinor: l.unitCostMinor ?? orderUnitCost(l.costMinor, l.qty),
+    })),
     receipts: r.receipts as PurchaseOrderReceipt[],
     baseCurrency: await baseOf(tx),
     createdAt: r.createdAt.toISOString(),
@@ -123,13 +132,17 @@ async function checked(tx: Transaction, input: PurchaseOrderInput) {
   if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
   const lines: PurchaseOrderLine[] = input.lines.map((l, i) => {
     const item = items.get(l.variantId)!;
+    // The unit cost is the figure a person types; the line's cost follows it
+    const unitCostMinor = l.unitCostMinor ?? orderUnitCost(l.costMinor, l.qty);
+    const costMinor = l.unitCostMinor === undefined ? l.costMinor : orderLineCost(unitCostMinor, l.qty);
     return {
       lineNo: i + 1,
       variantId: l.variantId,
       productId: item.product_id,
       name: item.name,
       qty: l.qty,
-      costMinor: l.costMinor,
+      costMinor,
+      unitCostMinor,
       receivedQty: 0,
     };
   });
@@ -330,18 +343,24 @@ export function suggestPurchaseOrder(
       .where(eq(suppliers.id, query.supplierId));
     if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
     const day = await today(tx);
+    const base = await baseOf(tx);
     const from = addDays(day, 1 - PERIOD_DAYS);
     const rows = await tx.execute<{
       variant_id: string;
       product_id: string;
+      product_name: string;
       name: string;
+      attributes: { name: string; value: string }[] | null;
       stock: string;
       min: string | null;
       sold: string;
       on_order: string;
+      order_numbers: string[] | null;
       last_supplier: string | null;
       last_cost: string | null;
       last_qty: string | null;
+      typical_unit: string | null;
+      price: string | null;
     }>(sql`
       with sold as (
         select l.variant_id, sum(l.base_qty) as qty
@@ -363,16 +382,24 @@ export function suggestPurchaseOrder(
       ),
       ordered as (
         select (l->>'variantId')::uuid as variant_id,
-               sum(greatest((l->>'qty')::bigint - (l->>'receivedQty')::bigint, 0)) as qty
+               sum(greatest((l->>'qty')::bigint - (l->>'receivedQty')::bigint, 0)) as qty,
+               array_agg(distinct o.number order by o.number) as numbers
         from purchase_orders o, jsonb_array_elements(o.lines) l
         where o.status in ('sent', 'partial')
         group by 1
       )
-      select v.id as variant_id, v.product_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
+      select v.id as variant_id, v.product_id, p.name_ar as product_name,
+             trim(p.name_ar || ' ' || coalesce(v.label, '')) as name, v.attributes,
              coalesce(k.qty, 0)::text as stock, v.min_stock_qty::text as min,
              (coalesce(s.qty, 0) - coalesce(b.qty, 0))::text as sold,
-             coalesce(o.qty, 0)::text as on_order,
-             lb.supplier_id::text as last_supplier, lb.cost_minor::text as last_cost, lb.qty::text as last_qty
+             coalesce(o.qty, 0)::text as on_order, o.numbers as order_numbers,
+             lb.supplier_id::text as last_supplier, lb.cost_minor::text as last_cost, lb.qty::text as last_qty,
+             (select (percentile_cont(0.5) within group (order by t.c))::text from (
+                select pl.cost_minor * 1000.0 / pl.qty as c from purchase_lines pl
+                join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
+                where pl.variant_id = v.id and pl.qty > 0 and pl.cost_minor > 0
+                order by pu.business_date desc, pu.created_at desc, pl.line_no desc limit 5) t) as typical_unit,
+             pr.price_minor::text as price
       from variants v
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
       left join stock k on k.variant_id = v.id
@@ -380,11 +407,13 @@ export function suggestPurchaseOrder(
       left join back b on b.variant_id = v.id
       left join ordered o on o.variant_id = v.id
       left join lastbuy lb on lb.variant_id = v.id
+      left join prices pr on pr.tenant_id = v.tenant_id and pr.id = v.id and pr.currency = ${base}
       where v.archived_at is null and p.archived_at is null and p.type = 'stock'
         and (lb.supplier_id = ${query.supplierId} ${query.all ? sql`or lb.supplier_id is null` : sql``})
       order by p.name_ar, v.sort_order`);
 
     const items: PurchaseOrderSuggestion['items'] = [];
+    const alreadyOrdered: PurchaseOrderAlreadyOrdered[] = [];
     for (const r of rows) {
       const stock = Number(r.stock);
       const min = r.min === null ? null : Number(r.min);
@@ -394,25 +423,48 @@ export function suggestPurchaseOrder(
       const below = min !== null && stock <= min;
       const fast = sold > 0 && stock <= perDay * FAST_DAYS;
       if (!below && !fast) continue;
-      const need = (min ?? 0) + perDay * COVER_DAYS - stock - onOrder;
-      if (need <= 0) continue;
+      const wanted = (min ?? 0) + perDay * COVER_DAYS - stock;
+      const need = wanted - onOrder;
+      if (need <= 0) {
+        // Short, but a waiting order already owes it: said, so the list does not look broken
+        if (wanted > 0 && onOrder > 0) {
+          alreadyOrdered.push({
+            variantId: r.variant_id,
+            name: r.name,
+            onOrderQty: onOrder,
+            orderNumbers: r.order_numbers ?? [],
+          });
+        }
+        continue;
+      }
       const suggestedQty = Math.max(1000, Math.ceil(need / 1000) * 1000);
       const lastQty = r.last_qty === null ? 0 : Number(r.last_qty);
-      const costMinor = lastQty > 0 ? Math.round((Number(r.last_cost) * suggestedQty) / lastQty) : 0;
+      const unitCostMinor = lastQty > 0 ? orderUnitCost(Number(r.last_cost), lastQty) : 0;
+      const typical = r.typical_unit === null ? 0 : Number(r.typical_unit);
+      const priceMinor = r.price === null ? null : Number(r.price);
+      const costDoubtful =
+        unitCostMinor > 0 &&
+        ((typical > 0 && (unitCostMinor > typical * 5 || unitCostMinor * 5 < typical)) ||
+          (priceMinor !== null && priceMinor > 0 && unitCostMinor > priceMinor * 20));
       items.push({
         variantId: r.variant_id,
         productId: r.product_id,
         name: r.name,
+        productName: r.product_name,
+        attributes: r.attributes ?? [],
         stockQty: stock,
         minStockQty: min,
         soldQty: sold,
         onOrderQty: onOrder,
         suggestedQty,
-        costMinor,
+        costMinor: orderLineCost(unitCostMinor, suggestedQty),
+        unitCostMinor,
+        costDoubtful,
+        priceMinor,
         reason: below ? 'below_min' : 'selling_fast',
         lastSupplierId: r.last_supplier,
       });
     }
-    return { periodDays: PERIOD_DAYS, coverDays: COVER_DAYS, items, baseCurrency: await baseOf(tx) };
+    return { periodDays: PERIOD_DAYS, coverDays: COVER_DAYS, items, alreadyOrdered, baseCurrency: base };
   });
 }

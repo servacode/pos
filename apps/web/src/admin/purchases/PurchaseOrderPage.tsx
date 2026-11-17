@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
+  formatMoney,
+  orderLineCost,
   orderLineRemaining,
   PURCHASE_ORDER_NEXT,
   PURCHASE_ORDER_STATUS_LABELS,
@@ -19,6 +21,7 @@ import {
   Card,
   CardHeader,
   DataTable,
+  Dialog,
   formatQuantity,
   ListIcon,
   Money,
@@ -36,6 +39,7 @@ import { errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { getStore } from '../store/api';
+import { today } from './api';
 import { getOrder, moveOrder } from './orderApi';
 import { ORDER_TONES } from './PurchaseOrdersPage';
 
@@ -62,6 +66,8 @@ export function PurchaseOrderPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Asked after WhatsApp opens («هل أُرسلت؟») and before an order is closed short
+  const [asking, setAsking] = useState<'sent' | 'close' | null>(null);
 
   useEffect(() => {
     getOrder(id)
@@ -92,15 +98,19 @@ export function PurchaseOrderPage() {
       store?.name ?? me.tenant.name,
       (q) => formatQuantity(q, digits),
       (d) => dayText(d, digits),
+      (m) => formatMoney(m, base, { digits }),
     );
     window.open(orderWhatsappLink(order.supplierPhone, text), '_blank', 'noopener');
-    if (order.status === 'draft') void step('sent', 'عُلّمت الطلبية مُرسلة.');
+    // The window opening does not mean the message went: a draft is marked sent only when the owner says so
+    if (order.status === 'draft') setAsking('sent');
   }
 
   const next = order ? PURCHASE_ORDER_NEXT[order.status] : [];
   const open = order ? purchaseOrderOpen(order.status) : false;
   const percent =
     order && order.orderedQty > 0 ? Math.round((order.receivedQty / order.orderedQty) * 100) : 0;
+  const doneLines = order ? order.lines.filter((l) => orderLineRemaining(l) === 0).length : 0;
+  const late = Boolean(order && open && order.expectedDate && order.expectedDate < today());
 
   const columns: DataColumn<PurchaseOrderLine>[] = [
     { key: 'name', header: 'الصنف', cell: (l) => <span className="font-semibold">{l.name}</span> },
@@ -114,7 +124,21 @@ export function PurchaseOrderPage() {
       key: 'got',
       header: 'المستلم',
       numeric: true,
-      cell: (l) => <span className="num">{formatQuantity(l.receivedQty, digits)}</span>,
+      cell: (l) => {
+        const left = orderLineRemaining(l);
+        const share = l.qty > 0 ? Math.min(100, Math.round((l.receivedQty / l.qty) * 100)) : 0;
+        return (
+          <span className="flex min-w-16 flex-col items-end gap-1">
+            <span className="num">{formatQuantity(l.receivedQty, digits)}</span>
+            <ProgressBar
+              value={share}
+              label={`المستلم من ${l.name} ${String(share)}٪`}
+              tone={left === 0 ? 'success' : 'brand'}
+              className="h-1"
+            />
+          </span>
+        );
+      },
     },
     {
       key: 'left',
@@ -130,11 +154,17 @@ export function PurchaseOrderPage() {
       },
     },
     {
-      key: 'cost',
-      header: 'الكلفة المتوقعة',
+      key: 'unit',
+      header: 'سعر الوحدة',
       numeric: true,
       className: 'hidden sm:table-cell',
-      cell: (l) => <Money minor={l.costMinor} currency={base} />,
+      cell: (l) => <Money minor={l.unitCostMinor} currency={base} />,
+    },
+    {
+      key: 'cost',
+      header: 'المجموع',
+      numeric: true,
+      cell: (l) => <Money minor={orderLineCost(l.unitCostMinor, l.qty)} currency={base} />,
     },
   ];
 
@@ -185,6 +215,14 @@ export function PurchaseOrderPage() {
                 <p className="text-sm text-ink-muted">
                   وصل{' '}
                   <span className="num font-semibold text-ink">
+                    {formatQuantity(doneLines * 1000, digits)}
+                  </span>{' '}
+                  من{' '}
+                  <span className="num font-semibold text-ink">
+                    {formatQuantity(order.lines.length * 1000, digits)}
+                  </span>{' '}
+                  أسطر · القطع{' '}
+                  <span className="num font-semibold text-ink">
                     {formatQuantity(order.receivedQty, digits)}
                   </span>{' '}
                   من{' '}
@@ -192,6 +230,12 @@ export function PurchaseOrderPage() {
                     {formatQuantity(order.orderedQty, digits)}
                   </span>
                   {order.expectedDate ? <> · التسليم المطلوب {dayText(order.expectedDate, digits)}</> : null}
+                  {late ? (
+                    <>
+                      {' '}
+                      <Badge tone="danger">متأخرة</Badge>
+                    </>
+                  ) : null}
                   {' · '}المجموع المتوقع{' '}
                   <Money minor={order.totalMinor} currency={base} className="font-semibold text-ink" />
                 </p>
@@ -227,11 +271,7 @@ export function PurchaseOrderPage() {
                     اطبع A4
                   </Button>
                   {next.includes('received') ? (
-                    <Button
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => void step('received', 'أُغلقت الطلبية مستلمة بما وصل.')}
-                    >
+                    <Button variant="ghost" disabled={busy} onClick={() => setAsking('close')}>
                       أغلقها بما وصل
                     </Button>
                   ) : null}
@@ -247,6 +287,54 @@ export function PurchaseOrderPage() {
                 </div>
               </div>
             </Card>
+            {asking === 'sent' ? (
+              <Dialog
+                open
+                onOpenChange={(o) => {
+                  if (!o) setAsking(null);
+                }}
+                title="هل أُرسلت الطلبية؟"
+                description="فتحنا واتساب. علّمها مُرسلة فقط إن أرسلت الرسالة فعلاً."
+              >
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => {
+                      setAsking(null);
+                      void step('sent', 'عُلّمت الطلبية مُرسلة.');
+                    }}
+                  >
+                    نعم، أُرسلت
+                  </Button>
+                  <Button variant="secondary" onClick={() => setAsking(null)}>
+                    لا
+                  </Button>
+                </div>
+              </Dialog>
+            ) : null}
+            {asking === 'close' ? (
+              <Dialog
+                open
+                onOpenChange={(o) => {
+                  if (!o) setAsking(null);
+                }}
+                title="إغلاق الطلبية بما وصل؟"
+                description={`وصل ${formatQuantity(order.receivedQty, digits)} من ${formatQuantity(order.orderedQty, digits)}. ما لم يصل لن يبقى منتظَراً على هذه الطلبية.`}
+              >
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => {
+                      setAsking(null);
+                      void step('received', 'أُغلقت الطلبية ناقصة بما وصل.');
+                    }}
+                  >
+                    نعم، أغلقها
+                  </Button>
+                  <Button variant="secondary" onClick={() => setAsking(null)}>
+                    لا، أبقها مفتوحة
+                  </Button>
+                </div>
+              </Dialog>
+            ) : null}
             <DataTable
               caption="أصناف الطلبية"
               columns={columns}

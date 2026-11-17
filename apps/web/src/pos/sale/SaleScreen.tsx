@@ -27,7 +27,6 @@ import {
   CartLine,
   CashierShell,
   Dialog,
-  DensityProvider,
   ClockIcon,
   CloseIcon,
   cn,
@@ -44,7 +43,6 @@ import {
   PercentIcon,
   PrintIcon,
   RemoveIcon,
-  Select,
   SendIcon,
   TotalPanel,
   UndoIcon,
@@ -1279,30 +1277,24 @@ export function SaleScreen(props: SaleScreenProps) {
           </div>
           {staff.length > 1 ? (
             <div className="flex shrink-0 items-center gap-2">
-              {/* Seen beside the box; the select is named by its own label for screen readers */}
-              <span aria-hidden="true" className="hidden text-sm text-ink-subtle sm:inline">
-                البائع
-              </span>
-              <DensityProvider density="dense">
-                <Select
-                  label="البائع"
-                  hideLabel
-                  value={seller}
-                  onChange={(e) => {
-                    setSeller(e.target.value);
-                    void pos.local.set(SELLER_KEY, { by: session.userId, id: e.target.value });
-                    const picked = e.target.value;
-                    if (cart.lines.length > 0) setCart((c) => ({ ...c, sellerId: picked }));
-                  }}
-                  className="w-28"
-                >
-                  {staff.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.fullName}
-                    </option>
-                  ))}
-                </Select>
-              </DensityProvider>
+              {/* A small chip with the seller's name: the native list opens from it (named «البائع» for screen readers) */}
+              <select
+                aria-label="البائع"
+                value={seller}
+                onChange={(e) => {
+                  setSeller(e.target.value);
+                  void pos.local.set(SELLER_KEY, { by: session.userId, id: e.target.value });
+                  const picked = e.target.value;
+                  if (cart.lines.length > 0) setCart((c) => ({ ...c, sellerId: picked }));
+                }}
+                className="min-h-9 max-w-32 truncate rounded-full border border-line bg-surface-muted ps-3 pe-1 text-sm font-semibold text-ink"
+              >
+                {staff.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.fullName}
+                  </option>
+                ))}
+              </select>
             </div>
           ) : null}
         </div>
@@ -1314,11 +1306,11 @@ export function SaleScreen(props: SaleScreenProps) {
                 size="md"
                 icon={<InboxIcon size={20} />}
                 aria-label={`طلبات المتجر (${waitingOnline.length})`}
-                title="طلبات المتجر"
+                title="طلبات المتجر التي قبلها المدير وتنتظر البيع هنا. الطلبات الجديدة تظهر عند المدير حتى يقبلها."
                 onClick={() => setMode({ kind: 'online' })}
                 className="border-brand/40 bg-brand-soft text-brand-ink"
               >
-                <span aria-hidden="true">طلبات المتجر</span>
+                <span aria-hidden="true">طلبات جاهزة</span>
                 <span
                   aria-hidden="true"
                   className="num grid h-7 min-w-7 place-items-center rounded-full bg-brand px-2 text-sm font-bold text-on-brand shadow-e1"
@@ -1698,75 +1690,78 @@ export function SaleScreen(props: SaleScreenProps) {
                       {NEED_TEXT[need]}
                     </p>
                   ) : null}
-                  <div className="flex w-full items-center gap-2">
-                    {line.weighed ? (
-                      <Button
-                        variant="secondary"
-                        size="md"
-                        icon={<WeighedIcon size={20} />}
-                        onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
-                      >
-                        الوزن
-                      </Button>
-                    ) : (
-                      <div
-                        dir="ltr"
-                        className="inline-flex items-stretch overflow-hidden rounded-control border border-line-control/50 bg-surface shadow-e1"
-                      >
-                        <button
-                          type="button"
-                          aria-label="أنقص الكمية"
-                          onClick={() => changeQty(line, -1)}
-                          className="grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink active:bg-surface-muted"
-                        >
-                          <RemoveIcon size={20} />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="اكتب الكمية"
+                  {/* One row: the quantity, then «خصم / السعر» (they wrap only when a manager's code joins) */}
+                  <div className="flex w-full flex-wrap items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
+                      {line.weighed ? (
+                        <Button
+                          variant="secondary"
+                          size="md"
+                          icon={<WeighedIcon size={20} />}
                           onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
-                          className="num min-w-14 border-x border-line px-2 text-center text-lg font-bold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
                         >
-                          {formatQuantity(line.qty, digits)}
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="زِد الكمية"
-                          onClick={() => changeQty(line, 1)}
-                          className="grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink active:bg-surface-muted"
+                          الوزن
+                        </Button>
+                      ) : (
+                        <div
+                          dir="ltr"
+                          className="inline-flex items-stretch overflow-hidden rounded-control border border-line-control/50 bg-surface shadow-e1"
                         >
-                          <AddIcon size={20} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="grid w-full auto-cols-fr grid-flow-col gap-2">
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      icon={<PercentIcon size={20} />}
-                      onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'percent' })}
-                    >
-                      خصم
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      icon={<OfferIcon size={20} />}
-                      onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'price' })}
-                    >
-                      السعر
-                    </Button>
-                    {need ? (
+                          <button
+                            type="button"
+                            aria-label="أنقص الكمية"
+                            onClick={() => changeQty(line, -1)}
+                            className="grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink active:bg-surface-muted"
+                          >
+                            <RemoveIcon size={20} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="اكتب الكمية"
+                            onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'qty' })}
+                            className="num min-w-14 border-x border-line px-2 text-center text-lg font-bold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
+                          >
+                            {formatQuantity(line.qty, digits)}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="زِد الكمية"
+                            onClick={() => changeQty(line, 1)}
+                            className="grid size-12 place-items-center text-ink-muted transition-colors duration-120 ease-standard hover:bg-surface-muted hover:text-ink active:bg-surface-muted"
+                          >
+                            <AddIcon size={20} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid min-w-40 flex-1 auto-cols-fr grid-flow-col gap-2">
                       <Button
                         variant="secondary"
                         size="md"
-                        icon={<KeyIcon size={20} />}
-                        onClick={() => setMode({ kind: 'approve', lineNo: line.lineNo, need })}
+                        icon={<PercentIcon size={20} />}
+                        onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'percent' })}
                       >
-                        رمز المدير
+                        خصم
                       </Button>
-                    ) : null}
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        icon={<OfferIcon size={20} />}
+                        onClick={() => setMode({ kind: 'line', lineNo: line.lineNo, adjust: 'price' })}
+                      >
+                        السعر
+                      </Button>
+                      {need ? (
+                        <Button
+                          variant="secondary"
+                          size="md"
+                          icon={<KeyIcon size={20} />}
+                          onClick={() => setMode({ kind: 'approve', lineNo: line.lineNo, need })}
+                        >
+                          رمز المدير
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 </CartLine>
               );
@@ -1778,7 +1773,7 @@ export function SaleScreen(props: SaleScreenProps) {
         <div
           role="status"
           aria-label="خصم الفاتورة"
-          title="يشمل كل الأسطر، وما تضيفه بعد الآن."
+          title={`يشمل كل الأسطر${cart.lines.some((l) => l.isService) ? ' ما عدا الخدمات' : ''}، وما تضيفه بعد الآن.`}
           className="mx-3 mb-1.5 flex shrink-0 items-center gap-3 rounded-card border border-info/20 bg-info-soft py-0.5 ps-3 pe-1 text-sm text-info-ink"
         >
           <PercentIcon size={20} className="shrink-0" />
@@ -1790,7 +1785,11 @@ export function SaleScreen(props: SaleScreenProps) {
                 : ''}{' '}
               <ExactMoney minor={totals.invoiceDiscountMinor} currency={ctx.currency} symbol={false} />
             </span>
-            <span className="sr-only">يشمل كل الأسطر، وما تضيفه بعد الآن.</span>
+            <span className={cart.lines.some((l) => l.isService) ? 'block text-xs' : 'sr-only'}>
+              {cart.lines.some((l) => l.isService)
+                ? 'ما عدا الخدمات، وما تضيفه بعد الآن'
+                : 'يشمل كل الأسطر، وما تضيفه بعد الآن.'}
+            </span>
           </span>
           <Button
             variant="ghost"

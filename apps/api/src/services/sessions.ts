@@ -114,7 +114,12 @@ export async function rotateSession(
 
   if (current.revoked_at) {
     if (!current.replaced_by) return { status: 'invalid' }; // signed out or revoked
-    if (now.getTime() - time(current.revoked_at) <= REUSE_GRACE_MS) return { status: 'race' };
+    if (now.getTime() - time(current.revoked_at) <= REUSE_GRACE_MS) {
+      // Owner-approved (2026-11-17): shortly after a rotation the browser most likely never got
+      // the answer (a page change or a dropped connection mid-refresh) and still holds this
+      // token. Rotate the family's live token again instead of signing the owner out.
+      return rotateLiveHead(db, current, policy, now, meta);
+    }
     await revokeFamily(db, current.tenant_id, current.family_id, now);
     return { status: 'invalid' };
   }
@@ -151,6 +156,57 @@ export async function rotateSession(
       .returning({ id: sessions.id });
     if (revoked.length === 0) {
       // Another request rotated this token first; void ours and let the client retry.
+      await tx.update(sessions).set({ revokedAt: now }).where(eq(sessions.id, next.rowId));
+      return { status: 'race' };
+    }
+    return { status: 'rotated', session: next };
+  });
+}
+
+/**
+ * Recovers a refresh whose answer was lost: the family's one live token is replaced by a new one
+ * and points to it, so a request still carrying it inside the grace window recovers the same way.
+ * A family with no live token (signed out, or ended as stolen) gets nothing.
+ */
+async function rotateLiveHead(
+  db: Database,
+  current: StoredSession,
+  policy: SessionPolicy,
+  now: Date,
+  meta: RequestMeta,
+): Promise<RotateResult> {
+  if (time(current.absolute_expires_at) <= now.getTime()) return { status: 'invalid' };
+  return withTenant(db, current.tenant_id, async (tx): Promise<RotateResult> => {
+    const [head] = await tx
+      .select({ id: sessions.id, expiresAt: sessions.expiresAt })
+      .from(sessions)
+      .where(and(eq(sessions.familyId, current.family_id), isNull(sessions.revokedAt)))
+      .limit(1);
+    if (!head || new Date(head.expiresAt).getTime() <= now.getTime()) return { status: 'invalid' };
+    const [owner] = await tx
+      .select({ userStatus: users.status, tenantStatus: tenants.status })
+      .from(users)
+      .innerJoin(tenants, eq(tenants.id, users.tenantId))
+      .where(eq(users.id, current.user_id))
+      .limit(1);
+    if (owner?.userStatus !== 'active' || owner.tenantStatus !== 'active') return { status: 'invalid' };
+    const next = await createSession(
+      tx,
+      {
+        tenantId: current.tenant_id,
+        userId: current.user_id,
+        now,
+        policy,
+        family: { id: current.family_id, absoluteExpiresAt: new Date(current.absolute_expires_at) },
+      },
+      meta,
+    );
+    const replaced = await tx
+      .update(sessions)
+      .set({ revokedAt: now, replacedBy: next.rowId })
+      .where(and(eq(sessions.id, head.id), isNull(sessions.revokedAt)))
+      .returning({ id: sessions.id });
+    if (replaced.length === 0) {
       await tx.update(sessions).set({ revokedAt: now }).where(eq(sessions.id, next.rowId));
       return { status: 'race' };
     }

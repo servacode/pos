@@ -240,6 +240,45 @@ describe('serial tracking at the till and on the server', () => {
     ).toEqual([first.number, second.number].sort());
   });
 
+  it('a number two sales took stays with the sale the owner picks', async () => {
+    const store = await openStore(app);
+    const a15 = await phone(store);
+    await received(store, a15, ['KEEP-1']);
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const mk = () =>
+      doc(
+        'sale',
+        sale(store, open.id, {
+          lines: [cartLine(1, 2_000_000, { ...a15, serials: ['KEEP-1'] })],
+          payments: salePayments,
+        }),
+      );
+    const first = mk();
+    const second = mk();
+    await push(app, store.device, [open, first, second]);
+    const row = await history(store, 'KEEP-1');
+    expect(row.saleNumber).toBe(first.number);
+    const other = row.sales.find((x) => x.saleNumber === second.number)!;
+    const fix = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'POST', url: '/v1/serials/fix', headers: as(store), payload });
+    // Already with that sale, or a sale that never took it: refused
+    expect((await fix({ serial: 'KEEP-1', status: 'sold', keepSaleId: row.saleId })).statusCode).toBe(400);
+    expect(
+      (await fix({ serial: 'KEEP-1', status: 'sold', keepSaleId: '00000000-0000-4000-8000-000000000000' }))
+        .statusCode,
+    ).toBe(400);
+    expect((await fix({ serial: 'KEEP-1', status: 'in_stock', keepSaleId: other.saleId })).statusCode).toBe(
+      400,
+    );
+    expect((await fix({ serial: 'KEEP-1', status: 'sold', keepSaleId: other.saleId })).statusCode).toBe(200);
+    const after = await history(store, 'KEEP-1');
+    expect(after.saleNumber).toBe(second.number);
+    // The history keeps both sales, the repeat still flagged
+    expect(after.flags).toEqual(['duplicate']);
+    expect(after.sales).toHaveLength(2);
+  });
+
   it('flags an unknown number and a manager override, and a purchase entered later adopts it', async () => {
     const store = await openStore(app);
     const a15 = await phone(store);

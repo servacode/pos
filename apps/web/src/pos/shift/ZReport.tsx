@@ -136,7 +136,10 @@ export function ZReport({
           </Fragment>
         ))}
         {(activity.cashRounding ?? []).map((r) => (
-          <Line key={`rd:${r.currency}`} label="منها تقريب النقد">
+          <Line
+            key={`rd:${r.currency}`}
+            label={hasReturns ? 'منها تقريب النقد (بيع ومرتجع)' : 'منها تقريب النقد'}
+          >
             <ExactMoney minor={r.amountMinor} currency={r.currency} decimals={2} trimZeros />
           </Line>
         ))}
@@ -219,11 +222,18 @@ export function ZReport({
           ))}
         </Section>
       ) : null}
-      {(activity.deposits?.count ?? 0) > 0 ? (
+      {(activity.deposits?.count ?? 0) > 0 || (activity.depositsUsed?.length ?? 0) > 0 ? (
         <Section title="عربون">
-          <Line label="العدد">{counted(activity.deposits!.count, DEPOSITS, digits)}</Line>
-          {activity.deposits!.byCurrency.map((row) => (
-            <Line key={row.currency} label="قيمته">
+          {(activity.deposits?.count ?? 0) > 0 ? (
+            <Line label="العدد">{counted(activity.deposits!.count, DEPOSITS, digits)}</Line>
+          ) : null}
+          {(activity.deposits?.byCurrency ?? []).map((row) => (
+            <Line key={`in:${row.currency}`} label="عربون مقبوض">
+              <ExactMoney minor={row.amountMinor} currency={row.currency} />
+            </Line>
+          ))}
+          {(activity.depositsUsed ?? []).map((row) => (
+            <Line key={`out:${row.currency}`} label="عربون مستعمل">
               <ExactMoney minor={row.amountMinor} currency={row.currency} />
             </Line>
           ))}

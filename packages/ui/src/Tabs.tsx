@@ -124,7 +124,7 @@ export function Tabs<V extends string>({
       {underline ? (
         <ScrollStrip>{list}</ScrollStrip>
       ) : (
-        <ScrollStrip className="w-fit max-w-full self-start">{list}</ScrollStrip>
+        <ScrollStrip wrapClassName="w-fit max-w-full self-start">{list}</ScrollStrip>
       )}
       {active ? (
         <div

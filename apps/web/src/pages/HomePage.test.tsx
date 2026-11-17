@@ -136,6 +136,22 @@ describe('HomePage', () => {
       expect(screen.getByRole('link', { name: 'افتح الكاشير' })).toHaveAttribute('href', '/pos');
     });
 
+    it('counts the accepted orders waiting for a till, the number the till shows', async () => {
+      const order = (id: string) => ({ id, source: 'shop', status: 'accepted' });
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'customers.view']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport({}) },
+        'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
+        'GET /v1/online-orders?status=accepted': {
+          status: 200,
+          body: { items: [order('o-4'), order('o-5')] },
+        },
+      });
+      renderApp('/');
+      expect(await screen.findByText('طلبات مقبولة تنتظر البيع على الكاشير')).toBeInTheDocument();
+    });
+
     it('explains a negative margin with a link to the products sold under their cost', async () => {
       mockFetch({
         'POST /v1/auth/refresh': signedInRefresh,

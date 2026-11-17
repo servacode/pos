@@ -128,4 +128,64 @@ describe('cash rounding on the Z (round 19)', () => {
     expect(text).toContain('تقريب النقد');
     expect(text).toContain('−3.5');
   });
+
+  it('says a deposit taken and a deposit used on two rows, and the rounding of sales and refunds together', () => {
+    const text = renderZ([
+      doc('deposit', { shiftId: SHIFT_ID, currency: 'SYP', amountMinor: 300_00, method: 'cash' }, 1),
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 71_250, discountMinor: 0 },
+          payments: [
+            { method: 'voucher', currency: 'SYP', amountMinor: 300_00, reference: 'DEP-001-001-0000001' },
+            { method: 'cash', currency: 'SYP', amountMinor: 41_000 },
+          ],
+          cashRounding: { currency: 'SYP', roundingMinor: -250 },
+          change: null,
+        },
+        2,
+      ),
+      doc(
+        'return',
+        {
+          shiftId: SHIFT_ID,
+          refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 71_000, roundingMinor: -250 }],
+        },
+        3,
+      ),
+    ]);
+    expect(text).toContain('عربون مقبوض');
+    expect(text).toContain('عربون مستعمل');
+    // The sale lost 2.50 to the step, the refund gained 2.50: together nothing is left, so no row
+    expect(text).not.toContain('تقريب النقد');
+  });
+
+  it('adds the rounding of a cash refund to the sales’ rounding in one clear row', () => {
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 71_250, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 71_000 }],
+          cashRounding: { currency: 'SYP', roundingMinor: -250 },
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        {
+          shiftId: SHIFT_ID,
+          refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 71_500, roundingMinor: 250 }],
+        },
+        2,
+      ),
+    ]);
+    expect(text).toContain('منها تقريب النقد (بيع ومرتجع)');
+    expect(text).toContain('5');
+  });
 });

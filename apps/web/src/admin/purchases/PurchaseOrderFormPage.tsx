@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import type { PurchaseOrderDetail, PurchaseOrderSuggestionLine, SupplierRow } from '@serva/core';
+import {
+  formatMoney,
+  orderLineCost,
+  type PurchaseOrderAlreadyOrdered,
+  type PurchaseOrderDetail,
+  type PurchaseOrderSuggestionLine,
+  type SupplierRow,
+} from '@serva/core';
 import {
   Alert,
   Badge,
@@ -21,24 +28,45 @@ import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';
 import { ApiError, errorMessage } from '../../lib/api';
 import { DateField } from '../../lib/DateField';
-import { moneyOf, qtyOf, listSuppliers, today } from './api';
+import { getInventory, moneyOf, qtyOf, listSuppliers, today } from './api';
+import { getProduct } from '../catalog/api';
 import { moneyText } from './packLines';
 import { createOrder, getOrder, suggestOrder, updateOrder } from './orderApi';
 import { Caption, LinesHead, LinesTable, RemoveLine } from './parts';
+import { purchaseWarnings, referenceCosts, type CostReference } from './purchaseSanity';
+import { SanityDialog } from './SanityDialog';
+import { SuggestPanel, groupSuggestion } from './SuggestPanel';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 
 interface Line {
   variantId: string;
+  productId?: string;
   name: string;
   /** Pieces as typed */
   qty: string;
-  /** The line's expected cost in all, as typed */
-  cost: string;
+  /** What one piece is expected to cost, as typed; the line's total follows it */
+  unit: string;
   /** Why the suggestion put it here */
   why?: PurchaseOrderSuggestionLine;
 }
 
-const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_10rem_10rem_2.5rem]';
+/** What is known about an item when it sits on the order: the shelf, the usual costs, the price */
+interface Facts {
+  stock?: number;
+  min?: number | null;
+  price?: number | null;
+  reference?: CostReference;
+}
+
+const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_9rem_9rem_8rem_2.5rem]';
+
+/** The last cost, unless it is far from the usual one (a slipped key in an old purchase is not copied forward) */
+function usualUnit(ref: CostReference | undefined): number | null {
+  if (!ref) return null;
+  const { last, typical } = ref;
+  if (last && (!typical || (last <= typical * 5 && last * 5 >= typical))) return last;
+  return typical ?? null;
+}
 
 const NOTES_CLASS =
   'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base';
@@ -57,13 +85,18 @@ export function PurchaseOrderFormPage() {
   const [loading, setLoading] = useState(Boolean(id));
   const [saved, setSaved] = useState<PurchaseOrderDetail | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
+  const [suppliersLoaded, setSuppliersLoaded] = useState(false);
   const [supplierId, setSupplierId] = useState('');
   const [expected, setExpected] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
+  const [facts, setFacts] = useState<Record<string, Facts>>({});
   const [all, setAll] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
+  const [already, setAlready] = useState<PurchaseOrderAlreadyOrdered[]>([]);
+  const [panel, setPanel] = useState<PurchaseOrderSuggestionLine[] | null>(null);
+  const [warnings, setWarnings] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -72,15 +105,43 @@ export function PurchaseOrderFormPage() {
     if (error) errorBox.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   }, [error]);
 
+  const learn = (variantId: string, more: Facts) =>
+    setFacts((now) => ({ ...now, [variantId]: { ...now[variantId], ...more } }));
+
   useEffect(() => {
     listSuppliers()
       .then((r) => {
         const active = r.items.filter((s) => !s.archived);
         setSuppliers(active);
         setSupplierId((current) => current || (id ? '' : (active[0]?.id ?? '')));
+        setSuppliersLoaded(true);
       })
       .catch((e: unknown) => setError(errorMessage(e)));
   }, [id]);
+
+  // The shelf and the usual costs of every item, for the line notes and the cost doubts; no permission, no notes
+  useEffect(() => {
+    let alive = true;
+    getInventory()
+      .then((r) => {
+        if (!alive) return;
+        const stock = new Map<string, number>();
+        for (const row of r.items) stock.set(row.variantId, (stock.get(row.variantId) ?? 0) + row.qty);
+        const refs = referenceCosts(r.items);
+        setFacts((now) => {
+          const next = { ...now };
+          for (const [variantId, qty] of stock) {
+            const reference = refs.get(variantId);
+            next[variantId] = { ...next[variantId], stock: qty, ...(reference ? { reference } : {}) };
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -93,28 +154,92 @@ export function PurchaseOrderFormPage() {
         setLines(
           o.lines.map((l) => ({
             variantId: l.variantId,
+            productId: l.productId,
             name: l.name,
             qty: String(l.qty / 1000),
-            cost: moneyText(l.costMinor),
+            unit: moneyText(l.unitCostMinor),
           })),
         );
+        // The shelf price and minimum of each item, for the doubts about a cost
+        for (const productId of new Set(o.lines.map((l) => l.productId))) {
+          getProduct(productId)
+            .then((d) => {
+              for (const v of d.variants) {
+                learn(v.id, {
+                  min: v.minStockQty,
+                  price: v.price.currency === 'SYP' && v.price.priceMinor > 0 ? v.price.priceMinor : null,
+                });
+              }
+            })
+            .catch(() => undefined);
+        }
       })
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setLoading(false));
   }, [id]);
 
-  const parsed = lines.map((l) => ({ qty: qtyOf(l.qty), cost: l.cost.trim() ? moneyOf(l.cost) : 0 }));
+  const parsed = lines.map((l) => {
+    const qty = qtyOf(l.qty);
+    const unit = l.unit.trim() ? moneyOf(l.unit) : 0;
+    return { qty, unit, total: qty && unit !== null ? orderLineCost(unit, qty) : 0 };
+  });
+  const missingQty = lines.filter((_, i) => !(parsed[i]!.qty && parsed[i]!.qty! > 0));
+  const missingCost = lines.filter((_, i) => parsed[i]!.unit === null);
   const ready =
-    Boolean(supplierId) && lines.length > 0 && parsed.every((p) => p.qty && p.qty > 0 && p.cost !== null);
-  const total = parsed.reduce((n, p) => n + (p.cost ?? 0), 0);
+    Boolean(supplierId) && lines.length > 0 && missingQty.length === 0 && missingCost.length === 0;
+  const total = parsed.reduce((n, p) => n + p.total, 0);
   const locked = saved !== null && saved.status !== 'draft' && saved.status !== 'sent';
+  /** Why «احفظ» waits, in words: a button never goes grey without a reason */
+  const notReadyWhy = ready
+    ? null
+    : !supplierId
+      ? 'اختر المورد ليُحفظ.'
+      : lines.length === 0
+        ? 'أضف صنفاً واحداً على الأقل.'
+        : missingQty.length > 0
+          ? `اكتب الكمية لـ ${missingQty.map((l) => l.name).join('، ')} ليُحفظ.`
+          : `اكتب سعر الوحدة لـ ${missingCost.map((l) => l.name).join('، ')} ليُحفظ.`;
 
   function addItem(v: PickedVariant) {
+    const reference = facts[v.variantId]?.reference;
+    learn(v.variantId, {
+      ...(v.priceMinor ? { price: v.priceMinor } : {}),
+      ...(v.minStockQty ? { min: v.minStockQty } : {}),
+    });
+    const usual = usualUnit(reference);
     setLines((list) =>
       list.some((l) => l.variantId === v.variantId)
         ? list
-        : [...list, { variantId: v.variantId, name: v.name, qty: '', cost: '' }],
+        : [
+            ...list,
+            {
+              variantId: v.variantId,
+              name: v.name,
+              qty: '',
+              unit: usual ? moneyText(Math.round(usual)) : '',
+            },
+          ],
     );
+  }
+
+  function addSuggested(items: PurchaseOrderSuggestionLine[]) {
+    for (const i of items) learn(i.variantId, { stock: i.stockQty, min: i.minStockQty, price: i.priceMinor });
+    setLines((list) => {
+      const have = new Set(list.map((l) => l.variantId));
+      return [
+        ...list,
+        ...items
+          .filter((i) => !have.has(i.variantId))
+          .map((i) => ({
+            variantId: i.variantId,
+            productId: i.productId,
+            name: i.name,
+            qty: String(i.suggestedQty / 1000),
+            unit: i.unitCostMinor > 0 ? moneyText(i.unitCostMinor) : '',
+            why: i,
+          })),
+      ];
+    });
   }
 
   async function suggest() {
@@ -122,27 +247,36 @@ export function PurchaseOrderFormPage() {
     setSuggesting(true);
     setError(null);
     setSuggestNote(null);
+    setPanel(null);
     try {
       const got = await suggestOrder(supplierId, all);
       const have = new Set(lines.map((l) => l.variantId));
       const fresh = got.items.filter((i) => !have.has(i.variantId));
-      setLines((list) => [
-        ...list,
-        ...fresh.map((i) => ({
-          variantId: i.variantId,
-          name: i.name,
-          qty: String(i.suggestedQty / 1000),
-          cost: i.costMinor > 0 ? moneyText(i.costMinor) : '',
-          why: i,
-        })),
-      ]);
-      setSuggestNote(
-        got.items.length === 0
-          ? 'لا شيء ينقص عند هذا المورد الآن. جرّب «أصناف لم تُشترَ منه» إن كان عندك أصناف بلا مورد.'
-          : fresh.length === 0
+      setAlready(got.alreadyOrdered);
+      const orders = [...new Set(got.alreadyOrdered.flatMap((a) => a.orderNumbers))].join('، ');
+      const alreadyText =
+        got.alreadyOrdered.length === 0
+          ? ''
+          : got.alreadyOrdered.length === 1
+            ? ` صنف واحد مطلوب أصلاً في ${orders}.`
+            : ` ${formatQuantity(got.alreadyOrdered.length * 1000, digits)} أصناف مطلوبة أصلاً في ${orders}.`;
+      if (fresh.length === 0) {
+        setSuggestNote(
+          got.items.length > 0
             ? 'كل ما اقتُرح موجود في الطلبية أصلاً.'
-            : `اقتُرحت الأصناف التالية (${formatQuantity(fresh.length * 1000, digits)}).عدّل الكميات والكلفة كما تريد قبل الحفظ.`,
-      );
+            : got.alreadyOrdered.length > 0
+              ? `لا شيء جديد ينقص.${alreadyText}`
+              : 'لا شيء ينقص عند هذا المورد الآن. جرّب «أصناف لم تُشترَ منه» إن كان عندك أصناف بلا مورد.',
+        );
+      } else {
+        // A few plain items go straight to the order; a model in sizes and colours is ticked in a grid first
+        const simple = fresh.length <= 4 && groupSuggestion(fresh).length === fresh.length;
+        if (simple) addSuggested(fresh);
+        else setPanel(fresh);
+        setSuggestNote(
+          `اقتُرحت ${formatQuantity(fresh.length * 1000, digits)} من الأصناف. عدّل الكميات والسعر كما تريد قبل الحفظ.${alreadyText}`,
+        );
+      }
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -150,9 +284,7 @@ export function PurchaseOrderFormPage() {
     }
   }
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (!ready) return;
+  async function write() {
     setBusy(true);
     setError(null);
     setFields({});
@@ -163,7 +295,8 @@ export function PurchaseOrderFormPage() {
       lines: lines.map((l, i) => ({
         variantId: l.variantId,
         qty: parsed[i]!.qty!,
-        costMinor: parsed[i]!.cost ?? 0,
+        costMinor: parsed[i]!.total,
+        unitCostMinor: parsed[i]!.unit ?? 0,
       })),
     };
     try {
@@ -181,13 +314,45 @@ export function PurchaseOrderFormPage() {
     }
   }
 
+  function save(event: FormEvent) {
+    event.preventDefault();
+    if (!ready) return;
+    const doubts = purchaseWarnings(
+      lines.map((l, i) => ({
+        variantId: l.variantId,
+        name: l.name,
+        qty: parsed[i]!.qty,
+        costMinor: parsed[i]!.total,
+        priceMinor: facts[l.variantId]?.price ?? l.why?.priceMinor ?? null,
+      })),
+      new Map(Object.entries(facts).flatMap(([k, f]) => (f.reference ? [[k, f.reference] as const] : []))),
+    );
+    if (doubts.length > 0) setWarnings(doubts);
+    else void write();
+  }
+
+  /** «عندك 12 · الحد الأدنى 20 · آخر شراء 1,314»: what the owner needs to choose the quantity */
+  function noteOf(l: Line): string {
+    const f = facts[l.variantId];
+    const parts: string[] = [];
+    if (f?.stock !== undefined) parts.push(`عندك ${formatQuantity(f.stock, digits)}`);
+    if (f?.min && f.min >= 10) parts.push(`الحد الأدنى ${formatQuantity(f.min, digits)}`);
+    if (l.why) {
+      if (l.why.soldQty > 0) parts.push(`بيع ${formatQuantity(l.why.soldQty, digits)} في 30 يوماً`);
+      if (l.why.onOrderQty > 0) parts.push(`مطلوب سابقاً ${formatQuantity(l.why.onOrderQty, digits)}`);
+    }
+    const last = f?.reference?.last ?? (l.why && l.why.unitCostMinor > 0 ? l.why.unitCostMinor : null);
+    if (last) parts.push(`آخر شراء ${formatMoney(Math.round(last), base, { digits })}`);
+    return parts.join(' · ');
+  }
+
   const title = saved ? `تعديل الطلبية ${saved.number}` : 'طلبية شراء جديدة';
   return (
     <ReportScreen me={me} access={['purchases.manage']} title={title}>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title={title}
-          description="اختر المورد وأضف الأصناف بكمياتها وكلفتها المتوقعة. تُحفظ مسودة، ثم ترسلها للمورد."
+          description="اختر المورد وأضف الأصناف بكمياتها وسعر الوحدة المتوقع. تُحفظ مسودة، ثم ترسلها للمورد."
           icon={<ListIcon />}
         />
         {loading ? (
@@ -195,7 +360,17 @@ export function PurchaseOrderFormPage() {
         ) : locked ? (
           <Alert tone="warning">هذه الطلبية لا تُعدَّل بعد أن استُلم منها شيء أو أُغلقت.</Alert>
         ) : (
-          <form onSubmit={(e) => void save(e)} aria-label="طلبية شراء" className="flex flex-col gap-6">
+          <form onSubmit={save} aria-label="طلبية شراء" className="flex flex-col gap-6">
+            {warnings ? (
+              <SanityDialog
+                warnings={warnings}
+                title="راجع الأرقام قبل الحفظ"
+                description="هذه الطلبية تبدو غير معتادة. إن كانت صحيحة احفظها."
+                confirm="الأرقام صحيحة، احفظ"
+                onConfirm={() => void write()}
+                onClose={() => setWarnings(null)}
+              />
+            ) : null}
             {error ? (
               <div ref={errorBox}>
                 <Alert tone="error">{error}</Alert>
@@ -227,7 +402,7 @@ export function PurchaseOrderFormPage() {
                   error={fields.expectedDate}
                 />
               </div>
-              {suppliers.length === 0 && !loading ? (
+              {suppliersLoaded && suppliers.length === 0 ? (
                 <div className="mt-4">
                   <Alert tone="info">لا موردين بعد. أضف المورد من «المشتريات».</Alert>
                 </div>
@@ -253,6 +428,29 @@ export function PurchaseOrderFormPage() {
                   <Switch label="أصناف لم تُشترَ منه من قبل" checked={all} onCheckedChange={setAll} />
                 </div>
                 {suggestNote ? <Alert tone="info">{suggestNote}</Alert> : null}
+                {already.length > 0 ? (
+                  <ul aria-label="أصناف مطلوبة أصلاً" className="flex flex-col gap-1 text-sm text-ink-muted">
+                    {already.slice(0, 8).map((a) => (
+                      <li key={a.variantId}>
+                        {a.name}: مطلوب أصلاً في {a.orderNumbers.join('، ')} (
+                        {formatQuantity(a.onOrderQty, digits)})
+                      </li>
+                    ))}
+                    {already.length > 8 ? (
+                      <li>و{formatQuantity((already.length - 8) * 1000, digits)} غيرها</li>
+                    ) : null}
+                  </ul>
+                ) : null}
+                {panel ? (
+                  <SuggestPanel
+                    items={panel}
+                    onAdd={(picked) => {
+                      addSuggested(picked);
+                      setPanel(null);
+                    }}
+                    onCancel={() => setPanel(null)}
+                  />
+                ) : null}
                 <VariantPicker onPick={addItem} />
                 {lines.length > 0 ? (
                   <LinesTable
@@ -261,72 +459,76 @@ export function PurchaseOrderFormPage() {
                       <LinesHead className={LINE_COLUMNS}>
                         <span>الصنف</span>
                         <span>الكمية</span>
-                        <span>الكلفة المتوقعة</span>
+                        <span>سعر الوحدة</span>
+                        <span>المجموع</span>
                         <span />
                       </LinesHead>
                     }
                   >
-                    {lines.map((l, i) => (
-                      <li
-                        key={l.variantId}
-                        className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 px-4 py-3 md:items-center ${LINE_COLUMNS}`}
-                      >
-                        <span className="col-span-2 flex min-w-0 flex-col gap-1 md:col-span-1">
-                          <span className="truncate font-semibold text-ink">{l.name}</span>
-                          {l.why ? (
-                            <span className="flex flex-wrap items-center gap-2 text-xs text-ink-subtle">
+                    {lines.map((l, i) => {
+                      const note = noteOf(l);
+                      return (
+                        <li
+                          key={l.variantId}
+                          className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2 px-4 py-3 md:items-center ${LINE_COLUMNS}`}
+                        >
+                          <span className="col-span-2 flex min-w-0 flex-col gap-1 md:col-span-1">
+                            <span className="truncate font-semibold text-ink">{l.name}</span>
+                            {l.why ? (
                               <Badge tone={l.why.reason === 'below_min' ? 'warning' : 'info'}>
                                 {l.why.reason === 'below_min' ? 'تحت الحد الأدنى' : 'يُباع بسرعة'}
                               </Badge>
-                              <span>
-                                في المخزون {formatQuantity(l.why.stockQty, digits)}
-                                {l.why.minStockQty !== null
-                                  ? ` · الحد الأدنى ${formatQuantity(l.why.minStockQty, digits)}`
-                                  : ''}
-                                {l.why.soldQty > 0
-                                  ? ` · بيع ${formatQuantity(l.why.soldQty, digits)} في 30 يوماً`
-                                  : ''}
-                                {l.why.onOrderQty > 0
-                                  ? ` · مطلوب سابقاً ${formatQuantity(l.why.onOrderQty, digits)}`
-                                  : ''}
+                            ) : null}
+                            {note ? <span className="text-xs text-ink-subtle">{note}</span> : null}
+                            {l.why?.costDoubtful ? (
+                              <span className="text-xs font-semibold text-warning-ink">
+                                آخر سعر شراء يبدو غير معتاد، راجعه.
                               </span>
-                            </span>
-                          ) : null}
-                        </span>
-                        <div className="col-span-3 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
-                          <Caption>الكمية</Caption>
-                          <NumberField
-                            label={`كمية ${l.name}`}
-                            hideLabel
-                            decimals={3}
-                            value={l.qty}
-                            onValueChange={(qty) =>
-                              setLines((all) => all.map((x, j) => (j === i ? { ...x, qty } : x)))
-                            }
-                            error={fields[`lines.${i}.qty`]}
-                          />
-                        </div>
-                        <div className="col-span-3 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
-                          <Caption>الكلفة المتوقعة</Caption>
-                          <NumberField
-                            label={`كلفة ${l.name}`}
-                            hideLabel
-                            decimals={2}
-                            value={l.cost}
-                            onValueChange={(cost) =>
-                              setLines((all) => all.map((x, j) => (j === i ? { ...x, cost } : x)))
-                            }
-                            error={fields[`lines.${i}.costMinor`]}
-                          />
-                        </div>
-                        <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto">
-                          <RemoveLine
-                            name={l.name}
-                            onRemove={() => setLines((all) => all.filter((_, j) => j !== i))}
-                          />
-                        </div>
-                      </li>
-                    ))}
+                            ) : null}
+                          </span>
+                          <div className="col-span-3 row-start-2 md:col-span-1 md:col-start-auto md:row-start-auto">
+                            <Caption>الكمية</Caption>
+                            <NumberField
+                              label={`كمية ${l.name}`}
+                              hideLabel
+                              decimals={3}
+                              value={l.qty}
+                              onValueChange={(qty) =>
+                                setLines((all) => all.map((x, j) => (j === i ? { ...x, qty } : x)))
+                              }
+                              error={fields[`lines.${i}.qty`]}
+                            />
+                          </div>
+                          <div className="col-span-3 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
+                            <Caption>سعر الوحدة</Caption>
+                            <NumberField
+                              label={`سعر وحدة ${l.name}`}
+                              hideLabel
+                              decimals={2}
+                              value={l.unit}
+                              onValueChange={(unit) =>
+                                setLines((all) => all.map((x, j) => (j === i ? { ...x, unit } : x)))
+                              }
+                              error={fields[`lines.${i}.costMinor`]}
+                            />
+                          </div>
+                          <div className="col-span-3 row-start-4 flex items-baseline justify-between md:col-span-1 md:col-start-auto md:row-start-auto md:block">
+                            <Caption>المجموع</Caption>
+                            <Money
+                              minor={parsed[i]!.total}
+                              currency={base}
+                              className="font-semibold text-ink"
+                            />
+                          </div>
+                          <div className="col-start-3 row-start-1 md:col-start-auto md:row-start-auto">
+                            <RemoveLine
+                              name={l.name}
+                              onRemove={() => setLines((all) => all.filter((_, j) => j !== i))}
+                            />
+                          </div>
+                        </li>
+                      );
+                    })}
                   </LinesTable>
                 ) : (
                   <p className="text-sm text-ink-muted">ابحث عن صنف وأضفه، أو اضغط «اقترح طلبية».</p>
@@ -361,10 +563,24 @@ export function PurchaseOrderFormPage() {
                 >
                   إلغاء
                 </Button>
-                <Button type="submit" disabled={!ready} loading={busy}>
+                <Button
+                  type="submit"
+                  disabled={!ready}
+                  loading={busy}
+                  aria-describedby={notReadyWhy ? 'order-not-ready' : undefined}
+                >
                   {saved ? 'احفظ التعديلات' : 'احفظ كمسودة'}
                 </Button>
               </span>
+              {notReadyWhy ? (
+                <p
+                  id="order-not-ready"
+                  aria-live="polite"
+                  className="w-full text-sm font-semibold text-warning-ink"
+                >
+                  {notReadyWhy}
+                </p>
+              ) : null}
             </div>
           </form>
         )}

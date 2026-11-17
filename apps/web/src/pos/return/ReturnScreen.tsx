@@ -219,7 +219,16 @@ export function ReturnScreen({
         .filter((h) => !shown.some((x) => x.number === h.number))
         .map((hit) => ({ kind: 'hit' as const, at: Date.parse(hit.deviceTime), hit })),
     ];
-    return list.sort((x, y) => y.at - x.at);
+    // One row per invoice: the picked one (a store invoice opened from the list) is never listed twice
+    const seen = new Set<string>();
+    return list
+      .filter((row) => {
+        const number = row.kind === 'local' ? row.sale.number : row.hit.number;
+        if (seen.has(number)) return false;
+        seen.add(number);
+        return true;
+      })
+      .sort((x, y) => y.at - x.at);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shown.map((x) => x.id).join(), storeList, remote.sale]);
 
@@ -907,6 +916,15 @@ export function ReturnScreen({
                     </span>
                   ) : null}
                 </div>
+                {method === 'cash' &&
+                current.sale.payments.some(
+                  (p) => p.method === 'cash' && p.currency !== current.sale.currency,
+                ) ? (
+                  // A refund leaves in the invoice's own currency; the dollar drawer has no refund method yet
+                  <Alert tone="info">
+                    دُفعت هذه الفاتورة بالدولار. الرد يكون بالليرة بسعر الفاتورة، من درج الليرة.
+                  </Alert>
+                ) : null}
                 {error ? <Alert tone="error">{error}</Alert> : null}
                 {approving ? (
                   <ManagerCode

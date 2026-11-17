@@ -54,6 +54,11 @@ export const purchaseOrderLineInput = z.object({
   qty: z.int('الكمية مطلوبة').positive('الكمية أكبر من صفر').max(1_000_000_000, 'الكمية كبيرة'),
   /** What the line is expected to cost in all, base currency minor units */
   costMinor: nonNegativeMinorSchema,
+  /**
+   * What one unit is expected to cost, minor units. When it is sent the line's cost is worked out
+   * from it (`unit × qty`); without it the unit cost is worked out from `costMinor`.
+   */
+  unitCostMinor: nonNegativeMinorSchema.optional(),
 });
 
 const orderFields = {
@@ -101,6 +106,8 @@ export interface PurchaseOrderLine {
   name: string;
   qty: number;
   costMinor: number;
+  /** What one unit is expected to cost, minor units (worked out from `costMinor` on an old line) */
+  unitCostMinor: number;
   /** What arrived so far, in purchases made from the order (may pass `qty`) */
   receivedQty: number;
 }
@@ -147,6 +154,10 @@ export interface PurchaseOrderSuggestionLine {
   variantId: string;
   productId: string;
   name: string;
+  /** The product's own name, for grouping the sizes and colours of one model */
+  productName: string;
+  /** The variant's sizes and colours («المقاس: 42») */
+  attributes: { name: string; value: string }[];
   stockQty: number;
   minStockQty: number | null;
   /** Sold over the last `periodDays` */
@@ -156,9 +167,24 @@ export interface PurchaseOrderSuggestionLine {
   suggestedQty: number;
   /** The expected cost of `suggestedQty` at the last purchase's price; 0 when never bought */
   costMinor: number;
+  /** What one unit cost on the last purchase; 0 when never bought */
+  unitCostMinor: number;
+  /** The last cost looks wrong (far from the usual cost, or far above the shelf price) */
+  costDoubtful: boolean;
+  /** The shelf price of one unit in the base currency, null when unknown */
+  priceMinor: number | null;
   reason: PurchaseOrderSuggestReason;
   /** The supplier the item was last bought from, null when never bought */
   lastSupplierId: string | null;
+}
+
+/** An item that runs short but is already owed on an order waiting at a supplier */
+export interface PurchaseOrderAlreadyOrdered {
+  variantId: string;
+  name: string;
+  onOrderQty: number;
+  /** The waiting orders that owe it */
+  orderNumbers: string[];
 }
 
 export interface PurchaseOrderSuggestion {
@@ -166,8 +192,18 @@ export interface PurchaseOrderSuggestion {
   /** Days of sales the suggestion covers on top of the minimum */
   coverDays: number;
   items: PurchaseOrderSuggestionLine[];
+  /** Short items left out because a waiting order already owes enough of them */
+  alreadyOrdered: PurchaseOrderAlreadyOrdered[];
   baseCurrency: CurrencyCode;
 }
+
+/** The cost of `qty` thousandths at `unitCostMinor` per unit, rounded once */
+export const orderLineCost = (unitCostMinor: number, qty: number): number =>
+  Math.round((unitCostMinor * qty) / 1000);
+
+/** What one unit costs when only the line's whole cost is known, rounded to a minor unit */
+export const orderUnitCost = (costMinor: number, qty: number): number =>
+  qty > 0 ? Math.round((costMinor * 1000) / qty) : 0;
 
 /** The quantity still owed on a line: never below zero */
 export const orderLineRemaining = (l: Pick<PurchaseOrderLine, 'qty' | 'receivedQty'>): number =>
@@ -179,9 +215,19 @@ export function purchaseOrderText(
   storeName: string,
   qtyText: (qty: number) => string,
   dayText: (day: string) => string,
+  moneyText?: (minor: number) => string,
 ): string {
   const out: string[] = [`طلبية شراء رقم ${order.number} من ${storeName}`, ''];
-  order.lines.forEach((l, i) => out.push(`${i + 1}. ${l.name} × ${qtyText(orderLineRemaining(l) || l.qty)}`));
+  let total = 0;
+  order.lines.forEach((l, i) => {
+    const qty = orderLineRemaining(l) || l.qty;
+    const unit = l.unitCostMinor;
+    const cost = orderLineCost(unit, qty);
+    total += cost;
+    const price = moneyText && unit > 0 ? ` × ${moneyText(unit)} = ${moneyText(cost)}` : '';
+    out.push(`${i + 1}. ${l.name} × ${qtyText(qty)}${price}`);
+  });
+  if (moneyText && total > 0) out.push('', `المجموع المتوقع: ${moneyText(total)}`);
   out.push('');
   if (order.expectedDate) out.push(`موعد التسليم المطلوب: ${dayText(order.expectedDate)}`);
   if (order.notes) out.push(`ملاحظات: ${order.notes}`);

@@ -177,6 +177,8 @@ export interface ShiftActivity {
   vouchers: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
   /** Deposits («عربون») taken in this shift, per currency; gift-voucher deposits of older tills stay in `vouchers` */
   deposits?: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** Deposits paid with on this shift's invoices (taken today or earlier), per currency */
+  depositsUsed?: { currency: Code; amountMinor: number }[];
   /** What the shift's invoices came to and the discounts given on them, per invoice currency */
   salesTotals: { currency: Code; totalMinor: number; discountMinor: number }[];
   /** Per seller (the chosen seller, else the cashier) and invoice currency: invoices and what they came to */
@@ -189,7 +191,7 @@ export interface ShiftActivity {
     vouchers: { currency: Code; amountMinor: number }[];
     deposits?: { currency: Code; amountMinor: number }[];
   };
-  /** What cash rounding took off (negative) or added to the invoices of this shift, per currency (display only) */
+  /** What cash rounding took off (negative) or added (positive) on this shift's invoices and cash refunds, per currency (display only) */
   cashRounding?: { currency: Code; amountMinor: number }[];
   /** A foreign cash payment (20$) given back in another currency (800 ل.س): what was paid in, what came back */
   changeBack?: { paid: Code; change: Code; paidMinor: number; changeMinor: number }[];
@@ -219,6 +221,7 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   const gifts = new Map<Code, number>();
   const deposits = new Map<Code, number>();
   const depositsCash = new Map<Code, number>();
+  const depositsUsed = new Map<Code, number>();
   let depositCount = 0;
   let giftCount = 0;
   const movements: ShiftActivity['movements'] = [];
@@ -256,6 +259,8 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       bySeller.set(sellerKey, seller);
       for (const p of sale.payments) {
         if (p.method === 'cash') termsOf(p.currency).cashInMinor += p.amountMinor;
+        if (p.method === 'voucher' && /^DEP-/i.test(p.reference ?? ''))
+          depositsUsed.set(p.currency, (depositsUsed.get(p.currency) ?? 0) + p.amountMinor);
         const key = `${p.method}:${p.currency}`;
         const row = byMethod.get(key) ?? { method: p.method, currency: p.currency, count: 0, amountMinor: 0 };
         row.count += 1;
@@ -295,6 +300,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       returnCount += 1;
       for (const r of (payload as unknown as ReturnPayload).refunds) {
         if (r.method === 'cash') termsOf(r.currency).refundsMinor += r.amountMinor;
+        // A cash refund rounded to the step: what the till paid out less is a gain, more a loss (same sign as the sales')
+        if (r.method === 'cash' && r.roundingMinor)
+          rounding.set(r.currency, (rounding.get(r.currency) ?? 0) - r.roundingMinor);
         const key = `${r.method}:${r.currency}`;
         const row = refunds.get(key) ?? { method: r.method, currency: r.currency, amountMinor: 0 };
         row.amountMinor += r.amountMinor;
@@ -352,6 +360,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       count: depositCount,
       byCurrency: [...deposits].map(([currency, amountMinor]) => ({ currency, amountMinor })),
     },
+    ...(depositsUsed.size > 0
+      ? { depositsUsed: [...depositsUsed].map(([currency, amountMinor]) => ({ currency, amountMinor })) }
+      : {}),
     salesTotals: [...salesTotals.values()],
     bySeller: [...bySeller.values()],
     movements,
@@ -363,8 +374,12 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
         : undefined,
     },
     changeBack: [...changeBack.values()],
-    ...(rounding.size > 0
-      ? { cashRounding: [...rounding].map(([currency, amountMinor]) => ({ currency, amountMinor })) }
+    ...([...rounding].some(([, n]) => n !== 0)
+      ? {
+          cashRounding: [...rounding]
+            .filter(([, n]) => n !== 0)
+            .map(([currency, amountMinor]) => ({ currency, amountMinor })),
+        }
       : {}),
   };
 }

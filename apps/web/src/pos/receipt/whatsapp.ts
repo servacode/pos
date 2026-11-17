@@ -4,7 +4,7 @@ import { normalizePhone } from '@serva/core/phone';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { exactDecimals } from '../ExactMoney';
-import { methodLabel, priceTag, type ReceiptData } from './Receipt';
+import { paymentLabel, priceTag, type ReceiptData } from './Receipt';
 import { serialText, warrantyText } from './warranty';
 
 /** The wa.me address of a phone typed any common way (Syrian forms go to 963…), or null when it is not a phone */
@@ -41,7 +41,7 @@ export function receiptText(data: ReceiptData): string {
   if (contractSaved > 0) out.push(`وفّرت ${money(contractSaved)}`);
   out.push(`الإجمالي: ${money(sale.totals.totalMinor)}`);
   for (const p of sale.payments) {
-    out.push(`${methodLabel(p.method, p.currency, base)}: ${money(p.amountMinor, p.currency)}`);
+    out.push(`${paymentLabel(p, base)}: ${money(p.amountMinor, p.currency)}`);
   }
   if (sale.cashRounding && sale.cashRounding.roundingMinor !== 0) {
     const r = sale.cashRounding;

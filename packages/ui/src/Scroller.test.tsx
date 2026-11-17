@@ -33,13 +33,15 @@ describe('ScrollStrip', () => {
         <a href="/a">أ</a>
       </ScrollStrip>,
     );
-    const strip = container.firstElementChild!.firstElementChild as HTMLElement;
+    const strip = container.querySelector('.overflow-x-auto') as HTMLElement;
     // The page is right to left: the strip starts at the right and more waits on the left
     sized(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 0 });
     fireEvent.scroll(strip);
     expect(strip).toHaveAttribute('data-fade-left');
     expect(strip).not.toHaveAttribute('data-fade-right');
     expect(strip.style.maskImage).toContain('transparent');
+    // An arrow in the fade says more is hidden on that side (and only that side)
+    expect(container.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(1);
 
     // Scrolled to the end (negative in RTL): now the right edge hides the start
     act(() => {
@@ -56,13 +58,13 @@ describe('ScrollStrip', () => {
         <a href="/a">أ</a>
       </ScrollStrip>,
     );
-    const strip = container.firstElementChild!.firstElementChild as HTMLElement;
+    const strip = container.querySelector('.overflow-x-auto') as HTMLElement;
     expect(strip.style.paddingInlineEnd).toBe('');
     sized(strip, { scrollWidth: 600, clientWidth: 300, scrollLeft: 0 });
     fireEvent.scroll(strip);
-    expect(strip.style.paddingInlineEnd).toBe('28px');
+    expect(strip.style.paddingInlineEnd).toBe('40px');
     // Everything fits again: no padding
-    sized(strip, { scrollWidth: 328, clientWidth: 300, scrollLeft: 0 });
+    sized(strip, { scrollWidth: 340, clientWidth: 300, scrollLeft: 0 });
     fireEvent.scroll(strip);
     expect(strip.style.paddingInlineEnd).toBe('');
   });

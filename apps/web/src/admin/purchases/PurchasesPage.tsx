@@ -2,6 +2,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   contactPhoneSchema,
+  orderLineCost,
   orderLineRemaining,
   packOptionsOf,
   type PurchaseOrderDetail,
@@ -70,8 +71,9 @@ import {
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead } from './parts';
 import { SlimKpis } from '../SlimKpis';
 import { PackQty } from './PackQty';
+import { SanityDialog } from './SanityDialog';
 import { PurchaseDetailDialog } from './PurchaseDetailDialog';
-import { baseQtyOf, packSummary, withPackChange } from './packLines';
+import { baseQtyOf, moneyText, packSummary, withPackChange } from './packLines';
 import { purchaseWarnings, referenceCosts, type CostReference } from './purchaseSanity';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 import { getProduct } from '../catalog/api';
@@ -633,7 +635,10 @@ export function SupplierForm({
   );
 }
 
-/** What a purchase order is still owed, as the lines of a purchase: the rest of each quantity at its expected price */
+/**
+ * What a purchase order is still owed, as the lines of a purchase: the rest of each quantity at the
+ * order's unit cost, which stays when the quantity is changed (the line's total follows it)
+ */
 function linesOfOrder(order: PurchaseOrderDetail): Line[] {
   return order.lines
     .filter((l) => orderLineRemaining(l) > 0)
@@ -644,7 +649,8 @@ function linesOfOrder(order: PurchaseOrderDetail): Line[] {
         name: l.name,
         qty: String(left / 1000),
         packQty: 1000,
-        cost: String(Math.round((l.costMinor * left) / l.qty) / 100),
+        unitCost: moneyText(l.unitCostMinor),
+        cost: moneyText(orderLineCost(l.unitCostMinor, left)),
       };
     });
 }
@@ -688,6 +694,10 @@ function PurchaseForm({
                     packs: packOptionsOf(v.barcodes),
                     ...(d.requiresExpiry ? { requiresExpiry: true } : {}),
                     ...(d.tracksSerial ? { tracksSerial: true } : {}),
+                    // The shelf price, so a cost far above it is asked about here too
+                    ...(v.price.currency === 'SYP' && v.price.priceMinor > 0
+                      ? { priceMinor: v.price.priceMinor }
+                      : {}),
                   }
                 : l;
             }),
@@ -728,28 +738,35 @@ function PurchaseForm({
   }, []);
   const pastLines = lines.filter((l) => l.expiry && l.expiry < today());
   const parsed = lines.map((l) => ({ qty: baseQtyOf(l), cost: moneyOf(l.cost) }));
+  // A line with the quantity 0 is left out of the invoice, not a reason to stop: what did not arrive stays on the order
+  const used = lines.flatMap((_, i) => (parsed[i]!.qty === 0 ? [] : [i]));
+  const skipped = lines.length - used.length;
   const ready =
-    lines.length > 0 &&
-    parsed.every((p) => p.qty && p.qty > 0 && p.cost !== null) &&
-    lines.every((l) => !l.requiresExpiry || Boolean(l.expiry)) &&
+    used.length > 0 &&
+    used.every((i) => parsed[i]!.qty && parsed[i]!.qty! > 0 && parsed[i]!.cost !== null) &&
+    used.every((i) => !lines[i]!.requiresExpiry || Boolean(lines[i]!.expiry)) &&
     (pastLines.length === 0 || pastOk);
-  const total = parsed.reduce((sum, p) => sum + (p.cost ?? 0), 0);
+  const total = used.reduce((sum, i) => sum + (parsed[i]!.cost ?? 0), 0);
   /** Why «سجّل الفاتورة» waits, in words: the buttons never go grey without a reason */
-  const missingExpiry = lines.filter((l) => l.requiresExpiry && !l.expiry);
+  const missingExpiry = used.map((i) => lines[i]!).filter((l) => l.requiresExpiry && !l.expiry);
   const notReadyWhy =
     ready || lines.length === 0
       ? null
-      : parsed.some((p) => !(p.qty && p.qty > 0) || p.cost === null)
-        ? 'اكتب الكمية والكلفة لكل صنف ليُسجَّل.'
-        : missingExpiry.length > 0
-          ? `اكتب تاريخ الانتهاء لـ ${missingExpiry.map((l) => l.name).join('، ')} ليُسجَّل.`
-          : 'أكّد أن تاريخ الانتهاء الماضي صحيح ليُسجَّل.';
+      : used.length === 0
+        ? 'كل الأسطر بكمية صفر. اكتب كمية لسطر واحد على الأقل.'
+        : used.some((i) => !(parsed[i]!.qty && parsed[i]!.qty! > 0) || parsed[i]!.cost === null)
+          ? 'اكتب الكمية والكلفة لكل صنف ليُسجَّل.'
+          : missingExpiry.length > 0
+            ? `اكتب تاريخ الانتهاء لـ ${missingExpiry.map((l) => l.name).join('، ')} ليُسجَّل.`
+            : 'أكّد أن تاريخ الانتهاء الماضي صحيح ليُسجَّل.';
 
   const withDates = storeSells(me.tenant.sectors, EXPIRY_SECTORS);
   const supplier = suppliers.find((x) => x.id === supplierId);
-  const pieces = parsed.reduce((sum, p) => sum + (p.qty ?? 0), 0);
+  const pieces = used.reduce((sum, i) => sum + (parsed[i]!.qty ?? 0), 0);
 
   function save() {
+    // The zero-quantity lines go first, so the lines the server names are the ones still on the screen
+    if (skipped > 0) setLines(used.map((i) => lines[i]!));
     void s
       .run(() =>
         createPurchase({
@@ -759,24 +776,36 @@ function PurchaseForm({
           reference: reference || null,
           notes: null,
           ...(order ? { purchaseOrderId: order.id } : {}),
-          lines: lines.map((l, i) => ({
-            variantId: l.variantId,
-            qty: parsed[i]!.qty!,
-            costMinor: parsed[i]!.cost!,
-            batchNo: l.batch?.trim() || null,
-            expiryDate: l.expiry || null,
-            ...(l.serials?.trim()
-              ? {
-                  serials: l.serials
-                    .split(/[\n,،]+/)
-                    .map((x) => x.trim())
-                    .filter(Boolean),
-                }
-              : {}),
-          })),
+          lines: used.map((i) => {
+            const l = lines[i]!;
+            return {
+              variantId: l.variantId,
+              qty: parsed[i]!.qty!,
+              costMinor: parsed[i]!.cost!,
+              batchNo: l.batch?.trim() || null,
+              expiryDate: l.expiry || null,
+              ...(l.serials?.trim()
+                ? {
+                    serials: l.serials
+                      .split(/[\n,،]+/)
+                      .map((x) => x.trim())
+                      .filter(Boolean),
+                  }
+                : {}),
+            };
+          }),
         }),
       )
       .then((r) => r && onSaved(r.number));
+  }
+
+  /** The message about one line's serial numbers: its own, or the invoice-wide one that names a number typed on it */
+  function serialProblem(i: number): string | undefined {
+    const own = s.fields[`lines.${i}.serials`];
+    if (own) return own;
+    const wide = s.fields.lines;
+    const typed = (lines[i]?.serials ?? '').split(/[\n,،]+/).map((x) => x.trim());
+    return wide && typed.some((x) => x !== '' && wide.includes(x)) ? wide : undefined;
   }
 
   return (
@@ -788,12 +817,12 @@ function PurchaseForm({
         e.preventDefault();
         if (!ready) return;
         const doubts = purchaseWarnings(
-          lines.map((l, i) => ({
-            variantId: l.variantId,
-            name: l.name,
+          used.map((i) => ({
+            variantId: lines[i]!.variantId,
+            name: lines[i]!.name,
             qty: parsed[i]!.qty,
             costMinor: parsed[i]!.cost,
-            priceMinor: l.priceMinor ?? null,
+            priceMinor: lines[i]!.priceMinor ?? null,
           })),
           averages,
         );
@@ -805,38 +834,10 @@ function PurchaseForm({
       }}
     >
       {warnings ? (
-        <Dialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setWarnings(null);
-          }}
-          title="راجع الأرقام قبل التسجيل"
-          description="هذه الفاتورة تبدو غير معتادة. إن كانت صحيحة سجّلها."
-        >
-          <div className="flex flex-col gap-4">
-            <ul className="flex list-disc flex-col gap-1.5 ps-5 text-sm text-ink">
-              {warnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-            <div className="flex flex-wrap gap-3">
-              <Button
-                onClick={() => {
-                  setWarnings(null);
-                  save();
-                }}
-              >
-                الأرقام صحيحة، سجّل
-              </Button>
-              <Button variant="ghost" onClick={() => setWarnings(null)}>
-                أعد المراجعة
-              </Button>
-            </div>
-          </div>
-        </Dialog>
+        <SanityDialog warnings={warnings} onConfirm={save} onClose={() => setWarnings(null)} />
       ) : null}
       <div className="flex min-w-0 flex-col gap-6">
-        {s.error ? <Alert tone="error">{s.error}</Alert> : null}
+        {s.error ? <Alert tone="error">{s.fields.lines ?? s.error}</Alert> : null}
         {order ? (
           <Alert tone="info">
             استلام من الطلبية{' '}
@@ -937,8 +938,7 @@ function PurchaseForm({
                     l.requiresExpiry === true ||
                     Boolean(l.batch || l.expiry || s.fields[`lines.${i}.expiryDate`]);
                   // Serial numbers only for a product that tracks them (one number per piece)
-                  const showSerials =
-                    l.tracksSerial === true || Boolean(l.serials || s.fields[`lines.${i}.serials`]);
+                  const showSerials = l.tracksSerial === true || Boolean(l.serials || serialProblem(i));
                   return (
                     <li key={`${l.variantId}-${i}`} className="flex flex-col gap-3 px-4 py-3">
                       <div
@@ -1072,12 +1072,11 @@ function PurchaseForm({
                                     all.map((x, j) => (j === i ? { ...x, serials: e.target.value } : x)),
                                   )
                                 }
-                                className="num rounded-control border border-line-control bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden"
+                                aria-invalid={serialProblem(i) ? true : undefined}
+                                className={`num rounded-control border bg-surface px-3 py-2 text-[0.9375rem] text-ink transition-[border-color,box-shadow] duration-120 ease-standard hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden ${serialProblem(i) ? 'border-danger' : 'border-line-control'}`}
                               />
-                              {s.fields[`lines.${i}.serials`] ? (
-                                <span className="text-sm text-danger-ink">
-                                  {s.fields[`lines.${i}.serials`]}
-                                </span>
+                              {serialProblem(i) ? (
+                                <span className="text-sm text-danger-ink">{serialProblem(i)}</span>
                               ) : null}
                             </label>
                           ) : null}
@@ -1136,7 +1135,7 @@ function PurchaseForm({
             ) : null}
             <SummaryRow term="الدفع">{PAYMENT_TEXT[payment]}</SummaryRow>
             <SummaryRow term="الأصناف">
-              <span className="num">{lines.length}</span>
+              <span className="num">{used.length}</span>
             </SummaryRow>
             <SummaryRow term="الكمية">
               <span className="num">{formatQuantity(pieces, digits)}</span>
@@ -1172,6 +1171,12 @@ function PurchaseForm({
               checked={pastOk}
               onCheckedChange={setPastOk}
             />
+          ) : null}
+          {skipped > 0 && used.length > 0 ? (
+            <p role="status" className="text-sm text-ink-muted">
+              {skipped === 1 ? 'سطر واحد بكمية صفر' : `${skipped} أسطر بكمية صفر`} لن يُسجَّل
+              {order ? '، ويبقى على الطلبية' : ''}.
+            </p>
           ) : null}
           {notReadyWhy ? (
             <p id="purchase-not-ready" aria-live="polite" className="text-sm font-semibold text-warning-ink">
