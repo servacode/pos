@@ -910,6 +910,10 @@ export interface BranchRow {
   address: string | null;
   phone: string | null;
   isActive: boolean;
+  /** store | van; a cache from before vans has none, which is a store */
+  kind?: 'store' | 'van';
+  parentBranchId?: string | null;
+  vehiclePlate?: string | null;
   version: number;
 }
 

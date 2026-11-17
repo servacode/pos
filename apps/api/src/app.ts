@@ -48,6 +48,7 @@ import { recipeRoutes } from './routes/recipes';
 import { staffRoutes } from './routes/staff';
 import { staffAdminRoutes } from './routes/staff-admin';
 import { branchRoutes } from './routes/branches';
+import { distributionRoutes } from './routes/distribution';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
 import type { SyncProcessors } from './services/sync-push';
@@ -150,6 +151,7 @@ export async function buildApp({
   await app.register(staffRoutes);
   await app.register(staffAdminRoutes);
   await app.register(branchRoutes);
+  await app.register(distributionRoutes);
   await app.register(reportRoutes);
   await app.register(ledgerDocRoutes);
   await app.register(financialReportRoutes);

@@ -153,6 +153,22 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/branches': 'signed-in',
   'PATCH /v1/branches/:id': 'signed-in',
   'POST /v1/branches/:id/active': 'signed-in',
+  'GET /v1/regions': 'signed-in',
+  'POST /v1/regions': 'signed-in',
+  'PATCH /v1/regions/:id': 'signed-in',
+  'GET /v1/vans': 'signed-in',
+  'POST /v1/vans': 'signed-in',
+  'PATCH /v1/vans/:id': 'signed-in',
+  'POST /v1/vans/:id/active': 'signed-in',
+  'GET /v1/reps': 'signed-in',
+  'POST /v1/reps': 'signed-in',
+  'PATCH /v1/reps/:id': 'signed-in',
+  'POST /v1/reps/:id/active': 'signed-in',
+  'GET /v1/routes': 'signed-in',
+  'POST /v1/routes': 'signed-in',
+  'GET /v1/routes/:id': 'signed-in',
+  'PATCH /v1/routes/:id': 'signed-in',
+  'PUT /v1/routes/:id/customers': 'signed-in',
   'GET /v1/staff': 'signed-in',
   'POST /v1/staff': 'signed-in',
   'POST /v1/staff/pin-check': 'signed-in',
@@ -419,6 +435,76 @@ function branchIdor(url: (id: string) => string, method: 'PATCH' | 'POST', paylo
     const [row] = await ownerDb()<{ name: string; is_active: boolean }[]>`
       select name, is_active from branches where id = ${id}`;
     expect(row).toEqual(before);
+  };
+}
+
+/**
+ * Store B's owner (on a plan with the reps module) on store A's region, van, rep or route: 404, and the
+ * row is untouched. The rows are written straight to the tables, since store A's plan has no reps.
+ */
+let distributionRowCount = 0;
+const distributionRows = {
+  region: async (a: Stores['a']) =>
+    (
+      await ownerDb()<{ id: string }[]>`
+        insert into regions (tenant_id, name) values (${a.tenantId}, ${`منطقة ${++distributionRowCount}`}) returning id`
+    )[0]!.id,
+  van: async (a: Stores['a']) => {
+    const [branch] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into branches (tenant_id, code, name, kind, parent_branch_id)
+        values (${a.tenantId}, ${String(900 + ++distributionRowCount)}, 'سيارة أ', 'van', ${branch!.id}) returning id`
+    )[0]!.id;
+  },
+  rep: async (a: Stores['a']) => {
+    const [branch] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    const [user] = await ownerDb()<{ id: string }[]>`
+      insert into users (tenant_id, full_name, phone, password_hash)
+      values (${a.tenantId}, 'مندوب أ', ${`+96394400${String(++distributionRowCount).padStart(4, '0')}`}, 'x') returning id`;
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into sales_reps (tenant_id, user_id, branch_id) values (${a.tenantId}, ${user!.id}, ${branch!.id})
+        returning id`
+    )[0]!.id;
+  },
+  route: async (a: Stores['a']) =>
+    (
+      await ownerDb()<{ id: string }[]>`
+        insert into routes (tenant_id, name) values (${a.tenantId}, ${`خط ${++distributionRowCount}`}) returning id`
+    )[0]!.id,
+};
+
+function distributionIdor(
+  table: 'regions' | 'branches' | 'sales_reps' | 'routes',
+  make: keyof typeof distributionRows,
+  method: 'GET' | 'PATCH' | 'POST' | 'PUT',
+  path: (id: string) => string,
+  payload?: (b: { branchId: string }) => Record<string, unknown>,
+) {
+  return async (app: FastifyInstance, { a, b }: Stores) => {
+    await ownerDb()`update plans set limits = limits || '{"reps": null}'::jsonb`;
+    try {
+      const id = await distributionRows[make](a);
+      const read = async () =>
+        (
+          await ownerDb()<{ version: number; name: string | null }[]>`
+          select version, to_jsonb(t) ->> 'name' as name from ${ownerDb()(table)} t where id = ${id}`
+        )[0];
+      const before = await read();
+      const res = await app.inject({
+        method,
+        url: path(id),
+        headers: owner(b),
+        ...(payload ? { payload: payload({ branchId: await firstBranch(b.tenantId) }) } : {}),
+      });
+      expect(res.statusCode, `${method} ${path(':id')}`).toBe(404);
+      expect(await read()).toEqual(before);
+    } finally {
+      await ownerDb()`update plans set limits = limits || '{"reps": 0}'::jsonb`;
+    }
   };
 }
 
@@ -1487,6 +1573,69 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
   'POST /v1/customers/:id/archive-duplicate': customerIdor('POST', '/archive-duplicate'),
   'PATCH /v1/branches/:id': branchIdor((id) => `/v1/branches/${id}`, 'PATCH', { name: 'مسروق' }),
   'POST /v1/branches/:id/active': branchIdor((id) => `/v1/branches/${id}/active`, 'POST', { active: false }),
+  'PATCH /v1/regions/:id': distributionIdor(
+    'regions',
+    'region',
+    'PATCH',
+    (id) => `/v1/regions/${id}`,
+    () => ({
+      name: 'مسروق',
+      version: 1,
+    }),
+  ),
+  'PATCH /v1/vans/:id': distributionIdor(
+    'branches',
+    'van',
+    'PATCH',
+    (id) => `/v1/vans/${id}`,
+    ({ branchId }) => ({
+      name: 'مسروق',
+      parentBranchId: branchId,
+    }),
+  ),
+  'POST /v1/vans/:id/active': distributionIdor(
+    'branches',
+    'van',
+    'POST',
+    (id) => `/v1/vans/${id}/active`,
+    () => ({ active: false }),
+  ),
+  'PATCH /v1/reps/:id': distributionIdor(
+    'sales_reps',
+    'rep',
+    'PATCH',
+    (id) => `/v1/reps/${id}`,
+    ({ branchId }) => ({
+      branchId,
+      mode: 'both',
+      version: 1,
+    }),
+  ),
+  'POST /v1/reps/:id/active': distributionIdor(
+    'sales_reps',
+    'rep',
+    'POST',
+    (id) => `/v1/reps/${id}/active`,
+    () => ({ active: false }),
+  ),
+  'GET /v1/routes/:id': distributionIdor('routes', 'route', 'GET', (id) => `/v1/routes/${id}`),
+  'PATCH /v1/routes/:id': distributionIdor(
+    'routes',
+    'route',
+    'PATCH',
+    (id) => `/v1/routes/${id}`,
+    () => ({
+      name: 'مسروق',
+      version: 1,
+    }),
+  ),
+  'PUT /v1/routes/:id/customers': distributionIdor(
+    'routes',
+    'route',
+    'PUT',
+    (id) => `/v1/routes/${id}/customers`,
+    () => ({ customerIds: [], version: 1 }),
+  ),
   'PATCH /v1/staff/:id': staffIdor('PATCH', '', { fullName: 'مسروق' }),
   'POST /v1/staff/:id/pin': staffIdor('POST', '/pin', { pin: '7391' }),
   'POST /v1/staff/:id/deactivate': staffIdor('POST', '/deactivate'),

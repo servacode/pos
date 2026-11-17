@@ -40,7 +40,12 @@ import { ensureServiceItem, MAINTENANCE_ITEM_NAME, RENTAL_ITEM_NAME } from './co
 const notFound = () => new AppError(404, 'not_found', 'المتجر غير موجود.');
 
 async function mainBranch(tx: Transaction) {
-  const [row] = await tx.select().from(branches).orderBy(asc(branches.code)).limit(1);
+  const [row] = await tx
+    .select()
+    .from(branches)
+    .where(eq(branches.kind, 'store'))
+    .orderBy(asc(branches.code))
+    .limit(1);
   return row ?? null;
 }
 

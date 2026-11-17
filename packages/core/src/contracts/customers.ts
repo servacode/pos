@@ -25,8 +25,22 @@ import {
 export const PRICE_TIERS = ['retail', 'wholesale'] as const;
 export type PriceTier = (typeof PRICE_TIERS)[number];
 
-/** What kind of customer: clinic, hospital, pharmacy, individual, government body */
-export const CUSTOMER_KINDS = ['clinic', 'hospital', 'pharmacy', 'individual', 'government'] as const;
+/**
+ * What kind of customer: clinic, hospital, pharmacy, individual, government body; and the shops a
+ * distributor sells to (grocery, mini-market, supermarket, restaurant, sub-wholesaler)
+ */
+export const CUSTOMER_KINDS = [
+  'clinic',
+  'hospital',
+  'pharmacy',
+  'individual',
+  'government',
+  'grocery',
+  'minimarket',
+  'supermarket',
+  'restaurant',
+  'sub_wholesaler',
+] as const;
 export type CustomerKind = (typeof CUSTOMER_KINDS)[number];
 export const CUSTOMER_KIND_LABELS: Record<CustomerKind, string> = {
   clinic: 'عيادة',
@@ -34,6 +48,11 @@ export const CUSTOMER_KIND_LABELS: Record<CustomerKind, string> = {
   pharmacy: 'صيدلية',
   individual: 'فرد',
   government: 'جهة حكومية',
+  grocery: 'بقالية',
+  minimarket: 'ميني ماركت',
+  supermarket: 'سوبرماركت',
+  restaurant: 'مطعم',
+  sub_wholesaler: 'جملة فرعي',
 };
 
 const optionalText = (max: number, message: string) =>

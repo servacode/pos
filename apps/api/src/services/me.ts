@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   catalogOptionsOf,
   ALL_PERMISSIONS,
@@ -64,7 +64,7 @@ export async function loadMe(
     const branchRows = await tx
       .select({ id: branches.id, code: branches.code, name: branches.name })
       .from(branches)
-      .where(eq(branches.isActive, true))
+      .where(and(eq(branches.isActive, true), eq(branches.kind, 'store')))
       .orderBy(branches.code);
 
     const s = sub.subscription;

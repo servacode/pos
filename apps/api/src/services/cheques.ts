@@ -57,7 +57,7 @@ const all = sql`
   where r.method = 'cheque'
   union all
   select 'supplier_payment', sp.id, 1, sp.number, sp.business_date::text,
-         (select id from branches order by id limit 1), null::uuid, null::text,
+         (select id from branches where kind = 'store' order by id limit 1), null::uuid, null::text,
          sp.cheque->>'number', sp.amount_minor::text, (select base_currency from tenant_settings limit 1),
          sp.cheque, s.name
   from supplier_payments sp

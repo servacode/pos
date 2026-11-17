@@ -131,7 +131,7 @@ export async function listStaff(db: Database, auth: AccessClaims): Promise<Staff
     const branchRows = await tx
       .select({ id: branches.id, name: branches.name })
       .from(branches)
-      .where(eq(branches.isActive, true))
+      .where(and(eq(branches.isActive, true), eq(branches.kind, 'store')))
       .orderBy(branches.code);
     return {
       staff: await loadMembers(tx),

@@ -38,9 +38,10 @@ describe('default roles', () => {
     expect(role('cashier')?.permissions).not.toContain('report.view');
     expect(manager).not.toContain('settings.manage');
     // users, WhatsApp, subscription, devices, settings, the hand-written journal (accounting.post)
-    // and the controlled medicines (pharmacy.controlled)
-    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 7);
+    // the controlled medicines (pharmacy.controlled) and the reps' live location (rep.track)
+    expect(manager).toHaveLength(ALL_PERMISSIONS.length - 8);
     expect(manager).not.toContain('pharmacy.controlled');
+    expect(manager).not.toContain('rep.track');
     expect(role('pharmacist')?.permissions).toContain('pharmacy.controlled');
     expect(role('cashier')?.permissions).not.toContain('pharmacy.controlled');
   });

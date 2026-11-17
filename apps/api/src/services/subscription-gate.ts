@@ -116,7 +116,7 @@ export async function assertStoreWritable(
 
 // ─── Plan limits ─────────────────────────────────────────────────────────────
 
-type LimitKind = 'users' | 'registers' | 'branches' | 'hallDevices';
+type LimitKind = 'users' | 'registers' | 'branches' | 'hallDevices' | 'reps';
 
 /** Devices that take no money (03 › وضع النادل): they are not counted against the cashier limit */
 const NON_TILL_KINDS: readonly string[] = ['waiter', 'kitchen_screen', 'call_screen'];
@@ -131,7 +131,7 @@ const LIMIT_TEXT: Record<LimitKind, { count: SQL; message: (limit: number) => st
     // 03 › وضع النادل: waiter, kitchen and call screens take no money, so they are not tills
     count: sql`select count(*)::int as n from devices
       where status = 'active' and revoked_at is null
-        and kind not in ('waiter', 'kitchen_screen', 'call_screen')`,
+        and kind not in ('waiter', 'kitchen_screen', 'call_screen', 'rep_phone')`,
     message: (n) =>
       `وصلت باقتك إلى حدّها: ${n} أجهزة كاشير فعّالة. أوقف جهازاً أو انتقل إلى باقة أعلى من صفحة الاشتراك.`,
   },
@@ -143,10 +143,35 @@ const LIMIT_TEXT: Record<LimitKind, { count: SQL; message: (limit: number) => st
       `وصلت باقتك إلى حدّها: ${n} أجهزة للنُدُل والمطبخ والنداء. أوقف جهازاً أو انتقل إلى باقة أعلى من صفحة الاشتراك.`,
   },
   branches: {
-    count: sql`select count(*)::int as n from branches where is_active`,
+    // A van is not a branch of the plan: it belongs to a rep, who is counted under `reps`
+    count: sql`select count(*)::int as n from branches where is_active and kind = 'store'`,
     message: (n) => `وصلت باقتك إلى حدّها: ${n} فروع. انتقل إلى باقة أعلى من صفحة الاشتراك.`,
   },
+  reps: {
+    count: sql`select count(*)::int as n from sales_reps where status = 'active'`,
+    message: (n) =>
+      `وصلت باقتك إلى حدّها: ${n} مندوبين فعّالين. أوقف مندوباً أو انتقل إلى باقة أعلى من صفحة الاشتراك.`,
+  },
 };
+
+const repsUnavailable = () =>
+  new AppError(
+    403,
+    'plan_limit_reached',
+    'المندوبون والتوزيع غير متاحين في باقتك. انتقل إلى باقة أعلى من صفحة الاشتراك.',
+  );
+
+/**
+ * The reps module (plans.limits.reps): 0, or no such limit on the plan, hides it; null is unlimited.
+ * A store that has no subscription row at all is left alone, like the other limits. Read-only: it
+ * counts nothing, so it is also the guard of listing and editing what already exists.
+ */
+export async function assertRepsEnabled(tx: Transaction): Promise<void> {
+  const found = await readFacts(tx);
+  if (!found) return;
+  const limit = found.limits.reps;
+  if (limit === undefined || limit === 0) throw repsUnavailable();
+}
 
 /**
  * Refuses to ADD one more of `kind` when the plan's limit is already reached (null or missing
@@ -162,7 +187,9 @@ export async function assertWithinPlanLimit(
    */
   deviceKind?: string,
 ): Promise<void> {
+  if (kind === 'registers' && deviceKind === 'rep_phone') return assertRepsEnabled(tx);
   if (kind === 'registers' && deviceKind && NON_TILL_KINDS.includes(deviceKind)) kind = 'hallDevices';
+  if (kind === 'reps') await assertRepsEnabled(tx);
   const found = await readFacts(tx);
   const limit = found?.limits[kind];
   if (limit === null || limit === undefined) return;

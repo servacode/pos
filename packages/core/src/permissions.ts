@@ -43,6 +43,16 @@ export const PERMISSIONS = {
   'installments.view': 'رؤية خطط الأقساط والمستحق منها',
   'installments.create': 'البيع بالتقسيط',
   'installments.manage': 'إلغاء خطة تقسيط وإدارتها',
+  // المندوبون والتوزيع (docs/specs/32-sales-reps.md): the rep's phone, the supervisor's desk
+  'rep.sell': 'البيع والمرتجع من جوال المندوب',
+  'rep.order': 'أخذ طلبيات البيع المسبق من جوال المندوب',
+  'rep.collect': 'التحصيل وإيصال القبض من جوال المندوب',
+  'rep.deliver': 'تسليم الطلبيات للزبائن (السائق)',
+  'rep.settle': 'تسوية حساب المندوب آخر اليوم واعتماد الفروق',
+  'rep.track': 'الموقع الحي للمندوبين',
+  'rep.targets': 'أهداف المندوبين وعمولاتهم',
+  'routes.manage': 'المناطق وخطوط السير والمندوبون والسيارات',
+  'sales_orders.manage': 'الطلبيات وحجزها وتسليمها',
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -50,7 +60,16 @@ export type Permission = keyof typeof PERMISSIONS;
 export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];
 
 export type SystemRoleKey =
-  'owner' | 'manager' | 'cashier' | 'waiter' | 'pharmacist' | 'accountant' | 'storekeeper';
+  | 'owner'
+  | 'manager'
+  | 'cashier'
+  | 'waiter'
+  | 'pharmacist'
+  | 'accountant'
+  | 'storekeeper'
+  | 'rep'
+  | 'driver'
+  | 'sales_supervisor';
 
 export interface RoleTemplate {
   key: SystemRoleKey;
@@ -72,6 +91,8 @@ const OWNER_ONLY: readonly Permission[] = [
   'accounting.post',
   // 03 › الأدوية المراقبة: the pharmacist's role holds it, and the owner who grants it
   'pharmacy.controlled',
+  // 09 › rep.track: where the reps are is the owner's alone to see, and to grant to a supervisor
+  'rep.track',
 ];
 
 /** Roles created automatically for every new store. The owner can edit them or add more. */
@@ -118,5 +139,46 @@ export const DEFAULT_ROLES: readonly RoleTemplate[] = [
     nameAr: 'أمين مستودع',
     permissions: ['purchases.manage', 'inventory.adjust'],
     maxDiscountBp: 0,
+  },
+  // «مندوب»: sells, takes orders and collects on his own phone; nothing else (docs/specs/32-sales-reps.md)
+  {
+    key: 'rep',
+    nameAr: 'مندوب',
+    permissions: [
+      'sale.create',
+      'sale.discount',
+      'sale.credit',
+      'sale.refund',
+      'receipt.create',
+      'shift.close_own',
+      'customers.view',
+      'rep.sell',
+      'rep.order',
+      'rep.collect',
+    ],
+    maxDiscountBp: 500,
+  },
+  // «سائق توصيل»: delivers the orders the supervisor loaded and takes the money due on them
+  {
+    key: 'driver',
+    nameAr: 'سائق توصيل',
+    permissions: ['sale.create', 'receipt.create', 'shift.close_own', 'customers.view', 'rep.deliver'],
+    maxDiscountBp: 0,
+  },
+  // «مشرف مبيعات»: plans the routes, follows the orders, settles the reps and approves their customers
+  {
+    key: 'sales_supervisor',
+    nameAr: 'مشرف مبيعات',
+    permissions: [
+      'customers.view',
+      'customers.manage',
+      'report.view',
+      'rep.settle',
+      'rep.targets',
+      'routes.manage',
+      'sales_orders.manage',
+      'rep.deliver',
+    ],
+    maxDiscountBp: 1000,
   },
 ];

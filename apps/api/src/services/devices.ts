@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { assertWithinPlanLimit } from './subscription-gate';
+import { assertRepsEnabled, assertWithinPlanLimit } from './subscription-gate';
 import { and, asc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import {
   PAIRING_CODE_ALPHABET,
@@ -111,10 +111,24 @@ async function reserveCode(tx: Transaction, branchId: string): Promise<string> {
 
 async function activeBranch(tx: Transaction, branchId: string) {
   const [branch] = await tx
-    .select({ id: branches.id, code: branches.code, name: branches.name })
+    .select({ id: branches.id, code: branches.code, name: branches.name, kind: branches.kind })
     .from(branches)
     .where(and(eq(branches.id, branchId), eq(branches.isActive, true)));
   return branch ?? null;
+}
+
+/**
+ * A van (a branch of kind van) takes the rep's phone and nothing else, and a rep's phone belongs on a
+ * van: its sales and its stock are the van's. Everything else links to a store branch.
+ */
+function assertKindFitsBranch(branchKind: string, deviceKind: string | undefined): void {
+  const isRepPhone = deviceKind === 'rep_phone';
+  if (branchKind === 'van' && !isRepPhone) {
+    throw wrongState('هذه سيارة مندوب: لا يُربط بها إلا جوال المندوب.');
+  }
+  if (branchKind !== 'van' && isRepPhone) {
+    throw wrongState('جوال المندوب يُربط بسيارته، لا بفرع.');
+  }
 }
 
 /** A branch of this store the user may link devices to: 403 without the permission, else 404. */
@@ -173,6 +187,8 @@ export async function createPairingCode(
 ): Promise<PairingCodeResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const branch = await branchToManage(tx, auth, input.branchId);
+    assertKindFitsBranch(branch.kind, input.kind);
+    if (input.kind === 'rep_phone') await assertRepsEnabled(tx);
     const [tenant] = await tx.select({ storeCode: tenants.storeCode }).from(tenants).limit(1);
 
     const qrToken = newQrToken();
@@ -240,6 +256,7 @@ async function claimPairing(
   if (pairing.usedAt || pairing.expiresAt.getTime() <= now.getTime()) return { error: 'expired' };
   const branch = await activeBranch(tx, pairing.branchId);
   if (!branch) return { error: 'expired' };
+  assertKindFitsBranch(branch.kind, data.kind);
   const [claimed] = await tx
     .update(devicePairings)
     .set({ usedAt: now })
@@ -377,6 +394,7 @@ export async function activateByOwner(
 ): Promise<{ status: 'active'; device: ActivatedDevice }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     const branch = await branchToManage(tx, auth, data.branchId);
+    assertKindFitsBranch(branch.kind, data.kind);
     await assertWithinPlanLimit(tx, 'registers', data.kind);
     const code = await reserveCode(tx, branch.id);
     const token = newDeviceToken();

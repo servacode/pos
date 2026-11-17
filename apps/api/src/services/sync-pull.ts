@@ -107,6 +107,10 @@ const PULL_SETS: Record<string, PullSet> = {
       address: branches.address,
       phone: branches.phone,
       isActive: branches.isActive,
+      // A van is a branch of kind van: a till tells it from a store by this (older caches have no kind: a store)
+      kind: branches.kind,
+      parentBranchId: branches.parentBranchId,
+      vehiclePlate: branches.vehiclePlate,
       version: branches.version,
     },
   },

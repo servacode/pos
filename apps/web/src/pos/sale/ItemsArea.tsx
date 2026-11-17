@@ -446,7 +446,9 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           }
         />
       ) : (
-        <BranchStock.Provider value={(catalog.staff.branches?.length ?? 0) > 1}>
+        <BranchStock.Provider
+          value={(catalog.staff.branches?.filter((b) => (b.kind ?? 'store') === 'store').length ?? 0) > 1}
+        >
           <Grid
             entries={entries}
             best={best}

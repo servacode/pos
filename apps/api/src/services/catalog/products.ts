@@ -89,7 +89,7 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
   const branchRows = await tx
     .select({ id: branches.id, name: branches.name })
     .from(branches)
-    .where(eq(branches.isActive, true))
+    .where(and(eq(branches.isActive, true), eq(branches.kind, 'store')))
     .orderBy(asc(branches.code));
   const stockRows =
     ids.length > 0 ? await tx.select().from(stockLevels).where(inArray(stockLevels.variantId, ids)) : [];

@@ -43,7 +43,7 @@ const paidPlans: {
     sortOrder: 1,
     priceMonthlyMinor: 1000,
     priceYearlyMinor: 10000,
-    limits: { branches: 1, registers: 1, users: 3, products: 2000 },
+    limits: { branches: 1, registers: 1, users: 3, products: 2000, reps: 0 },
     features: ['sales', 'inventory', 'customers', 'credit'],
   },
   {
@@ -52,7 +52,7 @@ const paidPlans: {
     sortOrder: 2,
     priceMonthlyMinor: 2500,
     priceYearlyMinor: 25000,
-    limits: { branches: 3, registers: 5, users: 15, products: null },
+    limits: { branches: 3, registers: 5, users: 15, products: null, reps: 2 },
     features: [
       'sales',
       'inventory',
@@ -70,7 +70,7 @@ const paidPlans: {
     sortOrder: 3,
     priceMonthlyMinor: 5000,
     priceYearlyMinor: 50000,
-    limits: { branches: null, registers: null, users: null, products: null },
+    limits: { branches: null, registers: null, users: null, products: null, reps: null },
     features: [
       'sales',
       'inventory',

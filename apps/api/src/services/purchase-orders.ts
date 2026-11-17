@@ -122,7 +122,12 @@ async function checked(tx: Transaction, input: PurchaseOrderInput) {
   if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
   const [branch] = input.branchId
     ? await tx.select({ id: branches.id }).from(branches).where(eq(branches.id, input.branchId))
-    : await tx.select({ id: branches.id }).from(branches).orderBy(asc(branches.code)).limit(1);
+    : await tx
+        .select({ id: branches.id })
+        .from(branches)
+        .where(eq(branches.kind, 'store'))
+        .orderBy(asc(branches.code))
+        .limit(1);
   if (!branch) throw invalid({ branchId: 'الفرع غير موجود' });
   const items = await stockedItems(
     tx,

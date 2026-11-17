@@ -83,8 +83,8 @@ export const devicePublicKeySchema = z
 /** POST /v1/devices/pairing-codes (owner) */
 export const createPairingCodeInput = z.object({
   branchId: z.uuid('اختر الفرع'),
-  /** What the device to link is for: the link carries it, so a kitchen screen opens /kitchen (cashier by default) */
-  kind: z.enum(['cashier', 'waiter', 'kitchen_screen', 'call_screen']).optional(),
+  /** What the device to link is for: the link carries it, so a kitchen screen opens /kitchen, a rep's phone /rep (cashier by default); a rep phone needs a van branch */
+  kind: z.enum(['cashier', 'waiter', 'kitchen_screen', 'call_screen', 'rep_phone']).optional(),
 });
 export type CreatePairingCodeInput = z.input<typeof createPairingCodeInput>;
 

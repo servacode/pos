@@ -118,9 +118,12 @@ describe('wholesale prices and customers', () => {
     expect(Object.fromEntries(rows.map((r) => [r.key, r.has]))).toEqual({
       accountant: false,
       cashier: false,
+      driver: false,
       manager: true,
       owner: true,
       pharmacist: false,
+      rep: false,
+      sales_supervisor: false,
       storekeeper: false,
       waiter: false,
     });

@@ -4,6 +4,7 @@ import {
   boolean,
   customType,
   date,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -88,6 +89,11 @@ export interface PlanLimits {
   users?: number | null;
   products?: number | null;
   assistantQuestionsPerMonth?: number | null;
+  /**
+   * «المندوبون والتوزيع»: how many sales reps the plan allows. 0 or missing: the module is hidden;
+   * null: unlimited (migration 0073 sets 0 / 2 / null on free+basic / pro / enterprise).
+   */
+  reps?: number | null;
 }
 
 /** Subscription plans. Everything here is editable from the platform admin panel. */
@@ -447,6 +453,8 @@ export const tenantSettings = pgTable(
     }>(),
     /** «الأقساط» (packages/core › installments.ts InstalmentSettings); null: off, the defaults */
     installments: jsonb('installments').$type<Record<string, unknown>>(),
+    /** «المندوبون والتوزيع» (packages/core › contracts/distribution.ts DistributionSettings); null: the defaults */
+    distribution: jsonb('distribution').$type<Record<string, unknown>>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -467,6 +475,11 @@ export const branches = pgTable(
     address: text('address'),
     phone: text('phone'),
     isActive: boolean('is_active').notNull().default(true),
+    /** store | van: a rep's van is a branch of kind van (its stock is the van's stock); every list of stores leaves vans out */
+    kind: text('kind').notNull().default('store'),
+    /** A van's home branch (where it is loaded from); null for a store */
+    parentBranchId: uuid('parent_branch_id'),
+    vehiclePlate: text('vehicle_plate'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -474,6 +487,11 @@ export const branches = pgTable(
   },
   (t) => [
     primaryKey({ name: 'branches_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({
+      name: 'branches_parent_fk',
+      columns: [t.tenantId, t.parentBranchId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
     unique('branches_tenant_code_unique').on(t.tenantId, t.code),
     index('branches_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
@@ -534,6 +552,11 @@ export const devices = pgTable(
     clockOffsetMs: integer('clock_offset_ms'),
     /** The owner took a stopped device off the list («احذف من القائمة»): hidden only, its documents stay */
     hiddenAt: timestamp('hidden_at', { withTimezone: true }),
+    /** Pull sets the device must download again from scratch (a scope shrank); the next pull's commands.resync names them, then it is emptied */
+    resyncSets: text('resync_sets')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1670,6 +1693,36 @@ export const saleReturnLines = pgTable(
   ],
 );
 
+/** «المناطق» (المندوبون والتوزيع): where customers are; a region may sit under another. Shared by routes, delivery and the reports. */
+export const regions = pgTable(
+  'regions',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    parentId: uuid('parent_id'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'regions_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({
+      name: 'regions_parent_fk',
+      columns: [t.tenantId, t.parentId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    uniqueIndex('regions_name_unique').on(t.tenantId, sql`lower(${t.name})`),
+    index('regions_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
 /**
  * The store's customers (09 › customers). Every till pulls them; a till may add one (the
  * `customer` document, whose id becomes the customer's). What a customer owes is not stored here:
@@ -1700,6 +1753,13 @@ export const customers = pgTable(
     /** The person to ask for and their phone, at a clinic, hospital or office */
     contactName: text('contact_name'),
     contactPhone: text('contact_phone'),
+    /** «المنطقة» of regions: the rep's route and the reports group by it */
+    regionId: uuid('region_id'),
+    /** approved | pending | rejected: a customer a rep adds waits for the supervisor (cash only until then) */
+    approvalStatus: text('approval_status').notNull().default('approved'),
+    /** Where the shop is, when a rep marked it */
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
     /** The till document that created it, when a till did */
     createdByDoc: uuid('created_by_doc'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -1710,6 +1770,12 @@ export const customers = pgTable(
   },
   (t) => [
     primaryKey({ name: 'customers_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({
+      name: 'customers_region_fk',
+      columns: [t.tenantId, t.regionId],
+      foreignColumns: [regions.tenantId, regions.id],
+    }),
+    index('customers_region_idx').on(t.tenantId, t.regionId),
     index('customers_phone_idx').on(t.tenantId, t.phone),
     index('customers_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     tenantIsolation(),
@@ -2586,6 +2652,23 @@ export const promotions = pgTable(
     toTime: text('to_time'),
     /** «كود الخصم»: when set, the promotion applies only to a shop order that carries this code */
     couponCode: text('coupon_code'),
+    /** kind tiered: [{ minQty, percentBp }, …] by quantity bought */
+    tiers: jsonb('tiers').$type<{ minQty: number; percentBp: number }[]>(),
+    /** kind free_item: buying the scope gives freeQty of this variant free */
+    freeVariantId: uuid('free_variant_id'),
+    freeQty: integer('free_qty'),
+    /** Only customers of these kinds (customers.kind) get it; empty: everyone */
+    customerKinds: text('customer_kinds')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Only these price tiers (retail, wholesale) get it; empty: both */
+    priceTiers: text('price_tiers')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Offered on a rep's phone only */
+    repOnly: boolean('rep_only').notNull().default(false),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     version: version(),
     createdAt: createdAt(),
@@ -3374,6 +3457,400 @@ export const promissoryNotes = pgTable(
     }),
     unique('promissory_notes_number_unique').on(t.tenantId, t.number),
     index('promissory_notes_status_idx').on(t.tenantId, t.status, t.dueDate),
+    tenantIsolation(),
+  ],
+);
+
+// ─── Distribution: sales reps, vans, routes, orders, settlements (المندوبون والتوزيع) ───────────────
+// A van is a branch of kind 'van' and a rep's phone is a device paired to it, so a van sale, a
+// loading and a van count are the ordinary sale, transfer and stocktake. Nothing here is money:
+// the rep's cash is his shift drawer (1110) and these tables are the plan, the day's record and
+// the settlement's record. The module is gated by plans.limits.reps.
+
+/** A user who sells in the field, and the van and limits he works under */
+export const salesReps = pgTable(
+  'sales_reps',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    userId: uuid('user_id').notNull(),
+    /** The branch he is loaded from and settles in */
+    branchId: uuid('branch_id').notNull(),
+    /** His van (a branch of kind van); null for a pre-sale rep who carries nothing */
+    vanBranchId: uuid('van_branch_id'),
+    /** The phone he works on, once paired */
+    deviceId: uuid('device_id'),
+    /** van | presale | both */
+    mode: text('mode').notNull().default('van'),
+    /** Most discount he may give in basis points; null: his role's limit */
+    maxDiscountBp: integer('max_discount_bp'),
+    /** Most credit he may give in a day, base currency; null: no limit */
+    dailyCreditLimitMinor: bigint('daily_credit_limit_minor', { mode: 'number' }),
+    commissionPlanId: uuid('commission_plan_id'),
+    /** active | stopped */
+    status: text('status').notNull().default('active'),
+    note: text('note'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'sales_reps_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.userId], foreignColumns: [users.tenantId, users.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({
+      name: 'sales_reps_van_fk',
+      columns: [t.tenantId, t.vanBranchId],
+      foreignColumns: [branches.tenantId, branches.id],
+    }),
+    foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
+    foreignKey({
+      name: 'sales_reps_commission_fk',
+      columns: [t.tenantId, t.commissionPlanId],
+      foreignColumns: [commissionPlans.tenantId, commissionPlans.id],
+    }),
+    unique('sales_reps_user_unique').on(t.tenantId, t.userId),
+    uniqueIndex('sales_reps_van_unique')
+      .on(t.tenantId, t.vanBranchId)
+      .where(sql`${t.vanBranchId} is not null`),
+    tenantIsolation(),
+  ],
+);
+
+/** «خط السير»: the customers a rep visits on given weekdays, in order */
+export const routes = pgTable(
+  'routes',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    regionId: uuid('region_id'),
+    /** 0 = Sunday … 6 = Saturday */
+    weekdays: integer('weekdays')
+      .array()
+      .notNull()
+      .default(sql`'{}'::integer[]`),
+    repId: uuid('rep_id'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'routes_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.regionId], foreignColumns: [regions.tenantId, regions.id] }),
+    foreignKey({ columns: [t.tenantId, t.repId], foreignColumns: [salesReps.tenantId, salesReps.id] }),
+    uniqueIndex('routes_name_unique').on(t.tenantId, sql`lower(${t.name})`),
+    index('routes_rep_idx').on(t.tenantId, t.repId),
+    index('routes_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/** A customer on a route and the place he holds in its visiting order */
+export const routeCustomers = pgTable(
+  'route_customers',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    routeId: uuid('route_id').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    visitOrder: integer('visit_order').notNull().default(0),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'route_customers_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.routeId], foreignColumns: [routes.tenantId, routes.id] }),
+    foreignKey({ columns: [t.tenantId, t.customerId], foreignColumns: [customers.tenantId, customers.id] }),
+    unique('route_customers_unique').on(t.tenantId, t.routeId, t.customerId),
+    index('route_customers_customer_idx').on(t.tenantId, t.customerId),
+    index('route_customers_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/** Why a visit ended without a sale: the owner's list, a few come with the store */
+export const noSaleReasons = pgTable(
+  'no_sale_reasons',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** Set on the ones that came with the store (packages/core › DEFAULT_NO_SALE_REASONS); null on the owner's own */
+    key: text('key'),
+    name: text('name').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'no_sale_reasons_pkey', columns: [t.tenantId, t.id] }),
+    uniqueIndex('no_sale_reasons_key_unique')
+      .on(t.tenantId, t.key)
+      .where(sql`${t.key} is not null`),
+    index('no_sale_reasons_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/** A pre-sale order (SO): promises goods, posts nothing; the invoice is an ordinary sale that names it */
+export const salesOrders = pgTable(
+  'sales_orders',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    /** Where it was taken (the rep's van or branch) */
+    branchId: uuid('branch_id').notNull(),
+    /** Where it is filled from */
+    warehouseBranchId: uuid('warehouse_branch_id').notNull(),
+    deviceId: uuid('device_id'),
+    repId: uuid('rep_id'),
+    customerId: uuid('customer_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    deviceTime: timestamp('device_time', { withTimezone: true }),
+    /** open | partial | delivered | cancelled | expired */
+    status: text('status').notNull().default('open'),
+    currency: text('currency').notNull(),
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    /** [{ variantId, qty, deliveredQty, unitPriceMinor, … }]: what was ordered and what has been delivered */
+    lines: jsonb('lines').notNull(),
+    /** A deposit taken with the order (a receipt of its own) */
+    depositMinor: bigint('deposit_minor', { mode: 'number' }).notNull().default(0),
+    depositReceiptId: uuid('deposit_receipt_id'),
+    deliveryDate: date('delivery_date'),
+    /** The order holds its goods until here, then expires */
+    holdUntil: timestamp('hold_until', { withTimezone: true }),
+    note: text('note'),
+    cancelReason: text('cancel_reason'),
+    createdBy: uuid('created_by'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    changeXid: changeXid(),
+  },
+  (t) => [
+    primaryKey({ name: 'sales_orders_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({
+      name: 'sales_orders_warehouse_fk',
+      columns: [t.tenantId, t.warehouseBranchId],
+      foreignColumns: [branches.tenantId, branches.id],
+    }),
+    foreignKey({ columns: [t.tenantId, t.customerId], foreignColumns: [customers.tenantId, customers.id] }),
+    foreignKey({ columns: [t.tenantId, t.repId], foreignColumns: [salesReps.tenantId, salesReps.id] }),
+    unique('sales_orders_number_unique').on(t.tenantId, t.number),
+    index('sales_orders_open_idx').on(t.tenantId, t.status, t.warehouseBranchId),
+    index('sales_orders_customer_idx').on(t.tenantId, t.customerId),
+    index('sales_orders_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
+    tenantIsolation(),
+  ],
+);
+
+/** A rep's working day: opened with the van's load and the cash float, closed with the count */
+export const repDays = pgTable(
+  'rep_days',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    repId: uuid('rep_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** open | closed */
+    status: text('status').notNull().default('open'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    /** His shift drawer for the day (1110) */
+    shiftId: uuid('shift_id'),
+    /** The cash he started with per currency: { SYP: 0, USD: 0 } */
+    openingCash: jsonb('opening_cash'),
+    /** The loading transfer, when he confirmed what he got, the unloading transfer and the van count */
+    loadTransferId: uuid('load_transfer_id'),
+    loadConfirmedAt: timestamp('load_confirmed_at', { withTimezone: true }),
+    unloadTransferId: uuid('unload_transfer_id'),
+    stocktakeId: uuid('stocktake_id'),
+    note: text('note'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'rep_days_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.repId], foreignColumns: [salesReps.tenantId, salesReps.id] }),
+    unique('rep_days_rep_date_unique').on(t.tenantId, t.repId, t.businessDate),
+    index('rep_days_date_idx').on(t.tenantId, t.businessDate),
+    tenantIsolation(),
+  ],
+);
+
+/** One visit: who, when, where, and how it ended */
+export const repVisits = pgTable(
+  'rep_visits',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    repDayId: uuid('rep_day_id').notNull(),
+    repId: uuid('rep_id').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    routeId: uuid('route_id'),
+    /** A visit to a customer who is not on today's route */
+    offRoute: boolean('off_route').notNull().default(false),
+    arrivedAt: timestamp('arrived_at', { withTimezone: true }).notNull(),
+    leftAt: timestamp('left_at', { withTimezone: true }),
+    lat: doublePrecision('lat'),
+    lng: doublePrecision('lng'),
+    /** sale | order | collection | return | no_sale | none */
+    outcome: text('outcome').notNull().default('none'),
+    noSaleReasonId: uuid('no_sale_reason_id'),
+    /** The documents the visit produced (sale, order, receipt, return) */
+    docIds: uuid('doc_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'rep_visits_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.repDayId], foreignColumns: [repDays.tenantId, repDays.id] }),
+    foreignKey({ columns: [t.tenantId, t.repId], foreignColumns: [salesReps.tenantId, salesReps.id] }),
+    foreignKey({ columns: [t.tenantId, t.customerId], foreignColumns: [customers.tenantId, customers.id] }),
+    foreignKey({ columns: [t.tenantId, t.routeId], foreignColumns: [routes.tenantId, routes.id] }),
+    foreignKey({
+      name: 'rep_visits_reason_fk',
+      columns: [t.tenantId, t.noSaleReasonId],
+      foreignColumns: [noSaleReasons.tenantId, noSaleReasons.id],
+    }),
+    index('rep_visits_day_idx').on(t.tenantId, t.repDayId, t.arrivedAt),
+    index('rep_visits_customer_idx').on(t.tenantId, t.customerId, t.arrivedAt),
+    tenantIsolation(),
+  ],
+);
+
+/** RST: the record of settling a rep's day (what he should hand over, what he did, the difference); it posts nothing itself */
+export const repSettlements = pgTable(
+  'rep_settlements',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** RST-001-000-0000045: numbered by the server in his branch */
+    number: text('number').notNull(),
+    repId: uuid('rep_id').notNull(),
+    repDayId: uuid('rep_day_id'),
+    branchId: uuid('branch_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    /** draft | approved | cancelled */
+    status: text('status').notNull().default('draft'),
+    /** Per currency: { SYP: minor, USD: minor } */
+    expectedCash: jsonb('expected_cash'),
+    countedCash: jsonb('counted_cash'),
+    cashDifference: jsonb('cash_difference'),
+    /** The cheques he took: handed over and matched */
+    cheques: jsonb('cheques'),
+    /** The van count against the stock it should hold */
+    goodsDifference: jsonb('goods_difference'),
+    /** rep_debt (1250) | shop_loss (6200 / 6300) */
+    treatment: text('treatment'),
+    /** Documents that had not reached the server when it was made */
+    pendingDocs: integer('pending_docs').notNull().default(0),
+    approvedBy: uuid('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    note: text('note'),
+    createdBy: uuid('created_by'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'rep_settlements_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.repId], foreignColumns: [salesReps.tenantId, salesReps.id] }),
+    foreignKey({ columns: [t.tenantId, t.repDayId], foreignColumns: [repDays.tenantId, repDays.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    unique('rep_settlements_number_unique').on(t.tenantId, t.number),
+    index('rep_settlements_rep_idx').on(t.tenantId, t.repId, t.businessDate),
+    tenantIsolation(),
+  ],
+);
+
+/** A target for a rep over a period (report only: nothing is posted from it) */
+export const repTargets = pgTable(
+  'rep_targets',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    repId: uuid('rep_id').notNull(),
+    periodStart: date('period_start').notNull(),
+    periodEnd: date('period_end').notNull(),
+    /** net_sales | collections | new_customers | qty */
+    metric: text('metric').notNull(),
+    /** What the metric is counted over: all | product | category */
+    scope: text('scope').notNull().default('all'),
+    productId: uuid('product_id'),
+    categoryId: uuid('category_id'),
+    /** Money in base-currency minor units, a quantity in thousandths, a count as is */
+    targetValue: bigint('target_value', { mode: 'number' }).notNull(),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'rep_targets_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.repId], foreignColumns: [salesReps.tenantId, salesReps.id] }),
+    index('rep_targets_rep_idx').on(t.tenantId, t.repId, t.periodStart),
+    tenantIsolation(),
+  ],
+);
+
+/** How a rep's commission is worked out (report only): a rate or tiers, on sales or on collections */
+export const commissionPlans = pgTable(
+  'commission_plans',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    name: text('name').notNull(),
+    /** sales | collections */
+    basis: text('basis').notNull().default('sales'),
+    /** flat | tiered */
+    mode: text('mode').notNull().default('flat'),
+    rateBp: integer('rate_bp'),
+    /** [{ fromMinor, rateBp }, …] */
+    tiers: jsonb('tiers'),
+    /** deduct | ignore: what a return does to the commission */
+    returnsEffect: text('returns_effect').notNull().default('deduct'),
+    isActive: boolean('is_active').notNull().default(true),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'commission_plans_pkey', columns: [t.tenantId, t.id] }),
+    uniqueIndex('commission_plans_name_unique').on(t.tenantId, sql`lower(${t.name})`),
     tenantIsolation(),
   ],
 );

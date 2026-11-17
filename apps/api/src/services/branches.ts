@@ -32,6 +32,7 @@ const toRow = (r: Db): BranchAdminRow => ({
   staffCount: r.staff,
 });
 
+// Stores only: a van (kind van) is the van's own page, and it is not a branch of the plan
 const select = sql`
   select b.id, b.code, b.name, b.address, b.phone, b.is_active,
          (select count(*)::int from devices d where d.branch_id = b.id and d.status = 'active' and d.revoked_at is null) as devices,
@@ -41,8 +42,19 @@ const select = sql`
 
 const notFound = () => new AppError(404, 'not_found', 'هذا الفرع غير موجود.');
 
+/**
+ * The next code, 001, 002, … after the highest in use: a stopped branch keeps its code. A van takes
+ * its number from the same line, so a document number never names two places.
+ */
+export async function nextBranchCode(tx: Transaction): Promise<string> {
+  const [last] = await tx.execute<{ n: number }>(
+    sql`select coalesce(max(code::int), 0)::int as n from branches where code ~ '^[0-9]+$'`,
+  );
+  return String((last?.n ?? 0) + 1).padStart(3, '0');
+}
+
 async function readOne(tx: Transaction, id: string): Promise<BranchAdminRow> {
-  const [row] = await tx.execute<Db>(sql`${select} where b.id = ${id}`);
+  const [row] = await tx.execute<Db>(sql`${select} where b.kind = 'store' and b.id = ${id}`);
   if (!row) throw notFound();
   return toRow(row);
 }
@@ -50,7 +62,7 @@ async function readOne(tx: Transaction, id: string): Promise<BranchAdminRow> {
 export async function listBranches(db: Database, auth: AccessClaims): Promise<BranchAdminRow[]> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'settings.manage');
-    const rows = await tx.execute<Db>(sql`${select} order by b.code`);
+    const rows = await tx.execute<Db>(sql`${select} where b.kind = 'store' order by b.code`);
     return rows.map(toRow);
   });
 }
@@ -64,11 +76,7 @@ export async function createBranch(
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'settings.manage');
     await assertWithinPlanLimit(tx, 'branches');
-    // The next code, 001, 002, … after the highest in use: a stopped branch keeps its code
-    const [last] = await tx.execute<{ n: number }>(
-      sql`select coalesce(max(code::int), 0)::int as n from branches where code ~ '^[0-9]+$'`,
-    );
-    const code = String((last?.n ?? 0) + 1).padStart(3, '0');
+    const code = await nextBranchCode(tx);
     const [made] = await tx
       .insert(branches)
       .values({
@@ -143,7 +151,7 @@ export async function setBranchActive(
       await assertWithinPlanLimit(tx, 'branches');
     } else {
       const [others] = await tx.execute<{ n: number }>(
-        sql`select count(*)::int as n from branches where is_active and id <> ${id}`,
+        sql`select count(*)::int as n from branches where is_active and kind = 'store' and id <> ${id}`,
       );
       if ((others?.n ?? 0) === 0) {
         throw new AppError(409, 'conflict', 'لا يمكن إيقاف آخر فرع فعّال.');

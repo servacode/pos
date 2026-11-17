@@ -61,7 +61,7 @@ async function loadLookups(ctx: ImportContext): Promise<Lookups> {
   const branchRows = await tx
     .select({ id: branches.id })
     .from(branches)
-    .where(eq(branches.isActive, true))
+    .where(and(eq(branches.isActive, true), eq(branches.kind, 'store')))
     .orderBy(branches.code);
   const unitRows = await tx.select().from(units).where(isNull(units.archivedAt));
   const taxRows = await tx.select().from(taxRates).where(isNull(taxRates.archivedAt));

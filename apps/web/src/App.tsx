@@ -10,6 +10,8 @@ import { useTestMode } from './lib/testMode';
 const PosApp = lazy(() => import('./pos/PosApp').then((m) => ({ default: m.PosApp })));
 const KitchenApp = lazy(() => import('./hall/kitchen/KitchenApp').then((m) => ({ default: m.KitchenApp })));
 const WaiterApp = lazy(() => import('./hall/waiter/WaiterApp').then((m) => ({ default: m.WaiterApp })));
+// The rep's phone (المندوبون والتوزيع): a device of its own kind, a chunk of its own
+const RepApp = lazy(() => import('./rep/RepApp').then((m) => ({ default: m.RepApp })));
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })));
 const ShopApp = lazy(() => import('./shop/ShopApp').then((m) => ({ default: m.ShopApp })));
 const LegalPage = lazy(() => import('./legal/LegalPage').then((m) => ({ default: m.LegalPage })));
@@ -26,9 +28,16 @@ const UiGallery = import.meta.env.DEV
 /** The pairing QR holds `<origin>/link#spq_…`: a device's camera opens the cashier's link screen. */
 function PairingLink() {
   const { hash, search } = useLocation();
-  // A kitchen screen or a waiter's phone scans a link made for its kind (03 › وضع النادل)
+  // A kitchen screen, a waiter's phone or a rep's phone scans a link made for its kind (03 › وضع النادل)
   const kind = new URLSearchParams(search).get('kind');
-  const pathname = kind === 'kitchen_screen' ? '/kitchen' : kind === 'waiter' ? '/waiter' : '/pos';
+  const pathname =
+    kind === 'kitchen_screen'
+      ? '/kitchen'
+      : kind === 'waiter'
+        ? '/waiter'
+        : kind === 'rep_phone'
+          ? '/rep'
+          : '/pos';
   return <Navigate to={{ pathname, hash }} replace />;
 }
 
@@ -52,6 +61,7 @@ export function App() {
           {/* The restaurant's kitchen screen and the waiter's phone: devices of their own kind */}
           <Route path="/kitchen" element={<KitchenApp />} />
           <Route path="/waiter" element={<WaiterApp />} />
+          <Route path="/rep" element={<RepApp />} />
           <Route path="/link" element={<PairingLink />} />
           <Route path="/platform/*" element={<PlatformApp />} />
           <Route path="/agent/*" element={<AgentApp />} />

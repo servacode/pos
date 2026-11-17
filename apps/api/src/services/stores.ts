@@ -1,8 +1,9 @@
 import { sql } from 'drizzle-orm';
-import { DEFAULT_ROLES } from '@serva/core';
+import { DEFAULT_NO_SALE_REASONS, DEFAULT_ROLES } from '@serva/core';
 import {
   branches,
   legalAcceptances,
+  noSaleReasons,
   roles,
   tenantSettings,
   tenants,
@@ -84,6 +85,15 @@ export async function registerStore(
         )
         .returning({ id: roles.id, key: roles.key });
       const ownerRole = createdRoles.find((r) => r.key === 'owner')!;
+      // The reasons a rep's visit may end without a sale (المندوبون والتوزيع): the store's to edit
+      await tx.insert(noSaleReasons).values(
+        DEFAULT_NO_SALE_REASONS.map((r) => ({
+          tenantId,
+          key: r.key,
+          name: r.name,
+          sortOrder: r.sortOrder,
+        })),
+      );
 
       const [user] = await tx
         .insert(users)
