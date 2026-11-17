@@ -35,7 +35,7 @@ export function PeriodBar({
     <Card className="grid gap-4 sm:flex sm:flex-wrap sm:items-end">
       <DayField label="من" value={from} max={to} onChange={onFrom} />
       <DayField label="إلى" value={to} max={today} onChange={onTo} />
-      <BranchSelect me={me} value={branchId} onChange={onBranch} />
+      <BranchSelect me={me} value={branchId} onChange={onBranch} alwaysAll />
       {children ? (
         // As tall as the fields beside it, so its words line up with what is typed in them.
         <div

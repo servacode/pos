@@ -131,7 +131,7 @@ export function AccountLedgerPage() {
     isDay(params.get('from')) ? params.get('from')! : monthStart(today),
   );
   const [to, setTo] = useState(() => (isDay(params.get('to')) ? params.get('to')! : today));
-  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
+  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me, true));
   const accounts = useReport('accounts', () => listAccounts());
   const { data, error, loading } = useReport(`${code}|${from}|${to}|${branchId ?? ''}`, () =>
     getAccountLedger({ code, from, to, branchId }),

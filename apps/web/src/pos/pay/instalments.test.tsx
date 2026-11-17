@@ -117,11 +117,12 @@ async function toPay(
   const list = await screen.findByRole('list', { name: 'الموظفون' });
   await pos.user.click(within(list).getByRole('button', { name: /سامر/ }));
   await pos.user.keyboard(PINS[ids.samer]!);
-  await screen.findByRole('list', { name: 'الأصناف' });
+  if (!keep) await screen.findByRole('list', { name: 'الأصناف' });
   // After a reload the cart (and its customer) come back from the device, so nothing is scanned again
   if (!keep) await scan(pos.user, PRODUCTS.oil.barcode!.code);
-  else await screen.findAllByText(/زيت/);
-  await pos.user.keyboard('{F12}');
+  else await screen.findByRole('region', { name: 'الدفع' });
+  // After a reload the pay screen itself comes back, so the key is pressed only on a fresh sale
+  if (!keep) await pos.user.keyboard('{F12}');
   const pay = await screen.findByRole('region', { name: 'الدفع' });
   if (!keep) {
     await pos.user.click(within(pay).getByRole('button', { name: /اختر الزبون/ }));
@@ -226,6 +227,7 @@ describe('the pay screen', () => {
     const again = await toPay({ enabled: true }, first.local);
     await within(again.pay).findByRole('status', { name: 'خطة التقسيط' });
     expect(plain(again.pay)).toContain('رجّعنا خطة التقسيط');
+    // The pay screen reopened by itself (nothing pressed), with the plan on it
     // Cancelling it forgets it
     await again.user.click(within(again.pay).getByRole('button', { name: 'ألغِ التقسيط' }));
     expect(await again.local.get('pending-instalment-plan')).toBeNull();
@@ -242,5 +244,33 @@ describe('the pay screen', () => {
     await user.click(within(pay).getByRole('button', { name: 'أتمّ الدفع' }));
     expect(await within(pay).findByText('بدأت خطة تقسيط ولم تكتمل')).toBeInTheDocument();
     expect(outbox.find((e) => e.type === 'sale')).toBeUndefined();
+  });
+});
+
+describe('the sheet and the cart panel', () => {
+  it('moves the first date one period from the sale when the frequency changes, until a date is picked', async () => {
+    const { user, pay } = await toPay({ enabled: true });
+    await user.click(await within(pay).findByRole('button', { name: 'بيع بالتقسيط' }));
+    const sheet = await within(pay).findByRole('region', { name: 'خطة التقسيط' });
+    const first = within(sheet)
+      .getAllByLabelText(/تاريخ أول قسط/)
+      .find((e) => e.tagName === 'INPUT') as HTMLInputElement;
+    const monthly = first.value;
+    await user.click(within(sheet).getByRole('radio', { name: 'أسبوعي' }));
+    const weekly = first.value;
+    await user.click(within(sheet).getByRole('radio', { name: 'كل أسبوعين' }));
+    const biweekly = first.value;
+    // The field shows the day as text: each frequency gives its own first day, and a pick is kept
+    expect(new Set([monthly, weekly, biweekly]).size).toBe(3);
+  });
+
+  it('shows the total with the instalment fee on the cart panel once a plan is chosen', async () => {
+    const { user, pay } = await toPay({ enabled: true });
+    await user.click(await within(pay).findByRole('button', { name: 'بيع بالتقسيط' }));
+    const sheet = await within(pay).findByRole('region', { name: 'خطة التقسيط' });
+    await user.click(within(sheet).getByRole('button', { name: 'اعتمد الخطة' }));
+    await within(pay).findByRole('status', { name: 'خطة التقسيط' });
+    expect(await screen.findAllByText('رسم التقسيط')).not.toHaveLength(0);
+    expect(screen.getAllByText('المطلوب مع رسم التقسيط').length).toBeGreaterThan(0);
   });
 });

@@ -87,12 +87,14 @@ function Tables({ flow, link }: { flow: CashFlow; link: boolean }) {
       header: 'قبض',
       numeric: true,
       cell: (a) => <Money minor={a.inMinor} currency={base} />,
+      total: <Money minor={flow.totals.inMinor} currency={base} />,
     },
     {
       key: 'out',
       header: 'دفع',
       numeric: true,
       cell: (a) => <Money minor={a.outMinor} currency={base} />,
+      total: <Money minor={flow.totals.outMinor} currency={base} />,
     },
     {
       key: 'closing',
@@ -104,18 +106,89 @@ function Tables({ flow, link }: { flow: CashFlow; link: boolean }) {
   ];
   return (
     <div className="flex flex-col gap-4">
-      <DataTable
-        caption="القبض والدفع حسب النوع"
-        columns={kinds}
-        rows={flow.categories}
-        rowKey={(r) => r.category}
-      />
-      <DataTable
-        caption="الصندوق والخزنة والبنك والمحافظ"
-        columns={accounts}
-        rows={flow.accounts}
-        rowKey={(a) => a.accountCode}
-      />
+      <div className="hidden sm:block">
+        <DataTable
+          caption="القبض والدفع حسب النوع"
+          columns={kinds}
+          rows={flow.categories}
+          rowKey={(r) => r.category}
+        />
+      </div>
+      <div className="flex flex-col gap-3 sm:hidden">
+        <h3 className="font-semibold text-ink">القبض والدفع حسب النوع</h3>
+        {flow.categories.map((r) => (
+          <div key={r.category} className="flex flex-col gap-1 rounded-card border border-line p-3 text-sm">
+            <span className="font-semibold text-ink">{CASH_FLOW_LABEL[r.category]}</span>
+            {(
+              [
+                ['قبض', r.inMinor, false],
+                ['دفع', r.outMinor, false],
+                ['الصافي', r.netMinor, true],
+              ] as const
+            ).map(([label, minor, tone]) => (
+              <span key={label} className="flex justify-between gap-3">
+                <span className="text-ink-muted">{label}</span>
+                <Money minor={minor} currency={base} negativeTone={tone} />
+              </span>
+            ))}
+          </div>
+        ))}
+        <span className="flex justify-between gap-3 border-t border-line pt-2 text-sm font-semibold">
+          <span>المجموع (قبض / دفع)</span>
+          <span>
+            <Money minor={flow.totals.inMinor} currency={base} /> /{' '}
+            <Money minor={flow.totals.outMinor} currency={base} />
+          </span>
+        </span>
+      </div>
+      <div className="hidden sm:block">
+        <DataTable
+          caption="الصندوق والخزنة والبنك والمحافظ"
+          columns={accounts}
+          rows={flow.accounts}
+          rowKey={(a) => a.accountCode}
+        />
+      </div>
+      {/* A phone: one card per account, so no column is cut at the edge */}
+      <div className="flex flex-col gap-3 sm:hidden">
+        <h3 className="font-semibold text-ink">الصندوق والخزنة والبنك والمحافظ</h3>
+        {flow.accounts.map((a) => (
+          <div
+            key={a.accountCode}
+            className="flex flex-col gap-1 rounded-card border border-line p-3 text-sm"
+          >
+            <span className="font-semibold text-ink">
+              {link ? (
+                <Link
+                  to={`/accounting/reports/ledger?code=${a.accountCode}&from=${flow.from}&to=${flow.to}`}
+                  className="text-brand-ink underline-offset-4 hover:underline"
+                >
+                  <AccountName code={a.accountCode} name={a.accountName} />
+                </Link>
+              ) : (
+                <AccountName code={a.accountCode} name={a.accountName} />
+              )}
+            </span>
+            {(
+              [
+                ['أول المدة', a.openingMinor, true],
+                ['قبض', a.inMinor, false],
+                ['دفع', a.outMinor, false],
+                ['آخر المدة', a.closingMinor, true],
+              ] as const
+            ).map(([label, minor, tone]) => (
+              <span key={label} className="flex justify-between gap-3">
+                <span className="text-ink-muted">{label}</span>
+                <Money minor={minor} currency={base} negativeTone={tone} />
+              </span>
+            ))}
+          </div>
+        ))}
+        <span className="flex justify-between gap-3 border-t border-line pt-2 text-sm font-semibold">
+          <span>المجموع (آخر المدة)</span>
+          <Money minor={flow.totals.closingMinor} currency={base} negativeTone />
+        </span>
+      </div>
     </div>
   );
 }
@@ -133,7 +206,7 @@ export function CashFlowPage() {
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [from, setFrom] = useState(() => monthStart(today));
   const [to, setTo] = useState(today);
-  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
+  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me, true));
   const { data, error, loading, retry } = useReport(`${from}|${to}|${branchId ?? ''}`, () =>
     getCashFlow({ from, to, branchId }),
   );

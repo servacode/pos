@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockFetch, type MockReply } from '../../test/fetchMock';
 import { signedInRefresh } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
-import { ACCOUNTS, MANAGER_KEYS, meWith, NOW, OWNER_KEYS, TODAY } from '../../test/reports';
+import { ACCOUNTS, BRANCHES, MANAGER_KEYS, meWith, NOW, OWNER_KEYS, TODAY } from '../../test/reports';
 import { accountLedgerTable, balanceSheetTable, cashFlowTable, supplierAgeingTable, taxTable } from './csv';
 
 const text = (element: Element) => stripBidiControls(element.textContent ?? '');
@@ -438,5 +438,38 @@ describe('the accounting addresses', () => {
   it('sends an unknown accounting address to the chart', async () => {
     signIn('/accounting/whatever', { 'GET /v1/accounts': { status: 200, body: { items: ACCOUNTS } } });
     expect(await screen.findByRole('heading', { name: 'دليل الحسابات', level: 1 })).toBeInTheDocument();
+  });
+});
+
+describe('round 29: the books’ reports', () => {
+  it('offers «كل الفروع» and opens on it even for a store with one branch, so entries with no branch show', async () => {
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: { ...meWith(OWNER_KEYS), branches: [BRANCHES[0]!] } },
+      [`GET /v1/reports/balance-sheet?asOf=${TODAY}`]: { status: 200, body: sheet() },
+    });
+    renderApp('/accounting/reports/balance-sheet');
+    await screen.findByText('الأصول', { selector: 'dt' });
+    const options = within(screen.getByLabelText('الفرع')).getAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['كل الفروع', 'الفرع الرئيسي']);
+    expect(mock.requestsTo('GET', `/v1/reports/balance-sheet?asOf=${TODAY}`)).toHaveLength(1);
+  });
+
+  it('shows each cash account as a card on a phone, with the receipts and payments in the totals', async () => {
+    signIn('/accounting/reports/cash-flow', {
+      [`GET /v1/reports/cash-flow?${PERIOD}`]: { status: 200, body: flow() },
+    });
+    const cards = await screen.findByText('المجموع (آخر المدة)');
+    expect(cards).toBeInTheDocument();
+    const accounts = screen.getByRole('table', { name: 'الصندوق والخزنة والبنك والمحافظ' });
+    const totalRow = within(accounts).getAllByRole('row').at(-1)!;
+    expect(text(totalRow)).toContain('4,000');
+    expect(text(totalRow)).toContain('1,500');
+  });
+
+  it('writes the net tax in the total row of the CSV', () => {
+    const table = taxTable(tax());
+    const total = table.rows.find((r) => r[0] === 'المجموع')!;
+    expect(total.at(-1)).not.toBe('');
   });
 });

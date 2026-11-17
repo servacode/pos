@@ -1282,18 +1282,16 @@ function PaymentForm({
           ))}
         </Select>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <TextField
+          <NumberField
             label="المبلغ بالليرة"
-            inputMode="decimal"
-            dir="ltr"
+            decimals={2}
             autoFocus
             value={amount}
-            onChange={(e) => {
-              setAmount(e.target.value);
+            onValueChange={(v) => {
+              setAmount(v);
               setAdvance(false);
             }}
             error={problem ?? s.fields.amountMinor}
-            inputClassName="num"
           />
           <DateField label="التاريخ" value={date} onChange={setDate} required />
         </div>

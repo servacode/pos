@@ -711,6 +711,7 @@ export async function trialBalance(
           accountCode: r.code,
           accountName: r.name,
           type: r.type,
+          normalSide: r.normal_side,
           openingMinor: sign * opening + 0,
           debitMinor: debit,
           creditMinor: credit,

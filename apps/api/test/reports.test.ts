@@ -535,7 +535,8 @@ describe('GET /v1/accounts, /v1/journal and /v1/reports/trial-balance', () => {
       creditMinor: 369_750,
       closingMinor: 369_750,
     });
-    expect(row('4200')).toMatchObject({ debitMinor: 6_000, closingMinor: 6_000 });
+    expect(row('4200')).toMatchObject({ normalSide: 'debit', debitMinor: 6_000, closingMinor: 6_000 });
+    expect(row('4100')).toMatchObject({ normalSide: 'credit' });
     expect(row('6200')).toMatchObject({ debitMinor: 1_000, closingMinor: 1_000 });
     expect(row('6400')).toMatchObject({ creditMinor: 250, closingMinor: -250 });
     expect(row('2550')).toMatchObject({ type: 'liability', closingMinor: 5_000 });

@@ -123,7 +123,7 @@ export function BalanceSheetPage() {
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [asOf, setAsOf] = useState(today);
   const [compareTo, setCompareTo] = useState<string | null>(null);
-  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
+  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me, true));
   const { data, error, loading } = useReport(`${asOf}|${compareTo ?? ''}|${branchId ?? ''}`, () =>
     getBalanceSheet({ asOf, compareTo, branchId }),
   );

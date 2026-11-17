@@ -71,7 +71,7 @@ export function DayBar({
   return (
     <Card className="grid gap-4 sm:flex sm:flex-wrap sm:items-end">
       <DayField label={label} value={value} max={today} onChange={onChange} />
-      <BranchSelect me={me} value={branchId} onChange={onBranch} />
+      <BranchSelect me={me} value={branchId} onChange={onBranch} alwaysAll />
       {children}
     </Card>
   );

@@ -197,6 +197,8 @@ describe('«الأقساط»', () => {
     await user.type(within(dialog).getByLabelText('السبب'), 'ألغاها الزبون');
     await user.click(within(dialog).getByRole('button', { name: 'ألغِ الخطة' }));
     expect(await screen.findByText(/سبب الإغلاق: ألغاها الزبون/)).toBeInTheDocument();
+    // A cancelled plan prints no promissory notes
+    expect(screen.queryByRole('button', { name: 'اطبع الكمبيالات' })).not.toBeInTheDocument();
     expect(requestsTo('POST', '/v1/installment-plans/p-1/cancel').at(-1)?.body).toEqual({
       reason: 'ألغاها الزبون',
     });

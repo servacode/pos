@@ -250,6 +250,8 @@ export interface TrialBalanceRow {
   accountCode: string;
   accountName: string;
   type: AccountType;
+  /** The side the balances below are signed by; a contra account (discounts 4200) is debit though a revenue type */
+  normalSide?: 'debit' | 'credit';
   /**
    * Balances are signed by the account's normal side (10 › الطبيعة): positive is a debit balance
    * for a debit account (cash, expenses, 4200 discounts) and a credit balance for a credit account

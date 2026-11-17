@@ -186,4 +186,38 @@ describe('«استيراد البيانات»', () => {
     ]);
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
+  it('says no opening balance is booked once the check leaves every row out', async () => {
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': {
+        status: 200,
+        body: catalogMe(['catalog.manage', 'customers.manage', 'purchases.manage']),
+      },
+      'POST /v1/import': (request: MockRequest): MockReply => {
+        const input = request.body as ImportInput;
+        const results: ImportRowResult[] = input.rows.map((row) => ({
+          line: row.line,
+          status: 'skip',
+          errors: [],
+          notes: [],
+        }));
+        const body: ImportResponse = {
+          type: input.type,
+          mode: input.mode,
+          results,
+          totals: { create: 0, update: 0, skip: results.length, error: 0 },
+        };
+        return { status: 200, body };
+      },
+    });
+    const { user } = { ...mock, ...renderApp('/import?type=customers') };
+    await screen.findByRole('heading', { name: 'استيراد البيانات' });
+    await upload(user, ['اسم,رصيد', 'أحمد,500', 'سامر,300'].join('\r\n'), 'زبائن.csv');
+    await screen.findByRole('heading', { name: 'أعمدة الملف' });
+    await user.click(screen.getByRole('button', { name: 'التالي: راجع الملف' }));
+    expect(await screen.findByText(/رصيد افتتاحي، مجموعها/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'افحص الملف' }));
+    await screen.findByRole('heading', { name: 'ما سيحدث عند الاستيراد' });
+    expect(screen.queryByText(/رصيد افتتاحي، مجموعها/)).not.toBeInTheDocument();
+  });
 });

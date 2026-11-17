@@ -90,15 +90,19 @@ export function ReportError({ message, onRetry }: { message: string; onRetry: ()
 }
 
 /** The branches this user may pick: every branch with «كل الفروع» when no role ties them to one. */
-export function branchChoices(me: MeResponse): { all: boolean; branches: MeResponse['branches'] } {
+export function branchChoices(
+  me: MeResponse,
+  /** The books' reports offer «كل الفروع» even to a one-branch store: entries with no branch show there */
+  alwaysAll = false,
+): { all: boolean; branches: MeResponse['branches'] } {
   const tied = me.user.roles.map((role) => role.branchId);
   const all = tied.length === 0 || tied.includes(null);
   const branches = all ? me.branches : me.branches.filter((branch) => tied.includes(branch.id));
-  return { all: all && branches.length > 1, branches };
+  return { all: all && (alwaysAll || branches.length > 1), branches };
 }
 
-export function defaultBranch(me: MeResponse): string | null {
-  const { all, branches } = branchChoices(me);
+export function defaultBranch(me: MeResponse, alwaysAll = false): string | null {
+  const { all, branches } = branchChoices(me, alwaysAll);
   return all ? null : (branches[0]?.id ?? null);
 }
 
@@ -106,12 +110,14 @@ export function BranchSelect({
   me,
   value,
   onChange,
+  alwaysAll = false,
 }: {
   me: MeResponse;
   value: string | null;
   onChange: (branchId: string | null) => void;
+  alwaysAll?: boolean;
 }) {
-  const { all, branches } = branchChoices(me);
+  const { all, branches } = branchChoices(me, alwaysAll);
   return (
     <Select
       label="الفرع"

@@ -97,7 +97,7 @@ export function TaxReportPage() {
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [from, setFrom] = useState(() => monthStart(today));
   const [to, setTo] = useState(today);
-  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
+  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me, true));
   const { data, error, loading, retry } = useReport(`${from}|${to}|${branchId ?? ''}`, () =>
     getTaxReport({ from, to, branchId }),
   );

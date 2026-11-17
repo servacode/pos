@@ -93,6 +93,8 @@ export interface PaymentPanelProps {
   salespersonId?: string | null;
   /** A customer the owner marked «زبون جملة» was picked: the cart moves to the wholesale price */
   onWholesaleCustomer?: () => void;
+  /** The instalment fee of the plan chosen (0 with none): the cart panel shows the total with it */
+  onPlanFee?: (minor: number) => void;
   /** A customer was picked: the till asks for their contract prices and prices the cart; true when some applied */
   onContractPrices?: (customerId: string) => Promise<boolean>;
   /** The customer was picked or removed: the cart keeps them, so a quotation, a reload or a held cart brings them back */
@@ -158,6 +160,7 @@ export function PaymentPanel({
   canCredit = false,
   staff,
   onWholesaleCustomer,
+  onPlanFee,
   onContractPrices,
   onCustomer,
   salespersonId = null,
@@ -176,6 +179,13 @@ export function PaymentPanel({
   const [pendingPlan, setPendingPlan] = useState<PlanDraft | null>(null);
   const [planId] = useState(() => crypto.randomUUID());
   const totalMinor = goodsTotalMinor + (plan?.markupMinor ?? 0);
+  const feeMinor = plan?.markupMinor ?? 0;
+  useEffect(() => {
+    onPlanFee?.(feeMinor);
+    // the callback is the screen's own setter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feeMinor]);
+  useEffect(() => () => onPlanFee?.(0), []); // eslint-disable-line react-hooks/exhaustive-deps
   const saleCart = useMemo(
     () => (plan ? { ...cart, lines: [...cart.lines, feeLine(cart, plan.markupMinor, base)] } : cart),
     [cart, plan, base],

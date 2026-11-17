@@ -2,12 +2,12 @@ import { useMemo, useState } from 'react';
 import {
   INSTALMENT_FREQUENCY_LABELS,
   checkTerms,
+  defaultFirstDueDate,
   minDownPayment,
   type InstalmentFrequency,
   type InstalmentSettings,
 } from '@serva/core/installments';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
-import { plusMonths } from '@serva/core/rentals';
 import {
   Alert,
   BackIcon,
@@ -52,7 +52,9 @@ export function InstalmentSheet({
   const [down, setDown] = useState(() => amountText(minDown, base));
   const [count, setCount] = useState(counts.includes(6) ? 6 : (counts[0] ?? 1));
   const [frequency, setFrequency] = useState<Exclude<InstalmentFrequency, 'custom'>>('monthly');
-  const [first, setFirst] = useState(() => plusMonths(today, 1));
+  const [first, setFirst] = useState(() => defaultFirstDueDate(today, 'monthly'));
+  // The first date follows «كل كم» until the cashier picks a date himself
+  const [firstPicked, setFirstPicked] = useState(false);
   const [guarantor, setGuarantor] = useState({ name: '', phone: '', nationalId: '' });
   const [borrower, setBorrower] = useState({ nationalId: '', address: '' });
 
@@ -132,13 +134,25 @@ export function InstalmentSheet({
           <SegmentedControl
             label="كل كم"
             value={frequency}
-            onValueChange={setFrequency}
+            onValueChange={(f) => {
+              setFrequency(f);
+              if (!firstPicked) setFirst(defaultFirstDueDate(today, f));
+            }}
             options={(['monthly', 'biweekly', 'weekly'] as const).map((f) => ({
               value: f,
               label: INSTALMENT_FREQUENCY_LABELS[f],
             }))}
           />
-          <DateField label="تاريخ أول قسط" value={first} required min={today} onChange={setFirst} />
+          <DateField
+            label="تاريخ أول قسط"
+            value={first}
+            required
+            min={today}
+            onChange={(day) => {
+              setFirst(day);
+              setFirstPicked(true);
+            }}
+          />
           <details className="rounded-card border border-line p-3">
             <summary className="cursor-pointer font-semibold text-ink">
               الكفيل وبيانات الزبون{' '}

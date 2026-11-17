@@ -147,14 +147,19 @@ function Import() {
   const busy = phase === 'checking' || phase === 'importing';
   // Opening balances in the file: posted by the server against 3900 with the import, shown here first
   const balances = useMemo(() => {
+    // Once the file is checked, only the rows that will be imported book a balance (a skipped or refused one books nothing)
     const nums =
       type === 'products'
         ? []
         : prepared
+            .filter((r) => {
+              const status = results.get(r.line)?.status;
+              return status === undefined || status === 'create' || status === 'update';
+            })
             .map((r) => Number(String(r.values.balance ?? '').replace(/,/g, '')))
             .filter((n) => Number.isFinite(n) && n !== 0);
     return { count: nums.length, sum: nums.reduce((a, b) => a + b, 0) };
-  }, [prepared, type]);
+  }, [prepared, type, results]);
 
   const totals: ImportTotals = useMemo(() => {
     const t = emptyImportTotals();

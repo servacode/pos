@@ -200,6 +200,8 @@ export interface SaleScreenProps {
 const SELLER_KEY = 'salesperson';
 /** The unit last used for each item (the piece or a box), so the unit sheet offers it first */
 const LAST_UNIT_KEY = 'serva.lastUnit';
+/** The pay screen was open: a reload of the till brings it back for the same cashier and total */
+const PAY_OPEN_KEY = 'pay-open';
 /** «علّق» and «خصم» beside the pay button: an icon over a small word, 72 high like the button */
 const CART_QUICK =
   'flex min-h-18 w-16 flex-col items-center justify-center gap-1 rounded-card border border-line-control/50 bg-surface text-xs font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50';
@@ -482,6 +484,47 @@ export function SaleScreen(props: SaleScreenProps) {
   }, [cart, priced, ctx, rules]);
   const invoiceNeeds = priced ? invoiceNeed(cart, priced.priced, rules) : null;
   const totalMinor = priced?.priced.totals.totalMinor ?? 0;
+  // The instalment fee of the plan being made on the pay screen: shown with the total in the cart panel
+  const [planFeeMinor, setPlanFeeMinor] = useState(0);
+  // A reload in the middle of paying brings the pay screen back (with the instalment plan, which the
+  // pay screen restores itself) for the same cashier, cart size and total
+  const payKey = useRef<{ userId: string; lines: number; total: number } | null | undefined>(undefined);
+  const [payKeyLoaded, setPayKeyLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    pos.local
+      .get<{ userId: string; lines: number; total: number }>(PAY_OPEN_KEY)
+      .then((saved) => {
+        if (!alive) return;
+        payKey.current = saved ?? null;
+        setPayKeyLoaded(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [pos.local]);
+  useEffect(() => {
+    const saved = payKey.current;
+    if (!payKeyLoaded || !saved || !priced || cart.lines.length === 0) return;
+    payKey.current = null;
+    if (saved.userId === session.userId && saved.lines === cart.lines.length && saved.total === totalMinor) {
+      setMode({ kind: 'pay' });
+    } else {
+      pos.local.remove(PAY_OPEN_KEY).catch(() => undefined);
+    }
+  }, [payKeyLoaded, priced, cart.lines.length, totalMinor, session.userId, pos.local]);
+  useEffect(() => {
+    // Before the saved flag is read (or while it waits for the cart), leave it alone
+    if (!payKeyLoaded || payKey.current) return;
+    if (mode.kind === 'pay' && cart.lines.length > 0) {
+      pos.local
+        .set(PAY_OPEN_KEY, { userId: session.userId, lines: cart.lines.length, total: totalMinor })
+        .catch(() => undefined);
+    } else {
+      pos.local.remove(PAY_OPEN_KEY).catch(() => undefined);
+    }
+  }, [payKeyLoaded, mode.kind, cart.lines.length, totalMinor, session.userId, pos.local]);
   const contractSaved = cart.lines.reduce((sum, l) => sum + contractSavingMinor(l, ctx), 0);
   const unnumbered = missingSerials(cart);
   const blocked =
@@ -1849,9 +1892,9 @@ export function SaleScreen(props: SaleScreenProps) {
         </div>
       ) : null}
       <TotalPanel
-        totalMinor={totalMinor}
+        totalMinor={totalMinor + planFeeMinor}
         currency={ctx.currency}
-        label="المطلوب"
+        label={planFeeMinor > 0 ? 'المطلوب مع رسم التقسيط' : 'المطلوب'}
         breakdown={[
           ...(totals && totals.discountMinor > 0
             ? [
@@ -1863,6 +1906,7 @@ export function SaleScreen(props: SaleScreenProps) {
           ...(totals && !settings.taxInclusive && totals.taxMinor > 0
             ? [{ label: 'الضريبة', minor: totals.taxMinor }]
             : []),
+          ...(planFeeMinor > 0 ? [{ label: 'رسم التقسيط', minor: planFeeMinor }] : []),
         ]}
         note={
           foreign ? (
@@ -2114,6 +2158,7 @@ export function SaleScreen(props: SaleScreenProps) {
               staff={staff}
               salespersonId={seller !== session.userId ? seller : null}
               onWholesaleCustomer={() => setCart((c) => setPriceTier(c, 'wholesale'))}
+              onPlanFee={setPlanFeeMinor}
               onCustomer={(picked) =>
                 setCart((c) => {
                   if (picked) return { ...c, customer: picked };

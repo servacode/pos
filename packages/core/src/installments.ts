@@ -123,6 +123,14 @@ export interface InstalmentSchedule {
   instalments: ScheduledInstalment[];
 }
 
+/** The day the first instalment falls by default: one period after the sale (7 or 14 days, a month for monthly) */
+export function defaultFirstDueDate(
+  saleDate: string,
+  frequency: Exclude<InstalmentFrequency, 'custom'>,
+): string {
+  return dueDateOf(saleDate, frequency, 1);
+}
+
 /** The i-th due day (0 is the first) of a regular plan; monthly keeps the first day's number (31 Jan → 28 Feb → 31 Mar) */
 export function dueDateOf(
   first: string,

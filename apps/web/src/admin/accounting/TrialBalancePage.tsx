@@ -49,7 +49,7 @@ export function TrialBalancePage() {
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [from, setFrom] = useState(() => monthStart(today));
   const [to, setTo] = useState(today);
-  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
+  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me, true));
   const { data, error, loading, retry } = useReport(`${from}|${to}|${branchId ?? ''}`, () =>
     getTrialBalance({ from, to, branchId }),
   );
@@ -68,7 +68,9 @@ export function TrialBalancePage() {
       key: 'opening',
       header: 'رصيد أول المدة',
       numeric: true,
-      cell: (row) => <Balance minor={debitSigned(row.openingMinor, row.type)} currency={base} />,
+      cell: (row) => (
+        <Balance minor={debitSigned(row.openingMinor, row.type, row.normalSide)} currency={base} />
+      ),
     },
     {
       key: 'debit',
@@ -88,7 +90,9 @@ export function TrialBalancePage() {
       key: 'closing',
       header: 'رصيد آخر المدة',
       numeric: true,
-      cell: (row) => <Balance minor={debitSigned(row.closingMinor, row.type)} currency={base} />,
+      cell: (row) => (
+        <Balance minor={debitSigned(row.closingMinor, row.type, row.normalSide)} currency={base} />
+      ),
     },
   ];
 

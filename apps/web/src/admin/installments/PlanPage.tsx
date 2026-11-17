@@ -195,7 +195,7 @@ export function PlanPage() {
                   اطبع الجدول
                 </Button>
               ) : null}
-              {plan && plan.notes.length > 0 ? (
+              {plan && plan.status !== 'cancelled' && plan.notes.length > 0 ? (
                 <Button
                   variant="secondary"
                   icon={<PrintIcon />}

@@ -101,7 +101,7 @@ describe('طلبية شراء بجدول المقاسات', () => {
     // Nothing typed yet: a run's count note stays quiet
     expect(within(grid).queryByText(/أعداد|بلا كمية/)).toBeNull();
     // The usual cost of the model (the white M was bought at 1,100) starts the box
-    expect(within(grid).getByLabelText('كلفة القطعة الواحدة')).toHaveValue('1100');
+    expect(within(grid).getByLabelText('كلفة القطعة الواحدة')).toHaveValue('1,100');
     await user.type(within(grid).getByLabelText('كمية M · أبيض'), '6');
     await user.type(within(grid).getByLabelText('كمية L · أبيض'), '4');
     await user.click(within(grid).getByRole('button', { name: 'أضف 10 قطع' }));

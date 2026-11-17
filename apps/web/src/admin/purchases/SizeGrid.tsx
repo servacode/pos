@@ -7,7 +7,7 @@ import {
   type ProductDetail,
   type SizeRun,
 } from '@serva/core';
-import { AddIcon, Alert, Button, GridIcon, IconChip, TextField } from '@serva/ui';
+import { AddIcon, Alert, Button, GridIcon, IconChip, NumberField, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { errorMessage } from '../../lib/api';
 import { orderValues } from '../../lib/optionOrder';
@@ -355,14 +355,13 @@ export function SizeGrid({
         </table>
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <TextField
+        <NumberField
           label="كلفة القطعة الواحدة"
-          dir="ltr"
-          inputMode="decimal"
+          decimals={2}
           value={unit}
-          onChange={(e) => setUnit(e.target.value.slice(0, 14))}
+          onValueChange={(v) => setUnit(v.slice(0, 14))}
           className="w-full sm:w-48"
-          endAdornment={<span className="me-3 text-sm">ل.س</span>}
+          unit="ل.س"
         />
         <Button
           icon={<AddIcon />}

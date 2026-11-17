@@ -338,7 +338,7 @@ export function JournalPage() {
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [from, setFrom] = useState(() => monthStart(today));
   const [to, setTo] = useState(today);
-  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
+  const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me, true));
   const key = `${from}|${to}|${branchId ?? ''}`;
   const first = useReport(key, () => getJournal({ from, to, branchId }));
   const [more, setMore] = useState<{

@@ -7,6 +7,7 @@ import {
   daysLate,
   DEFAULT_INSTALMENT_SETTINGS,
   dueDateOf,
+  defaultFirstDueDate,
   instalmentSettingsOf,
   instalmentState,
   markupBpFor,
@@ -272,5 +273,14 @@ describe('numberToArabicWords', () => {
   it('refuses what is not a whole number from zero', () => {
     expect(() => numberToArabicWords(-1)).toThrow(RangeError);
     expect(() => numberToArabicWords(1.5)).toThrow(RangeError);
+  });
+});
+
+describe('the default first due date', () => {
+  it('is one period after the sale: 7 days weekly, 14 biweekly, a month monthly', () => {
+    expect(defaultFirstDueDate('2026-11-17', 'weekly')).toBe('2026-11-24');
+    expect(defaultFirstDueDate('2026-11-17', 'biweekly')).toBe('2026-12-01');
+    expect(defaultFirstDueDate('2026-11-17', 'monthly')).toBe('2026-12-17');
+    expect(defaultFirstDueDate('2026-01-31', 'monthly')).toBe('2026-02-28');
   });
 });

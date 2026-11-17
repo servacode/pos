@@ -59,6 +59,21 @@ export function oldPoundPreview(rows: readonly PreparedRow[]) {
   return { samples, tiny };
 }
 
+/** The median of the file's selling prices (cost when there is no price column), 0 when there are none */
+export function medianPrice(rows: readonly PreparedRow[]): number {
+  const nums = rows
+    .filter((r) => !DOLLAR_ROW.test(String(r.values.currency ?? '')))
+    .map((r) => Number(toLatinDigits(String(r.values.price ?? r.values.cost ?? '')).replace(/[\s,]/g, '')))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .sort((a, b) => a - b);
+  if (nums.length === 0) return 0;
+  const mid = Math.floor(nums.length / 2);
+  return nums.length % 2 ? nums[mid]! : (nums[mid - 1]! + nums[mid]!) / 2;
+}
+
+/** A median above this looks like old pounds (a hundred thousand new pounds is a very dear piece) */
+export const OLD_POUND_MEDIAN = 100_000;
+
 /** «الأسعار بالليرة القديمة»: an import-only switch with the preview of what it does to the amounts. */
 export function OldPoundSwitch({
   checked,
@@ -89,6 +104,13 @@ export function OldPoundSwitch({
             </li>
           ))}
         </ul>
+      ) : null}
+      {!checked && medianPrice(rows) > OLD_POUND_MEDIAN ? (
+        <Alert tone="warning">
+          الأسعار في الملف كبيرة (الوسيط{' '}
+          <bdi className="num">{Math.round(medianPrice(rows)).toLocaleString('en-US')}</bdi>
+          ). إن كانت بالليرة القديمة شغّل «الأسعار بالليرة القديمة» أعلاه قبل الاستيراد.
+        </Alert>
       ) : null}
       {preview && preview.tiny > 0 ? (
         <Alert tone="warning">
