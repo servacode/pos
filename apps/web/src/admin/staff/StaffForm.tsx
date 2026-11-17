@@ -102,11 +102,18 @@ export function StaffForm({
       setFields({ commissionBp: 'اكتب نسبة من 0 إلى 100' });
       return;
     }
+    const code = pinDigits(pin);
+    // The code's length belongs to the role (6 for a manager): said here, before anything is sent
+    if (code !== '' && code.length !== digits) {
+      setFields({
+        pin: `رمز دور «${role?.name ?? ''}» ${digits} أرقام، وكتبت ${String(code.length)}. غيّر الدور أو أكمل الرمز.`,
+      });
+      return;
+    }
     setSaving(true);
     setError(null);
     setFields({});
     const branches = allBranches ? null : branchIds;
-    const code = pinDigits(pin);
     try {
       if (!member) {
         const created = await createStaff({
@@ -229,7 +236,10 @@ export function StaffForm({
         autoComplete="off"
         maxLength={6}
         value={pin}
-        onChange={(e) => setPin(e.target.value)}
+        onChange={(e) => {
+          setPin(e.target.value);
+          setFields((f) => ({ ...f, pin: '' }));
+        }}
         error={fields.pin}
       />
       {sharedWith.length > 0 ? (

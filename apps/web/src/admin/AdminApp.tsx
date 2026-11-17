@@ -2,10 +2,13 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { AuthProvider } from '../auth/AuthProvider';
 import { GuestOnly, RequireAuth } from '../auth/guards';
+import { useAuth } from '../auth/useAuth';
+import { ShellSkeleton } from '../layout/ShellSkeleton';
 import { PageLoading } from '../layout/PageLoading';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { HomePage } from '../pages/HomePage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
+const LandingPage = lazy(() => import('../pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
 import { SectorGate } from './SectorGate';
@@ -97,6 +100,19 @@ const ControlledRegisterPage = lazy(() =>
 const ExpiryPage = lazy(() => import('./purchases/ExpiryPage').then((m) => ({ default: m.ExpiryPage })));
 const RecallPage = lazy(() => import('./purchases/RecallPage').then((m) => ({ default: m.RecallPage })));
 const ChequesPage = lazy(() => import('./cheques/ChequesPage').then((m) => ({ default: m.ChequesPage })));
+// الأقساط: the plans, the due list and the store's rules
+const InstalmentPlansPage = lazy(() =>
+  import('./installments/PlansPage').then((m) => ({ default: m.PlansPage })),
+);
+const InstalmentPlanPage = lazy(() =>
+  import('./installments/PlanPage').then((m) => ({ default: m.PlanPage })),
+);
+const InstalmentWorklistPage = lazy(() =>
+  import('./installments/WorklistPage').then((m) => ({ default: m.WorklistPage })),
+);
+const InstalmentSettingsPage = lazy(() =>
+  import('./installments/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
 const PromotionsPage = lazy(() =>
   import('./promotions/PromotionsPage').then((m) => ({ default: m.PromotionsPage })),
 );
@@ -156,6 +172,19 @@ const ProfitLossPage = lazy(() =>
   import('./ledger/ProfitLossPage').then((m) => ({ default: m.ProfitLossPage })),
 );
 
+/** The root: the home page for a signed-in user, the landing page for a visitor (the session is restored first) */
+function Front() {
+  const { state } = useAuth();
+  if (state.status === 'loading') return <ShellSkeleton />;
+  return state.status === 'signedIn' ? (
+    <HomePage />
+  ) : (
+    <Suspense fallback={<ShellSkeleton />}>
+      <LandingPage />
+    </Suspense>
+  );
+}
+
 const page = (element: ReactNode) => <Suspense fallback={<PageLoading />}>{element}</Suspense>;
 
 /**
@@ -172,8 +201,9 @@ export function AdminApp() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         </Route>
+        {/* A visitor who is not signed in sees the landing page at the root; a signed-in user, the home page */}
+        <Route path="/" element={<Front />} />
         <Route element={<RequireAuth />}>
-          <Route path="/" element={<HomePage />} />
           <Route path="/devices" element={page(<DevicesPage />)} />
           <Route path="/products" element={page(<ProductsPage />)} />
           <Route path="/products/import" element={<Navigate to="/import?type=products" replace />} />
@@ -188,6 +218,10 @@ export function AdminApp() {
               </SectorGate>,
             )}
           />
+          <Route path="/installments" element={page(<InstalmentPlansPage />)} />
+          <Route path="/installments/due" element={page(<InstalmentWorklistPage />)} />
+          <Route path="/installments/settings" element={page(<InstalmentSettingsPage />)} />
+          <Route path="/installments/:id" element={page(<InstalmentPlanPage />)} />
           <Route path="/customers" element={page(<CustomersPage />)} />
           <Route path="/messages" element={page(<BroadcastsPage />)} />
           <Route path="/purchases" element={page(<PurchasesPage />)} />

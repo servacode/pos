@@ -34,7 +34,7 @@ import type { Catalog } from '../catalog';
 import { FlowHeader } from '../FlowParts';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
-import type { OpenShift } from '../shift/shift';
+import { RENTAL_DEPOSIT_REF, type OpenShift } from '../shift/shift';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
 import { DateField } from '../../lib/DateField';
@@ -173,7 +173,7 @@ export function RentalsScreen({
           currency: base,
           amountMinor: depositMinor,
           method: 'cash',
-          reference: null,
+          reference: RENTAL_DEPOSIT_REF,
           forName: name.trim(),
         };
         const entry = await pos.save({

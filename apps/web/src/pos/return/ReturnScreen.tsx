@@ -36,7 +36,7 @@ import {
 import type { InvoiceHit } from '@serva/core/contracts/till';
 import type { Catalog } from '../catalog';
 import { ExactMoney } from '../ExactMoney';
-import { clockText, dateText } from '../format';
+import { clockText, dateText, isolateSizes } from '../format';
 import { fetchPurchases } from '../customers/CustomerHistory';
 import { ChoiceGroup, DoneCard, FlowHeader, OptionChip, OptionTile } from '../FlowParts';
 import { usePos } from '../services';
@@ -725,7 +725,7 @@ export function ReturnScreen({
                         className="flex flex-wrap items-center justify-between gap-3 py-3"
                       >
                         <span className="flex min-w-40 flex-1 flex-col gap-0.5">
-                          <span className="font-semibold text-ink">{line.name}</span>
+                          <span className="font-semibold text-ink">{isolateSizes(line.name)}</span>
                           <span className="num text-sm text-ink-muted">
                             بيع {formatQuantity(line.soldQty, digits)}
                             {line.returnedQty > 0 ? ` · رجع ${formatQuantity(line.returnedQty, digits)}` : ''}
@@ -922,7 +922,11 @@ export function ReturnScreen({
                 ) ? (
                   // A refund leaves in the invoice's own currency; the dollar drawer has no refund method yet
                   <Alert tone="info">
-                    دُفعت هذه الفاتورة بالدولار. الرد يكون بالليرة بسعر الفاتورة، من درج الليرة.
+                    {current.sale.payments.every(
+                      (p) => p.method === 'cash' && p.currency !== current.sale.currency,
+                    )
+                      ? 'دُفعت هذه الفاتورة بالدولار. الرد يكون بالليرة بسعر الفاتورة، من درج الليرة.'
+                      : 'دُفعت هذه الفاتورة بأكثر من طريقة، وجزء منها بالدولار. الرد النقدي يكون بالليرة بسعر الفاتورة، من درج الليرة.'}
                   </Alert>
                 ) : null}
                 {error ? <Alert tone="error">{error}</Alert> : null}

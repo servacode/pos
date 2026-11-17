@@ -55,6 +55,7 @@ import { ButtonLink } from '../admin/products/parts';
 import { getProfit, listExpiry, listSuppliers } from '../admin/purchases/api';
 import { listCustomers } from '../admin/customers/api';
 import { listCheques } from '../admin/cheques/api';
+import { getSummary as getInstalmentSummary } from '../admin/installments/api';
 import { listProducts } from '../admin/catalog/api';
 import { dueSoon } from '../admin/cheques/ChequesPage';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
@@ -1053,7 +1054,7 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
         {single ? (
           size ? (
             <>
-              {item.name}: المقاس {size}
+              {item.name}: المقاس <bdi dir="ltr">{size}</bdi>
               {colour ? ` (${colour})` : ''} {state}
             </>
           ) : (
@@ -1260,6 +1261,8 @@ type SupplierDues = ReportState<Awaited<ReturnType<typeof listSuppliers>>>;
 interface MoneyArgs {
   /** The cheques, to say which fall due within a week (in and out) */
   cheques?: ChequesState | null;
+  /** الأقساط: what falls due today and what is late (absent when the person does not see them) */
+  instalments?: ReportState<Awaited<ReturnType<typeof getInstalmentSummary>>> | null;
   today?: string;
   customers: CustomerDebts;
   suppliers: SupplierDues;
@@ -1268,7 +1271,17 @@ interface MoneyArgs {
 }
 
 /** What the store is owed and owes, from the customers' and suppliers' own lists: the rows and how many */
-function moneyFigures({ customers, suppliers, seesCustomers, seesSuppliers, cheques, today }: MoneyArgs) {
+function moneyFigures({
+  customers,
+  suppliers,
+  seesCustomers,
+  seesSuppliers,
+  cheques,
+  instalments,
+  today,
+}: MoneyArgs) {
+  const dueToday = instalments?.data?.dueTodayCount ?? 0;
+  const lateInstalments = instalments?.data?.lateCount ?? 0;
   const chequesDue = seesCustomers && cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
   const chequesOut =
     seesCustomers && cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
@@ -1285,8 +1298,14 @@ function moneyFigures({ customers, suppliers, seesCustomers, seesSuppliers, cheq
     (owedByCustomers > 0 ? 1 : 0) +
     (owedToSuppliers > 0 ? 1 : 0) +
     (chequesDue > 0 ? 1 : 0) +
-    (chequesOut > 0 ? 1 : 0);
+    (chequesOut > 0 ? 1 : 0) +
+    (dueToday > 0 ? 1 : 0) +
+    (lateInstalments > 0 ? 1 : 0);
   return {
+    dueToday,
+    dueTodayMinor: instalments?.data?.dueTodayMinor ?? 0,
+    lateInstalments,
+    lateInstalmentsMinor: instalments?.data?.lateMinor ?? 0,
     chequesDue,
     chequesOut,
     overLimit,
@@ -1324,6 +1343,18 @@ function MoneyRows(args: MoneyArgs) {
           ) : (
             'زبائن تجاوزوا حدّ الدين'
           )}
+        </WaitingRow>
+      ) : null}
+      {f.lateInstalments > 0 ? (
+        <WaitingRow to="/installments/due" count={f.lateInstalments} tone="danger" icon={<CalendarIcon />}>
+          {f.lateInstalments === 1 ? 'قسط متأخر' : 'أقساط متأخرة'}{' '}
+          <Money minor={f.lateInstalmentsMinor} currency={f.customersBase ?? 'SYP'} className="font-bold" />
+        </WaitingRow>
+      ) : null}
+      {f.dueToday > 0 ? (
+        <WaitingRow to="/installments/due" count={f.dueToday} tone="warning" icon={<CalendarIcon />}>
+          {f.dueToday === 1 ? 'قسط مستحق اليوم' : 'أقساط مستحقة اليوم'}{' '}
+          <Money minor={f.dueTodayMinor} currency={f.customersBase ?? 'SYP'} className="font-bold" />
         </WaitingRow>
       ) : null}
       {f.chequesDue > 0 ? (
@@ -1532,6 +1563,11 @@ export function HomePage() {
     cache: 'home',
   });
   const suppliers = useReport(seesExpiry ? 'home:dues' : null, () => listSuppliers(), { cache: 'home' });
+  const instalments = useReport(
+    holdsAny(me, ['installments.view']) ? 'home:instalments' : null,
+    () => getInstalmentSummary(),
+    { cache: 'home' },
+  );
 
   // A new store starts in the wizard (04 › معالج البداية); the owner can leave it and come back.
   if (!me.onboarding.done && me.user.permissions.includes('settings.manage')) {
@@ -1568,6 +1604,7 @@ export function HomePage() {
     seesCustomers: seesCheques,
     seesSuppliers: seesExpiry,
     cheques,
+    instalments,
     today,
   };
 

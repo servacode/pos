@@ -70,9 +70,26 @@ export const rateSchema = z
   .pipe(
     z
       .string()
-      .regex(/^\d{1,7}(\.\d{1,4})?$/, 'اكتب سعر الدولار بالأرقام، مثل 13000 أو 13,000')
+      .regex(/^\d{1,7}(\.\d{1,4})?$/, 'اكتب سعر الدولار بالأرقام، مثل 120')
       .refine((v) => Number(v) > 0, 'سعر الصرف أكبر من صفر'),
   );
+
+/**
+ * A warning (never a refusal) for a dollar rate that looks like an old-pound figure or a slip: outside
+ * 50 to 500 pounds, or ten times above or below the rate it replaces. Null when it looks right.
+ */
+export function rateWarning(next: string, previous?: string | null): string | null {
+  const now = Number(rateText(next));
+  if (!Number.isFinite(now) || now <= 0) return null;
+  const before = Number(previous ?? '');
+  if (before > 0 && (now > before * 10 || now < before / 10)) {
+    return 'السعر يختلف عن السعر السابق بأكثر من عشرة أضعاف. هل كتبته بالليرة القديمة؟ إن كان صحيحاً اضغط احفظ مرة ثانية.';
+  }
+  if (now < 50 || now > 500) {
+    return 'السعر خارج المعتاد للدولار بالليرة الجديدة (من 50 إلى 500). إن كان صحيحاً اضغط احفظ مرة ثانية.';
+  }
+  return null;
+}
 
 export const storeCurrencyInput = z
   .object({

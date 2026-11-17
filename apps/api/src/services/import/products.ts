@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
   BRANCH_QTY_PREFIX,
   barcodeCodeSchema,
   createProductInput,
+  convert,
   currencyCodeSchema,
   normalizeArabic,
   serialSchema,
@@ -23,6 +24,7 @@ import {
   serials,
   type Transaction,
 } from '@serva/db';
+import { audit } from '../audit';
 import { ZodError } from 'zod';
 import { inScope, permissionScope } from '../../auth/permissions';
 import { AppError, isUniqueViolation } from '../../errors';
@@ -43,6 +45,8 @@ import { postOpeningStock, variantsWithMovements, type OpeningLine, type Opening
 /** Everything about the store a product row refers to, read once per chunk. */
 interface Lookups {
   base: CurrencyCode;
+  /** The latest dollar rate in the base currency (one dollar is worth `rate`), or null */
+  usdRate: string | null;
   branchIds: Set<string>;
   defaultBranchId: string | null;
   units: Map<string, { id: string; allowsFraction: boolean }>;
@@ -62,6 +66,9 @@ async function loadLookups(ctx: ImportContext): Promise<Lookups> {
   const unitRows = await tx.select().from(units).where(isNull(units.archivedAt));
   const taxRows = await tx.select().from(taxRates).where(isNull(taxRates.archivedAt));
   const categoryRows = await tx.select().from(categories).where(isNull(categories.archivedAt));
+  const [rateRow] = await tx.execute<{ rate: string }>(sql`
+    select rate from exchange_rates where unit = 'USD' and quote = ${base}
+    order by effective_at desc, id desc limit 1`);
   const unitMap = new Map<string, { id: string; allowsFraction: boolean }>();
   for (const u of unitRows) {
     const entry = { id: u.id, allowsFraction: u.allowsFraction };
@@ -78,6 +85,7 @@ async function loadLookups(ctx: ImportContext): Promise<Lookups> {
   }
   return {
     base,
+    usdRate: rateRow?.rate ?? null,
     branchIds: new Set(branchRows.map((b) => b.id)),
     defaultBranchId: wanted ?? branchRows[0]?.id ?? null,
     units: unitMap,
@@ -99,6 +107,8 @@ interface Parsed {
   model: string | null;
   season: string | null;
   unitId: string | null;
+  /** A unit the file names that the store does not have yet: made before the rows are saved */
+  newUnit: string | null;
   taxRateId: string | null;
   /** The file said something about the tax (even «0»), so an update touches it */
   hasTax: boolean;
@@ -106,6 +116,8 @@ interface Parsed {
   wholesaleMinor: number | null;
   /** One unit's cost in the base currency, for the opening stock's value */
   costMinor: number | null;
+  /** The cost was written in dollars and converted: what to tell the owner */
+  costNote: string | null;
   minStock: number | null;
   attributes: { name: string; value: string }[];
   /** Opening quantities by branch, thousandths */
@@ -127,6 +139,25 @@ interface ParsedPack {
   /** null: the system makes an internal barcode */
   code: string | null;
   priceMinor: number | null;
+}
+
+/** The code of a currency written as a word: «ليرة», «دولار», «ل.س», «$» or the code itself */
+const CURRENCY_WORDS: Record<string, string> = {
+  ليره: 'SYP',
+  'ليره سوريه': 'SYP',
+  'ليره جديده': 'SYP',
+  'ل.س': 'SYP',
+  'ل س': 'SYP',
+  lira: 'SYP',
+  دولار: 'USD',
+  'دولار امريكي': 'USD',
+  $: 'USD',
+  dollar: 'USD',
+  us$: 'USD',
+};
+
+function currencyOfWords(text: string): string {
+  return CURRENCY_WORDS[normalizeArabic(text)] ?? text.toUpperCase();
 }
 
 const SIZE = 'المقاس';
@@ -152,6 +183,7 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
   }
 
   let unitId: string | null = null;
+  let newUnit: string | null = null;
   let allowsFraction = false;
   const unitText = textOf(row.values.unit);
   if (unitText !== null) {
@@ -159,7 +191,8 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
     if (unit) {
       unitId = unit.id;
       allowsFraction = unit.allowsFraction;
-    } else issues.add('unit', `الوحدة «${unitText}» غير موجودة في المتجر. أضفها من الوحدات أولاً`);
+    } else if (unitText.length <= 20) newUnit = unitText;
+    else issues.add('unit', `اسم الوحدة «${unitText}» أطول من 20 حرفاً`);
   }
 
   let taxRateId: string | null = null;
@@ -178,13 +211,29 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
   let currency = lookups.base;
   const currencyText = textOf(row.values.currency);
   if (currencyText !== null) {
-    const parsed = currencyCodeSchema.safeParse(currencyText.toUpperCase());
+    const parsed = currencyCodeSchema.safeParse(currencyOfWords(currencyText));
     if (parsed.success) currency = parsed.data;
-    else issues.add('currency', `العملة «${currencyText}» غير مدعومة. اكتب SYP أو USD`);
+    else issues.add('currency', `العملة «${currencyText}» غير مدعومة. اكتب ليرة أو دولار (SYP أو USD)`);
   }
   const priceMinor = amountOf(row, 'price', currency, 'سعر البيع', issues);
   const wholesaleMinor = amountOf(row, 'wholesalePrice', currency, 'سعر الجملة', issues);
-  const costMinor = amountOf(row, 'cost', lookups.base, 'التكلفة', issues);
+  // The cost is written in the item's own currency: a dollar item's cost is dollars, kept in the base currency
+  let costMinor = amountOf(row, 'cost', currency, 'التكلفة', issues);
+  let costNote: string | null = null;
+  if (costMinor !== null && currency !== lookups.base) {
+    const written = costMinor;
+    if (lookups.usdRate === null || currency !== 'USD') {
+      issues.add('cost', 'لا سعر صرف للدولار في المتجر لتحويل التكلفة. أضف سعر الصرف من الإعدادات');
+      costMinor = null;
+    } else {
+      costMinor = convert(written, currency, lookups.base, {
+        unit: 'USD',
+        quote: lookups.base,
+        rate: lookups.usdRate,
+      });
+      costNote = 'التكلفة بالدولار حُوّلت إلى عملة المتجر بسعر الصرف الحالي';
+    }
+  }
   const minStock = quantityOf(row, 'minStock', 'الحد الأدنى', issues, { allowsFraction: true });
 
   const attributes: { name: string; value: string }[] = [];
@@ -270,11 +319,13 @@ function parseRow(row: ImportRow, lookups: Lookups, issues: Issues): Parsed {
     model,
     season,
     unitId,
+    newUnit,
     taxRateId,
     hasTax: taxText !== null,
     price: priceMinor === null ? null : { currency, priceMinor },
     wholesaleMinor,
     costMinor,
+    costNote,
     minStock,
     attributes,
     stock,
@@ -404,6 +455,20 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
     }
     if (issues.any) results.fail(row.line, issues.list);
     else parsed.push(p);
+  }
+  // A unit the file names that the store lacks is made, like a category, once for all the rows
+  const madeUnits = new Map<string, { id: string; allowsFraction: boolean }>();
+  for (const p of parsed) {
+    if (p.newUnit === null) continue;
+    const key = normalizeArabic(p.newUnit);
+    let unit = lookups.units.get(key) ?? madeUnits.get(key);
+    if (!unit) {
+      unit = await createUnitOf(ctx, p.newUnit);
+      madeUnits.set(key, unit);
+      lookups.units.set(key, unit);
+    }
+    p.unitId = unit.id;
+    results.note(p.line, `سيُنشأ وحدة جديدة «${p.newUnit}»`);
   }
   // A barcode belongs to one variant: a later row repeating it (maybe for another size or colour)
   // is refused and named, never merged into the first row and lost
@@ -589,6 +654,30 @@ function differs(detail: ProductDetail, variantId: string, p: Parsed, categoryId
     (p.tracksSerial !== null && detail.tracksSerial !== p.tracksSerial) ||
     (p.pack !== null && withPack(v.barcodes, p.pack).changed)
   );
+}
+
+/** A new unit of the store named by the file (pieces only; the owner can change it in the units screen) */
+async function createUnitOf(
+  ctx: ImportContext,
+  name: string,
+): Promise<{ id: string; allowsFraction: boolean }> {
+  const [row] = await ctx.tx
+    .insert(units)
+    .values({ tenantId: ctx.auth.tenantId, name, symbol: name.slice(0, 10), allowsFraction: false })
+    .returning({ id: units.id });
+  await audit(
+    ctx.tx,
+    {
+      tenantId: ctx.auth.tenantId,
+      userId: ctx.auth.userId,
+      action: 'unit.created',
+      entity: 'unit',
+      entityId: row!.id,
+      data: { name, symbol: name.slice(0, 10), allowsFraction: false },
+    },
+    ctx.meta,
+  );
+  return { id: row!.id, allowsFraction: false };
 }
 
 async function categoryIdOf(
@@ -861,6 +950,7 @@ async function processGroup(
     }
     if (stock.size === 0) continue;
     if (o.parsed.costMinor === null) results.note(o.parsed.line, 'لا تكلفة في الصف: يدخل المخزون بقيمة صفر');
+    else if (o.parsed.costNote !== null) results.note(o.parsed.line, o.parsed.costNote);
     if (results.statusOf(o.parsed.line) === 'skip')
       results.set(o.parsed.line, 'update', ['تُضاف الكمية الافتتاحية فقط']);
     openings.push({

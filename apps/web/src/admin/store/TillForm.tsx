@@ -18,6 +18,9 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   const [blockNegative, setBlockNegative] = useState(store.till?.blockNegativeStock === true);
   const [blockOverLimit, setBlockOverLimit] = useState(store.till?.creditOverLimit === 'block');
   const [belowCost, setBelowCost] = useState(store.till?.belowCostApproval === true);
+  const [oldPound, setOldPound] = useState(store.till?.showOldPound === true);
+  const [beep, setBeep] = useState(store.till?.scanBeep !== false);
+  const [lock, setLock] = useState(store.till?.cashierLock === true);
   const [askCustomer, setAskCustomer] = useState(warrantyAsksCustomer(store.till, store.sectors));
   const [terms, setTerms] = useState(store.till?.warrantyTerms ?? '');
   const currencies = noteCurrencies(store);
@@ -61,6 +64,9 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
             : {}),
           creditOverLimit: blockOverLimit ? 'block' : 'approve',
           belowCostApproval: belowCost,
+          showOldPound: oldPound,
+          scanBeep: beep,
+          cashierLock: lock,
           warrantyAskCustomer: askCustomer,
           warrantyTerms: terms.trim() || null,
         }),
@@ -123,6 +129,24 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
         description="مطفأ: يحذّر الكاشير فقط. مشعل: لا يُتمّ البيع بسعر أقل من متوسط التكلفة إلا برمز مدير."
         checked={belowCost}
         onCheckedChange={setBelowCost}
+      />
+      <Switch
+        label="اطبع سطر «بالقديم» تحت الإجمالي"
+        description="يُكتب المبلغ بالليرة القديمة تحت الإجمالي على الإيصال والفاتورة. للعرض فقط، ولا يغيّر أي مبلغ."
+        checked={oldPound}
+        onCheckedChange={setOldPound}
+      />
+      <Switch
+        label="صوت عند مسح الباركود"
+        description="نغمة قصيرة عند مسح صنف، ونغمة أخرى حين لا يُعرف الباركود. أطفئه إن أزعجك الصوت."
+        checked={beep}
+        onCheckedChange={setBeep}
+      />
+      <Switch
+        label="قفل الكاشير على شاشة البيع"
+        description="لا يخرج الكاشير من شاشة البيع إلى الإدارة أو الإعدادات إلا برمز المدير."
+        checked={lock}
+        onCheckedChange={setLock}
       />
       <Switch
         label="اطلب اسم الزبون وجواله لبيع جهاز بكفالة"

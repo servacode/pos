@@ -71,7 +71,7 @@ describe('«طلبيات الشراء»', () => {
     });
     renderApp('/purchase-orders');
     const table = await screen.findByRole('table', { name: 'طلبيات الشراء' });
-    expect(within(table).getAllByText('PO-2026-000001').length).toBeGreaterThan(0);
+    expect((await within(table).findAllByText('PO-2026-000001')).length).toBeGreaterThan(0);
     expect(within(table).getAllByText('مُرسلة').length).toBeGreaterThan(0);
     expect(within(table).getAllByText(/6/).length).toBeGreaterThan(0);
   });

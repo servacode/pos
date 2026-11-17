@@ -39,6 +39,10 @@ export const PERMISSIONS = {
   'hall.cancel_approve': 'الموافقة على إلغاء بند بعد إرساله للمطبخ',
   // 03 › الصيدليات › الأدوية المراقبة: only the pharmacist sells them and reads their register
   'pharmacy.controlled': 'بيع الأدوية المراقبة وسجلها',
+  // الأقساط: the plans and the due list; selling on instalments; cancelling a plan
+  'installments.view': 'رؤية خطط الأقساط والمستحق منها',
+  'installments.create': 'البيع بالتقسيط',
+  'installments.manage': 'إلغاء خطة تقسيط وإدارتها',
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;

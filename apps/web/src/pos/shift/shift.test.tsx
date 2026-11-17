@@ -391,9 +391,7 @@ describe('the banknotes the counter offers', () => {
   };
 
   it('falls back to the built-in notes when the store set none', () => {
-    expect(notesFor(null, 'SYP')).toEqual([
-      500_000, 200_000, 100_000, 50_000, 20_000, 10_000, 5_000, 2_500, 1_000,
-    ]);
+    expect(notesFor(null, 'SYP')).toEqual([50_000, 20_000, 10_000, 5_000, 2_500, 1_000, 500]);
     expect(notesFor({ returnWindowDays: null, cardApprovalRequired: false }, 'USD')).toEqual([
       10_000, 5_000, 2_000, 1_000, 500, 100,
     ]);

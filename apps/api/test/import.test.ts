@@ -126,7 +126,7 @@ describe('products', () => {
       { name: '', price: '100' },
       { name: 'قلم', price: 'ابتدائي', barcode: '12' },
       { name: 'دفتر', price: '-5' },
-      { name: 'مسطرة', price: '3000', unit: 'لتر مكعب' },
+      { name: 'مسطرة', price: '3000', unit: 'وحدة اسمها أطول بكثير من عشرين حرفاً' },
       { name: 'ممحاة', price: '1500', cost: 'x' },
       { name: 'مقص', price: '8000' },
       { name: 'لاصق' },
@@ -145,6 +145,36 @@ describe('products', () => {
     expect(byLine(8).errors).toEqual([{ field: 'price', message: 'سعر البيع مطلوب للمنتج الجديد' }]);
     expect(byLine(7).status).toBe('create');
     expect(await count('products')).toBe(1);
+  });
+
+  it('makes a unit the file names and the store lacks, once, and reads Arabic currency words', async () => {
+    const res = await imported('products', [
+      { name: 'حقنة', price: '1000', unit: 'علبة' },
+      { name: 'قطرة', price: '2000', unit: 'علبة' },
+      { name: 'كمامة', price: '3000', currency: 'ليرة' },
+      { name: 'قفاز', price: '5', currency: 'دولار' },
+    ]);
+    expect(res.totals).toMatchObject({ create: 4, error: 0 });
+    expect(res.results[0]!.notes.join(' ')).toContain('وحدة جديدة');
+    const units = await ownerDb()`select name from units where tenant_id = ${s.tenantId} and name = 'علبة'`;
+    expect(units).toHaveLength(1);
+    const prices = await ownerDb()`
+      select p.name_ar, pr.currency from products p join prices pr on pr.id = (select id from variants where product_id = p.id) order by p.name_ar`;
+    expect(prices.find((r) => r.name_ar === 'قفاز')!.currency).toBe('USD');
+    expect(prices.find((r) => r.name_ar === 'كمامة')!.currency).toBe('SYP');
+  });
+
+  it('reads the cost of a dollar item in dollars and keeps it in the base currency', async () => {
+    await ownerDb()`insert into exchange_rates (tenant_id, unit, quote, rate, effective_at) values (${s.tenantId}, 'USD', 'SYP', '130', now())`;
+    const res = await imported('products', [
+      { name: 'عباءة', price: '45', currency: 'USD', cost: '28', quantity: '2', barcode: '6281234500098' },
+    ]);
+    expect(res.totals.create).toBe(1);
+    expect(res.results[0]!.notes.join(' ')).toContain('حُوّلت');
+    const value =
+      await ownerDb()`select value_minor::int as v from stock_values where tenant_id = ${s.tenantId}`;
+    // 2 pieces at 28 dollars = 56 x 130 = 7,280.00 pounds in hundredths
+    expect(value[0]!.v).toBe(728_000);
   });
 
   it('reads Arabic digits, thousands separators and a decimal comma', async () => {

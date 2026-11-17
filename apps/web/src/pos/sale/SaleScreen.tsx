@@ -52,7 +52,7 @@ import {
 } from '@serva/ui';
 import { barcodeKey, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
 import { ExactMoney } from '../ExactMoney';
-import { counted } from '../format';
+import { counted, isolateSizes } from '../format';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
 import { CartWarnings } from './CartWarnings';
@@ -91,6 +91,7 @@ import {
   type PricingContext,
 } from './cart';
 import { useScanner } from './useScanner';
+import { scanBeep } from '../beep';
 import { usePos } from '../services';
 import { fetchContractPrices } from '../rentals/api';
 import { PrintableQuote, type QuoteData } from '../receipt/Quote';
@@ -301,7 +302,12 @@ export function SaleScreen(props: SaleScreenProps) {
   const [mode, setMode] = useState<SaleMode>({ kind: 'items' });
   const [selected, setSelected] = useState<number | null>(null);
   const [multiplier, setMultiplier] = useState<number | null>(null);
-  const [notice, setNotice] = useState<{ tone: 'warning' | 'info'; text: string } | null>(null);
+  const [notice, setNotice] = useState<{
+    tone: 'warning' | 'info';
+    text: string;
+    href?: string;
+    linkText?: string;
+  } | null>(null);
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
   // «أُضيف ✓»: a picker closes the moment its last choice adds the piece, so the add is said out loud for a moment
@@ -696,7 +702,9 @@ export function SaleScreen(props: SaleScreenProps) {
       const code = barcodeKey(raw);
       const hit = catalog.byBarcode.get(code);
       // «سعر صنف»: a scan shows the item's price and stock, and adds nothing
+      const beepOn = settings.till?.scanBeep !== false;
       const take = (item: CatalogItem, h: BarcodeHit | null, qty?: number) => {
+        scanBeep('ok', beepOn);
         if (checkingRef.current) handlers.current.showPrice(item, h);
         else add(item, h, qty);
       };
@@ -724,6 +732,7 @@ export function SaleScreen(props: SaleScreenProps) {
           return;
         }
       }
+      scanBeep('error', beepOn);
       if (reading && !weighed) {
         setNotice({
           tone: 'warning',
@@ -731,12 +740,17 @@ export function SaleScreen(props: SaleScreenProps) {
         });
         return;
       }
+      // A user who may manage the catalog (and is online) gets the new-product form with the code filled in
+      const canAdd = session.permissions.has('catalog.manage') && navigator.onLine;
       setNotice({
         tone: 'warning',
         text: `الباركود ${code} غير معروف على هذا الجهاز. ابحث عن الصنف باسمه.`,
+        ...(canAdd
+          ? { href: `/products/new?barcode=${encodeURIComponent(code)}`, linkText: 'أضف الصنف' }
+          : {}),
       });
     },
-    [catalog, add, settings.scaleBarcode, ctx],
+    [catalog, add, settings.scaleBarcode, settings.till, session.permissions, ctx],
   );
 
   const keypadOpen =
@@ -818,6 +832,21 @@ export function SaleScreen(props: SaleScreenProps) {
     [catalog.items],
   );
   const inCart = useMemo(() => new Set(cart.lines.map((l) => l.variantId)), [cart.lines]);
+  // A wholesale customer on the cart (however he got there: the pay panel, a quotation, a held sale) brings the
+  // wholesale prices once; the cashier can still switch back to the shelf price by hand
+  const tierAppliedFor = useRef<string | null>(null);
+  const cartCustomerId = cart.customer?.id ?? null;
+  useEffect(() => {
+    if (!cartCustomerId) {
+      tierAppliedFor.current = null;
+      return;
+    }
+    if (tierAppliedFor.current === cartCustomerId || cart.lines.length === 0) return;
+    tierAppliedFor.current = cartCustomerId;
+    const known = catalog.customers.find((c) => c.id === cartCustomerId);
+    if (known?.priceTier === 'wholesale' && cart.priceTier !== 'wholesale')
+      setCart((c) => setPriceTier(c, 'wholesale'));
+  }, [cartCustomerId, catalog.customers, cart.priceTier, cart.lines.length, setCart]);
   /** What the cart holds of each piece, thousandths (taken off the stock the picker shows) */
   const inCartQty = useMemo(() => {
     const map = new Map<string, number>();
@@ -1601,8 +1630,8 @@ export function SaleScreen(props: SaleScreenProps) {
                 <CartLine
                   key={line.lineNo}
                   id={`cart-line-${line.lineNo}`}
-                  name={split.name}
-                  {...(split.variant ? { variant: split.variant } : {})}
+                  name={isolateSizes(split.name)}
+                  {...(split.variant ? { variant: isolateSizes(split.variant) } : {})}
                   qtyThousandths={line.qty}
                   unit={line.unitSymbol ?? undefined}
                   unitPriceMinor={p?.unitPriceMinor ?? 0}

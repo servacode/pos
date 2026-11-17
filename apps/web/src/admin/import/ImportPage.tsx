@@ -32,6 +32,7 @@ import { errorMessage } from '../../lib/api';
 import { MONTHS } from '../../lib/dates';
 import { downloadText } from '../accounting/csv';
 import { postImport } from './api';
+import { applyOldPound, OldPoundSwitch } from './oldPound';
 import { FileProblem, readSpreadsheet, type Sheet } from './file';
 import {
   assign,
@@ -119,6 +120,7 @@ function Import() {
   const [results, setResults] = useState<Map<number, ImportRowResult>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
+  const [oldPound, setOldPound] = useState(false);
   const cancel = useRef(false);
 
   const branches = me.branches.map((b) => ({ id: b.id, name: b.name }));
@@ -126,7 +128,8 @@ function Import() {
     () => targetsOf(type, branches, me.tenant.sectors),
     [type, me.branches, me.tenant.sectors],
   ); // eslint-disable-line react-hooks/exhaustive-deps
-  const prepared = useMemo(() => prepareRows(type, table, mapping), [type, table, mapping]);
+  const fromFile = useMemo(() => prepareRows(type, table, mapping), [type, table, mapping]);
+  const prepared = useMemo(() => (oldPound ? applyOldPound(fromFile) : fromFile), [fromFile, oldPound]);
   const byLine = useMemo(() => new Map(prepared.map((r) => [r.line, r])), [prepared]);
   const missing = missingRequired(type, mapping);
   const busy = phase === 'checking' || phase === 'importing';
@@ -267,6 +270,19 @@ function Import() {
     .filter((r) => (totals.error > 0 && !finished ? r.status === 'error' : true))
     .sort((a, b) => a.line - b.line)
     .slice(0, SHOWN_ROWS);
+  // The same problem on many rows is said once: «علبة: الوحدة غير موجودة — 40 صفاً»
+  const errorGroups = new Map<string, { text: string; lines: number[] }>();
+  for (const r of results.values()) {
+    if (r.status !== 'error') continue;
+    for (const e of r.errors) {
+      const label = chosen.find((f) => f.key === e.field)?.label;
+      const text = label ? `${label}: ${e.message}` : e.message;
+      const group = errorGroups.get(text) ?? { text, lines: [] };
+      group.lines.push(r.line);
+      errorGroups.set(text, group);
+    }
+  }
+  const groupedErrors = [...errorGroups.values()].sort((a, b) => b.lines.length - a.lines.length);
   const columns: DataColumn<ImportRowResult>[] = [
     {
       key: 'line',
@@ -513,6 +529,16 @@ function Import() {
                     setResults(new Map());
                   }}
                 />
+                <OldPoundSwitch
+                  checked={oldPound}
+                  onChange={(on) => {
+                    setOldPound(on);
+                    setPhase('idle');
+                    setResults(new Map());
+                  }}
+                  rows={fromFile}
+                  labels={new Map(fieldsFor(type, me.tenant.sectors).map((f) => [f.key, f.label]))}
+                />
                 {type === 'products' && me.branches.length > 1 ? (
                   <Select
                     label="فرع الكمية الافتتاحية"
@@ -562,6 +588,11 @@ function Import() {
                     أوقف
                   </Button>
                 </div>
+                {phase === 'checking' ? (
+                  <p className="text-sm text-ink-muted">
+                    نفحص الملف كله قبل أن يتغيّر شيء. الملف الكبير قد يأخذ دقيقة، فانتظر ولا تغلق الصفحة.
+                  </p>
+                ) : null}
               </Card>
             ) : null}
 
@@ -602,6 +633,22 @@ function Import() {
                       </Button>
                     </span>
                   </Alert>
+                ) : null}
+                {totals.error > 0 && groupedErrors.some((g) => g.lines.length > 1) ? (
+                  <ul className="list-disc ps-5 text-sm text-ink-muted">
+                    {groupedErrors.slice(0, 5).map((g) => (
+                      <li key={g.text}>
+                        {g.text}
+                        {g.lines.length > 1 ? (
+                          <>
+                            {' '}
+                            (<bdi className="num">{countNoun(g.lines.length, COUNT_NOUNS.row)}</bdi>، أولها
+                            السطر <bdi className="num">{g.lines[0]}</bdi>)
+                          </>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
                 ) : null}
                 {finished ? (
                   <Alert tone="success">

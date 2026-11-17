@@ -150,7 +150,7 @@ const PRODUCT_FIELDS: readonly ImportFieldDef[] = [
     key: 'unit',
     label: 'الوحدة',
     aliases: ['الوحدة', 'وحدة القياس', 'وحدة', 'unit', 'uom', 'unit of measure'],
-    hint: 'اسم وحدة موجودة في المتجر (قطعة، كيلو…). الفارغ: قطعة',
+    hint: 'اسم الوحدة (قطعة، علبة، كيلو…). الوحدة التي ليست في المتجر تُنشأ عند الاستيراد. الفارغ: قطعة',
     example: 'قطعة',
   },
   {
@@ -179,13 +179,13 @@ const PRODUCT_FIELDS: readonly ImportFieldDef[] = [
       'unit price',
     ],
     hint: 'مطلوب للمنتج الجديد. بعملة المتجر الأساسية ما لم تُحدَّد عملة',
-    example: '85000',
+    example: '850',
   },
   {
     key: 'currency',
     label: 'عملة السعر',
     aliases: ['عملة السعر', 'العملة', 'currency', 'cur'],
-    hint: 'SYP أو USD. الفارغ: عملة المتجر الأساسية',
+    hint: 'ليرة أو دولار (أو SYP أو USD). الفارغ: عملة المتجر الأساسية',
     example: 'SYP',
   },
   {
@@ -193,7 +193,7 @@ const PRODUCT_FIELDS: readonly ImportFieldDef[] = [
     label: 'سعر الجملة',
     aliases: ['سعر الجملة', 'الجملة', 'جملة', 'wholesale', 'wholesale price'],
     hint: 'اختياري',
-    example: '75000',
+    example: '750',
   },
   {
     key: 'cost',
@@ -211,8 +211,8 @@ const PRODUCT_FIELDS: readonly ImportFieldDef[] = [
       'buy price',
       'cost price',
     ],
-    hint: 'كلفة القطعة بعملة المتجر الأساسية؛ تُستعمل لقيمة المخزون الافتتاحي فقط',
-    example: '60000',
+    hint: 'كلفة القطعة بعملة سعر الصنف نفسها (صنف بالدولار: كلفته بالدولار وتُحوَّل بسعر الصرف)؛ تُستعمل لقيمة المخزون الافتتاحي فقط',
+    example: '600',
   },
   {
     key: 'quantity',
@@ -363,7 +363,7 @@ const PRODUCT_FIELDS: readonly ImportFieldDef[] = [
       'box price',
     ],
     hint: 'اختياري: سعر العبوة كاملة؛ الفارغ: كمية العبوة × سعر القطعة',
-    example: '900000',
+    example: '9000',
   },
   {
     key: 'warrantyMonths',
@@ -466,7 +466,7 @@ const CUSTOMER_FIELDS: readonly ImportFieldDef[] = [
     label: 'حد الدين',
     aliases: ['حد الدين', 'سقف الدين', 'حد الائتمان', 'سقف الائتمان', 'credit limit', 'limit'],
     hint: 'أقصى ما يجوز أن يدينه الزبون؛ الفارغ: بلا حد',
-    example: '500000',
+    example: '5000',
   },
   {
     key: 'priceTier',
@@ -492,7 +492,7 @@ const CUSTOMER_FIELDS: readonly ImportFieldDef[] = [
       'owes',
     ],
     hint: 'ما على الزبون للمتجر (موجب)، أو للزبون على المتجر (سالب). للمالك فقط، ويُقيَّد مقابل 3900',
-    example: '150000',
+    example: '1500',
   },
 ];
 
@@ -561,7 +561,7 @@ const SUPPLIER_FIELDS: readonly ImportFieldDef[] = [
       'we owe',
     ],
     hint: 'ما على المتجر للمورد (موجب)، أو للمتجر عند المورد (سالب). للمالك فقط، ويُقيَّد مقابل 3900',
-    example: '2000000',
+    example: '20000',
   },
 ];
 

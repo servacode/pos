@@ -1,16 +1,18 @@
-import type { CurrencyCode } from '@serva/core/currencies';
+import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import type {
   GiftVoucherPayload,
   ReceiptPayload,
   ReturnPayload,
   SalePayload,
 } from '@serva/core/contracts/documents';
+import { oldPoundText } from '@serva/core/contracts/till';
 import { formatMoney } from '@serva/core/money';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { clockText, dateText } from '../format';
 import { dayText } from '../../lib/dates';
 import {
+  giftNote,
   isDepositCode,
   methodLabel,
   needsThanks,
@@ -19,6 +21,7 @@ import {
   type ReceiptData,
 } from '../receipt/Receipt';
 import { serialText, warrantyText } from '../receipt/warranty';
+import { INSTALMENT_TITLE, instalmentRows, rowLabel } from './instalmentLines';
 import { packPiecesNote } from '../sale/packText';
 
 /** « (200 قطعة)» after the packs of a line sold by the box, nothing for single units. */
@@ -153,6 +156,20 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
   }
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
+  if (data.giftReceipt) {
+    // «إيصال هدية»: the pieces and their count, no price or payment; the invoice barcode stays for the exchange
+    lines.push(...header(data, 'إيصال هدية', data.doc.number, at));
+    for (const l of sale.lines) {
+      lines.push({ kind: 'pair', start: l.name, end: formatQuantity(l.baseQty), bold: true });
+    }
+    lines.push({ kind: 'rule' });
+    lines.push({ kind: 'center', text: giftNote(data) });
+    if (data.doc.number) {
+      lines.push({ kind: 'barcode', code: data.doc.number });
+      lines.push({ kind: 'center', text: data.doc.number });
+    }
+    return [...lines, { kind: 'rule' }, { kind: 'center', text: 'سيرفا · Serva' }];
+  }
   lines.push(...header(data, 'فاتورة مبيعات', data.doc.number, at));
   if (data.sellerName && data.sellerName !== data.cashierName) {
     lines.push({ kind: 'center', text: `البائع: ${data.sellerName}` });
@@ -211,6 +228,8 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     });
   }
   lines.push({ kind: 'pair', start: 'الإجمالي', end: money(t.totalMinor, base), bold: true });
+  const oldPound = data.settings.till?.showOldPound === true && base === 'SYP';
+  if (oldPound) lines.push({ kind: 'pair', start: 'بالقديم', end: oldPoundText(t.totalMinor) });
   lines.push({ kind: 'rule' });
   for (const p of sale.payments) {
     lines.push({
@@ -219,6 +238,14 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       end: money(p.amountMinor, p.currency),
     });
     if (p.reference) lines.push({ kind: 'pair', start: 'المرجع', end: p.reference });
+  }
+  const rate = foreignRateText(sale);
+  if (rate) lines.push({ kind: 'pair', start: 'سعر الصرف', end: rate });
+  if (sale.installmentPlan) {
+    lines.push({ kind: 'rule' }, { kind: 'center', text: INSTALMENT_TITLE, bold: true });
+    for (const r of instalmentRows(sale.installmentPlan, (m) => money(m, base))) {
+      lines.push({ kind: 'pair', start: rowLabel(r), end: r.value, ...(r.bold ? { bold: true } : {}) });
+    }
   }
   for (const v of data.vouchersAfter ?? []) {
     if (isDepositCode(v.code) && v.balanceMinor <= 0) continue;
@@ -236,6 +263,9 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
       bold: true,
     });
   }
+  if (sale.change && oldPound && sale.change.currency === base) {
+    lines.push({ kind: 'pair', start: 'الباقي بالقديم', end: oldPoundText(sale.change.amountMinor) });
+  }
   const rx = sale.prescription;
   if (rx && (rx.ref || rx.doctor)) {
     lines.push({ kind: 'rule' });
@@ -250,6 +280,25 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     lines.push({ kind: 'center', text: data.doc.number });
   }
   return [...lines, ...footer(data)];
+}
+
+/**
+ * «1$ = 120 ل.س» when the sale involved a foreign currency (a payment, the change or a foreign-priced
+ * line), from the rate stamped on the invoice; null for a pound-only sale. Display only.
+ */
+export function foreignRateText(
+  sale: Pick<SalePayload, 'currency' | 'exchangeRates' | 'payments' | 'change'>,
+): string | null {
+  const base = sale.currency;
+  const rate = sale.exchangeRates?.[0];
+  if (!rate) return null;
+  const foreign = rate.unit === base ? rate.quote : rate.unit;
+  const involved =
+    (sale.payments ?? []).some((p) => p.currency === foreign) || sale.change?.currency === foreign;
+  if (!involved || rate.unit === base) return null;
+  return stripBidiControls(
+    `1${CURRENCIES[foreign as CurrencyCode].symbolAr} = ${rate.rate} ${CURRENCIES[base].symbolAr}`,
+  );
 }
 
 /** What a line's discount is called on the receipt: a promotion by its name. */

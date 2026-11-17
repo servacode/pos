@@ -22,6 +22,8 @@ export interface GridLine {
   qty: string;
   /** The line's whole cost, as typed: pieces × the cost of one */
   cost: string;
+  /** The cost of one piece as typed in the grid (an order line keeps the one, not the whole) */
+  unit?: string;
 }
 
 type Variant = ProductDetail['variants'][number];
@@ -110,6 +112,8 @@ function SizeRuns({ sizes, onFill }: { sizes: number; onFill: (counts: number[],
   const me = useMe();
   const [options, setOptions] = useState<CatalogOptions>(() => catalogOptionsOf(me.settings.catalogOptions));
   const [sets, setSets] = useState('1');
+  // A run's note about its count is told once the run is used, not before anything is typed
+  const [used, setUsed] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<{ name: string; counts: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +150,14 @@ function SizeRuns({ sizes, onFill }: { sizes: number; onFill: (counts: number[],
       <div className="flex flex-wrap items-end gap-2">
         <span className="text-sm font-semibold text-ink">طقم مقاسات</span>
         {options.sizeRuns.map((run) => (
-          <Button key={run.name} variant="secondary" onClick={() => onFill(run.counts, setCount)}>
+          <Button
+            key={run.name}
+            variant="secondary"
+            onClick={() => {
+              setUsed(run.name);
+              onFill(run.counts, setCount);
+            }}
+          >
             {run.name}
           </Button>
         ))}
@@ -173,6 +184,7 @@ function SizeRuns({ sizes, onFill }: { sizes: number; onFill: (counts: number[],
         ) : null}
       </div>
       {options.sizeRuns.map((run) => {
+        if (run.name !== used) return null;
         const note = runMismatchNote(run.name, run.counts.length, sizes);
         return note ? (
           <p key={run.name} className="text-xs text-warning-ink">
@@ -247,15 +259,18 @@ export function SizeGrid({
   product,
   onAdd,
   onCancel,
+  initialUnit = '',
 }: {
   product: ProductDetail;
   onAdd: (lines: GridLine[]) => void;
   onCancel: () => void;
+  /** The last known cost of one piece, to start the cost box with (the owner changes it) */
+  initialUnit?: string;
 }) {
   const live = product.variants.filter((v) => !v.archivedAt);
   const grid = gridOf(live);
   const [qty, setQty] = useState<Record<string, string>>({});
-  const [unit, setUnit] = useState('');
+  const [unit, setUnit] = useState(initialUnit);
   const pieces = live
     .map((v) => ({ v, n: qtyOf(qty[v.id] ?? '') }))
     .filter((x): x is { v: Variant; n: number } => x.n !== null && x.n > 0);
@@ -359,6 +374,7 @@ export function SizeGrid({
                 name: v.label ? `${product.nameAr} ${v.label}` : product.nameAr,
                 qty: qty[v.id]!.trim(),
                 cost: costText(unit, n / 1000),
+                unit: unit.trim(),
               })),
             )
           }

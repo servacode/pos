@@ -10,6 +10,7 @@ import {
   GiftIcon,
   IconChip,
   ListIcon,
+  PrintIcon,
   ShieldCheckIcon,
   StoreIcon,
   WeighedIcon,
@@ -61,6 +62,12 @@ export const SETTINGS_SECTIONS = {
     title: 'الصندوق',
     description: 'مدة قبول المرتجع، ورقم الموافقة عند الدفع بالبطاقة، وفئات النقد في عدّ الدرج.',
     icon: CashIcon,
+  },
+  where: {
+    id: 'store-where',
+    title: 'الطباعة والتقريب والفروع',
+    description: 'أين تجد تقريب النقد والطابعة واسم الفرع.',
+    icon: PrintIcon,
   },
   pharmacy: {
     id: 'store-pharmacy',

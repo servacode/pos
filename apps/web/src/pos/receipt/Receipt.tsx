@@ -2,7 +2,8 @@ import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { CURRENCIES } from '@serva/core/currencies';
-import { convert } from '@serva/core/money';
+import { convert, formatMoney } from '@serva/core/money';
+import { oldPoundText, returnWindowDays } from '@serva/core/contracts/till';
 import type { BranchRow, SettingsRow } from '@serva/core/contracts/catalog';
 import type {
   PaymentMethod,
@@ -16,10 +17,11 @@ import type { SyncDocument } from '@serva/sync';
 import { cn, displayNumber, formatQuantity, useDigits } from '@serva/ui';
 import { ExactMoney } from '../ExactMoney';
 import { packPiecesNote } from '../sale/packText';
-import { clockText, dateText } from '../format';
+import { clockText, dateText, isolateSizes } from '../format';
 import { Bars } from '../../lib/Bars';
 import { dayText } from '../../lib/dates';
 import { discountLabel, VOUCHER_NOTE } from '../print/lines';
+import { INSTALMENT_TITLE, instalmentRows } from '../print/instalmentLines';
 import { DEPOSIT_BACK_NAME } from '../rentals/api';
 import { ORDER_TYPE_TEXT } from './KitchenTicket';
 import { serialText, warrantyText } from './warranty';
@@ -61,6 +63,8 @@ export interface ReceiptData {
   cashierName: string;
   /** The salesperson of a sale, named when it is not the cashier (the receipt says «البائع») */
   sellerName?: string | null;
+  /** «إيصال هدية»: the sale's slip with no prices or payments, for the person the gift goes to (display and print only) */
+  giftReceipt?: boolean;
   /** What is left on each voucher a sale paid with, once the sale is counted */
   vouchersAfter?: { code: string; balanceMinor: number; currency: CurrencyCode }[];
   /** The catalog's services: a fee is work, not a piece, so «عدد القطع» leaves it out */
@@ -274,7 +278,7 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
       <ul className="flex flex-col gap-1.5">
         {ret.lines.map((line) => (
           <li key={line.lineNo} className="flex flex-col">
-            <span className="font-bold">{line.name}</span>
+            <span className="font-bold">{isolateSizes(line.name)}</span>
             <div className="flex justify-between gap-2">
               <bdi dir="rtl" className="num">
                 {formatQuantity(line.qty, digits)}
@@ -382,6 +386,68 @@ function GiftVoucherSlip({ data, width, copy }: { data: ReceiptData; width: Pape
   );
 }
 
+/** What a gift receipt says about changing the piece: the store's return window, the invoice number to bring */
+export function giftNote(data: ReceiptData): string {
+  const days = returnWindowDays(data.settings.till, data.settings.sectors);
+  return `للاستبدال أو الإرجاع خلال ${days} يوماً من تاريخ الشراء، أحضر هذا الإيصال.`;
+}
+
+/** «إيصال هدية»: the pieces and their count, never a price, a discount or a payment; the invoice barcode stays so the till finds it */
+function GiftReceiptSlip({ data, width, copy }: { data: ReceiptData; width: PaperWidth; copy: boolean }) {
+  const digits = useDigits();
+  const sale = data.doc.payload as unknown as SalePayload;
+  const at = Date.parse(data.doc.deviceTime);
+  return (
+    <div
+      dir="rtl"
+      lang="ar"
+      aria-label={`إيصال هدية ${width} مم`}
+      style={PAPER}
+      className={cn(
+        'flex flex-col gap-2 bg-surface px-1 py-3 font-semibold text-ink',
+        width === 80 ? 'w-[72mm] text-[13px]/[1.55]' : 'w-[48mm] text-[11px]/[1.5]',
+      )}
+    >
+      <ReceiptHeader data={data} width={width} copy={copy} />
+      <Rule />
+      <div className="flex flex-col items-center">
+        <span className="text-lg font-bold">إيصال هدية</span>
+        <bdi dir="ltr" className="num font-bold">
+          {data.doc.number}
+        </bdi>
+        <span>
+          {dateText(at, digits)} ، {clockText(at, digits)}
+        </span>
+      </div>
+      <Rule />
+      {sale.lines.map((line) => (
+        <div key={line.lineNo} className="flex items-baseline justify-between gap-2">
+          <span className="font-bold">{isolateSizes(line.name)}</span>
+          <span className="num text-end">{formatQuantity(line.baseQty, digits)}</span>
+        </div>
+      ))}
+      <Rule />
+      <p className="text-center text-xs">{giftNote(data)}</p>
+      {data.doc.number ? (
+        <div className="flex flex-col items-center gap-0.5" aria-label="باركود الفاتورة">
+          <div className="h-12 w-full px-2">
+            <Bars code={data.doc.number} height={40} />
+          </div>
+          <bdi dir="ltr" className="num text-[10px]">
+            {data.doc.number}
+          </bdi>
+        </div>
+      ) : null}
+      <p className="text-center text-[10px]">
+        سيرفا ·{' '}
+        <span lang="en" dir="ltr">
+          Serva
+        </span>
+      </p>
+    </div>
+  );
+}
+
 /**
  * The sale receipt (21 › إيصال 80 مم; print/Receipt80): the store, the number and the moment, each
  * line with «quantity × price», the discounts, the total and its value in dollars, the payments,
@@ -402,6 +468,7 @@ export function Receipt({
   if (data.kind === 'receipt') return <PaymentVoucher data={data} width={width} copy={copy} />;
   if (data.kind === 'gift' || data.kind === 'deposit')
     return <GiftVoucherSlip data={data} width={width} copy={copy} />;
+  if (data.giftReceipt) return <GiftReceiptSlip data={data} width={width} copy={copy} />;
   const sale = data.doc.payload as unknown as SalePayload;
   const base = sale.currency;
   const at = Date.parse(data.doc.deviceTime);
@@ -414,6 +481,7 @@ export function Receipt({
       sale.payments.some((p) => p.currency === foreignCode));
   const foreign = offered ? foreignCode : null;
   const t = sale.totals;
+  const oldPound = data.settings.till?.showOldPound === true && base === 'SYP';
   // A discount keeps its fraction (37.5, not 38): the lines then add up to the total the same way the kernel did
   const exact = (minor: number) => (
     <ExactMoney
@@ -479,12 +547,12 @@ export function Receipt({
             {single(line) ? (
               // One piece: the name and its amount on one row, not «25,000 × 1» and then 25,000 again
               <div className="flex justify-between gap-2">
-                <span className="font-bold">{line.name}</span>
+                <span className="font-bold">{isolateSizes(line.name)}</span>
                 <span className="num">{amount(line.priced.grossMinor)}</span>
               </div>
             ) : (
               <>
-                <span className="font-bold">{line.name}</span>
+                <span className="font-bold">{isolateSizes(line.name)}</span>
                 <div className="flex justify-between gap-2">
                   <bdi dir="rtl" className="num">
                     {formatQuantity(line.qty, digits)}
@@ -575,6 +643,11 @@ export function Receipt({
       <Row label="الإجمالي" strong>
         <ExactMoney minor={t.totalMinor} currency={base} />
       </Row>
+      {oldPound ? (
+        <Row label={<span className="text-xs">بالقديم</span>}>
+          <bdi className="num">{oldPoundText(t.totalMinor)}</bdi>
+        </Row>
+      ) : null}
       {foreign && foreignRate ? (
         <Row
           label={
@@ -609,6 +682,28 @@ export function Receipt({
               <ExactMoney minor={sale.customerBalanceAfterMinor} currency={base} />
             </Row>
           ) : null}
+          {sale.installmentPlan ? (
+            <div className="flex flex-col gap-0.5 pt-2" aria-label={INSTALMENT_TITLE}>
+              <span className="text-center font-bold">{INSTALMENT_TITLE}</span>
+              {instalmentRows(sale.installmentPlan, (m) => formatMoney(m, base)).map((r) => (
+                <Row
+                  key={r.label + (r.date ?? '')}
+                  label={
+                    r.date ? (
+                      <>
+                        {r.label} · <bdi dir="ltr">{r.date}</bdi>
+                      </>
+                    ) : (
+                      r.label
+                    )
+                  }
+                  strong={r.bold}
+                >
+                  {r.value}
+                </Row>
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-col gap-1 pt-3" aria-label="توقيع المستلم">
             <span className="text-xs">توقيع المستلم</span>
             <span className="mt-4 block border-b border-dashed border-current" />
@@ -637,6 +732,11 @@ export function Receipt({
       {sale.change ? (
         <Row label="الباقي للزبون" strong>
           <ExactMoney minor={sale.change.amountMinor} currency={sale.change.currency} />
+        </Row>
+      ) : null}
+      {sale.change && oldPound && sale.change.currency === base ? (
+        <Row label={<span className="text-xs">الباقي بالقديم</span>}>
+          <bdi className="num">{oldPoundText(sale.change.amountMinor)}</bdi>
         </Row>
       ) : null}
       {sale.prescription && (sale.prescription.ref || sale.prescription.doctor) ? (

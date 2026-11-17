@@ -13,6 +13,7 @@ import {
 } from './common';
 import { customerPayloadSchema, type CustomerPayload } from './customers';
 import { chequeDetailsSchema } from './cheques';
+import { installmentPlanInputSchema, receiptAllocationSchema } from './installments';
 
 /**
  * Payloads of the documents a cashier device sends in phase 1 (17 › الإرسال; 15 › عقد المزامنة v1;
@@ -377,6 +378,11 @@ export const salePayloadSchema = z
     onlineOrderId: uuidSchema.nullable().optional(),
     /** The prescription of a pharmacy sale (03 › الصيدليات); optional, an ordinary sale leaves it out */
     prescription: prescriptionSchema.nullable().optional(),
+    /**
+     * Instalments (الأقساط): the plan this sale finances, its credit payment being the financed amount.
+     * Optional and absent from every sale made before; it changes nothing about how the sale posts.
+     */
+    installmentPlan: installmentPlanInputSchema.nullable().optional(),
   })
   .superRefine((sale, ctx) => {
     const issue = (path: (string | number)[], message: string) =>
@@ -872,6 +878,8 @@ export const receiptPayloadSchema = z
     method: z.enum(RECEIPT_METHODS),
     reference: z.string().trim().min(1).max(64).nullable(),
     note: z.string().trim().max(200).nullable(),
+    /** Instalments (الأقساط): the instalments this payment settles; optional, posts nothing of its own */
+    allocations: z.array(receiptAllocationSchema).max(60).optional(),
   })
   .refine((r) => r.method === 'cash' || r.reference !== null, {
     path: ['reference'],

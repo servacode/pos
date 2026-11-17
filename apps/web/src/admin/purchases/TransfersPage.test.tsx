@@ -86,6 +86,8 @@ describe('«التحويل بين الفروع»', () => {
     });
     const table = await screen.findByRole('table', { name: 'التحويلات' });
     expect(await within(table).findByText('الفرع الرئيسي ← فرع المول')).toBeInTheDocument();
+    // The list says what state a transfer is in: it is one step, out and in together
+    expect(within(table).getByText('تمّ: خرج ودخل')).toBeInTheDocument();
   });
 
   it('says so for a store of one branch', async () => {

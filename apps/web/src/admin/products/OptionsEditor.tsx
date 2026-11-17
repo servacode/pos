@@ -16,7 +16,7 @@ import {
 } from '@serva/ui';
 import { apiFetch } from '../../lib/api';
 import { DEFAULT_AXIS_NAMES, MAX_AXES, newKey, type Axis } from './form';
-import { insertValue, presetGroups, SIZE_KINDS, type PresetGroup } from './presets';
+import { insertValue, PAIR_KINDS, presetGroups, SIZE_KINDS, type PresetGroup } from './presets';
 
 interface OptionsEditorProps {
   axes: Axis[];
@@ -158,6 +158,15 @@ export const OptionsEditor = memo(function OptionsEditor({
                 key={axis.key}
                 axis={axis}
                 first={index === 0}
+                onPair={(first, second) => {
+                  // «الخصر» × «الطول»: the first option is renamed, the second one is named or added
+                  const [a, b, ...rest] = axes;
+                  const named = [
+                    { ...a!, name: first },
+                    b ? { ...b, name: second } : { key: newKey('a'), name: second, values: [] },
+                  ];
+                  onChange([...named, ...rest]);
+                }}
                 storeValues={storeValues.get(axis.name.trim()) ?? []}
                 canRemove={axes.length > 1}
                 onChange={(next) => onChange(axes.map((a) => (a.key === axis.key ? next : a)))}
@@ -196,6 +205,7 @@ export const OptionsEditor = memo(function OptionsEditor({
 function AxisRow({
   axis,
   first,
+  onPair,
   storeValues,
   canRemove,
   onChange,
@@ -203,6 +213,7 @@ function AxisRow({
 }: {
   axis: Axis;
   first: boolean;
+  onPair: (first: string, second: string) => void;
   storeValues: readonly string[];
   canRemove: boolean;
   onChange: (axis: Axis) => void;
@@ -269,6 +280,21 @@ function AxisRow({
               single
               pressed={axis.name.trim() === kind.name}
               onClick={() => onChange({ ...axis, name: kind.name })}
+            >
+              {kind.pick}
+            </ChoiceChip>
+          ))}
+        </div>
+      ) : null}
+      {first ? (
+        <div role="group" aria-label="مقاسان" className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-ink-muted">بمقاسين:</span>
+          {PAIR_KINDS.map((kind) => (
+            <ChoiceChip
+              key={kind.name}
+              single
+              pressed={axis.name.trim() === kind.name}
+              onClick={() => onPair(kind.name, kind.second.name)}
             >
               {kind.pick}
             </ChoiceChip>

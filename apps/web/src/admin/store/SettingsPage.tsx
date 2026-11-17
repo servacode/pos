@@ -32,6 +32,7 @@ import { LoyaltyForm } from './LoyaltyForm';
 import { SETTINGS_SECTIONS, type SettingsSection } from './parts';
 import { ScaleForm } from './ScaleForm';
 import { ServiceForm } from './ServiceForm';
+import { ReturnDaysWarning, ShopWhere } from './ShopWhere';
 import { CurrencyForm, ProfileForm } from './StoreForms';
 
 /**
@@ -207,6 +208,7 @@ export function SettingsPage() {
     ...(weighs ? [SETTINGS_SECTIONS.scale] : []),
     ...(serves ? [SETTINGS_SECTIONS.service] : []),
     SETTINGS_SECTIONS.till,
+    SETTINGS_SECTIONS.where,
     ...(batches
       ? [
           store && storeSells(store.sectors, ['pharmacy'])
@@ -230,6 +232,7 @@ export function SettingsPage() {
         {error ? <Alert tone="error">{error}</Alert> : null}
         {!canEdit ? <Alert tone="info">هذه الإعدادات يغيّرها المالك فقط.</Alert> : null}
         {!store && !error ? <SettingsLoading /> : null}
+        {store && canEdit ? <ReturnDaysWarning store={store} /> : null}
         {store && canEdit ? (
           <div className="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)] lg:items-start">
             <SettingsNav sections={sections} />
@@ -239,6 +242,7 @@ export function SettingsPage() {
               {weighs ? <ScaleForm store={store} onSaved={saved} /> : null}
               {serves ? <ServiceForm store={store} onSaved={saved} /> : null}
               <TillForm store={store} onSaved={saved} />
+              <ShopWhere currencies={store.enabledCurrencies} />
               {batches ? <PharmacyForm store={store} onSaved={saved} /> : null}
               <LoyaltyForm store={store} onSaved={saved} />
               <DataCard />

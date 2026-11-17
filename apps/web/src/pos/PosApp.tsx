@@ -17,7 +17,7 @@ import { staffRoster, type StaffSession } from './staff/staff';
 import { TillBoundary } from './chunks';
 import { useLocalStock } from './localStock';
 import { StatusBar, type OutboxStatus } from './StatusBar';
-import { useOnline } from './useOnline';
+import { isWeakConnection, startConnectionProbe, useOnline, useReachable } from './useOnline';
 
 // Linking runs once per device: its screens load only on a device that is not linked yet.
 const DeviceLink = lazy(() => import('./link/DeviceLink').then((m) => ({ default: m.DeviceLink })));
@@ -52,7 +52,7 @@ export function useOutboxStatus(pos: PosServices, tick: number): OutboxStatus | 
  * database through `services`, so it opens the same with or without internet; tests pass fakes.
  */
 export function PosSession({ services, persisted }: { services: PosServices; persisted: boolean | null }) {
-  const online = useOnline();
+  const online = useReachable();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [session, setSession] = useState<StaffSession | null>(null);
   const [tick, setTick] = useState(0);
@@ -190,6 +190,7 @@ export function PosSession({ services, persisted }: { services: PosServices; per
 export function PosApp() {
   const { loading, device, persisted, sync, reload, engineSave } = useDevice();
   const online = useOnline();
+  useEffect(() => (import.meta.env.MODE === 'test' ? undefined : startConnectionProbe()), []);
 
   const local = useMemo(() => (device ? dexieLocal(deviceStore().db) : null), [device]);
   const services = useMemo<PosServices | null>(() => {
@@ -200,7 +201,7 @@ export function PosApp() {
       local,
       device,
       save: saveWith(store, engineSave),
-      online: () => globalThis.navigator?.onLine ?? true,
+      online: () => (globalThis.navigator?.onLine ?? true) && !isWeakConnection(),
       now: Date.now,
       sync,
     };

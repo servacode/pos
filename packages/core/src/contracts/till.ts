@@ -43,14 +43,29 @@ export const tillSettingsSchema = z.object({
    * built-in list. Additive and optional: an older till ignores it.
    */
   cashNotes: z.partialRecord(z.enum(CURRENCY_CODES), cashNoteList).optional(),
+  /** «بالقديم»: a line under the total (and the change) that says the amount in old pounds; display only, off by default */
+  showOldPound: z.boolean().optional(),
+  /** «صوت المسح»: the till beeps on a scan (a different sound for an unknown code); left out: on */
+  scanBeep: z.boolean().optional(),
+  /** «قفل الكاشير»: a cashier cannot leave the sale screen without a manager's PIN; off by default */
+  cashierLock: z.boolean().optional(),
 });
 export type TillSettings = z.output<typeof tillSettingsSchema>;
 
 /** The till's built-in note values (whole units, high to low) for the currencies it counts by note. */
 export const DEFAULT_CASH_NOTES: Readonly<Record<string, readonly number[]>> = {
-  SYP: [5000, 2000, 1000, 500, 200, 100, 50, 25, 10],
+  SYP: [500, 200, 100, 50, 25, 10, 5],
   USD: [100, 50, 20, 10, 5, 1],
 };
+
+/**
+ * An amount of new pounds as the old pounds it equals (100 old = 1 new): since the new pound keeps two
+ * decimals the minor units are the old pounds themselves (125.00 new = 12,500 old). Display only.
+ */
+export function oldPoundText(minor: number): string {
+  const sign = minor < 0 ? '-' : '';
+  return `${sign}${String(Math.abs(Math.round(minor))).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+}
 
 /** The banknote values the till counts, sorted high to low; null for a currency the store did not set. */
 export function cashNotesOf(

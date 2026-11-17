@@ -158,6 +158,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'money',
+    to: '/installments',
+    label: 'الأقساط',
+    icon: CalendarIcon,
+    permission: ['installments.view'],
+  },
+  {
+    section: 'money',
     to: '/cheques',
     label: 'الشيكات',
     icon: ChequeIcon,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { CurrencyCode } from '@serva/core';
+import { normalizeContactPhone, type CurrencyCode } from '@serva/core';
 import { Alert, AddIcon, Button, Money, SearchField, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { createCustomer, listCustomers } from './api';
@@ -35,6 +35,8 @@ export function CustomerPicker({
   const [phone, setPhone] = useState('');
   const [saving, setSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  /** A customer already in the store with the phone just typed: offered instead of a second record */
+  const [same, setSame] = useState<PickedCustomer | null>(null);
 
   useEffect(() => {
     if (q.trim().length < 2) {
@@ -61,11 +63,24 @@ export function CustomerPicker({
     setSaving(true);
     setAddError(null);
     try {
+      if (!same && phone.trim()) {
+        const wanted = normalizeContactPhone(phone);
+        // Only a hint: when the lookup fails, adding goes on as before
+        const found = (await listCustomers(phone.trim()).catch(() => ({ items: [] as never[] }))).items.find(
+          (c) => !c.archived && c.phone === wanted,
+        );
+        if (found) {
+          setSame({ id: found.id, name: found.name, phone: found.phone });
+          setSaving(false);
+          return;
+        }
+      }
       const made = await createCustomer({ name: name.trim(), phone: phone.trim() || null });
       onChange({ id: made.id, name: made.name, phone: made.phone });
       setAdding(false);
       setName('');
       setPhone('');
+      setSame(null);
     } catch (e) {
       setAddError(e instanceof ApiError && e.fields ? Object.values(e.fields)[0]! : errorMessage(e));
     } finally {
@@ -145,6 +160,26 @@ export function CustomerPicker({
       {adding ? (
         <div className="flex flex-col gap-3 rounded-card border border-line p-3">
           {addError ? <Alert tone="error">{addError}</Alert> : null}
+          {same ? (
+            <Alert tone="warning" title="يوجد زبون بهذا الرقم">
+              <span className="flex flex-wrap items-center gap-3">
+                <span>{same.name}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    onChange(same);
+                    setAdding(false);
+                    setSame(null);
+                  }}
+                >
+                  اختر هذا الزبون
+                </Button>
+                <span className="text-sm">أو اضغط «أضف الزبون» مرة ثانية لإضافة زبون آخر بالرقم نفسه.</span>
+              </span>
+            </Alert>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <TextField label="اسم الزبون الجديد" value={name} onChange={(e) => setName(e.target.value)} />
             <TextField
@@ -152,7 +187,10 @@ export function CustomerPicker({
               dir="ltr"
               inputClassName="num"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                setSame(null);
+              }}
             />
           </div>
           <div className="flex gap-2">

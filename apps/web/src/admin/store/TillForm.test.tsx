@@ -73,6 +73,34 @@ describe('«الصندوق» in the settings', () => {
     expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({ blockNegativeStock: true });
   });
 
+  it('saves the old-pound line, the scan sound and the cashier lock (off, on, off until turned on)', async () => {
+    const current = store(['supermarket']);
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    const old = within(form).getByRole('switch', { name: /سطر «بالقديم»/ });
+    const beep = within(form).getByRole('switch', { name: /صوت عند مسح الباركود/ });
+    const lock = within(form).getByRole('switch', { name: /قفل الكاشير/ });
+    expect(old).not.toBeChecked();
+    expect(beep).toBeChecked();
+    expect(lock).not.toBeChecked();
+    await user.click(old);
+    await user.click(beep);
+    await user.click(lock);
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({
+      showOldPound: true,
+      scanBeep: false,
+      cashierLock: true,
+    });
+  });
+
   it('refuses a window outside 1 to 365 and shows a failed save', async () => {
     const current = store(['supermarket']);
     mockFetch({
@@ -114,7 +142,7 @@ describe('«الصندوق» in the settings', () => {
       within(group)
         .getAllByRole('listitem')
         .map((li) => li.textContent);
-    expect(chips(syp)).toEqual(['5000', '2000', '1000', '500', '200', '100', '50', '25', '10']);
+    expect(chips(syp)).toEqual(['500', '200', '100', '50', '25', '10', '5']);
 
     await user.type(within(syp).getByLabelText('أضف فئة ليرة سورية'), '20000');
     await user.click(within(syp).getByRole('button', { name: 'أضف' }));
@@ -124,16 +152,16 @@ describe('«الصندوق» in the settings', () => {
     await user.type(within(syp).getByLabelText('أضف فئة ليرة سورية'), '0{Enter}');
     expect(within(syp).getByText('اكتب عدداً صحيحاً أكبر من صفر')).toBeInTheDocument();
     await user.click(within(syp).getByRole('button', { name: 'احذف فئة 25 ل.س' }));
-    expect(chips(syp)).toEqual(['20000', '5000', '2000', '1000', '500', '200', '100', '50', '10']);
+    expect(chips(syp)).toEqual(['20000', '500', '200', '100', '50', '10', '5']);
 
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
     expect((requestsTo('PUT', '/v1/store/till').at(-1)?.body as { cashNotes: unknown }).cashNotes).toEqual({
-      SYP: [20000, 5000, 2000, 1000, 500, 200, 100, 50, 10],
+      SYP: [20000, 500, 200, 100, 50, 10, 5],
     });
 
     await user.click(within(syp).getByRole('button', { name: 'أعد الافتراضي' }));
-    expect(chips(syp)).toEqual(['5000', '2000', '1000', '500', '200', '100', '50', '25', '10']);
+    expect(chips(syp)).toEqual(['500', '200', '100', '50', '25', '10', '5']);
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     await within(form).findByText(/حُفظ/);
     expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).not.toHaveProperty('cashNotes');
@@ -149,7 +177,7 @@ describe('«الصندوق» in the settings', () => {
     });
     const { user } = renderApp('/settings');
     const form = await screen.findByRole('form', { name: 'الصندوق' });
-    for (const v of [5000, 2000, 1000, 500, 200, 100, 50, 25, 10]) {
+    for (const v of [500, 200, 100, 50, 25, 10, 5]) {
       await user.click(within(form).getByRole('button', { name: `احذف فئة ${v} ل.س` }));
     }
     expect(within(form).getByText('أبقِ فئة واحدة على الأقل.')).toBeInTheDocument();

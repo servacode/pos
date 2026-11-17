@@ -112,6 +112,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/platform/legal': 'platform',
   'PUT /v1/platform/legal': 'platform',
   'GET /v1/legal': 'public',
+  'GET /v1/plans': 'public',
   'PUT /v1/store/profile': 'signed-in',
   'PUT /v1/store/currency': 'signed-in',
   'PUT /v1/store/onboarding': 'signed-in',
@@ -122,6 +123,18 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/promotions/:id': 'signed-in',
   'GET /v1/cheques': 'signed-in',
   'POST /v1/cheques/actions': 'signed-in',
+  'GET /v1/installment-plans': 'signed-in',
+  'GET /v1/installment-plans/:id': 'signed-in',
+  'POST /v1/installment-plans/:id/collect': 'signed-in',
+  'POST /v1/installment-plans/:id/cancel': 'signed-in',
+  'POST /v1/installment-plans/:id/notes-printed': 'signed-in',
+  'POST /v1/promissory-notes/:id/action': 'signed-in',
+  'GET /v1/installments/worklist': 'signed-in',
+  'GET /v1/installments/summary': 'signed-in',
+  'POST /v1/installments/:planId/:no/reminders': 'signed-in',
+  'GET /v1/store/installments-settings': 'signed-in',
+  'PUT /v1/store/installments-settings': 'signed-in',
+  'GET /v1/device/installments/customer/:id': 'device',
   'POST /v1/device/staff-sessions': 'device',
   'GET /v1/branches': 'signed-in',
   'POST /v1/branches': 'signed-in',
@@ -571,7 +584,122 @@ async function rentablePieceOf(app: FastifyInstance, a: Stores['a']) {
   return serial;
 }
 
+/** A customer of this store with an instalment plan of one instalment, written straight to the tables */
+async function planOf(app: FastifyInstance, a: Stores['a']) {
+  const made = await app.inject({
+    method: 'POST',
+    url: '/v1/customers',
+    headers: owner(a),
+    payload: { name: 'زبون أقساط' },
+  });
+  expect(made.statusCode, made.body).toBe(201);
+  const customerId = made.json<{ id: string }>().id;
+  const planId = createUuidV7()();
+  const [branch] = await ownerDb()<
+    { id: string }[]
+  >`select id from branches where tenant_id = ${a.tenantId} limit 1`;
+  await ownerDb()`
+    insert into installment_plans (id, tenant_id, number, branch_id, customer_id, currency, total_minor,
+      down_payment_minor, principal_minor, markup_minor, financed_minor, installments_count, frequency, first_due_date)
+    values (${planId}, ${a.tenantId}, ${'INV-' + planId.slice(-6)}, ${branch!.id}, ${customerId}, 'SYP', 1000, 200, 800, 0, 800, 1,
+      'monthly', '2026-12-01')`;
+  await ownerDb()`
+    insert into installments (tenant_id, plan_id, no, due_date, amount_minor)
+    values (${a.tenantId}, ${planId}, 1, '2026-12-01', 800)`;
+  return { planId, customerId };
+}
+
 const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Promise<void>> = {
+  // Another store's instalment plan answers 404 for reading, collecting, cancelling and reminding, and stays as it was
+  'GET /v1/installment-plans/:id': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/installment-plans/${planId}`,
+      headers: owner(b),
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'POST /v1/installment-plans/:id/collect': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installment-plans/${planId}/collect`,
+      headers: owner(b),
+      payload: { amountMinor: 100 },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { paid: string }[]
+    >`select paid_minor::text as paid from installments where plan_id = ${planId}`;
+    expect(row!.paid).toBe('0');
+  },
+  'POST /v1/installment-plans/:id/cancel': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installment-plans/${planId}/cancel`,
+      headers: owner(b),
+      payload: { reason: 'x' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from installment_plans where id = ${planId}`;
+    expect(row!.status).toBe('active');
+  },
+  'POST /v1/installment-plans/:id/notes-printed': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installment-plans/${planId}/notes-printed`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+  },
+  'POST /v1/promissory-notes/:id/action': async (app, { a, b }) => {
+    const { planId, customerId } = await planOf(app, a);
+    const [note] = await ownerDb()<{ id: string }[]>`
+      insert into promissory_notes (tenant_id, number, plan_id, no, customer_id, amount_minor, issue_date, due_date)
+      values (${a.tenantId}, ${'N-' + planId.slice(-6)}, ${planId}, 1, ${customerId}, 800, '2026-11-01', '2026-12-01')
+      returning id`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/promissory-notes/${note!.id}/action`,
+      headers: owner(b),
+      payload: { action: 'paid' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { status: string }[]
+    >`select status from promissory_notes where id = ${note!.id}`;
+    expect(row!.status).toBe('issued');
+  },
+  'POST /v1/installments/:planId/:no/reminders': async (app, { a, b }) => {
+    const { planId } = await planOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/installments/${planId}/1/reminders`,
+      headers: owner(b),
+      payload: { kind: 'due' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from installment_reminders`;
+    expect(n!.n).toBe(0);
+  },
+  // Another store's device sees none of this store's customer's plans
+  'GET /v1/device/installments/customer/:id': async (app, { a, b }) => {
+    const { customerId } = await planOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/device/installments/customer/${customerId}`,
+      headers: { authorization: deviceB.authorization },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ plans: unknown[] }>().plans).toEqual([]);
+  },
   'GET /v1/shop/:slug': async (app, stores) => {
     const product = await twoShops(app, stores);
     const b = await app.inject({ method: 'GET', url: '/v1/shop/b-shop' });
@@ -1637,6 +1765,9 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/sync/snapshots/:id']!(app, { a, b });
+  },
+  'GET /v1/device/installments/customer/:id': async (app, { a, b }) => {
+    await IDOR_PROBES['GET /v1/device/installments/customer/:id']!(app, { a, b });
   },
   'GET /v1/device/customers/:id/purchases': async (app, { a, b }) => {
     await IDOR_PROBES['GET /v1/device/customers/:id/purchases']!(app, { a, b });

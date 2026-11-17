@@ -398,6 +398,8 @@ export const tenantSettings = pgTable(
       autoBarcode: boolean;
       sizeRuns: { name: string; counts: number[] }[];
     }>(),
+    /** «الأقساط» (packages/core › installments.ts InstalmentSettings); null: off, the defaults */
+    installments: jsonb('installments').$type<Record<string, unknown>>(),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -3150,6 +3152,181 @@ export const purchaseOrders = pgTable(
     unique('purchase_orders_number_unique').on(t.tenantId, t.number),
     index('purchase_orders_status_idx').on(t.tenantId, t.status, t.createdAt),
     index('purchase_orders_supplier_idx').on(t.tenantId, t.supplierId),
+    tenantIsolation(),
+  ],
+);
+
+// ─── Instalments (الأقساط) ──────────────────────────────────────────────────────
+// A schedule laid over the customer's receivable (1200): nothing here is money. The sale that
+// finances goods and the receipt that pays toward them post as they always did; these tables are
+// their projection and can be rebuilt from the stored sale and receipt payloads.
+
+/** A plan: the sale it came from (the plan's number is the sale's), the terms, the guarantor */
+export const installmentPlans = pgTable(
+  'installment_plans',
+  {
+    /** Minted on the till, so a re-sent sale cannot make two plans (the default is for plans made elsewhere) */
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    customerId: uuid('customer_id').notNull(),
+    saleId: uuid('sale_id'),
+    /** sale | debt */
+    source: text('source').notNull().default('sale'),
+    currency: text('currency').notNull(),
+    /** The goods' total before the markup */
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    downPaymentMinor: bigint('down_payment_minor', { mode: 'number' }).notNull(),
+    principalMinor: bigint('principal_minor', { mode: 'number' }).notNull(),
+    markupMinor: bigint('markup_minor', { mode: 'number' }).notNull(),
+    financedMinor: bigint('financed_minor', { mode: 'number' }).notNull(),
+    markupBp: integer('markup_bp').notNull().default(0),
+    installmentsCount: integer('installments_count').notNull(),
+    /** monthly | biweekly | weekly | custom */
+    frequency: text('frequency').notNull(),
+    firstDueDate: date('first_due_date').notNull(),
+    borrower: jsonb('borrower'),
+    guarantor: jsonb('guarantor'),
+    /** none | each | single */
+    notesMode: text('notes_mode').notNull().default('none'),
+    /** active | completed | cancelled | defaulted */
+    status: text('status').notNull().default('active'),
+    note: text('note'),
+    createdBy: uuid('created_by'),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    closeReason: text('close_reason'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'installment_plans_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.customerId], foreignColumns: [customers.tenantId, customers.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    unique('installment_plans_number_unique').on(t.tenantId, t.number),
+    index('installment_plans_customer_idx').on(t.tenantId, t.customerId, t.status),
+    tenantIsolation(),
+  ],
+);
+
+/** One instalment of a plan: its day, its amount and what has been paid of it */
+export const installments = pgTable(
+  'installments',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    planId: uuid('plan_id').notNull(),
+    no: integer('no').notNull(),
+    dueDate: date('due_date').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    paidMinor: bigint('paid_minor', { mode: 'number' }).notNull().default(0),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    /** open | paid | cancelled */
+    status: text('status').notNull().default('open'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'installments_pkey', columns: [t.tenantId, t.planId, t.no] }),
+    foreignKey({
+      columns: [t.tenantId, t.planId],
+      foreignColumns: [installmentPlans.tenantId, installmentPlans.id],
+    }),
+    index('installments_due_idx').on(t.tenantId, t.status, t.dueDate),
+    tenantIsolation(),
+  ],
+);
+
+/** What a customer's receipt settled of an instalment; one row per receipt and instalment, so a re-processed receipt adds nothing */
+export const installmentPayments = pgTable(
+  'installment_payments',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    planId: uuid('plan_id').notNull(),
+    no: integer('no').notNull(),
+    receiptId: uuid('receipt_id').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    payDate: date('pay_date').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'installment_payments_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({
+      columns: [t.tenantId, t.planId, t.no],
+      foreignColumns: [installments.tenantId, installments.planId, installments.no],
+    }),
+    unique('installment_payments_receipt_unique').on(t.tenantId, t.receiptId, t.planId, t.no),
+    index('installment_payments_plan_idx').on(t.tenantId, t.planId, t.no),
+    tenantIsolation(),
+  ],
+);
+
+/** A WhatsApp reminder sent for an instalment: who and when, so nobody sends twice by mistake */
+export const installmentReminders = pgTable(
+  'installment_reminders',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    planId: uuid('plan_id').notNull(),
+    no: integer('no').notNull(),
+    /** before | due | late */
+    kind: text('kind').notNull(),
+    channel: text('channel').notNull().default('whatsapp'),
+    sentBy: uuid('sent_by'),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'installment_reminders_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({
+      columns: [t.tenantId, t.planId, t.no],
+      foreignColumns: [installments.tenantId, installments.planId, installments.no],
+    }),
+    index('installment_reminders_idx').on(t.tenantId, t.planId, t.no, t.sentAt),
+    tenantIsolation(),
+  ],
+);
+
+/** كمبيالة: a promissory note tied to a plan (and an instalment, or the whole plan when `no` is null); posts nothing */
+export const promissoryNotes = pgTable(
+  'promissory_notes',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    planId: uuid('plan_id').notNull(),
+    no: integer('no'),
+    customerId: uuid('customer_id').notNull(),
+    amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
+    issueDate: date('issue_date').notNull(),
+    dueDate: date('due_date').notNull(),
+    /** issued | paid | protested | cancelled */
+    status: text('status').notNull().default('issued'),
+    statusDate: date('status_date'),
+    protestFeeMinor: bigint('protest_fee_minor', { mode: 'number' }).notNull().default(0),
+    printedCount: integer('printed_count').notNull().default(0),
+    note: text('note'),
+    version: version(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'promissory_notes_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({
+      columns: [t.tenantId, t.planId],
+      foreignColumns: [installmentPlans.tenantId, installmentPlans.id],
+    }),
+    unique('promissory_notes_number_unique').on(t.tenantId, t.number),
+    index('promissory_notes_status_idx').on(t.tenantId, t.status, t.dueDate),
     tenantIsolation(),
   ],
 );

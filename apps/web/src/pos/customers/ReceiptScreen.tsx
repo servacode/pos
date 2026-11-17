@@ -25,6 +25,8 @@ import { usePos } from '../services';
 import type { OpenShift } from '../shift/shift';
 import type { StaffSession } from '../staff/staff';
 import { CustomerBalance, CustomerPicker, useCustomerBalance, type PickedCustomer } from './CustomerPicker';
+import { allocationsFor, InstalmentPick, useCustomerInstalments } from './InstalmentPick';
+import { amountText } from '../pay/payment';
 
 const METHOD_TEXT: Record<ReceiptMethod, string> = {
   cash: 'نقداً',
@@ -68,6 +70,14 @@ export function ReceiptScreen({
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
   // What the customer owes, as the server says (online only)
   const owed = useCustomerBalance(customer?.id ?? null);
+  // الأقساط: the customer's open plans (online only); a payment can be taken toward the oldest instalment
+  const instalments = useCustomerInstalments(customer?.id ?? null);
+  const hasPlans = !!instalments && instalments.plans.length > 0;
+  const [onInstalment, setOnInstalment] = useState(true);
+  const [pickedPlan, setPickedPlan] = useState('');
+  const planId = hasPlans
+    ? (instalments.plans.find((p) => p.id === pickedPlan)?.id ?? instalments.plans[0]!.id)
+    : '';
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<ReceiptMethod>('cash');
   const [reference, setReference] = useState('');
@@ -98,6 +108,8 @@ export function ReceiptScreen({
         reference: method === 'cash' ? null : reference.trim(),
         note: note.trim() || null,
       };
+      const allocations = hasPlans && onInstalment ? allocationsFor(instalments, planId, minor!) : [];
+      if (allocations.length > 0) payload.allocations = allocations;
       const entry = await pos.save({
         type: 'receipt',
         payload: payload as unknown as Record<string, unknown>,
@@ -208,6 +220,20 @@ export function ReceiptScreen({
                 onCancel={onBack}
               />
             )}
+            {customer && hasPlans ? (
+              <InstalmentPick
+                data={instalments}
+                base={base}
+                on={onInstalment}
+                onToggle={setOnInstalment}
+                planId={planId}
+                onPlan={setPickedPlan}
+                onFill={(m) => {
+                  setOnInstalment(true);
+                  setAmount(amountText(m, base));
+                }}
+              />
+            ) : null}
             <TextField
               label="المبلغ"
               inputMode="decimal"

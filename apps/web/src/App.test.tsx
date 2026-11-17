@@ -19,14 +19,18 @@ describe('routing', () => {
     await waitFor(() => expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(1));
     expect(screen.getByRole('status')).toHaveTextContent('جارٍ التحميل…');
     finishRefresh(signedOutRefresh);
-    expect(await screen.findByRole('heading', { name: 'أهلاً بعودتك' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
+    ).toBeInTheDocument();
   });
 
-  it('sends signed-out visitors to the login page', async () => {
+  it('shows signed-out visitors the landing page, with the way to sign in', async () => {
     mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
     renderApp('/');
 
-    expect(await screen.findByRole('heading', { name: 'أهلاً بعودتك' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
+    ).toBeInTheDocument();
   });
 
   it('sends signed-in users away from the register page', async () => {
@@ -85,14 +89,16 @@ describe('routing', () => {
     expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(0);
   });
 
-  it('ends at the login page when the kept session turns out to be lost', async () => {
+  it('ends at the landing page when the kept session turns out to be lost', async () => {
     // A fresh page load: no token held in memory yet
     setAccessToken(null);
     sessionStorage.setItem('serva.me', JSON.stringify(makeMe()));
     mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
     renderApp('/');
 
-    expect(await screen.findByRole('heading', { name: 'أهلاً بعودتك' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
+    ).toBeInTheDocument();
     expect(sessionStorage.getItem('serva.me')).toBeNull();
   });
 });

@@ -13,6 +13,7 @@ import {
   type Icon,
 } from '@serva/ui';
 import type { CatalogItem } from '../catalog';
+import { isolateSizes } from '../format';
 import { Kbd } from './Kbd';
 import { canChoose, lowestPrice, optionsOf, pieceFor, piecesText, stockFor } from './models';
 import { SalePanel } from './SalePanel';
@@ -270,7 +271,7 @@ export function VariantPicker({
                               'line-through decoration-2',
                           )}
                         >
-                          {value}
+                          {isolateSizes(value)}
                         </span>
                       </span>
                       {left !== null && possible && showStock ? (

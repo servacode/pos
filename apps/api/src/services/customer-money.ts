@@ -47,6 +47,8 @@ export async function receiveCustomerPayment(
   input: CustomerPaymentInput,
   meta: RequestMeta,
   now: Date,
+  /** Runs in the same transaction once the payment is posted (instalments: what it settles) */
+  inside?: (tx: Transaction, result: CustomerMoneyResult) => Promise<void>,
 ): Promise<CustomerMoneyResult> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'receipt.create');
@@ -106,7 +108,7 @@ export async function receiveCustomerPayment(
       );
     }
     const after = await customerFor(tx, customerId);
-    return {
+    const result: CustomerMoneyResult = {
       kind: 'payment',
       number,
       date,
@@ -120,6 +122,8 @@ export async function receiveCustomerPayment(
       balanceAfterMinor: after.balance,
       baseCurrency: currency,
     };
+    if (inside) await inside(tx, result);
+    return result;
   });
 }
 

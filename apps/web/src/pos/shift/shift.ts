@@ -177,6 +177,8 @@ export interface ShiftActivity {
   vouchers: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
   /** Deposits («عربون») taken in this shift, per currency; gift-voucher deposits of older tills stay in `vouchers` */
   deposits?: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
+  /** Rental deposits («تأمين إيجار») taken in this shift, per currency: kept out of the gift vouchers line (display only) */
+  rentalDeposits?: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
   /** Deposits paid with on this shift's invoices (taken today or earlier), per currency */
   depositsUsed?: { currency: Code; amountMinor: number }[];
   /** What the shift's invoices came to and the discounts given on them, per invoice currency */
@@ -190,12 +192,16 @@ export interface ShiftActivity {
     receipts: { currency: Code; amountMinor: number }[];
     vouchers: { currency: Code; amountMinor: number }[];
     deposits?: { currency: Code; amountMinor: number }[];
+    rentals?: { currency: Code; amountMinor: number }[];
   };
   /** What cash rounding took off (negative) or added (positive) on this shift's invoices and cash refunds, per currency (display only) */
   cashRounding?: { currency: Code; amountMinor: number }[];
   /** A foreign cash payment (20$) given back in another currency (800 ل.س): what was paid in, what came back */
   changeBack?: { paid: Code; change: Code; paidMinor: number; changeMinor: number }[];
 }
+
+/** A rental's deposit is saved as a gift voucher document marked with this reference: the Z names it on its own line */
+export const RENTAL_DEPOSIT_REF = 'تأمين إيجار';
 
 /** Sums the shift's sales and drawer movements (10 › مطابقة الصندوق) from its documents. */
 export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]): ShiftActivity {
@@ -223,6 +229,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   const depositsCash = new Map<Code, number>();
   const depositsUsed = new Map<Code, number>();
   let depositCount = 0;
+  const rentals = new Map<Code, number>();
+  const rentalsCash = new Map<Code, number>();
+  let rentalCount = 0;
   let giftCount = 0;
   const movements: ShiftActivity['movements'] = [];
   const receiptsCash = new Map<Code, number>();
@@ -318,12 +327,20 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     } else if (doc.type === 'gift_voucher') {
       // A gift voucher sold for cash goes into this drawer, as money received
       const g = payload as unknown as GiftVoucherPayload;
+      // The drawer takes it the same either way; a rental's deposit is only named on its own line
+      const rental = g.reference === RENTAL_DEPOSIT_REF;
       if (g.method === 'cash') {
         termsOf(g.currency).receiptsMinor += g.amountMinor;
-        vouchersCash.set(g.currency, (vouchersCash.get(g.currency) ?? 0) + g.amountMinor);
+        const into = rental ? rentalsCash : vouchersCash;
+        into.set(g.currency, (into.get(g.currency) ?? 0) + g.amountMinor);
       }
-      giftCount += 1;
-      gifts.set(g.currency, (gifts.get(g.currency) ?? 0) + g.amountMinor);
+      if (rental) {
+        rentalCount += 1;
+        rentals.set(g.currency, (rentals.get(g.currency) ?? 0) + g.amountMinor);
+      } else {
+        giftCount += 1;
+        gifts.set(g.currency, (gifts.get(g.currency) ?? 0) + g.amountMinor);
+      }
     } else if (doc.type === 'deposit') {
       // A deposit taken in cash goes into this drawer exactly like a gift voucher did
       const g = payload as unknown as GiftVoucherPayload;
@@ -360,6 +377,14 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       count: depositCount,
       byCurrency: [...deposits].map(([currency, amountMinor]) => ({ currency, amountMinor })),
     },
+    ...(rentalCount > 0
+      ? {
+          rentalDeposits: {
+            count: rentalCount,
+            byCurrency: [...rentals].map(([currency, amountMinor]) => ({ currency, amountMinor })),
+          },
+        }
+      : {}),
     ...(depositsUsed.size > 0
       ? { depositsUsed: [...depositsUsed].map(([currency, amountMinor]) => ({ currency, amountMinor })) }
       : {}),
@@ -371,6 +396,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       vouchers: [...vouchersCash].map(([currency, amountMinor]) => ({ currency, amountMinor })),
       deposits: depositsCash.size
         ? [...depositsCash].map(([currency, amountMinor]) => ({ currency, amountMinor }))
+        : undefined,
+      rentals: rentalsCash.size
+        ? [...rentalsCash].map(([currency, amountMinor]) => ({ currency, amountMinor }))
         : undefined,
     },
     changeBack: [...changeBack.values()],

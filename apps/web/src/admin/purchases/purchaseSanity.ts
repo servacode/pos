@@ -57,6 +57,26 @@ export function referenceCosts(rows: readonly InventoryRow[]): Map<string, CostR
   return out;
 }
 
+/** The last cost, unless it is far from the usual one (a slipped key in an old purchase is not copied forward) */
+export function usualUnit(ref: CostReference | undefined): number | null {
+  if (!ref) return null;
+  const { last, typical } = ref;
+  if (last && (!typical || (last <= typical * 5 && last * 5 >= typical))) return last;
+  return typical ?? null;
+}
+
+/** What one piece of a model usually cost: the middle of its pieces' usual costs, null when none was ever bought */
+export function usualUnitOf(
+  references: ReadonlyMap<string, CostReference>,
+  variantIds: readonly string[],
+): number | null {
+  const costs = variantIds
+    .map((id) => usualUnit(references.get(id)))
+    .filter((c): c is number => c !== null && c > 0)
+    .sort((a, b) => a - b);
+  return costs.length === 0 ? null : costs[Math.floor(costs.length / 2)]!;
+}
+
 /** A date or a phone number pasted in the cost box reads as a huge round-looking number of digits */
 export function looksLikeDateOrPhone(whole: number): boolean {
   if (!Number.isInteger(whole)) return false;

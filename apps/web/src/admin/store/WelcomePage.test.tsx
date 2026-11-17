@@ -172,6 +172,24 @@ describe('«إعدادات المتجر»', () => {
     expect(saved().usdRate).toBe('132');
   });
 
+  it('asks twice before saving a rate that looks like an old-pound figure', async () => {
+    const { user, store: saved } = openWizard(
+      owner(4, true),
+      store({ enabledCurrencies: ['SYP', 'USD'], usdRate: '130', sectors: ['cafe'] }),
+      '/settings',
+    );
+    const rate = await screen.findByLabelText('سعر الدولار اليوم بالليرة');
+    expect(rate).toHaveAttribute('placeholder', '120');
+    await user.clear(rate);
+    await user.type(rate, '13000');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/عشرة أضعاف/)).toBeInTheDocument();
+    expect(saved().usdRate).toBe('130');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText('حُفظت العملة وسعر الصرف.')).toBeInTheDocument();
+    expect(saved().usdRate).toBe('13000');
+  });
+
   it('shows the owner-only notice to others', async () => {
     const base = makeMe();
     openWizard({ ...base, onboarding: { step: 4, done: true } }, store({ name: 'محلي' }), '/settings');

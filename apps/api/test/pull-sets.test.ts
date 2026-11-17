@@ -98,6 +98,7 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'scaleBarcode',
     'service',
     'loyalty',
+    'installments',
     'pharmacy',
     'till',
     'sectors',

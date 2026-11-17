@@ -26,6 +26,7 @@ export function a4DataOfReceipt(
       address: data.branch?.address ?? null,
       phone: data.branch?.phone ?? null,
       footer: data.settings.receiptFooter ?? null,
+      showOldPound: data.settings.till?.showOldPound === true,
     },
     number: data.doc.number ?? '',
     deviceTime: data.doc.deviceTime,

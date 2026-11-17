@@ -91,6 +91,8 @@ const PULL_SETS: Record<string, PullSet> = {
                || coalesce(tenant_settings.pharmacy, '{}'::jsonb)
         else tenant_settings.pharmacy end`,
       till: tenantSettings.till,
+      // الأقساط: the store's rules, so the till can price a plan offline (null: off)
+      installments: tenantSettings.installments,
       sectors: sql<string[]>`(select t.sectors from tenants t where t.id = tenant_settings.tenant_id)`,
       version: tenantSettings.version,
     },

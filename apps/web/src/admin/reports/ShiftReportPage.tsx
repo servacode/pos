@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import type { CurrencyCode, MeResponse } from '@serva/core';
+import type { MeResponse } from '@serva/core';
 import {
   BackIcon,
   Button,
@@ -22,18 +22,8 @@ import { getShift } from './api';
 import type { ShiftCurrencyRow, ShiftMovement, ShiftReport } from './contracts';
 import { currencyName, methodLabel, MOVEMENT_LABEL } from './labels';
 import { PageHead, ReportError, ReportLoading, ReportScreen, Section } from './parts';
-import { ShiftStatus } from './ShiftsPage';
+import { Difference, ShiftStatus } from './ShiftsPage';
 import { useReport } from './useReport';
-
-/** «عجز 1,500 ل.س», «زيادة 500 ل.س», «لا فرق» (print/ShiftReport › الفرق). */
-export function Difference({ minor, currency }: { minor: number; currency: CurrencyCode }) {
-  if (minor === 0) return <span className="text-ink-muted">لا فرق</span>;
-  return (
-    <span className={cn('font-semibold', minor < 0 ? 'text-danger-ink' : 'text-ink')}>
-      {minor < 0 ? 'عجز' : 'زيادة'} <Money minor={minor} currency={currency} signDisplay="never" />
-    </span>
-  );
-}
 
 interface CashLine {
   key: string;

@@ -61,9 +61,10 @@ import {
 /** The last opening count of each drawer, to notice a count that jumps */
 const LAST_OPENING_KEY = 'lastOpeningCount';
 /** An opening count more than this many times the last one is asked about */
-const OPENING_JUMP = 100;
-/** Above this (in minor units) no opening count is believable, whatever the history */
-const ABSURD_OPENING_MINOR = 1_000_000_000_000;
+const OPENING_JUMP = 20;
+/** Above this (in minor units) no opening count is believable, whatever the history: 100 million in the base currency, 500,000 in a foreign drawer */
+const ABSURD_OPENING_MINOR = 10_000_000_000;
+const ABSURD_FOREIGN_OPENING_MINOR = 50_000_000;
 /** A foreign drawer counted above this (5,000 in a currency of 2 decimals) is asked about at closing */
 const ODD_FOREIGN_MINOR = 500_000;
 
@@ -196,6 +197,7 @@ export function ShiftOpenScreen({
   const [counts, setCounts] = useState<DrawerCount[]>(() => drawerCurrencies(catalog).map(totalCount));
   const [saving, setSaving] = useState(false);
   const [warn, setWarn] = useState(false);
+  const [oddDrawers, setOddDrawers] = useState('');
   const [error, setError] = useState<string | null>(null);
   // One click = one shift: a second click while the first is still saving does nothing
   const inFlight = useRef(false);
@@ -221,12 +223,15 @@ export function ShiftOpenScreen({
     // A count far above the usual opening is most likely a slipped key: ask once before it is saved
     if (!confirmed) {
       const usual = await pos.local.get<Record<string, number>>(LAST_OPENING_KEY);
-      const odd = counts.some((c) => {
+      const odds = counts.filter((c) => {
         const total = countTotal(c);
         const before = usual?.[c.currency] ?? 0;
-        return total > ABSURD_OPENING_MINOR || (before > 0 && total > before * OPENING_JUMP);
+        const absurd =
+          c.currency === catalog.settings?.baseCurrency ? ABSURD_OPENING_MINOR : ABSURD_FOREIGN_OPENING_MINOR;
+        return total > absurd || (before > 0 && total > before * OPENING_JUMP);
       });
-      if (odd) {
+      if (odds.length > 0) {
+        setOddDrawers(odds.map((c) => drawerName(c.currency)).join(' و'));
         setWarn(true);
         return;
       }
@@ -276,7 +281,7 @@ export function ShiftOpenScreen({
         {error ? <Alert tone="error">{error}</Alert> : null}
         {warn ? (
           <Alert tone="warning">
-            مبلغ الافتتاح أكبر بكثير من المعتاد. تأكد من الأرقام، فقد تكون زادت خانة بالخطأ.
+            مبلغ الافتتاح في {oddDrawers} أكبر بكثير من المعتاد. تأكد من الأرقام، فقد تكون زادت خانة بالخطأ.
           </Alert>
         ) : null}
         <Button size="lg" fullWidth icon={<CashIcon />} onClick={() => void open(warn)} loading={saving}>
@@ -586,6 +591,7 @@ export function ShiftCloseScreen({
             (activity.returns.count > 0 ||
               activity.vouchers.count > 0 ||
               (activity.deposits?.count ?? 0) > 0 ||
+              (activity.rentalDeposits?.count ?? 0) > 0 ||
               (activity.depositsUsed?.length ?? 0) > 0 ||
               activity.saleCount > 0 ||
               activity.movements.length > 0 ||
@@ -690,6 +696,12 @@ export function ShiftCloseScreen({
                     ))}
                   </li>
                 ) : null}
+                {(activity.rentalDeposits?.byCurrency ?? []).map((v) => (
+                  <li key={`rt:${v.currency}`} className="flex flex-wrap items-center gap-x-1">
+                    تأمين إيجار مقبوض:{' '}
+                    <ExactMoney minor={v.amountMinor} currency={v.currency} className="text-ink" />
+                  </li>
+                ))}
                 {(activity.deposits?.byCurrency ?? []).map((v) => (
                   <li key={`di:${v.currency}`} className="flex flex-wrap items-center gap-x-1">
                     عربون مقبوض:{' '}

@@ -326,6 +326,15 @@ describe('the company and legal details', () => {
       update platform_settings set legal = ${ownerDb().json({ governingCity: 'دمشق' })} where id = 1`;
   });
 
+  it('lists the active plans to a visitor who has not signed in', async () => {
+    const res = await app.inject({ method: 'GET', url: '/v1/plans' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('public, max-age=60');
+    const { items } = res.json<{ items: { code: string; isActive: boolean }[] }>();
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((p) => p.isActive)).toBe(true);
+  });
+
   it('is readable without signing in, with only the public fields and a short cache', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/legal' });
     expect(res.statusCode).toBe(200);

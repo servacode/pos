@@ -25,6 +25,7 @@ import {
   openInvoice,
   platformPayments,
   platformPlans,
+  publicPlans,
   platformSettings,
   platformStores,
   reportPayment,
@@ -177,6 +178,11 @@ export function billingRoutes(processors: SyncProcessors = {}) {
       await saveLegalDetails(app.db, platformOf(request), parseBody(legalInput, request.body));
       return reply.code(204).send();
     });
+
+    /** The landing page's plans and prices: public, no sign-in, cached for a minute. */
+    app.get('/v1/plans', async (_request, reply) =>
+      reply.header('cache-control', 'public, max-age=60').send(await publicPlans(app.db)),
+    );
 
     /** The terms and privacy pages and the contact details read this without signing in. */
     app.get('/v1/legal', async (_request, reply) =>

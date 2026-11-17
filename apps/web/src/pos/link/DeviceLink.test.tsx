@@ -361,6 +361,17 @@ describe('step 3 «بانتظار موافقة المالك من جواله»', 
     expect(await loadPendingLink(deviceStore())).toBeNull();
   });
 
+  it('links a device the owner approved even when this device thinks the time is up', async () => {
+    // The saved request ran out by this device's clock (the tab was closed); the server has approved it
+    await savedLink({ expiresAt: new Date(Date.now() - 60_000).toISOString() });
+    mockFetch({
+      [`GET ${ACTIVATION}`]: { status: 200, body: { status: 'active', device: activatedDevice } },
+    });
+    const { onLinked } = renderLink();
+
+    await vi.waitFor(() => expect(onLinked).toHaveBeenCalledOnce());
+  });
+
   it.each([
     ['the server says expired', { status: 200, body: { status: 'expired' } }],
     ['the answer was already given (410)', apiError(410, 'not_found', 'انتهى الطلب')],
@@ -372,12 +383,17 @@ describe('step 3 «بانتظار موافقة المالك من جواله»', 
     expect(await screen.findByRole('heading', { name: 'انتهت مهلة الطلب' })).toBeInTheDocument();
   });
 
-  it('ends the wait when the countdown runs out', async () => {
+  it('asks the server once more when the countdown runs out, and ends the wait on its answer', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const expiresAt = new Date(Date.now() + 5000).toISOString();
     await savedLink({ expiresAt });
+    // The server decides: it is asked once more as the countdown ends, and says expired
+    let asked = 0;
     const { requestsTo } = mockFetch({
-      [`GET ${ACTIVATION}`]: { status: 200, body: pendingActivation({ expiresAt, pollAfterSeconds: 30 }) },
+      [`GET ${ACTIVATION}`]: () => ({
+        status: 200,
+        body: ++asked === 1 ? pendingActivation({ expiresAt, pollAfterSeconds: 30 }) : { status: 'expired' },
+      }),
     });
     renderLink({ timers: true });
 
@@ -385,7 +401,7 @@ describe('step 3 «بانتظار موافقة المالك من جواله»', 
     expect(screen.getByText(/ينتهي الطلب بعد/)).toHaveTextContent(/0:0[45]/);
     await act(() => vi.advanceTimersByTimeAsync(6000));
     expect(await screen.findByRole('heading', { name: 'انتهت مهلة الطلب' })).toBeInTheDocument();
-    expect(requestsTo('GET', ACTIVATION)).toHaveLength(1);
+    expect(requestsTo('GET', ACTIVATION)).toHaveLength(2);
   });
 
   it('keeps waiting through a lost connection and says so', async () => {

@@ -69,6 +69,25 @@ describe('«الورديات»', () => {
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
   });
 
+  it('shows the drawer expected, counted and difference of each shift to whoever sees the difference', async () => {
+    signIn(
+      OWNER_KEYS,
+      {
+        [`GET /v1/shifts?date=${TODAY}`]: { status: 200, body: { items: [shiftSummary()] } },
+        'GET /v1/shifts/shift-1': { status: 200, body: shiftReport() },
+      },
+      '/shifts',
+    );
+
+    const table = await screen.findByRole('table', { name: 'ورديات 31 تشرين الأول 2026' });
+    await within(table).findByText('عجز');
+    const row = within(table).getAllByRole('row').map(text)[1] ?? '';
+    expect(row).toContain('152,700 ل.س460.00 $');
+    expect(row).toContain('151,200 ل.س460.00 $');
+    expect(row).toContain('عجز 1,500 ل.سلا فرق');
+    expect(within(table).getByText('عجز')).toHaveClass('text-danger-ink');
+  });
+
   it('says when there is no shift that day, and shows a failed load with a retry', async () => {
     let calls = 0;
     signIn(

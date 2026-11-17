@@ -67,8 +67,8 @@ describe('tillSettingsSchema', () => {
 });
 
 describe('the built-in cash notes', () => {
-  it('start with the current high pound notes, high to low', () => {
-    expect(DEFAULT_CASH_NOTES.SYP).toEqual([5000, 2000, 1000, 500, 200, 100, 50, 25, 10]);
+  it('are the new-pound notes, high to low', () => {
+    expect(DEFAULT_CASH_NOTES.SYP).toEqual([500, 200, 100, 50, 25, 10, 5]);
     expect([...DEFAULT_CASH_NOTES.SYP!].sort((a, b) => b - a)).toEqual(DEFAULT_CASH_NOTES.SYP);
   });
 });

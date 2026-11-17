@@ -13,6 +13,7 @@ import {
 } from '@serva/core/sale';
 import type { Approval, PaymentMethod } from '@serva/core/contracts/documents';
 import { chequeReference } from '@serva/core/contracts/cheques';
+import { instalmentSettingsOf } from '@serva/core/installments';
 import type { OutboxEntry } from '@serva/sync';
 import {
   AddIcon,
@@ -22,6 +23,7 @@ import {
   BackIcon,
   BookIcon,
   Button,
+  CalendarIcon,
   CardIcon,
   CashIcon,
   CheckIcon,
@@ -66,6 +68,8 @@ import {
   type PayOption,
 } from './payment';
 import { findVoucher, tillVouchers } from './vouchers';
+import { InstalmentSheet } from './InstalmentSheet';
+import { feeLine, type PlanDraft } from './instalments';
 
 export interface PaymentPanelProps {
   cart: Cart;
@@ -95,6 +99,15 @@ const VOUCHER_OPTION = (base: PayOption['currency']): PayOption => ({
   method: 'voucher',
   currency: base,
   label: 'قسيمة',
+  rate: null,
+});
+
+/** The part a plan puts on the customer's account */
+const ACCOUNT_OPTION = (base: PayOption['currency']): PayOption => ({
+  key: 'credit',
+  method: 'credit',
+  currency: base,
+  label: 'آجل على الحساب',
   rate: null,
 });
 
@@ -131,7 +144,7 @@ function shownAmount(minor: number, currency: PayOption['currency']): number {
 export function PaymentPanel({
   cart,
   ctx,
-  totalMinor,
+  totalMinor: goodsTotalMinor,
   catalog,
   shiftId,
   cashierId,
@@ -148,6 +161,18 @@ export function PaymentPanel({
   const digits = useDigits();
   const settings = catalog.settings!;
   const base = ctx.currency;
+  // الأقساط: the plan chosen in the sheet. It adds one line, «رسم التقسيط», to the invoice, so the
+  // total the panel works with is the goods plus that fee; nothing else about paying changes
+  const installmentSettings = instalmentSettingsOf(settings.installments);
+  const [plan, setPlan] = useState<PlanDraft | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [pendingPlan, setPendingPlan] = useState<PlanDraft | null>(null);
+  const [planId] = useState(() => crypto.randomUUID());
+  const totalMinor = goodsTotalMinor + (plan?.markupMinor ?? 0);
+  const saleCart = useMemo(
+    () => (plan ? { ...cart, lines: [...cart.lines, feeLine(cart, plan.markupMinor, base)] } : cart),
+    [cart, plan, base],
+  );
   // A customer already on the cart (a quotation's, a rental's, a reloaded sale) is the one paying
   const [customer, setCustomer] = useState<PickedCustomer | null>(() => {
     const on = cart.customer;
@@ -246,7 +271,7 @@ export function PaymentPanel({
   // An exchange opens on the voucher of the return just saved
   const [option, setOption] = useState<PayOption>(cart.voucher ? VOUCHER_OPTION(base) : options[0]!);
   // Who is asked for a manager's code now: a sale on account or by cheque, or one under cost
-  const [approving, setApproving] = useState<'credit' | 'cost' | null>(null);
+  const [approving, setApproving] = useState<'credit' | 'cost' | 'down' | null>(null);
   const [creditGrant, setCreditGrant] = useState<Approval | null>(null);
   const [costGrant, setCostGrant] = useState<Approval | null>(null);
   const [split, setSplit] = useState(false);
@@ -262,6 +287,32 @@ export function PaymentPanel({
     setTotalAtPick((at) => at ?? totalMinor);
     void onContractPrices(customer.id).then((applied) => applied && setParts([]));
   }, [customer, cart, onContractPrices, totalMinor]);
+  const planStands =
+    plan !== null &&
+    customer !== null &&
+    plan.goodsTotalMinor === goodsTotalMinor &&
+    parts.some((p) => p.tender.method === 'credit' && p.tender.amountMinor === plan.financedMinor);
+  useEffect(() => {
+    if (plan && !planStands) setPlan(null);
+  }, [plan, planStands]);
+  function applyPlan(draft: PlanDraft) {
+    setPlan(draft);
+    setPlanning(false);
+    setSplit(true);
+    setRestPrefill(true);
+    setParts([
+      { option: ACCOUNT_OPTION(base), tender: tenderOf(ACCOUNT_OPTION(base), draft.financedMinor, '') },
+    ]);
+    setOption(options[0]!);
+    setText('');
+    setReference('');
+    setError(null);
+  }
+  function cancelPlan() {
+    setPlan(null);
+    setParts((list) => list.filter((p) => p.tender.method !== 'credit'));
+    setRestPrefill(false);
+  }
   const [text, setText] = useState('');
   const [reference, setReference] = useState(cart.voucher ?? '');
   // A cheque's details: bank, number, due day, and whose it is when not the customer's
@@ -528,7 +579,7 @@ export function PaymentPanel({
           }
         : null;
       const built = buildSalePayload({
-        ...pricingInput(cart, ctx),
+        ...pricingInput(saleCart, ctx),
         shiftId,
         cashierId,
         payments: tenders,
@@ -545,6 +596,7 @@ export function PaymentPanel({
         ...(approved && (onCredit || onCheque) ? { creditApproval: approved } : {}),
         // The balance the receipt prints under a sale on account
         ...(onCredit && owed !== null ? { customerBalanceAfterMinor: owed + creditAmount } : {}),
+        ...(plan && planStands ? { installmentPlan: plan.plan } : {}),
       };
       const payload = { ...built, ...extra };
       const entry = await pos.save({
@@ -691,10 +743,10 @@ export function PaymentPanel({
                 );
               })}
             </div>
-            {customer && totalAtPick !== null && totalAtPick !== totalMinor ? (
+            {customer && totalAtPick !== null && totalAtPick !== goodsTotalMinor ? (
               <Alert tone="info">
                 تغيّر السعر حسب سعر الزبون: من <Money minor={totalAtPick} currency={base} /> إلى{' '}
-                <Money minor={totalMinor} currency={base} />.
+                <Money minor={goodsTotalMinor} currency={base} />.
               </Alert>
             ) : null}
           </div>
@@ -988,6 +1040,38 @@ export function PaymentPanel({
                 {canCredit ? 'اختر الزبون (للبيع بالآجل)' : 'اختر الزبون'}
               </Button>
             )}
+            {customer && installmentSettings.enabled && !plan && !cart.voucher && goodsTotalMinor > 0 ? (
+              <Button
+                variant="secondary"
+                size="md"
+                icon={<CalendarIcon size={20} />}
+                onClick={() => setPlanning(true)}
+              >
+                بيع بالتقسيط
+              </Button>
+            ) : null}
+            {plan ? (
+              <div
+                role="status"
+                aria-label="خطة التقسيط"
+                className="flex flex-col gap-1 rounded-card border border-brand/30 bg-brand-soft/40 px-3 py-2.5 text-sm"
+              >
+                <span className="font-semibold text-ink">
+                  تقسيط: <bdi className="num">{plan.plan.count}</bdi> أقساط · أول قسط{' '}
+                  <bdi className="num">{plan.plan.firstDueDate}</bdi>
+                </span>
+                <span className="text-ink-muted">
+                  رسم التقسيط <Money minor={plan.markupMinor} currency={base} /> · على الحساب{' '}
+                  <Money minor={plan.financedMinor} currency={base} className="font-semibold text-ink" />
+                </span>
+                <span className="text-ink-muted">المطلوب الآن هو الدفعة الأولى فقط.</span>
+                <span>
+                  <Button variant="ghost" size="md" onClick={cancelPlan}>
+                    ألغِ التقسيط
+                  </Button>
+                </span>
+              </div>
+            ) : null}
             {/* One payment or several (هوية 4 › Segmented control), drawn as its track */}
             <div
               role="group"
@@ -1090,17 +1174,30 @@ export function PaymentPanel({
             <div className="w-full max-w-md">
               <ManagerCode
                 staff={staff}
-                permission={approving === 'cost' ? 'sale.discount_over_limit' : 'sale.credit'}
-                reason={
+                permission={
                   approving === 'cost'
-                    ? 'البيع بأقل من التكلفة يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                    : tenders.some((t) => t.method === 'cheque')
-                      ? 'قبول الشيك يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
-                      : 'البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                    ? 'sale.discount_over_limit'
+                    : approving === 'down'
+                      ? 'installments.manage'
+                      : 'sale.credit'
+                }
+                reason={
+                  approving === 'down'
+                    ? 'الدفعة الأولى أقل من الحد الأدنى للتقسيط، وتخفيضها يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                    : approving === 'cost'
+                      ? 'البيع بأقل من التكلفة يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                      : tenders.some((t) => t.method === 'cheque')
+                        ? 'قبول الشيك يحتاج رمز مدير حاضر. يُسجَّل باسمه.'
+                        : 'البيع على الحساب يزيد دين الزبون، فيحتاج رمز مدير حاضر. يُسجَّل باسمه.'
                 }
                 onApproved={(approval) => {
                   const kind = approving;
                   setApproving(null);
+                  if (kind === 'down') {
+                    if (pendingPlan) applyPlan(pendingPlan);
+                    setPendingPlan(null);
+                    return;
+                  }
                   if (kind === 'cost') setCostGrant(approval);
                   else setCreditGrant(approval);
                   void complete(kind === 'cost' ? { cost: approval } : { credit: approval });
@@ -1136,6 +1233,24 @@ export function PaymentPanel({
           <Kbd tone="brand">Enter</Kbd>
         </Button>
       </footer>
+      {planning && customer ? (
+        <InstalmentSheet
+          goodsTotalMinor={goodsTotalMinor}
+          base={base}
+          today={businessDateOf(pos.now(), settings.timezone, settings.businessDayCutoff)}
+          settings={installmentSettings}
+          customerName={customer.name}
+          planId={planId}
+          onCancel={() => setPlanning(false)}
+          onConfirm={(draft) => {
+            if (draft.belowMinimum && !canCredit && staff) {
+              setPendingPlan(draft);
+              setPlanning(false);
+              setApproving('down');
+            } else applyPlan(draft);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

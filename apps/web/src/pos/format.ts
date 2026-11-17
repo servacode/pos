@@ -58,3 +58,14 @@ export function counted(
       return `${v} ${many}`;
   }
 }
+
+/**
+ * A size written as a range or a measure («3-6m», «12-18m», «32×34») wrapped as a left-to-right island, so
+ * Arabic text around it cannot turn it round into «6m-3». Text with no such size comes back unchanged.
+ */
+export function isolateSizes(text: string): string {
+  return text.replace(
+    /(?<![\w.])(\d+(?:\.\d+)?\s?[-–×xX]\s?\d+(?:\.\d+)?[a-zA-Z]{0,2}|\d+[mMyY])(?![\w])/g,
+    '⁦$1⁩',
+  );
+}

@@ -33,9 +33,16 @@ import { getProduct } from '../catalog/api';
 import { moneyText } from './packLines';
 import { createOrder, getOrder, suggestOrder, updateOrder } from './orderApi';
 import { Caption, LinesHead, LinesTable, RemoveLine } from './parts';
-import { purchaseWarnings, referenceCosts, type CostReference } from './purchaseSanity';
+import {
+  purchaseWarnings,
+  referenceCosts,
+  usualUnit,
+  usualUnitOf,
+  type CostReference,
+} from './purchaseSanity';
 import { SanityDialog } from './SanityDialog';
 import { SuggestPanel, groupSuggestion } from './SuggestPanel';
+import type { GridLine } from './SizeGrid';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 
 interface Line {
@@ -60,14 +67,6 @@ interface Facts {
 
 const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_9rem_9rem_8rem_2.5rem]';
 
-/** The last cost, unless it is far from the usual one (a slipped key in an old purchase is not copied forward) */
-function usualUnit(ref: CostReference | undefined): number | null {
-  if (!ref) return null;
-  const { last, typical } = ref;
-  if (last && (!typical || (last <= typical * 5 && last * 5 >= typical))) return last;
-  return typical ?? null;
-}
-
 const NOTES_CLASS =
   'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base';
 
@@ -91,6 +90,8 @@ export function PurchaseOrderFormPage() {
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
   const [facts, setFacts] = useState<Record<string, Facts>>({});
+  /** What a model usually cost, for a piece of it that was never bought itself */
+  const [modelCost, setModelCost] = useState<Record<string, number>>({});
   const [all, setAll] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestNote, setSuggestNote] = useState<string | null>(null);
@@ -113,7 +114,8 @@ export function PurchaseOrderFormPage() {
       .then((r) => {
         const active = r.items.filter((s) => !s.archived);
         setSuppliers(active);
-        setSupplierId((current) => current || (id ? '' : (active[0]?.id ?? '')));
+        // With one supplier there is nothing to choose; with several the owner picks (the first is not assumed)
+        setSupplierId((current) => current || (id || active.length !== 1 ? '' : active[0]!.id));
         setSuppliersLoaded(true);
       })
       .catch((e: unknown) => setError(errorMessage(e)));
@@ -128,6 +130,17 @@ export function PurchaseOrderFormPage() {
         const stock = new Map<string, number>();
         for (const row of r.items) stock.set(row.variantId, (stock.get(row.variantId) ?? 0) + row.qty);
         const refs = referenceCosts(r.items);
+        const byModel = new Map<string, string[]>();
+        for (const row of r.items) {
+          if (row.productId)
+            byModel.set(row.productId, [...(byModel.get(row.productId) ?? []), row.variantId]);
+        }
+        const costs: Record<string, number> = {};
+        for (const [productId, ids] of byModel) {
+          const usual = usualUnitOf(refs, ids);
+          if (usual) costs[productId] = usual;
+        }
+        setModelCost(costs);
         setFacts((now) => {
           const next = { ...now };
           for (const [variantId, qty] of stock) {
@@ -206,7 +219,7 @@ export function PurchaseOrderFormPage() {
       ...(v.priceMinor ? { price: v.priceMinor } : {}),
       ...(v.minStockQty ? { min: v.minStockQty } : {}),
     });
-    const usual = usualUnit(reference);
+    const usual = usualUnit(reference) ?? (v.productId ? (modelCost[v.productId] ?? null) : null);
     setLines((list) =>
       list.some((l) => l.variantId === v.variantId)
         ? list
@@ -220,6 +233,28 @@ export function PurchaseOrderFormPage() {
             },
           ],
     );
+  }
+
+  /** A model's pieces typed as a grid: each becomes a line with the grid's cost of one piece */
+  function addGrid(picked: GridLine[]) {
+    setLines((list) => [
+      ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
+      ...picked.map((p) => ({
+        variantId: p.variantId,
+        name: p.name,
+        qty: p.qty,
+        unit: p.unit ?? '',
+      })),
+    ]);
+  }
+
+  /** The last cost of one piece of a model, as typed, to start the grid's cost box with */
+  function gridUnit(ids: string[]): string {
+    const refs = new Map(
+      Object.entries(facts).flatMap(([k, f]) => (f.reference ? [[k, f.reference] as const] : [])),
+    );
+    const usual = usualUnitOf(refs, ids);
+    return usual ? moneyText(Math.round(usual)) : '';
   }
 
   function addSuggested(items: PurchaseOrderSuggestionLine[]) {
@@ -451,7 +486,7 @@ export function PurchaseOrderFormPage() {
                     onCancel={() => setPanel(null)}
                   />
                 ) : null}
-                <VariantPicker onPick={addItem} />
+                <VariantPicker onPick={addItem} onPickGrid={addGrid} unitFor={gridUnit} />
                 {lines.length > 0 ? (
                   <LinesTable
                     label="أصناف الطلبية"

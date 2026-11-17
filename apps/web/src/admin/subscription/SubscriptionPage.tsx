@@ -6,7 +6,6 @@ import type {
   SubscriptionPage as Page,
   SubscriptionPayment,
 } from '@serva/core';
-import { COUNT_NOUNS, countNoun, type CountForms } from '@serva/core';
 import {
   Alert,
   Badge,
@@ -34,6 +33,7 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { formatDays } from '../../lib/format';
+import { limitLines } from './planLimits';
 
 const STATUS_TEXT: Record<Page['status'], string> = {
   trialing: 'فترة التجربة',
@@ -66,40 +66,7 @@ const INVOICE_STATUS: Record<SubscriptionInvoice['status'], Status> = {
 };
 const CYCLE_TEXT: Record<BillingCycle, string> = { monthly: 'شهري', yearly: 'سنوي' };
 
-/** What a plan allows, in the platform's limit keys, as the plan card lists them. */
-const LIMITS: readonly { key: string; forms: CountForms; unlimited: string }[] = [
-  { key: 'branches', forms: COUNT_NOUNS.branch, unlimited: 'فروع بلا حد' },
-  {
-    key: 'registers',
-    forms: { one: 'جهاز كاشير واحد', two: 'جهازان للكاشير', few: 'أجهزة كاشير', many: 'جهازاً للكاشير' },
-    unlimited: 'أجهزة كاشير بلا حد',
-  },
-  {
-    key: 'hallDevices',
-    forms: {
-      one: 'جهاز واحد للنُدُل والمطبخ',
-      two: 'جهازان للنُدُل والمطبخ',
-      few: 'أجهزة للنُدُل والمطبخ',
-      many: 'جهازاً للنُدُل والمطبخ',
-    },
-    unlimited: 'أجهزة النُدُل والمطبخ بلا حد',
-  },
-  { key: 'users', forms: COUNT_NOUNS.user, unlimited: 'مستخدمون بلا حد' },
-  { key: 'products', forms: COUNT_NOUNS.item, unlimited: 'أصناف بلا حد' },
-];
-
 const count = new Intl.NumberFormat('ar-u-nu-latn');
-
-function limitLines(plan: PlanRow): string[] {
-  return LIMITS.flatMap((limit) => {
-    if (!(limit.key in plan.limits)) return [];
-    const value = plan.limits[limit.key];
-    if (value === null || value === undefined) return [limit.unlimited];
-    return [
-      value === 1 ? limit.forms.one : `حتى ${countNoun(value, limit.forms, count.format(value), true)}`,
-    ];
-  });
-}
 
 const dateText = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('ar-SY-u-nu-latn') : '—');
 
@@ -431,7 +398,8 @@ export function SubscriptionPage() {
                     اختر باقتك
                   </h2>
                   <p className="text-sm text-ink-muted">
-                    {Number(page.sypPerUsd) > 0 ? (
+                    {/* A rate in thousands is the old pound's scale: it is not shown beside new-pound prices */}
+                    {Number(page.sypPerUsd) > 0 && Number(page.sypPerUsd) < 1000 ? (
                       <>
                         الأسعار بالدولار، وتدفعها بالدولار أو بالليرة بسعر اليوم{' '}
                         <bdi className="num">{count.format(Number(page.sypPerUsd))}</bdi> ل.س.

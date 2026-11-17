@@ -47,6 +47,7 @@ import {
 import type { DocumentContext, SyncProcessors } from './sync-push';
 import { returnSerials, sellSerials } from './serials';
 import { refreshExpiry } from './expiry';
+import { applyAllocations, reconcilePlanAfterReturn, recordPlanFromSale } from './installments';
 import { recordReturnBatches, recordSaleBatches } from './batches';
 import { inScope, permissionScope } from '../auth/permissions';
 
@@ -282,6 +283,17 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     },
     sale,
   );
+  // Instalments (الأقساط): the plan the sale carries is kept beside it, never changing how it posted
+  if (sale.installmentPlan) {
+    flags.push(
+      ...(await recordPlanFromSale(
+        tx,
+        { tenantId, branchId: device.branchId, userId: sale.cashierId },
+        { id: doc.id, number: doc.number!, businessDate: doc.businessDate },
+        sale,
+      )),
+    );
+  }
   // Vouchers spent (03 › قسيمة الاستبدال): never refused, flagged when unknown or overdrawn
   flags.push(...(await redeemVouchers(tx, tenantId, sale)));
   // Loyalty points (03 › نقاط الولاء): earned on what was not paid with points, spent at their value
@@ -446,6 +458,12 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     },
     postedAs,
   );
+  // Instalments: what went back on the customer's account shortens the plan of that sale
+  await reconcilePlanAfterReturn(
+    tx,
+    ret.saleId,
+    ret.refunds.filter((r) => r.method === 'account').reduce((sum, r) => sum + r.amountMinor, 0),
+  );
   return { flags };
 }
 
@@ -576,6 +594,7 @@ async function processReceipt({ tx, device, doc }: DocumentContext) {
     })
     .onConflictDoNothing()
     .returning({ id: receipts.id });
+  const flags: SyncFlag[] = [];
   if (inserted) {
     await postReceipt(
       tx,
@@ -588,8 +607,19 @@ async function processReceipt({ tx, device, doc }: DocumentContext) {
       },
       r,
     );
+    // Instalments: what this payment settles of them (a record beside the posting, never part of it)
+    if (r.allocations?.length) {
+      flags.push(
+        ...(await applyAllocations(
+          tx,
+          { tenantId: device.tenantId },
+          { id: doc.id, businessDate: doc.businessDate, customerId: r.customerId },
+          r.allocations,
+        )),
+      );
+    }
   }
-  return { flags: [] };
+  return { flags };
 }
 
 /**

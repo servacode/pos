@@ -418,6 +418,11 @@ export async function setSubscription(
 
 export const platformPlans = async (db: Database) => ({ items: await plans(db) });
 
+/** The plans a visitor may read before signing up: the active ones, with their prices and limits. */
+export const publicPlans = async (db: Database) => ({
+  items: (await plans(db)).filter((p) => p.isActive),
+});
+
 export async function savePlan(
   db: Database,
   claims: PlatformClaims,

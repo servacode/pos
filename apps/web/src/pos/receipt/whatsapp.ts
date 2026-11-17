@@ -1,11 +1,14 @@
 import type { SalePayload } from '@serva/core/contracts/documents';
+import { oldPoundText } from '@serva/core/contracts/till';
 import { formatMoney } from '@serva/core/money';
 import { normalizePhone } from '@serva/core/phone';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
 import { exactDecimals } from '../ExactMoney';
+import { foreignRateText } from '../print/lines';
 import { paymentLabel, priceTag, type ReceiptData } from './Receipt';
 import { serialText, warrantyText } from './warranty';
+import { INSTALMENT_TITLE, instalmentRows, rowLabel } from '../print/instalmentLines';
 
 /** The wa.me address of a phone typed any common way (Syrian forms go to 963…), or null when it is not a phone */
 export function whatsappNumber(phone: string | null | undefined): string | null {
@@ -40,9 +43,14 @@ export function receiptText(data: ReceiptData): string {
   const contractSaved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
   if (contractSaved > 0) out.push(`وفّرت ${money(contractSaved)}`);
   out.push(`الإجمالي: ${money(sale.totals.totalMinor)}`);
+  if (data.settings.till?.showOldPound === true && base === 'SYP') {
+    out.push(`بالقديم: ${oldPoundText(sale.totals.totalMinor)}`);
+  }
   for (const p of sale.payments) {
     out.push(`${paymentLabel(p, base)}: ${money(p.amountMinor, p.currency)}`);
   }
+  const rate = foreignRateText(sale);
+  if (rate) out.push(`سعر الصرف: ${rate}`);
   if (sale.cashRounding && sale.cashRounding.roundingMinor !== 0) {
     const r = sale.cashRounding;
     out.push(
@@ -53,6 +61,11 @@ export function receiptText(data: ReceiptData): string {
   const debt = sale.customerBalanceAfterMinor;
   if (sale.payments.some((p) => p.method === 'credit') && debt !== null && debt !== undefined) {
     out.push(`رصيدك الجديد: ${money(debt)}`);
+  }
+  if (sale.installmentPlan) {
+    out.push('', INSTALMENT_TITLE);
+    for (const r of instalmentRows(sale.installmentPlan, (m) => money(m)))
+      out.push(`${rowLabel(r)}: ${r.value}`);
   }
   out.push('', 'شكراً لزيارتكم');
   return out.join('\n');

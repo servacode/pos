@@ -1,17 +1,41 @@
-import { useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { CurrencyCode } from '@serva/core';
-import { Badge, ClockIcon, DataTable, EmptyState, Money, useDigits, type DataColumn } from '@serva/ui';
+import { Badge, ClockIcon, cn, DataTable, EmptyState, Money, useDigits, type DataColumn } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay, zonedClock } from '../../lib/dates';
-import { SHIFTS_ACCESS } from './access';
-import { listShifts } from './api';
-import type { ShiftSummary } from './contracts';
+import { seesDifference, SHIFTS_ACCESS } from './access';
+import { getShift, listShifts } from './api';
+import type { ShiftCurrencyRow, ShiftReport, ShiftSummary } from './contracts';
 import { BranchSelect, DayField, defaultBranch, PageHead, ReportFilters, ReportScreen } from './parts';
 import { useReport } from './useReport';
 
 export function ShiftStatus({ status }: { status: ShiftSummary['status'] }) {
   return status === 'open' ? <Badge tone="success">مفتوحة</Badge> : <Badge>مغلقة</Badge>;
+}
+
+/** «عجز 1,500 ل.س», «زيادة 500 ل.س», «لا فرق» (print/ShiftReport › الفرق). */
+export function Difference({ minor, currency }: { minor: number; currency: CurrencyCode }) {
+  if (minor === 0) return <span className="text-ink-muted">لا فرق</span>;
+  return (
+    <span className={cn('font-semibold', minor < 0 ? 'text-danger-ink' : 'text-ink')}>
+      {minor < 0 ? 'عجز' : 'زيادة'} <Money minor={minor} currency={currency} signDisplay="never" />
+    </span>
+  );
+}
+
+/** One line per currency of a shift's drawer, or a dash while the figure does not exist yet */
+function cashCell(report: ShiftReport | undefined, pick: (row: ShiftCurrencyRow) => ReactNode) {
+  const lines = (report?.byCurrency ?? []).map((row) => ({ currency: row.currency, node: pick(row) }));
+  const shown = lines.filter((line) => line.node !== null);
+  if (shown.length === 0) return '—';
+  return (
+    <span className="flex flex-col">
+      {shown.map((line) => (
+        <span key={line.currency}>{line.node}</span>
+      ))}
+    </span>
+  );
 }
 
 /**
@@ -33,6 +57,25 @@ export function ShiftsPage() {
   const rows = data?.items ?? [];
   const salesTotal = rows.reduce((sum, row) => sum + row.salesTotalMinor, 0);
   const salesCount = rows.reduce((sum, row) => sum + row.salesCount, 0);
+
+  // Expected, counted and the difference of every shift on the list: each one's close report, which
+  // the server only fills for those who may see the difference.
+  const showsCash = seesDifference(me);
+  const [cash, setCash] = useState<Record<string, ShiftReport>>({});
+  useEffect(() => {
+    if (!showsCash || !data) return;
+    let live = true;
+    for (const row of data.items) {
+      getShift(row.id)
+        .then((report) => {
+          if (live) setCash((all) => ({ ...all, [row.id]: report }));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      live = false;
+    };
+  }, [data, showsCash]);
 
   const columns: DataColumn<ShiftSummary>[] = [
     {
@@ -71,6 +114,39 @@ export function ShiftsPage() {
       cell: (row) => <Money minor={row.salesTotalMinor} currency={base} />,
       total: <Money minor={salesTotal} currency={base} />,
     },
+    ...(showsCash
+      ? ([
+          {
+            key: 'expected',
+            header: 'المتوقع بالدرج',
+            numeric: true,
+            cell: (row) =>
+              cashCell(cash[row.id], (c) =>
+                c.expectedMinor === null ? null : <Money minor={c.expectedMinor} currency={c.currency} />,
+              ),
+          },
+          {
+            key: 'counted',
+            header: 'المعدود',
+            numeric: true,
+            cell: (row) =>
+              cashCell(cash[row.id], (c) =>
+                c.countedMinor === null ? null : <Money minor={c.countedMinor} currency={c.currency} />,
+              ),
+          },
+          {
+            key: 'difference',
+            header: 'الفرق',
+            numeric: true,
+            cell: (row) =>
+              cashCell(cash[row.id], (c) =>
+                c.differenceMinor === null ? null : (
+                  <Difference minor={c.differenceMinor} currency={c.currency} />
+                ),
+              ),
+          },
+        ] satisfies DataColumn<ShiftSummary>[])
+      : []),
   ];
 
   return (

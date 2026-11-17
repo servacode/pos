@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { addMonthsIso } from '@serva/core/contracts/warranty';
 import type { SalePayload } from '@serva/core/contracts/documents';
+import { oldPoundText } from '@serva/core/contracts/till';
 import type { Quotation } from '@serva/core/contracts/quotations';
 import type { PurchaseOrderDetail } from '@serva/core/contracts/purchase-orders';
 import { formatQuantity, Money, useDigits } from '@serva/ui';
@@ -21,6 +22,8 @@ export interface A4Store {
   address: string | null;
   phone: string | null;
   footer: string | null;
+  /** «بالقديم» under the total (the store's setting; display only) */
+  showOldPound?: boolean;
 }
 
 export interface A4Customer {
@@ -286,6 +289,12 @@ export function InvoiceA4({ data }: { data: A4SaleData }) {
             <Money minor={p.totals.totalMinor} currency={base} />
           </dd>
         </div>
+        {data.store.showOldPound && base === 'SYP' ? (
+          <div className="flex justify-between text-ink-muted">
+            <dt>بالقديم</dt>
+            <dd className="num">{oldPoundText(p.totals.totalMinor)}</dd>
+          </div>
+        ) : null}
       </dl>
       <p>
         <strong>شروط الدفع:</strong> {paymentTerms(p)}

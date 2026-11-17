@@ -159,11 +159,23 @@ export function DrawerCounter({
       aria-label={drawerName(currency)}
       className="flex flex-col gap-3 rounded-card border border-line bg-surface p-4 shadow-e1"
     >
-      <div className="flex items-center gap-3 pb-1">
+      <div
+        role="presentation"
+        className="flex items-center gap-3 pb-1"
+        // A tap on the drawer's title picks this drawer (the keypad types here) and goes to its field
+        onClick={(e) => {
+          onActivate?.(firstKey(count, till));
+          e.currentTarget.closest('section')?.querySelector('input')?.focus();
+        }}
+      >
         <IconChip size="sm">
           <CashIcon size={16} />
         </IconChip>
-        <h2 className="flex-1 text-lg font-semibold text-ink">{drawerName(currency)}</h2>
+        <h2 className="text-lg font-semibold text-ink">{drawerName(currency)}</h2>
+        <span className="num rounded-small bg-surface-muted px-2 py-0.5 text-sm font-bold text-ink-muted">
+          {CURRENCIES[currency].symbolAr}
+        </span>
+        <span className="flex-1" />
         {/* Typed as one total, the field below is the total: it is not said a second time up here */}
         {byNote ? <Money minor={total} currency={currency} className="text-xl font-bold text-ink" /> : null}
       </div>

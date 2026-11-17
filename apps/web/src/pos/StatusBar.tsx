@@ -152,6 +152,7 @@ function StatusChip({
           {pending > 0 ? (
             <span aria-hidden="true" className="num">
               {pending}
+              <span className="sr-only 2xl:not-sr-only"> بانتظار الإرسال</span>
             </span>
           ) : null}
         </ConnectionPill>

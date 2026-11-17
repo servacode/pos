@@ -501,7 +501,7 @@ describe('closing the shift', () => {
     expect(z).toHaveTextContent('المتوقع');
     expect(z).toHaveTextContent('الفرق');
     const close = outbox.find((e) => e.type === 'shift_close')!.doc.payload as unknown as ShiftClosePayload;
-    expect(close.cash[0]).toMatchObject({ countedMinor: 2_000_000 });
+    expect(close.cash[0]).toMatchObject({ countedMinor: 200_000 });
   });
 
   it('sums returns, gift vouchers and drawer movements of the shift for the report', () => {

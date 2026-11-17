@@ -76,6 +76,7 @@ import { PosProvider, usePos } from './services';
 import { validated } from './validate';
 import { voucherBalancesAfter } from './pay/vouchers';
 import { readShift, type OpenShift } from './shift/shift';
+import { ManagerCode } from './staff/ManagerCode';
 import { staffRoster, type StaffSession } from './staff/staff';
 import { SubscriptionChip, useTillSubscription } from '../layout/subscription-banner';
 import { InstallHintMenuItem, StatusBar, type OutboxStatus } from './StatusBar';
@@ -233,12 +234,37 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const [view, setViewNow] = useState<View>('sale');
   // Coming back from a sub-screen (rentals, returns...): its closing click must not reach a tile
   const viewRef = useRef<View>('sale');
-  const setView = useCallback((next: View) => {
+  const goView = useCallback((next: View) => {
     // Only a sub-screen closing back to the sale arms the guard (not sign-in or the first screen)
     if (next === 'sale' && viewRef.current !== 'sale') armClickGuard();
     viewRef.current = next;
     setViewNow(next);
   }, []);
+  // «قفل الكاشير» and unsent documents: leaving the sale screen, closing the shift or locking needs a manager's code
+  const [gate, setGate] = useState<{ reason: string; then: () => void } | null>(null);
+  const isManager = session.permissions.has('shift.close_any');
+  // Only while nothing can be sent (offline or too weak): online, the documents leave within seconds
+  const unsent = online ? 0 : (outbox?.pending ?? 0);
+  const unsentReason = `لم يُرسل ${String(unsent)} مستنداً بعد. ما تخرج به الآن يبقى على الجهاز، لكن لا تمسح بيانات المتصفح قبل أن يصل. رمز المدير يسمح بالمتابعة.`;
+  const setView = useCallback(
+    (next: View) => {
+      if (viewRef.current === 'sale' && next !== 'sale' && !isManager) {
+        if (next === 'close' && unsent > 0) {
+          setGate({ reason: unsentReason, then: () => goView(next) });
+          return;
+        }
+        if (next !== 'close' && settings?.till?.cashierLock === true) {
+          setGate({
+            reason: 'الكاشير مقفل على شاشة البيع. اطلب رمز المدير للخروج منها.',
+            then: () => goView(next),
+          });
+          return;
+        }
+      }
+      goView(next);
+    },
+    [goView, isManager, unsent, unsentReason, settings?.till?.cashierLock],
+  );
   // «تبديل» from the menu opens the return screen already set on an exchange
   const [startExchange, setStartExchange] = useState(false);
   const [cart, setCartState] = useState<Cart>(EMPTY_CART);
@@ -451,6 +477,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
 
   const idleMinutes = settings?.idleMinutes ?? DEFAULT_IDLE_MINUTES;
   useIdle(idleMinutes * 60_000, lock);
+  /** The menu's «اقفل الشاشة»: with documents still unsent it asks a manager first (the idle lock never asks) */
+  const lockByHand = useCallback(() => {
+    if (unsent > 0 && !isManager) setGate({ reason: unsentReason, then: lock });
+    else lock();
+  }, [unsent, isManager, unsentReason, lock]);
 
   // Print once the receipt is in the page; the portal stays until the next one. A USB thermal
   // printer takes the receipt as an image with no dialog; if it fails, the dialog opens instead.
@@ -468,7 +499,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
       if (printer.mode !== 'usb' || printJob.certificate) return dialog();
       const image = renderLines(receiptLines(printJob.data, printJob.copy), paper);
       if (!image) return dialog();
-      const tookCash = paidInCash(printJob.data);
+      const tookCash = !printJob.data.giftReceipt && paidInCash(printJob.data);
       void sendToPrinter(escposJob(image.bits, image.width, image.height, printer.drawer && tookCash)).then(
         (ok) => {
           if (!ok && !cancelled) dialog();
@@ -908,7 +939,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     }
     if (event.code === 'KeyL') {
       event.preventDefault();
-      lock();
+      lockByHand();
       return true;
     }
     return false;
@@ -1043,7 +1074,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           </MenuItem>
           <InstallHintMenuItem persisted={persisted} />
           <MenuSeparator />
-          <MenuItem icon={<LockIcon />} shortcut={phone ? undefined : 'Alt+L'} onSelect={lock}>
+          <MenuItem icon={<LockIcon />} shortcut={phone ? undefined : 'Alt+L'} onSelect={lockByHand}>
             اقفل الشاشة
           </MenuItem>
           {shift ? (
@@ -1074,6 +1105,29 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   const printPortal = (
     <>
       {printNode}
+      {gate ? (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setGate(null);
+          }}
+          size="md"
+          title="رمز المدير"
+          description={gate.reason}
+        >
+          <ManagerCode
+            staff={staff}
+            permission="shift.close_any"
+            reason="تُسجَّل الموافقة باسم المدير."
+            onApproved={() => {
+              const go = gate.then;
+              setGate(null);
+              go();
+            }}
+            onCancel={() => setGate(null)}
+          />
+        </Dialog>
+      ) : null}
       {waJob ? (
         <Dialog
           open
@@ -1393,6 +1447,7 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 }}
                 onPrint={() => setPrintJob({ data: done, copy: false })}
                 onPrintA4={(kind) => setA4Job({ data: done, kind })}
+                onPrintGift={() => setPrintJob({ data: { ...done, giftReceipt: true }, copy: false })}
                 onPrintWarranty={
                   certificateOf(done, null)
                     ? () => setPrintJob({ data: done, copy: false, certificate: true })

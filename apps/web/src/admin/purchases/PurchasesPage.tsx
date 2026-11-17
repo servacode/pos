@@ -73,8 +73,9 @@ import { SlimKpis } from '../SlimKpis';
 import { PackQty } from './PackQty';
 import { SanityDialog } from './SanityDialog';
 import { PurchaseDetailDialog } from './PurchaseDetailDialog';
+import { SafeWarning } from './SafeWarning';
 import { baseQtyOf, moneyText, packSummary, withPackChange } from './packLines';
-import { purchaseWarnings, referenceCosts, type CostReference } from './purchaseSanity';
+import { purchaseWarnings, referenceCosts, usualUnitOf, type CostReference } from './purchaseSanity';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 import { getProduct } from '../catalog/api';
 import { getOrder } from './orderApi';
@@ -899,6 +900,10 @@ function PurchaseForm({
                     : [...list, { ...v, qty: '', packQty: 1000, cost: '', batch: '', expiry: '' }],
                 );
               }}
+              unitFor={(ids) => {
+                const usual = usualUnitOf(averages, ids);
+                return usual ? moneyText(Math.round(usual)) : '';
+              }}
               onPickGrid={(picked) =>
                 setLines((list) => [
                   ...list.filter((l) => !picked.some((p) => p.variantId === l.variantId)),
@@ -1120,6 +1125,7 @@ function PurchaseForm({
               })}
             </div>
           </RadioGroup>
+          <SafeWarning active={payment === 'cash'} amountMinor={total} />
         </Card>
       </div>
       {/* The totals stay in view: beside the form on a wide screen, over the bottom edge on a phone. */}
@@ -1312,6 +1318,7 @@ function PaymentForm({
             ))}
           </div>
         </RadioGroup>
+        <SafeWarning active={method === 'cash'} amountMinor={minor} />
         {method === 'cheque' ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <TextField label="البنك" value={bank} onChange={(e) => setBank(e.target.value)} required />

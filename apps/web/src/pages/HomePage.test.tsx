@@ -61,7 +61,7 @@ describe('HomePage', () => {
     expect(screen.queryByText(/الباقة المجانية/)).not.toBeInTheDocument();
   });
 
-  it('logs out and returns to the login page', async () => {
+  it('logs out and shows the landing page with its way back in', async () => {
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: makeMe() },
@@ -72,7 +72,10 @@ describe('HomePage', () => {
     await user.click(await screen.findByRole('button', { name: /^حسابي/ }));
     await user.click(await screen.findByRole('button', { name: /خروج/ }));
 
-    expect(await screen.findByRole('heading', { name: 'أهلاً بعودتك' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'تسجيل الدخول' })).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/auth/logout')).toHaveLength(1);
   });
 
@@ -233,7 +236,15 @@ describe('HomePage', () => {
       const top = await screen.findByRole('list', { name: 'الأكثر مبيعاً هذا الأسبوع' });
       expect(within(top).getAllByRole('listitem')).toHaveLength(2);
       expect(within(top).getByRole('link', { name: 'بنطال جينز' })).toHaveAttribute('href', '/products/p-2');
-      expect(await screen.findByText('قميص كتان: المقاس M (أبيض) نفد', { exact: false })).toBeInTheDocument();
+      // The size sits in its own <bdi> (so «3-6m» keeps its order), so match on the whole line
+      expect(
+        await screen.findByText(
+          (_, el) =>
+            el?.tagName !== 'BDI' &&
+            !!el?.textContent?.startsWith('قميص كتان: المقاس M (أبيض) نفد') &&
+            ![...(el?.children ?? [])].some((c) => c.textContent?.startsWith('قميص كتان')),
+        ),
+      ).toBeInTheDocument();
     });
 
     it('names the returns, notes the vouchers in the payment mix, and counts recalled batches', async () => {
@@ -477,6 +488,41 @@ describe('HomePage', () => {
       await user.click(screen.getByRole('tab', { name: /المال/ }));
       expect(await screen.findByText('شيك يستحق خلال 7 أيام')).toBeInTheDocument();
       expect(screen.getByText('شيك صادر للمورد يستحق خلال 7 أيام')).toBeInTheDocument();
+    });
+
+    it('says how many instalments fall due today and how many are late, under «المال» (الأقساط)', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': {
+          status: 200,
+          body: meWith([...OWNER_KEYS, 'customers.view', 'installments.view']),
+        },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        'GET /v1/installments/summary': {
+          status: 200,
+          body: {
+            dueTodayCount: 2,
+            dueTodayMinor: 5_600_000,
+            lateCount: 1,
+            lateMinor: 2_800_000,
+            activePlans: 3,
+            outstandingMinor: 9_000_000,
+          },
+        },
+        'GET /v1/cheques': { status: 200, body: { items: [] } },
+        'GET /v1/customers?owing=true': {
+          status: 200,
+          body: { items: [], totalOwedMinor: 0, baseCurrency: 'SYP' },
+        },
+      });
+      const { user } = renderApp('/');
+      await user.click(await screen.findByRole('tab', { name: /المال/ }));
+      const late = await screen.findByText(/قسط متأخر/);
+      expect(late.closest('a')).toHaveAttribute('href', '/installments/due');
+      expect(screen.getByText(/أقساط مستحقة اليوم/).closest('a')).toHaveAttribute(
+        'href',
+        '/installments/due',
+      );
     });
 
     it('after midnight with last night’s shift open: says so, and compares nothing', async () => {

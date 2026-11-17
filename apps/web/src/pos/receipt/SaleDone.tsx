@@ -19,6 +19,7 @@ export function SaleDone({
   onPrint,
   onPrintWarranty,
   onPrintA4,
+  onPrintGift,
   onNewSale,
   customerPhone = null,
 }: {
@@ -31,6 +32,8 @@ export function SaleDone({
   onPrintWarranty?: () => void;
   /** «اطبع A4» and «إشعار تسليم»: the invoice (a tax invoice when the store has a tax number) or its delivery note on A4 */
   onPrintA4?: (kind: 'invoice' | 'delivery') => void;
+  /** «إيصال هدية»: the same sale's slip with no prices, for the one who receives the gift */
+  onPrintGift?: () => void;
   onNewSale: () => void;
   /** The customer's phone when the sale named one; without it «أرسل عبر واتساب» asks for a number */
   customerPhone?: string | null;
@@ -130,6 +133,20 @@ export function SaleDone({
               )}
             </div>
           )}
+          {(data.vouchersAfter ?? [])
+            .filter((v) => v.balanceMinor > 0)
+            .map((v) => (
+              // What the customer still holds on the voucher he just paid with
+              <p
+                key={v.code}
+                role="status"
+                aria-label="رصيد القسيمة"
+                className="text-sm font-semibold text-info-ink"
+              >
+                بقي على القسيمة <bdi dir="ltr">{v.code}</bdi>{' '}
+                <ExactMoney minor={v.balanceMinor} currency={v.currency} />
+              </p>
+            ))}
           {sale.cashRounding && sale.cashRounding.roundingMinor !== 0 ? (
             // Display only: the cash due was rounded to the step, the difference is booked as before
             <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
@@ -178,7 +195,7 @@ export function SaleDone({
             >
               اطبع
             </Button>
-            {onPrintA4 ? (
+            {onPrintA4 || onPrintGift ? (
               <Menu
                 label="خيارات أخرى"
                 align="start"
@@ -188,12 +205,21 @@ export function SaleDone({
                   </Button>
                 }
               >
-                <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('invoice')}>
-                  اطبع A4
-                </MenuItem>
-                <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('delivery')}>
-                  إشعار تسليم
-                </MenuItem>
+                {onPrintA4 ? (
+                  <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('invoice')}>
+                    اطبع A4
+                  </MenuItem>
+                ) : null}
+                {onPrintA4 ? (
+                  <MenuItem icon={<PrintIcon />} onSelect={() => onPrintA4('delivery')}>
+                    إشعار تسليم
+                  </MenuItem>
+                ) : null}
+                {onPrintGift ? (
+                  <MenuItem icon={<PrintIcon />} onSelect={onPrintGift}>
+                    إيصال هدية
+                  </MenuItem>
+                ) : null}
               </Menu>
             ) : null}
             {onPrintWarranty ? (

@@ -4,6 +4,7 @@ import type { OnlineOrderRow } from './shop';
 import type { SerialStockRow } from './purchases';
 import type { PromotionRow } from './promotions';
 import type { ScaleBarcodeConfig } from '../scale';
+import type { InstalmentSettings } from '../installments';
 import type { LoyaltySettings, ServiceSettings } from './store';
 import type { PharmacySettings, ShelfBatch, StockBatch } from './pharmacy';
 import type { TillSettings } from './till';
@@ -857,6 +858,8 @@ export interface SettingsRow {
   pharmacy?: PharmacySettings | null;
   /** «الصندوق» (contracts/till.ts): the return window and the card approval rule; null: the defaults */
   till?: TillSettings | null;
+  /** «الأقساط» (installments.ts InstalmentSettings, stored partial): null or `enabled: false` when the store does not sell on instalments */
+  installments?: Partial<InstalmentSettings> | null;
   /** The store's business types, from tenants (the till words return reasons by them) */
   sectors?: SectorKey[];
   version: number;

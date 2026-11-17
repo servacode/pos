@@ -44,6 +44,7 @@ import { CustomerForm } from './CustomerForm';
 import { CustomerMoneyDialog } from './CustomerMoneyDialog';
 import { WarrantyDevices } from '../warranty/WarrantyDevices';
 import { statementWhat } from '../ledger/csv';
+import { CustomerPlans } from '../installments/CustomerPlans';
 import { pieces } from '../../lib/plural';
 
 const SOURCE_TEXT: Record<string, string> = {
@@ -608,6 +609,7 @@ export function CustomerPage() {
                     }
                   />
                 </section>
+                <CustomerPlans customerId={customer.id} />
                 {storeSells(me.tenant.sectors, ['electronics', 'medical_supplies']) ? (
                   <WarrantyDevices
                     by={{ customerId: customer.id }}

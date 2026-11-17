@@ -15,6 +15,8 @@ import { gridOf, SizeGrid, type GridLine } from './SizeGrid';
 
 export interface PickedVariant {
   variantId: string;
+  /** The model it belongs to, to start its cost from a sibling's when it was never bought itself */
+  productId?: string;
   name: string;
   /** The named packs of the item («علبة 100»), for typing a quantity in them */
   packs?: PackOption[];
@@ -35,9 +37,12 @@ export interface PickedVariant {
 export function VariantPicker({
   onPick,
   onPickGrid,
+  unitFor,
 }: {
   onPick: (v: PickedVariant) => void;
   onPickGrid?: (lines: GridLine[]) => void;
+  /** The last known cost of one piece of these variants, as typed, to start the grid's cost box with */
+  unitFor?: (variantIds: string[]) => string;
 }) {
   const density = useDensity();
   const [q, setQ] = useState('');
@@ -68,6 +73,7 @@ export function VariantPicker({
       .filter((v) => !v.archivedAt)
       .map((v) => ({
         variantId: v.id,
+        productId: detail.id,
         name: v.label ? `${detail.nameAr} ${v.label}` : detail.nameAr,
         packs: packOptionsOf(v.barcodes),
         ...(detail.requiresExpiry ? { requiresExpiry: true } : {}),
@@ -91,6 +97,7 @@ export function VariantPicker({
       {grid && onPickGrid ? (
         <SizeGrid
           product={grid}
+          initialUnit={unitFor?.(grid.variants.filter((v) => !v.archivedAt).map((v) => v.id)) ?? ''}
           onAdd={(lines) => {
             onPickGrid(lines);
             setGrid(null);

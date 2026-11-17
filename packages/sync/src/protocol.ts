@@ -216,6 +216,12 @@ export const SYNC_FLAGS = [
   'posted_to_open_period',
   /** A refund to the customer's account named a customer other than the sale's (or the sale had none) */
   'refund_customer_mismatch',
+  /** Instalments (الأقساط): a sale's plan did not add up, so the sale stands and the plan was left out */
+  'installment_plan_invalid',
+  /** The plan's schedule on the sale differs from the server's own: the printed schedule is kept */
+  'schedule_mismatch',
+  /** A receipt paid more toward an instalment than was left of it (two tills): the money is accepted, the rest stays as the customer's credit */
+  'installment_overpaid',
   /**
    * Stored safely, but this server has nothing yet that posts this type (task M0-3): no entry,
    * no stock, no drawer. "accepted" says the document arrived, never that it was posted; this

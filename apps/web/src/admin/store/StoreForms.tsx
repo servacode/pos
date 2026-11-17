@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import {
   SECTORS,
+  rateWarning,
   storeCurrencyInput,
   storeProfileInput,
   type SectorKey,
@@ -35,6 +36,7 @@ import {
   WholesaleIcon,
   type Icon,
 } from '@serva/ui';
+import { ApiError } from '../../lib/api';
 import { useForm } from '../../lib/useForm';
 import { saveCurrency, saveProfile } from './api';
 import { FailedNote, SavedNote, SettingsCard, type SettingsSection } from './parts';
@@ -62,11 +64,14 @@ export const SECTOR_ICONS: Record<SectorKey, Icon> = {
  */
 function SectorCard({
   label,
+  hint,
   icon: SectorGlyph,
   checked,
   onChange,
 }: {
   label: string;
+  /** A line under the name saying what else the activity covers (not part of the box's name) */
+  hint?: string;
   icon: Icon;
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -91,7 +96,14 @@ function SectorCard({
         size={24}
         className="text-ink-muted transition-colors duration-120 ease-standard group-has-checked/sector:text-brand-ink"
       />
-      <span className="min-w-0 flex-1 font-semibold text-ink">{label}</span>
+      <span className="min-w-0 flex-1 font-semibold text-ink">
+        {label}
+        {hint ? (
+          <span aria-hidden="true" className="block text-sm font-normal text-ink-muted">
+            {hint}
+          </span>
+        ) : null}
+      </span>
       <span className="grid size-5 shrink-0 place-items-center rounded-box border border-line-control bg-surface text-on-brand transition-colors duration-120 ease-standard group-hover/sector:border-ink-subtle group-has-checked/sector:border-brand group-has-checked/sector:bg-brand">
         <CheckIcon
           size={16}
@@ -130,6 +142,7 @@ export function SectorPicker({
             <SectorCard
               key={s.key}
               label={s.labelAr}
+              {...(s.key === 'clothing' ? { hint: 'تشمل ألبسة الأطفال والمواليد' } : {})}
               icon={SECTOR_ICONS[s.key]}
               checked={value.includes(s.key)}
               onChange={(checked) => toggle(s.key, checked)}
@@ -395,6 +408,8 @@ export function CurrencyForm({
   secondaryAction?: ReactNode;
 }) {
   const [saved, setSaved] = useState(false);
+  // The rate the owner already confirmed after a warning: the same figure saves on the second press
+  const [confirmedRate, setConfirmedRate] = useState<string | null>(null);
   const form = useForm<CurrencyValues, StoreCurrencyInput>({
     initialValues: () => ({
       // On only once there is a rate: an empty rate under an on switch would block «احفظ وتابع» for nothing
@@ -412,6 +427,11 @@ export function CurrencyForm({
       }),
     onSubmit: async (input) => {
       setSaved(false);
+      const warning = input.usdEnabled && input.usdRate ? rateWarning(input.usdRate, store.usdRate) : null;
+      if (warning && confirmedRate !== input.usdRate) {
+        setConfirmedRate(input.usdRate ?? null);
+        throw new ApiError(400, 'validation_failed', warning);
+      }
       onSaved(await saveCurrency(input));
       setSaved(true);
     },
@@ -448,8 +468,8 @@ export function CurrencyForm({
             <TextField
               name="usdRate"
               label="سعر الدولار اليوم بالليرة"
-              hint="مثل 13,000 أو ١٣٠٠٠. تعدّله كلما تغيّر، والفواتير السابقة تبقى بالسعر الذي بيعت به"
-              placeholder="13,000"
+              hint="مثل 120 أو ١٢٠. تعدّله كلما تغيّر، والفواتير السابقة تبقى بالسعر الذي بيعت به"
+              placeholder="120"
               inputMode="decimal"
               dir="ltr"
               inputClassName="num"

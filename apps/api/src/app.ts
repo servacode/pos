@@ -37,6 +37,7 @@ import { billingRoutes } from './routes/billing';
 import { platformAuthRoutes } from './routes/platform-auth';
 import { promotionRoutes } from './routes/promotions';
 import { chequeRoutes } from './routes/cheques';
+import { installmentRoutes } from './routes/installments';
 import { serialRoutes } from './routes/serials';
 import { warrantyRoutes } from './routes/warranty';
 import { contractRoutes } from './routes/contracts';
@@ -164,6 +165,7 @@ export async function buildApp({
   await app.register(platformAuthRoutes);
   await app.register(promotionRoutes);
   await app.register(chequeRoutes);
+  await app.register(installmentRoutes);
   await app.register(serialRoutes);
   await app.register(warrantyRoutes);
   await app.register(contractRoutes);

@@ -46,7 +46,9 @@ export function WaitingStep({ link, onActive, onRestart, kind = 'cashier' }: Wai
   const [expiresAt, setExpiresAt] = useState(link.expiresAt);
   const now = useNow(1000, state === 'pending');
   const left = Date.parse(expiresAt) - now;
-  const timedOut = state === 'pending' && left <= 0;
+  // The server decides when a request has run out (its clock, not this device's); the device's own clock only
+  // ends the wait when the server cannot be reached at all
+  const timedOut = state === 'pending' && left <= 0 && offline;
   const onActiveRef = useRef(onActive);
   useEffect(() => {
     onActiveRef.current = onActive;
@@ -55,17 +57,19 @@ export function WaitingStep({ link, onActive, onRestart, kind = 'cashier' }: Wai
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadline = Date.parse(link.expiresAt);
+    // Asks again after the poll interval, or just after the deadline: the server's answer then ends it
     const wait = (seconds: number) => {
-      if (alive) timer = setTimeout(() => void poll(), Math.max(MIN_POLL_MS, seconds * 1000));
+      if (!alive) return;
+      const untilDeadline = deadline - Date.now() + 500;
+      const delay = Math.max(MIN_POLL_MS, seconds * 1000);
+      timer = setTimeout(
+        () => void poll(),
+        untilDeadline > 0 && untilDeadline < delay ? untilDeadline : delay,
+      );
     };
 
-    let deadline = Date.parse(link.expiresAt);
-
     async function poll() {
-      if (Date.now() >= deadline) {
-        setState('expired');
-        return;
-      }
       try {
         const answer = await activationStatus(link.activationId, link.activationSecret);
         if (!alive) return;
@@ -74,9 +78,7 @@ export function WaitingStep({ link, onActive, onRestart, kind = 'cashier' }: Wai
         else if (answer.status === 'pending_approval') {
           setExpiresAt(answer.expiresAt);
           deadline = Date.parse(answer.expiresAt);
-          // Past its time the request cannot be approved any more: stop asking.
-          if (deadline <= Date.now()) setState('expired');
-          else wait(answer.pollAfterSeconds);
+          wait(answer.pollAfterSeconds);
         } else setState(answer.status);
       } catch (error) {
         if (!alive) return;
@@ -119,7 +121,7 @@ export function WaitingStep({ link, onActive, onRestart, kind = 'cashier' }: Wai
           <p className="text-ink-muted">
             {rejected
               ? 'إن كان الرفض خطأً، اطلب من المالك رمزاً جديداً وابدأ من جديد.'
-              : 'لم يصل رد المالك خلال 10 دقائق. اطلب رمزاً جديداً من الإدارة وابدأ من جديد.'}
+              : `لم يصل رد المالك خلال ${ACTIVATION_TTL_SECONDS / 60} دقيقة. اطلب رمزاً جديداً من الإدارة وابدأ من جديد.`}
           </p>
         </div>
         <Button size="lg" icon={<RetryIcon />} onClick={() => onRestart()}>

@@ -38,6 +38,7 @@ import {
   type Icon,
 } from '@serva/ui';
 import { barcodeKey, searchCatalog, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
+import { isolateSizes } from '../format';
 import { Kbd } from './Kbd';
 import { gridEntries, lowestPrice, piecesText, sizeStock, type GridEntry } from './models';
 import { stockInPacks } from './packStock';
@@ -80,7 +81,7 @@ export interface ItemsAreaProps {
   /** A model tile that is open in the picker */
   pickingProduct: string | null;
   multiplier: number | null;
-  notice: { tone: 'warning' | 'info'; text: string } | null;
+  notice: { tone: 'warning' | 'info'; text: string; href?: string; linkText?: string } | null;
   onDismissNotice: () => void;
   hasLastLines: boolean;
   onRepeatLast: () => void;
@@ -119,10 +120,14 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
 
-  const results = useMemo(
-    () => searchCatalog(catalog, query, { categoryId: category, limit: 60 }),
-    [catalog, query, category],
+  // The grid shows 60 items at a time; «عرض المزيد» adds 60 (a new search or category starts again)
+  const [shown, setShown] = useState(60);
+  const found = useMemo(
+    () => searchCatalog(catalog, query, { categoryId: category, limit: shown + 1 }),
+    [catalog, query, category, shown],
   );
+  const hasMore = found.length > shown;
+  const results = useMemo(() => (hasMore ? found.slice(0, shown) : found), [found, hasMore, shown]);
   const today = businessDateOf(
     Date.now(),
     catalog.settings?.timezone ?? 'UTC',
@@ -238,7 +243,10 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           label="ابحث أو امسح الباركود"
           hideLabel
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setShown(60);
+          }}
           onKeyDown={onSearchKey}
           placeholder="ابحث أو امسح الباركود"
           autoComplete="off"
@@ -352,6 +360,16 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
               <InfoIcon size={20} className="shrink-0" />
             )}
             <span className="min-w-0 flex-1 py-2 font-semibold">{props.notice.text}</span>
+            {props.notice.href ? (
+              <a
+                href={props.notice.href}
+                target="_blank"
+                rel="noopener"
+                className="shrink-0 font-semibold underline"
+              >
+                {props.notice.linkText}
+              </a>
+            ) : null}
             <IconButton
               label="أخفِ التنبيه"
               size="md"
@@ -376,6 +394,7 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
                 aria-pressed={on}
                 onClick={() => {
                   setCategory(c.id);
+                  setShown(60);
                   setQuery('');
                 }}
                 className={cn(
@@ -449,6 +468,16 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
           />
         </BranchStock.Provider>
       )}
+      {hasMore ? (
+        <Button
+          variant="secondary"
+          size="md"
+          className="mx-auto mt-3"
+          onClick={() => setShown((n) => n + 60)}
+        >
+          عرض المزيد
+        </Button>
+      ) : null}
     </>
   );
 });
@@ -527,7 +556,7 @@ const Grid = memo(function Grid({
                     entry.kind === 'model' ? onPickModel(entry.productId) : onPickItem(entry.item)
                   }
                 >
-                  {entry.kind === 'model' ? entry.name : entry.item.name}
+                  {isolateSizes(entry.kind === 'model' ? entry.name : entry.item.name)}
                 </button>
               </li>
             ))}
@@ -575,7 +604,7 @@ const ItemTileMemo = memo(function ItemTileMemo({
   const note = fx ? dollarNote(item.price.priceMinor, item.price.currency, fx) : null;
   return (
     <ItemTile
-      name={item.name}
+      name={isolateSizes(item.name)}
       priceMinor={item.price.priceMinor}
       currency={item.price.currency}
       {...(item.isService && item.price.priceMinor === 0 ? { priceLabel: 'السعر عند البيع' } : {})}
@@ -622,7 +651,7 @@ const ModelTile = memo(function ModelTile({
   const note = fx ? dollarNote(price.priceMinor, price.currency, fx) : null;
   return (
     <ItemTile
-      name={entry.name}
+      name={isolateSizes(entry.name)}
       priceMinor={price.priceMinor}
       currency={price.currency}
       {...(sizes ? {} : { detail: piecesText(entry.pieces.length) })}
@@ -681,8 +710,8 @@ function SizeChips({
             onClick={() => onPick(s)}
             className="min-h-7 touch-manipulation rounded-small bg-surface-muted px-2 text-[0.8125rem] font-semibold whitespace-nowrap text-ink pointer-coarse:min-h-9"
           >
-            <bdi aria-hidden="true">
-              {s.value}
+            <bdi aria-hidden="true" dir="auto">
+              {isolateSizes(s.value)}
               {s.left !== null ? (
                 <span className="num ms-1 text-[0.8125rem] font-normal text-ink-muted">
                   · {formatQuantity(s.left, digits)}
@@ -692,7 +721,7 @@ function SizeChips({
           </button>
         ) : (
           <bdi key={s.value} className="px-2 py-0.5 text-ink-muted line-through decoration-2">
-            {s.value}
+            {isolateSizes(s.value)}
             <span className="sr-only"> نفد</span>
           </bdi>
         ),

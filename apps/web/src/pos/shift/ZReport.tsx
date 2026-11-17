@@ -88,7 +88,8 @@ export function ZReport({
     activity.movements.length > 0 ||
     (cashIn?.receipts.length ?? 0) > 0 ||
     (cashIn?.vouchers.length ?? 0) > 0 ||
-    (cashIn?.deposits?.length ?? 0) > 0;
+    (cashIn?.deposits?.length ?? 0) > 0 ||
+    (cashIn?.rentals?.length ?? 0) > 0;
   return (
     <div
       dir="rtl"
@@ -239,6 +240,16 @@ export function ZReport({
           ))}
         </Section>
       ) : null}
+      {(activity.rentalDeposits?.count ?? 0) > 0 ? (
+        <Section title="تأمين إيجار">
+          <Line label="العدد">{counted(activity.rentalDeposits!.count, DEPOSITS, digits)}</Line>
+          {activity.rentalDeposits!.byCurrency.map((row) => (
+            <Line key={`rt:${row.currency}`} label="تأمين مقبوض">
+              <ExactMoney minor={row.amountMinor} currency={row.currency} />
+            </Line>
+          ))}
+        </Section>
+      ) : null}
       <Section title="حركات الدرج">
         {!hasDrawerLines ? <span>لا حركات.</span> : null}
         {(cashIn?.receipts ?? []).map((r) => (
@@ -253,6 +264,11 @@ export function ZReport({
         ))}
         {(cashIn?.deposits ?? []).map((r) => (
           <Line key={`dp:${r.currency}`} label="عربون نقداً">
+            <ExactMoney minor={r.amountMinor} currency={r.currency} />
+          </Line>
+        ))}
+        {(cashIn?.rentals ?? []).map((r) => (
+          <Line key={`rt:${r.currency}`} label="تأمين إيجار نقداً">
             <ExactMoney minor={r.amountMinor} currency={r.currency} />
           </Line>
         ))}

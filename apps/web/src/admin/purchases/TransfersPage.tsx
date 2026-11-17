@@ -3,6 +3,7 @@ import type { TransferDetail, TransferInput, TransferRow } from '@serva/core';
 import {
   Alert,
   BackIcon,
+  Badge,
   Button,
   Card,
   CardHeader,
@@ -127,6 +128,12 @@ export function TransfersPage() {
       cell: (r) => <span className="num text-ink-muted">{r.date}</span>,
     },
     { key: 'way', header: 'من ← إلى', cell: (r) => <Route from={r.fromBranch} to={r.toBranch} /> },
+    {
+      key: 'status',
+      header: 'الحالة',
+      className: 'whitespace-nowrap',
+      cell: () => <Badge tone="success">تمّ: خرج ودخل</Badge>,
+    },
     {
       key: 'pieces',
       header: 'القطع',
@@ -320,7 +327,10 @@ export function TransfersPage() {
           </section>
         )}
         <section aria-label="التحويلات السابقة" className="flex flex-col gap-3">
-          <SectionHead title="التحويلات" description="الأحدث أولاً، بكلفة ما خرج من الفرع المرسِل." />
+          <SectionHead
+            title="التحويلات"
+            description="الأحدث أولاً. كل تحويل يتمّ في خطوة واحدة: يخرج من الفرع المرسِل ويدخل الفرع الآخر في اللحظة نفسها، فلا «في الطريق»."
+          />
           <DataTable
             caption="التحويلات"
             columns={columns}
