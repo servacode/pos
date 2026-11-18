@@ -6,11 +6,16 @@ import {
   categories,
   customers,
   exchangeRates,
+  noSaleReasons,
   onlineOrders,
   prices,
   products,
   promotions,
+  regions,
   roles,
+  routeCustomers,
+  routes,
+  salesOrders,
   serials,
   stockLevels,
   syncTombstones,
@@ -308,9 +313,26 @@ const PULL_SETS: Record<string, PullSet> = {
       creditLimitMinor: customers.creditLimitMinor,
       priceTier: customers.priceTier,
       loyaltyPoints: customers.loyaltyPoints,
+      // «المندوبون»: where he is, and whether the supervisor approved him (pending: cash only); additive, older clients ignore them
+      regionId: customers.regionId,
+      approvalStatus: customers.approvalStatus,
+      lat: customers.lat,
+      lng: customers.lng,
       archived: archivedFlag(customers.archivedAt),
       version: customers.version,
     },
+    // A van's phone keeps only the customers on its rep's routes and the ones it added itself; every other device keeps all
+    scope: (device) => sql`(
+      not exists (select 1 from branches b where b.tenant_id = ${customers.tenantId} and b.id = ${device.branchId}::uuid and b.kind = 'van')
+      or exists (select 1 from route_customers rc
+                 join routes r on r.tenant_id = rc.tenant_id and r.id = rc.route_id
+                 join sales_reps sr on sr.tenant_id = r.tenant_id and sr.id = r.rep_id
+                 where rc.tenant_id = ${customers.tenantId} and rc.customer_id = ${customers.id}
+                   and sr.van_branch_id = ${device.branchId}::uuid)
+      or (${customers.createdByDoc} is not null and exists (
+            select 1 from sync_inbox i join devices d on d.tenant_id = i.tenant_id and d.id = i.device_id
+            where i.tenant_id = ${customers.tenantId} and i.doc_id = ${customers.createdByDoc}
+              and d.branch_id = ${device.branchId}::uuid)))`,
   },
   vouchers: {
     table: vouchers,
@@ -393,7 +415,105 @@ const PULL_SETS: Record<string, PullSet> = {
   },
 };
 
-export const PULL_SET_NAMES = Object.keys(PULL_SETS);
+/** The routes of the rep whose van is the device's branch */
+const repOfVan = (device: PullScope, repId: SQL | PgColumn, tenantId: SQL | PgColumn) =>
+  sql`exists (select 1 from sales_reps sr where sr.tenant_id = ${tenantId} and sr.id = ${repId}
+              and sr.van_branch_id = ${device.branchId}::uuid)`;
+
+/**
+ * «المندوبون»: the sets only a rep's phone (a device of kind rep_phone) pulls, scoped to its van's
+ * rep. Nothing here carries cost. A till never gets them, so older and ordinary clients are unaffected.
+ */
+const REP_PULL_SETS: Record<string, PullSet> = {
+  regions: {
+    table: regions,
+    id: regions.id,
+    tenantId: regions.tenantId,
+    columns: {
+      name: regions.name,
+      parentId: regions.parentId,
+      sortOrder: regions.sortOrder,
+      isActive: regions.isActive,
+      version: regions.version,
+    },
+  },
+  routes: {
+    table: routes,
+    id: routes.id,
+    tenantId: routes.tenantId,
+    columns: {
+      name: routes.name,
+      regionId: routes.regionId,
+      weekdays: routes.weekdays,
+      repId: routes.repId,
+      sortOrder: routes.sortOrder,
+      isActive: routes.isActive,
+      version: routes.version,
+    },
+    scope: (device) => repOfVan(device, routes.repId, routes.tenantId),
+  },
+  route_customers: {
+    table: routeCustomers,
+    id: routeCustomers.id,
+    tenantId: routeCustomers.tenantId,
+    columns: {
+      routeId: routeCustomers.routeId,
+      customerId: routeCustomers.customerId,
+      visitOrder: routeCustomers.visitOrder,
+      version: routeCustomers.version,
+    },
+    scope: (device) =>
+      sql`exists (select 1 from routes r where r.tenant_id = ${routeCustomers.tenantId} and r.id = ${routeCustomers.routeId}
+                  and ${repOfVan(device, sql`r.rep_id`, sql`r.tenant_id`)})`,
+  },
+  no_sale_reasons: {
+    table: noSaleReasons,
+    id: noSaleReasons.id,
+    tenantId: noSaleReasons.tenantId,
+    columns: {
+      key: noSaleReasons.key,
+      name: noSaleReasons.name,
+      sortOrder: noSaleReasons.sortOrder,
+      isActive: noSaleReasons.isActive,
+      version: noSaleReasons.version,
+    },
+  },
+  // Orders taken in or filled from this van: the open ones, and the ones changed lately so a phone sees one leave
+  sales_orders: {
+    table: salesOrders,
+    id: salesOrders.id,
+    tenantId: salesOrders.tenantId,
+    columns: {
+      number: salesOrders.number,
+      status: salesOrders.status,
+      customerId: salesOrders.customerId,
+      branchId: salesOrders.branchId,
+      warehouseBranchId: salesOrders.warehouseBranchId,
+      repId: salesOrders.repId,
+      businessDate: sql<string>`${salesOrders.businessDate}::text`,
+      currency: salesOrders.currency,
+      totalMinor: salesOrders.totalMinor,
+      depositMinor: salesOrders.depositMinor,
+      deliveryDate: sql<string | null>`${salesOrders.deliveryDate}::text`,
+      lines: salesOrders.lines,
+      version: salesOrders.version,
+    },
+    scope: (device) =>
+      sql`(${salesOrders.branchId} = ${device.branchId}::uuid or ${salesOrders.warehouseBranchId} = ${device.branchId}::uuid)
+          and (${salesOrders.status} in ('open', 'partial') or ${salesOrders.updatedAt} > now() - interval '30 days')`,
+  },
+};
+Object.assign(PULL_SETS, REP_PULL_SETS);
+
+export const PULL_SET_NAMES = Object.keys(PULL_SETS).filter((name) => !(name in REP_PULL_SETS));
+/** The sets a rep's phone pulls on top of the usual ones (its bootstrap and its default pull) */
+export const REP_PULL_SET_NAMES = Object.keys(REP_PULL_SETS);
+
+/** The sets this device is served: the usual ones, plus the rep's when it is a rep_phone */
+export async function setsFor(tx: Transaction, deviceId: string): Promise<string[]> {
+  const [d] = await tx.execute<{ kind: string }>(sql`select kind from devices where id = ${deviceId}`);
+  return d?.kind === 'rep_phone' ? [...PULL_SET_NAMES, ...REP_PULL_SET_NAMES] : PULL_SET_NAMES;
+}
 
 const MAX_UUID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
 
@@ -410,8 +530,10 @@ function parseCursor(cursor: string): Key {
 const compareKeys = (a: Key, b: Key) =>
   a.xid < b.xid ? -1 : a.xid > b.xid ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
-export function unknownSets(names: string[]): void {
-  const unknown = names.filter((name) => !(name in PULL_SETS));
+export function unknownSets(names: string[], allowed?: readonly string[]): void {
+  const unknown = names.filter(
+    (name) => !(name in PULL_SETS) || (allowed ? !allowed.includes(name) : name in REP_PULL_SETS),
+  );
   if (unknown.length > 0) {
     throw new AppError(400, 'validation_failed', 'مجموعة بيانات غير معروفة.', {
       cursors: unknown.join(', '),
@@ -432,9 +554,10 @@ export async function pullChanges(
   limit: number,
   now: Date,
 ): Promise<PullResponse> {
-  const names = Object.keys(cursors).length > 0 ? Object.keys(cursors) : PULL_SET_NAMES;
-  unknownSets(names);
   return withTenant(db, device.tenantId, async (tx) => {
+    const allowed = await setsFor(tx, device.deviceId);
+    const names = Object.keys(cursors).length > 0 ? Object.keys(cursors) : allowed;
+    unknownSets(names, allowed);
     const state = await readServerState(tx);
     const xmin = await currentXmin(tx);
     const sets: Record<string, PullSetPage> = {};

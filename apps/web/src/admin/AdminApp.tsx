@@ -7,7 +7,10 @@ import { ShellSkeleton } from '../layout/ShellSkeleton';
 import { PageLoading } from '../layout/PageLoading';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { HomePage } from '../pages/HomePage';
-import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
+// Rarely opened: its own chunk keeps the admin shell small
+const ForgotPasswordPage = lazy(() =>
+  import('../pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })),
+);
 const LandingPage = lazy(() => import('../pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
@@ -159,6 +162,7 @@ const StatementPage = lazy(() =>
 );
 const ExpensesPage = lazy(() => import('./ledger/ExpensesPage').then((m) => ({ default: m.ExpensesPage })));
 const Accounting = lazy(() => import('./accounting/AccountingRoutes'));
+const Distribution = lazy(() => import('./distribution/DistributionRoutes'));
 
 /** The root: the home page for a signed-in user, the landing page for a visitor (the session is restored first) */
 function Front() {
@@ -187,7 +191,14 @@ export function AdminApp() {
         <Route element={<GuestOnly />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route
+            path="/forgot-password"
+            element={
+              <Suspense fallback={<ShellSkeleton />}>
+                <ForgotPasswordPage />
+              </Suspense>
+            }
+          />
         </Route>
         {/* A visitor who is not signed in sees the landing page at the root; a signed-in user, the home page */}
         <Route path="/" element={<Front />} />
@@ -327,6 +338,7 @@ export function AdminApp() {
           <Route path="/shifts/:id" element={page(<ShiftReportPage />)} />
           <Route path="/evidence" element={page(<EvidencePage />)} />
           <Route path="/accounting/*" element={page(<Accounting />)} />
+          <Route path="/distribution/*" element={page(<Distribution />)} />
         </Route>
         <Route element={<RequireAuth />}>
           <Route path="*" element={<NotFoundPage />} />

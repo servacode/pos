@@ -28,6 +28,8 @@ import { audit } from './audit';
 
 const newId = createUuidV7();
 const notFound = () => new AppError(404, 'not_found', 'هذا الزبون غير موجود.');
+const invalid = (fields: Record<string, string>) =>
+  new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', fields);
 
 async function baseCurrency(tx: Transaction): Promise<CurrencyCode> {
   const [row] = await tx.execute<{ base: string }>(sql`select base_currency as base from tenant_settings`);
@@ -45,6 +47,11 @@ type Row = {
   kind: string | null;
   contact_name: string | null;
   contact_phone: string | null;
+  region_id: string | null;
+  region_name: string | null;
+  approval_status: string;
+  lat: number | null;
+  lng: number | null;
   balance: string;
 };
 
@@ -66,20 +73,36 @@ const item = (r: Row): CustomerListItem => ({
   kind: (r.kind as CustomerKind | null) ?? null,
   contactName: r.contact_name,
   contactPhone: r.contact_phone,
+  regionId: r.region_id,
+  regionName: r.region_name,
+  approvalStatus:
+    r.approval_status === 'pending' || r.approval_status === 'rejected' ? r.approval_status : 'approved',
+  lat: r.lat,
+  lng: r.lng,
 });
 
 export async function listCustomers(
   db: Database,
   auth: AccessClaims,
-  query: { q?: string; owing?: boolean; kind?: CustomerKind },
+  query: {
+    q?: string;
+    owing?: boolean;
+    kind?: CustomerKind;
+    regionId?: string;
+    approval?: 'approved' | 'pending' | 'rejected';
+  },
 ): Promise<CustomerListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
     const rows = await tx.execute<Row>(sql`
       select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
-             c.kind, c.contact_name, c.contact_phone, coalesce(b.balance, 0)::text as balance
+             c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
+             c.approval_status, c.lat, c.lng, coalesce(b.balance, 0)::text as balance
       from customers c left join (${balances}) b on b.customer_id = c.id
+      left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
       where ${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
+        and ${query.regionId ? sql`c.region_id = ${query.regionId}` : sql`true`}
+        and ${query.approval ? sql`c.approval_status = ${query.approval}` : sql`true`}
       order by coalesce(b.balance, 0) desc, c.name, c.id`);
     // What each customer bought: the last day, the total net of returns, and the size they take most
     const sold = await tx.execute<{ customer_id: string; last: string; spent: string }>(sql`
@@ -132,9 +155,11 @@ async function detail(tx: Transaction, id: string): Promise<CustomerDetail> {
     Row & { tax_number: string | null; address: string | null; notes: string | null; created_at: string }
   >(sql`
     select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at, c.tax_number, c.address,
-           c.kind, c.contact_name, c.contact_phone,
+           c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
+           c.approval_status, c.lat, c.lng,
            c.notes, c.created_at, coalesce(b.balance, 0)::text as balance
     from customers c left join (${balances}) b on b.customer_id = c.id
+    left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
     where c.id = ${id}`);
   if (!row) throw notFound();
   const lines = await tx.execute<{
@@ -197,8 +222,24 @@ const fields = (input: CustomerInput, now: Date) => ({
   ...(input.kind !== undefined ? { kind: input.kind } : {}),
   ...(input.contactName !== undefined ? { contactName: input.contactName } : {}),
   ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
+  ...(input.regionId !== undefined ? { regionId: input.regionId } : {}),
+  ...(input.lat !== undefined ? { lat: input.lat } : {}),
+  ...(input.lng !== undefined ? { lng: input.lng } : {}),
   ...(input.archived !== undefined ? { archivedAt: input.archived ? now : null } : {}),
 });
+
+/** A region must be the store's own, and a location is a latitude with its longitude */
+async function checkPlace(tx: Transaction, input: CustomerInput): Promise<void> {
+  if (input.regionId) {
+    const [region] = await tx.execute<{ id: string }>(
+      sql`select id from regions where id = ${input.regionId}`,
+    );
+    if (!region) throw invalid({ regionId: 'منطقة غير موجودة' });
+  }
+  if ((input.lat === undefined || input.lat === null) !== (input.lng === undefined || input.lng === null)) {
+    throw invalid({ lng: 'الموقع خط عرض وخط طول معاً' });
+  }
+}
 
 export async function createCustomer(
   db: Database,
@@ -222,6 +263,7 @@ export async function createCustomerTx(
   now: Date,
 ): Promise<CustomerDetail> {
   const id = newId();
+  await checkPlace(tx, input);
   await tx.insert(customers).values({ tenantId: auth.tenantId, id, ...fields(input, now) });
   const created = await detail(tx, id);
   await audit(
@@ -263,6 +305,7 @@ export async function updateCustomerTx(
   now: Date,
 ): Promise<CustomerDetail> {
   const before = await detail(tx, id);
+  await checkPlace(tx, input);
   await tx
     .update(customers)
     .set({ ...fields(input, now), updatedAt: now })
@@ -280,6 +323,9 @@ export async function updateCustomerTx(
     'kind',
     'contactName',
     'contactPhone',
+    'regionId',
+    'lat',
+    'lng',
     'archived',
   ] as const) {
     if (before[key] !== after[key]) changes[key] = [before[key], after[key]];

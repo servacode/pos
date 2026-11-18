@@ -56,6 +56,7 @@ import {
   returnRental,
 } from './rentals/api';
 import type { Quotation } from '@serva/core/contracts/quotations';
+import type { InvoiceLookup } from '@serva/core/contracts/till';
 import { convertQuotation } from './quotations/api';
 import { quotationCart } from './quotations/quotationCart';
 import { useQuotationFromAddress } from './quotations/useQuotationFromAddress';
@@ -85,6 +86,9 @@ import { DEFAULT_IDLE_MINUTES } from './staff/persist';
 import { cartAlreadySold } from './soldCart';
 import { ALTERATION_SECTORS, GIFT_SECTORS, RENTAL_SECTORS, storeSells } from '../lib/sectors';
 import { lazyChunk, preloadTill, TillBoundary } from './chunks';
+import { useRep } from '../rep/state';
+import { salesOrderCart } from '../rep/orderCart';
+import type { SalesOrderPullRow } from '@serva/core/distribution';
 
 const ShiftOpenScreen = lazyChunk(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.ShiftOpenScreen })),
@@ -110,6 +114,8 @@ const AlterationsScreen = lazyChunk(() =>
 const QuotationsScreen = lazyChunk(() =>
   import('./quotations/QuotationsScreen').then((m) => ({ default: m.QuotationsScreen })),
 );
+// «وضع المندوب»: the day's home, only on a rep's phone (rep/state.tsx provides it; a till never loads this)
+const RepHome = lazyChunk(() => import('../rep/RepHome').then((m) => ({ default: m.RepHome })));
 const CashMovementScreen = lazyChunk(() =>
   import('./shift/ShiftScreens').then((m) => ({ default: m.CashMovementScreen })),
 );
@@ -174,6 +180,7 @@ interface LastSale {
 }
 
 type View =
+  | 'rep'
   | 'sale'
   | 'close'
   | 'cash'
@@ -212,7 +219,20 @@ export function CashierApp(props: CashierAppProps) {
   );
 }
 
-function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut }: CashierAppProps) {
+function CashierScreens({
+  session,
+  catalog: baseCatalog,
+  persisted,
+  online,
+  outbox,
+  onSignOut,
+}: CashierAppProps) {
+  // «وضع المندوب»: on a rep's phone the day's home comes first, and customers he added (pending) are known here
+  const rep = useRep();
+  const catalog = useMemo(
+    () => (rep ? { ...baseCatalog, customers: rep.withLocalCustomers(baseCatalog.customers) } : baseCatalog),
+    [baseCatalog, rep],
+  );
   // A phone has no keyboard: the menu shows no key hints there
   const phone = useIsPhone();
   const pos = usePos();
@@ -231,15 +251,21 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     [catalog.staff, pos.device.branchCode],
   );
   const [shift, setShift] = useState<OpenShift | null | undefined>(undefined);
-  const [view, setViewNow] = useState<View>('sale');
+  const [view, setViewNow] = useState<View>(rep ? 'rep' : 'sale');
   // Coming back from a sub-screen (rentals, returns...): its closing click must not reach a tile
-  const viewRef = useRef<View>('sale');
-  const goView = useCallback((next: View) => {
-    // Only a sub-screen closing back to the sale arms the guard (not sign-in or the first screen)
-    if (next === 'sale' && viewRef.current !== 'sale') armClickGuard();
-    viewRef.current = next;
-    setViewNow(next);
-  }, []);
+  const viewRef = useRef<View>(rep ? 'rep' : 'sale');
+  const isRep = rep !== null;
+  const goView = useCallback(
+    (next: View) => {
+      // A rep's sub-screens close to his day, not to a sale screen he did not open
+      if (isRep && next === 'sale' && viewRef.current !== 'sale' && viewRef.current !== 'rep') next = 'rep';
+      // Only a sub-screen closing back to the sale arms the guard (not sign-in or the first screen)
+      if (next === 'sale' && viewRef.current !== 'sale') armClickGuard();
+      viewRef.current = next;
+      setViewNow(next);
+    },
+    [isRep],
+  );
   // «قفل الكاشير» and unsent documents: leaving the sale screen, closing the shift or locking needs a manager's code
   const [gate, setGate] = useState<{ reason: string; then: () => void } | null>(null);
   const isManager = session.permissions.has('shift.close_any');
@@ -267,6 +293,9 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
   );
   // «تبديل» from the menu opens the return screen already set on an exchange
   const [startExchange, setStartExchange] = useState(false);
+  // From a customer's page the rep opens the return and the receipt already on him
+  const [repReturnFor, setRepReturnFor] = useState('');
+  const [repCollectFor, setRepCollectFor] = useState<{ id: string; name: string } | null>(null);
   const [cart, setCartState] = useState<Cart>(EMPTY_CART);
   const cartRef = useRef(cart);
   cartRef.current = cart;
@@ -671,6 +700,24 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     setOpenedNote('كانت عندك فاتورة جارية، فعلّقناها. تجدها في «المعلّقة».');
   }
 
+  /** A rep opens the sale screen on a customer, or on the order he delivers: the sale in progress is put aside first */
+  function repSell(customer: { id: string; name: string }, order?: SalesOrderPullRow): void {
+    rep?.enter(customer.id);
+    if (cart.lines.length > 0 && (cart.customer?.id !== customer.id || order)) parkCurrent();
+    if (order) {
+      const built = salesOrderCart(order, customer, catalog);
+      setCart(() => built.cart);
+      if (built.missing.length > 0)
+        setOpenedNote(
+          `${built.missing.length} من أصناف الطلبية غير موجودة على هذا الجهاز ولم تُضف. أخبر المشرف.`,
+        );
+    } else if (cart.customer?.id !== customer.id || cart.lines.length === 0) {
+      setCart(() => ({ ...EMPTY_CART, customer }));
+    }
+    setDone(null);
+    goView('sale');
+  }
+
   /** Brings a held cart back (the last one when no index is given); a cart being taken is held first. */
   function resume(index: number = held.length - 1) {
     const picked = held[index];
@@ -985,6 +1032,11 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
           className="w-64"
           trigger={<IconButton label="المزيد" size="md" icon={<MoreIcon />} />}
         >
+          {rep ? (
+            <MenuItem icon={<ListIcon />} onSelect={() => goView('rep')}>
+              يومي: خط السير
+            </MenuItem>
+          ) : null}
           {shift ? (
             <MenuItem
               icon={<UndoIcon />}
@@ -1198,6 +1250,47 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
     );
   }
 
+  if (rep && view === 'rep') {
+    return (
+      <>
+        <TillBoundary>
+          <Suspense fallback={null}>
+            <RepHome
+              session={session}
+              catalog={catalog}
+              shift={shift}
+              online={online}
+              outbox={outbox}
+              persisted={persisted}
+              onShiftOpened={(opened) => {
+                setShiftClosed(false);
+                setShift(opened);
+              }}
+              onSell={(customer, order) => repSell(customer, order)}
+              onReturn={(customer) => {
+                rep.enter(customer.id);
+                setRepReturnFor(customer.name);
+                setStartExchange(false);
+                goView('return');
+              }}
+              onCollect={(customer) => {
+                rep.enter(customer.id);
+                setRepCollectFor(customer);
+                goView('receipt');
+              }}
+              onCash={() => goView('cash')}
+              onCloseShift={() => goView('close')}
+              onLock={lockByHand}
+              onPrinter={() => goView('printer')}
+            />
+          </Suspense>
+        </TillBoundary>
+        {printPortal}
+        {a4Portal}
+      </>
+    );
+  }
+
   if (shift === null || view !== 'sale') {
     return (
       <CashierShell statusBar={statusBar} mainClassName="flex justify-center p-6 lg:px-10">
@@ -1237,6 +1330,15 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
                 session={session}
                 catalog={catalog}
                 shift={shift}
+                {...(rep && repCollectFor
+                  ? {
+                      initialCustomer: {
+                        ...repCollectFor,
+                        creditLimitMinor:
+                          catalog.customers.find((c) => c.id === repCollectFor.id)?.creditLimitMinor ?? null,
+                      },
+                    }
+                  : {})}
                 onBack={() => setView('sale')}
                 onPrint={(doc) =>
                   setPrintJob({
@@ -1368,6 +1470,8 @@ function CashierScreens({ session, catalog, persisted, online, outbox, onSignOut
             ) : view === 'return' ? (
               <ReturnScreen
                 startExchange={startExchange}
+                {...(rep && repReturnFor ? { initialSearch: repReturnFor } : {})}
+                {...(rep?.sheet ? { extraInvoices: rep.sheet.returnable as InvoiceLookup[] } : {})}
                 session={session}
                 catalog={catalog}
                 staff={staff}

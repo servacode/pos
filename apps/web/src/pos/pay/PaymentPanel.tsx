@@ -14,6 +14,7 @@ import {
 import type { Approval, PaymentMethod } from '@serva/core/contracts/documents';
 import { chequeReference } from '@serva/core/contracts/cheques';
 import { instalmentSettingsOf } from '@serva/core/installments';
+import { cashOnly } from '@serva/core/distribution';
 import type { OutboxEntry } from '@serva/sync';
 import {
   AddIcon,
@@ -248,7 +249,13 @@ export function PaymentPanel({
     if (customer && loyalty && points > 0) {
       list.push({ key: 'points', method: 'points', currency: base, label: `نقاط (${points})`, rate: null });
     }
-    if (customer && canCredit) {
+    // A customer a rep added and the supervisor has not approved yet is sold to for cash only
+    const unapproved = customer
+      ? cashOnly(catalog.customers.find((c) => c.id === customer.id)?.approvalStatus)
+      : false;
+    if (customer && unapproved) {
+      // cash, card and the rest only: no account and no cheque
+    } else if (customer && canCredit) {
       list.push({ key: 'credit', method: 'credit', currency: base, label: 'آجل على الحساب', rate: null });
       list.push({ key: 'cheque', method: 'cheque', currency: base, label: 'شيك', rate: null });
     } else if (customer && staff) {
@@ -277,6 +284,7 @@ export function PaymentPanel({
     settings.enabledCurrencies,
     catalog.rates,
     catalog.collectRates,
+    catalog.customers,
     customer,
     canCredit,
     staff,
@@ -647,6 +655,7 @@ export function PaymentPanel({
         salespersonId,
         service,
         onlineOrderId: cart.onlineOrder?.id ?? null,
+        salesOrderId: cart.salesOrder?.id ?? null,
         prescription:
           cart.prescription && Object.values(cart.prescription).some(Boolean) ? cart.prescription : null,
       });

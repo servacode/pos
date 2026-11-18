@@ -59,17 +59,20 @@ export function ReceiptScreen({
   shift,
   onBack,
   onPrint,
+  initialCustomer,
 }: {
   session: StaffSession;
   catalog: Catalog;
   shift: OpenShift;
   onBack: () => void;
   onPrint: (saved: SavedReceipt) => void;
+  /** The rep opens it from a customer's page: that customer starts picked */
+  initialCustomer?: PickedCustomer;
 }) {
   const pos = usePos();
   const settings = catalog.settings!;
   const base = settings.baseCurrency;
-  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  const [customer, setCustomer] = useState<PickedCustomer | null>(initialCustomer ?? null);
   // What the customer owes, as the server says (online only)
   const owed = useCustomerBalance(customer?.id ?? null);
   // الأقساط: the customer's open plans (online only); a payment can be taken toward the oldest instalment

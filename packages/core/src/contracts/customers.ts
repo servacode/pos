@@ -8,6 +8,7 @@ import {
   shortTextSchema,
   uuidSchema,
 } from './common';
+import type { CustomerApproval } from './distribution';
 
 /**
  * Customers and what they owe (09 › customers، party_balances; 10 › الذمم): the owner adds and
@@ -81,6 +82,11 @@ export const customerInput = z.object({
   /** The person to ask for at a clinic, hospital or office, and their phone */
   contactName: optionalText(80, 'الاسم طويل'),
   contactPhone: optionalText(30, 'الرقم طويل'),
+  /** «المنطقة» of the distribution module (regions); null clears it */
+  regionId: uuidSchema.nullable().optional(),
+  /** Where the shop is, for the rep's map; both or neither */
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
   archived: z.boolean().optional(),
 });
 export type CustomerInput = z.output<typeof customerInput>;
@@ -94,6 +100,10 @@ export const customerListQuery = z.object({
     .optional(),
   /** Only customers of one kind */
   kind: z.enum(CUSTOMER_KINDS).optional(),
+  /** Only customers of one region */
+  regionId: uuidSchema.optional(),
+  /** Only customers with this approval: `pending` is the ones a rep added and the supervisor has not approved */
+  approval: z.enum(['approved', 'pending', 'rejected']).optional(),
 });
 
 /** `customers` pull set: what a till needs to find a customer and sell to them on credit */
@@ -107,6 +117,11 @@ export interface CustomerRow {
   loyaltyPoints: number;
   archived: boolean;
   version: number;
+  /** Distribution: added by a rep and not approved yet means cash sales only; absent on older rows */
+  approvalStatus?: CustomerApproval;
+  regionId?: string | null;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface CustomerListItem {
@@ -122,6 +137,13 @@ export interface CustomerListItem {
   kind: CustomerKind | null;
   contactName: string | null;
   contactPhone: string | null;
+  /** Distribution (the server always sends these; optional so older fixtures stay valid) */
+  regionId?: string | null;
+  regionName?: string | null;
+  /** approved, pending (a rep added it: cash only) or rejected */
+  approvalStatus?: CustomerApproval;
+  lat?: number | null;
+  lng?: number | null;
   /** The list only: the day of the latest sale to this customer; null for none yet */
   lastPurchaseDate?: string | null;
   /** The list only: what they bought in all, net of returns, in the invoices' own money (as on their page) */

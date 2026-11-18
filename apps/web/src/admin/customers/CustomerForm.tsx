@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import {
   CUSTOMER_KIND_LABELS,
@@ -8,12 +8,14 @@ import {
   type CustomerDetail,
   type CustomerKind,
   type CustomerListItem,
+  type RegionRow,
   type SectorKey,
 } from '@serva/core';
 import { Alert, Button, Card, CardHeader, Select, Switch, TextField, UserIcon } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
 import { storeSells } from '../../lib/sectors';
+import { approveCustomer, listRegions } from '../distribution/api';
 import { createCustomer, updateCustomer } from './api';
 
 /** The shops that sell to clinics, hospitals and offices: only they type a customer by kind */
@@ -105,6 +107,18 @@ export function CustomerForm({
   const [kind, setKind] = useState<CustomerKind | ''>(customer?.kind ?? '');
   const [contactName, setContactName] = useState(customer?.contactName ?? '');
   const [contactPhone, setContactPhone] = useState(customer?.contactPhone ?? '');
+  // «التوزيع»: the region and the shop's place, for a store whose plan has reps
+  const distribution = me.subscription.repsEnabled === true && me.user.permissions.includes('routes.manage');
+  const [regions, setRegions] = useState<RegionRow[]>([]);
+  const [regionId, setRegionId] = useState(customer?.regionId ?? '');
+  const [lat, setLat] = useState(typeof customer?.lat === 'number' ? String(customer.lat) : '');
+  const [lng, setLng] = useState(typeof customer?.lng === 'number' ? String(customer.lng) : '');
+  useEffect(() => {
+    if (!distribution) return;
+    listRegions()
+      .then((r) => setRegions(r.filter((x) => x.isActive || x.id === customer?.regionId)))
+      .catch(() => setRegions([]));
+  }, [distribution, customer?.regionId]);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -120,7 +134,19 @@ export function CustomerForm({
     setSaving(true);
     setError(null);
     setFields({});
+    const place = distribution
+      ? {
+          regionId: regionId || null,
+          lat: lat.trim() ? Number(lat.trim()) : null,
+          lng: lng.trim() ? Number(lng.trim()) : null,
+        }
+      : {};
+    if (distribution && (Number.isNaN(place.lat) || Number.isNaN(place.lng))) {
+      setFields({ lat: 'اكتب الموقع أرقاماً، مثل 33.51 و 36.29' });
+      return;
+    }
     const input = {
+      ...place,
       name,
       phone,
       taxNumber,
@@ -160,6 +186,27 @@ export function CustomerForm({
         />
         <div className="flex flex-col gap-6">
           {error ? <Alert tone="error">{error}</Alert> : null}
+          {distribution && customer?.approvalStatus === 'pending' ? (
+            <Alert tone="warning" title="زبون أضافه مندوب وينتظر موافقتك">
+              <p>حتى توافق عليه يبيعه المندوب نقداً فقط.</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(['approved', 'rejected'] as const).map((status) => (
+                  <Button
+                    key={status}
+                    variant={status === 'approved' ? 'primary' : 'secondary'}
+                    size="sm"
+                    onClick={() =>
+                      void approveCustomer(customer.id, { status })
+                        .then(onSaved)
+                        .catch((e: unknown) => setError(errorMessage(e)))
+                    }
+                  >
+                    {status === 'approved' ? 'وافق' : 'ارفض'}
+                  </Button>
+                ))}
+              </div>
+            </Alert>
+          ) : null}
           {same.length > 0 ? (
             <Alert tone="warning" title="يوجد زبون بالاسم أو الرقم نفسه">
               <ul className="flex flex-col gap-1">
@@ -248,6 +295,43 @@ export function CustomerForm({
               />
             </div>
           </FormSection>
+          {distribution ? (
+            <FormSection title="التوزيع" description="منطقة الزبون وموقع محله لخط سير المندوب.">
+              <div className="grid gap-x-4 gap-y-5 sm:grid-cols-3">
+                <Select
+                  label="المنطقة"
+                  value={regionId}
+                  onChange={(e) => setRegionId(e.target.value)}
+                  error={fields.regionId}
+                >
+                  <option value="">بلا منطقة</option>
+                  {regions.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </Select>
+                <TextField
+                  label="خط العرض"
+                  hint="اختياري"
+                  inputMode="decimal"
+                  dir="ltr"
+                  value={lat}
+                  onChange={(e) => setLat(e.target.value)}
+                  error={fields.lat}
+                />
+                <TextField
+                  label="خط الطول"
+                  hint="اختياري"
+                  inputMode="decimal"
+                  dir="ltr"
+                  value={lng}
+                  onChange={(e) => setLng(e.target.value)}
+                  error={fields.lng}
+                />
+              </div>
+            </FormSection>
+          ) : null}
           <FormSection title="البيع بالآجل" description="حدّ دينه، والسعر الذي يشتري به.">
             <div className="flex flex-col gap-4">
               <TextField

@@ -42,7 +42,12 @@ export async function loadMe(
     const [tenant] = await tx.select().from(tenants).where(eq(tenants.id, auth.tenantId)).limit(1);
     const [settings] = await tx.select().from(tenantSettings).limit(1);
     const [sub] = await tx
-      .select({ subscription: subscriptions, planName: plans.name, graceDays: plans.graceDays })
+      .select({
+        subscription: subscriptions,
+        planName: plans.name,
+        graceDays: plans.graceDays,
+        limits: plans.limits,
+      })
       .from(subscriptions)
       .innerJoin(plans, eq(plans.id, subscriptions.planId))
       .limit(1);
@@ -113,6 +118,9 @@ export async function loadMe(
         readOnly: enforceSubscription && life.readOnly,
         writeUntil: life.writeUntil?.toISOString() ?? null,
         graceDaysLeft: life.daysLeft,
+        repsEnabled:
+          (sub.limits as Record<string, number | null> | null)?.reps !== undefined &&
+          (sub.limits as Record<string, number | null>).reps !== 0,
       },
       branches: branchRows,
       onboarding: { step: settings.onboardingStep, done: settings.onboardedAt !== null },

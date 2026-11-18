@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { CurrencyCode } from '../currencies';
 import {
   bpSchema,
   isoDateSchema,
@@ -200,6 +201,8 @@ export const repInput = z.object({
   /** Most credit he may give in a day, base currency; null: no limit */
   dailyCreditLimitMinor: nonNegativeMinorSchema.nullable().optional(),
   commissionPlanId: uuidSchema.nullable().optional(),
+  /** The phone he works on (a rep_phone paired to his van); left out, the van's phone is taken */
+  deviceId: uuidSchema.nullable().optional(),
   note: optionalText(300, 'الملاحظة طويلة'),
 });
 export type RepInput = z.output<typeof repInput>;
@@ -226,6 +229,13 @@ export interface RepRow {
   note: string | null;
   routeCount: number;
   version: number;
+}
+
+/** A staff member with the rep role who has not been made a rep yet */
+export interface RepCandidate {
+  userId: string;
+  name: string;
+  phone: string | null;
 }
 
 // ─── Routes ─────────────────────────────────────────────────────────────────
@@ -325,22 +335,142 @@ export const salesOrderPayloadSchema = z.object({
 });
 export type SalesOrderPayload = z.output<typeof salesOrderPayloadSchema>;
 
+/** A line as the screens show it: the item's name and code come from the catalog */
+export interface SalesOrderLineView extends SalesOrderLine {
+  name: string;
+  sku: string | null;
+}
+
 export interface SalesOrderRow {
   id: string;
   number: string;
+  /** What it is now: an order past its hold date reads `expired` */
   status: SalesOrderStatus;
   customerId: string;
   customerName: string;
+  customerPhone: string | null;
+  /** Where it was taken (the rep's van or branch) */
+  branchId: string;
   warehouseBranchId: string;
+  warehouseName: string;
   repId: string | null;
   repName: string | null;
   businessDate: string;
-  currency: string;
+  currency: CurrencyCode;
   totalMinor: number;
   depositMinor: number;
   deliveryDate: string | null;
   holdUntil: string | null;
-  lines: SalesOrderLine[];
+  note: string | null;
+  cancelReason: string | null;
+  lines: SalesOrderLineView[];
+  version: number;
+}
+
+/**
+ * What a rep phone or the supervisor sends to take an order. The server prices nothing: it keeps the
+ * prices it was given, adds them up itself (`totalMinor` of the input is ignored), and holds the goods
+ * for `orderHoldDays` of the distribution settings. Sent again with the same `id` it is the same order.
+ */
+export const salesOrderCreateInput = salesOrderPayloadSchema
+  .omit({ totalMinor: true, depositReceiptId: true, depositMinor: true })
+  .extend({
+    id: uuidSchema.optional(),
+    totalMinor: nonNegativeMinorSchema.optional(),
+    depositMinor: nonNegativeMinorSchema.default(0),
+    depositReceiptId: uuidSchema.nullable().default(null),
+  });
+export type SalesOrderCreateInput = z.output<typeof salesOrderCreateInput>;
+
+export const salesOrderCancelInput = z.object({
+  reason: z.string().trim().min(2, 'اكتب سبب الإلغاء').max(200, 'السبب طويل'),
+  version: versionSchema,
+});
+export type SalesOrderCancelInput = z.output<typeof salesOrderCancelInput>;
+
+/** Sends the order to be filled from a van (or back to a branch): the van's rep sees it in his day */
+export const salesOrderAssignInput = z.object({
+  warehouseBranchId: uuidSchema,
+  version: versionSchema,
+});
+export type SalesOrderAssignInput = z.output<typeof salesOrderAssignInput>;
+
+export const SALES_ORDER_FILTERS = ['active', ...SALES_ORDER_STATUSES] as const;
+export const salesOrderListQuery = z.object({
+  /** active: open and partly delivered */
+  status: z.enum(SALES_ORDER_FILTERS).optional(),
+  q: z.string().trim().max(60).optional(),
+  customerId: uuidSchema.optional(),
+  repId: uuidSchema.optional(),
+  warehouseBranchId: uuidSchema.optional(),
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+});
+export type SalesOrderListQuery = z.output<typeof salesOrderListQuery>;
+
+/** The picking list: what to pull from one branch's shelves for these orders (all its open ones when none is named) */
+export const pickingListQuery = z.object({
+  warehouseBranchId: uuidSchema,
+  /** Comma separated order ids */
+  ids: z
+    .string()
+    .trim()
+    .max(2000)
+    .transform((v) => (v === '' ? [] : v.split(',')))
+    .pipe(z.array(uuidSchema).max(50))
+    .optional(),
+});
+export type PickingListQuery = z.output<typeof pickingListQuery>;
+
+export interface PickingListItem {
+  variantId: string;
+  name: string;
+  sku: string | null;
+  /** Still to deliver on these orders, thousandths */
+  qty: number;
+  /** On the branch's shelf now, thousandths */
+  onHand: number;
+}
+
+export interface PickingList {
+  warehouseBranchId: string;
+  warehouseName: string;
+  orders: { id: string; number: string; customerName: string; deliveryDate: string | null }[];
+  items: PickingListItem[];
+}
+
+export const committedQuery = z.object({ warehouseBranchId: uuidSchema.optional() });
+/** What open orders already promise of an item at a branch (never taken off the shelf), thousandths */
+export interface CommittedRow {
+  warehouseBranchId: string;
+  variantId: string;
+  qty: number;
+}
+
+/** Approving or refusing a customer a rep added (a pending customer is sold to for cash only) */
+export const customerApprovalInput = z.object({
+  status: z.enum(['approved', 'rejected']),
+});
+export type CustomerApprovalInput = z.output<typeof customerApprovalInput>;
+
+// ─── No-sale reasons and commission plans (the owner's lists) ───────────────
+
+export const noSaleReasonInput = z.object({
+  name: z.string('اكتب السبب').trim().min(2, 'اكتب السبب').max(60, 'السبب طويل'),
+  sortOrder: z.int().min(0).max(10_000).optional(),
+  isActive: z.boolean().optional(),
+});
+export type NoSaleReasonInput = z.output<typeof noSaleReasonInput>;
+export const noSaleReasonUpdateInput = noSaleReasonInput.extend({ version: versionSchema });
+export type NoSaleReasonUpdateInput = z.output<typeof noSaleReasonUpdateInput>;
+
+export interface NoSaleReasonRow {
+  id: string;
+  /** Set on the ones that came with the store */
+  key: string | null;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
   version: number;
 }
 
@@ -508,3 +638,23 @@ export const commissionPlanInput = z
     }
   });
 export type CommissionPlanInput = z.output<typeof commissionPlanInput>;
+
+export const commissionPlanUpdateInput = z.intersection(
+  commissionPlanInput,
+  z.object({ version: versionSchema }),
+);
+export type CommissionPlanUpdateInput = z.output<typeof commissionPlanUpdateInput>;
+
+export interface CommissionPlanRow {
+  id: string;
+  name: string;
+  basis: (typeof COMMISSION_BASES)[number];
+  mode: (typeof COMMISSION_MODES)[number];
+  rateBp: number | null;
+  tiers: { fromMinor: number; rateBp: number }[] | null;
+  returnsEffect: (typeof COMMISSION_RETURNS_EFFECTS)[number];
+  isActive: boolean;
+  /** Reps working under it */
+  repCount: number;
+  version: number;
+}

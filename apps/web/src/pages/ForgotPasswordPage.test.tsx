@@ -7,12 +7,15 @@ import { renderApp } from '../test/renderApp';
 const RESET_ID = '0193e5b4-0000-7000-8000-000000000002';
 const codeSent = { status: 202, body: { resetId: RESET_ID, expiresIn: 600 } };
 
+// The page is loaded lazily: the first visit in a run waits for the chunk
 describe('the login page link', () => {
   it('offers «نسيت كلمة السر؟» and opens the recovery page', async () => {
     mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
     const { user } = renderApp('/login');
     await user.click(await screen.findByRole('link', { name: 'نسيت كلمة السر؟' }));
-    expect(await screen.findByRole('heading', { name: 'نسيت كلمة السر؟' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: 'نسيت كلمة السر؟' }, { timeout: 8000 }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -20,7 +23,7 @@ describe('ForgotPasswordPage', () => {
   it('shows the phone error and calls nothing for an invalid number', async () => {
     const { fetchMock } = mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
     const { user } = renderApp('/forgot-password');
-    await user.type(await screen.findByLabelText('رقم الجوال'), '123');
+    await user.type(await screen.findByLabelText('رقم الجوال', {}, { timeout: 8000 }), '123');
     fetchMock.mockClear();
     await user.click(screen.getByRole('button', { name: 'أرسل الرمز' }));
     expect(screen.getByText('رقم الجوال غير صحيح. مثال: 0912345678')).toBeInTheDocument();

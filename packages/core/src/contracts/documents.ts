@@ -376,6 +376,11 @@ export const salePayloadSchema = z
      * contract v1 as optional: an ordinary sale leaves it out.
      */
     onlineOrderId: uuidSchema.nullable().optional(),
+    /**
+     * A pre-sale order (SO, «المندوبون والتوزيع») this sale delivers: the sale marks it delivered, in
+     * part or in whole. Optional and additive, like onlineOrderId: it changes nothing about how the sale posts.
+     */
+    salesOrderId: uuidSchema.nullable().optional(),
     /** The prescription of a pharmacy sale (03 › الصيدليات); optional, an ordinary sale leaves it out */
     prescription: prescriptionSchema.nullable().optional(),
     /**

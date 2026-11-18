@@ -33,7 +33,7 @@ import {
   UndoIcon,
   useDigits,
 } from '@serva/ui';
-import type { InvoiceHit } from '@serva/core/contracts/till';
+import type { InvoiceHit, InvoiceLookup } from '@serva/core/contracts/till';
 import type { Catalog } from '../catalog';
 import { ExactMoney } from '../ExactMoney';
 import { clockText, dateText, isolateSizes } from '../format';
@@ -129,6 +129,8 @@ export function ReturnScreen({
   onPrint,
   onExchange,
   startExchange = false,
+  initialSearch = '',
+  extraInvoices = [],
 }: {
   session: StaffSession;
   catalog: Catalog;
@@ -140,6 +142,10 @@ export function ReturnScreen({
   onExchange?: (voucherCode: string | null, cashBackMinor?: number) => void;
   /** Opened from «تبديل»: the exchange choice and its reason start picked */
   startExchange?: boolean;
+  /** The rep opens it from a customer's page: the search starts on his name */
+  initialSearch?: string;
+  /** The rep's morning sheet: his customers' invoices of the last 60 days, found here without the server */
+  extraInvoices?: readonly InvoiceLookup[];
 }) {
   const pos = usePos();
   const digits = useDigits();
@@ -148,7 +154,7 @@ export function ReturnScreen({
   const REASONS = useMemo(() => returnReasons(settings.sectors), [settings.sectors]);
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
   const [tick, setTick] = useState(0);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const [picked, setPicked] = useState<ReturnableSale | null>(null);
   const [qty, setQty] = useState<Record<number, number>>({});
   // «العلبة مغلقة»: the sealed-box tick of a medicine line (03 › الصيدليات)
@@ -198,10 +204,16 @@ export function ReturnScreen({
     };
   }, [pos.store, tick]);
 
-  const sales = useMemo(
-    () => (entries ? returnableSales(entries, pos.now(), windowDays) : []),
-    [entries, pos, windowDays],
-  );
+  const sales = useMemo(() => {
+    if (!entries) return [];
+    const mine = returnableSales(entries, pos.now(), windowDays);
+    const known = new Set(mine.map((s) => s.id));
+    const extra = extraInvoices
+      .filter((inv) => !known.has(inv.id))
+      .map((inv) => saleFromServer(inv, entries, pos.now(), windowDays))
+      .filter((s): s is ReturnableSale => s !== null);
+    return [...mine, ...extra].sort((a, b) => Date.parse(b.deviceTime) - Date.parse(a.deviceTime));
+  }, [entries, pos, windowDays, extraInvoices]);
   const online = pos.online();
   const shown = sales.filter((s) => matchesInvoice(s, search, catalog.customers)).slice(0, 30);
 

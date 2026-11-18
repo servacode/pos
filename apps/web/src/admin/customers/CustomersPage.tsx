@@ -152,6 +152,7 @@ export function CustomersPage() {
   const [search, setSearch] = useState('');
   const [owing, setOwing] = useState(false);
   const [away, setAway] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const [kind, setKind] = useState<CustomerKind | ''>('');
   const [adding, setAdding] = useState(false);
   // Every customer, whatever the search says, for the duplicate warning of the new-customer form
@@ -191,8 +192,11 @@ export function CustomersPage() {
   const cutoff = new Date(Date.parse(`${today}T00:00:00Z`) - 90 * 86_400_000).toISOString().slice(0, 10);
   // «لم يزر منذ 90 يوماً»: bought before, but not in the last 90 days
   const items = (list?.items ?? []).filter(
-    (c) => !away || (!!c.lastPurchaseDate && c.lastPurchaseDate < cutoff),
+    (c) =>
+      (!away || (!!c.lastPurchaseDate && c.lastPurchaseDate < cutoff)) &&
+      (!waiting || c.approvalStatus === 'pending'),
   );
+  const waitingCount = (list?.items ?? []).filter((c) => c.approvalStatus === 'pending').length;
   const owingCount = items.filter((c) => c.balanceMinor > 0).length;
   // The debt tile follows the same filter as the other tiles (all of them say so below when it is on)
   const owedMinor = away
@@ -224,6 +228,7 @@ export function CustomersPage() {
               {c.priceTier === 'wholesale' ? <Badge tone="brand">جملة</Badge> : null}
               {c.kind ? <Badge tone="info">{CUSTOMER_KIND_LABELS[c.kind]}</Badge> : null}
               {c.archived ? <Badge>مؤرشف</Badge> : null}
+              {c.approvalStatus === 'pending' ? <Badge tone="warning">بانتظار الموافقة</Badge> : null}
             </span>
             {c.phone && !((clothing && c.favouriteSize) || c.lastPurchaseDate) ? (
               <span className="text-xs text-ink-muted md:hidden">
@@ -428,6 +433,13 @@ export function CustomersPage() {
               checked={away}
               onChange={(e) => setAway(e.target.checked)}
             />
+            {waitingCount > 0 ? (
+              <ToggleChip
+                label={`بانتظار الموافقة (${waitingCount})`}
+                checked={waiting}
+                onChange={(e) => setWaiting(e.target.checked)}
+              />
+            ) : null}
           </div>
           {/* The count is a line over the list, not a card of its own */}
           {list ? (

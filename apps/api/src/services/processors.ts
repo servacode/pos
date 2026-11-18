@@ -47,6 +47,7 @@ import {
 import type { DocumentContext, SyncProcessors } from './sync-push';
 import { returnSerials, sellSerials } from './serials';
 import { refreshExpiry } from './expiry';
+import { deliverSalesOrder } from './sales-orders';
 import { applyAllocations, reconcilePlanAfterReturn, recordPlanFromSale } from './installments';
 import { recordReturnBatches, recordSaleBatches } from './batches';
 import { inScope, permissionScope } from '../auth/permissions';
@@ -317,6 +318,13 @@ async function processSale({ tx, device, doc }: DocumentContext) {
           eq(onlineOrders.status, 'accepted'),
         ),
       );
+  }
+  // A pre-sale order this sale delivers («المندوبون والتوزيع»): marked delivered, in part or whole; nothing else changes
+  if (sale.salesOrderId) {
+    await deliverSalesOrder(tx, tenantId, sale.salesOrderId, {
+      customerId: sale.customerId,
+      lines: sale.lines,
+    });
   }
   // A credit sale over the customer's limit is accepted and flagged (08 › قاعدة 8)
   if (sale.customerId && sale.payments.some((p) => p.method === 'credit')) {

@@ -1,24 +1,36 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import type {
-  RegionInput,
-  RegionRow,
-  RegionUpdateInput,
-  RepInput,
-  RepMode,
-  RepRow,
-  RepUpdateInput,
-  RouteCustomer,
-  RouteCustomersInput,
-  RouteDetail,
-  RouteInput,
-  RouteRow,
-  RouteUpdateInput,
-  VanInput,
-  VanRow,
+import {
+  distributionSettingsOf,
+  type CommissionPlanInput,
+  type CommissionPlanRow,
+  type CommissionPlanUpdateInput,
+  type CustomerApprovalInput,
+  type DistributionSettings,
+  type NoSaleReasonInput,
+  type NoSaleReasonRow,
+  type NoSaleReasonUpdateInput,
+  type RegionInput,
+  type RepCandidate,
+  type RegionRow,
+  type RegionUpdateInput,
+  type RepInput,
+  type RepMode,
+  type RepRow,
+  type RepUpdateInput,
+  type RouteCustomer,
+  type RouteCustomersInput,
+  type RouteDetail,
+  type RouteInput,
+  type RouteRow,
+  type RouteUpdateInput,
+  type VanInput,
+  type VanRow,
 } from '@serva/core';
 import {
   branches,
+  commissionPlans,
   customers,
+  noSaleReasons,
   regions,
   routeCustomers,
   routes,
@@ -407,7 +419,8 @@ const repRow = (r: RepDb): RepRow => ({
 
 const repSelect = sql`
   select r.id, r.user_id, u.full_name as user_name, r.branch_id, b.name as branch_name,
-         r.van_branch_id, v.name as van_name, v.vehicle_plate, r.device_id, d.name as device_name,
+         r.van_branch_id, v.name as van_name, v.vehicle_plate,
+         coalesce(r.device_id, vd.id) as device_id, coalesce(d.name, vd.name) as device_name,
          r.mode, r.max_discount_bp, r.daily_credit_limit_minor::text as daily_credit_limit_minor,
          r.commission_plan_id, r.status, r.note, r.version,
          (select count(*)::int from routes x where x.rep_id = r.id and x.is_active) as routes
@@ -415,7 +428,11 @@ const repSelect = sql`
   join users u on u.tenant_id = r.tenant_id and u.id = r.user_id
   join branches b on b.tenant_id = r.tenant_id and b.id = r.branch_id
   left join branches v on v.tenant_id = r.tenant_id and v.id = r.van_branch_id
-  left join devices d on d.tenant_id = r.tenant_id and d.id = r.device_id`;
+  left join devices d on d.tenant_id = r.tenant_id and d.id = r.device_id
+  left join lateral (
+    select dd.id, dd.name from devices dd
+    where dd.tenant_id = r.tenant_id and dd.branch_id = r.van_branch_id and dd.kind = 'rep_phone' and dd.revoked_at is null
+    order by dd.created_at desc limit 1) vd on true`;
 
 async function readRep(tx: Transaction, id: string): Promise<RepRow> {
   const [row] = await tx.execute<RepDb>(sql`${repSelect} where r.id = ${id}`);
@@ -444,6 +461,16 @@ async function checkRepPlaces(
   }
 }
 
+/** The phone of a rep is a live rep_phone paired to his van */
+async function checkRepDevice(tx: Transaction, deviceId: string, vanBranchId: string | null): Promise<void> {
+  const [device] = await tx.execute<{ branch_id: string }>(
+    sql`select branch_id from devices where id = ${deviceId} and kind = 'rep_phone' and revoked_at is null`,
+  );
+  if (!device) throw fieldError('deviceId', 'جهاز غير موجود');
+  if (!vanBranchId || device.branch_id !== vanBranchId)
+    throw fieldError('deviceId', 'هذا الجهاز مربوط بسيارة أخرى');
+}
+
 const isVanTaken = (error: unknown) => isUniqueViolation(error, 'sales_reps_van_unique');
 
 export function listReps(db: Database, auth: AccessClaims): Promise<RepRow[]> {
@@ -451,6 +478,21 @@ export function listReps(db: Database, auth: AccessClaims): Promise<RepRow[]> {
     await guard(tx, auth);
     const rows = await tx.execute<RepDb>(sql`${repSelect} order by u.full_name, r.id`);
     return rows.map(repRow);
+  });
+}
+
+/** The staff who hold the rep role and are not reps yet: the supervisor picks one without needing the staff page */
+export function listRepCandidates(db: Database, auth: AccessClaims): Promise<RepCandidate[]> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const rows = await tx.execute<{ id: string; full_name: string; phone: string | null }>(sql`
+      select distinct u.id, u.full_name, u.phone
+      from users u
+      join user_roles ur on ur.tenant_id = u.tenant_id and ur.user_id = u.id
+      join roles r on r.tenant_id = ur.tenant_id and r.id = ur.role_id and r.key = 'rep'
+      where u.status = 'active' and not exists (select 1 from sales_reps x where x.user_id = u.id)
+      order by u.full_name, u.id`);
+    return rows.map((r) => ({ userId: r.id, name: r.full_name, phone: r.phone }));
   });
 }
 
@@ -469,6 +511,7 @@ export function createRep(
       .where(and(eq(users.id, input.userId), eq(users.status, 'active')));
     if (!user) throw fieldError('userId', 'مستخدم غير موجود');
     await checkRepPlaces(tx, input);
+    if (input.deviceId) await checkRepDevice(tx, input.deviceId, input.vanBranchId ?? null);
     let id: string;
     try {
       const [made] = await tx
@@ -482,6 +525,7 @@ export function createRep(
           maxDiscountBp: input.maxDiscountBp ?? null,
           dailyCreditLimitMinor: input.dailyCreditLimitMinor ?? null,
           commissionPlanId: input.commissionPlanId ?? null,
+          deviceId: input.deviceId ?? null,
           note: text(input.note),
         })
         .returning({ id: salesReps.id });
@@ -523,6 +567,17 @@ export function updateRep(
     const commissionPlanId =
       input.commissionPlanId === undefined ? before.commissionPlanId : input.commissionPlanId;
     await checkRepPlaces(tx, { branchId: input.branchId, vanBranchId, commissionPlanId });
+    // His own phone stays while it is still on his van; a new one is checked; a new van drops the old phone
+    const [stored] = await tx
+      .select({ deviceId: salesReps.deviceId })
+      .from(salesReps)
+      .where(eq(salesReps.id, id));
+    let deviceId: string | null = stored?.deviceId ?? null;
+    if (input.deviceId !== undefined) deviceId = input.deviceId;
+    if (deviceId) {
+      if (input.deviceId !== undefined) await checkRepDevice(tx, deviceId, vanBranchId);
+      else if (vanBranchId !== before.vanBranchId) deviceId = null;
+    }
     try {
       await tx
         .update(salesReps)
@@ -536,6 +591,7 @@ export function updateRep(
               ? before.dailyCreditLimitMinor
               : input.dailyCreditLimitMinor,
           commissionPlanId,
+          deviceId,
           note: input.note === undefined ? before.note : text(input.note),
         })
         .where(eq(salesReps.id, id));
@@ -853,5 +909,322 @@ export function setRouteCustomers(
       meta,
     );
     return readRoute(tx, id);
+  });
+}
+
+// ─── Settings ───────────────────────────────────────────────────────────────
+
+/** The store's distribution rules, the defaults filling what the owner never chose (a rep phone reads them too) */
+export async function readDistributionSettings(tx: Transaction): Promise<DistributionSettings> {
+  const [row] = await tx.execute<{ distribution: Record<string, unknown> | null }>(
+    sql`select distribution from tenant_settings limit 1`,
+  );
+  return distributionSettingsOf(row?.distribution ?? null);
+}
+
+export function getDistributionSettings(db: Database, auth: AccessClaims): Promise<DistributionSettings> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    return readDistributionSettings(tx);
+  });
+}
+
+export function saveDistributionSettings(
+  db: Database,
+  auth: AccessClaims,
+  input: DistributionSettings,
+  meta: RequestMeta,
+): Promise<DistributionSettings> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const before = await readDistributionSettings(tx);
+    await tx.execute(
+      sql`update tenant_settings set distribution = ${JSON.stringify(input)}::jsonb, updated_at = now() where tenant_id = ${auth.tenantId}`,
+    );
+    const changes: Record<string, [unknown, unknown]> = {};
+    for (const key of Object.keys(input) as (keyof DistributionSettings)[]) {
+      if (before[key] !== input[key]) changes[key] = [before[key], input[key]];
+    }
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'distribution.settings',
+        entity: 'tenant_settings',
+        entityId: auth.tenantId,
+        changes,
+      },
+      meta,
+    );
+    return readDistributionSettings(tx);
+  });
+}
+
+// ─── No-sale reasons ────────────────────────────────────────────────────────
+
+const reasonRow = (r: typeof noSaleReasons.$inferSelect): NoSaleReasonRow => ({
+  id: r.id,
+  key: r.key,
+  name: r.name,
+  sortOrder: r.sortOrder,
+  isActive: r.isActive,
+  version: r.version,
+});
+
+export function listNoSaleReasons(db: Database, auth: AccessClaims): Promise<NoSaleReasonRow[]> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const rows = await tx.select().from(noSaleReasons).orderBy(noSaleReasons.sortOrder, noSaleReasons.name);
+    return rows.map(reasonRow);
+  });
+}
+
+export function createNoSaleReason(
+  db: Database,
+  auth: AccessClaims,
+  input: NoSaleReasonInput,
+  meta: RequestMeta,
+): Promise<NoSaleReasonRow> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const [last] = await tx.execute<{ top: number | null }>(
+      sql`select max(sort_order) as top from no_sale_reasons`,
+    );
+    const [made] = await tx
+      .insert(noSaleReasons)
+      .values({
+        tenantId: auth.tenantId,
+        name: input.name,
+        sortOrder: input.sortOrder ?? (last?.top ?? 0) + 1,
+        isActive: input.isActive ?? true,
+      })
+      .returning();
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'no_sale_reason.create',
+        entity: 'no_sale_reason',
+        entityId: made!.id,
+        changes: { name: [null, input.name] },
+      },
+      meta,
+    );
+    return reasonRow(made!);
+  });
+}
+
+export function updateNoSaleReason(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  input: NoSaleReasonUpdateInput,
+  meta: RequestMeta,
+): Promise<NoSaleReasonRow> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const [before] = await tx.select().from(noSaleReasons).where(eq(noSaleReasons.id, id));
+    if (!before) throw notFound('هذا السبب');
+    if (before.version !== input.version) throw staleVersion();
+    const [after] = await tx
+      .update(noSaleReasons)
+      .set({
+        name: input.name,
+        sortOrder: input.sortOrder ?? before.sortOrder,
+        isActive: input.isActive ?? before.isActive,
+      })
+      .where(eq(noSaleReasons.id, id))
+      .returning();
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'no_sale_reason.update',
+        entity: 'no_sale_reason',
+        entityId: id,
+        changes: { name: [before.name, after!.name], isActive: [before.isActive, after!.isActive] },
+      },
+      meta,
+    );
+    return reasonRow(after!);
+  });
+}
+
+// ─── Commission plans (report-only for now) ─────────────────────────────────
+
+const planSelect = sql`
+  select p.id, p.name, p.basis, p.mode, p.rate_bp, p.tiers, p.returns_effect, p.is_active, p.version,
+         (select count(*)::int from sales_reps r where r.commission_plan_id = p.id and r.status = 'active') as reps
+  from commission_plans p`;
+
+type PlanDb = {
+  id: string;
+  name: string;
+  basis: string;
+  mode: string;
+  rate_bp: number | null;
+  tiers: { fromMinor: number; rateBp: number }[] | null;
+  returns_effect: string;
+  is_active: boolean;
+  version: number;
+  reps: number;
+};
+
+const planRow = (r: PlanDb): CommissionPlanRow => ({
+  id: r.id,
+  name: r.name,
+  basis: r.basis as CommissionPlanRow['basis'],
+  mode: r.mode as CommissionPlanRow['mode'],
+  rateBp: r.rate_bp,
+  tiers: r.tiers,
+  returnsEffect: r.returns_effect as CommissionPlanRow['returnsEffect'],
+  isActive: r.is_active,
+  repCount: r.reps,
+  version: r.version,
+});
+
+async function readPlan(tx: Transaction, id: string): Promise<CommissionPlanRow> {
+  const [row] = await tx.execute<PlanDb>(sql`${planSelect} where p.id = ${id}`);
+  if (!row) throw notFound('خطة العمولة هذه');
+  return planRow(row);
+}
+
+const planName = (error: unknown) =>
+  isUniqueViolation(error, 'commission_plans_name_unique')
+    ? fieldError('name', 'يوجد خطة بهذا الاسم')
+    : error;
+
+/** A flat plan keeps no tiers and a tiered one no flat rate, so what is stored always reads one way */
+const planValues = (input: CommissionPlanInput) => ({
+  name: input.name,
+  basis: input.basis,
+  mode: input.mode,
+  rateBp: input.mode === 'flat' ? input.rateBp : null,
+  tiers: input.mode === 'tiered' ? [...(input.tiers ?? [])].sort((a, b) => a.fromMinor - b.fromMinor) : null,
+  returnsEffect: input.returnsEffect,
+  isActive: input.isActive,
+});
+
+export function listCommissionPlans(db: Database, auth: AccessClaims): Promise<CommissionPlanRow[]> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const rows = await tx.execute<PlanDb>(sql`${planSelect} order by p.name, p.id`);
+    return rows.map(planRow);
+  });
+}
+
+export function createCommissionPlan(
+  db: Database,
+  auth: AccessClaims,
+  input: CommissionPlanInput,
+  meta: RequestMeta,
+): Promise<CommissionPlanRow> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    let id: string;
+    try {
+      const [made] = await tx
+        .insert(commissionPlans)
+        .values({ tenantId: auth.tenantId, ...planValues(input) })
+        .returning({ id: commissionPlans.id });
+      id = made!.id;
+    } catch (error) {
+      throw planName(error);
+    }
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'commission_plan.create',
+        entity: 'commission_plan',
+        entityId: id,
+        changes: { name: [null, input.name] },
+      },
+      meta,
+    );
+    return readPlan(tx, id);
+  });
+}
+
+export function updateCommissionPlan(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  input: CommissionPlanUpdateInput,
+  meta: RequestMeta,
+): Promise<CommissionPlanRow> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const before = await readPlan(tx, id);
+    if (before.version !== input.version) throw staleVersion();
+    try {
+      await tx.update(commissionPlans).set(planValues(input)).where(eq(commissionPlans.id, id));
+    } catch (error) {
+      throw planName(error);
+    }
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'commission_plan.update',
+        entity: 'commission_plan',
+        entityId: id,
+        changes: {
+          name: [before.name, input.name],
+          rateBp: [before.rateBp, input.mode === 'flat' ? input.rateBp : null],
+          isActive: [before.isActive, input.isActive],
+        },
+      },
+      meta,
+    );
+    return readPlan(tx, id);
+  });
+}
+
+// ─── A customer a rep added ─────────────────────────────────────────────────
+
+/**
+ * The supervisor approves or refuses a customer a rep added (until then he is sold to for cash only).
+ * Refusing archives him, approving a refused one brings him back; the customer's debts and history stay.
+ */
+export function setCustomerApproval(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  input: CustomerApprovalInput,
+  meta: RequestMeta,
+): Promise<void> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await guard(tx, auth);
+    const [before] = await tx
+      .select({ status: customers.approvalStatus, archivedAt: customers.archivedAt })
+      .from(customers)
+      .where(eq(customers.id, id));
+    if (!before) throw notFound('هذا الزبون');
+    if (before.status !== input.status) {
+      const archivedAt =
+        input.status === 'rejected' ? sql`now()` : before.status === 'rejected' ? null : before.archivedAt;
+      await tx
+        .update(customers)
+        .set({ approvalStatus: input.status, archivedAt, updatedAt: sql`now()` })
+        .where(eq(customers.id, id));
+      await audit(
+        tx,
+        {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: 'customer.approval',
+          entity: 'customer',
+          entityId: id,
+          changes: { approvalStatus: [before.status, input.status] },
+        },
+        meta,
+      );
+    }
   });
 }

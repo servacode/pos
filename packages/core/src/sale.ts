@@ -134,6 +134,8 @@ export interface SaleCart
   service?: ServiceInfo | null;
   /** An online shop order this sale delivers (26 › حياة الطلب); left out of an ordinary sale */
   onlineOrderId?: string | null;
+  /** A pre-sale order this sale delivers (distribution); left out of an ordinary sale */
+  salesOrderId?: string | null;
   /** A pharmacy sale's prescription (03 › الصيدليات); left out of an ordinary sale */
   prescription?: Prescription | null;
 }
@@ -416,6 +418,7 @@ export function buildSalePayload(cart: SaleCart): SalePayload {
     note: cart.note ?? null,
     ...(cart.service ? { service: cart.service } : {}),
     ...(cart.onlineOrderId ? { onlineOrderId: cart.onlineOrderId } : {}),
+    ...(cart.salesOrderId ? { salesOrderId: cart.salesOrderId } : {}),
     ...(cart.prescription ? { prescription: cart.prescription } : {}),
   };
 }

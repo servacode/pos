@@ -22,6 +22,7 @@
     "./phone": "./src/phone.ts",
     "./sectors": "./src/sectors.ts",
     "./permissions": "./src/permissions.ts",
+    "./distribution": "./src/distribution.ts",
     "./contracts/*": "./src/contracts/*.ts"
   },
   "scripts": {

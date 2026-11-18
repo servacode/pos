@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import {
   activeInput,
+  commissionPlanInput,
+  commissionPlanUpdateInput,
+  customerApprovalInput,
+  distributionSettingsInput,
+  noSaleReasonInput,
+  noSaleReasonUpdateInput,
   regionInput,
   regionUpdateInput,
   repInput,
@@ -11,22 +17,35 @@ import {
   uuidSchema,
   vanInput,
 } from '@serva/core';
+import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
+import { readCustomer } from '../services/customers';
+import { deviceRepSettings } from '../services/sales-orders';
 import {
+  createCommissionPlan,
+  createNoSaleReason,
   createRegion,
   createRep,
   createRoute,
   createVan,
+  getDistributionSettings,
   getRoute,
+  listCommissionPlans,
+  listNoSaleReasons,
   listRegions,
+  listRepCandidates,
   listReps,
   listRoutes,
   listVans,
+  saveDistributionSettings,
+  setCustomerApproval,
   setRepActive,
   setRouteCustomers,
   setVanActive,
+  updateCommissionPlan,
+  updateNoSaleReason,
   updateRegion,
   updateRep,
   updateRoute,
@@ -107,6 +126,10 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
     if (!request.auth) throw unauthorized();
     return listReps(app.db, request.auth);
   });
+  app.get('/v1/reps/candidates', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listRepCandidates(app.db, request.auth);
+  });
   app.post('/v1/reps', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
     const made = await createRep(app.db, request.auth, parseBody(repInput, request.body), meta(request));
@@ -161,5 +184,90 @@ export async function distributionRoutes(app: FastifyInstance): Promise<void> {
       parseBody(routeCustomersInput, request.body),
       meta(request),
     );
+  });
+  // The store's distribution rules
+  app.get('/v1/distribution/settings', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return getDistributionSettings(app.db, request.auth);
+  });
+  app.put('/v1/distribution/settings', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return saveDistributionSettings(
+      app.db,
+      request.auth,
+      parseBody(distributionSettingsInput, request.body),
+      meta(request),
+    );
+  });
+  // A rep phone reads the same rules (order hold days, approval of new customers, …)
+  app.get('/v1/device/distribution/settings', { onRequest: requireDevice() }, async (request) => {
+    if (!request.device) throw unauthorized();
+    return deviceRepSettings(app.db, request.device);
+  });
+
+  // The owner's no-sale reasons
+  app.get('/v1/no-sale-reasons', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listNoSaleReasons(app.db, request.auth);
+  });
+  app.post('/v1/no-sale-reasons', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const made = await createNoSaleReason(
+      app.db,
+      request.auth,
+      parseBody(noSaleReasonInput, request.body),
+      meta(request),
+    );
+    return reply.code(201).send(made);
+  });
+  app.patch('/v1/no-sale-reasons/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updateNoSaleReason(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا السبب'),
+      parseBody(noSaleReasonUpdateInput, request.body),
+      meta(request),
+    );
+  });
+
+  // Commission plans (report-only)
+  app.get('/v1/commission-plans', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listCommissionPlans(app.db, request.auth);
+  });
+  app.post('/v1/commission-plans', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const made = await createCommissionPlan(
+      app.db,
+      request.auth,
+      parseBody(commissionPlanInput, request.body),
+      meta(request),
+    );
+    return reply.code(201).send(made);
+  });
+  app.patch('/v1/commission-plans/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return updateCommissionPlan(
+      app.db,
+      request.auth,
+      idOf(request.params, 'خطة العمولة هذه'),
+      parseBody(commissionPlanUpdateInput, request.body),
+      meta(request),
+    );
+  });
+
+  // The supervisor's answer on a customer a rep added
+  app.post('/v1/customers/:id/approval', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const id = idOf(request.params, 'هذا الزبون');
+    await setCustomerApproval(
+      app.db,
+      request.auth,
+      id,
+      parseBody(customerApprovalInput, request.body),
+      meta(request),
+    );
+    return readCustomer(app.db, request.auth, id);
   });
 }

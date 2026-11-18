@@ -73,6 +73,8 @@ export interface NavEntry {
    * expiry dates). A store with no business type set sees everything.
    */
   sectors?: readonly SectorKey[];
+  /** Shown only on a plan that has the reps and distribution module */
+  reps?: boolean;
 }
 
 export type NavGroupKey = 'home' | 'selling' | 'stock' | 'buying' | 'money' | 'admin';
@@ -201,6 +203,14 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
     label: 'رسائل للزبائن',
     icon: MegaphoneIcon,
     permission: ['customers.manage'],
+  },
+  {
+    section: 'sales',
+    to: '/distribution',
+    label: 'التوزيع',
+    icon: TransferIcon,
+    permission: ['routes.manage'],
+    reps: true,
   },
   {
     section: 'online',
@@ -460,7 +470,10 @@ function fitsSectors(entry: NavEntry, sectors: readonly SectorKey[] | undefined)
   return !entry.sectors || storeSells(sectors, entry.sectors);
 }
 
-type NavMe = Pick<MeResponse, 'user' | 'settings'> & { tenant?: { sectors?: readonly SectorKey[] } };
+type NavMe = Pick<MeResponse, 'user' | 'settings'> & {
+  tenant?: { sectors?: readonly SectorKey[] };
+  subscription?: { repsEnabled?: boolean };
+};
 
 /** The pages this user may open, flat and in menu order. */
 export function navFor(me: NavMe): (NavEntry & { section: NavSectionKey })[] {
@@ -468,6 +481,7 @@ export function navFor(me: NavMe): (NavEntry & { section: NavSectionKey })[] {
     (entry) =>
       (!entry.permission || holdsAny(me, entry.permission)) &&
       (!entry.accountingMode || inAccountingMode(me)) &&
+      (!entry.reps || me.subscription?.repsEnabled) &&
       fitsSectors(entry, me.tenant?.sectors),
   );
 }

@@ -179,6 +179,8 @@ export interface MeResponse {
     writeUntil: string | null;
     /** Whole days until selling stops once in grace (or until the period ends); null when unlimited */
     graceDaysLeft: number | null;
+    /** The plan has the reps and distribution module (plans.limits.reps is not 0); the menu hides it otherwise */
+    repsEnabled?: boolean;
   };
   branches: { id: string; code: string; name: string }[];
   /** The start wizard (04 › معالج البداية): the step to resume at, and whether it is over */

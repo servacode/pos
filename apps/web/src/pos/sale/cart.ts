@@ -139,6 +139,8 @@ export interface Cart {
     /** The offer the customer's coupon code opened: it prices this sale's lines like a running promotion */
     couponRule?: OrderCouponRule | null;
   };
+  /** A pre-sale order this sale delivers (المندوبون): the sale names it, and the server marks it delivered, in part or whole */
+  salesOrder?: { id: string; number: string };
   /** A sale that delivers an alteration ticket (03 › التعديل والتقصير): the ticket turns delivered once it is saved */
   alteration?: { id: string; number: string; version: number };
   /** A sale made from a quotation (03 › الجملة): the quotation turns converted once the sale is saved */

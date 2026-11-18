@@ -34,6 +34,7 @@
 /apps/api/src/services/batches.ts @servacode
 /apps/api/src/services/expiry.ts @servacode
 /apps/api/src/services/serials.ts @servacode
+/apps/api/src/services/sales-orders.ts @servacode
 /apps/api/src/services/purchases.ts @servacode
 /apps/api/src/services/purchase-order-receipt.ts @servacode
 

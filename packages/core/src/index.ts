@@ -52,6 +52,7 @@ export * from './packs';
 export * from './rentals';
 export * from './installments';
 export * from './ageing';
+export * from './distribution';
 export * from './subscription-lifecycle';
 export * from './pricing';
 export * from './sale';
