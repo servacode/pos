@@ -9,14 +9,13 @@ import { postDayStart } from './api';
 import { cartonText, packsOf } from './packs';
 import { useRepRequired } from './state';
 
-const ShiftOpenScreen = lazyChunk(() =>
-  import('../pos/shift/ShiftScreens').then((m) => ({ default: m.ShiftOpenScreen })),
-);
+// The shift opens at 0 and the float is a pay-in from the safe with a manager's code (round 35 › D5)
+const RepShiftOpen = lazyChunk(() => import('./DayFloat').then((m) => ({ default: m.RepShiftOpen })));
 
 /**
  * «ابدأ يومك»: the rep checks what the supervisor loaded on his van, confirms it, then opens his
- * shift with the cash he starts with (his drawer is account 1110: the float is the opening count).
- * The server is told the day started when it can be reached; nothing here posts anything.
+ * shift at 0 (his drawer is account 1110) and takes the float the manager hands him as a pay-in from
+ * the safe, with the manager's code. The server is told the day started when it can be reached.
  */
 export function DayStart({
   session,
@@ -42,17 +41,14 @@ export function DayStart({
 
   if (confirmed) {
     return (
-      <ShiftOpenScreen
+      <RepShiftOpen
         session={session}
         catalog={catalog}
-        onOpened={(opened) => {
+        onOpened={(opened, float) => {
           const token = pos.device.token;
           if (token && rep.businessDate && pos.online()) {
-            const openingCash: Record<string, number> = {};
-            for (const o of opened.opening)
-              openingCash[o.currency] = (openingCash[o.currency] ?? 0) + o.amountMinor;
             void postDayStart(
-              { businessDate: rep.businessDate, openingCash, loadConfirmed: true },
+              { businessDate: rep.businessDate, openingCash: float, loadConfirmed: true },
               token,
               pos.fetch,
             );
@@ -102,7 +98,9 @@ export function DayStart({
         checked={confirmed}
         onChange={(e) => setConfirmed(e.target.checked)}
       />
-      <p className="text-xs text-ink-muted">تؤكد الحمولة ثم تعدّ نقدك الافتتاحي وتفتح الوردية.</p>
+      <p className="text-xs text-ink-muted">
+        تؤكد الحمولة ثم تفتح الوردية وتسجّل العهدة التي يسلّمك إياها المدير.
+      </p>
     </section>
   );
 }

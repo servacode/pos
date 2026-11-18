@@ -46,6 +46,7 @@ import {
   updatePurchaseOrder,
 } from '../services/purchase-orders';
 import { expiryReport } from '../services/expiry';
+import { listDamagedStock } from '../services/damaged-stock';
 import { recall, setBatchBlocked } from '../services/batches';
 import { parseBody } from './validation';
 
@@ -170,6 +171,11 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/inventory', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return inventory(app.db, request.auth, parseBody(inventoryQuery, request.query));
+  });
+  // «البضاعة التالفة» (round 35, D7): what each store holds as damaged goods
+  app.get('/v1/damaged-stock', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listDamagedStock(app.db, request.auth);
   });
   app.get('/v1/inventory/expiry', opts, async (request) => {
     if (!request.auth) throw unauthorized();

@@ -33,3 +33,4 @@ apps/api/src/services/subscription-gate.ts
 apps/api/src/services/purchase-order-receipt.ts
 packages/core/src/contracts/installments.ts
 apps/api/src/services/installments.ts
+apps/api/src/services/damaged-stock.ts

@@ -5,6 +5,8 @@ import {
   customerOfDocument,
   dayList,
   daySummary,
+  FLOAT_REASON,
+  floatOf,
   isEmptyVisit,
   leaving,
   localBalanceDelta,
@@ -16,6 +18,8 @@ import {
 import { salesOrderCart } from './orderCart';
 import { PRODUCTS, posSets } from '../test/pos';
 import { loadCatalog } from '../pos/catalog';
+import { closeDrawer, shiftActivity } from '../pos/shift/shift';
+import { totalCount } from '../pos/shift/DrawerCounter';
 
 let n = 0;
 const newId = () => `v-${++n}`;
@@ -256,5 +260,39 @@ describe('an order opened as the cart', () => {
     expect(cart.lines).toHaveLength(1);
     expect(cart.lines[0]).toMatchObject({ variantId: milk, qty: 2000, priceMinor: 42_000, priceTyped: true });
     expect(missing).toEqual(['gone']);
+  });
+});
+
+describe('the rep’s day-start float (round 35 › D5)', () => {
+  const move = (shiftId: string, kind: string, amountMinor: number, reason: string, currency = 'SYP') =>
+    ({
+      id: `m-${++n}`,
+      type: 'cash_movement',
+      status: 'confirmed',
+      doc: { id: `m-${n}`, type: 'cash_movement', payload: { shiftId, kind, amountMinor, reason, currency } },
+    }) as unknown as OutboxEntry;
+
+  it('adds up the shift’s pay-ins written as the float, and nothing else', () => {
+    const entries = [
+      move('s1', 'pay_in', 500_000, FLOAT_REASON),
+      move('s1', 'pay_in', 100_000, FLOAT_REASON, 'USD'),
+      move('s1', 'pay_in', 70_000, 'فكة'),
+      move('s1', 'safe_drop', 30_000, FLOAT_REASON),
+      move('s2', 'pay_in', 900_000, FLOAT_REASON),
+    ];
+    expect(floatOf(entries, 's1')).toEqual({ SYP: 500_000, USD: 100_000 });
+    expect(floatOf(entries, null)).toEqual({});
+    expect(floatOf([], 's1')).toEqual({});
+  });
+
+  it('is part of what the shift expects at closing, so a shift opened at 0 closes with no difference', () => {
+    const entries = [move('s1', 'pay_in', 500_000, FLOAT_REASON)];
+    const terms = shiftActivity('s1', entries).terms.get('SYP');
+    const counted = { ...totalCount('SYP'), totalMinor: 500_000 };
+    const close = closeDrawer('SYP', 'SYP', [], 0, terms, counted);
+    expect(close.openingMinor).toBe(0);
+    expect(close.payInMinor).toBe(500_000);
+    expect(close.expectedMinor).toBe(500_000);
+    expect(close.differenceMinor).toBe(0);
   });
 });

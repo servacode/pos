@@ -32,6 +32,7 @@
 /apps/api/src/services/rebuild.ts @servacode
 /apps/api/src/services/costing.ts @servacode
 /apps/api/src/services/batches.ts @servacode
+/apps/api/src/services/damaged-stock.ts @servacode
 /apps/api/src/services/expiry.ts @servacode
 /apps/api/src/services/serials.ts @servacode
 /apps/api/src/services/sales-orders.ts @servacode

@@ -68,7 +68,8 @@ export function merchandiseReport(
     const ids = await branchesOf(tx, auth, query.branchId);
     const inBranches = (column: SQL): SQL =>
       ids === null
-        ? sql`true`
+        ? // Damaged goods are not stock a shop can sell (round 35, D7)
+          sql`${column} not in (select id from branches where kind = 'damaged')`
         : sql`${column} in (${sql.join(
             ids.map((id) => sql`${id}::uuid`),
             sql`, `,

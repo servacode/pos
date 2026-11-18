@@ -827,6 +827,12 @@ export const returnPayloadSchema = z
      * and absent from every other return, so tills that predate it still sync.
      */
     customerId: uuidSchema.nullable().optional(),
+    /**
+     * Round 35 (D7): the goods come back broken or past their date. They do not go back on the shelf:
+     * the server puts them in the branch's damaged stock (never sellable) until they are returned to
+     * the supplier or written off. Optional and absent from every return made before.
+     */
+    damaged: z.boolean().optional(),
   })
   .superRefine((r, ctx) => {
     const issue = (path: (string | number)[], message: string) =>

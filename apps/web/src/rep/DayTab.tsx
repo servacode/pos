@@ -4,7 +4,7 @@ import { Alert, Badge, Button, CashIcon, CheckCircleIcon, LockIcon, StockIcon } 
 import type { OutboxEntry } from '@serva/sync';
 import { deviceDocuments, type OpenShift } from '../pos/shift/shift';
 import { usePos } from '../pos/services';
-import { daySummary, type DaySummary } from './day';
+import { daySummary, floatOf, type DaySummary } from './day';
 import { Figure, MoneyList } from './parts';
 import { useRepRequired } from './state';
 import { VAN_COUNT_KEY } from './day';
@@ -47,6 +47,7 @@ export function DayTab({
 
   const progress = dayProgress(rep.list.stops);
   const pending = entries.filter((e) => e.status !== 'confirmed').length;
+  const float = floatOf(entries, shift?.id ?? null);
   const handed = summary
     ? entries.filter(
         (e) =>
@@ -79,6 +80,18 @@ export function DayTab({
           {progress.done} من {progress.total}
         </Figure>
       </section>
+      {Object.keys(float).length > 0 ? (
+        <section
+          aria-label="عهدة اليوم"
+          className="flex items-center gap-2 rounded-card border border-line bg-surface p-3 text-sm"
+        >
+          <CheckCircleIcon size={20} className="shrink-0 text-success-ink" />
+          <span className="font-semibold text-ink">استلمت عهدة</span>
+          <span className="num font-bold text-ink">
+            <MoneyList byCurrency={float} />
+          </span>
+        </section>
+      ) : null}
       {pending > 0 ? (
         <Alert tone="info">{pending} مستنداً لم يصل إلى الخادم بعد. تُرسل عند وجود اتصال.</Alert>
       ) : null}

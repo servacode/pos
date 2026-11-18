@@ -238,3 +238,29 @@ export function daySummary(entries: readonly OutboxEntry[], businessDate: string
   }
   return out;
 }
+
+/** The reason written on the pay-in that records the rep's day-start float (round 35 › D5) */
+export const FLOAT_REASON = 'عهدة بداية اليوم';
+
+/**
+ * The float the rep received today, per currency: the pay-ins of this shift written with the float's
+ * reason. It came out of the safe through a manager's code; the shift itself opened at 0.
+ */
+export function floatOf(entries: readonly OutboxEntry[], shiftId: string | null): Record<string, number> {
+  const given: Record<string, number> = {};
+  if (!shiftId) return given;
+  for (const e of entries) {
+    if (e.doc.type !== 'cash_movement') continue;
+    const p = e.doc.payload as {
+      shiftId?: string;
+      kind?: string;
+      reason?: string;
+      currency?: string;
+      amountMinor?: number;
+    };
+    if (p.shiftId !== shiftId || p.kind !== 'pay_in' || p.reason !== FLOAT_REASON) continue;
+    if (!p.currency || !p.amountMinor) continue;
+    given[p.currency] = (given[p.currency] ?? 0) + p.amountMinor;
+  }
+  return given;
+}

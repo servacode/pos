@@ -131,6 +131,31 @@ function assertKindFitsBranch(branchKind: string, deviceKind: string | undefined
   }
 }
 
+/**
+ * Who may sign in on a rep's phone (round 35 › D3): the rep of its van, a manager and the owner. The
+ * server decides, whatever the phone shows. Any other device kind is not asked (this does nothing
+ * for it), and the answer for a refusal says why in plain Arabic.
+ * `roleKeys` are the keys of the roles the person holds for this device's branch.
+ */
+export const REP_PHONE_REFUSAL = 'هذا جوال مندوب. يدخل عليه مندوب سيارته أو المدير أو المالك فقط.';
+
+export async function mayUseRepPhone(
+  tx: Transaction,
+  device: { deviceId: string; branchId: string },
+  userId: string,
+  roleKeys: readonly string[],
+): Promise<boolean> {
+  const [row] = await tx.select({ kind: devices.kind }).from(devices).where(eq(devices.id, device.deviceId));
+  if (row?.kind !== 'rep_phone') return true;
+  if (roleKeys.includes('owner') || roleKeys.includes('manager')) return true;
+  const [rep] = await tx.execute<{ id: string }>(sql`
+    select id from sales_reps
+    where user_id = ${userId} and status = 'active'
+      and (van_branch_id = ${device.branchId} or device_id = ${device.deviceId})
+    limit 1`);
+  return Boolean(rep);
+}
+
 /** A branch of this store the user may link devices to: 403 without the permission, else 404. */
 async function branchToManage(tx: Transaction, auth: AccessClaims, branchId: string) {
   const scope = await requirePermission(tx, auth.userId, 'devices.manage');

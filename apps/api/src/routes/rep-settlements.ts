@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  repDebtForgiveInput,
+  repDebtPaymentInput,
   repSettlementCreateInput,
   repVanCountInput,
   settlementApproveInput,
@@ -21,6 +23,7 @@ import {
   previewSettlement,
   saveVanCount,
 } from '../services/rep-settlements';
+import { forgiveRepDebt, getRepDebt, listRepDebts, payRepDebt } from '../services/rep-debt';
 import { parseBody } from './validation';
 
 /**
@@ -78,6 +81,41 @@ export async function repSettlementRoutes(app: FastifyInstance): Promise<void> {
       request.auth,
       idOf(request.params),
       parseBody(settlementCancelInput, request.body),
+      meta(request),
+    );
+  });
+
+  // What a rep owes the shop after a cash shortage (round 35, D6): his balance, what he pays back, what the owner forgives
+  const repIdOf = (params: unknown) => {
+    const parsed = uuidSchema.safeParse((params as { id?: string }).id);
+    if (!parsed.success) throw new AppError(404, 'not_found', 'هذا المندوب غير موجود.');
+    return parsed.data;
+  };
+  app.get('/v1/rep-debts', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listRepDebts(app.db, request.auth);
+  });
+  app.get('/v1/reps/:id/debt', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return getRepDebt(app.db, request.auth, repIdOf(request.params));
+  });
+  app.post('/v1/reps/:id/debt/payments', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return payRepDebt(
+      app.db,
+      request.auth,
+      repIdOf(request.params),
+      parseBody(repDebtPaymentInput, request.body),
+      meta(request),
+    );
+  });
+  app.post('/v1/reps/:id/debt/forgive', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return forgiveRepDebt(
+      app.db,
+      request.auth,
+      repIdOf(request.params),
+      parseBody(repDebtForgiveInput, request.body),
       meta(request),
     );
   });

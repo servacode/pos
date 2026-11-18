@@ -46,6 +46,7 @@ import {
   postShiftClose,
 } from './posting';
 import type { DocumentContext, SyncProcessors } from './sync-push';
+import { damagedLocationOf } from './damaged-stock';
 import { returnSerials, sellSerials } from './serials';
 import { refreshExpiry } from './expiry';
 import { deliverSalesOrder } from './sales-orders';
@@ -87,8 +88,11 @@ async function moveStock(
   kind: 'sale' | 'return',
   lines: readonly { lineNo: number; variantId: string; baseQty: number }[],
   sign: 1 | -1,
+  /** Round 35 (D7): damaged goods go to the branch's damaged location, priced at the branch they came back to */
+  damaged?: { branchId: string },
 ): Promise<boolean> {
   const { tenantId } = device;
+  const placeId = damaged?.branchId ?? device.branchId;
   const ids = [...new Set(lines.map((l) => l.variantId))];
   if (ids.length === 0) return false;
   const stocked = new Set(
@@ -111,20 +115,21 @@ async function moveStock(
       .insert(stockMovements)
       .values({
         tenantId,
-        branchId: device.branchId,
+        branchId: placeId,
         variantId: line.variantId,
         qty,
         kind,
         docId: doc.id,
         lineNo: line.lineNo,
         businessDate: doc.businessDate,
+        costBranchId: damaged ? device.branchId : null,
       })
       .onConflictDoNothing()
       .returning({ id: stockMovements.id });
     if (!moved) continue;
     const [level] = await tx
       .insert(stockLevels)
-      .values({ tenantId, branchId: device.branchId, variantId: line.variantId, qty })
+      .values({ tenantId, branchId: placeId, variantId: line.variantId, qty })
       .onConflictDoUpdate({
         target: [stockLevels.tenantId, stockLevels.branchId, stockLevels.variantId],
         set: { qty: sql`${stockLevels.qty} + excluded.qty` },
@@ -431,10 +436,26 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
       totalMinor: l.refund.totalMinor,
     })),
   );
-  await moveStock(tx, device, doc, 'return', ret.lines, 1);
+  // A damaged return does not go back on the shelf: it waits in the branch's damaged location
+  const damagedAt = ret.damaged ? await damagedLocationOf(tx, tenantId, device.branchId) : null;
+  await moveStock(
+    tx,
+    device,
+    doc,
+    'return',
+    ret.lines,
+    1,
+    damagedAt ? { branchId: damagedAt.id } : undefined,
+  );
   await recordReturnBatches(
     tx,
-    { tenantId, branchId: device.branchId, docId: doc.id, date: doc.businessDate, saleId: ret.saleId },
+    {
+      tenantId,
+      branchId: damagedAt?.id ?? device.branchId,
+      docId: doc.id,
+      date: doc.businessDate,
+      saleId: ret.saleId,
+    },
     ret.lines,
   );
   await returnSerials(

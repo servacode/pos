@@ -157,6 +157,8 @@ export interface ReturnRequest {
   /** The approval code of a card, wallet or transfer refund */
   reference?: string | null;
   approval?: Approval | null;
+  /** The goods are damaged: they go to the damaged stock, not back on the shelf (round 35, D7) */
+  damaged?: boolean;
   /**
    * settings.cashRoundingSteps for the sale's currency (0 or missing = none). A cash refund is
    * rounded to it like a cash sale: the drawer pays the rounded amount and the difference is the
@@ -226,5 +228,7 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
     approval: request.approval ?? null,
     // Only an account refund names the customer: every other return stays as it always was
     ...(method === 'account' && totals.totalMinor > 0 ? { customerId: sale.customerId } : {}),
+    // Only a damaged return says so: every other return stays exactly as it was
+    ...(request.damaged ? { damaged: true } : {}),
   };
 }

@@ -191,6 +191,7 @@ describe('«التسوية»', () => {
             stocktakeNumber: 'STK-2026-000001',
             transferNumber: 'TRF-2026-000002',
           },
+          repDebt: { shortage: { SYP: 10_000 }, baseMinor: 10_000, entryNumber: '2026-0000051' },
         });
         return { status: 200, body: current };
       },
@@ -256,8 +257,13 @@ describe('«التسوية»', () => {
     await user.click(screen.getByRole('button', { name: 'اعتمد التسوية' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/يُجرد مخزون السيارة/)).toBeInTheDocument();
+    // The shortage is said to become the rep's debt, moved off the loss
+    expect(within(dialog).getByText(/ذمة على المندوب سمير/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'اعتمد' }));
     expect(await screen.findByText('STK-2026-000001')).toBeInTheDocument();
+    // What was put on the rep, and the entry that carries it
+    expect(await screen.findByText('سُجّل على المندوب')).toBeInTheDocument();
+    expect(screen.getByText('2026-0000051')).toBeInTheDocument();
     expect(screen.getByText('TRF-2026-000002')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'اعتمد التسوية' })).not.toBeInTheDocument();
     expect(requestsTo('POST', '/v1/rep-settlements/st-1/approve')[0]?.body).toEqual({ version: 1 });

@@ -145,6 +145,12 @@ describe('what the migration leaves for every store', () => {
       .filter((part) => /^(--[^\n]*\n)*INSERT INTO "(roles|no_sale_reasons)"/.test(part));
     expect(backfill).toHaveLength(4);
     for (const statement of backfill) await ownerDb().unsafe(statement);
+    // …and the later migration that gave the supervisor the cash and stock permissions (round 35 › D2)
+    const supervisorGrant = readFileSync(join(migrationsFolder, '0076_supervisor_cash_stock.sql'), 'utf8')
+      .split('--> statement-breakpoint')
+      .map((part) => part.replace(/^(--[^\n]*\n)+/gm, '').trim())
+      .filter(Boolean);
+    for (const statement of supervisorGrant) await ownerDb().unsafe(statement);
     const after = await ownerDb()<{ key: string; permissions: string[] }[]>`
       select key, permissions from roles where tenant_id = ${s.tenantId} and key in ('rep', 'driver', 'sales_supervisor') order by key`;
     expect(after).toEqual(before);

@@ -1279,6 +1279,11 @@ export const stockMovements = pgTable(
     docId: uuid('doc_id').notNull(),
     lineNo: integer('line_no').notNull(),
     businessDate: date('business_date').notNull(),
+    /**
+     * A damaged return goes into the branch's «damaged» location (a branch of kind damaged) but is
+     * priced at the branch it came back to: that branch's average cost. Null on every other movement.
+     */
+    costBranchId: uuid('cost_branch_id'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -3775,6 +3780,12 @@ export const repSettlements = pgTable(
     goodsDifference: jsonb('goods_difference'),
     /** rep_debt (1250) | shop_loss (6200 / 6300) */
     treatment: text('treatment'),
+    /**
+     * What approving it put on the rep as a debt (round 35, D6): the shortage per currency, its value in
+     * the base currency, and the journal entry that carries it. Null on every settlement made before, and
+     * on one with no shortage or the shop's own loss.
+     */
+    repDebt: jsonb('rep_debt'),
     /** Documents that had not reached the server when it was made */
     pendingDocs: integer('pending_docs').notNull().default(0),
     /** What the settlement saw when it was made (the drawer per currency, the cheques, the van count): a record that later documents never change */

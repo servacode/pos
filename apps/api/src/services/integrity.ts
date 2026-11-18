@@ -435,7 +435,11 @@ async function stockValueLedger(tx: Transaction, tenantId: string): Promise<Inte
   if (!(await hasTable(tx, 'stock_values'))) return check('stock_value_ledger', []);
   const rows = await tx.execute<{ branch: string; stock: string; ledger: string }>(sql`
     with stock as (
-      select branch_id, sum(value_minor) as amount from stock_values where tenant_id = ${tenantId} group by branch_id
+      -- a store's damaged goods (round 35, D7) are on the store's books
+      select coalesce(d.parent_branch_id, sv.branch_id) as branch_id, sum(sv.value_minor) as amount
+      from stock_values sv
+      left join branches d on d.tenant_id = sv.tenant_id and d.id = sv.branch_id and d.kind = 'damaged'
+      where sv.tenant_id = ${tenantId} group by 1
     ),
     books as (
       select e.branch_id, sum(l.debit_minor - l.credit_minor) as amount

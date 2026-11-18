@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { stockBack, stockOut, type StockValue } from '@serva/core';
+import { averageValue, stockBack, stockIn, stockOut, type StockValue } from '@serva/core';
 import { movementCosts, stockValues, withTenant, type Database, type Transaction } from '@serva/db';
 import { postEntry, type DraftLine } from './posting';
 
@@ -122,9 +122,13 @@ export async function costPending(tx: Transaction, tenantId: string): Promise<nu
     qty: string;
     kind: 'sale' | 'return';
     business_date: string;
+    cost_branch_id: string | null;
+    ledger_branch_id: string;
   }>(sql`
-    select m.doc_id, m.line_no, m.branch_id, m.variant_id, m.qty::text, m.kind, m.business_date::text
+    select m.doc_id, m.line_no, m.branch_id, m.variant_id, m.qty::text, m.kind, m.business_date::text,
+           m.cost_branch_id, coalesce(d.parent_branch_id, m.branch_id) as ledger_branch_id
     from stock_movements m
+    left join branches d on d.tenant_id = m.tenant_id and d.id = m.branch_id and d.kind = 'damaged'
     where m.tenant_id = ${tenantId} and m.kind in ('sale', 'return')
       and not exists (
         select 1 from movement_costs c
@@ -133,17 +137,23 @@ export async function costPending(tx: Transaction, tenantId: string): Promise<nu
     limit 5000`);
   if (pending.length === 0) return 0;
 
-  const values = await loadValues(
-    tx,
-    tenantId,
-    pending.map((p) => stockKey(p.branch_id, p.variant_id)),
-  );
+  const values = await loadValues(tx, tenantId, [
+    ...pending.map((p) => stockKey(p.branch_id, p.variant_id)),
+    ...pending.flatMap((p) => (p.cost_branch_id ? [stockKey(p.cost_branch_id, p.variant_id)] : [])),
+  ]);
   const costs: { row: (typeof pending)[number]; costMinor: number }[] = [];
   for (const row of pending) {
     const key = stockKey(row.branch_id, row.variant_id);
     const now = values.get(key) ?? EMPTY;
     const qty = Number(row.qty);
-    if (qty < 0) {
+    if (row.cost_branch_id && qty > 0) {
+      // A damaged return (round 35, D7): it sits in the damaged location but came back at the average
+      // of the branch it was returned to, which stays as it is; the sale's cost comes back off 5100
+      const from = values.get(stockKey(row.cost_branch_id, row.variant_id)) ?? EMPTY;
+      const valueMinor = averageValue(from, qty);
+      values.set(key, stockIn(now, qty, valueMinor).after);
+      costs.push({ row, costMinor: -valueMinor });
+    } else if (qty < 0) {
       const out = stockOut(now, -qty);
       values.set(key, out.after);
       costs.push({ row, costMinor: out.costMinor });
@@ -159,7 +169,8 @@ export async function costPending(tx: Transaction, tenantId: string): Promise<nu
   const currency = await baseCurrency(tx);
   const groups = new Map<string, typeof costs>();
   for (const c of costs) {
-    const key = `${c.row.branch_id}|${c.row.business_date}`;
+    // The books of a store's damaged goods are the store's own: its entries carry the store's branch
+    const key = `${c.row.ledger_branch_id}|${c.row.business_date}`;
     groups.set(key, [...(groups.get(key) ?? []), c]);
   }
   for (const [key, list] of groups) {

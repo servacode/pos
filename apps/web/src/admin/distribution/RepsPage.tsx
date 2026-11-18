@@ -19,6 +19,7 @@ import {
   Dialog,
   EditIcon,
   EmptyState,
+  Money,
   PageHeader,
   Select,
   TextField,
@@ -27,8 +28,18 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { errorMessage } from '../../lib/api';
-import { createRep, listPlans, listRepCandidates, listReps, listVans, setRepActive, updateRep } from './api';
+import {
+  createRep,
+  listPlans,
+  listRepCandidates,
+  listRepDebts,
+  listReps,
+  listVans,
+  setRepActive,
+  updateRep,
+} from './api';
 import { FormFooter, ROUTE_NOUN, saveFailure, useLoad } from './parts';
+import { RepDebtDialog } from './RepDebtDialog';
 
 /** «5» → 500 basis points; '' → null (his role's limit); NaN when it is not 0 to 100 */
 function percentToBp(text: string): number | null {
@@ -244,6 +255,11 @@ export function RepsPage() {
   const { data, error, reload } = useLoad(listReps);
   const vans = useLoad(listVans);
   const plans = useLoad(listPlans);
+  // What each rep owes after a shortage; a supervisor without the settling permission just sees no column
+  const debts = useLoad(listRepDebts);
+  const owes = new Map((debts.data ?? []).map((d) => [d.repId, d.balanceMinor]));
+  const base = useMe().settings.baseCurrency;
+  const [debtOf, setDebtOf] = useState<RepRow | null>(null);
   const [editing, setEditing] = useState<RepRow | 'new' | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -288,6 +304,26 @@ export function RepsPage() {
       className: 'hidden sm:table-cell',
       cell: (r) => countNoun(r.routeCount, ROUTE_NOUN),
     },
+    ...(debts.data
+      ? [
+          {
+            key: 'debt',
+            header: 'عليه',
+            cell: (r: RepRow) => {
+              const owed = owes.get(r.id) ?? 0;
+              return owed > 0 ? (
+                <Button variant="ghost" size="sm" onClick={() => setDebtOf(r)}>
+                  <Money minor={owed} currency={base} />
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => setDebtOf(r)}>
+                  <span className="text-ink-muted">لا شيء</span>
+                </Button>
+              );
+            },
+          } satisfies DataColumn<RepRow>,
+        ]
+      : []),
     {
       key: 'status',
       header: 'الحالة',
@@ -336,6 +372,14 @@ export function RepsPage() {
           />
         }
       />
+      {debtOf ? (
+        <RepDebtDialog
+          repId={debtOf.id}
+          repName={debtOf.userName}
+          onClose={() => setDebtOf(null)}
+          onChanged={debts.reload}
+        />
+      ) : null}
       {editing ? (
         <RepDialog
           rep={editing === 'new' ? null : editing}

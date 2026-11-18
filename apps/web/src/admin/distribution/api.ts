@@ -15,6 +15,10 @@ import type {
   RegionRow,
   RegionUpdateInput,
   RepCandidate,
+  RepDebt,
+  RepDebtBalance,
+  RepDebtForgiveInput,
+  RepDebtPaymentInput,
   RepInput,
   RepRow,
   RepSettlementCreateInput,
@@ -125,6 +129,14 @@ export const approveSettlement = (id: string, version: number) =>
   send<RepSettlementDetail>('POST', `/v1/rep-settlements/${id}/approve`, { version });
 export const cancelSettlement = (id: string, version: number, reason: string) =>
   send<RepSettlementDetail>('POST', `/v1/rep-settlements/${id}/cancel`, { version, reason });
+
+// What a rep owes after a cash shortage (rep.settle; forgiving needs accounting.post)
+export const listRepDebts = () => get<RepDebtBalance[]>('/v1/rep-debts');
+export const getRepDebt = (repId: string) => get<RepDebt>(`/v1/reps/${repId}/debt`);
+export const payRepDebt = (repId: string, input: RepDebtPaymentInput) =>
+  send<RepDebt>('POST', `/v1/reps/${repId}/debt/payments`, input);
+export const forgiveRepDebt = (repId: string, input: RepDebtForgiveInput) =>
+  send<RepDebt>('POST', `/v1/reps/${repId}/debt/forgive`, input);
 
 export const getBoard = (date?: string) =>
   get<TodayBoard>(`/v1/distribution/today${date ? `?date=${date}` : ''}`);

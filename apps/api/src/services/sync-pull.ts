@@ -118,6 +118,8 @@ const PULL_SETS: Record<string, PullSet> = {
       vehiclePlate: branches.vehiclePlate,
       version: branches.version,
     },
+    // A store's damaged-goods place (round 35, D7) is the server's own: no till ever lists it
+    scope: () => sql`${branches.kind} <> 'damaged'`,
   },
   users: {
     table: users,

@@ -81,7 +81,7 @@ export function notifyStockAlert(
   return tenantOf(db, slug).then((tenantId) =>
     withTenant(db, tenantId, async (tx) => {
       const [piece] = await tx.execute<{ in_stock: boolean }>(sql`
-        select (p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) > 0) as in_stock
+        select (p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) > 0) as in_stock
         from variants v join products p on p.id = v.product_id
         where v.id = ${input.variantId} and p.id = ${productId} and v.archived_at is null
           and p.archived_at is null and p.status = 'active' and p.sell_on_pos`);
@@ -116,7 +116,7 @@ export function listStockAlerts(
       in_stock: boolean;
     }>(sql`
       select a.id, a.variant_id, v.label, a.phone, a.created_at, a.notified_at,
-             (p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) > 0) as in_stock
+             (p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) > 0) as in_stock
       from stock_alerts a
       join variants v on v.id = a.variant_id
       join products p on p.id = a.product_id

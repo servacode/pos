@@ -533,6 +533,27 @@
       "when": 1794968873696,
       "tag": "0075_rep_resync_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794990000000,
+      "tag": "0076_supervisor_cash_stock",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794997093907,
+      "tag": "0077_damaged_stock",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794997125584,
+      "tag": "0078_rep_debt",
+      "breakpoints": true
     }
   ]
 }

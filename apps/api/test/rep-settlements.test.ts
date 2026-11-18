@@ -631,7 +631,7 @@ describe('the settlement', () => {
     ).toBe(404);
   });
 
-  it('lets a sales supervisor record it but not unload the van, and says who may; others see nothing', async () => {
+  it('lets a sales supervisor record it and approve it (round 35: he holds the stock permission), and says who may; others see nothing', async () => {
     const w = await world();
     await sendCount(w, 7000);
     const supervisor = await staffUser(app, s, 'sales_supervisor', '0955900001');
@@ -643,28 +643,16 @@ describe('the settlement', () => {
       { repId: w.rep.id, businessDate: DATE, countedCash: { SYP: 330_000 } },
       201,
     );
-    // The van count and the transfer need the stock permission, which the supervisor role does not hold
-    const refused = await call(supervisor.accessToken, 'POST', `/v1/rep-settlements/${made.id}/approve`, {
-      version: made.version,
-    });
-    expect(refused.statusCode).toBe(403);
-    const again = await ok<RepSettlementDetail>(
+    // The van count and the transfer need the stock permission, which the supervisor role holds since round 35 (D2)
+    const approved = await ok<RepSettlementDetail>(
       supervisor.accessToken,
-      'GET',
-      `/v1/rep-settlements/${made.id}`,
+      'POST',
+      `/v1/rep-settlements/${made.id}/approve`,
+      { version: made.version },
     );
-    expect(again.status).toBe('draft');
-    const [claim] = await ownerDb()<{ claimed: string | null }[]>`
-      select goods_difference ->> 'claimedAt' as claimed from rep_settlements where id = ${made.id}`;
-    expect(claim!.claimed).toBeNull();
-    // The owner finishes it
-    expect(
-      (
-        await ok<RepSettlementDetail>(s.accessToken, 'POST', `/v1/rep-settlements/${made.id}/approve`, {
-          version: again.version,
-        })
-      ).status,
-    ).toBe('approved');
+    expect(approved.status).toBe('approved');
+    expect(await stockOf(w.van.id, w.variantId)).toBe(0);
+    expect(await stockOf(w.mainBranch, w.variantId)).toBe(7000);
 
     for (const [method, url] of [
       ['GET', `/v1/rep-settlements/preview?repId=${w.rep.id}&date=${DATE}`],

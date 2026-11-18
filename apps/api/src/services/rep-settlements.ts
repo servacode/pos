@@ -12,6 +12,7 @@ import {
   type SettlementItem,
   type SettlementListQuery,
   type SettlementPreview,
+  type SettlementRepDebt,
   type SettlementStatus,
   type SettlementTreatment,
   type VanCountRecord,
@@ -26,6 +27,7 @@ import { audit } from './audit';
 import { staleVersion } from './catalog/common';
 import { baseCurrencyOf } from './contracts-common';
 import { createStocktake, createTransfer, nextNumber } from './purchases';
+import { postRepShortage, repDebtBalance } from './rep-debt';
 import { assertRepsEnabled } from './subscription-gate';
 
 /**
@@ -34,6 +36,10 @@ import { assertRepsEnabled } from './subscription-gate';
  * receipts and the van count) and sets it beside what the supervisor counted. Nothing is posted by
  * it. Approving it settles the van through the two ordinary documents: the van count (a stocktake of
  * the van to the counted figures) and the unloading transfer (van to its home branch).
+ *
+ * One entry is posted at approval (round 35, D6): a cash shortage is moved off the cash-difference loss the
+ * shift close booked onto the rep, as a debt in 1250 (services/rep-debt.ts), unless the supervisor chose
+ * to leave it as the shop's loss.
  */
 
 const notFound = (what = 'هذه التسوية') => new AppError(404, 'not_found', `${what} غير موجودة.`);
@@ -358,6 +364,7 @@ async function buildPreview(
     pendingDocs: device?.unsent ?? 0,
     keepStockInVan: distributionSettingsOf(settingsRow?.distribution).keepStockInVanOvernight,
     existing,
+    repDebtMinor: await repDebtBalance(tx, rep.userId),
   };
 }
 
@@ -391,6 +398,7 @@ type Row = {
   cheques: { received?: string[] } | null;
   goods_difference: (SettlementGoods & { claimedAt?: string }) | null;
   treatment: SettlementTreatment | null;
+  rep_debt: SettlementRepDebt | null;
   pending_docs: number;
   approved_at: string | null;
   approved_by_name: string | null;
@@ -403,7 +411,7 @@ type Row = {
 const select = sql`
   select s.id, s.number, s.rep_id, ru.full_name as rep_name, s.branch_id, s.business_date::text as business_date,
          s.status, s.expected_cash, s.counted_cash, s.cash_difference, s.cheques, s.goods_difference, s.treatment,
-         s.pending_docs, s.approved_at, au.full_name as approved_by_name, cu.full_name as created_by_name, s.note,
+         s.rep_debt, s.pending_docs, s.approved_at, au.full_name as approved_by_name, cu.full_name as created_by_name, s.note,
          s.snapshot, s.version
   from rep_settlements s
   join sales_reps r on r.tenant_id = s.tenant_id and r.id = s.rep_id
@@ -449,6 +457,7 @@ function detailOf(r: Row): RepSettlementDetail {
       transferNumber: goods?.transferNumber ?? null,
       lines: goods?.lines ?? [],
     },
+    repDebt: r.rep_debt ?? null,
   };
 }
 
@@ -671,10 +680,26 @@ export async function approveSettlement(
       }
     }
     return await withTenant(db, auth.tenantId, async (tx) => {
+      // A shortage the supervisor counted becomes the rep's debt, unless he chose to leave it as the shop's loss
+      const debt =
+        claimed.treatment === 'shop_loss'
+          ? null
+          : await postRepShortage(tx, {
+              tenantId: auth.tenantId,
+              settlementId: id,
+              settlementNumber: claimed.number,
+              businessDate: claimed.business_date,
+              branchId: preview.vanBranchId ?? claimed.branch_id,
+              repUserId: (await repInfo(tx, claimed.rep_id)).userId,
+              shiftIds: preview.shifts.map((s) => s.id),
+              cashDifference: claimed.cash_difference ?? {},
+              baseCurrency: preview.baseCurrency,
+            });
       await tx.execute(sql`
         update rep_settlements
         set status = 'approved', approved_by = ${auth.userId}, approved_at = now(), version = version + 1,
-            updated_at = now(), goods_difference = ${JSON.stringify(withoutClaim(goods))}::jsonb
+            updated_at = now(), goods_difference = ${JSON.stringify(withoutClaim(goods))}::jsonb,
+            rep_debt = ${debt ? JSON.stringify(debt) : null}::jsonb
         where id = ${id} and status = 'draft'`);
       // The rep's day keeps the two documents it ended with
       await tx.execute(sql`

@@ -330,6 +330,13 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   },
   {
     section: 'inventory',
+    to: '/damaged-stock',
+    label: 'البضاعة التالفة',
+    icon: PackageOpenIcon,
+    permission: ['inventory.adjust'],
+  },
+  {
+    section: 'inventory',
     to: '/expiry',
     label: 'الصلاحية',
     icon: CalendarIcon,

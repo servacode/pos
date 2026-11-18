@@ -37,6 +37,7 @@ import {
   previewSettlement,
 } from './api';
 import { FormFooter, qtyOf, thousandths } from './parts';
+import { RepDebtDialog } from './RepDebtDialog';
 
 export const SETTLEMENT_TONE: Record<SettlementStatus, BadgeTone> = {
   draft: 'warning',
@@ -60,10 +61,13 @@ export function minorOf(text: string, decimals: number): number | null {
   return Math.round(Number(clean) * 10 ** decimals);
 }
 
-/** The treatment is a note only: it creates no debt, the shortage was booked as a cash difference when the shift closed */
+/**
+ * What a cash shortage becomes (round 35, D6). The shift close booked it as a cash-difference loss; approving the
+ * settlement moves it onto the rep as a debt, unless it is left as the shop's loss.
+ */
 const TREATMENT_LABELS = {
-  rep_debt: 'سجّل النقص على المندوب (ملاحظة)',
-  shop_loss: 'سجّل النقص خسارة على المحل (ملاحظة)',
+  rep_debt: 'ذمة على المندوب',
+  shop_loss: 'خسارة على المحل',
 } as const;
 
 /** What a currency's drawer shows, line by line, in the order the money moved */
@@ -333,6 +337,11 @@ export function SettlementSheet({ detail }: { detail: RepSettlementDetail }) {
         </tbody>
       </table>
       {detail.treatment ? <p>المعالجة: {TREATMENT_LABELS[detail.treatment]}</p> : null}
+      {detail.repDebt ? (
+        <p>
+          سُجّل على المندوب: <Money minor={detail.repDebt.baseMinor} currency={p.baseCurrency} />
+        </p>
+      ) : null}
       {p.cheques.length > 0 ? (
         <>
           <h2 style={{ fontSize: '12pt', fontWeight: 700, marginTop: '8pt' }}>الشيكات</h2>
@@ -398,7 +407,7 @@ export function NewSettlementPage() {
   const [counted, setCounted] = useState<Record<string, string>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
   const [received, setReceived] = useState<string[]>([]);
-  const [treatment, setTreatment] = useState('');
+  const [treatment, setTreatment] = useState('rep_debt');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -451,7 +460,7 @@ export function NewSettlementPage() {
         repId,
         businessDate: date,
         countedCash,
-        treatment: treatment === '' ? null : (treatment as 'rep_debt' | 'shop_loss'),
+        treatment: short ? (treatment as 'rep_debt' | 'shop_loss') : null,
         note: note.trim() === '' ? null : note,
         receivedCheques: received,
         ...(own
@@ -564,19 +573,21 @@ export function NewSettlementPage() {
         <div className="flex flex-col gap-4">
           {short ? (
             <Select label="النقص يصير" value={treatment} onChange={(e) => setTreatment(e.target.value)}>
-              <option value="">لم أقرر بعد</option>
               <option value="rep_debt">{TREATMENT_LABELS.rep_debt}</option>
               <option value="shop_loss">{TREATMENT_LABELS.shop_loss}</option>
             </Select>
           ) : null}
           {short ? (
             <p className="text-xs text-ink-muted">
-              هذا الاختيار ملاحظة فقط، لا ينشئ ذمة ولا قيداً. النقص سُجّل كفرق صندوق عند إغلاق الوردية.
+              {treatment === 'shop_loss'
+                ? 'يبقى النقص خسارة على المحل كما سُجّل كفرق صندوق عند إغلاق الوردية.'
+                : 'عند الاعتماد يُنقل النقص من خسارة الصندوق إلى ذمة على المندوب، فلا يُحسب مرتين.'}
             </p>
           ) : null}
           <TextField label="ملاحظة" value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} />
           <p className="text-xs text-ink-muted">
-            التسوية سجل فقط: لا تُرحِّل قيداً. الاعتماد يجرد السيارة ويفرّغ ما فيها إلى مخزن الفرع.
+            الحفظ هنا مسودة لا تُرحِّل قيداً. الاعتماد يجرد السيارة ويفرّغ ما فيها إلى مخزن الفرع، وينقل النقص
+            إلى ذمة المندوب إن اخترت ذلك.
           </p>
           <FormFooter>
             <Button loading={saving} disabled={!!preview.existing} onClick={() => void save()}>
@@ -618,6 +629,12 @@ function ApproveDialog({
     >
       <div className="flex flex-col gap-4">
         {error ? <Alert tone="error">{error}</Alert> : null}
+        {Object.values(detail.cashDifference).some((d) => d < 0) && detail.treatment !== 'shop_loss' ? (
+          <Alert tone="warning">
+            في الصندوق نقص: يُسجَّل عند الاعتماد ذمة على المندوب {detail.repName}، وينتقل من خسارة الصندوق فلا
+            يُحسب مرتين.
+          </Alert>
+        ) : null}
         <FormFooter>
           <Button variant="secondary" onClick={onCancel}>
             تراجع
@@ -702,6 +719,7 @@ export function SettlementPage() {
   const [detail, setDetail] = useState<RepSettlementDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<'approve' | 'cancel' | null>(null);
+  const [debtOpen, setDebtOpen] = useState(false);
   const { paper, print } = usePrint();
 
   useEffect(() => {
@@ -712,6 +730,8 @@ export function SettlementPage() {
 
   if (!detail) return error ? <Alert tone="error">{error}</Alert> : <Skeleton className="h-40 w-full" />;
   const p = detail.preview;
+  // A shortage in any currency: approving it puts it on the rep unless it was left as the shop's loss
+  const shortage = Object.values(detail.cashDifference).some((d) => d < 0);
   return (
     <>
       <PageHeader
@@ -730,6 +750,11 @@ export function SettlementPage() {
                 كل التسويات
               </Button>
             </Link>
+            {detail.repDebt || (typeof p.repDebtMinor === 'number' && p.repDebtMinor > 0) ? (
+              <Button variant="secondary" onClick={() => setDebtOpen(true)}>
+                ذمة المندوب
+              </Button>
+            ) : null}
             <Button variant="secondary" icon={<PrintIcon />} onClick={() => print('A4')}>
               اطبع
             </Button>
@@ -784,8 +809,29 @@ export function SettlementPage() {
           <dl className="flex flex-col gap-2 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">المعالجة</dt>
-              <dd>{detail.treatment ? TREATMENT_LABELS[detail.treatment] : '—'}</dd>
+              <dd>
+                {detail.treatment ? TREATMENT_LABELS[detail.treatment] : shortage ? 'ذمة على المندوب' : '—'}
+              </dd>
             </div>
+            {detail.repDebt ? (
+              <div className="flex justify-between gap-3">
+                <dt className="text-ink-muted">سُجّل على المندوب</dt>
+                <dd className="flex items-center gap-2">
+                  <Money minor={detail.repDebt.baseMinor} currency={p.baseCurrency} />
+                  {detail.repDebt.entryNumber ? (
+                    <bdi className="num text-xs text-ink-muted">{detail.repDebt.entryNumber}</bdi>
+                  ) : null}
+                </dd>
+              </div>
+            ) : null}
+            {typeof p.repDebtMinor === 'number' && p.repDebtMinor > 0 ? (
+              <div className="flex justify-between gap-3">
+                <dt className="text-ink-muted">على المندوب قبلها</dt>
+                <dd>
+                  <Money minor={p.repDebtMinor} currency={p.baseCurrency} />
+                </dd>
+              </div>
+            ) : null}
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">أنشأها</dt>
               <dd>{detail.createdByName ?? '—'}</dd>
@@ -847,6 +893,14 @@ export function SettlementPage() {
           </Button>
           <Button onClick={() => setDialog('approve')}>اعتمد التسوية</Button>
         </div>
+      ) : null}
+      {debtOpen ? (
+        <RepDebtDialog
+          repId={detail.repId}
+          repName={detail.repName}
+          onClose={() => setDebtOpen(false)}
+          onChanged={() => undefined}
+        />
       ) : null}
       {dialog === 'approve' ? (
         <ApproveDialog

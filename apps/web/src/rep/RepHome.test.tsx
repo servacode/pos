@@ -247,8 +247,49 @@ describe('the rep’s day (/rep)', () => {
     await h.user.click(screen.getByRole('button', { name: 'اعرض الأصناف' }));
     expect(screen.getByRole('list', { name: 'حمولة السيارة' })).toHaveTextContent('حليب كامل الدسم 1 لتر');
     await h.user.click(screen.getByRole('checkbox', { name: 'استلمت الحمولة وراجعتها' }));
-    // Then the till's own shift opening, for the float
+    // Then the shift opens at 0 (the float is a pay-in after it)
     expect(await screen.findByRole('heading', { name: /فتح وردية|ابدأ الوردية|وردية/ })).toBeInTheDocument();
+  });
+
+  it('opens the shift at 0, then records the float as the till’s pay-in with a manager’s code and says «استلمت عهدة»', async () => {
+    const h = harness();
+    await signIn(h.user);
+    await h.user.click(await screen.findByRole('checkbox', { name: 'استلمت الحمولة وراجعتها' }));
+    // Nothing is counted: one button opens the shift empty
+    await h.user.click(await screen.findByRole('button', { name: 'افتح الوردية' }));
+    const open = h.outbox.find((e) => e.type === 'shift_open')!;
+    expect(
+      (open.doc.payload as { opening: { amountMinor: number }[] }).opening.every((o) => o.amountMinor === 0),
+    ).toBe(true);
+    // The float: the amount, then the manager’s code (she is the only one who may approve here)
+    await h.user.type(await screen.findByRole('textbox', { name: 'مبلغ العهدة' }), '500000');
+    await h.user.click(screen.getByRole('button', { name: /سجّل العهدة/ }));
+    expect(await screen.findByRole('region', { name: 'رمز المدير' })).toBeInTheDocument();
+    await h.user.keyboard(PINS[ids.maryam]!);
+    expect(await screen.findByText(/استلمت عهدة/)).toBeInTheDocument();
+    const move = h.outbox.find((e) => e.type === 'cash_movement')!;
+    expect(move.doc.payload).toMatchObject({
+      shiftId: open.doc.id,
+      kind: 'pay_in',
+      reason: 'عهدة بداية اليوم',
+      performedBy: REP,
+      approval: { userId: ids.maryam, method: 'pin' },
+    });
+    expect((move.doc.payload as { amountMinor: number }).amountMinor).toBeGreaterThan(0);
+    // The day starts: the route shows, and «يومي» keeps saying what he received
+    await h.user.click(screen.getByRole('button', { name: 'ابدأ جولتك' }));
+    await h.user.click(await screen.findByRole('button', { name: 'يومي' }));
+    expect(await screen.findByRole('region', { name: 'عهدة اليوم' })).toHaveTextContent('استلمت عهدة');
+  });
+
+  it('can start the day without a float: «لا عهدة اليوم»', async () => {
+    const h = harness();
+    await signIn(h.user);
+    await h.user.click(await screen.findByRole('checkbox', { name: 'استلمت الحمولة وراجعتها' }));
+    await h.user.click(await screen.findByRole('button', { name: 'افتح الوردية' }));
+    await h.user.click(await screen.findByRole('button', { name: 'لا عهدة اليوم، ابدأ جولتك' }));
+    expect(await screen.findByRole('list', { name: 'خط سير اليوم' })).toBeInTheDocument();
+    expect(h.outbox.map((e) => e.type)).not.toContain('cash_movement');
   });
 
   it('lists today’s route in order with the progress, and opens a customer with his balance', async () => {

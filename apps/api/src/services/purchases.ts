@@ -60,6 +60,7 @@ import {
   uuidArray,
   type StockKey,
 } from './costing';
+import { ledgerBranchOf } from './damaged-stock';
 import { postEntry, type DraftLine } from './posting';
 import {
   recordBatchMovements,
@@ -700,7 +701,12 @@ export async function inventory(
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
       left join units un on un.tenant_id = p.tenant_id and un.id = p.unit_id
       left join stock_values sv on sv.tenant_id = l.tenant_id and sv.branch_id = l.branch_id and sv.variant_id = l.variant_id
-      ${query.branchId ? sql`where l.branch_id = ${query.branchId}` : sql``}
+      ${
+        query.branchId
+          ? sql`where l.branch_id = ${query.branchId}`
+          : // The damaged goods have their own page (round 35, D7): this one is the stock a shop can sell
+            sql`where l.branch_id not in (select id from branches where kind = 'damaged')`
+      }
       order by name, l.variant_id`);
     const items = rows.map((r) => {
       const qty = Number(r.qty);
@@ -890,7 +896,7 @@ export async function createStocktake(
     // A loss (negative difference) is Dr 6300 / Cr 1300
     await postEntry(tx, {
       tenantId: auth.tenantId,
-      branchId,
+      branchId: await ledgerBranchOf(tx, branchId),
       date: input.date,
       sourceType: 'stocktake',
       sourceId: id,
@@ -1225,7 +1231,7 @@ export async function createSupplierReturn(
     const difference = costMinor - amountMinor;
     await postEntry(tx, {
       tenantId: auth.tenantId,
-      branchId,
+      branchId: await ledgerBranchOf(tx, branchId),
       date: input.date,
       sourceType: 'supplier_return',
       sourceId: id,

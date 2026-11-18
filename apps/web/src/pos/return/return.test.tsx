@@ -71,6 +71,8 @@ describe('«مرتجع» on the till', () => {
       refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 25_000, reference: null }],
       approval: { userId: ids.maryam, method: 'pin' },
     });
+    // The reason is «تالف أو منتهي الصلاحية»: the goods go to the damaged stock, not back on the shelf
+    expect(payload.damaged).toBe(true);
 
     // The second piece is all that is left; then nothing is
     await user.click(screen.getByRole('button', { name: 'مرتجع آخر من نفس الفاتورة' }));
@@ -124,6 +126,57 @@ describe('«مرتجع» on the till', () => {
       { method: 'card', currency: 'SYP', amountMinor: 25_000, reference: 'R-12' },
     ]);
     expect(payload.approval).toBeNull();
+  });
+});
+
+describe('the damaged goods of a return (round 35, D7)', () => {
+  async function toReturn() {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const { user, outbox } = renderPos({ local });
+    await signIn(user, 'مريم');
+    await sellTwoOils(user);
+    await user.keyboard('{Alt>}r{/Alt}');
+    await user.click(await screen.findByRole('button', { name: /INV-001-002-0000001/ }));
+    await user.click(screen.getByRole('button', { name: /زد زيت/ }));
+    return { user, outbox };
+  }
+
+  it('sends a return for another reason as an ordinary one, and lets the cashier say the piece is broken', async () => {
+    const { user, outbox } = await toReturn();
+    await user.click(screen.getByRole('button', { name: 'الزبون غيّر رأيه' }));
+    expect(screen.getByRole('button', { name: 'سليمة: تعود إلى الرف' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const first = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(first.damaged).toBeUndefined();
+    expect(validateDocumentPayload('return', first)).toEqual({ ok: true, checked: true });
+
+    await user.click(screen.getByRole('button', { name: 'مرتجع آخر من نفس الفاتورة' }));
+    await user.click(await screen.findByRole('button', { name: 'الكل' }));
+    await user.click(screen.getByRole('button', { name: 'الزبون غيّر رأيه' }));
+    await user.click(screen.getByRole('button', { name: 'تالفة: لا تُباع' }));
+    expect(screen.getByText(/البضاعة التالفة/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findAllByRole('heading', { name: 'سُجّل المرتجع' });
+    const returns = outbox.filter((e) => e.type === 'return');
+    const second = returns[1]!.doc.payload as unknown as ReturnPayload;
+    expect(second).toMatchObject({ reason: 'الزبون غيّر رأيه', damaged: true });
+    expect(validateDocumentPayload('return', second)).toEqual({ ok: true, checked: true });
+  });
+
+  it('starts on «تالفة» when the reason is damaged or expired, and can be taken back to the shelf', async () => {
+    const { user, outbox } = await toReturn();
+    expect(screen.getByRole('button', { name: 'تالفة: لا تُباع' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'سليمة: تعود إلى الرف' }));
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await screen.findByRole('heading', { name: 'سُجّل المرتجع' });
+    const payload = outbox.find((e) => e.type === 'return')!.doc.payload as unknown as ReturnPayload;
+    expect(payload.reason).toBe('تالف أو منتهي الصلاحية');
+    expect(payload.damaged).toBeUndefined();
   });
 });
 

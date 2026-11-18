@@ -178,6 +178,10 @@ export const DEFAULT_ROLES: readonly RoleTemplate[] = [
       'routes.manage',
       'sales_orders.manage',
       'rep.deliver',
+      // round 35 › D2: he approves the evening settlement (the van count and the unloading transfer
+      // need the stock permission) and the manager's code for a rep's day-start float
+      'cash.move',
+      'inventory.adjust',
     ],
     maxDiscountBp: 1000,
   },

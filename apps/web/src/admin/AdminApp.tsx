@@ -69,6 +69,9 @@ const SalesReportPage = lazy(() =>
 const CancellationsPage = lazy(() =>
   import('./reports/CancellationsPage').then((m) => ({ default: m.CancellationsPage })),
 );
+const DamagedStockPage = lazy(() =>
+  import('./purchases/DamagedStockPage').then((m) => ({ default: m.DamagedStockPage })),
+);
 const SupplierReturnsPage = lazy(() =>
   import('./purchases/SupplierReturnsPage').then((m) => ({ default: m.SupplierReturnsPage })),
 );
@@ -264,6 +267,7 @@ export function AdminApp() {
           <Route path="/purchase-orders/:id" element={page(<PurchaseOrderPage />)} />
           <Route path="/purchase-orders/:id/edit" element={page(<PurchaseOrderFormPage />)} />
           <Route path="/supplier-returns" element={page(<SupplierReturnsPage />)} />
+          <Route path="/damaged-stock" element={page(<DamagedStockPage />)} />
           <Route path="/reports" element={page(<ReportsHomePage />)} />
           <Route path="/reports/sales" element={page(<SalesReportPage />)} />
           <Route path="/reports/below-cost" element={page(<BelowCostPage />)} />

@@ -269,9 +269,9 @@ const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online
   cross join lateral jsonb_array_elements(o.lines) x
   where o.status = 'accepted' and x->>'variantId' = v.id::text), 0)`;
 /** On the shelf in any branch, less what accepted orders hold; or a service that has no stock */
-const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} > 0)`;
+const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - ${heldSql} > 0)`;
 /** What is left of the piece, in stock units; null for a service. Only «بقي 2 فقط» comes out of it. */
-const unitsLeftSql = sql`(case when p.type = 'service' then null else coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id), 0) - ${heldSql} end)`;
+const unitsLeftSql = sql`(case when p.type = 'service' then null else coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - ${heldSql} end)`;
 /** At most this many pieces left shows «بقي 2 فقط» */
 const LOW_STOCK = 3;
 /** The most one order may hold of a piece: what is on the shelf, whole pieces, at most 50; null for a service */

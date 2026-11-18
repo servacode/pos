@@ -379,7 +379,10 @@ export function suggestPurchaseOrder(
         where r.business_date between ${from} and ${day}
         group by rl.variant_id
       ),
-      stock as (select variant_id, sum(qty) as qty from stock_levels group by variant_id),
+      stock as (
+        select variant_id, sum(qty) as qty from stock_levels
+        where branch_id not in (select id from branches where kind = 'damaged') group by variant_id
+      ),
       lastbuy as (
         select distinct on (pl.variant_id) pl.variant_id, p.supplier_id, pl.cost_minor, pl.qty
         from purchase_lines pl join purchases p on p.tenant_id = pl.tenant_id and p.id = pl.purchase_id

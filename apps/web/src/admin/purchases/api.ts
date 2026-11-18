@@ -1,4 +1,5 @@
 import type {
+  DamagedStock,
   BatchBlockInput,
   BatchBlockResult,
   RecallResponse,
@@ -30,6 +31,11 @@ export const createPurchase = (input: PurchaseInput) =>
 export const paySupplier = (input: SupplierPaymentInput) =>
   apiFetch<SupplierPaymentRow>('/v1/supplier-payments', { method: 'POST', body: input, auth: true });
 export const getInventory = () => apiFetch<InventoryResponse>('/v1/inventory', { auth: true });
+// «البضاعة التالفة»: what each store holds as damaged goods. It goes back to the supplier, or is written
+// off, through the two calls any branch uses, naming the damaged place as the branch.
+export const getDamagedStock = () => apiFetch<DamagedStock>('/v1/damaged-stock', { auth: true });
+export const sendBackDamaged = (input: SupplierReturnInput) =>
+  apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });
 export const createStocktake = (input: StocktakeInput) =>
   apiFetch<StocktakeDetail>('/v1/stocktakes', { method: 'POST', body: input, auth: true });
 export const getProfit = (from: string, to: string) =>

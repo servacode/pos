@@ -202,6 +202,8 @@ export const JOURNAL_SOURCE_TYPES = [
   'expense',
   'shift_close',
   'cash_movement',
+  'rep_settlement',
+  'rep_debt',
   'manual',
   'reversal',
 ] as const;

@@ -30,7 +30,7 @@ export function statusOf(result: Exclude<CodeCheck, { ok: true }>): PinStatus {
     case 'never_online':
       return { kind: 'message', text: NEVER_ONLINE_TEXT };
     case 'refused':
-      return { kind: 'message', text: REFUSED_TEXT };
+      return { kind: 'message', text: result.message ?? REFUSED_TEXT };
   }
 }
 

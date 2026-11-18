@@ -17,6 +17,8 @@ import {
  * report: a settlement posts nothing itself (the rep's cash is already in his shift drawer and the
  * safe drops), it only compares what he should hand over with what was counted, and — once the
  * supervisor approves — unloads the van through the ordinary van count (stocktake) and transfer.
+ * One exception (round 35, D6): a cash shortage the supervisor counted is moved off the cash
+ * difference loss (6200, booked when the shift closed) onto the rep, as a debt in 1250 under his name.
  *
  *   GET  /v1/rep-settlements/preview?repId&date      SettlementPreview      (rep.settle)
  *   GET  /v1/rep-settlements                         RepSettlementRow[]
@@ -25,6 +27,10 @@ import {
  *   POST /v1/rep-settlements/{id}/approve            { version } → RepSettlementDetail
  *   POST /v1/rep-settlements/{id}/cancel             { version, reason } → RepSettlementDetail
  *   POST /v1/device/rep/van-count                    repVanCountInput → { id }   (a rep_phone's blind count)
+ *   GET  /v1/rep-debts                               RepDebtBalance[]        (rep.settle)
+ *   GET  /v1/reps/{id}/debt                          RepDebt                 (rep.settle)
+ *   POST /v1/reps/{id}/debt/payments                 repDebtPaymentInput → RepDebt  (rep.settle)
+ *   POST /v1/reps/{id}/debt/forgive                  repDebtForgiveInput → RepDebt  (rep.settle + accounting.post)
  *   GET  /v1/distribution/today?date                 TodayBoard              (report.view)
  *   GET/POST/PUT/DELETE /v1/rep-targets              RepTargetRow            (rep.targets)
  *   GET  /v1/distribution/reports/{kind}?from&to&repId   DistributionReport (report.view)
@@ -131,6 +137,8 @@ export interface SettlementPreview {
   keepStockInVan: boolean;
   /** A settlement that already covers this rep and day */
   existing: { id: string; number: string; status: SettlementStatus } | null;
+  /** What the rep owes the shop now, in the base currency (round 35, D6); absent in a record made before */
+  repDebtMinor?: number;
 }
 
 export const repSettlementCreateInput = z.object({
@@ -203,7 +211,75 @@ export interface RepSettlementDetail {
   preview: SettlementPreview;
   cheques: { received: string[]; unmatched: SettlementCheque[] };
   goods: SettlementGoods;
+  /** What approving it put on the rep as a debt; null when it put none (round 35, D6) */
+  repDebt?: SettlementRepDebt | null;
 }
+
+/** The cash shortage an approval moved onto the rep: per currency as counted, and its value in the base currency */
+export interface SettlementRepDebt {
+  shortage: Record<string, number>;
+  baseMinor: number;
+  /** The journal entry that carries it */
+  entryNumber: string | null;
+}
+
+// ─── What a rep owes ────────────────────────────────────────────────────────
+
+export const REP_DEBT_KINDS = ['shortage', 'payment', 'forgiven'] as const;
+export type RepDebtKind = (typeof REP_DEBT_KINDS)[number];
+export const REP_DEBT_KIND_LABELS: Record<RepDebtKind, string> = {
+  shortage: 'عجز في التسوية',
+  payment: 'سدّد المندوب',
+  forgiven: 'إعفاء',
+};
+
+export interface RepDebtEntry {
+  id: string;
+  /** The journal entry's number */
+  number: string;
+  date: string;
+  kind: RepDebtKind;
+  /** Base currency; positive makes the debt bigger, negative brings it down */
+  amountMinor: number;
+  memo: string | null;
+}
+
+export interface RepDebt {
+  repId: string;
+  repName: string;
+  baseCurrency: CurrencyCode;
+  /** What he owes the shop now; 0 when nothing */
+  balanceMinor: number;
+  entries: RepDebtEntry[];
+}
+
+export interface RepDebtBalance {
+  repId: string;
+  repName: string;
+  balanceMinor: number;
+}
+
+/** The rep pays back some of it in cash, into the safe */
+export const repDebtPaymentInput = z.object({
+  amountMinor: z.int().positive('اكتب مبلغاً أكبر من صفر'),
+  date: isoDateSchema.optional(),
+  note: z
+    .string()
+    .trim()
+    .max(200, 'الملاحظة طويلة')
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+});
+export type RepDebtPaymentInput = z.output<typeof repDebtPaymentInput>;
+
+/** The owner lets some of it go: it becomes the shop's loss */
+export const repDebtForgiveInput = z.object({
+  amountMinor: z.int().positive('اكتب مبلغاً أكبر من صفر'),
+  date: isoDateSchema.optional(),
+  reason: z.string().trim().min(2, 'اكتب سبب الإعفاء').max(200, 'السبب طويل'),
+});
+export type RepDebtForgiveInput = z.output<typeof repDebtForgiveInput>;
 
 // ─── The day board ──────────────────────────────────────────────────────────
 

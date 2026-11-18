@@ -113,6 +113,19 @@ describe('a return', () => {
     expect(validateDocumentPayload('return', r)).toEqual({ ok: true, checked: true });
   });
 
+  it('says it is damaged only when it is (round 35, D7), and passes its schema either way', () => {
+    const sale = aSale([line(1, 125_000, { qty: 2000 })]);
+    const picks = [{ saleLineNo: 1, qty: 1000 }];
+    const ordinary = buildReturnPayload(request(sale, picks));
+    // An ordinary return carries no flag at all: it is exactly what every earlier till made
+    expect('damaged' in ordinary).toBe(false);
+    expect(buildReturnPayload({ ...request(sale, picks), damaged: false })).toEqual(ordinary);
+    const broken = buildReturnPayload({ ...request(sale, picks), damaged: true });
+    expect(broken).toEqual({ ...ordinary, damaged: true });
+    expect(validateDocumentPayload('return', broken)).toEqual({ ok: true, checked: true });
+    expect(validateDocumentPayload('return', ordinary)).toEqual({ ok: true, checked: true });
+  });
+
   it('in pieces adds up, to the qirsh, to the line it came from, with tax and a discount', () => {
     fc.assert(
       fc.property(

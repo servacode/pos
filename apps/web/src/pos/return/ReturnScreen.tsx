@@ -178,6 +178,8 @@ export function ReturnScreen({
     busy: false,
   });
   const [otherReason, setOtherReason] = useState('');
+  // «تالفة»: the goods do not go back on the shelf but to the damaged stock (null: it follows the reason)
+  const [brokenPicked, setBrokenPicked] = useState<boolean | null>(null);
   const [method, setMethod] = useState<RefundMethod>('cash');
   const [reference, setReference] = useState('');
   const [approving, setApproving] = useState(false);
@@ -296,6 +298,7 @@ export function ReturnScreen({
     .map(([lineNo, q]) => ({ saleLineNo: Number(lineNo), qty: q }))
     .filter((p) => p.qty > 0);
   const why = reason === 'other' ? otherReason.trim() : reason;
+  const broken = brokenPicked ?? reason === DAMAGED_REASON;
   const needsReference = method !== 'cash' && method !== 'voucher' && method !== 'account';
 
   const draft = useMemo((): ReturnPayload | null => {
@@ -313,11 +316,12 @@ export function ReturnScreen({
         refundMethod: method,
         reference: reference.trim() || null,
         cashStepMinor: settings.cashRoundingSteps[current.sale.currency] ?? 0,
+        damaged: broken,
       });
     } catch {
       return null;
     }
-  }, [current, picks, shift.id, session.userId, why, method, reference, settings.cashRoundingSteps]);
+  }, [current, picks, shift.id, session.userId, why, method, reference, settings.cashRoundingSteps, broken]);
 
   // A damaged or expired box is never «sealed»: that reason does not ask for the tick
   const damaged = reason === DAMAGED_REASON;
@@ -850,6 +854,20 @@ export function ReturnScreen({
                     value={otherReason}
                     onChange={(e) => setOtherReason(e.target.value.slice(0, 200))}
                   />
+                ) : null}
+                <ChoiceGroup label="القطع المرتجعة" className="flex flex-wrap gap-2">
+                  <OptionChip selected={!broken} onClick={() => setBrokenPicked(false)}>
+                    سليمة: تعود إلى الرف
+                  </OptionChip>
+                  <OptionChip selected={broken} onClick={() => setBrokenPicked(true)}>
+                    تالفة: لا تُباع
+                  </OptionChip>
+                </ChoiceGroup>
+                {broken ? (
+                  <p className="text-xs text-ink-muted">
+                    تذهب القطع إلى «البضاعة التالفة» ولا تُحسب من مخزون البيع، وتبقى بكلفتها حتى تُرجَع للمورد
+                    أو تُشطب.
+                  </p>
                 ) : null}
               </div>
 
