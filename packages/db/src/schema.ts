@@ -3687,6 +3687,8 @@ export const repDays = pgTable(
     loadConfirmedAt: timestamp('load_confirmed_at', { withTimezone: true }),
     unloadTransferId: uuid('unload_transfer_id'),
     stocktakeId: uuid('stocktake_id'),
+    /** The blind van count the phone sent at the end of the day: { at, lines: [{ variantId, counted }] }; the settlement reads it */
+    vanCount: jsonb('van_count'),
     note: text('note'),
     version: version(),
     createdAt: createdAt(),
@@ -3775,6 +3777,8 @@ export const repSettlements = pgTable(
     treatment: text('treatment'),
     /** Documents that had not reached the server when it was made */
     pendingDocs: integer('pending_docs').notNull().default(0),
+    /** What the settlement saw when it was made (the drawer per currency, the cheques, the van count): a record that later documents never change */
+    snapshot: jsonb('snapshot'),
     approvedBy: uuid('approved_by'),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     note: text('note'),

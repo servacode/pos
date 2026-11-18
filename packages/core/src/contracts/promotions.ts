@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PROMOTION_KINDS, PROMOTION_SCOPES, type PromotionRule } from '../promotions';
+import { CUSTOMER_KINDS } from './customers';
 import { bpSchema, isoTimeSchema, uuidSchema, versionSchema } from './common';
 
 /**
@@ -14,6 +15,14 @@ import { bpSchema, isoTimeSchema, uuidSchema, versionSchema } from './common';
  * Stopping a promotion is `archived: true`; it stays in the list and in old receipts' reasons.
  */
 
+export const PROMOTION_PRICE_TIERS = ['retail', 'wholesale'] as const;
+
+/** «من 10 قطع: 5%»: one step of a tiered promotion */
+export const promotionTierInput = z.object({
+  minQty: z.int('اكتب عدد القطع').min(2, 'من قطعتين فأكثر').max(100_000, 'العدد كبير'),
+  percentBp: bpSchema.refine((n) => n > 0, 'اكتب نسبة الخصم'),
+});
+
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'الوقت بصيغة 14:30');
 
 export const promotionInput = z
@@ -23,6 +32,17 @@ export const promotionInput = z
     percentBp: bpSchema.nullable().default(null),
     buyQty: z.int().min(1).max(100).nullable().default(null),
     getQty: z.int().min(1).max(100).nullable().default(null),
+    /** tiered: «من 10 قطع 5%، من 50 قطعة 8%»; any other kind leaves it empty */
+    tiers: z.array(promotionTierInput).max(10, 'عشر شرائح على الأكثر').default([]),
+    /** free_item: the item that comes free, and how many of it for each buyQty bought */
+    freeVariantId: uuidSchema.nullable().default(null),
+    freeQty: z.int().min(1).max(100).nullable().default(null),
+    /** Only these kinds of customers get it; empty: everyone */
+    customerKinds: z.array(z.enum(CUSTOMER_KINDS)).max(20).default([]),
+    /** Only customers on these price lists; empty: everyone */
+    priceTiers: z.array(z.enum(PROMOTION_PRICE_TIERS)).max(2).default([]),
+    /** Only on a rep's phone, not at the shop's till */
+    repOnly: z.boolean().default(false),
     scope: z.enum(PROMOTION_SCOPES),
     categoryIds: z.array(uuidSchema).max(100).default([]),
     productIds: z.array(uuidSchema).max(500).default([]),
@@ -49,6 +69,25 @@ export const promotionInput = z
     if (p.kind === 'buy_get') {
       if (!p.buyQty) ctx.addIssue({ code: 'custom', path: ['buyQty'], message: 'كم قطعة يشتري الزبون؟' });
       if (!p.getQty) ctx.addIssue({ code: 'custom', path: ['getQty'], message: 'كم قطعة مجاناً؟' });
+    }
+    if (p.kind === 'tiered') {
+      if (p.tiers.length === 0) {
+        ctx.addIssue({ code: 'custom', path: ['tiers'], message: 'أضف شريحة واحدة على الأقل' });
+      }
+      const mins = p.tiers.map((t) => t.minQty);
+      if (new Set(mins).size !== mins.length) {
+        ctx.addIssue({ code: 'custom', path: ['tiers'], message: 'لا تكرر عدد القطع في شريحتين' });
+      }
+    }
+    if (p.kind === 'free_item') {
+      if (!p.buyQty) ctx.addIssue({ code: 'custom', path: ['buyQty'], message: 'كم قطعة يشتري الزبون؟' });
+      if (!p.freeQty) ctx.addIssue({ code: 'custom', path: ['freeQty'], message: 'كم قطعة مجاناً؟' });
+      if (!p.freeVariantId) {
+        ctx.addIssue({ code: 'custom', path: ['freeVariantId'], message: 'اختر الصنف المجاني' });
+      }
+    }
+    if ((p.kind === 'tiered' || p.kind === 'free_item') && p.couponCode) {
+      ctx.addIssue({ code: 'custom', path: ['couponCode'], message: 'الكود لعروض الخصم والعبوات فقط' });
     }
     if (p.scope === 'categories' && p.categoryIds.length === 0) {
       ctx.addIssue({ code: 'custom', path: ['categoryIds'], message: 'اختر تصنيفاً واحداً على الأقل' });

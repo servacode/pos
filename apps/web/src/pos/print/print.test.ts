@@ -78,6 +78,35 @@ describe('the receipt as printer lines', () => {
     expect(text).not.toMatch(/[⁦-⁩]/);
   });
 
+  it('says «مجاناً» and the promotion on a free line, and prints nothing extra on an ordinary one', () => {
+    const withFree = buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [],
+      shiftId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a03',
+      cashierId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a04',
+      cashSteps: {},
+      lines: [
+        { ...sale.lines[0]!, discount: null },
+        {
+          lineNo: 2,
+          productId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a05',
+          variantId: '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a06',
+          name: 'كولا',
+          qty: 1000,
+          priceCurrency: 'SYP',
+          priceMinor: 0,
+          taxRateBp: 0,
+          discount: { type: 'amount', minor: 0, source: 'promotion', reason: 'هدية الكولا', approval: null },
+        },
+      ],
+      payments: [{ method: 'cash', currency: 'SYP', amountMinor: 50_000 }],
+    });
+    const lines = receiptLines({ ...data, doc: { ...data.doc, payload: withFree as never } });
+    expect(lines).toContainEqual({ kind: 'text', text: 'مجاناً · هدية الكولا' });
+    expect(JSON.stringify(receiptLines(data))).not.toContain('مجاناً');
+  });
+
   it('marks a reprint as a copy', () => {
     expect(receiptLines(data, true)[0]).toEqual({ kind: 'center', text: '— نسخة —', bold: true });
   });

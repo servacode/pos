@@ -4,6 +4,8 @@ import type {
   CommissionPlanUpdateInput,
   CustomerApprovalInput,
   CustomerDetail,
+  DistributionReport,
+  DistributionReportKind,
   DistributionSettings,
   NoSaleReasonInput,
   NoSaleReasonRow,
@@ -15,6 +17,11 @@ import type {
   RepCandidate,
   RepInput,
   RepRow,
+  RepSettlementCreateInput,
+  RepSettlementDetail,
+  RepSettlementRow,
+  RepTargetInput,
+  RepTargetRow,
   RepUpdateInput,
   RouteCustomersInput,
   RouteDetail,
@@ -23,8 +30,12 @@ import type {
   RouteUpdateInput,
   SalesOrderAssignInput,
   SalesOrderCancelInput,
+  SalesOrderCreateInput,
   SalesOrderListQuery,
   SalesOrderRow,
+  SettlementListQuery,
+  SettlementPreview,
+  TodayBoard,
   VanInput,
   VanRow,
 } from '@serva/core';
@@ -97,3 +108,39 @@ export const getPickingList = (warehouseBranchId: string, ids: string[] = []) =>
 // A customer a rep added
 export const approveCustomer = (id: string, input: CustomerApprovalInput) =>
   send<CustomerDetail>('POST', `/v1/customers/${id}/approval`, input);
+
+// The evening settlement, the day board, targets and reports (rep.settle, report.view, rep.targets)
+export const previewSettlement = (repId: string, date: string) =>
+  get<SettlementPreview>(`/v1/rep-settlements/preview?repId=${repId}&date=${date}`);
+export const listSettlements = (query: Partial<SettlementListQuery> = {}) => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value) params.set(key, String(value));
+  const text = params.toString();
+  return get<RepSettlementRow[]>(`/v1/rep-settlements${text ? `?${text}` : ''}`);
+};
+export const getSettlement = (id: string) => get<RepSettlementDetail>(`/v1/rep-settlements/${id}`);
+export const createSettlement = (input: RepSettlementCreateInput) =>
+  send<RepSettlementDetail>('POST', '/v1/rep-settlements', input);
+export const approveSettlement = (id: string, version: number) =>
+  send<RepSettlementDetail>('POST', `/v1/rep-settlements/${id}/approve`, { version });
+export const cancelSettlement = (id: string, version: number, reason: string) =>
+  send<RepSettlementDetail>('POST', `/v1/rep-settlements/${id}/cancel`, { version, reason });
+
+export const getBoard = (date?: string) =>
+  get<TodayBoard>(`/v1/distribution/today${date ? `?date=${date}` : ''}`);
+
+export const listTargets = (month: string) => get<RepTargetRow[]>(`/v1/rep-targets?month=${month}`);
+export const createTarget = (input: RepTargetInput) => send<RepTargetRow>('POST', '/v1/rep-targets', input);
+export const updateTarget = (id: string, targetValue: number, version: number) =>
+  send<RepTargetRow>('PUT', `/v1/rep-targets/${id}`, { targetValue, version });
+export const deleteTarget = (id: string) =>
+  apiFetch<void>(`/v1/rep-targets/${id}`, { method: 'DELETE', auth: true });
+
+export const getDistributionReport = (kind: DistributionReportKind, from: string, to: string, repId = '') =>
+  get<DistributionReport>(
+    `/v1/distribution/reports/${kind}?from=${from}&to=${to}${repId ? `&repId=${repId}` : ''}`,
+  );
+
+// A new order from the office
+export const createOrder = (input: SalesOrderCreateInput) =>
+  send<SalesOrderRow>('POST', '/v1/sales-orders', input);

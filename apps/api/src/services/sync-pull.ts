@@ -318,6 +318,8 @@ const PULL_SETS: Record<string, PullSet> = {
       approvalStatus: customers.approvalStatus,
       lat: customers.lat,
       lng: customers.lng,
+      // What a trade promotion targets («عروض التجار»); additive
+      kind: customers.kind,
       archived: archivedFlag(customers.archivedAt),
       version: customers.version,
     },
@@ -364,6 +366,13 @@ const PULL_SETS: Record<string, PullSet> = {
       daysOfWeek: promotions.daysOfWeek,
       fromTime: promotions.fromTime,
       toTime: promotions.toTime,
+      // Trade promotions (tiered, free_item) and who they are for; additive, older tills ignore them
+      tiers: sql<{ minQty: number; percentBp: number }[]>`coalesce(${promotions.tiers}, '[]'::jsonb)`,
+      freeVariantId: promotions.freeVariantId,
+      freeQty: promotions.freeQty,
+      customerKinds: promotions.customerKinds,
+      priceTiers: promotions.priceTiers,
+      repOnly: promotions.repOnly,
       // A coupon's offer is not for every sale: it reaches the till on the order that carries its code
       archived: sql<boolean>`(${promotions.archivedAt} is not null or ${promotions.couponCode} is not null)`,
       version: promotions.version,
@@ -562,17 +571,33 @@ export async function pullChanges(
     const xmin = await currentXmin(tx);
     const sets: Record<string, PullSetPage> = {};
     const resync: string[] = [];
+    // Sets the server asked this device to download again (a rep's route lost customers: the pull cannot say «delete»)
+    const [asked] = await tx.execute<{ sets: string[] }>(
+      sql`select resync_sets as sets from devices where id = ${device.deviceId}`,
+    );
+    const flagged = new Set(asked?.sets ?? []);
     let hasMore = false;
     for (const name of names) {
       const after = parseCursor(cursors[name] ?? INITIAL_CURSOR);
       // Tombstones older than the horizon are gone: a cursor before it cannot see those deletions.
-      if (after.xid !== 0n && after.xid < state.tombstoneHorizon) {
+      // A set the device has not pulled yet has nothing stale to forget: it is served from the start anyway
+      if (after.xid !== 0n && (flagged.has(name) || after.xid < state.tombstoneHorizon)) {
         resync.push(name);
         continue;
       }
       const page = await pullSet(tx, device, PULL_SETS[name]!, name, after, xmin, limit);
       sets[name] = page.page;
       hasMore ||= page.hasMore;
+    }
+    // What the answer tells the device to download again is no longer owed
+    const done = names.filter((name) => flagged.has(name));
+    if (done.length > 0) {
+      await tx.execute(sql`
+        update devices set resync_sets = array(select s from unnest(resync_sets) s where s <> all(array[${sql.join(
+          done.map((d) => sql`${d}`),
+          sql`, `,
+        )}]::text[]))
+        where id = ${device.deviceId}`);
     }
     return {
       contractVersion: CONTRACT_VERSION,

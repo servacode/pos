@@ -6,7 +6,7 @@ import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import type { Approval } from '@serva/core/contracts/documents';
 import { businessDateOf, packPrice, rateFor } from '@serva/core/sale';
-import { promotionActive } from '@serva/core/promotions';
+import { promotionActive, type PromotionAudience } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
 import {
   allocateFefo,
@@ -52,6 +52,7 @@ import {
 } from '@serva/ui';
 import { barcodeKey, type BarcodeHit, type Catalog, type CatalogItem } from '../catalog';
 import { ExactMoney } from '../ExactMoney';
+import { useRep } from '../../rep/state';
 import { counted, isolateSizes } from '../format';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember, StaffSession } from '../staff/staff';
@@ -284,15 +285,36 @@ export function SaleScreen(props: SaleScreenProps) {
   );
   const batchApproved = cart.batchApproval?.sig === batchPlan.signature;
   const batchWaits = guard.approvals.length > 0 && !batchApproved;
+  // Who the sale is for, so a promotion meant for wholesale customers, one kind of shop or the reps'
+  // phones reaches only them
+  const repState = useRep();
+  const audience = useMemo<PromotionAudience>(() => {
+    const known = cart.customer ? catalog.customers.find((c) => c.id === cart.customer!.id) : undefined;
+    return {
+      customerKind: known?.kind ?? null,
+      priceTier: cart.priceTier ?? known?.priceTier ?? 'retail',
+      rep: repState !== null,
+    };
+  }, [cart.customer, cart.priceTier, catalog.customers, repState]);
   const ctx = useMemo<PricingContext>(
     () => ({
       currency: settings.baseCurrency,
       taxInclusive: settings.taxInclusive,
       rates: catalog.rates,
       promotions: activePromotions,
+      audience,
+      variants: catalog.byVariant,
       batchPlan: batchPlan.allocations,
     }),
-    [settings.baseCurrency, settings.taxInclusive, catalog.rates, activePromotions, batchPlan.allocations],
+    [
+      settings.baseCurrency,
+      settings.taxInclusive,
+      catalog.rates,
+      activePromotions,
+      audience,
+      catalog.byVariant,
+      batchPlan.allocations,
+    ],
   );
   const rules = useMemo<ApprovalRules>(
     () => ({
@@ -1838,6 +1860,19 @@ export function SaleScreen(props: SaleScreenProps) {
                 </CartLine>
               );
             })}
+            {/* The free pieces a promotion earned: derived from the cart, so they come and go with it */}
+            {(priced?.lines.slice(cart.lines.length) ?? []).map((free) => (
+              <li
+                key={free.lineNo}
+                aria-label={`مجاني: ${free.name}`}
+                className="flex items-center gap-2 rounded-small bg-success-soft px-3 py-2 text-sm font-semibold text-success-ink"
+              >
+                <span className="min-w-0 flex-1">
+                  {free.name} × {formatQuantity(free.qty, digits)}
+                </span>
+                <span className="shrink-0">مجاناً · {free.discount?.reason}</span>
+              </li>
+            ))}
           </ul>
         )}
       </div>

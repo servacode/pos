@@ -229,9 +229,14 @@ export function OrdersPage() {
         description="طلبيات البيع المسبق: لا تُسجَّل مالياً حتى تُفوتَر عند التسليم."
         icon={<TruckIcon />}
         actions={
-          <Button variant="secondary" icon={<PrintIcon />} onClick={() => setPicking(true)}>
-            قائمة التجهيز
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to="/distribution/orders/new">
+              <Button>طلبية جديدة</Button>
+            </Link>
+            <Button variant="secondary" icon={<PrintIcon />} onClick={() => setPicking(true)}>
+              قائمة التجهيز
+            </Button>
+          </div>
         }
       />
       <div className="flex flex-wrap items-center gap-3">

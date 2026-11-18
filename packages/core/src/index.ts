@@ -26,6 +26,7 @@ export * from './contracts/promotions';
 export * from './contracts/cheques';
 export * from './contracts/installments';
 export * from './contracts/distribution';
+export * from './contracts/distribution-ops';
 export * from './contracts/merchandise';
 export * from './contracts/sales-breakdown';
 export * from './contracts/shop';

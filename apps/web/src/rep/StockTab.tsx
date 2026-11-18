@@ -20,6 +20,8 @@ export interface VanCount {
   /** The business day it was counted for */
   date: string;
   at: number;
+  /** The server has it (set by the phone's state once it was sent) */
+  sent?: boolean;
   lines: { variantId: string; name: string; system: number; counted: number }[];
 }
 
@@ -80,6 +82,8 @@ export function StockTab({ catalog }: { catalog: Catalog }) {
     await pos.local.set(VAN_COUNT_KEY, count);
     setSaved(count);
     setCounting(false);
+    // The supervisor settles the day from this count: it goes at once when the server can be reached, else with the next sync
+    void rep.sendVanCount();
   }
 
   if (counting) {

@@ -157,6 +157,7 @@ function sheetFor(sets: CatalogSets, returnable: RepDaySheet['returnable'] = [])
 }
 
 interface Calls {
+  vanCounts: Record<string, unknown>[];
   visits: Record<string, unknown>[];
   orders: Record<string, unknown>[];
 }
@@ -173,7 +174,7 @@ function harness(
   const { store, outbox } = memoryStore(linkedDevice, sets);
   const local = options.local ?? memoryLocal();
   let online = options.online ?? true;
-  const calls: Calls = { visits: [], orders: [] };
+  const calls: Calls = { vanCounts: [], visits: [], orders: [] };
   const staff = staffServer(sets);
   const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url);
@@ -182,6 +183,10 @@ function harness(
     if (path === '/v1/device/rep/visits') {
       calls.visits.push(JSON.parse(String(init?.body)));
       return json({ id: 'x' }, 201);
+    }
+    if (path === '/v1/device/rep/van-count') {
+      calls.vanCounts.push(JSON.parse(String(init?.body)));
+      return json({ id: 'd' });
     }
     if (path === '/v1/device/sales-orders') {
       calls.orders.push(JSON.parse(String(init?.body)));
@@ -388,6 +393,35 @@ describe('the rep’s day (/rep)', () => {
     const section = await screen.findByRole('region', { name: 'جرد اليوم' });
     expect(section).toHaveTextContent('ناقص');
     expect(section).toHaveTextContent('2');
+    // The count goes to the server for the supervisor's settlement, and the phone remembers it was sent
+    await waitFor(() => expect(h.calls.vanCounts).toHaveLength(1));
+    expect(h.calls.vanCounts[0]).toEqual({
+      businessDate: '2026-11-18',
+      lines: [{ variantId: PRODUCTS.milk.variant.id, counted: 10_000 }],
+    });
+    await waitFor(async () =>
+      expect(await h.local.get<{ sent?: boolean }>('rep:van-count')).toMatchObject({ sent: true }),
+    );
+  });
+
+  it('keeps the van count on the phone while there is no connection, unsent', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const h = harness({ local });
+    await signIn(h.user);
+    await screen.findByRole('list', { name: 'خط سير اليوم' });
+    // The signal drops after the morning sheet was read
+    h.setOnline(false);
+    await h.user.click(await screen.findByRole('button', { name: 'السيارة' }));
+    await h.user.click(await screen.findByRole('button', { name: 'جرد السيارة' }));
+    await h.user.type(await screen.findByRole('textbox', { name: 'العدد' }), '12');
+    await h.user.click(screen.getByRole('button', { name: 'احفظ الجرد' }));
+    await screen.findByRole('region', { name: 'جرد اليوم' });
+    expect(h.calls.vanCounts).toHaveLength(0);
+    expect(await local.get<{ sent?: boolean; lines: unknown[] }>('rep:van-count')).toMatchObject({
+      lines: [expect.objectContaining({ counted: 12_000 })],
+    });
+    expect((await local.get<{ sent?: boolean }>('rep:van-count'))?.sent).toBeUndefined();
   });
 
   it('delivers an order from the van at the price it promised, and the sale names the order', async () => {

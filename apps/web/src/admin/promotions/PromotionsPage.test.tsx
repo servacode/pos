@@ -140,6 +140,100 @@ describe('«العروض»', () => {
   });
 });
 
+describe('trade promotions', () => {
+  it('adds a «حسب الكمية» promotion with its steps, for wholesale customers and the reps', async () => {
+    const { user, requestsTo } = open('/promotions', []);
+    await user.click(await screen.findByRole('button', { name: 'عرض جديد' }));
+    const form = screen.getByRole('form', { name: 'عرض جديد' });
+    await user.type(within(form).getByLabelText('اسم العرض كما يُطبع على الإيصال'), 'خصم الكميات');
+    await user.click(within(form).getByRole('radio', { name: /خصم حسب الكمية/ }));
+    await user.type(within(form).getByLabelText('الخصم %'), '5');
+    await user.click(within(form).getByRole('button', { name: 'أضف شريحة' }));
+    await user.type(within(form).getByLabelText('من كم قطعة (شريحة 2)'), '50');
+    const percents = within(form).getAllByLabelText('الخصم %');
+    await user.type(percents[1]!, '8');
+    await user.click(within(form).getByRole('checkbox', { name: 'زبائن الجملة' }));
+    await user.click(within(form).getByRole('checkbox', { name: 'بقالية' }));
+    await user.click(within(form).getByRole('checkbox', { name: 'على هاتف المندوب فقط' }));
+    // A code is for the old kinds only
+    expect(within(form).queryByLabelText('الكود (اختياري)')).toBeNull();
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    await screen.findByText('خصم الكميات');
+    expect(requestsTo('POST', '/v1/promotions').at(-1)?.body).toMatchObject({
+      kind: 'tiered',
+      percentBp: null,
+      tiers: [
+        { minQty: 10, percentBp: 500 },
+        { minQty: 50, percentBp: 800 },
+      ],
+      priceTiers: ['wholesale'],
+      customerKinds: ['grocery'],
+      repOnly: true,
+      couponCode: null,
+    });
+  });
+
+  it('adds a free-item promotion: the gift is picked by name, one variant', async () => {
+    let items: Promotion[] = [];
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/promotions': () => ({ status: 200, body: { items } }),
+      'GET /v1/categories': () => ({ status: 200, body: { items: [dairy] } }),
+      'GET /v1/products?limit=200': () => ({ status: 200, body: { items: [], nextCursor: null } }),
+      'GET /v1/products?q=%D9%83%D9%88%D9%84%D8%A7&limit=8': () => ({
+        status: 200,
+        body: {
+          items: [{ id: 'prod-cola', nameAr: 'كولا', singleVariantId: 'var-cola' }],
+          nextCursor: null,
+        },
+      }),
+      'POST /v1/promotions': (r: MockRequest) => {
+        const made = promo({ ...(r.body as Partial<Promotion>), id: 'p-9' } as Partial<Promotion>);
+        items = [made];
+        return { status: 201, body: made };
+      },
+    });
+    const { user } = renderApp('/promotions');
+    await user.click(await screen.findByRole('button', { name: 'عرض جديد' }));
+    const form = screen.getByRole('form', { name: 'عرض جديد' });
+    await user.type(within(form).getByLabelText('اسم العرض كما يُطبع على الإيصال'), 'هدية كولا');
+    await user.click(within(form).getByRole('radio', { name: /اشترِ واحصل على صنف آخر مجاناً/ }));
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText('اختر الصنف المجاني')).toBeInTheDocument();
+    await user.type(within(form).getByLabelText('الصنف المجاني: ابحث بالاسم'), 'كولا');
+    await user.click(await within(form).findByRole('button', { name: 'كولا' }));
+    expect(within(form).getByText('الصنف المجاني: كولا')).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    await screen.findByText('هدية كولا');
+    expect(mock.requestsTo('POST', '/v1/promotions').at(-1)?.body).toMatchObject({
+      kind: 'free_item',
+      buyQty: 2,
+      freeQty: 1,
+      freeVariantId: 'var-cola',
+      percentBp: null,
+      tiers: [],
+    });
+  });
+
+  it('describes the new kinds on their cards', async () => {
+    open('/promotions', [
+      promo({
+        id: 'p-t',
+        name: 'كميات',
+        kind: 'tiered',
+        percentBp: null,
+        scope: 'all',
+        tiers: [{ minQty: 10, percentBp: 500 }],
+        repOnly: true,
+      }),
+    ]);
+    const list = await screen.findByRole('list', { name: 'العروض' });
+    expect(await within(list).findByText('كميات')).toBeInTheDocument();
+    expect(list).toHaveTextContent('خصم حسب الكمية: من 10 5% على كل المنتجات · للمندوب فقط');
+  });
+});
+
 describe('«باركود الميزان» in the settings', () => {
   it('turns scale labels on with the usual setting and saves it', async () => {
     const store: StoreResponse = {

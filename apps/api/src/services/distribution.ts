@@ -797,6 +797,29 @@ export function createRoute(
   });
 }
 
+/** The sets a rep's phone downloads again from scratch when a route stops being his or loses customers */
+const ROUTE_SETS = ['customers', 'route_customers', 'routes'];
+const textArray = (items: readonly string[]) =>
+  sql`array[${sql.join(
+    items.map((i) => sql`${i}`),
+    sql`, `,
+  )}]::text[]`;
+
+/**
+ * A customer who leaves a route (or a route that leaves the rep) is only a row that stops matching the
+ * phone's scope (and one who joins it is a row that never changed): the pull never says «delete» nor re-sends it. So the rep's phone is told to download these sets again
+ * (devices.resync_sets, read by the next pull as `commands.resync`), and the removed customers go.
+ */
+async function resyncRepPhone(tx: Transaction, repId: string | null): Promise<void> {
+  if (!repId) return;
+  await tx.execute(sql`
+    update devices
+    set resync_sets = (select coalesce(array_agg(distinct s), '{}') from unnest(resync_sets || ${textArray(ROUTE_SETS)}) s)
+    where kind = 'rep_phone' and revoked_at is null
+      and (id in (select device_id from sales_reps where id = ${repId} and device_id is not null)
+           or branch_id in (select van_branch_id from sales_reps where id = ${repId} and van_branch_id is not null))`);
+}
+
 export function updateRoute(
   db: Database,
   auth: AccessClaims,
@@ -839,6 +862,11 @@ export function updateRoute(
       },
       meta,
     );
+    // The route left its rep (given to another, or stopped): his phone must forget it, and the new rep's phone must get its customers
+    if (before.repId !== repId || before.isActive !== (input.isActive ?? before.isActive)) {
+      await resyncRepPhone(tx, before.repId);
+      if (repId !== before.repId) await resyncRepPhone(tx, repId);
+    }
     return readRoute(tx, id);
   });
 }
@@ -908,6 +936,10 @@ export function setRouteCustomers(
       },
       meta,
     );
+    // Customers who left the route must leave the rep's phone, and the ones who joined it (whose own rows did not change) must reach it
+    if (gone.length > 0 || ids.some((c) => !kept.some((k) => k.customerId === c))) {
+      await resyncRepPhone(tx, before.repId);
+    }
     return readRoute(tx, id);
   });
 }

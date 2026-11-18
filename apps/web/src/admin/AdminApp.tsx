@@ -163,6 +163,9 @@ const StatementPage = lazy(() =>
 const ExpensesPage = lazy(() => import('./ledger/ExpensesPage').then((m) => ({ default: m.ExpensesPage })));
 const Accounting = lazy(() => import('./accounting/AccountingRoutes'));
 const Distribution = lazy(() => import('./distribution/DistributionRoutes'));
+const DistributionReports = lazy(() =>
+  import('./distribution/DistributionReportsPage').then((m) => ({ default: m.DistributionReportsPage })),
+);
 
 /** The root: the home page for a signed-in user, the landing page for a visitor (the session is restored first) */
 function Front() {
@@ -339,6 +342,7 @@ export function AdminApp() {
           <Route path="/evidence" element={page(<EvidencePage />)} />
           <Route path="/accounting/*" element={page(<Accounting />)} />
           <Route path="/distribution/*" element={page(<Distribution />)} />
+          <Route path="/reports/distribution" element={page(<DistributionReports />)} />
         </Route>
         <Route element={<RequireAuth />}>
           <Route path="*" element={<NotFoundPage />} />

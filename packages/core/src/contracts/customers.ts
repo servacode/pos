@@ -122,6 +122,8 @@ export interface CustomerRow {
   regionId?: string | null;
   lat?: number | null;
   lng?: number | null;
+  /** grocery, supermarket…: what a trade promotion targets; absent on older rows */
+  kind?: CustomerKind | null;
 }
 
 export interface CustomerListItem {

@@ -51,6 +51,8 @@ import { branchRoutes } from './routes/branches';
 import { distributionRoutes } from './routes/distribution';
 import { salesOrderRoutes } from './routes/sales-orders';
 import { repDayRoutes } from './routes/rep-day';
+import { repSettlementRoutes } from './routes/rep-settlements';
+import { distributionReportRoutes } from './routes/distribution-reports';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
 import type { SyncProcessors } from './services/sync-push';
@@ -156,6 +158,8 @@ export async function buildApp({
   await app.register(distributionRoutes);
   await app.register(salesOrderRoutes);
   await app.register(repDayRoutes);
+  await app.register(repSettlementRoutes);
+  await app.register(distributionReportRoutes);
   await app.register(reportRoutes);
   await app.register(ledgerDocRoutes);
   await app.register(financialReportRoutes);

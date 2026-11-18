@@ -519,6 +519,20 @@
       "when": 1794947899864,
       "tag": "0073_distribution",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794967785347,
+      "tag": "0074_rep_van_count_settlement_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1794968873696,
+      "tag": "0075_rep_resync_grant",
+      "breakpoints": true
     }
   ]
 }

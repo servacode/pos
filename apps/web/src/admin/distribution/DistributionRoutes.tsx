@@ -7,6 +7,14 @@ const OrdersPage = lazy(() => import('./OrdersPage').then((m) => ({ default: m.O
 const OrderPage = lazy(() => import('./OrderPage').then((m) => ({ default: m.OrderPage })));
 const RoutesPage = lazy(() => import('./RoutesPage').then((m) => ({ default: m.RoutesPage })));
 const RoutePage = lazy(() => import('./RoutePage').then((m) => ({ default: m.RoutePage })));
+const NewOrderPage = lazy(() => import('./NewOrderPage').then((m) => ({ default: m.NewOrderPage })));
+const BoardPage = lazy(() => import('./BoardPage').then((m) => ({ default: m.BoardPage })));
+const SettlementsPage = lazy(() => import('./SettlementsPage').then((m) => ({ default: m.SettlementsPage })));
+const SettlementPage = lazy(() => import('./SettlementPage').then((m) => ({ default: m.SettlementPage })));
+const NewSettlementPage = lazy(() =>
+  import('./SettlementPage').then((m) => ({ default: m.NewSettlementPage })),
+);
+const TargetsPage = lazy(() => import('./TargetsPage').then((m) => ({ default: m.TargetsPage })));
 const RepsPage = lazy(() => import('./RepsPage').then((m) => ({ default: m.RepsPage })));
 const VansPage = lazy(() => import('./VansPage').then((m) => ({ default: m.VansPage })));
 const RegionsPage = lazy(() => import('./RegionsPage').then((m) => ({ default: m.RegionsPage })));
@@ -18,7 +26,13 @@ function First() {
   return (
     <Navigate
       to={
-        me.user.permissions.includes('sales_orders.manage') ? '/distribution/orders' : '/distribution/routes'
+        me.user.permissions.includes('sales_orders.manage')
+          ? '/distribution/orders'
+          : me.user.permissions.includes('routes.manage')
+            ? '/distribution/routes'
+            : me.user.permissions.includes('rep.settle')
+              ? '/distribution/settlements'
+              : '/distribution/today'
       }
       replace
     />
@@ -36,7 +50,13 @@ export default function DistributionRoutes() {
       <Route element={<DistributionFrame />}>
         <Route index element={<First />} />
         <Route path="orders" element={<OrdersPage />} />
+        <Route path="orders/new" element={<NewOrderPage />} />
         <Route path="orders/:id" element={<OrderPage />} />
+        <Route path="today" element={<BoardPage />} />
+        <Route path="settlements" element={<SettlementsPage />} />
+        <Route path="settlements/new" element={<NewSettlementPage />} />
+        <Route path="settlements/:id" element={<SettlementPage />} />
+        <Route path="targets" element={<TargetsPage />} />
         <Route path="routes" element={<RoutesPage />} />
         <Route path="routes/:id" element={<RoutePage />} />
         <Route path="reps" element={<RepsPage />} />

@@ -3,6 +3,7 @@ import {
   cashMovementPayloadSchema,
   customerPayloadSchema,
   depositPayloadSchema,
+  distributionSettingsOf,
   giftVoucherPayloadSchema,
   receiptPayloadSchema,
   returnPayloadSchema,
@@ -570,9 +571,27 @@ async function processCustomer({ tx, device, doc }: DocumentContext) {
       .where(and(eq(customers.tenantId, device.tenantId), eq(customers.phone, c.phone)));
     if (same) flags.push('duplicate_customer');
   }
+  // A customer a rep's phone added waits for the supervisor (cash only until then) when the store asks for it
+  let approvalStatus: 'pending' | undefined;
+  const [kind] = await tx.execute<{ kind: string }>(
+    sql`select kind from devices where id = ${device.deviceId}`,
+  );
+  if (kind?.kind === 'rep_phone') {
+    const [row] = await tx.execute<{ distribution: Record<string, unknown> | null }>(
+      sql`select distribution from tenant_settings where tenant_id = ${device.tenantId}`,
+    );
+    if (distributionSettingsOf(row?.distribution).requireCustomerApproval) approvalStatus = 'pending';
+  }
   await tx
     .insert(customers)
-    .values({ tenantId: device.tenantId, id: doc.id, name: c.name, phone: c.phone, createdByDoc: doc.id })
+    .values({
+      tenantId: device.tenantId,
+      id: doc.id,
+      name: c.name,
+      phone: c.phone,
+      createdByDoc: doc.id,
+      ...(approvalStatus ? { approvalStatus } : {}),
+    })
     .onConflictDoNothing();
   return { flags };
 }

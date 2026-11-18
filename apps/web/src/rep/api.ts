@@ -38,6 +38,13 @@ export const postVisit = (
   fetchFn?: typeof fetch,
 ): Promise<Answer<{ id: string }>> => call('/v1/device/rep/visits', token, fetchFn, report);
 
+/** The blind van count of the day (thousandths); sent again it replaces the last one */
+export const postVanCount = (
+  input: { businessDate: string; lines: { variantId: string; counted: number }[] },
+  token: string,
+  fetchFn?: typeof fetch,
+): Promise<Answer<{ id: string }>> => call('/v1/device/rep/van-count', token, fetchFn, input);
+
 /** A pre-sale order; sent again with the same id it is the same order */
 export const postOrder = (
   input: Pick<

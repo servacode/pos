@@ -131,6 +131,87 @@ describe('promotions at the till', () => {
   });
 });
 
+describe('trade promotions at the till', () => {
+  const gift = (over: Partial<PromotionRow> = {}) =>
+    promotion({
+      id: '0192a000-0000-7000-8000-00000000c010',
+      name: 'اشترِ 2 سكر وخذ زيتاً',
+      kind: 'free_item',
+      percentBp: null,
+      buyQty: 2,
+      freeQty: 1,
+      freeVariantId: PRODUCTS.oil.variant.id,
+      scope: 'products',
+      categoryIds: [],
+      productIds: [PRODUCTS.sugar.product.id],
+      ...over,
+    });
+
+  it('two sugars earn a free oil: shown in the cart, costs nothing, and the sale carries it as an ordinary line', async () => {
+    const { user, outbox } = await saleScreen({ sets: posSets({ promotions: [gift()] }) });
+    await scan(user, PRODUCTS.sugar.barcode!.code);
+    expect(screen.queryByLabelText(/مجاني:/)).toBeNull();
+    await scan(user, PRODUCTS.sugar.barcode!.code);
+    const free = await screen.findByLabelText('مجاني: زيت دوار الشمس 1 لتر');
+    expect(plain(free)).toContain('مجاناً · اشترِ 2 سكر وخذ زيتاً');
+    // 2 × 790, the oil is free
+    expect(plain(due())).toContain('1,580 ل.س');
+    await payExact(user);
+    const sale = savedSale(outbox);
+    expect(validateDocumentPayload('sale', sale)).toEqual({ ok: true, checked: true });
+    expect(verifySalePayload(sale)).toEqual([]);
+    expect(sale.lines).toHaveLength(2);
+    expect(sale.lines[1]).toMatchObject({
+      variantId: PRODUCTS.oil.variant.id,
+      qty: 1000,
+      baseQty: 1000,
+      priceMinor: 0,
+      unitPriceMinor: 0,
+      discount: { source: 'promotion', reason: 'اشترِ 2 سكر وخذ زيتاً', minor: 0 },
+      priced: { grossMinor: 0, netMinor: 0, totalMinor: 0 },
+    });
+    expect(sale.totals.totalMinor).toBe(158_000);
+  });
+
+  it('removing a sugar takes the free oil away with it', async () => {
+    const { user } = await saleScreen({ sets: posSets({ promotions: [gift()] }) });
+    await scan(user, PRODUCTS.sugar.barcode!.code);
+    await scan(user, PRODUCTS.sugar.barcode!.code);
+    await screen.findByLabelText('مجاني: زيت دوار الشمس 1 لتر');
+    await user.click(within(cartLines()).getByRole('button', { name: /سكر/ }));
+    await user.click(within(cartLines()).getByRole('button', { name: 'أنقص الكمية' }));
+    expect(screen.queryByLabelText(/مجاني:/)).toBeNull();
+  });
+
+  it('a tiered promotion takes the percent of the step reached', async () => {
+    const tiered = promotion({
+      id: '0192a000-0000-7000-8000-00000000c011',
+      name: 'كميات الزيت',
+      kind: 'tiered',
+      percentBp: null,
+      tiers: [{ minQty: 3, percentBp: 1000 }],
+      scope: 'products',
+      categoryIds: [],
+      productIds: [PRODUCTS.oil.product.id],
+    });
+    const { user } = await saleScreen({ sets: posSets({ promotions: [tiered] }) });
+    for (let i = 0; i < 2; i++) await scan(user, PRODUCTS.oil.barcode!.code);
+    expect(plain(cartLines())).not.toContain('كميات الزيت');
+    await scan(user, PRODUCTS.oil.barcode!.code);
+    expect(plain(cartLines())).toContain('كميات الزيت');
+    // 3 × 250 − 10%
+    expect(plain(due())).toContain('675 ل.س');
+  });
+
+  it('a promotion for wholesale customers does not run for a retail sale', async () => {
+    const forWholesale = promotion({ priceTiers: ['wholesale'] });
+    const { user } = await saleScreen({ sets: posSets({ promotions: [forWholesale] }) });
+    await scan(user, PRODUCTS.milk.barcode!.code);
+    expect(plain(cartLines())).not.toContain('خصم الألبان 10%');
+    expect(plain(due())).toContain('500 ل.س');
+  });
+});
+
 describe('scale labels', () => {
   /** Olives are sold by the kilo and carry their scale number 00123 as a barcode. */
   function scaleSets(kind: 'weight' | 'price' = 'weight') {

@@ -1,6 +1,14 @@
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
-import type { Promotion, PromotionData, PromotionKind, PromotionScope } from '@serva/core';
-import { categories, products, promotions, withTenant, type Database, type Transaction } from '@serva/db';
+import type { CustomerKind, Promotion, PromotionData, PromotionKind, PromotionScope } from '@serva/core';
+import {
+  categories,
+  products,
+  promotions,
+  variants,
+  withTenant,
+  type Database,
+  type Transaction,
+} from '@serva/db';
 import { requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
@@ -33,6 +41,12 @@ const view = (r: Row): Promotion => ({
   fromTime: r.fromTime,
   toTime: r.toTime,
   couponCode: r.couponCode,
+  tiers: r.tiers ?? [],
+  freeVariantId: r.freeVariantId,
+  freeQty: r.freeQty,
+  customerKinds: r.customerKinds as CustomerKind[],
+  priceTiers: r.priceTiers as ('retail' | 'wholesale')[],
+  repOnly: r.repOnly,
   archived: r.archivedAt !== null,
   version: r.version,
   updatedAt: r.updatedAt.toISOString(),
@@ -44,7 +58,7 @@ function columns(input: PromotionData, now: Date, archivedAt: Date | null) {
     name: input.name,
     kind: input.kind,
     percentBp: input.kind === 'percent' ? input.percentBp : null,
-    buyQty: input.kind === 'buy_get' ? input.buyQty : null,
+    buyQty: input.kind === 'buy_get' || input.kind === 'free_item' ? input.buyQty : null,
     getQty: input.kind === 'buy_get' ? input.getQty : null,
     scope: input.scope,
     categoryIds: input.scope === 'categories' ? [...new Set(input.categoryIds)] : [],
@@ -55,6 +69,13 @@ function columns(input: PromotionData, now: Date, archivedAt: Date | null) {
     fromTime: input.fromTime,
     toTime: input.toTime,
     couponCode: input.couponCode ? input.couponCode.toUpperCase() : null,
+    // Trade promotions: the fields of the other kinds are never kept
+    tiers: input.kind === 'tiered' ? [...input.tiers].sort((a, b) => a.minQty - b.minQty) : null,
+    freeVariantId: input.kind === 'free_item' ? input.freeVariantId : null,
+    freeQty: input.kind === 'free_item' ? input.freeQty : null,
+    customerKinds: [...new Set(input.customerKinds)].sort(),
+    priceTiers: [...new Set(input.priceTiers)].sort(),
+    repOnly: input.repOnly,
     archivedAt: input.archived ? (archivedAt ?? now) : null,
   };
 }
@@ -65,6 +86,14 @@ async function checkTargets(tx: Transaction, input: PromotionData): Promise<void
     const ids = [...new Set(input.categoryIds)];
     const found = await tx.select({ id: categories.id }).from(categories).where(inArray(categories.id, ids));
     if (found.length !== ids.length) throw fieldError('categoryIds', 'تصنيف غير موجود');
+  }
+  if (input.kind === 'free_item' && input.freeVariantId) {
+    const [found] = await tx
+      .select({ id: variants.id })
+      .from(variants)
+      .where(eq(variants.id, input.freeVariantId))
+      .limit(1);
+    if (!found) throw fieldError('freeVariantId', 'الصنف المجاني غير موجود');
   }
   if (input.scope === 'products') {
     const ids = [...new Set(input.productIds)];

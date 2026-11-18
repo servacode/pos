@@ -10,7 +10,12 @@ import type {
 import type { TradeRate } from '@serva/core/contracts/common';
 import type { OrderCouponRule } from '@serva/core/contracts/shop';
 import type { PricedInvoice } from '@serva/core/pricing';
-import { bestPromotions, type PromotionRule } from '@serva/core/promotions';
+import {
+  bestPromotions,
+  freeGrants,
+  type PromotionAudience,
+  type PromotionRule,
+} from '@serva/core/promotions';
 import {
   discountOverLimit,
   packPrice,
@@ -85,6 +90,11 @@ export interface CartLine {
   priceTyped?: boolean;
   /** The average cost of one unit in priceCurrency, when the till knows it («أقل من التكلفة») */
   costMinor?: number | null;
+  /**
+   * A free line a «اشترِ وخذ مجاناً» promotion earned: price 0, never stored in the cart (it is
+   * worked out again from the cart on every change, see freeLinesOf) and named for the receipt.
+   */
+  free?: { promotionId: string; name: string };
 }
 
 /** One choice of a modifier group: «الحجم: كبير» adding its price to one unit */
@@ -176,6 +186,10 @@ export interface PricingContext {
   rates: readonly TradeRate[];
   /** The promotions running now (promotionActive): each line without a typed discount gets its best one */
   promotions?: readonly PromotionRule[];
+  /** Who the sale is for: promotions for certain customers, price lists or reps' phones check it */
+  audience?: PromotionAudience;
+  /** The items by variant, for the free item of a «اشترِ وخذ مجاناً» promotion */
+  variants?: ReadonlyMap<string, CatalogItem>;
   /** What each line takes from which batch, first expiry first (sale/batches.ts); a line not in it has none */
   batchPlan?: ReadonlyMap<number, readonly BatchAllocation[]>;
 }
@@ -399,11 +413,60 @@ export function linePromotion(line: CartLine, ctx: PricingContext) {
       },
     ],
     ctx.promotions,
+    ctx.audience,
   );
   return best.get(line.lineNo) ?? null;
 }
 
+/** Free lines take line numbers from here up, clear of any line the cashier adds */
+export const FREE_LINE_BASE = 1_000_000;
+
+/**
+ * The free lines the cart earns now: ordinary lines at price 0 that name their promotion. They are
+ * not kept in the cart, so removing the goods that earned them removes them too; the sale carries
+ * them like any other line (stock leaves, the cost goes to cost of sales as for any piece).
+ */
+export function freeLinesOf(cart: Cart, ctx: PricingContext): CartLine[] {
+  if (!ctx.promotions?.length || !ctx.variants) return [];
+  const grants = freeGrants(
+    cart.lines.map((line) => ({
+      lineNo: line.lineNo,
+      productId: line.productId,
+      categoryPath: line.categoryPath ?? [],
+      qty: line.qty,
+      unitPriceMinor: unitPriceOf(line, ctx),
+      weighed: line.weighed,
+    })),
+    ctx.promotions,
+    ctx.audience,
+  );
+  const out: CartLine[] = [];
+  grants.forEach((grant, index) => {
+    const item = ctx.variants!.get(grant.variantId);
+    // A piece sold by serial number cannot be handed out without one: the promotion skips it
+    if (!item || item.tracksSerial) return;
+    const line = addItem(EMPTY_CART, item, null, grant.qty).lines[0];
+    if (!line) return;
+    out.push({
+      ...line,
+      lineNo: FREE_LINE_BASE + index,
+      priceMinor: 0,
+      retailPriceMinor: 0,
+      wholesalePriceMinor: null,
+      minPriceMinor: null,
+      adjustment: null,
+      approval: null,
+      free: { promotionId: grant.promotionId, name: grant.name },
+    });
+  });
+  return out;
+}
+
 function lineDiscount(line: CartLine, ctx: PricingContext): SaleDiscount | null {
+  // A free line carries its promotion's name and nothing off: its price is already 0
+  if (line.free) {
+    return { type: 'amount', minor: 0, source: 'promotion', reason: line.free.name, approval: null };
+  }
   const adj = line.adjustment;
   if (!adj) {
     const promo = linePromotion(line, ctx);
@@ -446,7 +509,7 @@ function batchesOf(
 }
 
 export function pricingInput(cart: Cart, ctx: PricingContext): SalePricingInput {
-  const lines: SaleCartLine[] = cart.lines.map((line) => ({
+  const lines: SaleCartLine[] = [...cart.lines, ...freeLinesOf(cart, ctx)].map((line) => ({
     lineNo: line.lineNo,
     productId: line.productId,
     variantId: line.variantId,

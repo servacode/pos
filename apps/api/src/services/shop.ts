@@ -192,6 +192,7 @@ export async function runningRules(
            to_char(ends_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as ends_at,
            days_of_week, from_time, to_time, kind, buy_qty, get_qty, coupon_code
     from promotions where archived_at is null
+      and not rep_only and customer_kinds = '{}' and price_tiers = '{}'
       and (${percentOnly ? sql`kind = 'percent'` : sql`true`})
       and (${coupon ? sql`coupon_code is null or lower(coupon_code) = lower(${coupon})` : sql`coupon_code is null`})`);
   const now = new Date();
@@ -724,7 +725,9 @@ export function placeShopOrder(
       let couponSnapshot: OnlineOrderCouponRule | null = null;
       if (input.coupon) {
         const rule = await couponRule(tx, input.coupon);
-        if (!rule?.couponCode) throw fieldError('coupon', COUPON_BAD);
+        if (!rule?.couponCode || (rule.kind !== 'percent' && rule.kind !== 'buy_get')) {
+          throw fieldError('coupon', COUPON_BAD);
+        }
         coupon = rule.couponCode;
         couponSnapshot = {
           id: rule.id,

@@ -28,14 +28,25 @@ import { localDate, PromotionForm, WEEKDAY_NAMES } from './PromotionForm';
 /** What the promotion gives, as the owner says it. */
 export function promotionSummary(p: Promotion): string {
   const what =
-    p.kind === 'percent' ? `خصم ${(p.percentBp ?? 0) / 100}%` : `اشترِ ${p.buyQty} وخذ ${p.getQty} مجاناً`;
+    p.kind === 'percent'
+      ? `خصم ${(p.percentBp ?? 0) / 100}%`
+      : p.kind === 'tiered'
+        ? `خصم حسب الكمية: ${(p.tiers ?? []).map((t) => `من ${t.minQty} ${t.percentBp / 100}%`).join('، ')}`
+        : p.kind === 'free_item'
+          ? `اشترِ ${p.buyQty} وخذ ${p.freeQty} من صنف آخر مجاناً`
+          : `اشترِ ${p.buyQty} وخذ ${p.getQty} مجاناً`;
+  const who = [
+    p.repOnly ? 'للمندوب فقط' : null,
+    (p.customerKinds ?? []).length > 0 ? 'لأنواع محددة من الزبائن' : null,
+    (p.priceTiers ?? []).length > 0 ? 'لقائمة سعر محددة' : null,
+  ].filter(Boolean);
   const on =
     p.scope === 'all'
       ? 'على كل المنتجات'
       : p.scope === 'categories'
         ? `على ${p.categoryIds.length} تصنيف`
         : `على ${p.productIds.length} منتج`;
-  return `${what} ${on}`;
+  return who.length > 0 ? `${what} ${on} · ${who.join('، ')}` : `${what} ${on}`;
 }
 
 /**
@@ -158,7 +169,8 @@ function Schedule({ promotion }: { promotion: Promotion }) {
 /** The ticket stub at the start of a card: what the promotion gives, big. */
 function Stub({ promotion, state }: { promotion: Promotion; state: PromotionState }) {
   const off = state === 'stopped' || state === 'ended';
-  const percent = promotion.kind === 'percent';
+  const percent = promotion.kind === 'percent' || promotion.kind === 'tiered';
+  const tiered = promotion.kind === 'tiered';
   return (
     <div
       aria-hidden="true"
@@ -172,9 +184,13 @@ function Stub({ promotion, state }: { promotion: Promotion; state: PromotionStat
       )}
     >
       <bdi dir="ltr" className="num text-2xl leading-none font-bold tracking-tight">
-        {percent ? `${(promotion.percentBp ?? 0) / 100}%` : `${promotion.buyQty}+${promotion.getQty}`}
+        {tiered
+          ? `${Math.max(0, ...(promotion.tiers ?? []).map((t) => t.percentBp)) / 100}%`
+          : percent
+            ? `${(promotion.percentBp ?? 0) / 100}%`
+            : `${promotion.buyQty}+${promotion.kind === 'free_item' ? (promotion.freeQty ?? 0) : promotion.getQty}`}
       </bdi>
-      <span className="text-xs font-semibold">{percent ? 'خصم' : 'مجاناً'}</span>
+      <span className="text-xs font-semibold">{tiered ? 'حتى' : percent ? 'خصم' : 'مجاناً'}</span>
     </div>
   );
 }

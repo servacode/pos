@@ -22,7 +22,8 @@ import type { CustomerRow } from '@serva/core/contracts/customers';
 import { businessDateOf } from '@serva/core/sale';
 import { uuidv7, type OutboxEntry } from '@serva/sync';
 import type { PosServices } from '../pos/services';
-import { fetchRepDay, postOrder, postVisit, type VisitReport } from './api';
+import type { VanCount } from './StockTab';
+import { fetchRepDay, postOrder, postVanCount, postVisit, type VisitReport } from './api';
 import {
   arriving,
   customerOfDocument,
@@ -34,6 +35,7 @@ import {
   ORDER_QUEUE_KEY,
   resultOf,
   SHEET_KEY,
+  VAN_COUNT_KEY,
   visitsKey,
   withResult,
   type DayList,
@@ -87,6 +89,8 @@ export interface RepState {
   noSale: (customerId: string, reasonId: string, note: string | null) => void;
   noteDocument: (type: string, payload: Record<string, unknown>, entry: OutboxEntry) => void;
   submitOrder: (input: Omit<QueuedOrder, 'id'> & { id?: string }) => Promise<OrderAnswer>;
+  /** Sends the day's van count to the server when it can be reached (the count stays on the phone until it is sent) */
+  sendVanCount: () => Promise<void>;
   /** The customers of the catalog with the ones this phone added (pending) on top */
   withLocalCustomers: (customers: readonly CustomerRow[]) => CustomerRow[];
 }
@@ -289,6 +293,27 @@ export function useRepState(pos: PosServices): RepState {
     void flushOrders();
   }, [flushOrders, sync]);
 
+  // The blind van count of the day goes to the server so the supervisor's settlement can use it
+  const sendVanCount = useCallback(async () => {
+    const token = device.token;
+    if (!token || !pos.online()) return;
+    const count = await local.get<VanCount & { sent?: boolean }>(VAN_COUNT_KEY);
+    if (!count || count.sent || !count.date) return;
+    const answer = await postVanCount(
+      {
+        businessDate: count.date,
+        lines: count.lines.map((l) => ({ variantId: l.variantId, counted: l.counted })),
+      },
+      token,
+      pos.fetch,
+    );
+    // No answer: it stays and goes later. A refusal will not change, so it is marked and left
+    if (answer.kind !== 'network') await local.set(VAN_COUNT_KEY, { ...count, sent: true });
+  }, [device.token, local, pos]);
+  useEffect(() => {
+    void sendVanCount();
+  }, [sendVanCount, sync]);
+
   const routeOfCustomer = useCallback(
     (customerId: string) => {
       const stop = dayList(
@@ -442,6 +467,7 @@ export function useRepState(pos: PosServices): RepState {
     noSale,
     noteDocument,
     submitOrder,
+    sendVanCount,
     withLocalCustomers,
   };
 }

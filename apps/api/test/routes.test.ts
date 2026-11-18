@@ -193,6 +193,19 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/device/rep/day': 'device',
   'POST /v1/device/rep/day': 'device',
   'POST /v1/device/rep/visits': 'device',
+  'POST /v1/device/rep/van-count': 'device',
+  'GET /v1/rep-settlements/preview': 'signed-in',
+  'GET /v1/rep-settlements': 'signed-in',
+  'POST /v1/rep-settlements': 'signed-in',
+  'GET /v1/rep-settlements/:id': 'signed-in',
+  'POST /v1/rep-settlements/:id/approve': 'signed-in',
+  'POST /v1/rep-settlements/:id/cancel': 'signed-in',
+  'GET /v1/distribution/today': 'signed-in',
+  'GET /v1/distribution/reports/:kind': 'signed-in',
+  'GET /v1/rep-targets': 'signed-in',
+  'POST /v1/rep-targets': 'signed-in',
+  'PUT /v1/rep-targets/:id': 'signed-in',
+  'DELETE /v1/rep-targets/:id': 'signed-in',
   'GET /v1/staff': 'signed-in',
   'POST /v1/staff': 'signed-in',
   'POST /v1/staff/pin-check': 'signed-in',
@@ -514,6 +527,26 @@ const distributionRows = {
       await ownerDb()<{ id: string }[]>`
         insert into customers (tenant_id, name, approval_status) values (${a.tenantId}, ${`زبون ${++distributionRowCount}`}, 'pending') returning id`
     )[0]!.id,
+  settlement: async (a: Stores['a']) => {
+    const [branch] = await ownerDb()<{ id: string }[]>`
+      select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+    const rep = await distributionRows.rep(a);
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into rep_settlements (tenant_id, number, rep_id, branch_id, business_date)
+        values (${a.tenantId}, ${`RST-2026-9${String(++distributionRowCount).padStart(5, '0')}`}, ${rep}, ${branch!.id}, '2026-10-30')
+        returning id`
+    )[0]!.id;
+  },
+  target: async (a: Stores['a']) => {
+    const rep = await distributionRows.rep(a);
+    return (
+      await ownerDb()<{ id: string }[]>`
+        insert into rep_targets (tenant_id, rep_id, period_start, period_end, metric, target_value)
+        values (${a.tenantId}, ${rep}, '2026-10-01', '2026-10-31', 'net_sales', 100)
+        returning id`
+    )[0]!.id;
+  },
   order: async (a: Stores['a']) => {
     const [branch] = await ownerDb()<{ id: string }[]>`
       select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
@@ -549,9 +582,11 @@ function distributionIdor(
     | 'no_sale_reasons'
     | 'commission_plans'
     | 'customers'
-    | 'sales_orders',
+    | 'sales_orders'
+    | 'rep_settlements'
+    | 'rep_targets',
   make: keyof typeof distributionRows,
-  method: 'GET' | 'PATCH' | 'POST' | 'PUT',
+  method: 'GET' | 'PATCH' | 'POST' | 'PUT' | 'DELETE',
   path: (id: string) => string,
   payload?: (b: { branchId: string }) => Record<string, unknown>,
 ) {
@@ -1741,6 +1776,54 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     (id) => `/v1/sales-orders/${id}/cancel`,
     () => ({ reason: 'مسروق', version: 1 }),
   ),
+  // The report names the rep it is about by a query id: another store's rep answers 404 and shows nothing
+  'GET /v1/distribution/reports/:kind': async (app, { a, b }) => {
+    await ownerDb()`update plans set limits = limits || '{"reps": null}'::jsonb`;
+    try {
+      const repId = await distributionRows.rep(a);
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/distribution/reports/sales_by_rep?from=2026-10-01&to=2026-10-31&repId=${repId}`,
+        headers: owner(b),
+      });
+      expect(res.statusCode).toBe(404);
+    } finally {
+      await ownerDb()`update plans set limits = limits || '{"reps": 0}'::jsonb`;
+    }
+  },
+  'GET /v1/rep-settlements/:id': distributionIdor(
+    'rep_settlements',
+    'settlement',
+    'GET',
+    (id) => `/v1/rep-settlements/${id}`,
+  ),
+  'POST /v1/rep-settlements/:id/approve': distributionIdor(
+    'rep_settlements',
+    'settlement',
+    'POST',
+    (id) => `/v1/rep-settlements/${id}/approve`,
+    () => ({ version: 1 }),
+  ),
+  'POST /v1/rep-settlements/:id/cancel': distributionIdor(
+    'rep_settlements',
+    'settlement',
+    'POST',
+    (id) => `/v1/rep-settlements/${id}/cancel`,
+    () => ({ version: 1, reason: 'مسروق' }),
+  ),
+  'PUT /v1/rep-targets/:id': distributionIdor(
+    'rep_targets',
+    'target',
+    'PUT',
+    (id) => `/v1/rep-targets/${id}`,
+    () => ({ targetValue: 1, version: 1 }),
+  ),
+  'DELETE /v1/rep-targets/:id': distributionIdor(
+    'rep_targets',
+    'target',
+    'DELETE',
+    (id) => `/v1/rep-targets/${id}`,
+  ),
   'POST /v1/sales-orders/:id/assign': distributionIdor(
     'sales_orders',
     'order',
@@ -1855,6 +1938,11 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
   },
   // An agent pays only for his own stores: agent 1 cannot activate (or find) agent 2's store
   'POST /v1/agent/stores/:id/activate': async (app, { a, b }) => {
+    // A paid plan to activate, whatever ran before on this database (a fresh one may have none)
+    await ownerDb()`
+      insert into plans (code, name, sort_order, limits, features, price_monthly_minor, price_yearly_minor)
+      values ('basic', 'الأساسية', 1, '{}', '{}', 1000, 10000)
+      on conflict (code) do update set price_monthly_minor = 1000, price_yearly_minor = 10000, is_active = true`;
     const hash = await hashSecret('agent-pass-123');
     const ids: string[] = [];
     for (const [n, tenantId] of [
@@ -1958,6 +2046,20 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
       url: '/v1/device/rep/day',
       headers: { authorization: deviceB.authorization },
       payload: { businessDate: '2026-11-18' },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from rep_days where tenant_id = ${a.tenantId}`;
+    expect(n!.n).toBe(0);
+  },
+  'POST /v1/device/rep/van-count': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/rep/van-count',
+      headers: { authorization: deviceB.authorization },
+      payload: { businessDate: '2026-11-18', lines: [] },
     });
     expect(res.statusCode).toBe(403);
     const [n] = await ownerDb()<

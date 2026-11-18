@@ -7,7 +7,11 @@ import { ApiError, errorMessage } from '../../lib/api';
 
 /** The pages of «التوزيع», each behind the permission the server checks again */
 const TABS = [
+  { to: '/distribution/today', label: 'اليوم', permission: 'report.view' },
   { to: '/distribution/orders', label: 'الطلبيات', permission: 'sales_orders.manage' },
+  { to: '/distribution/settlements', label: 'التسوية', permission: 'rep.settle' },
+  { to: '/distribution/targets', label: 'الأهداف', permission: 'rep.targets' },
+  { to: '/reports/distribution', label: 'التقارير', permission: 'report.view' },
   { to: '/distribution/routes', label: 'خطوط السير', permission: 'routes.manage' },
   { to: '/distribution/reps', label: 'المندوبون', permission: 'routes.manage' },
   { to: '/distribution/vans', label: 'السيارات', permission: 'routes.manage' },

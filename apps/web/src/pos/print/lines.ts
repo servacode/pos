@@ -194,6 +194,10 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
         end: `−${money(l.priced.lineDiscountMinor, base)}`,
       });
     }
+    // A piece a «اشترِ وخذ مجاناً» promotion gave: price 0, and the promotion's name
+    if (l.unitPriceMinor === 0 && l.discount?.source === 'promotion') {
+      lines.push({ kind: 'text', text: `مجاناً · ${l.discount.reason ?? 'عرض'}` });
+    }
     if (l.serials?.length) lines.push({ kind: 'text', text: serialText(l, data.settings) ?? '' });
     const until = warrantyText(l, data.doc.deviceTime, data.settings);
     if (until) lines.push({ kind: 'text', text: until });
