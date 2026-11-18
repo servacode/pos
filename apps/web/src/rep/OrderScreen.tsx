@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { CurrencyCode } from '@serva/core/currencies';
+import { promotionActive, type PromotionAudience } from '@serva/core/promotions';
 import { normalizeArabic } from '@serva/core/text';
 import {
   Alert,
@@ -14,6 +15,9 @@ import {
 } from '@serva/ui';
 import type { Catalog, CatalogItem } from '../pos/catalog';
 import { DateField } from '../lib/DateField';
+import { priceCart, type PricingContext } from '../pos/sale/cart';
+import { cartonText, packsOf } from './packs';
+import { salesOrderCart } from './orderCart';
 import { ScreenHead } from './parts';
 import { useRepRequired } from './state';
 
@@ -86,7 +90,53 @@ export function OrderScreen({
       .slice(0, 8);
   }, [search, catalog.items, base]);
 
-  const total = lines.reduce((n, l) => n + Math.round((l.qty * l.unitPriceMinor) / 1000), 0);
+  const packs = useMemo(() => packsOf(catalog), [catalog]);
+
+  // What the delivery will charge: the same promotion engine as the sale screen, for the customer
+  // and the rep's phone. Display only: the order itself carries the quantities and the promised
+  // prices, and the offers are applied when the sale delivers it.
+  const preview = useMemo(() => {
+    if (lines.length === 0 || !catalog.settings) return null;
+    const now = new Date();
+    const known = catalog.customers.find((c) => c.id === customerId);
+    const audience: PromotionAudience = {
+      customerKind: known?.kind ?? null,
+      priceTier: tier,
+      rep: true,
+    };
+    const ctx: PricingContext = {
+      currency: base,
+      taxInclusive: catalog.settings.taxInclusive,
+      rates: catalog.rates,
+      promotions: catalog.promotions.filter((p) => promotionActive(p, now, catalog.settings!.timezone)),
+      audience,
+      variants: catalog.byVariant,
+    };
+    const { cart } = salesOrderCart(
+      {
+        id: '',
+        number: '',
+        currency: base,
+        lines: lines.map((l) => ({
+          variantId: l.item.variantId,
+          qty: l.qty,
+          deliveredQty: 0,
+          unitPriceMinor: l.unitPriceMinor,
+        })),
+      } as Parameters<typeof salesOrderCart>[0],
+      { id: customerId, name: customerName },
+      catalog,
+    );
+    try {
+      return priceCart(cart, ctx);
+    } catch {
+      return null;
+    }
+  }, [lines, catalog, customerId, customerName, tier, base]);
+  const plain = lines.reduce((n, l) => n + Math.round((l.qty * l.unitPriceMinor) / 1000), 0);
+  const total = preview ? preview.priced.totals.totalMinor : plain;
+  const saved = Math.max(0, plain - total);
+  const freeLines = preview ? preview.lines.slice(lines.length) : [];
 
   function add(item: CatalogItem) {
     setSearch('');
@@ -176,7 +226,7 @@ export function OrderScreen({
         </ul>
       ) : null}
       <ul aria-label="بنود الطلبية" className="flex flex-col gap-2">
-        {lines.map((l) => (
+        {lines.map((l, index) => (
           <li
             key={l.item.variantId}
             className="flex items-center gap-2 rounded-card border border-line bg-surface p-3"
@@ -184,10 +234,48 @@ export function OrderScreen({
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate font-semibold text-ink">{l.item.name}</span>
               <Money minor={l.unitPriceMinor} currency={base} className="text-xs text-ink-muted" />
+              {cartonText(l.qty, packs.get(l.item.variantId)) ? (
+                <span className="num text-xs text-ink-muted">
+                  {cartonText(l.qty, packs.get(l.item.variantId))}
+                </span>
+              ) : null}
+              {preview &&
+              preview.lines[index]?.discount?.source === 'promotion' &&
+              preview.lines[index]!.priced.lineDiscountMinor > 0 ? (
+                <span className="text-xs font-semibold text-success-ink">
+                  {preview.lines[index]!.discount!.reason} −{' '}
+                  <Money
+                    minor={preview.lines[index]!.priced.lineDiscountMinor}
+                    currency={base}
+                    symbol={false}
+                  />
+                </span>
+              ) : null}
             </span>
             <IconButton label="أنقص" icon={<RemoveIcon />} onClick={() => step(l.item.variantId, -1000)} />
             <span className="num min-w-8 text-center font-bold">{formatQuantity(l.qty)}</span>
             <IconButton label="زد" icon={<AddIcon />} onClick={() => step(l.item.variantId, 1000)} />
+            {packs.get(l.item.variantId) ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => step(l.item.variantId, packs.get(l.item.variantId)!.packQty)}
+              >
+                + {packs.get(l.item.variantId)!.name}
+              </Button>
+            ) : null}
+          </li>
+        ))}
+        {freeLines.map((f) => (
+          <li
+            key={`free-${f.lineNo}`}
+            className="flex items-center gap-2 rounded-card border border-dashed border-line bg-surface p-3"
+          >
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate font-semibold text-ink">{f.name}</span>
+              <span className="text-xs font-semibold text-success-ink">مجاناً · {f.discount?.reason}</span>
+            </span>
+            <span className="num font-bold">{formatQuantity(f.qty)}</span>
           </li>
         ))}
       </ul>
@@ -198,8 +286,13 @@ export function OrderScreen({
         onChange={(e) => setNote(e.target.value.slice(0, 300))}
       />
       {result?.kind === 'refused' ? <Alert tone="error">{result.text}</Alert> : null}
+      {saved > 0 || freeLines.length > 0 ? (
+        <p className="text-xs text-ink-muted">
+          الأسعار بعد العروض للعرض فقط. تُطبَّق العروض عند التسليم، وقد يختلف المبلغ إن تغيّرت.
+        </p>
+      ) : null}
       <div className="flex items-center gap-3 border-t border-line pt-3">
-        <span className="flex-1 text-ink-muted">الإجمالي</span>
+        <span className="flex-1 text-ink-muted">الإجمالي بعد العروض</span>
         <Money minor={total} currency={base} className="text-lg font-bold text-ink" />
       </div>
       <Button size="lg" loading={saving} disabled={lines.length === 0} onClick={() => void save()}>

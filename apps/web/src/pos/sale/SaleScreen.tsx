@@ -75,6 +75,7 @@ import {
   setPriceTier,
   applyContractPrices,
   contractSavingMinor,
+  buyGetHint,
   customerPriceKind,
   shelfPriceOf,
   type ItemChoice,
@@ -1627,6 +1628,7 @@ export function SaleScreen(props: SaleScreenProps) {
               const need = needs.get(line.lineNo);
               const adj = line.adjustment;
               const discounted = p !== undefined && p.priced.lineDiscountMinor > 0;
+              const promoHint = buyGetHint(line, ctx);
               const percent =
                 adj?.kind === 'discount' && adj.discount.type === 'percent' ? adj.discount.bp : null;
               const meta = [
@@ -1666,6 +1668,12 @@ export function SaleScreen(props: SaleScreenProps) {
                   <span key="o" className="font-semibold text-success-ink">
                     {p.discount.reason} −
                     <ExactMoney minor={p.priced.lineDiscountMinor} currency={ctx.currency} symbol={false} />
+                  </span>
+                ) : null,
+                promoHint ? (
+                  <span key="hint" className="font-semibold text-success-ink">
+                    أضف قطعة تأخذ{' '}
+                    {promoHint.get === 1 ? 'واحدة' : displayNumber(String(promoHint.get), digits)} مجاناً
                   </span>
                 ) : null,
                 customerPriceKind(line) !== null ? (

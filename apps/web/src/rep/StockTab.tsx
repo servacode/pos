@@ -14,6 +14,7 @@ import {
 import type { Catalog } from '../pos/catalog';
 import { usePos } from '../pos/services';
 import { VAN_COUNT_KEY } from './day';
+import { cartonText, packsOf } from './packs';
 import { useRepRequired } from './state';
 
 export interface VanCount {
@@ -56,6 +57,7 @@ export function StockTab({ catalog }: { catalog: Catalog }) {
         .toSorted((a, b) => a.name.localeCompare(b.name, 'ar')),
     [catalog.items],
   );
+  const packs = useMemo(() => packsOf(catalog), [catalog]);
   const committed = useMemo(() => committedByVariant(rep.orders), [rep.orders]);
   const q = normalizeArabic(search);
   const shown = q ? items.filter((i) => i.searchKey.includes(q)) : items;
@@ -167,12 +169,16 @@ export function StockTab({ catalog }: { catalog: Catalog }) {
         <ul aria-label="مخزون السيارة" className="flex flex-col gap-2">
           {shown.map((i) => {
             const held = committed.get(i.variantId) ?? 0;
+            const carton = cartonText(i.stockQty ?? 0, packs.get(i.variantId));
             return (
               <li
                 key={i.variantId}
                 className="flex items-center gap-3 rounded-card border border-line bg-surface p-3"
               >
-                <span className="min-w-0 flex-1 truncate font-semibold text-ink">{i.name}</span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-semibold text-ink">{i.name}</span>
+                  {carton ? <span className="num text-xs text-ink-muted">{carton}</span> : null}
+                </span>
                 {held > 0 ? (
                   <Badge tone="info">
                     محجوز <span className="num">{formatQuantity(held)}</span>

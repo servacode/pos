@@ -6,6 +6,7 @@ import type { OpenShift } from '../pos/shift/shift';
 import type { StaffSession } from '../pos/staff/staff';
 import { usePos } from '../pos/services';
 import { postDayStart } from './api';
+import { cartonText, packsOf } from './packs';
 import { useRepRequired } from './state';
 
 const ShiftOpenScreen = lazyChunk(() =>
@@ -30,6 +31,7 @@ export function DayStart({
   const rep = useRepRequired();
   const [confirmed, setConfirmed] = useState(false);
   const [showItems, setShowItems] = useState(false);
+  const packs = useMemo(() => packsOf(catalog), [catalog]);
   const loaded = useMemo(
     () =>
       catalog.items
@@ -82,6 +84,9 @@ export function DayStart({
               {loaded.map((i) => (
                 <li key={i.variantId} className="flex items-center gap-2">
                   <span className="min-w-0 flex-1 truncate">{i.name}</span>
+                  <span className="num text-xs text-ink-muted">
+                    {cartonText(i.stockQty ?? 0, packs.get(i.variantId))}
+                  </span>
                   <span className="num font-bold">{formatQuantity(i.stockQty ?? 0)}</span>
                 </li>
               ))}

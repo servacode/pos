@@ -35,6 +35,7 @@ interface NameStepProps {
 }
 
 const SUGGESTIONS = ['كاشير 1', 'كاشير 2', 'كاشير 3'];
+const REP_SUGGESTIONS = ['جوال المندوب', 'جوال السيارة'];
 
 /** Step 2: name the device; the owner signed in here also picks the branch. */
 export function NameStep({
@@ -45,6 +46,7 @@ export function NameStep({
   onSubmit,
   kind = 'cashier',
 }: NameStepProps) {
+  const suggestions = kind === 'rep_phone' ? REP_SUGGESTIONS : SUGGESTIONS;
   const owner = credentials.method === 'owner' ? credentials.owner : null;
   const branches = owner?.me.branches ?? [];
   const [branchId, setBranchId] = useState<string | null>(branches[0]?.id ?? null);
@@ -136,7 +138,7 @@ export function NameStep({
             name="name"
             label="اسم الجهاز"
             autoComplete="off"
-            placeholder="مثل: كاشير 1"
+            placeholder={`مثل: ${suggestions[0]}`}
             value={name}
             maxLength={40}
             onChange={(e) => {
@@ -148,7 +150,7 @@ export function NameStep({
           <div className="flex flex-col gap-2">
             <span className="text-sm text-ink-subtle">أو اختر اسماً جاهزاً:</span>
             <div className="flex flex-wrap gap-2" role="group" aria-label="أسماء مقترحة">
-              {SUGGESTIONS.map((suggestion) => (
+              {suggestions.map((suggestion) => (
                 <Button
                   key={suggestion}
                   variant="secondary"

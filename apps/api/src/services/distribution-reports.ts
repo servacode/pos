@@ -113,6 +113,7 @@ interface Figures {
   salesMinor: number;
   returnsMinor: number;
   returnsQty: number;
+  returnsCount: number;
   receipts: number;
   collectedMinor: number;
 }
@@ -132,6 +133,7 @@ async function figuresOf(
       salesMinor: 0,
       returnsMinor: 0,
       returnsQty: 0,
+      returnsCount: 0,
       receipts: 0,
       collectedMinor: 0,
     });
@@ -147,12 +149,15 @@ async function figuresOf(
       f.salesMinor = num(s.total);
     }
   }
-  const back = await tx.execute<{ id: string; total: string }>(sql`
-    select cashier_id as id, sum(total_minor)::text as total from sale_returns
+  const back = await tx.execute<{ id: string; n: string; total: string }>(sql`
+    select cashier_id as id, count(*)::text as n, sum(total_minor)::text as total from sale_returns
     where cashier_id in (${users}) and business_date between ${from}::date and ${to}::date group by cashier_id`);
   for (const b of back) {
     const f = out.get(b.id);
-    if (f) f.returnsMinor = num(b.total);
+    if (f) {
+      f.returnsMinor = num(b.total);
+      f.returnsCount = num(b.n);
+    }
   }
   const paid = await tx.execute<{ id: string; n: string; total: string }>(sql`
     select cashier_id as id, count(*)::text as n,
@@ -210,6 +215,18 @@ export function todayBoard(db: Database, auth: AccessClaims, date: string | unde
       sql`select rep_id, status from rep_days where business_date = ${day}::date`,
     );
     const figures = await figuresOf(tx, reps, day, day, base);
+    // The documents decide the counts (what the money shows), not the outcome of each visit
+    const orderRows = await tx.execute<{ rep_id: string; n: string }>(sql`
+      select rep_id, count(*)::text as n from sales_orders
+      where business_date = ${day}::date and status <> 'cancelled' and rep_id is not null group by rep_id`);
+    // A rep whose van shifts of the day are all closed has ended his day, even if the settlement is not approved yet
+    const shiftRows = await tx.execute<{ branch_id: string; open: string; closed: string }>(sql`
+      select s.branch_id, count(*) filter (where s.status = 'open')::text as open,
+             count(*) filter (where s.status = 'closed')::text as closed
+      from shifts s
+      where coalesce(s.business_date,
+              (select (s.closed_at at time zone t.timezone)::date from tenants t where t.id = s.tenant_id)) = ${day}::date
+      group by s.branch_id`);
     const board: BoardRep[] = reps
       .filter((r) => r.vanBranchId !== null || visits.some((v) => v.rep_id === r.id))
       .map((rep) => {
@@ -231,21 +248,29 @@ export function todayBoard(db: Database, auth: AccessClaims, date: string | unde
         const here = mine.findLast((v) => v.left_at === null);
         const f = figures.get(rep.userId);
         const count = (o: string) => mine.filter((v) => v.outcome === o).length;
+        const plannedIds = new Set(planned.map((s) => s.customer_id));
+        const visitedIds = new Set(mine.map((v) => v.customer_id));
+        const plannedVisited = [...visitedIds].filter((id) => plannedIds.has(id)).length;
+        const shifts = shiftRows.find((s) => s.branch_id === rep.vanBranchId);
+        const stored = days.find((d) => d.rep_id === rep.id)?.status;
+        const ended =
+          stored === 'closed' || (shifts !== undefined && num(shifts.open) === 0 && num(shifts.closed) > 0);
         return {
           repId: rep.id,
           name: rep.name,
           vanName: rep.vanName,
-          day: days.find((d) => d.rep_id === rep.id)?.status ?? 'none',
+          day: ended ? 'closed' : (stored ?? 'none'),
           routeNames: [...new Set(planned.filter((s) => s.rep_id === rep.id).map((s) => s.route_name))],
           stops,
-          planned: planned.length === 0 ? 0 : new Set(planned.map((s) => s.customer_id)).size,
-          visited: new Set(mine.map((v) => v.customer_id)).size,
+          planned: plannedIds.size,
+          visited: plannedVisited,
+          extraVisited: visitedIds.size - plannedVisited,
           currentCustomer: here ? here.customer_name : null,
           lastVisitAt: mine.length > 0 ? new Date(mine[mine.length - 1]!.arrived_at).toISOString() : null,
-          sales: count('sale'),
-          orders: count('order'),
-          collections: count('collection'),
-          returns: count('return'),
+          sales: f?.invoices ?? 0,
+          orders: num(orderRows.find((o) => o.rep_id === rep.id)?.n ?? 0),
+          collections: f?.receipts ?? 0,
+          returns: f?.returnsCount ?? 0,
           noSales: count('no_sale'),
           salesTotalMinor: f?.salesMinor ?? 0,
           collectedMinor: f?.collectedMinor ?? 0,

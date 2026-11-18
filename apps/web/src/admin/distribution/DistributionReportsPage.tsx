@@ -5,6 +5,7 @@ import {
   DISTRIBUTION_REPORT_LABELS,
   getCurrency,
   isCurrencyId,
+  TARGET_METRIC_LABELS,
   type DistributionReport,
   type DistributionReportKind,
   type CurrencyCode,
@@ -41,11 +42,17 @@ export const monthStart = (today: string) => `${today.slice(0, 8)}01`;
 const metricKind = (row: Row): 'money' | 'qty' | 'int' =>
   row.metric === 'net_sales' || row.metric === 'collections' ? 'money' : row.metric === 'qty' ? 'qty' : 'int';
 
+/** The target metric key is kept in the row (it decides the cell kind) but shown by its Arabic name */
+const metricName = (col: Column, value: string) =>
+  col.key === 'metric' && value in TARGET_METRIC_LABELS
+    ? TARGET_METRIC_LABELS[value as keyof typeof TARGET_METRIC_LABELS]
+    : value;
+
 /** The cell as plain text, for the paper and the file */
 export function plainCell(col: Column, row: Row, base: string): string | number {
   const value = row[col.key];
   if (value === null || value === undefined) return '';
-  if (col.kind === 'text' || col.kind === 'date') return String(value);
+  if (col.kind === 'text' || col.kind === 'date') return metricName(col, String(value));
   if (typeof value !== 'number') return String(value);
   const kind = col.kind === 'metric' ? metricKind(row) : col.kind;
   if (kind === 'money') {
@@ -60,7 +67,7 @@ function Cell({ col, row, base }: { col: Column; row: Row; base: CurrencyCode })
   const value = row[col.key];
   if (value === null || value === undefined) return <>—</>;
   if (typeof value !== 'number')
-    return <>{col.kind === 'date' ? <bdi className="num">{value}</bdi> : value}</>;
+    return <>{col.kind === 'date' ? <bdi className="num">{value}</bdi> : metricName(col, value)}</>;
   const kind = col.kind === 'metric' ? metricKind(row) : col.kind;
   if (kind === 'money') {
     const cur = String(row.currency ?? base);

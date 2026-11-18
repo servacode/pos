@@ -990,11 +990,15 @@ describe('the day board', () => {
     const mine = board.reps.find((r) => r.repId === w.rep.id)!;
     expect(mine).toMatchObject({
       name: 'مندوب 1',
-      day: 'open',
+      // His van shift is closed, so the board says he ended his day
+      day: 'closed',
       planned: 2,
       visited: 2,
+      extraVisited: 0,
       currentCustomer: 'زبون ثان 1',
       sales: 1,
+      orders: 0,
+      returns: 0,
       salesTotalMinor: 200_000,
       collectedMinor: 70_000,
     });

@@ -4,6 +4,7 @@ import type {
   DeviceSummary,
   PairingCodeResponse,
   RenameDeviceInput,
+  VanRow,
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
@@ -36,4 +37,9 @@ export function renameDevice(id: string, input: RenameDeviceInput) {
     body: input,
     auth: true,
   });
+}
+
+/** The vans a rep's phone can be linked to (a van is a branch of kind van) */
+export function listVansForPairing() {
+  return apiFetch<VanRow[]>('/v1/vans', { auth: true });
 }

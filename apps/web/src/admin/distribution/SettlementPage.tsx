@@ -4,7 +4,6 @@ import {
   getCurrency,
   isCurrencyId,
   SETTLEMENT_STATUS_LABELS,
-  SETTLEMENT_TREATMENT_LABELS,
   type RepSettlementDetail,
   type SettlementPreview,
   type SettlementStatus,
@@ -60,6 +59,12 @@ export function minorOf(text: string, decimals: number): number | null {
   if (clean === '' || !/^\d+(\.\d+)?$/.test(clean)) return null;
   return Math.round(Number(clean) * 10 ** decimals);
 }
+
+/** The treatment is a note only: it creates no debt, the shortage was booked as a cash difference when the shift closed */
+const TREATMENT_LABELS = {
+  rep_debt: 'سجّل النقص على المندوب (ملاحظة)',
+  shop_loss: 'سجّل النقص خسارة على المحل (ملاحظة)',
+} as const;
 
 /** What a currency's drawer shows, line by line, in the order the money moved */
 function CashCard({
@@ -194,21 +199,29 @@ function Review({
   decimalsOf: (currency: string) => number;
 }) {
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {preview.cash.length === 0 ? (
-        <Alert tone="info">لا وردية لهذا المندوب في هذا اليوم: لا صندوق للمقارنة.</Alert>
-      ) : (
-        preview.cash.map((line) => (
-          <CashCard
-            key={line.currency}
-            line={line}
-            decimals={decimalsOf(line.currency)}
-            counted={counted ? (counted[line.currency] ?? '') : null}
-            onCounted={onCounted ? (text) => onCounted(line.currency, text) : null}
-          />
-        ))
-      )}
-      <Totals preview={preview} />
+    <div className="flex flex-col gap-4">
+      {preview.cash.length > 0 && onCounted ? (
+        <Alert tone="info">
+          إيداع النقد للخزنة من جوال المندوب يحتاج موافقة مدير برمز من 6 أرقام وصلاحية حركة الصندوق. يوافق
+          المالك أو المدير الذي له رمز. لإضافة رمز: الموظفون، افتح المستخدم، ثم رمز الدخول (6 أرقام).
+        </Alert>
+      ) : null}
+      <div className="grid gap-4 md:grid-cols-2">
+        {preview.cash.length === 0 ? (
+          <Alert tone="info">لا وردية لهذا المندوب في هذا اليوم: لا صندوق للمقارنة.</Alert>
+        ) : (
+          preview.cash.map((line) => (
+            <CashCard
+              key={line.currency}
+              line={line}
+              decimals={decimalsOf(line.currency)}
+              counted={counted ? (counted[line.currency] ?? '') : null}
+              onCounted={onCounted ? (text) => onCounted(line.currency, text) : null}
+            />
+          ))
+        )}
+        <Totals preview={preview} />
+      </div>
     </div>
   );
 }
@@ -319,7 +332,7 @@ export function SettlementSheet({ detail }: { detail: RepSettlementDetail }) {
           ))}
         </tbody>
       </table>
-      {detail.treatment ? <p>المعالجة: {SETTLEMENT_TREATMENT_LABELS[detail.treatment]}</p> : null}
+      {detail.treatment ? <p>المعالجة: {TREATMENT_LABELS[detail.treatment]}</p> : null}
       {p.cheques.length > 0 ? (
         <>
           <h2 style={{ fontSize: '12pt', fontWeight: 700, marginTop: '8pt' }}>الشيكات</h2>
@@ -552,9 +565,14 @@ export function NewSettlementPage() {
           {short ? (
             <Select label="النقص يصير" value={treatment} onChange={(e) => setTreatment(e.target.value)}>
               <option value="">لم أقرر بعد</option>
-              <option value="rep_debt">{SETTLEMENT_TREATMENT_LABELS.rep_debt}</option>
-              <option value="shop_loss">{SETTLEMENT_TREATMENT_LABELS.shop_loss}</option>
+              <option value="rep_debt">{TREATMENT_LABELS.rep_debt}</option>
+              <option value="shop_loss">{TREATMENT_LABELS.shop_loss}</option>
             </Select>
+          ) : null}
+          {short ? (
+            <p className="text-xs text-ink-muted">
+              هذا الاختيار ملاحظة فقط، لا ينشئ ذمة ولا قيداً. النقص سُجّل كفرق صندوق عند إغلاق الوردية.
+            </p>
           ) : null}
           <TextField label="ملاحظة" value={note} onChange={(e) => setNote(e.target.value.slice(0, 300))} />
           <p className="text-xs text-ink-muted">
@@ -766,7 +784,7 @@ export function SettlementPage() {
           <dl className="flex flex-col gap-2 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">المعالجة</dt>
-              <dd>{detail.treatment ? SETTLEMENT_TREATMENT_LABELS[detail.treatment] : '—'}</dd>
+              <dd>{detail.treatment ? TREATMENT_LABELS[detail.treatment] : '—'}</dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-ink-muted">أنشأها</dt>

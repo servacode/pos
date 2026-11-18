@@ -56,11 +56,17 @@ function RepCard({ rep, base }: { rep: BoardRep; base: TodayBoard['baseCurrency'
         <ProgressBar
           label={`زيارات ${rep.name}`}
           value={rep.visited}
-          max={Math.max(rep.planned, rep.visited, 1)}
+          max={Math.max(rep.planned, 1)}
           valueText={`زار ${rep.visited} من ${rep.planned}`}
         />
         <p>
           زار <bdi className="num">{rep.visited}</bdi> من <bdi className="num">{rep.planned}</bdi>
+          {rep.extraVisited > 0 ? (
+            <>
+              {' '}
+              (+<bdi className="num">{rep.extraVisited}</bdi> خارج الخط)
+            </>
+          ) : null}
           {rep.currentCustomer ? (
             <>
               {' '}

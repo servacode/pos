@@ -303,6 +303,7 @@ describe('«لوحة اليوم»', () => {
           ],
           planned: 3,
           visited: 2,
+          extraVisited: 0,
           currentCustomer: 'مطعم الشام',
           lastVisitAt: '2026-11-17T09:00:00.000Z',
           sales: 1,

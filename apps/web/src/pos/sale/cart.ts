@@ -13,6 +13,8 @@ import type { PricedInvoice } from '@serva/core/pricing';
 import {
   bestPromotions,
   freeGrants,
+  promotionCovers,
+  promotionReaches,
   type PromotionAudience,
   type PromotionRule,
 } from '@serva/core/promotions';
@@ -418,6 +420,33 @@ export function linePromotion(line: CartLine, ctx: PricingContext) {
   return best.get(line.lineNo) ?? null;
 }
 
+/**
+ * «اشترِ 10 وخذ 1 مجاناً» gives the free piece from the 11th: when the line is exactly one group short
+ * (10, 21, …) the cart says so, as a hint under the line. Display only: nothing is added by itself.
+ */
+export function buyGetHint(line: CartLine, ctx: PricingContext): { get: number; name: string } | null {
+  if (line.adjustment || line.weighed || line.free || !ctx.promotions?.length) return null;
+  const packs = Math.floor(line.qty / 1000);
+  const pl = {
+    lineNo: line.lineNo,
+    productId: line.productId,
+    categoryPath: line.categoryPath ?? [],
+    qty: line.qty,
+    unitPriceMinor: unitPriceOf(line, ctx),
+    weighed: line.weighed,
+  };
+  for (const rule of ctx.promotions) {
+    if (rule.kind !== 'buy_get' || !promotionReaches(rule, ctx.audience) || !promotionCovers(rule, pl)) {
+      continue;
+    }
+    const buy = rule.buyQty ?? 0;
+    const get = rule.getQty ?? 0;
+    if (buy <= 0 || get <= 0 || line.qty % 1000 !== 0) continue;
+    if (packs > 0 && packs % (buy + get) === buy) return { get, name: rule.name };
+  }
+  return null;
+}
+
 /** Free lines take line numbers from here up, clear of any line the cashier adds */
 export const FREE_LINE_BASE = 1_000_000;
 
@@ -441,12 +470,28 @@ export function freeLinesOf(cart: Cart, ctx: PricingContext): CartLine[] {
     ctx.audience,
   );
   const out: CartLine[] = [];
+  // What the device holds of each piece, in thousandths of a piece, less what the paid lines and the
+  // free lines already given will take: a free piece obeys the stock rule of a normal line (the till
+  // asks «بيع على كل حال؟» for a normal line, but cannot ask for a gift, so a free piece the device
+  // does not hold is not given)
+  const taken = new Map<string, number>();
+  for (const paid of cart.lines) {
+    taken.set(
+      paid.variantId,
+      (taken.get(paid.variantId) ?? 0) + Math.round((paid.qty * paid.packQty) / 1000),
+    );
+  }
   grants.forEach((grant, index) => {
     const item = ctx.variants!.get(grant.variantId);
     // A piece sold by serial number cannot be handed out without one: the promotion skips it
     if (!item || item.tracksSerial) return;
     const line = addItem(EMPTY_CART, item, null, grant.qty).lines[0];
     if (!line) return;
+    const want = Math.round((line.qty * line.packQty) / 1000);
+    if (!item.isService && typeof item.stockQty === 'number') {
+      if (item.stockQty - (taken.get(grant.variantId) ?? 0) < want) return;
+      taken.set(grant.variantId, (taken.get(grant.variantId) ?? 0) + want);
+    }
     out.push({
       ...line,
       lineNo: FREE_LINE_BASE + index,

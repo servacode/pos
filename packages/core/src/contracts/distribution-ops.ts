@@ -226,7 +226,10 @@ export interface BoardRep {
   routeNames: string[];
   stops: BoardStop[];
   planned: number;
+  /** Planned customers he has visited (never more than `planned`) */
   visited: number;
+  /** Customers visited that are not on today's route */
+  extraVisited: number;
   /** The customer he is with now, from a visit that has not ended */
   currentCustomer: string | null;
   lastVisitAt: string | null;

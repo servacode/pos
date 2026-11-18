@@ -34,7 +34,7 @@ export function promotionSummary(p: Promotion): string {
         ? `خصم حسب الكمية: ${(p.tiers ?? []).map((t) => `من ${t.minQty} ${t.percentBp / 100}%`).join('، ')}`
         : p.kind === 'free_item'
           ? `اشترِ ${p.buyQty} وخذ ${p.freeQty} من صنف آخر مجاناً`
-          : `اشترِ ${p.buyQty} وخذ ${p.getQty} مجاناً`;
+          : `${p.buyQty} + ${p.getQty} مجاناً: اشترِ ${p.buyQty} وتأخذ ${p.getQty} مجاناً (من كل ${(p.buyQty ?? 0) + (p.getQty ?? 0)} قطعة ${p.getQty} مجاناً)`;
   const who = [
     p.repOnly ? 'للمندوب فقط' : null,
     (p.customerKinds ?? []).length > 0 ? 'لأنواع محددة من الزبائن' : null,

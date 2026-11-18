@@ -294,6 +294,57 @@ describe('the pairing dialog «اربط جهازاً جديداً»', () => {
     ]);
   });
 
+  it('offers «جوال مندوب», asks for the van and makes the code for that van', async () => {
+    const van = (id: string, name: string, over: Record<string, unknown> = {}) => ({
+      id,
+      code: id,
+      name,
+      parentBranchId: 'branch-1',
+      parentBranchName: 'الفرع الرئيسي',
+      vehiclePlate: null,
+      isActive: true,
+      repId: null,
+      repName: null,
+      ...over,
+    });
+    const { user, requestsTo } = openDevices([cashier1], {
+      'GET /v1/vans': {
+        status: 200,
+        body: [van('van-1', 'سيارة 1', { repName: 'أحمد' }), van('van-2', 'سيارة 2', { isActive: false })],
+      },
+      'POST /v1/devices/pairing-codes': { status: 200, body: pairingCode() },
+    });
+    await user.click(await screen.findByRole('button', { name: 'اربط جهازاً جديداً' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('img', { name: /الفرع الرئيسي/ });
+    await user.selectOptions(within(dialog).getByLabelText('نوع الجهاز'), 'rep_phone');
+    const vanSelect = await within(dialog).findByLabelText('السيارة');
+    // Only a live van is offered, with its rep
+    expect(
+      within(vanSelect)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['سيارة 1 · أحمد']);
+    await waitFor(() =>
+      expect(requestsTo('POST', '/v1/devices/pairing-codes').map((r) => r.body)).toEqual([
+        { branchId: 'branch-1' },
+        { branchId: 'van-1', kind: 'rep_phone' },
+      ]),
+    );
+  });
+
+  it('says there is no van yet when a rep phone is picked and the store has none', async () => {
+    const { user } = openDevices([cashier1], {
+      'GET /v1/vans': { status: 200, body: [] },
+      'POST /v1/devices/pairing-codes': { status: 200, body: pairingCode() },
+    });
+    await user.click(await screen.findByRole('button', { name: 'اربط جهازاً جديداً' }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('img', { name: /الفرع الرئيسي/ });
+    await user.selectOptions(within(dialog).getByLabelText('نوع الجهاز'), 'rep_phone');
+    expect(await within(dialog).findByText(/لا توجد سيارة فعّالة بعد/)).toBeInTheDocument();
+  });
+
   it('makes a link for the kind of device picked, so a kitchen screen opens its own page', async () => {
     const { user, requestsTo } = openDevices([cashier1], {
       'POST /v1/devices/pairing-codes': { status: 200, body: pairingCode() },

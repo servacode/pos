@@ -3,6 +3,7 @@ import {
   PAIRING_MAX_ATTEMPTS,
   PAIRING_TTL_SECONDS,
   type DeviceSummary,
+  type VanRow,
   type MeResponse,
   type PairingCodeResponse,
   type CreatePairingCodeInput,
@@ -11,7 +12,7 @@ import { Alert, Button, ClockIcon, DeviceIcon, ProgressBar, RetryIcon, Select, S
 import { errorMessage } from '../../lib/api';
 import { DEVICE_KIND_LABELS, formatCountdown, formatPairingCode } from '../../lib/devices';
 import { useNow } from '../../lib/useNow';
-import { createPairingCode } from './api';
+import { createPairingCode, listVansForPairing } from './api';
 import { PendingDevice } from './PendingDevice';
 import { QrCode } from './QrCode';
 
@@ -34,6 +35,10 @@ export function PairingDialogBody({ branches, pending, busyId, onDecide }: Pairi
   const [code, setCode] = useState<PairingCodeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [vans, setVans] = useState<VanRow[] | null>(null);
+  const [vanId, setVanId] = useState('');
+  const isRep = kind === 'rep_phone';
+  const targetId = isRep ? vanId : branchId;
   const now = useNow(1000, code !== null);
 
   const create = useCallback(
@@ -57,13 +62,34 @@ export function PairingDialogBody({ branches, pending, busyId, onDecide }: Pairi
     [],
   );
 
+  // The vans are fetched once, when «جوال مندوب» is first chosen.
   useEffect(() => {
-    if (branchId) void create(branchId, kind);
-  }, [branchId, kind, create]);
+    if (!isRep || vans !== null) return;
+    let live = true;
+    listVansForPairing()
+      .then((rows) => {
+        if (!live) return;
+        const active = rows.filter((van) => van.isActive);
+        setVans(active);
+        setVanId((current) => current || active[0]?.id || '');
+      })
+      .catch((cause) => {
+        if (!live) return;
+        setVans([]);
+        setError(errorMessage(cause));
+      });
+    return () => {
+      live = false;
+    };
+  }, [isRep, vans]);
+
+  useEffect(() => {
+    if (targetId) void create(targetId, kind);
+  }, [targetId, kind, create]);
 
   const left = code ? Date.parse(code.expiresAt) - now : 0;
   const expired = code !== null && left <= 0;
-  const waiting = pending.filter((device) => device.branchId === branchId);
+  const waiting = pending.filter((device) => device.branchId === targetId);
 
   return (
     <div className="flex flex-col gap-5">
@@ -90,7 +116,7 @@ export function PairingDialogBody({ branches, pending, busyId, onDecide }: Pairi
         </p>
       ) : null}
 
-      {branches.length > 1 ? (
+      {branches.length > 1 && !isRep ? (
         <Select label="الفرع" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
           {branches.map((branch) => (
             <option key={branch.id} value={branch.id}>
@@ -104,14 +130,35 @@ export function PairingDialogBody({ branches, pending, busyId, onDecide }: Pairi
         label="نوع الجهاز"
         value={kind}
         onChange={(e) => setKind(e.target.value as typeof kind)}
-        hint="جوال النادل وشاشة المطبخ يفتحان صفحتيهما من الرابط نفسه."
+        hint={
+          isRep
+            ? 'جوال المندوب يُربط بسيارته: مبيعاته ومخزونه هما مبيعات السيارة ومخزونها.'
+            : 'جوال النادل وشاشة المطبخ يفتحان صفحتيهما من الرابط نفسه.'
+        }
       >
-        {(['cashier', 'waiter', 'kitchen_screen', 'call_screen'] as const).map((k) => (
+        {(['cashier', 'waiter', 'kitchen_screen', 'call_screen', 'rep_phone'] as const).map((k) => (
           <option key={k} value={k}>
             {DEVICE_KIND_LABELS[k]}
           </option>
         ))}
       </Select>
+
+      {isRep && vans !== null ? (
+        vans.length === 0 ? (
+          <Alert tone="warning">
+            لا توجد سيارة فعّالة بعد. أضف سيارة من «المبيعات › التوزيع › السيارات» ثم ارجع هنا.
+          </Alert>
+        ) : (
+          <Select label="السيارة" value={vanId} onChange={(e) => setVanId(e.target.value)}>
+            {vans.map((van) => (
+              <option key={van.id} value={van.id}>
+                {van.name}
+                {van.repName ? ` · ${van.repName}` : ''}
+              </option>
+            ))}
+          </Select>
+        )
+      ) : null}
 
       {error ? <Alert tone="error">{error}</Alert> : null}
 
@@ -170,7 +217,7 @@ export function PairingDialogBody({ branches, pending, busyId, onDecide }: Pairi
                 variant={expired ? 'primary' : 'ghost'}
                 size="sm"
                 icon={<RetryIcon size={16} />}
-                onClick={() => void create(branchId, kind)}
+                onClick={() => void create(targetId, kind)}
                 className="-me-2"
               >
                 رمز جديد

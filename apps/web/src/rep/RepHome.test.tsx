@@ -310,6 +310,39 @@ describe('the rep’s day (/rep)', () => {
     expect(screen.getAllByText('بقالية النور').length).toBeGreaterThan(0);
   });
 
+  it('shows the order with the running offers, as the sale screen prices it', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const offer = {
+      id: 'promo-1',
+      name: 'خصم 10%',
+      kind: 'percent',
+      percentBp: 1000,
+      buyQty: null,
+      getQty: null,
+      scope: 'all',
+      categoryIds: [],
+      productIds: [],
+      startsAt: null,
+      endsAt: null,
+      daysOfWeek: [],
+      fromTime: null,
+      toTime: null,
+      archived: false,
+      version: 1,
+    };
+    const h = harness({ local, extra: { promotions: [offer] } });
+    await signIn(h.user);
+    const list = await screen.findByRole('list', { name: 'خط سير اليوم' });
+    await h.user.click(within(within(list).getAllByRole('listitem')[0]!).getByRole('button'));
+    await h.user.click(await screen.findByRole('button', { name: 'طلبية' }));
+    await h.user.type(await screen.findByRole('textbox', { name: 'ابحث عن صنف' }), 'حليب');
+    await h.user.click(await screen.findByRole('button', { name: /حليب كامل الدسم/ }));
+    expect(await screen.findByText(/خصم 10%/)).toBeInTheDocument();
+    expect(screen.getByText('الإجمالي بعد العروض')).toBeInTheDocument();
+    expect(screen.getByText(/للعرض فقط/)).toBeInTheDocument();
+  });
+
   it('takes a pre-sale order online', async () => {
     const local = memoryLocal();
     await openShift(local);
