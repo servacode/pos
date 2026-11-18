@@ -1882,7 +1882,12 @@ export const purchases = pgTable(
     payment: text('payment').notNull(),
     reference: text('reference'),
     notes: text('notes'),
+    /** The invoice in the base currency: what the stock and the books take (a dollar invoice is converted at its rate) */
     totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    /** Round 36, decision 11: a dollar invoice names its currency (null = the base currency), the rate of the day and its total in dollars */
+    currency: text('currency'),
+    rate: text('rate'),
+    foreignTotalMinor: bigint('foreign_total_minor', { mode: 'number' }),
     createdBy: uuid('created_by').notNull(),
     createdAt: createdAt(),
   },
@@ -1909,6 +1914,8 @@ export const purchaseLines = pgTable(
     name: text('name').notNull(),
     qty: bigint('qty', { mode: 'number' }).notNull(),
     costMinor: bigint('cost_minor', { mode: 'number' }).notNull(),
+    /** What the line cost in the invoice's own currency (dollars); null on an invoice in the base currency */
+    foreignCostMinor: bigint('foreign_cost_minor', { mode: 'number' }),
     /** «رقم الدفعة» and «تاريخ الانتهاء» as received (03 › الصيدليات: الدفعة والصلاحية) */
     batchNo: text('batch_no'),
     expiryDate: date('expiry_date'),
@@ -1918,6 +1925,43 @@ export const purchaseLines = pgTable(
     foreignKey({ columns: [t.tenantId, t.purchaseId], foreignColumns: [purchases.tenantId, purchases.id] }),
     unique('purchase_lines_line_unique').on(t.tenantId, t.purchaseId, t.lineNo),
     index('purchase_lines_variant_idx').on(t.tenantId, t.variantId),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * The correction of a posted purchase (round 36, decision 12): a full reversal document. It takes the
+ * stock out at what the invoice cost, gives the supplier's debt (or the cash) back through the reversing
+ * entry of the purchase's own entry, and lets the person write the invoice again. A purchase is corrected
+ * once (unique), the purchase itself is never changed. `lines` keeps what each line took out.
+ */
+export const purchaseReversals = pgTable(
+  'purchase_reversals',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    number: text('number').notNull(),
+    purchaseId: uuid('purchase_id').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    supplierId: uuid('supplier_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    reason: text('reason'),
+    lines: jsonb('lines').notNull(),
+    /** What the invoice was, and what left the stock, in the base currency */
+    totalMinor: bigint('total_minor', { mode: 'number' }).notNull(),
+    valueOutMinor: bigint('value_out_minor', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'purchase_reversals_pkey', columns: [t.tenantId, t.id] }),
+    foreignKey({ columns: [t.tenantId, t.purchaseId], foreignColumns: [purchases.tenantId, purchases.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    unique('purchase_reversals_purchase_unique').on(t.tenantId, t.purchaseId),
+    unique('purchase_reversals_number_unique').on(t.tenantId, t.number),
     tenantIsolation(),
   ],
 );
@@ -1938,6 +1982,15 @@ export const supplierPayments = pgTable(
     method: text('method').notNull(),
     /** A payment by cheque: its bank, number and due date (paid from the bank account) */
     cheque: jsonb('cheque').$type<{ bank: string; number: string; dueDate: string } | null>(),
+    /**
+     * Round 36, decision 11: a payment in dollars. amount_minor is then what it cost in the base
+     * currency (at `rate`), `foreign_minor` the dollars paid, `fx_minor` the exchange difference
+     * against the books' value of that debt (positive is a loss, posted to 6510). All null otherwise.
+     */
+    currency: text('currency'),
+    foreignMinor: bigint('foreign_minor', { mode: 'number' }),
+    rate: text('rate'),
+    fxMinor: bigint('fx_minor', { mode: 'number' }),
     note: text('note'),
     createdBy: uuid('created_by').notNull(),
     createdAt: createdAt(),
@@ -2078,6 +2131,15 @@ export const supplierReturns = pgTable(
     lines: jsonb('lines').notNull(),
     amountMinor: bigint('amount_minor', { mode: 'number' }).notNull(),
     costMinor: bigint('cost_minor', { mode: 'number' }).notNull(),
+    /**
+     * Round 36, decision 13: the purchase invoice this return is against (null: none, the credit is
+     * the pieces' average cost as before). On a dollar invoice the credit is in dollars at the
+     * invoice's rate: currency, rate and the dollars credited.
+     */
+    purchaseId: uuid('purchase_id'),
+    currency: text('currency'),
+    rate: text('rate'),
+    foreignAmountMinor: bigint('foreign_amount_minor', { mode: 'number' }),
     createdBy: uuid('created_by').notNull(),
     createdAt: createdAt(),
   },

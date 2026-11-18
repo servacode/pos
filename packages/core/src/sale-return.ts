@@ -7,7 +7,9 @@ import type {
   SaleLine,
   SalePayload,
 } from './contracts/documents';
-import { QTY_SCALE, roundDiv } from './money';
+import type { TradeRate } from './contracts/common';
+import type { CurrencyCode } from './currencies';
+import { convert, QTY_SCALE, roundDiv } from './money';
 import { roundCashDue } from './pricing';
 
 /**
@@ -142,6 +144,68 @@ export function defaultRefundMethod(sale: SalePayload): RefundMethod {
   return 'cash';
 }
 
+/** What a sale took in one foreign cash drawer (the dollar's), after the change given back in it */
+export interface PaidForeign {
+  currency: CurrencyCode;
+  /** In `currency`, net of the change */
+  amountMinor: number;
+  /** The rate the sale took that payment at */
+  rate: TradeRate;
+  /** `amountMinor` in the invoice currency at `rate` */
+  baseAmountMinor: number;
+}
+
+/** The foreign cash the sale took, net of change: where a cash refund can go back to the same drawer */
+export function paidForeign(sale: SalePayload): PaidForeign[] {
+  const byCurrency = new Map<CurrencyCode, { amountMinor: number; rate: TradeRate }>();
+  for (const p of sale.payments) {
+    if (p.method !== 'cash' || p.currency === sale.currency || !p.rate) continue;
+    const row = byCurrency.get(p.currency);
+    if (row) row.amountMinor += p.amountMinor;
+    else byCurrency.set(p.currency, { amountMinor: p.amountMinor, rate: p.rate });
+  }
+  const out: PaidForeign[] = [];
+  for (const [currency, row] of byCurrency) {
+    const net =
+      row.amountMinor - (sale.change && sale.change.currency === currency ? sale.change.amountMinor : 0);
+    if (net <= 0) continue;
+    out.push({
+      currency,
+      amountMinor: net,
+      rate: row.rate,
+      baseAmountMinor: convert(net, currency, sale.currency, row.rate),
+    });
+  }
+  return out;
+}
+
+/**
+ * The default split of a cash refund (round 36, decision 10): the same share in each foreign drawer as the
+ * sale took, never more than what it took there. `refundTotalMinor` is the refund in the invoice currency.
+ */
+export function defaultForeignRefund(
+  sale: SalePayload,
+  refundTotalMinor: number,
+): { currency: CurrencyCode; amountMinor: number }[] {
+  const saleTotal = sale.totals.totalMinor;
+  if (saleTotal <= 0 || refundTotalMinor <= 0) return [];
+  const out: { currency: CurrencyCode; amountMinor: number }[] = [];
+  let left = refundTotalMinor;
+  for (const paid of paidForeign(sale)) {
+    const shareBase = Math.min(
+      left,
+      Number(roundDiv(BigInt(paid.baseAmountMinor) * BigInt(refundTotalMinor), BigInt(saleTotal))),
+    );
+    // Whole foreign minor units, rounded down so the drawer never pays more than the share
+    let amount = Math.min(paid.amountMinor, convert(shareBase, sale.currency, paid.currency, paid.rate));
+    while (convert(amount, paid.currency, sale.currency, paid.rate) > shareBase) amount -= 1;
+    if (amount <= 0) continue;
+    left -= convert(amount, paid.currency, sale.currency, paid.rate);
+    out.push({ currency: paid.currency, amountMinor: amount });
+  }
+  return out;
+}
+
 export interface ReturnRequest {
   sale: SalePayload;
   saleId: string;
@@ -165,6 +229,12 @@ export interface ReturnRequest {
    * rounding (6400). Other methods are never rounded.
    */
   cashStepMinor?: number;
+  /**
+   * Round 36 (decision 10): what of a cash refund leaves a foreign drawer (the dollar's), in that
+   * currency. Only for a currency the sale was paid in cash, and never more than it took there.
+   * Missing or empty: the whole refund leaves the invoice currency's drawer, as before.
+   */
+  foreignRefund?: readonly { currency: CurrencyCode; amountMinor: number }[];
 }
 
 export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
@@ -198,11 +268,33 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
   const method = request.refundMethod ?? defaultRefundMethod(sale);
   if (method === 'account' && !sale.customerId)
     throw new Error('only a sale of a named customer can be refunded to an account');
+  // Round 36: the part of a cash refund that goes back to a foreign drawer, valued at the rate the sale took it at
+  const foreign: NonNullable<Refund['foreign']> = [];
+  if (method === 'cash') {
+    const paid = paidForeign(sale);
+    for (const want of request.foreignRefund ?? []) {
+      if (want.amountMinor <= 0) continue;
+      const source = paid.find((p) => p.currency === want.currency);
+      if (!source) throw new Error(`the sale was not paid in ${want.currency} cash`);
+      if (want.amountMinor > source.amountMinor)
+        throw new Error(`more than the ${want.currency} the sale took`);
+      const baseAmountMinor = convert(want.amountMinor, want.currency, sale.currency, source.rate);
+      foreign.push({
+        currency: want.currency,
+        amountMinor: want.amountMinor,
+        baseAmountMinor,
+        rate: source.rate,
+      });
+    }
+  }
+  const foreignBase = foreign.reduce((n, f) => n + f.baseAmountMinor, 0);
+  if (foreignBase > totals.totalMinor) throw new Error('the foreign refund is more than the goods came to');
   // A cash refund is rounded to the cash step (half away from zero, like a sale). A refund that
-  // would round down to nothing stays exact: a refund of zero is no refund.
+  // would round down to nothing stays exact: a refund of zero is no refund. With a foreign part,
+  // only what the invoice currency's drawer pays is rounded.
   const rounded =
     method === 'cash' && (request.cashStepMinor ?? 0) > 0
-      ? roundCashDue(totals.totalMinor, request.cashStepMinor!)
+      ? roundCashDue(totals.totalMinor - foreignBase, request.cashStepMinor!)
       : null;
   const cashRounding = rounded && rounded.dueMinor > 0 ? rounded.roundingMinor : 0;
   const refund: Refund = {
@@ -213,6 +305,7 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
     // A voucher's code is the return's own number, given when it is saved
     reference:
       method === 'cash' || method === 'voucher' || method === 'account' ? null : (request.reference ?? null),
+    ...(foreign.length > 0 ? { foreign } : {}),
   };
   return {
     saleId: request.saleId,

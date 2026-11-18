@@ -38,6 +38,7 @@
 /apps/api/src/services/sales-orders.ts @servacode
 /apps/api/src/services/purchases.ts @servacode
 /apps/api/src/services/purchase-order-receipt.ts @servacode
+/apps/api/src/services/purchase-usd.ts @servacode
 
 # Schema, migrations (append-only triggers, balance trigger, RLS) and the migrator
 /packages/db/drizzle/ @servacode
@@ -76,6 +77,8 @@
 /packages/core/src/contracts/cheques.ts @servacode
 /packages/core/src/contracts/installments.ts @servacode
 /apps/api/src/services/installments.ts @servacode
+# the drawers a cash refund came out of (the dollar's, round 36)
+/apps/api/src/services/refund-drawers.ts @servacode
 # the document types the protocol and the local store accept
 /packages/sync/src/doc-types.ts @servacode
 # identifiers the protocol deduplicates on

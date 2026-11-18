@@ -51,7 +51,17 @@ export async function receiveCustomerPayment(
   inside?: (tx: Transaction, result: CustomerMoneyResult) => Promise<void>,
 ): Promise<CustomerMoneyResult> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'receipt.create');
+    // Round 36 (X1): a payment that names its branch needs the right for that branch and a branch of this store
+    const branchId = input.branchId ?? null;
+    await requirePermission(tx, auth.userId, 'receipt.create', branchId ?? undefined);
+    if (branchId) {
+      const [branch] = await tx.execute<{ id: string }>(sql`select id from branches where id = ${branchId}`);
+      if (!branch) {
+        throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+          branchId: 'الفرع غير موجود',
+        });
+      }
+    }
     const customer = await customerFor(tx, customerId);
     const currency: CurrencyCode = await baseCurrency(tx);
     const date = dayOf(now, input.date);
@@ -81,7 +91,7 @@ export async function receiveCustomerPayment(
     };
     const posted = await postEntry(tx, {
       tenantId: auth.tenantId,
-      branchId: null,
+      branchId,
       date,
       sourceType: 'manual',
       sourceId: id,
@@ -102,7 +112,7 @@ export async function receiveCustomerPayment(
           entity: 'customer',
           entityId: customer.id,
           changes: { balanceMinor: [customer.balance, customer.balance - input.amountMinor] },
-          data: { number, method: input.method },
+          data: { number, method: input.method, ...(branchId ? { branchId } : {}) },
         },
         meta,
       );
@@ -121,6 +131,7 @@ export async function receiveCustomerPayment(
       balanceBeforeMinor: after.balance + input.amountMinor,
       balanceAfterMinor: after.balance,
       baseCurrency: currency,
+      ...(branchId ? { branchId } : {}),
     };
     if (inside) await inside(tx, result);
     return result;

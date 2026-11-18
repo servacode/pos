@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   purchaseOrderOpen,
   type PurchaseOrderLine,
@@ -54,4 +54,44 @@ export async function applyReceipt(
     .update(purchaseOrders)
     .set({ lines: next, receipts, status, updatedAt: new Date() })
     .where(eq(purchaseOrders.id, orderId));
+}
+
+/**
+ * A corrected purchase (round 36, decision 12) no longer received its order: the pieces it brought are
+ * taken off the lines' received quantities, its receipt is dropped from the order's list, and the order
+ * goes back to waiting («استُلم جزء» while some of it has come, «مُرسلة» when none has). An order that was
+ * cancelled stays cancelled. The order the purchase did not come from is not touched.
+ */
+export async function undoReceipt(
+  tx: Transaction,
+  purchaseId: string,
+  lines: readonly { variantId: string; qty: number }[],
+): Promise<void> {
+  const [order] = await tx
+    .select()
+    .from(purchaseOrders)
+    .where(
+      sql`${purchaseOrders.receipts} @> jsonb_build_array(jsonb_build_object('purchaseId', ${purchaseId}::text))`,
+    )
+    .for('update');
+  if (!order) return;
+  const back = new Map<string, number>();
+  for (const l of lines) back.set(l.variantId, (back.get(l.variantId) ?? 0) + l.qty);
+  const next = (order.lines as PurchaseOrderLine[]).map((l) => ({
+    ...l,
+    receivedQty: Math.max(0, l.receivedQty - (back.get(l.variantId) ?? 0)),
+  }));
+  const receipts = (order.receipts as PurchaseOrderReceipt[]).filter((r) => r.purchaseId !== purchaseId);
+  const status: PurchaseOrderStatus =
+    order.status === 'partial' || order.status === 'received'
+      ? next.every((l) => l.receivedQty >= l.qty)
+        ? 'received'
+        : next.some((l) => l.receivedQty > 0)
+          ? 'partial'
+          : 'sent'
+      : (order.status as PurchaseOrderStatus);
+  await tx
+    .update(purchaseOrders)
+    .set({ lines: next, receipts, status, updatedAt: new Date() })
+    .where(eq(purchaseOrders.id, order.id));
 }

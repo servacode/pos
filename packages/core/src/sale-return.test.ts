@@ -4,7 +4,9 @@ import { returnPayloadSchema, validateDocumentPayload, type SalePayload } from '
 import { buildSalePayload, priceSale, type SaleCartLine } from './sale';
 import {
   buildReturnPayload,
+  defaultForeignRefund,
   defaultRefundMethod,
+  paidForeign,
   returnableLines,
   returnAmounts,
   type ReturnedLine,
@@ -348,5 +350,199 @@ describe('a return on account (08 › مرتجع مبيعات: تخفيض دين
       refunds: [{ method: 'account', currency: 'SYP', amountMinor: 1_000, reference: null }],
     };
     expect(returnPayloadSchema.safeParse(forged).success).toBe(false);
+  });
+});
+
+// ─── Round 36 (decision 10): a refund from the dollar drawer ────────────────────────────────────
+
+describe('a cash refund from the dollar drawer', () => {
+  const USD_130 = { unit: 'USD', quote: 'SYP', rate: '130' } as const;
+  // 1,170.00 ل.س sold; paid in dollars (9.00 $ at 130 = 1,170.00), or 585.00 ل.س + 4.50 $
+  const aDollarSale = (payments: Record<string, unknown>[]): SalePayload =>
+    buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [USD_130],
+      shiftId: SHIFT,
+      cashierId: CASHIER,
+      cashSteps: {},
+      lines: [line(1, 117_000)],
+      payments,
+    } as never);
+  const allUsd = () => aDollarSale([{ method: 'cash', currency: 'USD', amountMinor: 900 }]);
+  const half = () =>
+    aDollarSale([
+      { method: 'cash', currency: 'SYP', amountMinor: 58_500 },
+      { method: 'cash', currency: 'USD', amountMinor: 450 },
+    ]);
+  const request = (sale: SalePayload, extra: Record<string, unknown> = {}) => ({
+    sale,
+    saleId: SALE_ID,
+    saleNumber: 'INV-1',
+    shiftId: SHIFT,
+    cashierId: CASHIER,
+    reason: 'تالف',
+    picks: [{ saleLineNo: 1, qty: 1000 }],
+    ...extra,
+  });
+
+  it('knows what the sale took in dollars, net of the change given back in them', () => {
+    expect(paidForeign(allUsd())).toEqual([
+      { currency: 'USD', amountMinor: 900, rate: USD_130, baseAmountMinor: 117_000 },
+    ]);
+    const withChange = aDollarSale([{ method: 'cash', currency: 'USD', amountMinor: 1000 }]);
+    // 10 $ handed over, the change came back in pounds: the dollar drawer took the 10 $, but a refund never exceeds the goods
+    expect(withChange.change?.currency).toBe('SYP');
+    expect(paidForeign(withChange)[0]!.amountMinor).toBe(1000);
+    expect(defaultForeignRefund(withChange, 117_000)).toEqual([{ currency: 'USD', amountMinor: 900 }]);
+    expect(paidForeign(aSale([line(1, 5_000)]))).toEqual([]);
+  });
+
+  it('defaults to the same split as the payment, up to the dollars paid', () => {
+    expect(defaultForeignRefund(allUsd(), 117_000)).toEqual([{ currency: 'USD', amountMinor: 900 }]);
+    // half of the goods back: half of the dollars
+    expect(defaultForeignRefund(allUsd(), 58_500)).toEqual([{ currency: 'USD', amountMinor: 450 }]);
+    // a sale half in dollars gives half the refund to the dollar drawer
+    expect(defaultForeignRefund(half(), 117_000)).toEqual([{ currency: 'USD', amountMinor: 450 }]);
+    expect(defaultForeignRefund(half(), 58_500)).toEqual([{ currency: 'USD', amountMinor: 225 }]);
+    expect(defaultForeignRefund(aSale([line(1, 5_000)]), 5_000)).toEqual([]);
+  });
+
+  it('pays the dollars from the dollar drawer, the rest from the pound drawer, and passes the contract', () => {
+    const sale = half();
+    const ret = buildReturnPayload(
+      request(sale, { refundMethod: 'cash', foreignRefund: [{ currency: 'USD', amountMinor: 450 }] }),
+    );
+    expect(ret.refunds).toEqual([
+      {
+        method: 'cash',
+        currency: 'SYP',
+        amountMinor: 117_000,
+        reference: null,
+        foreign: [{ currency: 'USD', amountMinor: 450, baseAmountMinor: 58_500, rate: USD_130 }],
+      },
+    ]);
+    expect(returnPayloadSchema.safeParse(ret).success).toBe(true);
+  });
+
+  it('rounds only what the pound drawer pays', () => {
+    const sale = aDollarSale([
+      { method: 'cash', currency: 'SYP', amountMinor: 58_900 },
+      { method: 'cash', currency: 'USD', amountMinor: 450 },
+    ]);
+    // goods 1,174.00: 4.50 $ (585.00) from the dollar drawer, 589.00 left, rounded to 590.00 by the 10-pound step
+    const ret = buildReturnPayload(
+      request(sale, {
+        refundMethod: 'cash',
+        cashStepMinor: 1000,
+        foreignRefund: [{ currency: 'USD', amountMinor: 450 }],
+      }),
+    );
+    expect(ret.totals.totalMinor).toBe(sale.totals.totalMinor);
+    const refund = ret.refunds[0]!;
+    expect(refund.amountMinor - (refund.foreign?.[0]?.baseAmountMinor ?? 0)).toBe(
+      Math.round((sale.totals.totalMinor - 58_500) / 1000) * 1000,
+    );
+    expect(refund.amountMinor - (refund.roundingMinor ?? 0)).toBe(ret.totals.totalMinor);
+    expect(returnPayloadSchema.safeParse(ret).success).toBe(true);
+  });
+
+  it('refuses dollars the sale never took, or more than it took', () => {
+    expect(() =>
+      buildReturnPayload(
+        request(aSale([line(1, 5_000)]), {
+          refundMethod: 'cash',
+          foreignRefund: [{ currency: 'USD', amountMinor: 10 }],
+        }),
+      ),
+    ).toThrow(/not paid in USD/);
+    expect(() =>
+      buildReturnPayload(
+        request(half(), { refundMethod: 'cash', foreignRefund: [{ currency: 'USD', amountMinor: 451 }] }),
+      ),
+    ).toThrow(/more than/);
+  });
+
+  it('adds the dollars of every payment, takes the dollar change off, and skips a drawer left with nothing', () => {
+    const twice = aDollarSale([
+      { method: 'cash', currency: 'USD', amountMinor: 400 },
+      { method: 'cash', currency: 'USD', amountMinor: 500 },
+    ]);
+    expect(paidForeign(twice)[0]!.amountMinor).toBe(900);
+    const dollarChange = {
+      ...allUsd(),
+      change: { currency: 'USD' as const, amountMinor: 100, rate: USD_130, baseAmountMinor: 13_000 },
+    };
+    expect(paidForeign(dollarChange)[0]!.amountMinor).toBe(800);
+    const nothingLeft = {
+      ...allUsd(),
+      change: { currency: 'USD' as const, amountMinor: 900, rate: USD_130, baseAmountMinor: 117_000 },
+    };
+    expect(paidForeign(nothingLeft)).toEqual([]);
+  });
+
+  it('rounds the default down to whole cents and gives nothing for a refund too small to be a cent', () => {
+    // 380.00 ل.س paid with a 3.00 $ note … 292.31 $ would be 38,000.30: the drawer never pays more than the goods
+    const sale = aDollarSale([{ method: 'cash', currency: 'USD', amountMinor: 30_000 }]);
+    const exact = sale.totals.totalMinor;
+    const [one] = defaultForeignRefund(sale, exact);
+    expect(one!.currency).toBe('USD');
+    expect(one!.amountMinor * 130).toBeLessThanOrEqual(exact);
+    expect(defaultForeignRefund(sale, 0)).toEqual([]);
+    expect(defaultForeignRefund(sale, 1)).toEqual([]);
+  });
+
+  it('skips a foreign amount of zero and refuses dollars worth more than the goods', () => {
+    const none = buildReturnPayload(
+      request(allUsd(), { refundMethod: 'cash', foreignRefund: [{ currency: 'USD', amountMinor: 0 }] }),
+    );
+    expect(none.refunds[0]!.foreign).toBeUndefined();
+    const tender = aDollarSale([{ method: 'cash', currency: 'USD', amountMinor: 1000 }]);
+    expect(() =>
+      buildReturnPayload(
+        request(tender, { refundMethod: 'cash', foreignRefund: [{ currency: 'USD', amountMinor: 1000 }] }),
+      ),
+    ).toThrow(/more than the goods/);
+  });
+
+  it('leaves a refund with no foreign part exactly as before', () => {
+    const sale = allUsd();
+    const plain = buildReturnPayload(request(sale, { refundMethod: 'cash' }));
+    expect(plain.refunds[0]).toEqual({
+      method: 'cash',
+      currency: 'SYP',
+      amountMinor: 117_000,
+      reference: null,
+    });
+    const empty = buildReturnPayload(request(sale, { refundMethod: 'cash', foreignRefund: [] }));
+    expect(empty).toEqual(plain);
+    // a refund by card never leaves a dollar drawer
+    const card = buildReturnPayload(
+      request(sale, {
+        refundMethod: 'card',
+        reference: 'C-1',
+        foreignRefund: [{ currency: 'USD', amountMinor: 900 }],
+      }),
+    );
+    expect(card.refunds[0]!.foreign).toBeUndefined();
+  });
+
+  it('is refused by the contract when the drawers pay more than the refund or a foreign drawer repeats', () => {
+    const ret = buildReturnPayload(
+      request(half(), { refundMethod: 'cash', foreignRefund: [{ currency: 'USD', amountMinor: 450 }] }),
+    );
+    const refund = ret.refunds[0]!;
+    const over = {
+      ...ret,
+      refunds: [{ ...refund, foreign: [{ ...refund.foreign![0]!, baseAmountMinor: 120_000 }] }],
+    };
+    expect(returnPayloadSchema.safeParse(over).success).toBe(false);
+    const twice = { ...ret, refunds: [{ ...refund, foreign: [refund.foreign![0]!, refund.foreign![0]!] }] };
+    expect(returnPayloadSchema.safeParse(twice).success).toBe(false);
+    const sameCurrency = {
+      ...ret,
+      refunds: [{ ...refund, foreign: [{ ...refund.foreign![0]!, currency: 'SYP' }] }],
+    };
+    expect(returnPayloadSchema.safeParse(sameCurrency).success).toBe(false);
   });
 });

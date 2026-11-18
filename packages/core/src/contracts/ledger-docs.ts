@@ -46,6 +46,13 @@ export interface PartyStatementLine {
   creditMinor: number;
   /** After this line, on the account's side (a customer: owes; a supplier: is owed) */
   balanceMinor: number;
+  /**
+   * A supplier's statement in dollars (round 36, decision 11): the line's dollars on the same sides, and the
+   * running dollar balance after it. Present only when the supplier has dollar lines.
+   */
+  usdDebitMinor?: number;
+  usdCreditMinor?: number;
+  usdBalanceMinor?: number;
 }
 
 export interface PartyStatement {
@@ -60,6 +67,8 @@ export interface PartyStatement {
   totalCreditMinor: number;
   closingMinor: number;
   baseCurrency: CurrencyCode;
+  /** A supplier with dollar lines: the same account in dollars (cents), opening, totals and closing */
+  usd?: { openingMinor: number; totalDebitMinor: number; totalCreditMinor: number; closingMinor: number };
 }
 
 // ─── Expenses (مصاريف) ────────────────────────────────────────────────────────

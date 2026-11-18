@@ -401,14 +401,30 @@ export function returnLines(ret: ReturnPayload, taxAccountOf: (taxRateId: string
   lines.push(baseLine({ code: '4200' }, -discount, base));
   for (const r of ret.refunds) {
     if (r.method === 'cash') {
-      lines.push({
-        account: { cash: '1110', currency: r.currency },
-        baseMinor: -r.amountMinor,
-        currency: r.currency,
-        amountMinor: -r.amountMinor,
-        rate: null,
-        shiftId: ret.shiftId,
-      });
+      // Round 36: the dollar's part leaves the dollar drawer (its dollars and the rate it was taken at);
+      // the invoice currency's drawer pays the rest. A refund with no foreign part pays it all, as before.
+      const foreign = r.foreign ?? [];
+      const foreignBase = foreign.reduce((n, f) => n + f.baseAmountMinor, 0);
+      if (foreign.length === 0 || r.amountMinor - foreignBase !== 0) {
+        lines.push({
+          account: { cash: '1110', currency: r.currency },
+          baseMinor: -(r.amountMinor - foreignBase),
+          currency: r.currency,
+          amountMinor: -(r.amountMinor - foreignBase),
+          rate: null,
+          shiftId: ret.shiftId,
+        });
+      }
+      for (const f of foreign) {
+        lines.push({
+          account: { cash: '1110', currency: f.currency },
+          baseMinor: -f.baseAmountMinor,
+          currency: f.currency,
+          amountMinor: -f.amountMinor,
+          rate: f.rate,
+          shiftId: ret.shiftId,
+        });
+      }
       // Round 21: the drawer paid the rounded amount; the difference to what the goods came to
       // is cash rounding, on the same account a sale's rounding uses (6400). Absent on a refund
       // an older till made, which paid exactly the total. Paying less is a gain (a credit).

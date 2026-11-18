@@ -257,6 +257,8 @@ export const collectInput = z
     reference: z.string().trim().min(1).max(64).nullable().optional(),
     note: z.string().trim().max(200).nullable().optional(),
     date: isoDateSchema.optional(),
+    /** Round 36 (X1): the branch the instalment was taken at; missing: no branch, as before */
+    branchId: uuidSchema.nullable().optional(),
   })
   .refine((p) => p.method === 'cash' || !!p.reference, {
     path: ['reference'],

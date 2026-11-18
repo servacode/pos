@@ -1,6 +1,14 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { averageValue, EMPTY_STOCK, stockBack, stockIn, stockOut, type StockValue } from './costing';
+import {
+  averageValue,
+  EMPTY_STOCK,
+  stockBack,
+  stockIn,
+  stockOut,
+  stockOutAtValue,
+  type StockValue,
+} from './costing';
 
 const PIECE = 1000;
 
@@ -170,5 +178,27 @@ describe('stock cost by value (10 › الكلفة والربح)', () => {
       valueMinor: 200,
       after: { qty: PIECE, valueMinor: 100 },
     });
+  });
+});
+
+describe('goods out at a fixed value: a purchase turned back (round 36, decision 12)', () => {
+  it('takes out exactly what came in and leaves the rest of the stock as it was', () => {
+    const first = stockIn(EMPTY_STOCK, 10 * PIECE, 1000).after;
+    const both = stockIn(first, 10 * PIECE, 2000).after;
+    const back = stockOutAtValue(both, 10 * PIECE, 2000);
+    expect(back.valueOutMinor).toBe(2000);
+    expect(back.after).toMatchObject({ qty: 10 * PIECE, valueMinor: 1000 });
+  });
+
+  it('the last pieces take all the value left, so nothing is stranded', () => {
+    const s = stockIn(EMPTY_STOCK, 4 * PIECE, 1001).after;
+    const back = stockOutAtValue(s, 4 * PIECE, 1000);
+    expect(back.valueOutMinor).toBe(1001);
+    expect(back.after).toMatchObject({ qty: 0, valueMinor: 0 });
+  });
+
+  it('refuses a quantity that is not a positive whole number', () => {
+    expect(() => stockOutAtValue(EMPTY_STOCK, 0, 10)).toThrow(RangeError);
+    expect(() => stockOutAtValue(EMPTY_STOCK, PIECE, -1)).toThrow(RangeError);
   });
 });

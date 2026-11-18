@@ -40,6 +40,7 @@ import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { cancelPlan, collectOnPlan, getPlan, logReminder } from './api';
+import { defaultPaymentBranch, PaymentBranchField } from '../customers/PaymentBranch';
 import { NotesSheet, ScheduleSheet } from './sheets';
 import { reminderLink } from './whatsapp';
 
@@ -462,6 +463,7 @@ function CollectDialog({
   const [method, setMethod] = useState<CustomerPaymentMethod>('cash');
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
+  const [branchId, setBranchId] = useState(() => defaultPaymentBranch(me));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [askOver, setAskOver] = useState(false);
@@ -489,6 +491,7 @@ function CollectDialog({
           method,
           reference: reference.trim() || null,
           note: note.trim() || null,
+          ...(branchId ? { branchId } : {}),
         }),
       );
     } catch (e) {
@@ -551,6 +554,7 @@ function CollectDialog({
             maxLength={64}
           />
         ) : null}
+        <PaymentBranchField me={me} value={branchId} onChange={setBranchId} />
         <TextField
           label="ملاحظة"
           hint="اختياري"

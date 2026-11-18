@@ -1,11 +1,13 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
+  roundDiv,
   stockIn,
   stockBack,
   stockOut,
   type CurrencyCode,
   type InventoryResponse,
   type ProfitReport,
+  type PurchaseCurrencyCode,
   type PurchaseDetail,
   type PurchaseInput,
   type PurchaseListResponse,
@@ -17,6 +19,7 @@ import {
   type TransferRow,
   type StocktakeLineRow,
   type StockValue,
+  type TradeRate,
   type SupplierInput,
   type SupplierListResponse,
   type SupplierPaymentInput,
@@ -71,6 +74,7 @@ import {
   trackedVariants,
 } from './batches';
 import { applyReceipt } from './purchase-order-receipt';
+import { bookValueOfPayment, usdTerms, usdToBase, type UsdTerms } from './purchase-usd';
 import { outgoingSerials, receiveSerials, relocateSerials, returnSerialsToSupplier } from './serials';
 
 /**
@@ -135,9 +139,14 @@ async function stockedVariants(tx: Transaction, ids: string[]): Promise<Map<stri
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 
+// A supplier's balance is the sum of its 2100 lines in the base currency. The lines kept in dollars (round 36,
+// decision 11) also give the dollars owed (the amounts, signed like the lines) and what the books value them at.
 const supplierBalances = sql`
-  select l.party_id as supplier_id, sum(l.credit_minor - l.debit_minor) as balance
+  select l.party_id as supplier_id, sum(l.credit_minor - l.debit_minor) as balance,
+         coalesce(sum(-l.amount_minor) filter (where l.currency = 'USD' and l.currency <> st.base_currency), 0) as usd_balance,
+         coalesce(sum(l.credit_minor - l.debit_minor) filter (where l.currency = 'USD' and l.currency <> st.base_currency), 0) as usd_book
   from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+  cross join (select base_currency from tenant_settings limit 1) st
   where a.code = '2100' and l.party_type = 'supplier'
   group by l.party_id`;
 
@@ -151,10 +160,13 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
     notes: string | null;
     archived_at: string | null;
     balance: string;
+    usd_balance: string;
+    usd_book: string;
     last_purchase: string | null;
     purchases_total: string;
   }>(sql`
     select s.id, s.name, s.phone, s.notes, s.archived_at, coalesce(b.balance, 0)::text as balance,
+           coalesce(b.usd_balance, 0)::text as usd_balance, coalesce(b.usd_book, 0)::text as usd_book,
            pu.last_purchase::text as last_purchase, coalesce(pu.total, 0)::text as purchases_total
     from suppliers s left join (${supplierBalances}) b on b.supplier_id = s.id
     left join (
@@ -169,6 +181,8 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
     phone: r.phone,
     notes: r.notes,
     balanceMinor: Number(r.balance),
+    usdBalanceMinor: Number(r.usd_balance),
+    usdBookMinor: Number(r.usd_book),
     archived: r.archived_at !== null,
     lastPurchaseOn: r.last_purchase,
     purchasesTotalMinor: Number(r.purchases_total),
@@ -259,10 +273,22 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
     total_minor: string;
     branch_id: string;
     notes: string | null;
+    currency: string | null;
+    rate: string | null;
+    foreign_total_minor: string | null;
+    reversal_id: string | null;
+    reversal_number: string | null;
+    reversal_date: string | null;
+    order_id: string | null;
   }>(sql`
     select p.id, p.number, p.business_date::text, p.supplier_id, s.name as supplier_name, p.payment,
-           p.reference, p.total_minor::text, p.branch_id, p.notes
+           p.reference, p.total_minor::text, p.branch_id, p.notes, p.currency, p.rate,
+           p.foreign_total_minor::text, r.id as reversal_id, r.number as reversal_number,
+           r.business_date::text as reversal_date,
+           (select o.id from purchase_orders o where o.tenant_id = p.tenant_id
+              and o.receipts @> jsonb_build_array(jsonb_build_object('purchaseId', p.id)) limit 1) as order_id
     from purchases p join suppliers s on s.tenant_id = p.tenant_id and s.id = p.supplier_id
+    left join purchase_reversals r on r.tenant_id = p.tenant_id and r.purchase_id = p.id
     where p.id = ${id}`);
   if (!row) throw notFound('هذه الفاتورة');
   const lines = await tx
@@ -300,6 +326,17 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
     totalMinor: Number(row.total_minor),
     branchId: row.branch_id,
     notes: row.notes,
+    ...(row.currency
+      ? {
+          currency: row.currency as PurchaseCurrencyCode,
+          rate: row.rate,
+          foreignTotalMinor: Number(row.foreign_total_minor),
+        }
+      : {}),
+    correctedBy: row.reversal_id
+      ? { id: row.reversal_id, number: row.reversal_number!, date: row.reversal_date! }
+      : null,
+    purchaseOrderId: row.order_id,
     lines: lines.map((l) => ({
       lineNo: l.lineNo,
       variantId: l.variantId,
@@ -307,6 +344,7 @@ async function purchaseDetail(tx: Transaction, id: string): Promise<PurchaseDeta
       name: l.name,
       qty: l.qty,
       costMinor: l.costMinor,
+      ...(l.foreignCostMinor !== null ? { foreignCostMinor: l.foreignCostMinor } : {}),
       batchNo: l.batchNo,
       expiryDate: l.expiryDate,
       serials: numbers.filter((n) => n.variantId === l.variantId).map((n) => n.serial),
@@ -321,7 +359,7 @@ export async function moveStock(
   tenantId: string,
   branchId: string,
   docId: string,
-  kind: 'purchase' | 'stocktake' | 'transfer' | 'supplier_return',
+  kind: 'purchase' | 'purchase_reversal' | 'stocktake' | 'transfer' | 'supplier_return',
   date: string,
   lines: { lineNo: number; variantId: string; qty: number }[],
 ): Promise<void> {
@@ -374,11 +412,18 @@ export async function createPurchase(
       throw invalid({ [`lines.${undated}.expiryDate`]: 'هذا الصنف يتطلب تاريخ صلاحية. اكتبه قبل الحفظ' });
     }
 
+    // A dollar invoice (round 36, decision 11): the lines are typed in dollars and the stock takes them in the
+    // base currency at the rate of the day, line by line, so the stock's value and the entry agree to the qirsh
+    const currency = await baseCurrency(tx);
+    const usd = await usdTerms(tx, currency, input);
+    const baseCosts = input.lines.map((l) => (usd ? usdToBase(l.costMinor, usd, currency) : l.costMinor));
+    const foreignTotal = usd ? input.lines.reduce((sum, l) => sum + l.costMinor, 0) : null;
+
     // What was sold until now is costed at the old average first
     await costPending(tx, auth.tenantId);
     const id = newId();
     const number = await nextNumber(tx, auth.tenantId, 'PUR', input.date);
-    const total = input.lines.reduce((sum, l) => sum + l.costMinor, 0);
+    const total = baseCosts.reduce((sum, c) => sum + c, 0);
     await tx.insert(purchases).values({
       tenantId: auth.tenantId,
       id,
@@ -390,11 +435,17 @@ export async function createPurchase(
       reference: input.reference ?? null,
       notes: input.notes ?? null,
       totalMinor: total,
+      ...(usd ? { currency: 'USD', rate: usd.rate.rate, foreignTotalMinor: foreignTotal } : {}),
       createdBy: auth.userId,
     });
-    const lines = input.lines.map((l, i) => ({ ...l, lineNo: i + 1, name: names.get(l.variantId)! }));
+    const lines = input.lines.map((l, i) => ({
+      ...l,
+      costMinor: baseCosts[i]!,
+      lineNo: i + 1,
+      name: names.get(l.variantId)!,
+    }));
     await tx.insert(purchaseLines).values(
-      lines.map((l) => ({
+      lines.map((l, i) => ({
         tenantId: auth.tenantId,
         purchaseId: id,
         lineNo: l.lineNo,
@@ -402,6 +453,7 @@ export async function createPurchase(
         name: l.name,
         qty: l.qty,
         costMinor: l.costMinor,
+        foreignCostMinor: usd ? input.lines[i]!.costMinor : null,
         batchNo: l.batchNo ?? null,
         expiryDate: l.expiryDate ?? null,
       })),
@@ -453,24 +505,26 @@ export async function createPurchase(
     }
     await saveValues(tx, auth.tenantId, values);
 
-    const currency = await baseCurrency(tx);
+    // The credit side is in the invoice's currency: a dollar invoice owes (or pays) dollars, at its rate
+    const owedCurrency = usd ? usd.currency : currency;
+    const owedMinor = usd ? foreignTotal! : total;
     const credit: DraftLine =
       input.payment === 'credit'
         ? {
             account: { code: '2100' },
             baseMinor: -total,
-            currency,
-            amountMinor: -total,
-            rate: null,
+            currency: owedCurrency,
+            amountMinor: -owedMinor,
+            rate: usd?.rate ?? null,
             party: { type: 'supplier', id: supplier.id },
             memo: supplier.name,
           }
         : {
-            account: PAY_ACCOUNT(input.payment, currency),
+            account: PAY_ACCOUNT(input.payment, owedCurrency),
             baseMinor: -total,
-            currency,
-            amountMinor: -total,
-            rate: null,
+            currency: owedCurrency,
+            amountMinor: -owedMinor,
+            rate: usd?.rate ?? null,
           };
     await postEntry(tx, {
       tenantId: auth.tenantId,
@@ -479,7 +533,7 @@ export async function createPurchase(
       sourceType: 'purchase',
       sourceId: id,
       sourceNumber: number,
-      memo: `فاتورة شراء ${number} من ${supplier.name}${input.reference ? ` (${input.reference})` : ''}`,
+      memo: `فاتورة شراء ${number} من ${supplier.name}${input.reference ? ` (${input.reference})` : ''}${usd ? ` بالدولار على سعر ${usd.rate.rate}` : ''}`,
       baseCurrency: currency,
       lines: [
         { account: { code: '1300' }, baseMinor: total, currency, amountMinor: total, rate: null },
@@ -540,10 +594,18 @@ export async function listPurchases(
       payment: PurchaseRow['payment'];
       reference: string | null;
       total_minor: string;
+      currency: string | null;
+      rate: string | null;
+      foreign_total_minor: string | null;
+      reversal_id: string | null;
+      reversal_number: string | null;
+      reversal_date: string | null;
     }>(sql`
       select p.id, p.number, p.business_date::text, p.supplier_id, s.name as supplier_name, p.payment,
-             p.reference, p.total_minor::text
+             p.reference, p.total_minor::text, p.currency, p.rate, p.foreign_total_minor::text,
+             r.id as reversal_id, r.number as reversal_number, r.business_date::text as reversal_date
       from purchases p join suppliers s on s.tenant_id = p.tenant_id and s.id = p.supplier_id
+      left join purchase_reversals r on r.tenant_id = p.tenant_id and r.purchase_id = p.id
       where ${sql.join(conditions, sql` and `)}
       order by p.business_date desc, p.number desc
       limit 500`);
@@ -557,6 +619,16 @@ export async function listPurchases(
         payment: r.payment,
         reference: r.reference,
         totalMinor: Number(r.total_minor),
+        ...(r.currency
+          ? {
+              currency: r.currency as PurchaseCurrencyCode,
+              rate: r.rate,
+              foreignTotalMinor: Number(r.foreign_total_minor),
+            }
+          : {}),
+        correctedBy: r.reversal_id
+          ? { id: r.reversal_id, number: r.reversal_number!, date: r.reversal_date! }
+          : null,
       })),
       baseCurrency: await baseCurrency(tx),
     };
@@ -575,29 +647,53 @@ export async function paySupplier(
     await requirePermission(tx, auth.userId, 'purchases.manage');
     const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
     if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
-    const owed = (await supplierRows(tx, supplier.id))[0]!.balanceMinor;
+    const currency = await baseCurrency(tx);
+    // A payment in dollars (round 36, decision 11) pays the supplier's dollar debt, from the dollar safe or the bank
+    const usd = await usdTerms(tx, currency, input);
+    if (usd && input.cheque)
+      throw invalid({ currency: 'الشيك يُكتب بالليرة. اختر الدفع من الخزنة أو من البنك' });
+    const row = (await supplierRows(tx, supplier.id))[0]!;
+    const owed = usd ? row.usdBalanceMinor! : row.balanceMinor - row.usdBookMinor!;
     if (input.amountMinor > Math.max(0, owed) && !input.advance) {
-      const message =
-        owed > 0
+      const message = usd
+        ? owed > 0
+          ? 'المبلغ أكبر مما للمورد عليك بالدولار. إن كانت دفعة مقدّمة فأكّد ذلك'
+          : 'لا شيء مستحق لهذا المورد بالدولار الآن. إن كانت دفعة مقدّمة فأكّد ذلك'
+        : owed > 0
           ? 'المبلغ أكبر مما للمورد عليك. إن كانت دفعة مقدّمة فأكّد ذلك'
-          : 'لا شيء مستحق لهذا المورد الآن. إن كانت دفعة مقدّمة فأكّد ذلك';
+          : row.usdBalanceMinor! > 0
+            ? 'لا شيء مستحق لهذا المورد بالليرة. ما عليك له دولار: ادفع بالدولار، أو أكّد أنها دفعة مقدّمة'
+            : 'لا شيء مستحق لهذا المورد الآن. إن كانت دفعة مقدّمة فأكّد ذلك';
       throw new AppError(409, 'conflict', message, { amountMinor: message });
     }
     const id = newId();
     const number = await nextNumber(tx, auth.tenantId, 'PAY', input.date);
+    const method = input.cheque ? 'bank' : input.method;
+    // Dollars paid cost what they cost at today's rate; the books held that debt at its own rates, and
+    // the difference is the exchange difference of the payment
+    const paidBase = usd ? usdToBase(input.amountMinor, usd, currency) : input.amountMinor;
+    const bookBase = usd
+      ? bookValueOfPayment(
+          input.amountMinor,
+          { usdMinor: row.usdBalanceMinor!, bookMinor: row.usdBookMinor! },
+          (dollars) => usdToBase(dollars, usd, currency),
+        )
+      : input.amountMinor;
+    const fx = paidBase - bookBase;
     await tx.insert(supplierPayments).values({
       tenantId: auth.tenantId,
       id,
       number,
       supplierId: supplier.id,
       businessDate: input.date,
-      amountMinor: input.amountMinor,
-      method: input.cheque ? 'bank' : input.method,
+      amountMinor: paidBase,
+      method,
       cheque: input.cheque ?? null,
+      ...(usd ? { currency: 'USD', foreignMinor: input.amountMinor, rate: usd.rate.rate, fxMinor: fx } : {}),
       note: input.note ?? null,
       createdBy: auth.userId,
     });
-    const currency = await baseCurrency(tx);
+    const paidCurrency = usd ? usd.currency : currency;
     await postEntry(tx, {
       tenantId: auth.tenantId,
       branchId: await branchOf(tx, undefined),
@@ -605,25 +701,38 @@ export async function paySupplier(
       sourceType: 'supplier_payment',
       sourceId: id,
       sourceNumber: number,
-      memo: `سند دفع ${number} إلى ${supplier.name}`,
+      memo: `سند دفع ${number} إلى ${supplier.name}${usd ? ` بالدولار على سعر ${usd.rate.rate}` : ''}`,
       baseCurrency: currency,
       lines: [
         {
           account: { code: '2100' },
-          baseMinor: input.amountMinor,
-          currency,
+          baseMinor: bookBase,
+          currency: paidCurrency,
           amountMinor: input.amountMinor,
           rate: null,
           party: { type: 'supplier', id: supplier.id },
           memo: supplier.name,
         },
         {
-          account: PAY_ACCOUNT(input.cheque ? 'bank' : input.method, currency),
-          baseMinor: -input.amountMinor,
-          currency,
+          account: PAY_ACCOUNT(method, paidCurrency),
+          baseMinor: -paidBase,
+          currency: paidCurrency,
           amountMinor: -input.amountMinor,
-          rate: null,
+          rate: usd?.rate ?? null,
         },
+        // A loss when the dollars cost more than the books held them at (a debit), a gain when less
+        ...(fx !== 0
+          ? [
+              {
+                account: { code: '6510' },
+                baseMinor: fx,
+                currency,
+                amountMinor: fx,
+                rate: null,
+                memo: fx > 0 ? 'خسارة فرق الصرف' : 'ربح فرق الصرف',
+              } satisfies DraftLine,
+            ]
+          : []),
       ],
     });
     await audit(
@@ -634,7 +743,7 @@ export async function paySupplier(
         action: 'supplier.payment',
         entity: 'supplier',
         entityId: supplier.id,
-        changes: { amountMinor: [null, input.amountMinor] },
+        changes: { amountMinor: [null, input.amountMinor], ...(usd ? { fxMinor: [null, fx] } : {}) },
       },
       meta,
     );
@@ -644,7 +753,8 @@ export async function paySupplier(
       supplierId: supplier.id,
       date: input.date,
       amountMinor: input.amountMinor,
-      method: input.cheque ? 'bank' : input.method,
+      method,
+      ...(usd ? { currency: 'USD' as const, rate: usd.rate.rate, baseMinor: paidBase, fxMinor: fx } : {}),
     };
   });
 }
@@ -1110,6 +1220,12 @@ export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items
  * credits for them off its balance (Dr 2100) or paid back (Dr the drawer or the bank), Cr 1300 at
  * cost; what was credited above or below cost is cost of sales (5100). A branch cannot send back
  * more than it holds.
+ *
+ * Round 36, decision 13: a return that names its purchase invoice is credited at that invoice's cost
+ * for each line (a dollar invoice, in dollars at the invoice's rate, so the dollar debt comes down by
+ * what it went up and no exchange difference arises). The stock math is unchanged: the pieces leave at
+ * the current average, and the difference between what leaves and what is credited is the same cost
+ * variance as before, on 5100. A return with no invoice is exactly what it was.
  */
 export async function createSupplierReturn(
   db: Database,
@@ -1149,6 +1265,10 @@ export async function createSupplierReturn(
       ).map((r) => [r.variantId, r.qty]),
     );
     const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
+    const currency = await baseCurrency(tx);
+    const invoice = input.purchaseId
+      ? await invoiceForReturn(tx, input.purchaseId, supplier.id, input.lines, currency)
+      : null;
     const lines: SupplierReturnDetail['lines'] = [];
     for (const [index, l] of input.lines.entries()) {
       const onHand = held.get(l.variantId) ?? 0;
@@ -1159,12 +1279,15 @@ export async function createSupplierReturn(
       const out = stockOut(values.get(key) ?? empty, l.qty);
       values.set(key, out.after);
       const costMinor = Math.max(0, out.costMinor);
+      const credit = invoice?.credits[index];
       lines.push({
         variantId: l.variantId,
         name: names.get(l.variantId)!,
         qty: l.qty,
-        amountMinor: l.amountMinor ?? costMinor,
+        amountMinor: credit ? credit.baseMinor : (l.amountMinor ?? costMinor),
         costMinor,
+        ...(credit ? { invoiceCostMinor: credit.baseMinor } : {}),
+        ...(credit?.foreignMinor !== undefined ? { foreignAmountMinor: credit.foreignMinor } : {}),
       });
     }
     // A tracked product goes back with its serial numbers: they leave the store's stock
@@ -1188,6 +1311,10 @@ export async function createSupplierReturn(
       lines,
       amountMinor,
       costMinor,
+      ...(invoice ? { purchaseId: invoice.id } : {}),
+      ...(invoice?.usd
+        ? { currency: 'USD', rate: invoice.usd.rate.rate, foreignAmountMinor: invoice.foreignTotal }
+        : {}),
       createdBy: auth.userId,
     });
     await returnSerialsToSupplier(tx, outgoing);
@@ -1218,16 +1345,20 @@ export async function createSupplierReturn(
       input.lines.map((l) => l.variantId),
     );
 
-    const currency = await baseCurrency(tx);
     const line = (account: DraftLine['account'], baseMinor: number, extra: Partial<DraftLine> = {}) =>
       ({ account, baseMinor, currency, amountMinor: baseMinor, rate: null, ...extra }) as DraftLine;
+    // On a dollar invoice what the supplier credits is dollars, at the invoice's rate
+    const dollars: Partial<DraftLine> = invoice?.usd
+      ? { currency: 'USD', amountMinor: invoice.foreignTotal, rate: invoice.usd.rate }
+      : {};
     const back =
       input.refund === 'credit'
         ? line({ code: '2100' }, amountMinor, {
             party: { type: 'supplier', id: supplier.id },
             memo: supplier.name,
+            ...dollars,
           })
-        : line(PAY_ACCOUNT(input.refund, currency), amountMinor);
+        : line(PAY_ACCOUNT(input.refund, dollars.currency ?? currency), amountMinor, dollars);
     const difference = costMinor - amountMinor;
     await postEntry(tx, {
       tenantId: auth.tenantId,
@@ -1268,9 +1399,89 @@ export async function createSupplierReturn(
       lines,
       amountMinor,
       costMinor,
+      ...(invoice
+        ? {
+            purchaseId: invoice.id,
+            purchaseNumber: invoice.number,
+            ...(invoice.usd
+              ? {
+                  currency: 'USD' as const,
+                  rate: invoice.usd.rate.rate,
+                  foreignAmountMinor: invoice.foreignTotal,
+                }
+              : {}),
+          }
+        : {}),
       baseCurrency: currency,
     };
   });
+}
+
+/**
+ * The invoice a supplier return is against (round 36, decision 13): it must be this supplier's, every line
+ * must be an item of it, and no line may send back more than was bought less what earlier returns against
+ * it took. Each line's credit is its share of the invoice's cost for that item (the whole of it when the
+ * whole quantity goes back), or the amount typed, which is then in the invoice's currency.
+ */
+async function invoiceForReturn(
+  tx: Transaction,
+  purchaseId: string,
+  supplierId: string,
+  returned: z.output<typeof supplierReturnInput>['lines'],
+  base: CurrencyCode,
+) {
+  const [purchase] = await tx.select().from(purchases).where(eq(purchases.id, purchaseId));
+  if (!purchase || purchase.supplierId !== supplierId) {
+    throw invalid({ purchaseId: 'هذه الفاتورة ليست من هذا المورد' });
+  }
+  const bought = await tx.select().from(purchaseLines).where(eq(purchaseLines.purchaseId, purchaseId));
+  // The invoice's own rate: the credit is at the rate the debt was booked at
+  const usd: UsdTerms | null = purchase.currency
+    ? { currency: 'USD', rate: { unit: 'USD', quote: base, rate: purchase.rate! } as TradeRate }
+    : null;
+  // What earlier returns against this invoice took, per item
+  const earlier = await tx
+    .select({ lines: supplierReturns.lines })
+    .from(supplierReturns)
+    .where(eq(supplierReturns.purchaseId, purchaseId));
+  const taken = new Map<string, number>();
+  for (const r of earlier) {
+    for (const l of r.lines as { variantId: string; qty: number }[]) {
+      taken.set(l.variantId, (taken.get(l.variantId) ?? 0) + l.qty);
+    }
+  }
+  const sent = new Map<string, number>();
+  const credits: { baseMinor: number; foreignMinor?: number }[] = [];
+  let foreignTotal = 0;
+  for (const [index, l] of returned.entries()) {
+    const own = bought.filter(
+      (b) =>
+        b.variantId === l.variantId &&
+        (!l.batchNo || b.batchNo === l.batchNo) &&
+        (!l.expiryDate || b.expiryDate === l.expiryDate),
+    );
+    if (own.length === 0) {
+      throw invalid({ [`lines.${index}.variantId`]: 'هذا الصنف ليس في الفاتورة المذكورة' });
+    }
+    const qtyBought = own.reduce((sum, b) => sum + b.qty, 0);
+    const already = (taken.get(l.variantId) ?? 0) + (sent.get(l.variantId) ?? 0);
+    if (already + l.qty > qtyBought) {
+      throw invalid({
+        [`lines.${index}.qty`]: `اشتريت من هذا الصنف ${qtyBought / 1000} بهذه الفاتورة، وأُرجع منها ${already / 1000}. المتبقي ${Math.max(0, qtyBought - already) / 1000}`,
+      });
+    }
+    sent.set(l.variantId, (sent.get(l.variantId) ?? 0) + l.qty);
+    const share = (cost: number) =>
+      l.qty === qtyBought ? cost : Number(roundDiv(BigInt(cost) * BigInt(l.qty), BigInt(qtyBought)));
+    if (usd) {
+      const foreign = l.amountMinor ?? share(own.reduce((sum, b) => sum + (b.foreignCostMinor ?? 0), 0));
+      foreignTotal += foreign;
+      credits.push({ baseMinor: usdToBase(foreign, usd, base), foreignMinor: foreign });
+    } else {
+      credits.push({ baseMinor: l.amountMinor ?? share(own.reduce((sum, b) => sum + b.costMinor, 0)) });
+    }
+  }
+  return { id: purchase.id, number: purchase.number, usd, credits, foreignTotal };
 }
 
 export function listSupplierReturns(

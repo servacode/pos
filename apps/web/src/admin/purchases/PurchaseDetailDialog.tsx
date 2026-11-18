@@ -1,19 +1,33 @@
 import { useEffect, useState } from 'react';
 import { dayText } from '../../lib/dates';
 import { Link } from 'react-router';
-import type { PurchaseDetail, PurchaseRow } from '@serva/core';
+import type { PurchaseCorrection, PurchaseDetail, PurchaseRow } from '@serva/core';
 import { Alert, Button, Dialog, formatQuantity, Money, SkeletonText, TextLink, useDigits } from '@serva/ui';
-import { errorMessage } from '../../lib/api';
-import { getPurchase } from './api';
+import { ApiError, errorMessage } from '../../lib/api';
+import { correctPurchase, getPurchase } from './api';
 
 /**
- * One purchase invoice, read only (from the same record the labels page reads): each line with its
- * quantity, cost, batch, expiry and serial numbers, and the way to its labels.
+ * One purchase invoice (from the same record the labels page reads): each line with its quantity,
+ * cost, batch, expiry and serial numbers, and the way to its labels. «صحّح الفاتورة» (round 36,
+ * decision 12) turns it back with a reversal document and hands over a copy to fix and save; it is
+ * refused, with a way to a return to the supplier, when part of the goods was sold.
  */
-export function PurchaseDetailDialog({ purchase, onClose }: { purchase: PurchaseRow; onClose: () => void }) {
+export function PurchaseDetailDialog({
+  purchase,
+  onClose,
+  onCorrected,
+}: {
+  purchase: PurchaseRow;
+  onClose: () => void;
+  /** The invoice was turned back: the page opens its draft */
+  onCorrected?: (correction: PurchaseCorrection) => void;
+}) {
   const digits = useDigits();
   const [detail, setDetail] = useState<PurchaseDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -26,6 +40,25 @@ export function PurchaseDetailDialog({ purchase, onClose }: { purchase: Purchase
     };
   }, [purchase.id]);
 
+  async function correct() {
+    setWorking(true);
+    setRefused(null);
+    try {
+      const done = await correctPurchase(purchase.id, {});
+      onCorrected?.(done);
+    } catch (e) {
+      // A 409 is the answer «لا»: part of the goods is gone. It is said as it is, with the way out.
+      if (e instanceof ApiError && e.status === 409) setRefused(errorMessage(e));
+      else setError(errorMessage(e));
+      setAsking(false);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  const dollars = detail?.currency === 'USD';
+  const correctable = detail && !detail.correctedBy && onCorrected;
+
   return (
     <Dialog
       open
@@ -36,6 +69,11 @@ export function PurchaseDetailDialog({ purchase, onClose }: { purchase: Purchase
       description={`${purchase.supplierName} · ${dayText(purchase.date)}`}
       actions={
         <>
+          {correctable && !asking ? (
+            <Button variant="secondary" onClick={() => setAsking(true)}>
+              صحّح الفاتورة
+            </Button>
+          ) : null}
           <Button variant="secondary" onClick={onClose}>
             أغلق
           </Button>
@@ -43,15 +81,57 @@ export function PurchaseDetailDialog({ purchase, onClose }: { purchase: Purchase
       }
     >
       {error ? <Alert tone="error">{error}</Alert> : null}
+      {refused ? (
+        <Alert tone="warning" title="لا يمكن تصحيح هذه الفاتورة">
+          <p>{refused}</p>
+          <TextLink as={Link} to="/supplier-returns" className="mt-2 inline-block">
+            افتح مرتجعات الموردين
+          </TextLink>
+        </Alert>
+      ) : null}
       {!detail && !error ? <SkeletonText lines={4} /> : null}
       {detail ? (
         <div className="flex flex-col gap-4">
+          {detail.correctedBy ? (
+            <Alert tone="info">
+              صُحّحت هذه الفاتورة بالمستند{' '}
+              <bdi dir="ltr" className="num font-semibold">
+                {detail.correctedBy.number}
+              </bdi>{' '}
+              بتاريخ {dayText(detail.correctedBy.date)}. أثرها على المخزون وعلى حساب المورد انتهى.
+            </Alert>
+          ) : null}
+          {asking ? (
+            <Alert tone="warning" title="تصحيح الفاتورة">
+              <p>
+                نُخرج بضاعة الفاتورة من المخزون بكلفتها، ونُرجع للمورد ما سُجّل له، ثم تفتح لك نسخة من
+                الفاتورة لتعدّلها وتحفظها. لا يُمحى شيء من الدفاتر: يبقى الأصل والتصحيح معاً.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Button loading={working} onClick={() => void correct()}>
+                  نعم، صحّح
+                </Button>
+                <Button variant="ghost" disabled={working} onClick={() => setAsking(false)}>
+                  لا
+                </Button>
+              </div>
+            </Alert>
+          ) : null}
           <ul aria-label="أصناف الفاتورة" className="flex flex-col divide-y divide-line">
             {detail.lines.map((l) => (
               <li key={l.lineNo} className="flex flex-col gap-1 py-3">
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="min-w-0 font-semibold text-ink">{l.name}</span>
-                  <Money minor={l.costMinor} currency={detail.baseCurrency} className="font-semibold" />
+                  <span className="flex flex-col items-end">
+                    {dollars && typeof l.foreignCostMinor === 'number' ? (
+                      <Money minor={l.foreignCostMinor} currency="USD" className="font-semibold" />
+                    ) : null}
+                    <Money
+                      minor={l.costMinor}
+                      currency={detail.baseCurrency}
+                      className={dollars ? 'text-sm text-ink-muted' : 'font-semibold'}
+                    />
+                  </span>
                 </div>
                 <p className="text-sm text-ink-muted">
                   الكمية <span className="num">{formatQuantity(l.qty, digits)}</span>
@@ -82,8 +162,22 @@ export function PurchaseDetailDialog({ purchase, onClose }: { purchase: Purchase
           </ul>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-surface-total px-4 py-3">
             <span className="text-sm font-semibold text-ink-muted">مجموع الفاتورة</span>
-            <Money minor={detail.totalMinor} currency={detail.baseCurrency} className="text-lg font-bold" />
+            <span className="flex flex-col items-end">
+              {dollars && typeof detail.foreignTotalMinor === 'number' ? (
+                <Money minor={detail.foreignTotalMinor} currency="USD" className="text-lg font-bold" />
+              ) : null}
+              <Money
+                minor={detail.totalMinor}
+                currency={detail.baseCurrency}
+                className={dollars ? 'text-sm text-ink-muted' : 'text-lg font-bold'}
+              />
+            </span>
           </div>
+          {dollars && detail.rate ? (
+            <p className="text-sm text-ink-muted">
+              بالدولار على سعر <span className="num">{detail.rate}</span> ليرة للدولار.
+            </p>
+          ) : null}
           {detail.notes ? <p className="text-sm text-ink-muted">{detail.notes}</p> : null}
           <TextLink as={Link} to={`/labels?purchase=${detail.id}`} className="self-start">
             اطبع ملصقات هذه الفاتورة

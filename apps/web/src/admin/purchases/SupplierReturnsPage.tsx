@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  PurchaseRow,
   SupplierListResponse,
   SupplierReturnDetail,
   SupplierReturnInput,
@@ -95,6 +96,9 @@ export function SupplierReturnsPage() {
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
+  // «من فاتورة شراء» (round 36, decision 13): the supplier credits each line at what the invoice cost
+  const [invoices, setInvoices] = useState<PurchaseRow[]>([]);
+  const [purchaseId, setPurchaseId] = useState('');
   const [saving, setSaving] = useState(false);
   // The list of returns comes first; the form opens from «مرتجع جديد»
   const [formOpen, setFormOpen] = useState(false);
@@ -129,11 +133,12 @@ export function SupplierReturnsPage() {
     let alive = true;
     listPurchases()
       .then(async (all) => {
-        const recent = all.items
+        const mine = all.items
           .filter((p) => p.supplierId === supplierId)
           // Newest first; two on the same day: the later number
-          .sort((a, b) => (a.date === b.date ? (a.number < b.number ? 1 : -1) : a.date < b.date ? 1 : -1))
-          .slice(0, 5);
+          .sort((a, b) => (a.date === b.date ? (a.number < b.number ? 1 : -1) : a.date < b.date ? 1 : -1));
+        if (alive) setInvoices(mine.filter((p) => !p.correctedBy));
+        const recent = mine.slice(0, 5);
         const found = new Map<string, BatchSuggestion[]>();
         for (const p of recent) {
           const detail = await getPurchase(p.id);
@@ -153,6 +158,32 @@ export function SupplierReturnsPage() {
       alive = false;
     };
   }, [supplierId]);
+
+  const invoice = invoices.find((p) => p.id === purchaseId) ?? null;
+  const invoiceCurrency = invoice?.currency === 'USD' ? 'USD' : base;
+  /** Every item of the invoice as a line to send back (the quantity is typed by the person) */
+  async function addInvoiceLines() {
+    if (!invoice) return;
+    try {
+      const detail = await getPurchase(invoice.id);
+      setLines((list) => [
+        ...list.filter((l) => !detail.lines.some((d) => d.variantId === l.variantId)),
+        ...detail.lines.map((d) => ({
+          variantId: d.variantId,
+          productId: d.productId,
+          name: d.name,
+          qty: '',
+          packQty: 1000,
+          amount: '',
+          ...(d.batchNo || d.expiryDate
+            ? { batch: { batchNo: d.batchNo, expiryDate: d.expiryDate } as BatchChoice }
+            : {}),
+        })),
+      ]);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
 
   const parsed = lines.map((l) => ({
     qty: baseQtyOf(l),
@@ -174,6 +205,7 @@ export function SupplierReturnsPage() {
           branchId: branchId || undefined,
           date: today(),
           refund,
+          ...(purchaseId ? { purchaseId } : {}),
           reference: reference.trim() || null,
           note: note.trim() || null,
           lines: lines.map((l, i) => ({
@@ -193,6 +225,7 @@ export function SupplierReturnsPage() {
         }),
       );
       setLines([]);
+      setPurchaseId('');
       setReference('');
       setNote('');
       setFormOpen(false);
@@ -275,6 +308,22 @@ export function SupplierReturnsPage() {
           <Alert tone="success">
             سُجّل المرتجع {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
             {done.refund === 'credit' ? 'نزلت من رصيد المورد.' : 'استرددتها منه.'} خرجت القطع من المخزون.
+            {done.purchaseNumber ? (
+              <>
+                {' '}
+                بكلفتها في الفاتورة{' '}
+                <bdi dir="ltr" className="num">
+                  {done.purchaseNumber}
+                </bdi>
+                {done.foreignAmountMinor ? (
+                  <>
+                    {' '}
+                    (<Money minor={done.foreignAmountMinor} currency="USD" />)
+                  </>
+                ) : null}
+                .
+              </>
+            ) : null}
           </Alert>
         ) : null}
         {formOpen ? (
@@ -317,7 +366,11 @@ export function SupplierReturnsPage() {
                   <Select
                     label="المورد"
                     value={supplierId}
-                    onChange={(e) => setSupplierId(e.target.value)}
+                    onChange={(e) => {
+                      setSupplierId(e.target.value);
+                      setPurchaseId('');
+                      setInvoices([]);
+                    }}
                     error={fields.supplierId}
                   >
                     {supplierId ? null : <option value="">اختر المورد</option>}
@@ -328,6 +381,37 @@ export function SupplierReturnsPage() {
                     ))}
                   </Select>
                 </div>
+                {invoices.length > 0 ? (
+                  <div className="flex flex-col gap-3">
+                    <Select
+                      label="من فاتورة شراء (اختياري)"
+                      hint="إن اخترتها يُحتسب للمورد كل صنف بكلفته في الفاتورة، لا بمتوسط الكلفة اليوم."
+                      value={purchaseId}
+                      onChange={(e) => setPurchaseId(e.target.value)}
+                      error={fields.purchaseId}
+                    >
+                      <option value="">بلا فاتورة: بمتوسط الكلفة</option>
+                      {invoices.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.number} · {dayText(p.date, digits)}
+                        </option>
+                      ))}
+                    </Select>
+                    {invoice ? (
+                      <Alert tone="info">
+                        يُحسب للمورد كل صنف بكلفته في الفاتورة{' '}
+                        <bdi dir="ltr" className="num font-semibold">
+                          {invoice.number}
+                        </bdi>
+                        {invoice.currency === 'USD' ? ' بالدولار وبسعر يومها' : ''}. تخرج القطع من المخزون
+                        بمتوسط الكلفة اليوم، وما بين الكلفتين يدخل في كلفة المبيعات.{' '}
+                        <Button variant="ghost" size="xs" onClick={() => void addInvoiceLines()}>
+                          أضف أصناف الفاتورة
+                        </Button>
+                      </Alert>
+                    ) : null}
+                  </div>
+                ) : null}
                 <RadioGroup legend="الاسترداد">
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                     {(Object.keys(REFUND_CHOICE) as SupplierReturnRow['refund'][]).map((r) => {
@@ -386,7 +470,7 @@ export function SupplierReturnsPage() {
                       <LinesHead className={LINE_COLUMNS}>
                         <span>الصنف</span>
                         <span>الكمية</span>
-                        <span>المبلغ (فارغ: بكلفتها)</span>
+                        <span>{invoice ? 'المبلغ (فارغ: بكلفة الفاتورة)' : 'المبلغ (فارغ: بكلفتها)'}</span>
                         <span />
                       </LinesHead>
                     }
@@ -422,11 +506,17 @@ export function SupplierReturnsPage() {
                           />
                         </div>
                         <div className="col-span-3 row-start-3 md:col-span-1 md:col-start-auto md:row-start-auto">
-                          <Caption>المبلغ (فارغ: بكلفتها)</Caption>
+                          <Caption>
+                            {invoice
+                              ? invoiceCurrency === 'USD'
+                                ? 'المبلغ بالدولار (فارغ: بكلفة الفاتورة)'
+                                : 'المبلغ (فارغ: بكلفة الفاتورة)'
+                              : 'المبلغ (فارغ: بكلفتها)'}
+                          </Caption>
                           <NumberField
                             label={`مبلغ ${l.name}`}
                             hideLabel
-                            placeholder="بكلفتها"
+                            placeholder={invoice ? 'بكلفة الفاتورة' : 'بكلفتها'}
                             decimals={2}
                             value={l.amount}
                             onValueChange={(amount) =>

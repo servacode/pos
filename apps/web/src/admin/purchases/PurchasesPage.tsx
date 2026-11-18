@@ -5,6 +5,9 @@ import {
   orderLineCost,
   orderLineRemaining,
   packOptionsOf,
+  rateText,
+  type PurchaseCurrencyCode,
+  type PurchaseDraft,
   type PurchaseOrderDetail,
   type PurchasePayment,
   type PurchaseRow,
@@ -81,6 +84,8 @@ import { getProduct } from '../catalog/api';
 import { getOrder } from './orderApi';
 import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRules';
 import { downloadCsv } from '../exportCsv';
+import { useUsdRate, usdToBase } from '../../lib/useUsdRate';
+import { CurrencyTerms } from './CurrencyTerms';
 
 const PAYMENT_TEXT: Record<PurchasePayment, string> = {
   credit: 'على حساب المورد',
@@ -130,6 +135,12 @@ export function PurchasesPage() {
   // «استلم البضاعة» on a purchase order sends the order's number here as ?order=…
   const orderId = params.get('order');
   const [order, setOrder] = useState<PurchaseOrderDetail | null>(null);
+  // «صحّح الفاتورة»: the draft of the invoice to write again, and the two documents it came from
+  const [correction, setCorrection] = useState<{
+    draft: PurchaseDraft;
+    original: string;
+    reversal: string;
+  } | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -161,6 +172,7 @@ export function PurchasesPage() {
     setNotice(message);
     setMode('list');
     setOrder(null);
+    setCorrection(null);
     load();
   };
 
@@ -203,6 +215,9 @@ export function PurchasesPage() {
             <span>{dayText(p.date, me.settings.numberFormat)}</span>
             <Badge tone={PAYMENT_LOOK[p.payment].tone}>{PAYMENT_TEXT[p.payment]}</Badge>
             <Money minor={p.totalMinor} currency={base} className="text-sm font-semibold text-ink" />
+            {p.currency === 'USD' && p.foreignTotalMinor ? (
+              <Money minor={p.foreignTotalMinor} currency="USD" className="text-xs text-ink-muted" />
+            ) : null}
           </span>
         </span>
       ),
@@ -225,14 +240,26 @@ export function PurchasesPage() {
       key: 'payment',
       header: 'الدفع',
       className: 'max-md:hidden',
-      cell: (p) => <Badge tone={PAYMENT_LOOK[p.payment].tone}>{PAYMENT_TEXT[p.payment]}</Badge>,
+      cell: (p) => (
+        <span className="flex flex-wrap items-center gap-1.5">
+          <Badge tone={PAYMENT_LOOK[p.payment].tone}>{PAYMENT_TEXT[p.payment]}</Badge>
+          {p.correctedBy ? <Badge tone="neutral">مصحَّحة</Badge> : null}
+        </span>
+      ),
     },
     {
       key: 'total',
       header: 'المبلغ',
       numeric: true,
       className: 'max-md:hidden',
-      cell: (p) => <Money minor={p.totalMinor} currency={base} className="font-semibold" />,
+      cell: (p) => (
+        <span className="flex flex-col items-end">
+          <Money minor={p.totalMinor} currency={base} className="font-semibold" />
+          {p.currency === 'USD' && p.foreignTotalMinor ? (
+            <Money minor={p.foreignTotalMinor} currency="USD" className="text-xs text-ink-muted" />
+          ) : null}
+        </span>
+      ),
     },
     {
       key: 'labels',
@@ -302,10 +329,19 @@ export function PurchasesPage() {
           <PurchaseForm
             suppliers={suppliers.items}
             order={order}
+            correction={correction}
             onSaved={(n) => done(`سُجّلت الفاتورة ${n} ودخلت البضاعة المخزون.`)}
             onCancel={() => {
               setOrder(null);
+              setCorrection(null);
               setMode('list');
+              // The old invoice is already turned back: leaving the draft says so, it is not lost silently
+              if (correction) {
+                setNotice(
+                  `صُحّحت الفاتورة ${correction.original} بالمستند ${correction.reversal}، ولم تُسجَّل النسخة الجديدة بعد. سجّلها من «فاتورة شراء».`,
+                );
+                load();
+              }
             }}
           />
         ) : (
@@ -385,7 +421,17 @@ export function PurchasesPage() {
               />
             </section>
             <Suppliers suppliers={suppliers} failed={Boolean(error)} base={base} />
-            {opened ? <PurchaseDetailDialog purchase={opened} onClose={() => setOpened(null)} /> : null}
+            {opened ? (
+              <PurchaseDetailDialog
+                purchase={opened}
+                onClose={() => setOpened(null)}
+                onCorrected={(c) => {
+                  setCorrection({ draft: c.draft, original: opened.number, reversal: c.reversal.number });
+                  setOpened(null);
+                  setMode('buy');
+                }}
+              />
+            ) : null}
           </>
         )}
         {mode === 'supplier' ? (
@@ -430,8 +476,14 @@ function exportPurchases(rows: PurchaseRow[]) {
 function exportSuppliers(rows: SupplierRow[]) {
   downloadCsv(
     `الموردون-${today()}`,
-    ['المورد', 'الجوال', 'ما له عليك', 'ملاحظات'],
-    rows.map((x) => [x.name, x.phone ?? '', pounds(x.balanceMinor), x.notes ?? '']),
+    ['المورد', 'الجوال', 'ما له عليك', 'منه بالدولار', 'ملاحظات'],
+    rows.map((x) => [
+      x.name,
+      x.phone ?? '',
+      pounds(x.balanceMinor),
+      x.usdBalanceMinor ? pounds(x.usdBalanceMinor) : '',
+      x.notes ?? '',
+    ]),
   );
 }
 
@@ -507,6 +559,19 @@ function Suppliers({
                       unitClassName="text-xs font-semibold text-ink-subtle"
                     />
                   </div>
+                  {s.usdBalanceMinor ? (
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-sm text-ink-muted">
+                        {s.usdBalanceMinor > 0 ? 'منه بالدولار' : 'دفعة مقدّمة بالدولار'}
+                      </span>
+                      <Money
+                        minor={Math.abs(s.usdBalanceMinor)}
+                        currency="USD"
+                        className="font-semibold text-ink"
+                        unitClassName="text-xs font-semibold text-ink-subtle"
+                      />
+                    </div>
+                  ) : null}
                   {owed > 0 ? (
                     <ProgressBar
                       label={`نصيب ${s.name} من المستحق للموردين`}
@@ -656,33 +721,69 @@ function linesOfOrder(order: PurchaseOrderDetail): Line[] {
     });
 }
 
+/** The invoice a correction gives back, as the lines of a new one to fix and save (costs in the invoice's currency) */
+function linesOfDraft(draft: PurchaseDraft): Line[] {
+  return draft.lines.map((l) => ({
+    variantId: l.variantId,
+    productId: l.productId,
+    name: l.name,
+    qty: String(l.qty / 1000),
+    packQty: 1000,
+    cost: moneyText(l.costMinor),
+    batch: l.batchNo ?? '',
+    expiry: l.expiryDate ?? '',
+    ...(l.serials && l.serials.length > 0 ? { serials: l.serials.join('\n') } : {}),
+  }));
+}
+
 /** The grid of a purchase line: the item, its quantity, its cost and the bin. */
 const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_14rem_8rem_9rem_2.5rem]';
 
 function PurchaseForm({
   suppliers,
   order,
+  correction,
   onSaved,
   onCancel,
 }: {
   suppliers: SupplierRow[];
   /** The purchase order being received: its supplier and what is still owed fill the form */
   order?: PurchaseOrderDetail | null;
+  /** «صحّح الفاتورة»: the invoice just turned back, as a draft to fix and save */
+  correction?: { draft: PurchaseDraft; original: string; reversal: string } | null;
   onSaved: (number: string) => void;
   onCancel: () => void;
 }) {
   const me = useMe();
   const digits = useDigits();
-  const [supplierId, setSupplierId] = useState(order?.supplierId ?? suppliers[0]?.id ?? '');
-  const [date, setDate] = useState(today());
-  const [payment, setPayment] = useState<PurchasePayment>('credit');
-  const [reference, setReference] = useState('');
-  const [lines, setLines] = useState<Line[]>(() => (order ? linesOfOrder(order) : []));
+  const draft = correction?.draft ?? null;
+  const [supplierId, setSupplierId] = useState(
+    draft?.supplierId ?? order?.supplierId ?? suppliers[0]?.id ?? '',
+  );
+  const [date, setDate] = useState(draft?.date ?? today());
+  const [payment, setPayment] = useState<PurchasePayment>(draft?.payment ?? 'credit');
+  const [reference, setReference] = useState(draft?.reference ?? '');
+  const [lines, setLines] = useState<Line[]>(() =>
+    draft ? linesOfDraft(draft) : order ? linesOfOrder(order) : [],
+  );
+  // The invoice's currency and the dollar's rate of the day (decision 11): the rate starts at the store's
+  const base = me.settings.baseCurrency;
+  const known = useUsdRate();
+  const storeRate = base === 'SYP' ? known : null;
+  const [currency, setCurrency] = useState<PurchaseCurrencyCode>(draft?.currency === 'USD' ? 'USD' : 'SYP');
+  const [rate, setRate] = useState(draft?.rate ?? '');
+  useEffect(() => {
+    if (storeRate) setRate((typed) => typed || storeRate);
+  }, [storeRate]);
+  const usd = currency === 'USD';
+  const invoiceCurrency: 'SYP' | 'USD' = usd ? 'USD' : 'SYP';
+  const rateOk = !usd || (/^\d{1,7}(\.\d{1,4})?$/.test(rateText(rate)) && Number(rateText(rate)) > 0);
   // The items' flags (expiry, serial numbers, packs) come from their products, read after the form opens
   useEffect(() => {
-    if (!order) return;
+    const source = order?.lines ?? draft?.lines;
+    if (!source) return;
     let alive = true;
-    for (const productId of new Set(order.lines.map((l) => l.productId))) {
+    for (const productId of new Set(source.map((l) => l.productId))) {
       getProduct(productId)
         .then((d) => {
           if (!alive) return;
@@ -709,7 +810,7 @@ function PurchaseForm({
     return () => {
       alive = false;
     };
-  }, [order]);
+  }, [order, draft]);
   // The batch, expiry and serial fields of a trade that does not use them, shown on demand (هوية 2:
   // a clothing shop sees no expiry dates or IMEI).
   const [allFields, setAllFields] = useState(false);
@@ -744,10 +845,15 @@ function PurchaseForm({
   const skipped = lines.length - used.length;
   const ready =
     used.length > 0 &&
+    rateOk &&
     used.every((i) => parsed[i]!.qty && parsed[i]!.qty! > 0 && parsed[i]!.cost !== null) &&
     used.every((i) => !lines[i]!.requiresExpiry || Boolean(lines[i]!.expiry)) &&
     (pastLines.length === 0 || pastOk);
   const total = used.reduce((sum, i) => sum + (parsed[i]!.cost ?? 0), 0);
+  // In dollars: what the stock takes in pounds, line by line at the rate, as the server works it out
+  const totalBase = usd
+    ? used.reduce((sum, i) => sum + (usdToBase(parsed[i]!.cost ?? 0, base, rateText(rate)) ?? 0), 0)
+    : total;
   /** Why «سجّل الفاتورة» waits, in words: the buttons never go grey without a reason */
   const missingExpiry = used.map((i) => lines[i]!).filter((l) => l.requiresExpiry && !l.expiry);
   const notReadyWhy =
@@ -776,7 +882,12 @@ function PurchaseForm({
           payment,
           reference: reference || null,
           notes: null,
-          ...(order ? { purchaseOrderId: order.id } : {}),
+          ...(usd ? { currency: 'USD' as const, rate: rateText(rate) } : {}),
+          ...(order
+            ? { purchaseOrderId: order.id }
+            : draft?.purchaseOrderId
+              ? { purchaseOrderId: draft.purchaseOrderId }
+              : {}),
           lines: used.map((i) => {
             const l = lines[i]!;
             return {
@@ -822,7 +933,11 @@ function PurchaseForm({
             variantId: lines[i]!.variantId,
             name: lines[i]!.name,
             qty: parsed[i]!.qty,
-            costMinor: parsed[i]!.cost,
+            // What the sanity check compares is pounds: a dollar cost is converted at the rate
+            costMinor:
+              usd && parsed[i]!.cost !== null
+                ? usdToBase(parsed[i]!.cost!, base, rateText(rate))
+                : parsed[i]!.cost,
             priceMinor: lines[i]!.priceMinor ?? null,
           })),
           averages,
@@ -839,6 +954,16 @@ function PurchaseForm({
       ) : null}
       <div className="flex min-w-0 flex-col gap-6">
         {s.error ? <Alert tone="error">{s.fields.lines ?? s.error}</Alert> : null}
+        {correction ? (
+          <Alert tone="info" title={`صُحّحت الفاتورة ${correction.original}`}>
+            سُجّل مستند التصحيح{' '}
+            <bdi dir="ltr" className="num font-semibold">
+              {correction.reversal}
+            </bdi>
+            : خرجت البضاعة من المخزون بكلفتها ورجع ما للمورد. هذه نسخة من الفاتورة بالقيم القديمة: صحّح ما
+            يلزم ثم اضغط «سجّل الفاتورة».
+          </Alert>
+        ) : null}
         {order ? (
           <Alert tone="info">
             استلام من الطلبية{' '}
@@ -876,12 +1001,26 @@ function PurchaseForm({
               onChange={(e) => setReference(e.target.value)}
             />
           </div>
+          <CurrencyTerms
+            label="عملة الفاتورة"
+            currency={currency}
+            onCurrency={setCurrency}
+            rate={rate}
+            onRate={setRate}
+            storeRate={storeRate}
+            error={s.fields.rate ?? s.fields.currency}
+            className="mt-5"
+          />
         </Card>
         <Card>
           <CardHeader
             icon={<ProductsIcon />}
             title="الأصناف"
-            description="ابحث بالاسم أو امسح الباركود. كلفة كل سطر هي مجموعه بالليرة."
+            description={
+              usd
+                ? 'ابحث بالاسم أو امسح الباركود. كلفة كل سطر هي مجموعه بالدولار.'
+                : 'ابحث بالاسم أو امسح الباركود. كلفة كل سطر هي مجموعه بالليرة.'
+            }
           />
           <div className="flex flex-col gap-4">
             <VariantPicker
@@ -960,7 +1099,7 @@ function PurchaseForm({
                           ) : null}
                           {unit !== null ? (
                             <span className="text-xs text-ink-subtle">
-                              كلفة القطعة <Money minor={unit} currency="SYP" />
+                              كلفة القطعة <Money minor={unit} currency={invoiceCurrency} />
                             </span>
                           ) : null}
                         </div>
@@ -1009,7 +1148,16 @@ function PurchaseForm({
                           />
                           {p.cost !== null && p.cost > 0 ? (
                             <span className="mt-1 block text-xs text-ink-subtle">
-                              <Money minor={p.cost} currency="SYP" />
+                              <Money minor={p.cost} currency={invoiceCurrency} />
+                              {usd ? (
+                                <>
+                                  {' ≈ '}
+                                  <Money
+                                    minor={usdToBase(p.cost, base, rateText(rate)) ?? 0}
+                                    currency={base}
+                                  />
+                                </>
+                              ) : null}
                             </span>
                           ) : null}
                         </div>
@@ -1125,7 +1273,7 @@ function PurchaseForm({
               })}
             </div>
           </RadioGroup>
-          <SafeWarning active={payment === 'cash'} amountMinor={total} />
+          <SafeWarning active={payment === 'cash' && !usd} amountMinor={total} />
         </Card>
       </div>
       {/* The totals stay in view: beside the form on a wide screen, over the bottom edge on a phone. */}
@@ -1139,6 +1287,14 @@ function PurchaseForm({
                 <Money minor={supplier.balanceMinor} currency="SYP" />
               </SummaryRow>
             ) : null}
+            {supplier?.usdBalanceMinor ? (
+              <SummaryRow term="منه بالدولار">
+                <Money minor={supplier.usdBalanceMinor} currency="USD" />
+              </SummaryRow>
+            ) : null}
+            {usd ? (
+              <SummaryRow term="سعر الدولار">{rate ? <span className="num">{rate}</span> : '—'}</SummaryRow>
+            ) : null}
             <SummaryRow term="الدفع">{PAYMENT_TEXT[payment]}</SummaryRow>
             <SummaryRow term="الأصناف">
               <span className="num">{used.length}</span>
@@ -1151,10 +1307,15 @@ function PurchaseForm({
             <span className="text-sm font-semibold whitespace-nowrap text-ink-muted">مجموع الفاتورة</span>
             <Money
               minor={total}
-              currency="SYP"
+              currency={invoiceCurrency}
               className="text-2xl font-bold text-ink"
               unitClassName="text-base font-semibold text-ink-subtle"
             />
+            {usd ? (
+              <span className="text-sm text-ink-muted">
+                تدخل المخزون بـ <Money minor={totalBase} currency={base} className="font-semibold" />
+              </span>
+            ) : null}
           </div>
           <div className="flex gap-3 lg:flex-col">
             <Button
@@ -1204,6 +1365,13 @@ function SummaryRow({ term, children }: { term: string; children: ReactNode }) {
   );
 }
 
+/** A supplier the store owes in dollars and in nothing else: its payment starts in dollars */
+function dollarsOnly(supplier: SupplierRow | undefined): boolean {
+  return (
+    (supplier?.usdBalanceMinor ?? 0) > 0 && (supplier?.balanceMinor ?? 0) - (supplier?.usdBookMinor ?? 0) <= 0
+  );
+}
+
 function PaymentForm({
   suppliers,
   base,
@@ -1226,10 +1394,51 @@ function PaymentForm({
   const chequeReady = method !== 'cheque' || (bank.trim() !== '' && chequeNo.trim() !== '' && dueDate !== '');
   const [advance, setAdvance] = useState(false);
   const s = useSaving();
+  // A payment in dollars (decision 11): from the dollar safe, at the rate of the day; the difference from the
+  // rate the debt was booked at is the exchange difference
+  const known = useUsdRate();
+  const storeRate = base === 'SYP' ? known : null;
+  const [currency, setCurrency] = useState<PurchaseCurrencyCode>(() =>
+    dollarsOnly(suppliers.find((x) => x.id === supplierId)) ? 'USD' : 'SYP',
+  );
+  const [rate, setRate] = useState('');
+  useEffect(() => {
+    if (storeRate) setRate((typed) => typed || storeRate);
+  }, [storeRate]);
+  const usd = currency === 'USD';
+  const rateOk = !usd || (/^\d{1,7}(\.\d{1,4})?$/.test(rateText(rate)) && Number(rateText(rate)) > 0);
   const minor = moneyOf(amount);
   const supplier = suppliers.find((x) => x.id === supplierId);
   const problem = paymentProblem(amount, minor);
-  const over = minor !== null && supplier ? isAdvance(minor, supplier.balanceMinor) : false;
+  // What is owed in the currency being paid: the dollars, or the pounds that are not dollars' book value
+  const owedIn = !supplier
+    ? 0
+    : usd
+      ? (supplier.usdBalanceMinor ?? 0)
+      : supplier.balanceMinor - (supplier.usdBookMinor ?? 0);
+  const over = minor !== null && supplier ? isAdvance(minor, owedIn) : false;
+  const exchange = (() => {
+    if (!usd || !supplier || !minor || !rateOk) return null;
+    const owedUsd = supplier.usdBalanceMinor ?? 0;
+    const book = supplier.usdBookMinor ?? 0;
+    const paid = usdToBase(minor, base, rateText(rate));
+    if (paid === null) return null;
+    const settled =
+      owedUsd <= 0
+        ? paid
+        : minor >= owedUsd
+          ? book + (usdToBase(minor - owedUsd, base, rateText(rate)) ?? 0)
+          : Math.round((book * minor) / owedUsd);
+    return { paid, difference: paid - settled };
+  })();
+  /** A supplier owed in dollars only is paid in dollars: the form starts there */
+  function chooseSupplier(id: string) {
+    setSupplierId(id);
+    setAdvance(false);
+    const onlyDollars = dollarsOnly(suppliers.find((x) => x.id === id));
+    setCurrency(onlyDollars ? 'USD' : 'SYP');
+    if (onlyDollars && method === 'cheque') setMethod('cash');
+  }
   return (
     <Dialog
       open
@@ -1244,7 +1453,7 @@ function PaymentForm({
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!minor || (over && !advance) || !chequeReady) return;
+          if (!minor || (over && !advance) || !chequeReady || !rateOk) return;
           void s
             .run(() =>
               paySupplier({
@@ -1252,6 +1461,7 @@ function PaymentForm({
                 date,
                 amountMinor: minor,
                 method: method === 'cheque' ? 'bank' : method,
+                ...(usd ? { currency: 'USD' as const, rate: rateText(rate) } : {}),
                 ...(method === 'cheque'
                   ? { cheque: { bank: bank.trim(), number: chequeNo.trim(), dueDate } }
                   : {}),
@@ -1266,11 +1476,17 @@ function PaymentForm({
         <Select
           label="المورد"
           value={supplierId}
-          onChange={(e) => setSupplierId(e.target.value)}
+          onChange={(e) => chooseSupplier(e.target.value)}
           hint={
             supplier ? (
               <>
                 له عليك الآن <Money minor={supplier.balanceMinor} currency={base} className="font-semibold" />
+                {supplier.usdBalanceMinor ? (
+                  <>
+                    {' '}
+                    (منه <Money minor={supplier.usdBalanceMinor} currency="USD" className="font-semibold" />)
+                  </>
+                ) : null}
               </>
             ) : undefined
           }
@@ -1281,9 +1497,22 @@ function PaymentForm({
             </option>
           ))}
         </Select>
+        <CurrencyTerms
+          label="عملة الدفعة"
+          currency={currency}
+          onCurrency={(next) => {
+            setCurrency(next);
+            setAdvance(false);
+            if (next === 'USD' && method === 'cheque') setMethod('cash');
+          }}
+          rate={rate}
+          onRate={setRate}
+          storeRate={storeRate}
+          error={s.fields.rate ?? s.fields.currency}
+        />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <NumberField
-            label="المبلغ بالليرة"
+            label={usd ? 'المبلغ بالدولار' : 'المبلغ بالليرة'}
             decimals={2}
             autoFocus
             value={amount}
@@ -1295,6 +1524,14 @@ function PaymentForm({
           />
           <DateField label="التاريخ" value={date} onChange={setDate} required />
         </div>
+        {exchange && exchange.difference !== 0 ? (
+          <Alert tone={exchange.difference > 0 ? 'warning' : 'info'}>
+            تدفع <Money minor={exchange.paid} currency={base} className="font-semibold" /> بسعر اليوم، وكان
+            الدين مسجّلاً {exchange.difference > 0 ? 'بأقل منها: خسارة' : 'بأكثر منها: ربح'} صرف{' '}
+            <Money minor={Math.abs(exchange.difference)} currency={base} className="font-semibold" /> تُسجَّل
+            في «فروقات صرف محققة».
+          </Alert>
+        ) : null}
         {over ? (
           <Alert tone="warning">
             المبلغ أكبر مما للمورد عليك. الفرق يبقى دفعة مقدّمة له عندك، فيصير رصيده لك عنده.
@@ -1303,20 +1540,22 @@ function PaymentForm({
         ) : null}
         <RadioGroup legend="من أين">
           <div className="grid grid-cols-1 gap-2">
-            {(['cash', 'bank', 'cheque'] as const).map((m) => (
+            {(usd ? (['cash', 'bank'] as const) : (['cash', 'bank', 'cheque'] as const)).map((m) => (
               <ChoiceCard
                 key={m}
                 name="supplier-payment-method"
                 value={m}
                 checked={method === m}
                 onChange={() => setMethod(m)}
-                title={m === 'cash' ? 'من الخزنة' : m === 'bank' ? 'من البنك' : 'بشيك'}
+                title={
+                  m === 'cash' ? (usd ? 'من خزنة الدولار' : 'من الخزنة') : m === 'bank' ? 'من البنك' : 'بشيك'
+                }
                 leading={m === 'cash' ? <CashIcon /> : <ChequeIcon />}
               />
             ))}
           </div>
         </RadioGroup>
-        <SafeWarning active={method === 'cash'} amountMinor={minor} />
+        <SafeWarning active={method === 'cash' && !usd} amountMinor={minor} />
         {method === 'cheque' ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <TextField label="البنك" value={bank} onChange={(e) => setBank(e.target.value)} required />
@@ -1347,7 +1586,11 @@ function PaymentForm({
           <Button variant="secondary" onClick={onCancel}>
             إلغاء
           </Button>
-          <Button type="submit" loading={s.saving} disabled={!minor || (over && !advance) || !chequeReady}>
+          <Button
+            type="submit"
+            loading={s.saving}
+            disabled={!minor || (over && !advance) || !chequeReady || !rateOk}
+          >
             سجّل الدفعة
           </Button>
         </div>

@@ -330,14 +330,30 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
       // Cash paid back for goods returned comes out of this drawer
       returnCount += 1;
       for (const r of (payload as unknown as ReturnPayload).refunds) {
-        if (r.method === 'cash') termsOf(r.currency).refundsMinor += r.amountMinor;
+        // Round 36: the dollar's part of a cash refund comes out of the dollar drawer, in dollars; the invoice
+        // currency's drawer pays the rest. A refund with no foreign part is all of it, as it always was.
+        const foreign = r.method === 'cash' ? (r.foreign ?? []) : [];
+        const own = r.amountMinor - foreign.reduce((n, f) => n + f.baseAmountMinor, 0);
+        if (r.method === 'cash') termsOf(r.currency).refundsMinor += own;
+        for (const f of foreign) {
+          termsOf(f.currency).refundsMinor += f.amountMinor;
+          const frow = refunds.get(`cash:${f.currency}`) ?? {
+            method: r.method,
+            currency: f.currency,
+            amountMinor: 0,
+          };
+          frow.amountMinor += f.amountMinor;
+          refunds.set(`cash:${f.currency}`, frow);
+        }
         // A cash refund rounded to the step: what the till paid out less is a gain, more a loss (same sign as the sales')
         if (r.method === 'cash' && r.roundingMinor)
           rounding.set(r.currency, (rounding.get(r.currency) ?? 0) - r.roundingMinor);
-        const key = `${r.method}:${r.currency}`;
-        const row = refunds.get(key) ?? { method: r.method, currency: r.currency, amountMinor: 0 };
-        row.amountMinor += r.amountMinor;
-        refunds.set(key, row);
+        if (own !== 0 || foreign.length === 0) {
+          const key = `${r.method}:${r.currency}`;
+          const row = refunds.get(key) ?? { method: r.method, currency: r.currency, amountMinor: 0 };
+          row.amountMinor += own;
+          refunds.set(key, row);
+        }
       }
     } else if (doc.type === 'receipt') {
       // A customer's payment in cash goes into this drawer

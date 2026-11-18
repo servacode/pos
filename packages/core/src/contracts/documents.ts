@@ -786,6 +786,26 @@ export const refundSchema = z
      * every non-cash one): there the refund is exactly what the goods came to.
      */
     roundingMinor: z.int().optional(),
+    /**
+     * Round 36 (decision 10): part of a cash refund paid out of a foreign drawer (the dollar's),
+     * when the sale was paid in it. `amountMinor` stays the whole refund in the invoice currency
+     * (rounding included); each entry is what left its drawer in its own currency, its value in the
+     * invoice currency at `rate` (the rate the sale took that payment at), so the drawer of the
+     * invoice currency pays `amountMinor` less the sum of the `baseAmountMinor`. Optional and absent
+     * from every refund made before: there the whole refund leaves the invoice currency's drawer.
+     */
+    foreign: z
+      .array(
+        z.object({
+          currency: currencyCodeSchema,
+          amountMinor: positiveMinorSchema,
+          baseAmountMinor: positiveMinorSchema,
+          rate: exchangeRateSchema,
+        }),
+      )
+      .min(1)
+      .max(3)
+      .optional(),
   })
   .refine(
     (r) => r.method === 'cash' || r.method === 'voucher' || r.method === 'account' || r.reference !== null,
@@ -797,6 +817,35 @@ export const refundSchema = z
   .refine((r) => r.roundingMinor === undefined || r.roundingMinor === 0 || r.method === 'cash', {
     path: ['roundingMinor'],
     message: 'only a cash refund is rounded',
+  })
+  .superRefine((r, ctx) => {
+    if (!r.foreign) return;
+    if (r.method !== 'cash') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foreign'],
+        message: 'only a cash refund leaves a foreign drawer',
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    for (const [i, f] of r.foreign.entries()) {
+      if (f.currency === r.currency || seen.has(f.currency)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['foreign', i, 'currency'],
+          message: 'one foreign drawer per currency, other than the invoice currency',
+        });
+      }
+      seen.add(f.currency);
+    }
+    if (bigSum(r.foreign.map((f) => f.baseAmountMinor)) > BigInt(r.amountMinor)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['foreign'],
+        message: 'the foreign drawers cannot pay more than the refund',
+      });
+    }
   });
 export type Refund = z.output<typeof refundSchema>;
 

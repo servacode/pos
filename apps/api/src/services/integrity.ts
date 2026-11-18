@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { Transaction } from '@serva/db';
+import { cashRefundDrawers } from './refund-drawers';
 
 /**
  * «فحص السلامة» (task M0-5): canonical fingerprints of a store's books, and the first
@@ -246,9 +247,8 @@ async function drawerLedger(tx: Transaction, tenantId: string): Promise<Integrit
     : sql``;
   const refunds = (await hasReturns(tx))
     ? sql`union all
-      select r.shift_id, r.currency,
-             -coalesce((r.payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, r.total_minor)
-      from sale_returns r where r.tenant_id = ${tenantId} and r.refund_method = 'cash'`
+      select x.shift_id, x.currency, -x.amount
+      from (${cashRefundDrawers(sql`r.tenant_id = ${tenantId}`)}) x`
     : sql``;
   // What went in and out of each drawer by the documents, and the close's counted amount less the
   // expected one; against the drawer accounts (children of 1110) by shift. The float itself is not

@@ -111,6 +111,10 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
         bold: true,
       });
     }
+    // Round 36: what of the cash refund left the dollar drawer
+    for (const f of r.refunds.find((x) => x.method === 'cash')?.foreign ?? []) {
+      lines.push({ kind: 'pair', start: 'منه من درج الدولار', end: money(f.amountMinor, f.currency) });
+    }
     lines.push({ kind: 'pair', start: 'السبب', end: r.reason });
     // A cash exchange is two documents: this return in cash, then the sale of the other piece in cash
     if (r.reason === 'تبديل' && r.refunds.length === 1 && r.refunds[0]!.method === 'cash') {

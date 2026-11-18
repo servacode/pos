@@ -38,12 +38,23 @@ export function statementCsv(s: PartyStatement): string {
     s.type === 'customer' ? 'عليه' : 'عليه',
     'له',
     'الرصيد',
+    ...(s.usd ? ['عليه بالدولار', 'له بالدولار', 'الرصيد بالدولار'] : []),
   ];
+  const usd = (minor: number) => csvField(minorToDecimal(minor, 'USD'), true);
   return join([
     [text(s.type === 'customer' ? 'كشف حساب زبون' : 'كشف حساب مورد'), text(s.party.name)],
     [text('من'), text(s.from), text('إلى'), text(s.to)],
     head.map(text),
-    [text(s.from), text('رصيد أول المدة'), text(''), text(''), n(0), n(0), n(s.openingMinor)],
+    [
+      text(s.from),
+      text('رصيد أول المدة'),
+      text(''),
+      text(''),
+      n(0),
+      n(0),
+      n(s.openingMinor),
+      ...(s.usd ? [usd(0), usd(0), usd(s.usd.openingMinor)] : []),
+    ],
     ...s.lines.map((l) => [
       text(l.date),
       text(statementWhat(l)),
@@ -52,6 +63,7 @@ export function statementCsv(s: PartyStatement): string {
       n(l.debitMinor),
       n(l.creditMinor),
       n(l.balanceMinor),
+      ...(s.usd ? [usd(l.usdDebitMinor ?? 0), usd(l.usdCreditMinor ?? 0), usd(l.usdBalanceMinor ?? 0)] : []),
     ]),
     [
       text(s.to),
@@ -61,6 +73,7 @@ export function statementCsv(s: PartyStatement): string {
       n(s.totalDebitMinor),
       n(s.totalCreditMinor),
       n(s.closingMinor),
+      ...(s.usd ? [usd(s.usd.totalDebitMinor), usd(s.usd.totalCreditMinor), usd(s.usd.closingMinor)] : []),
     ],
   ]);
 }

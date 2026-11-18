@@ -7,7 +7,14 @@ import {
 } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
-import { buildReturnPayload, defaultRefundMethod, returnableLines } from '@serva/core/sale-return';
+import {
+  buildReturnPayload,
+  defaultForeignRefund,
+  defaultRefundMethod,
+  paidForeign,
+  returnableLines,
+} from '@serva/core/sale-return';
+import { convert, toMinor } from '@serva/core/money';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
 import {
   AddIcon,
@@ -182,6 +189,8 @@ export function ReturnScreen({
   const [brokenPicked, setBrokenPicked] = useState<boolean | null>(null);
   const [method, setMethod] = useState<RefundMethod>('cash');
   const [reference, setReference] = useState('');
+  // Round 36: what of a cash refund leaves the dollar drawer, as the cashier typed it (null: the same split the sale took)
+  const [foreignText, setForeignText] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   // An irreversible refund (to the customer's account) waits for a second tap
   const [confirming, setConfirming] = useState(false);
@@ -301,6 +310,52 @@ export function ReturnScreen({
   const broken = brokenPicked ?? reason === DAMAGED_REASON;
   const needsReference = method !== 'cash' && method !== 'voucher' && method !== 'account';
 
+  // The foreign cash the sale took (the dollar's), and what a cash refund of these picks gives back to it by default
+  const foreignPaid = useMemo(() => (current ? paidForeign(current.sale)[0] : undefined), [current]);
+  const foreignWanted = useMemo((): number => {
+    if (!current || !foreignPaid || method !== 'cash' || picks.length === 0) return 0;
+    try {
+      const plain = buildReturnPayload({
+        sale: current.sale,
+        saleId: current.id,
+        saleNumber: current.number,
+        shiftId: shift.id,
+        cashierId: session.userId,
+        reason: '—',
+        picks,
+        returned: current.returned,
+        refundMethod: 'cash',
+      });
+      const ceiling = Math.min(
+        foreignPaid.amountMinor,
+        convert(plain.totals.totalMinor, current.sale.currency, foreignPaid.currency, foreignPaid.rate),
+      );
+      if (foreignText === null) {
+        return (
+          defaultForeignRefund(current.sale, plain.totals.totalMinor).find(
+            (f) => f.currency === foreignPaid.currency,
+          )?.amountMinor ?? 0
+        );
+      }
+      let typed = 0;
+      try {
+        typed = foreignText.trim() ? toMinor(foreignText, foreignPaid.currency) : 0;
+      } catch {
+        typed = 0;
+      }
+      let amount = Math.max(0, Math.min(typed, ceiling));
+      while (
+        amount > 0 &&
+        convert(amount, foreignPaid.currency, current.sale.currency, foreignPaid.rate) >
+          plain.totals.totalMinor
+      )
+        amount -= 1;
+      return amount;
+    } catch {
+      return 0;
+    }
+  }, [current, foreignPaid, method, picks, shift.id, session.userId, foreignText]);
+
   const draft = useMemo((): ReturnPayload | null => {
     if (!current || picks.length === 0) return null;
     try {
@@ -317,11 +372,26 @@ export function ReturnScreen({
         reference: reference.trim() || null,
         cashStepMinor: settings.cashRoundingSteps[current.sale.currency] ?? 0,
         damaged: broken,
+        ...(foreignPaid && foreignWanted > 0
+          ? { foreignRefund: [{ currency: foreignPaid.currency, amountMinor: foreignWanted }] }
+          : {}),
       });
     } catch {
       return null;
     }
-  }, [current, picks, shift.id, session.userId, why, method, reference, settings.cashRoundingSteps, broken]);
+  }, [
+    current,
+    picks,
+    shift.id,
+    session.userId,
+    why,
+    method,
+    reference,
+    settings.cashRoundingSteps,
+    broken,
+    foreignPaid,
+    foreignWanted,
+  ]);
 
   // A damaged or expired box is never «sealed»: that reason does not ask for the tick
   const damaged = reason === DAMAGED_REASON;
@@ -438,6 +508,7 @@ export function ReturnScreen({
     setSealed({});
     setMethod(exchange ? (exchangeCash ? 'cash' : 'voucher') : defaultRefundMethod(sale.sale));
     setReference('');
+    setForeignText(null);
     setError(null);
     setSaved(null);
   }
@@ -712,6 +783,11 @@ export function ReturnScreen({
                   والفرق تقريب النقد
                 </p>
               ) : null}
+              {((saved.payload as unknown as ReturnPayload).refunds[0]?.foreign ?? []).map((f) => (
+                <p key={f.currency} className="text-ink-muted">
+                  منها من درج الدولار <ExactMoney minor={f.amountMinor} currency={f.currency} />
+                </p>
+              ))}
               {savedRefund(saved) === 'voucher' ? (
                 <p className="max-w-md text-ink-muted">
                   القسيمة برقم المرتجع، مطبوعة على الإيصال. تُصرف على أي جهاز في المحل.
@@ -960,18 +1036,39 @@ export function ReturnScreen({
                     </span>
                   ) : null}
                 </div>
-                {method === 'cash' &&
-                current.sale.payments.some(
-                  (p) => p.method === 'cash' && p.currency !== current.sale.currency,
-                ) ? (
-                  // A refund leaves in the invoice's own currency; the dollar drawer has no refund method yet
-                  <Alert tone="info">
-                    {current.sale.payments.every(
-                      (p) => p.method === 'cash' && p.currency !== current.sale.currency,
-                    )
-                      ? 'دُفعت هذه الفاتورة بالدولار. الرد يكون بالليرة بسعر الفاتورة، من درج الليرة.'
-                      : 'دُفعت هذه الفاتورة بأكثر من طريقة، وجزء منها بالدولار. الرد النقدي يكون بالليرة بسعر الفاتورة، من درج الليرة.'}
-                  </Alert>
+                {method === 'cash' && foreignPaid ? (
+                  <div className="flex flex-col gap-3 rounded-control border border-line px-4 py-3">
+                    <p className="text-sm text-ink-muted">
+                      {current.sale.payments.every(
+                        (p) => p.method === 'cash' && p.currency !== current.sale.currency,
+                      )
+                        ? 'دُفعت هذه الفاتورة بالدولار، فيرجع المبلغ من درج الدولار.'
+                        : 'دُفعت هذه الفاتورة بأكثر من طريقة، وجزء منها بالدولار. يرجع نفس الجزء من درج الدولار.'}{' '}
+                      غيّر المبلغ، أو اكتب صفراً ليرجع كله بالليرة من درج الليرة.
+                    </p>
+                    <TextField
+                      label={`من درج الدولار (${foreignPaid.currency === 'USD' ? '$' : foreignPaid.currency})`}
+                      hint={`بسعر ${foreignPaid.rate.rate} ل.س للدولار، والمدفوع بالدولار ${(
+                        foreignPaid.amountMinor / 100
+                      ).toFixed(2)}`}
+                      inputMode="decimal"
+                      dir="ltr"
+                      value={foreignText ?? (foreignWanted > 0 ? (foreignWanted / 100).toFixed(2) : '0')}
+                      onChange={(e) => setForeignText(e.target.value)}
+                    />
+                    {draft?.refunds[0] ? (
+                      <p role="status" aria-label="الباقي من درج الليرة" className="text-sm text-ink-muted">
+                        {'من درج الليرة: '}
+                        <ExactMoney
+                          minor={
+                            draft.refunds[0].amountMinor -
+                            (draft.refunds[0].foreign ?? []).reduce((n, f) => n + f.baseAmountMinor, 0)
+                          }
+                          currency={current.sale.currency}
+                        />
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
                 {error ? <Alert tone="error">{error}</Alert> : null}
                 {approving ? (

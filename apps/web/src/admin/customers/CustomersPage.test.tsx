@@ -6,10 +6,11 @@ import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { bannedWordsIn, userFacingText } from '../../test/glossary';
 import { renderApp } from '../../test/renderApp';
 
-function owner(): MeResponse {
+function owner(branches?: MeResponse['branches']): MeResponse {
   const base = makeMe();
   return {
     ...base,
+    ...(branches ? { branches } : {}),
     user: {
       ...base.user,
       permissions: [
@@ -65,7 +66,12 @@ const detail = (over: Partial<CustomerDetail> = {}): CustomerDetail => ({
   ...over,
 });
 
-function open(path: string, start: CustomerDetail = detail(), twin = false) {
+function open(
+  path: string,
+  start: CustomerDetail = detail(),
+  twin = false,
+  branches?: MeResponse['branches'],
+) {
   let current = start;
   const list = (): CustomerListResponse => ({
     // The same person typed twice: «أرشف هذا الزبون المكرر» shows only then
@@ -75,7 +81,7 @@ function open(path: string, start: CustomerDetail = detail(), twin = false) {
   });
   const mock = mockFetch({
     'POST /v1/auth/refresh': signedInRefresh,
-    'GET /v1/me': () => ({ status: 200, body: owner() }),
+    'GET /v1/me': () => ({ status: 200, body: owner(branches) }),
     'GET /v1/customers': () => ({ status: 200, body: list() }),
     // The customer page asks whether another customer has the same name
     [`GET /v1/customers?${new URLSearchParams({ q: start.name })}`]: () => ({ status: 200, body: list() }),
@@ -192,6 +198,38 @@ describe('«الزبائن»', () => {
     expect(screen.getByRole('button', { name: 'اطبع السند' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'تم' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('sends the only branch with a payment, and asks which branch when the store has two (round 36, X1)', async () => {
+    const one = open('/customers/c-1');
+    await one.user.click(await screen.findByRole('button', { name: 'استلم دفعة' }));
+    const dialog = await screen.findByRole('dialog');
+    // One branch: nothing to choose, the payment goes to it
+    expect(within(dialog).queryByLabelText('الفرع')).toBeNull();
+    await one.user.type(within(dialog).getByLabelText(/المبلغ/), '100');
+    await one.user.click(within(dialog).getByRole('button', { name: 'سجّل الدفعة' }));
+    await screen.findByText('سُجّلت الدفعة');
+    expect(one.requestsTo('POST', '/v1/customers/c-1/payments').at(-1)?.body).toMatchObject({
+      branchId: 'branch-1',
+    });
+  });
+
+  it('lets the owner of two branches pick the branch of the payment', async () => {
+    const { user, requestsTo } = open('/customers/c-1', detail(), false, [
+      { id: 'branch-1', code: '001', name: 'الفرع الرئيسي' },
+      { id: 'branch-2', code: '002', name: 'دوار النعيم' },
+    ]);
+    await user.click(await screen.findByRole('button', { name: 'استلم دفعة' }));
+    const dialog = await screen.findByRole('dialog');
+    const branch = within(dialog).getByLabelText('الفرع');
+    expect(branch).toHaveValue('branch-1');
+    await user.selectOptions(branch, 'branch-2');
+    await user.type(within(dialog).getByLabelText(/المبلغ/), '100');
+    await user.click(within(dialog).getByRole('button', { name: 'سجّل الدفعة' }));
+    await screen.findByText('سُجّلت الدفعة');
+    expect(requestsTo('POST', '/v1/customers/c-1/payments').at(-1)?.body).toMatchObject({
+      branchId: 'branch-2',
+    });
   });
 
   it('records an opening debt from the customer page', async () => {

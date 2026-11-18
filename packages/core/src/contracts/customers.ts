@@ -214,6 +214,11 @@ export const customerPaymentInput = z
     date: isoDateSchema.optional(),
     /** Sent again after a lost answer, it posts once */
     id: uuidSchema.optional(),
+    /**
+     * Round 36 (X1): the branch the money came to, so that branch's reports and its books include it.
+     * Missing or null: the entry has no branch, as every payment made before.
+     */
+    branchId: uuidSchema.nullable().optional(),
   })
   .refine((p) => p.method === 'cash' || !!p.reference, {
     path: ['reference'],
@@ -243,6 +248,8 @@ export interface CustomerMoneyResult {
   balanceBeforeMinor: number;
   balanceAfterMinor: number;
   baseCurrency: CurrencyCode;
+  /** The branch a payment was taken at (round 36); absent or null on a payment with none */
+  branchId?: string | null;
 }
 
 export const statementQuery = z.object({

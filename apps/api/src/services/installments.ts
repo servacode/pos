@@ -628,6 +628,7 @@ export async function collectOnPlan(
       note: input.note ?? null,
       date: input.date,
       id: paymentId,
+      branchId: input.branchId ?? null,
     },
     meta,
     now,

@@ -5,6 +5,7 @@ import {
   inventoryQuery,
   profitQuery,
   purchaseInput,
+  purchaseCorrectionInput,
   purchaseListQuery,
   purchaseOrderInput,
   purchaseOrderListQuery,
@@ -45,6 +46,7 @@ import {
   suggestPurchaseOrder,
   updatePurchaseOrder,
 } from '../services/purchase-orders';
+import { correctPurchase } from '../services/purchase-correction';
 import { expiryReport } from '../services/expiry';
 import { listDamagedStock } from '../services/damaged-stock';
 import { recall, setBatchBlocked } from '../services/batches';
@@ -108,6 +110,19 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/purchases/:id', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return readPurchase(app.db, request.auth, idOf(request.params, 'هذه الفاتورة'));
+  });
+  // «صحّح الفاتورة»: a full reversal document, and the draft of the invoice to write again
+  app.post('/v1/purchases/:id/correct', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const done = await correctPurchase(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذه الفاتورة'),
+      parseBody(purchaseCorrectionInput, request.body ?? {}),
+      meta(request),
+      app.clock.now(),
+    );
+    return reply.code(201).send(done);
   });
 
   // Purchase orders (طلبية شراء): a promise to a supplier; nothing posts, nothing moves

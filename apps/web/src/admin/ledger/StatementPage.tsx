@@ -89,6 +89,7 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
             <th className="py-1 text-end">عليه</th>
             <th className="py-1 text-end">له</th>
             <th className="py-1 text-end">الرصيد</th>
+            {s.usd ? <th className="py-1 text-end">بالدولار</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -100,6 +101,11 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
             <td className="py-1 text-end">
               <Balance minor={copy.signed(s.openingMinor)} currency={base} />
             </td>
+            {s.usd ? (
+              <td className="py-1 text-end">
+                <Balance minor={copy.signed(s.usd.openingMinor)} currency="USD" />
+              </td>
+            ) : null}
           </tr>
           {s.lines.map((l, index) => (
             <tr key={`${l.sourceId}-${index}`} className="border-b border-line">
@@ -122,6 +128,13 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
               <td className="py-1 text-end">
                 <Balance minor={copy.signed(l.balanceMinor)} currency={base} />
               </td>
+              {s.usd ? (
+                <td className="py-1 text-end">
+                  {l.usdBalanceMinor !== undefined ? (
+                    <Balance minor={copy.signed(l.usdBalanceMinor)} currency="USD" />
+                  ) : null}
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
@@ -139,6 +152,11 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
             <td className="py-1 text-end">
               <Balance minor={copy.signed(s.closingMinor)} currency={base} />
             </td>
+            {s.usd ? (
+              <td className="py-1 text-end">
+                <Balance minor={copy.signed(s.usd.closingMinor)} currency="USD" />
+              </td>
+            ) : null}
           </tr>
         </tfoot>
       </table>
@@ -225,6 +243,29 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
       cell: (l) => <Balance minor={copy.signed(l.balanceMinor)} currency={base} />,
       total: data ? <Balance minor={copy.signed(data.closingMinor)} currency={base} /> : null,
     },
+    // A supplier with dollar invoices (round 36, decision 11): the same account in dollars
+    ...(data?.usd
+      ? [
+          {
+            key: 'usd',
+            header: 'بالدولار',
+            numeric: true,
+            cell: (l: PartyStatementLine) =>
+              l.usdBalanceMinor === undefined ? null : (
+                <div className="flex flex-col items-end">
+                  {l.usdDebitMinor || l.usdCreditMinor ? (
+                    <span className="text-xs text-ink-muted">
+                      {l.usdDebitMinor ? 'عليه' : 'له'}{' '}
+                      <Money minor={l.usdDebitMinor || l.usdCreditMinor || 0} currency="USD" />
+                    </span>
+                  ) : null}
+                  <Balance minor={copy.signed(l.usdBalanceMinor)} currency="USD" />
+                </div>
+              ),
+            total: <Balance minor={copy.signed(data.usd.closingMinor)} currency="USD" />,
+          } satisfies DataColumn<PartyStatementLine>,
+        ]
+      : []),
   ];
 
   const tile = (value: (s: PartyStatement) => ReactNode) =>
@@ -300,6 +341,13 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
           value={tile((s) => (
             <Balance minor={copy.signed(s.closingMinor)} currency={base} />
           ))}
+          footnote={
+            data?.usd ? (
+              <>
+                منه بالدولار <Balance minor={copy.signed(data.usd.closingMinor)} currency="USD" />
+              </>
+            ) : undefined
+          }
         />
       </div>
       <div className="flex flex-col gap-2 print:hidden">

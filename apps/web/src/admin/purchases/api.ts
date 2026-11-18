@@ -7,6 +7,8 @@ import type {
   ExpiryResponse,
   InventoryResponse,
   ProfitReport,
+  PurchaseCorrection,
+  PurchaseCorrectionInput,
   PurchaseDetail,
   PurchaseInput,
   PurchaseListResponse,
@@ -76,6 +78,13 @@ export const findSerials = (q: string) =>
 
 /** `GET /v1/purchases/{id}` (purchases.manage): one purchase with its lines */
 export const getPurchase = (id: string) => apiFetch<PurchaseDetail>(`/v1/purchases/${id}`, { auth: true });
+
+/**
+ * `POST /v1/purchases/{id}/correct` (purchases.manage): «صحّح الفاتورة». It posts the reversal document and
+ * answers the draft of the invoice to write again; refused (409) when part of the goods was sold.
+ */
+export const correctPurchase = (id: string, input: PurchaseCorrectionInput) =>
+  apiFetch<PurchaseCorrection>(`/v1/purchases/${id}/correct`, { method: 'POST', body: input, auth: true });
 
 /** `GET /v1/inventory/expiry?variantId=` (purchases.manage): every batch of one item, whatever its date */
 export const listBatchesOf = (variantId: string, branchId?: string) =>

@@ -13,6 +13,7 @@ import { DateField } from '../../lib/DateField';
 import { isoDay } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { openDebt, receivePayment } from './api';
+import { defaultPaymentBranch, PaymentBranchField } from './PaymentBranch';
 
 /**
  * The paper a payment prints on, and the opening debt's: «سند قبض», in the store's name, with what
@@ -101,6 +102,7 @@ export function CustomerMoneyDialog({
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(today);
+  const [branchId, setBranchId] = useState(() => defaultPaymentBranch(me));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -133,6 +135,7 @@ export function CustomerMoneyDialog({
               reference: reference.trim() || null,
               note: note.trim() || null,
               date,
+              ...(branchId ? { branchId } : {}),
             })
           : await openDebt(customer.id, { amountMinor, date }),
       );
@@ -239,6 +242,9 @@ export function CustomerMoneyDialog({
           onChange={setDate}
           error={fields.date}
         />
+        {payment ? (
+          <PaymentBranchField me={me} value={branchId} onChange={setBranchId} error={fields.branchId} />
+        ) : null}
         {payment ? (
           <TextField
             label="ملاحظة"

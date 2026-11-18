@@ -176,6 +176,8 @@ describe('«الأقساط»', () => {
     expect(requestsTo('POST', '/v1/installment-plans/p-1/collect').at(-1)?.body).toMatchObject({
       amountMinor: 2_800_000,
       method: 'cash',
+      // Round 36 (X1): the only branch of the store, sent unasked
+      branchId: 'branch-1',
     });
   });
 

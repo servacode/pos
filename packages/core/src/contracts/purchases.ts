@@ -3,6 +3,7 @@ import type { CurrencyCode } from '../currencies';
 import { contactPhoneSchema } from './auth';
 import { isoDateSchema, nonNegativeMinorSchema, positiveMinorSchema, uuidSchema } from './common';
 import { chequeDetailsSchema } from './cheques';
+import { rateSchema } from './store';
 
 /**
  * Suppliers, purchases, payments to suppliers, stock value and counts (08 › فاتورة شراء، سند دفع،
@@ -44,13 +45,20 @@ export interface SupplierRow {
   name: string;
   phone: string | null;
   notes: string | null;
-  /** What the store owes the supplier, base currency */
+  /** What the store owes the supplier, base currency (a dollar debt at the rate it was booked at) */
   balanceMinor: number;
   archived: boolean;
   /** The date of the latest purchase invoice (yyyy-mm-dd), null with none; absent from older servers */
   lastPurchaseOn?: string | null;
   /** All the supplier's purchase invoices together, base currency; absent from older servers */
   purchasesTotalMinor?: number;
+  /**
+   * Round 36 (decision 11): what the store owes the supplier in dollars, cents (negative: the supplier
+   * owes the store, an advance); 0 for a supplier with no dollar debt. Absent from older servers.
+   */
+  usdBalanceMinor?: number;
+  /** The base-currency value the books give that dollar debt (at the rates of its invoices); part of balanceMinor */
+  usdBookMinor?: number;
 }
 
 export interface SupplierListResponse {
@@ -76,11 +84,19 @@ export const batchKey = (l: {
   expiryDate?: string | null;
 }): string => `${l.variantId}|${l.batchNo ?? ''}|${l.expiryDate ?? ''}`;
 
+/**
+ * The currency of a purchase invoice (round 36, decision 11). `SYP` (or left out) is the store's base
+ * currency, as always; `USD` is a dollar invoice: its lines' costs are dollars, converted at the rate of
+ * the day into the base currency for the stock and the cost, and the supplier's debt is kept in dollars.
+ */
+export const PURCHASE_CURRENCY_CODES = ['SYP', 'USD'] as const;
+export type PurchaseCurrencyCode = (typeof PURCHASE_CURRENCY_CODES)[number];
+
 export const purchaseLineInput = z.object({
   variantId: uuidSchema,
   /** Base units bought, thousandths (12.5 kg is 12500) */
   qty: z.int('الكمية مطلوبة').positive('الكمية أكبر من صفر').max(1_000_000_000, 'الكمية كبيرة'),
-  /** What the line cost in all, base currency minor units */
+  /** What the line cost in all, minor units of the invoice's currency (the base currency unless `currency` is USD) */
   costMinor: nonNegativeMinorSchema,
   /** «رقم الدفعة» (03 › الصيدليات) */
   batchNo: optionalText(40, 'رقم الدفعة طويل'),
@@ -96,6 +112,10 @@ export const purchaseInput = z
     branchId: uuidSchema.optional(),
     date: isoDateSchema,
     payment: z.enum(PURCHASE_PAYMENTS),
+    /** The invoice's currency; left out it is the base currency */
+    currency: z.enum(PURCHASE_CURRENCY_CODES).optional(),
+    /** Pounds for one dollar on the day of a dollar invoice; left out, the store's rate */
+    rate: rateSchema.optional(),
     /** The supplier's invoice number */
     reference: optionalText(64, 'الرقم طويل'),
     notes: optionalText(500, 'الملاحظات طويلة'),
@@ -116,7 +136,10 @@ export interface PurchaseLineRow {
   productId: string;
   name: string;
   qty: number;
+  /** What the line cost, always in the base currency (a dollar line converted at the invoice's rate) */
   costMinor: number;
+  /** A dollar invoice: what the line cost in dollars, cents; absent or null otherwise */
+  foreignCostMinor?: number | null;
   batchNo: string | null;
   expiryDate: string | null;
   serials: string[];
@@ -130,14 +153,58 @@ export interface PurchaseRow {
   supplierName: string;
   payment: PurchasePayment;
   reference: string | null;
+  /** The invoice in the base currency */
   totalMinor: number;
+  /** Round 36: a dollar invoice names its currency, its dollars (cents) and the rate it was booked at; absent otherwise */
+  currency?: PurchaseCurrencyCode | null;
+  foreignTotalMinor?: number | null;
+  rate?: string | null;
+  /** Round 36 (decision 12): the document that corrected this invoice, once it has been; absent otherwise */
+  correctedBy?: { id: string; number: string; date: string } | null;
 }
 
 export interface PurchaseDetail extends PurchaseRow {
   branchId: string;
   notes: string | null;
   lines: PurchaseLineRow[];
+  /** The purchase order this invoice received, if any */
+  purchaseOrderId?: string | null;
   baseCurrency: CurrencyCode;
+}
+
+/**
+ *   POST /v1/purchases/{id}/correct   purchases.manage   purchaseCorrectionInput → PurchaseCorrection (201)
+ *
+ * «صحّح الفاتورة» (round 36, decision 12): a posted purchase is never edited. The correction posts a full
+ * reversal document (the stock out at the cost it came in at, the supplier's debt or the cash back through
+ * the reversing entry of the invoice's own entry) and answers a pre-filled draft of a new invoice to fix and
+ * save. Refused with 409 when part of what the invoice received was sold and the rest on hand cannot cover
+ * it: the answer says so and points to a return to the supplier instead.
+ */
+export const purchaseCorrectionInput = z.object({
+  /** The day of the reversal; left out, today */
+  date: isoDateSchema.optional(),
+  reason: optionalText(200, 'السبب طويل'),
+});
+export type PurchaseCorrectionInput = z.output<typeof purchaseCorrectionInput>;
+
+export interface PurchaseDraft {
+  supplierId: string;
+  branchId: string;
+  date: string;
+  payment: PurchasePayment;
+  reference: string | null;
+  notes: string | null;
+  currency: PurchaseCurrencyCode;
+  rate: string | null;
+  purchaseOrderId: string | null;
+  /** costMinor is in the draft's currency, the way the form takes it */
+  lines: (PurchaseInput['lines'][number] & { name: string; productId: string })[];
+}
+
+export interface PurchaseCorrection {
+  reversal: { id: string; number: string; date: string; valueOutMinor: number };
+  draft: PurchaseDraft;
 }
 
 export interface PurchaseListResponse {
@@ -164,6 +231,13 @@ export const supplierPaymentInput = z.object({
   note: optionalText(200, 'الملاحظة طويلة'),
   /** The owner confirmed the payment is more than what is owed: it stays as an advance with the supplier */
   advance: z.boolean().optional(),
+  /**
+   * Round 36 (decision 11): `USD` pays a dollar debt from the dollar safe (or the bank): `amountMinor` is then
+   * dollars (cents), at `rate` (left out, the store's rate). The difference between that rate and the one the
+   * debt was booked at is posted to «فروقات صرف محققة» (6510). SYP or left out: the base currency, as always.
+   */
+  currency: z.enum(PURCHASE_CURRENCY_CODES).optional(),
+  rate: rateSchema.optional(),
 });
 export type SupplierPaymentInput = z.output<typeof supplierPaymentInput>;
 
@@ -172,8 +246,14 @@ export interface SupplierPaymentRow {
   number: string;
   supplierId: string;
   date: string;
+  /** In the currency of the payment: the base currency, or dollars (cents) when `currency` is USD */
   amountMinor: number;
   method: 'cash' | 'bank';
+  /** Round 36: a dollar payment: its currency, rate, the base-currency cost and the exchange difference (positive: a loss) */
+  currency?: PurchaseCurrencyCode;
+  rate?: string | null;
+  baseMinor?: number;
+  fxMinor?: number;
 }
 
 export const inventoryQuery = z.object({ branchId: uuidSchema.optional() });
@@ -547,6 +627,13 @@ export const supplierReturnInput = z
     branchId: uuidSchema.optional(),
     date: isoDateSchema,
     refund: z.enum(PURCHASE_PAYMENTS),
+    /**
+     * Round 36 (decision 13): the purchase invoice the pieces came on. The supplier then credits each line at
+     * that invoice's cost (a dollar invoice, in dollars at its rate) instead of at the branch's average;
+     * the stock still leaves at the current average and the difference goes to cost of sales (5100). Left
+     * out, the return works as it always did.
+     */
+    purchaseId: uuidSchema.optional(),
     /** The supplier's credit note number */
     reference: optionalText(64, 'الرقم طويل'),
     note: optionalText(200, 'الملاحظة طويلة'),
@@ -555,7 +642,10 @@ export const supplierReturnInput = z
         z.object({
           variantId: uuidSchema,
           qty: z.int('الكمية مطلوبة').positive('الكمية أكبر من الصفر').max(1_000_000_000, 'الكمية كبيرة'),
-          /** What the supplier credits for the whole line; left out, the pieces' average cost */
+          /**
+           * What the supplier credits for the whole line; left out, the pieces' average cost, or their cost on
+           * the invoice when `purchaseId` names one (then in the invoice's currency)
+           */
           amountMinor: nonNegativeMinorSchema.nullable().optional(),
           /** The batch sent back; its balance goes down by `qty` (03 › الصيدليات). Left out: earliest expiry first */
           batchNo: optionalText(40, 'رقم الدفعة طويل'),
@@ -582,9 +672,25 @@ export interface SupplierReturnDetail {
   branchId: string;
   refund: PurchasePayment;
   reference: string | null;
-  lines: { variantId: string; name: string; qty: number; amountMinor: number; costMinor: number }[];
-  /** What the supplier credits */
+  lines: {
+    variantId: string;
+    name: string;
+    qty: number;
+    amountMinor: number;
+    costMinor: number;
+    /** Round 36: the line's cost on the invoice named, base currency; absent without one */
+    invoiceCostMinor?: number | null;
+    /** On a dollar invoice, what the supplier credits for the line in dollars (cents) */
+    foreignAmountMinor?: number | null;
+  }[];
+  /** What the supplier credits, base currency */
   amountMinor: number;
+  /** Round 36: the invoice named, and on a dollar invoice the dollars credited at its rate */
+  purchaseId?: string | null;
+  purchaseNumber?: string | null;
+  currency?: PurchaseCurrencyCode | null;
+  rate?: string | null;
+  foreignAmountMinor?: number | null;
   /** What the pieces cost, at the branch's average */
   costMinor: number;
   baseCurrency: CurrencyCode;

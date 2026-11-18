@@ -305,6 +305,11 @@ function ReturnReceipt({ data, width, copy }: { data: ReceiptData; width: PaperW
           <Row label={REFUND_LABEL[r.method]}>
             <ExactMoney minor={r.amountMinor} currency={r.currency} />
           </Row>
+          {(r.foreign ?? []).map((f) => (
+            <Row key={f.currency} label={<span className="text-xs">منه من درج الدولار</span>}>
+              <ExactMoney minor={f.amountMinor} currency={f.currency} />
+            </Row>
+          ))}
           {r.reference ? (
             <Row label={<span className="text-xs">المرجع</span>}>
               <Reference text={r.reference} />

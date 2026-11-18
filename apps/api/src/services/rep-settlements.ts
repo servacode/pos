@@ -28,6 +28,7 @@ import { staleVersion } from './catalog/common';
 import { baseCurrencyOf } from './contracts-common';
 import { createStocktake, createTransfer, nextNumber } from './purchases';
 import { postRepShortage, repDebtBalance } from './rep-debt';
+import { cashRefundDrawers } from './refund-drawers';
 import { assertRepsEnabled } from './subscription-gate';
 
 /**
@@ -143,10 +144,8 @@ async function cashOf(tx: Transaction, shiftIds: string[]): Promise<SettlementCa
     select r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
     where r.shift_id in (${ids}) and r.method = 'cash' group by r.currency
     union all
-    select r.currency, 'refund',
-           sum(coalesce((r.payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, r.total_minor))::text
-    from sale_returns r
-    where r.shift_id in (${ids}) and r.refund_method = 'cash' group by r.currency
+    select x.currency, 'refund', sum(x.amount)::text
+    from (${cashRefundDrawers(sql`r.shift_id in (${ids})`)}) x group by x.currency
     union all
     select v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
     where v.shift_id in (${ids}) and v.kind in ('gift', 'deposit') and v.method = 'cash' group by v.currency

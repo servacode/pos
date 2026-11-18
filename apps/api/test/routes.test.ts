@@ -45,6 +45,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/purchases': 'signed-in',
   'POST /v1/purchases': 'signed-in',
   'GET /v1/purchases/:id': 'signed-in',
+  'POST /v1/purchases/:id/correct': 'signed-in',
   'GET /v1/purchase-orders': 'signed-in',
   'GET /v1/purchase-orders/suggest': 'signed-in',
   'POST /v1/purchase-orders': 'signed-in',
@@ -1292,6 +1293,35 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       headers: owner(b),
     });
     expect(res.statusCode).toBe(404);
+  },
+  // Round 36: another store's purchase cannot be corrected: 404, and nothing is reversed
+  'POST /v1/purchases/:id/correct': async (app, { a, b }) => {
+    const supplierId = await supplierOf(app, a);
+    const product = await productOf(app, a);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/purchases',
+      headers: owner(a),
+      payload: {
+        supplierId,
+        date: '2026-10-30',
+        payment: 'credit',
+        lines: [{ variantId: product.variants[0]!.id, qty: 1000, costMinor: 100 }],
+      },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const id = made.json<{ id: string }>().id;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/purchases/${id}/correct`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from purchase_reversals where purchase_id = ${id}`;
+    expect(row!.n).toBe('0');
   },
   // Another store's purchase order answers 404 for reading, editing and moving on, and stays as it was
   'GET /v1/purchase-orders/:id': async (app, { a, b }) => {

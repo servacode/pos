@@ -31,6 +31,7 @@ import type { z } from 'zod';
 import { forbidden, inScope, permissionScope } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
+import { cashRefundDrawers } from './refund-drawers';
 
 /** The name a rental's deposit refund carries on the sale (the till writes «ردّ العربون · RNT-…»). */
 const DEPOSIT_BACK_NAME = 'ردّ العربون';
@@ -466,10 +467,8 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       select r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
       where r.shift_id = ${id} and r.method = 'cash' group by r.currency
       union all
-      select r.currency, 'refund',
-             sum(coalesce((r.payload -> 'refunds' -> 0 ->> 'amountMinor')::bigint, r.total_minor))::text
-      from sale_returns r
-      where r.shift_id = ${id} and r.refund_method = 'cash' group by r.currency
+      select x.currency, 'refund', sum(x.amount)::text
+      from (${cashRefundDrawers(sql`r.shift_id = ${id}`)}) x group by x.currency
       union all
       select v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
       where v.shift_id = ${id} and v.kind in ('gift', 'deposit') and v.method = 'cash' group by v.currency

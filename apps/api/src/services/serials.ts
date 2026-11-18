@@ -2,7 +2,15 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { SaleLine, SerialFixInput, SerialFlag, SerialRow, UnassignedSerialSale } from '@serva/core';
 import { addMonthsIso } from '@serva/core';
 import type { SyncFlag } from '@serva/sync';
-import { products, serials, variants, withTenant, type Database, type Transaction } from '@serva/db';
+import {
+  products,
+  purchaseReversals,
+  serials,
+  variants,
+  withTenant,
+  type Database,
+  type Transaction,
+} from '@serva/db';
 import { requirePermission } from '../auth/permissions';
 import { audit } from './audit';
 import type { RequestMeta } from '../types';
@@ -66,9 +74,32 @@ export async function receiveSerials(
     })
     .from(serials)
     .where(inArray(serials.serial, all));
-  // A number a till sold before it was entered here (a manager's override) is adopted by this purchase
+  // A number a till sold before it was entered here (a manager's override) is adopted by this purchase.
+  // So is one that came on an invoice since corrected (round 36, decision 12): its pieces went back out
+  // with the correction, and the corrected invoice brings them in again.
+  const corrected = new Set(
+    known.some((k) => k.status === 'returned' && k.purchaseId)
+      ? (
+          await tx
+            .select({ purchaseId: purchaseReversals.purchaseId })
+            .from(purchaseReversals)
+            .where(
+              inArray(
+                purchaseReversals.purchaseId,
+                known.flatMap((k) => (k.purchaseId ? [k.purchaseId] : [])),
+              ),
+            )
+        ).map((r) => r.purchaseId)
+      : [],
+  );
   const adoptable = new Map(
-    known.filter((k) => k.purchaseId === null && k.status === 'sold').map((k) => [k.serial, k] as const),
+    known
+      .filter(
+        (k) =>
+          (k.purchaseId === null && k.status === 'sold') ||
+          (k.status === 'returned' && k.purchaseId !== null && corrected.has(k.purchaseId)),
+      )
+      .map((k) => [k.serial, k] as const),
   );
   const wanted = new Map(
     lines.flatMap((l) => (l.serials ?? []).map((serial) => [serial, l.variantId] as const)),
@@ -76,7 +107,10 @@ export async function receiveSerials(
   const clash = known.find((k) => !adoptable.has(k.serial) || wanted.get(k.serial) !== k.variantId);
   if (clash) throw invalid({ lines: `الرقم ${clash.serial} موجود في المحل من قبل` });
   for (const k of adoptable.values()) {
-    await tx.update(serials).set({ purchaseId, branchId }).where(eq(serials.id, k.id));
+    await tx
+      .update(serials)
+      .set({ purchaseId, branchId, ...(k.status === 'returned' ? { status: 'in_stock' } : {}) })
+      .where(eq(serials.id, k.id));
   }
   const fresh = lines.flatMap((l) =>
     (l.serials ?? [])

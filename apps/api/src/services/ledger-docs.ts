@@ -126,8 +126,9 @@ export async function partyStatement(
     }
     const code = type === 'customer' ? '1200' : '2100';
     const side = type === 'customer' ? 'debit' : 'credit';
-    const [opening] = await tx.execute<{ net: string }>(sql`
-      select coalesce(sum(l.debit_minor - l.credit_minor), 0)::text as net
+    const [opening] = await tx.execute<{ net: string; usd: string }>(sql`
+      select coalesce(sum(l.debit_minor - l.credit_minor), 0)::text as net,
+             coalesce(sum(l.amount_minor) filter (where l.currency = 'USD'), 0)::text as usd
       from journal_lines l
       join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
       join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
@@ -141,9 +142,11 @@ export async function partyStatement(
       memo: string;
       debit: string;
       credit: string;
+      currency: string;
+      amount: string;
     }>(sql`
       select e.entry_date::text as date, e.source_type, e.source_id, e.source_number as number, e.memo,
-             l.debit_minor::text as debit, l.credit_minor::text as credit
+             l.debit_minor::text as debit, l.credit_minor::text as credit, l.currency, l.amount_minor::text as amount
       from journal_lines l
       join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
       join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
@@ -152,6 +155,11 @@ export async function partyStatement(
       order by e.entry_date, e.year, e.seq, l.line_no`);
     const debitSigned = num(opening?.net);
     const openingMinor = side === 'debit' ? debitSigned : -debitSigned;
+    const base = await baseCurrencyOf(tx);
+    // A supplier with dollar lines (round 36, decision 11) also gets the account in dollars: the lines' own
+    // amounts, on the same sides, with their own running balance (positive: the store owes the supplier)
+    const inDollars = type === 'supplier' && base !== 'USD' && rows.some((r) => r.currency === 'USD');
+    const usdOpening = type === 'supplier' && base !== 'USD' ? -num(opening?.usd) : 0;
     const run = runStatement(
       openingMinor,
       rows.map((r) => ({
@@ -165,17 +173,42 @@ export async function partyStatement(
       })),
       side,
     );
+    let usdRunning = usdOpening;
+    let usdDebit = 0;
+    let usdCredit = 0;
+    const lines = inDollars
+      ? run.lines.map((l, i) => {
+          const r = rows[i]!;
+          const dollars = r.currency === 'USD' ? num(r.amount) : 0;
+          const debit = Math.max(dollars, 0);
+          const credit = Math.max(-dollars, 0);
+          usdDebit += debit;
+          usdCredit += credit;
+          usdRunning += credit - debit;
+          return { ...l, usdDebitMinor: debit, usdCreditMinor: credit, usdBalanceMinor: usdRunning };
+        })
+      : run.lines;
     return {
       type,
       party: { id: party.id, name: party.name, phone: party.phone },
       from: range.from,
       to: range.to,
       openingMinor,
-      lines: run.lines,
+      lines,
       totalDebitMinor: run.totalDebitMinor,
       totalCreditMinor: run.totalCreditMinor,
       closingMinor: run.closingMinor,
-      baseCurrency: await baseCurrencyOf(tx),
+      baseCurrency: base,
+      ...(inDollars || usdOpening !== 0
+        ? {
+            usd: {
+              openingMinor: usdOpening,
+              totalDebitMinor: usdDebit,
+              totalCreditMinor: usdCredit,
+              closingMinor: usdRunning,
+            },
+          }
+        : {}),
     };
   });
 }
