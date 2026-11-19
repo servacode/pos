@@ -17,6 +17,7 @@ import {
   taxRates,
   type Transaction,
 } from '@serva/db';
+import { postingDateFor } from './period-close';
 
 /**
  * The automatic entries of tab 10 (› القيود التلقائية) for the phase-1 documents, posted inside
@@ -171,6 +172,8 @@ export async function postEntry(tx: Transaction, draft: DraftEntry): Promise<str
     lines.map((l) => l.account),
   );
   const year = Number(draft.date.slice(0, 4));
+  // Round 37 (decision 17): an event in a closed period is never refused here; it posts on the first open day
+  const { postingDate, moved } = await postingDateFor(tx, draft.tenantId, draft.date);
   const { seq, number } = await nextNumber(tx, draft.tenantId, year);
   const [entry] = await tx
     .insert(journalEntries)
@@ -181,7 +184,8 @@ export async function postEntry(tx: Transaction, draft: DraftEntry): Promise<str
       seq,
       number,
       entryDate: draft.date,
-      postingDate: draft.date,
+      postingDate,
+      postedToOpenPeriod: moved,
       kind: draft.kind ?? 'auto',
       sourceType: draft.sourceType,
       sourceId: draft.sourceId,

@@ -130,11 +130,11 @@ async function snapshot(
   }>(sql`
     select a.code, a.name, a.type,
            sum(l.debit_minor - l.credit_minor)::text as net,
-           coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.entry_date >= ${yearStart}), 0)::text as net_year
+           coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.posting_date >= ${yearStart}), 0)::text as net_year
     from journal_lines l
     join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
     join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
-    where e.entry_date <= ${day}::date and ${inList(sql`e.branch_id`, branches)}
+    where e.posting_date <= ${day}::date and ${inList(sql`e.branch_id`, branches)}
     group by a.code, a.name, a.type
     order by a.code`);
   const parties = await tx.execute<{ code: string; owed: string }>(sql`
@@ -144,7 +144,7 @@ async function snapshot(
       from journal_lines l
       join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
       join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
-      where e.entry_date <= ${day}::date and ${inList(sql`e.branch_id`, branches)}
+      where e.posting_date <= ${day}::date and ${inList(sql`e.branch_id`, branches)}
         and l.party_id is not null
         and ((a.code = '1200' and l.party_type = 'customer') or (a.code = '2100' and l.party_type = 'supplier'))
       group by a.code, l.party_id
@@ -354,14 +354,14 @@ export async function cashFlow(
       dout: string;
     }>(sql`
       select a.code, a.name,
-             coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.entry_date < ${query.from}::date), 0)::text as opening,
-             coalesce(sum(l.debit_minor) filter (where e.entry_date >= ${query.from}::date), 0)::text as din,
-             coalesce(sum(l.credit_minor) filter (where e.entry_date >= ${query.from}::date), 0)::text as dout
+             coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.posting_date < ${query.from}::date), 0)::text as opening,
+             coalesce(sum(l.debit_minor) filter (where e.posting_date >= ${query.from}::date), 0)::text as din,
+             coalesce(sum(l.credit_minor) filter (where e.posting_date >= ${query.from}::date), 0)::text as dout
       from journal_lines l
       join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
       join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
       where a.code ~ ${CASH_CODES} and a.is_group = false
-        and e.entry_date <= ${query.to}::date and ${inList(sql`e.branch_id`, branches)}
+        and e.posting_date <= ${query.to}::date and ${inList(sql`e.branch_id`, branches)}
       group by a.code, a.name
       order by a.code`);
     const accounts: CashFlowAccount[] = accountRows
@@ -400,7 +400,7 @@ export async function cashFlow(
         join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
         join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
         where a.code ~ ${CASH_CODES} and a.is_group = false
-          and e.entry_date >= ${query.from}::date and e.entry_date <= ${query.to}::date
+          and e.posting_date >= ${query.from}::date and e.posting_date <= ${query.to}::date
           and ${inList(sql`e.branch_id`, branches)}
         group by l.entry_id
       ) x
@@ -475,10 +475,10 @@ export async function accountLedger(
       where a.code in ${family} and ${inList(sql`e.branch_id`, branches)}`;
     const [opening] = await tx.execute<{ net: string }>(sql`
       select coalesce(sum(l.debit_minor - l.credit_minor), 0)::text as net ${base}
-        and e.entry_date < ${query.from}::date`);
+        and e.posting_date < ${query.from}::date`);
     const [totals] = await tx.execute<{ debit: string; credit: string }>(sql`
       select coalesce(sum(l.debit_minor), 0)::text as debit, coalesce(sum(l.credit_minor), 0)::text as credit ${base}
-        and e.entry_date >= ${query.from}::date and e.entry_date <= ${query.to}::date`);
+        and e.posting_date >= ${query.from}::date and e.posting_date <= ${query.to}::date`);
     const rows = await tx.execute<{
       date: string;
       entry_id: string;
@@ -495,8 +495,8 @@ export async function accountLedger(
       select e.entry_date::text as date, e.id as entry_id, e.number as entry_number, a.code, a.name,
              e.source_type, e.source_id, e.source_number, e.memo,
              l.debit_minor::text as debit, l.credit_minor::text as credit ${base}
-        and e.entry_date >= ${query.from}::date and e.entry_date <= ${query.to}::date
-      order by e.entry_date, e.year, e.seq, l.line_no
+        and e.posting_date >= ${query.from}::date and e.posting_date <= ${query.to}::date
+      order by e.posting_date, e.entry_date, e.year, e.seq, l.line_no
       limit ${ACCOUNT_LEDGER_LIMIT + 1}`);
     const truncated = rows.length > ACCOUNT_LEDGER_LIMIT;
     const side = account.normal_side;

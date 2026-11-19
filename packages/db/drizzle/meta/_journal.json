@@ -568,6 +568,34 @@
       "when": 1795006772907,
       "tag": "0080_purchase_reversals",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1795006800000,
+      "tag": "0081_hold_reservation",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1795100000000,
+      "tag": "0083_transit_transfers",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1795100001000,
+      "tag": "0084_period_close",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1795100002000,
+      "tag": "0085_agent_login_code_platform_rate",
+      "breakpoints": true
     }
   ]
 }

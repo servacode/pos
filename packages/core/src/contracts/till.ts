@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { barcodeCodeSchema, MAX_PRICE_MINOR } from './catalog';
+import { uuidSchema } from './common';
 import { CURRENCY_CODES, type CurrencyCode } from '../currencies';
 import type { SectorKey } from '../sectors';
 
@@ -43,8 +45,19 @@ export const tillSettingsSchema = z.object({
    * built-in list. Additive and optional: an older till ignores it.
    */
   cashNotes: z.partialRecord(z.enum(CURRENCY_CODES), cashNoteList).optional(),
-  /** «بالقديم»: a line under the total (and the change) that says the amount in old pounds; display only, off by default */
+  /**
+   * «بالقديم»: a line under the total (and the change) that says the amount in old pounds; display only.
+   * Left out (a store that never set it): ON until OLD_POUND_LINE_UNTIL, then off by itself. A store that
+   * set it (true or false) keeps its setting: see showOldPoundOn.
+   */
   showOldPound: z.boolean().optional(),
+  /**
+   * «مدة الحجز»: days a customer's hold keeps its pieces reserved before the reservation lapses (1 to 90);
+   * left out: HOLD_EXPIRY_DAYS. Lapsing deletes nothing: its pieces are only available again.
+   */
+  holdExpiryDays: z.number().int().min(1).max(90).optional(),
+  /** «مدة الفاتورة المعلّقة»: hours a cart put aside at this till keeps its pieces reserved (1 to 72); left out: HELD_CART_HOURS */
+  heldCartHours: z.number().int().min(1).max(72).optional(),
   /** «صوت المسح»: the till beeps on a scan (a different sound for an unknown code); left out: on */
   scanBeep: z.boolean().optional(),
   /** «قفل الكاشير»: a cashier cannot leave the sale screen without a manager's PIN; off by default */
@@ -57,6 +70,36 @@ export const DEFAULT_CASH_NOTES: Readonly<Record<string, readonly number[]>> = {
   SYP: [500, 200, 100, 50, 25, 10, 5],
   USD: [100, 50, 20, 10, 5, 1],
 };
+
+/** The last day (a business date, Damascus) the «بالقديم» line shows for a store that never set it */
+export const OLD_POUND_LINE_UNTIL = '2027-07-31';
+
+/**
+ * Whether the «بالقديم» line shows (decision 8): a store that set it explicitly keeps its setting; a
+ * store that never did gets it ON until the end of July 2027 and OFF after. `at` is the moment asked about
+ * (the sale's own time when a receipt is printed, else now).
+ */
+export function showOldPoundOn(
+  till: Pick<TillSettings, 'showOldPound'> | null | undefined,
+  at: Date | number | string = Date.now(),
+): boolean {
+  if (typeof till?.showOldPound === 'boolean') return till.showOldPound;
+  const ms = new Date(at).getTime();
+  if (Number.isNaN(ms)) return false;
+  // Damascus is UTC+3 all year since 2022
+  const day = new Date(ms + 3 * 3_600_000).toISOString().slice(0, 10);
+  return day <= OLD_POUND_LINE_UNTIL;
+}
+
+/** Days a customer's hold keeps its pieces reserved when the store did not set it */
+export const HOLD_EXPIRY_DAYS = 7;
+/** Hours a cart put aside at the till keeps its pieces reserved when the store did not set it */
+export const HELD_CART_HOURS = 12;
+
+export const holdExpiryDaysOf = (till: Pick<TillSettings, 'holdExpiryDays'> | null | undefined): number =>
+  till?.holdExpiryDays ?? HOLD_EXPIRY_DAYS;
+export const heldCartHoursOf = (till: Pick<TillSettings, 'heldCartHours'> | null | undefined): number =>
+  till?.heldCartHours ?? HELD_CART_HOURS;
 
 /**
  * An amount of new pounds as the old pounds it equals (100 old = 1 new): since the new pound keeps two
@@ -152,4 +195,37 @@ export interface InvoiceLookup {
     taxMinor: number;
     totalMinor: number;
   }[];
+}
+
+/**
+ * «أضف صنف جديد» at the till (round 37, decision 15): a barcode the store does not know becomes a product
+ * from the sale screen, through the product API's own write (createProduct), by someone who may manage the
+ * catalog: the signed-in user who holds catalog.manage, or a manager whose code was typed on the till.
+ *
+ *   POST /v1/device/products   (Authorization: Device)   tillProductInput → TillProductPlaced (201)
+ *
+ * It needs the server (a product is not a sync document, there is no offline queue for it). The product
+ * is made «بانتظار المراجعة» (status temporary): the till sells it at once, the owner reviews it, and the
+ * online shop shows it only once reviewed. The price is in the store's base currency. There is no cost
+ * field: a product's cost comes from its purchases, never from the product.
+ */
+export const tillProductInput = z.object({
+  /** The user who may add it: holds catalog.manage in this branch (the server checks) */
+  actorId: uuidSchema,
+  nameAr: z.string('اسم الصنف مطلوب').trim().min(1, 'اسم الصنف مطلوب').max(120, 'اسم الصنف طويل جداً'),
+  priceMinor: z
+    .number('اكتب السعر')
+    .int()
+    .min(1, 'اكتب سعراً أكبر من صفر')
+    .max(MAX_PRICE_MINOR, 'السعر كبير جداً. تحقق من الأرقام.'),
+  categoryId: uuidSchema.nullable().default(null),
+  barcode: barcodeCodeSchema,
+});
+export type TillProductInput = z.input<typeof tillProductInput>;
+
+export interface TillProductPlaced {
+  productId: string;
+  variantId: string;
+  nameAr: string;
+  barcode: string;
 }

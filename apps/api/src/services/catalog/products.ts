@@ -50,6 +50,7 @@ import {
   type CatalogContext,
 } from './common';
 import { imageUrl } from './images';
+import { reservedByBranch } from '../reservations';
 import { liveReference } from './reference';
 
 type BarcodeData = z.output<typeof barcodeInputSchema>;
@@ -94,6 +95,8 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
   const stockRows =
     ids.length > 0 ? await tx.select().from(stockLevels).where(inArray(stockLevels.variantId, ids)) : [];
 
+  // Decision 14: what holds and accepted orders reserve per branch (derived, nothing is written to stock)
+  const reserved = await reservedByBranch(tx, ids, branchRows[0]?.id ?? null);
   const variantViews: VariantDetail[] = variantRows.map(({ variant, price }) => ({
     id: variant.id,
     sku: variant.sku,
@@ -114,7 +117,7 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
         branchId: branch.id,
         branchName: branch.name,
         qty: level?.qty ?? 0,
-        reservedQty: level?.reservedQty ?? 0,
+        reservedQty: (level?.reservedQty ?? 0) + (reserved.get(`${branch.id}|${variant.id}`) ?? 0),
       };
     }),
   }));
@@ -774,6 +777,8 @@ export async function updateProductTx(
     taxRateId: input.taxRateId,
     sellOnPos: input.sellOnPos,
     modifiers: input.modifiers,
+    // «اعتمد الصنف»: a product made at the till is reviewed (the contract allows only 'active')
+    status: input.status,
   };
   await tx
     .update(products)

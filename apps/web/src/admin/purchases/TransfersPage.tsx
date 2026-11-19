@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { TransferDetail, TransferInput, TransferRow } from '@serva/core';
+import type {
+  TransferDetail,
+  TransferFull,
+  TransferInput,
+  TransferMode,
+  TransferRow,
+  TransferSettings,
+} from '@serva/core';
 import {
   Alert,
   BackIcon,
@@ -15,6 +22,7 @@ import {
   Select,
   TextField,
   TransferIcon,
+  TruckIcon,
   useDigits,
   type DataColumn,
 } from '@serva/ui';
@@ -25,9 +33,13 @@ import { qtyOf, today } from './api';
 import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } from './parts';
 import { PackQty } from './PackQty';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
+import { TransferReceive } from './TransferReceive';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 
 const listTransfers = () => apiFetch<{ items: TransferRow[] }>('/v1/transfers', { auth: true });
+const transferSettings = () => apiFetch<TransferSettings>('/v1/transfers/settings', { auth: true });
+const saveTransferMode = (mode: TransferMode) =>
+  apiFetch<TransferSettings>('/v1/transfers/settings', { method: 'PUT', body: { mode }, auth: true });
 const createTransfer = (input: TransferInput) =>
   apiFetch<TransferDetail>('/v1/transfers', { method: 'POST', body: input, auth: true });
 
@@ -43,9 +55,11 @@ interface Line extends PickedVariant {
 const LINE_COLUMNS = 'md:grid-cols-[minmax(0,1fr)_14rem_2.5rem]';
 
 /**
- * «التحويل بين الفروع» (09 › transfers): goods sent from one branch to another in one step, out of
- * the sender at its average cost and into the receiver at that value; each branch's stock and books
- * move together. A model in sizes and colours opens as a grid, its quantities typed in one go.
+ * «التحويل بين الفروع» (09 › transfers): goods sent from one branch to another, out of the sender at its
+ * average cost and into the receiver at that value; each branch's stock and books move together. Round 37
+ * (decision 16): a store with more than one branch sends «بالطريق» by default: the goods leave the sender at
+ * once and the receiving branch confirms what arrived (a shortage is written off with its reason); a store
+ * may keep the one-step transfer. A model in sizes and colours opens as a grid, its quantities typed in one go.
  */
 export function TransfersPage() {
   const me = useMe();
@@ -61,6 +75,9 @@ export function TransfersPage() {
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [done, setDone] = useState<TransferDetail | null>(null);
+  const [settings, setSettings] = useState<TransferSettings | null>(null);
+  const [receiving, setReceiving] = useState<TransferRow | null>(null);
+  const [received, setReceived] = useState<TransferFull | null>(null);
 
   const load = useCallback(() => {
     listTransfers()
@@ -68,6 +85,20 @@ export function TransfersPage() {
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    transferSettings()
+      .then(setSettings)
+      .catch(() => setSettings(null));
+  }, []);
+
+  async function chooseMode(mode: TransferMode) {
+    setError(null);
+    try {
+      setSettings(await saveTransferMode(mode));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
 
   const parsed = lines.map((l) => baseQtyOf(l));
   const ready = from && to && from !== to && lines.length > 0 && parsed.every((q) => q !== null && q > 0);
@@ -132,7 +163,19 @@ export function TransfersPage() {
       key: 'status',
       header: 'الحالة',
       className: 'whitespace-nowrap',
-      cell: () => <Badge tone="success">تمّ: خرج ودخل</Badge>,
+      cell: (r) =>
+        r.status === 'in_transit' ? (
+          <Badge tone="warning">
+            <TruckIcon size={16} />
+            في الطريق
+          </Badge>
+        ) : r.shortPieces ? (
+          <Badge tone="danger">
+            استُلم وفيه نقص <span className="num">{formatQuantity(r.shortPieces, digits)}</span>
+          </Badge>
+        ) : (
+          <Badge tone="success">تمّ: خرج ودخل</Badge>
+        ),
     },
     {
       key: 'pieces',
@@ -145,6 +188,17 @@ export function TransfersPage() {
       header: 'بالكلفة',
       numeric: true,
       cell: (r) => <Money minor={r.valueMinor} currency={base} className="font-semibold" />,
+    },
+    {
+      key: 'act',
+      header: '',
+      className: 'whitespace-nowrap',
+      cell: (r) =>
+        r.status === 'in_transit' ? (
+          <Button variant="secondary" size="sm" onClick={() => setReceiving(r)}>
+            استلم
+          </Button>
+        ) : null,
     },
   ];
 
@@ -174,9 +228,30 @@ export function TransfersPage() {
                 {error ? <Alert tone="error">{error}</Alert> : null}
                 {done ? (
                   <Alert tone="success">
-                    سُجّل التحويل {done.number} بكلفة <Money minor={done.valueMinor} currency={base} />. دخل
-                    مخزون الفرع الآخر.
+                    سُجّل التحويل {done.number} بكلفة <Money minor={done.valueMinor} currency={base} />.{' '}
+                    {done.status === 'in_transit'
+                      ? 'خرج من الفرع المرسِل وهو في الطريق: يؤكّد الفرع الآخر وصوله من القائمة تحت.'
+                      : 'دخل مخزون الفرع الآخر.'}
                   </Alert>
+                ) : null}
+                {settings ? (
+                  <div className="flex flex-wrap items-end gap-3 rounded-control bg-surface-muted px-4 py-3">
+                    <Select
+                      label="طريقة التحويل"
+                      value={settings.mode}
+                      onChange={(e) => void chooseMode(e.target.value as TransferMode)}
+                      className="min-w-56"
+                    >
+                      <option value="auto">تلقائي: بالطريق إن كان للمحل أكثر من فرع</option>
+                      <option value="transit">بالطريق دائماً</option>
+                      <option value="instant">في خطوة واحدة: يدخل الفرع الآخر فوراً</option>
+                    </Select>
+                    <p className="min-w-0 flex-1 basis-60 text-sm text-ink-muted">
+                      {settings.effective === 'transit'
+                        ? 'التحويل الجديد يخرج من الفرع المرسِل ويبقى في الطريق حتى يؤكّد الفرع الآخر ما وصله.'
+                        : 'التحويل الجديد يخرج من فرع ويدخل الآخر في اللحظة نفسها.'}
+                    </p>
+                  </div>
                 ) : null}
                 <div className="grid grid-cols-1 items-start gap-x-3 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
                   <Select label="من فرع" value={from} onChange={(e) => setFrom(e.target.value)}>
@@ -326,10 +401,29 @@ export function TransfersPage() {
             </Card>
           </section>
         )}
+        {received ? (
+          <Alert tone={received.receipt?.shortPieces ? 'warning' : 'success'}>
+            استُلم التحويل {received.number}.
+            {received.receipt?.shortPieces
+              ? ` سُجّل النقص (${formatQuantity(received.receipt.shortPieces, digits)}) بقيد الجرد ${received.receipt.stocktakeNumber ?? ''}.`
+              : ' وصل كله ودخل مخزون الفرع.'}
+          </Alert>
+        ) : null}
+        {receiving ? (
+          <TransferReceive
+            row={receiving}
+            onCancel={() => setReceiving(null)}
+            onDone={(t) => {
+              setReceiving(null);
+              setReceived(t);
+              load();
+            }}
+          />
+        ) : null}
         <section aria-label="التحويلات السابقة" className="flex flex-col gap-3">
           <SectionHead
             title="التحويلات"
-            description="الأحدث أولاً. كل تحويل يتمّ في خطوة واحدة: يخرج من الفرع المرسِل ويدخل الفرع الآخر في اللحظة نفسها، فلا «في الطريق»."
+            description="الأحدث أولاً. التحويل «في الطريق» خرج من الفرع المرسِل ولم يدخل الفرع الآخر بعد؛ يؤكّد الفرع الآخر ما وصله بزر «استلم»، وما نقص يظهر هنا ويُسجَّل بقيد جرد."
           />
           <DataTable
             caption="التحويلات"

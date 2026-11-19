@@ -586,8 +586,8 @@ export async function journal(
     const filter = await branchFilter(tx, auth, 'accounting.view', query.branchId);
     const after = decodeCursor(query.cursor);
     const conditions: SQL[] = [inBranches(sql`e.branch_id`, filter)];
-    if (query.from) conditions.push(sql`e.entry_date >= ${query.from}`);
-    if (query.to) conditions.push(sql`e.entry_date <= ${query.to}`);
+    if (query.from) conditions.push(sql`e.posting_date >= ${query.from}`);
+    if (query.to) conditions.push(sql`e.posting_date <= ${query.to}`);
     if (after) conditions.push(sql`(e.year, e.seq) > (${after.year}, ${after.seq})`);
     const entries = await tx.execute<{
       id: string;
@@ -684,13 +684,13 @@ export async function trialBalance(
       credit: string;
     }>(sql`
       select a.code, a.name, a.type, a.normal_side,
-             coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.entry_date < ${query.from}), 0)::text as opening,
-             coalesce(sum(l.debit_minor) filter (where e.entry_date >= ${query.from}), 0)::text as debit,
-             coalesce(sum(l.credit_minor) filter (where e.entry_date >= ${query.from}), 0)::text as credit
+             coalesce(sum(l.debit_minor - l.credit_minor) filter (where e.posting_date < ${query.from}), 0)::text as opening,
+             coalesce(sum(l.debit_minor) filter (where e.posting_date >= ${query.from}), 0)::text as debit,
+             coalesce(sum(l.credit_minor) filter (where e.posting_date >= ${query.from}), 0)::text as credit
       from journal_lines l
       join journal_entries e on e.id = l.entry_id
       join accounts a on a.id = l.account_id
-      where e.entry_date <= ${query.to} and ${inBranches(sql`e.branch_id`, filter)}
+      where e.posting_date <= ${query.to} and ${inBranches(sql`e.branch_id`, filter)}
       group by a.code, a.name, a.type, a.normal_side
       order by a.code`);
     let debitTotal = 0;

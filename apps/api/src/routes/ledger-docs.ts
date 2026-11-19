@@ -9,6 +9,7 @@ import {
   voidInput,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
+import type { AccessClaims } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import {
@@ -20,6 +21,7 @@ import {
   reverseManualEntry,
   voidExpense,
 } from '../services/ledger-docs';
+import { assertDatesOpen } from '../services/period-close';
 import { parseBody } from './validation';
 
 /**
@@ -37,6 +39,11 @@ export async function ledgerDocRoutes(app: FastifyInstance): Promise<void> {
     return parsed.data;
   };
   const opts = { preHandler: requireAuth };
+  // Round 37 (decision 17): a document dated in a closed period is refused, in plain Arabic
+  const dateOpen = (auth: AccessClaims, body: unknown) => {
+    const date = (body as { date?: unknown } | null)?.date;
+    return assertDatesOpen(app.db, auth, [typeof date === 'string' ? date : undefined]);
+  };
 
   app.get('/v1/customers/:id/statement', opts, async (request) => {
     if (!request.auth) throw unauthorized();
@@ -67,6 +74,7 @@ export async function ledgerDocRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/expenses', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const created = await createExpense(
       app.db,
       request.auth,
@@ -89,6 +97,7 @@ export async function ledgerDocRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/journal/manual', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const created = await createManualEntry(
       app.db,
       request.auth,

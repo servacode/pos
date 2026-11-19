@@ -12,6 +12,9 @@ const login = {
   agent: { id: 'ag-1', fullName: 'وكيل الرقة', code: 'AG-42', mustChangePassword: false },
 };
 
+// Round 37 (decision 21): the password is answered by a step, and the code opens the portal
+const codeStep = { step: 'code', challengeId: 'c-1', expiresIn: 600, phoneHint: '222••••' };
+
 const me = (over: Partial<AgentMe> = {}): AgentMe => ({
   id: 'ag-1',
   fullName: 'وكيل الرقة',
@@ -48,17 +51,21 @@ const store = (over: Partial<AgentStore>): AgentStore => ({
   ...over,
 });
 
-async function signIn(user: ReturnType<typeof renderApp>['user']) {
+async function signIn(user: ReturnType<typeof renderApp>['user'], withCode = true) {
   expect(await screen.findByRole('heading', { name: 'لوحة الوكيل', level: 1 })).toBeInTheDocument();
   await user.type(screen.getByLabelText('البريد الإلكتروني'), 'raqqa@agents.test');
   await user.type(screen.getByLabelText('كلمة السر'), 'agent-pass-1');
   await user.click(screen.getByRole('button', { name: 'ادخل' }));
+  if (!withCode) return;
+  await user.type(await screen.findByLabelText('الرمز'), '123456');
+  await user.click(screen.getByRole('button', { name: 'أكّد الدخول' }));
 }
 
 describe('the agent portal', () => {
   it('shows the balance and the stores; a store still in its trial cannot be activated yet', async () => {
     mockFetch({
-      'POST /v1/agent/login': { status: 200, body: login },
+      'POST /v1/agent/login': { status: 200, body: codeStep },
+      'POST /v1/agent/login/code': { status: 200, body: login },
       'GET /v1/agent/me': { status: 200, body: me() },
       'GET /v1/agent/stores': {
         status: 200,
@@ -95,7 +102,8 @@ describe('the agent portal', () => {
   it('activates a store at the wholesale price, with one key for the attempt', async () => {
     let paid = false;
     const { requestsTo } = mockFetch({
-      'POST /v1/agent/login': { status: 200, body: login },
+      'POST /v1/agent/login': { status: 200, body: codeStep },
+      'POST /v1/agent/login/code': { status: 200, body: login },
       'GET /v1/agent/me': () => ({ status: 200, body: me({ balanceMinor: paid ? 4200 : 5000 }) }),
       'GET /v1/agent/stores': () => ({
         status: 200,
@@ -142,7 +150,8 @@ describe('the agent portal', () => {
 
   it('will not pay when the balance is short, and says why', async () => {
     mockFetch({
-      'POST /v1/agent/login': { status: 200, body: login },
+      'POST /v1/agent/login': { status: 200, body: codeStep },
+      'POST /v1/agent/login/code': { status: 200, body: login },
       'GET /v1/agent/me': { status: 200, body: me({ balanceMinor: 300 }) },
       'GET /v1/agent/stores': {
         status: 200,
@@ -160,7 +169,8 @@ describe('the agent portal', () => {
   it('a new agent must choose his own password before he sees anything', async () => {
     let changed = false;
     const { requestsTo } = mockFetch({
-      'POST /v1/agent/login': {
+      'POST /v1/agent/login': { status: 200, body: codeStep },
+      'POST /v1/agent/login/code': {
         status: 200,
         body: { ...login, agent: { ...login.agent, mustChangePassword: true } },
       },
@@ -190,7 +200,36 @@ describe('the agent portal', () => {
       'POST /v1/agent/login': apiError(401, 'invalid_credentials', 'البريد أو كلمة السر غير صحيحة.'),
     });
     const { user } = renderApp('/agent');
-    await signIn(user);
+    await signIn(user, false);
     expect(await screen.findByText('البريد أو كلمة السر غير صحيحة.')).toBeInTheDocument();
+  });
+
+  it('asks for the code after the password, says where it went, and shows a wrong code’s refusal', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/agent/login': { status: 200, body: codeStep },
+      'POST /v1/agent/login/code': apiError(400, 'otp_invalid', 'الرمز غير صحيح. تأكد منه وأعد المحاولة.'),
+    });
+    const { user } = renderApp('/agent');
+    await signIn(user);
+    expect(await screen.findByText('الرمز غير صحيح. تأكد منه وأعد المحاولة.')).toBeInTheDocument();
+    expect(screen.getByText('222••••')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/agent/login/code')[0]!.body).toEqual({
+      challengeId: 'c-1',
+      code: '123456',
+    });
+    // The password was never kept: going back starts again
+    await user.click(screen.getByRole('button', { name: 'رجوع، أطلب رمزاً جديداً' }));
+    expect(await screen.findByLabelText('كلمة السر')).toBeInTheDocument();
+  });
+
+  it('the button waits for six digits', async () => {
+    mockFetch({ 'POST /v1/agent/login': { status: 200, body: codeStep } });
+    const { user } = renderApp('/agent');
+    await signIn(user, false);
+    const confirm = await screen.findByRole('button', { name: 'أكّد الدخول' });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByLabelText('الرمز'), '12ab34');
+    expect(screen.getByLabelText('الرمز')).toHaveValue('1234');
+    expect(confirm).toBeDisabled();
   });
 });

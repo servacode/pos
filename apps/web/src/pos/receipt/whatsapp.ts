@@ -1,5 +1,5 @@
 import type { SalePayload } from '@serva/core/contracts/documents';
-import { oldPoundText } from '@serva/core/contracts/till';
+import { oldPoundText, showOldPoundOn } from '@serva/core/contracts/till';
 import { formatMoney } from '@serva/core/money';
 import { normalizePhone } from '@serva/core/phone';
 import { stripBidiControls } from '@serva/core/text';
@@ -43,7 +43,7 @@ export function receiptText(data: ReceiptData): string {
   const contractSaved = Object.values(data.contractSavings ?? {}).reduce((sum, n) => sum + n, 0);
   if (contractSaved > 0) out.push(`وفّرت ${money(contractSaved)}`);
   out.push(`الإجمالي: ${money(sale.totals.totalMinor)}`);
-  if (data.settings.till?.showOldPound === true && base === 'SYP') {
+  if (showOldPoundOn(data.settings.till, data.doc.deviceTime) && base === 'SYP') {
     out.push(`بالقديم: ${oldPoundText(sale.totals.totalMinor)}`);
   }
   for (const p of sale.payments) {

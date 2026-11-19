@@ -79,7 +79,7 @@ export const userStatus = pgEnum('user_status', ['active', 'disabled']);
 /** Administrative state of a store, set by the platform team (e.g. suspended for abuse). */
 export const tenantStatus = pgEnum('tenant_status', ['active', 'suspended']);
 export const agentStatus = pgEnum('agent_status', ['active', 'suspended']);
-export const otpPurpose = pgEnum('otp_purpose', ['registration', 'password_reset']);
+export const otpPurpose = pgEnum('otp_purpose', ['registration', 'password_reset', 'agent_login']);
 
 // ─── Platform (no tenant_id) ──────────────────────────────────────────────────
 
@@ -455,6 +455,11 @@ export const tenantSettings = pgTable(
     installments: jsonb('installments').$type<Record<string, unknown>>(),
     /** «المندوبون والتوزيع» (packages/core › contracts/distribution.ts DistributionSettings); null: the defaults */
     distribution: jsonb('distribution').$type<Record<string, unknown>>(),
+    /**
+     * «التحويل بين الفروع» (round 37, decision 16): auto (in transit when the store has more than one
+     * branch), instant (goods leave and arrive in one step, as before) or transit
+     */
+    transferMode: text('transfer_mode').notNull().default('auto'),
     version: version(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2097,6 +2102,12 @@ export const transfers = pgTable(
     note: text('note'),
     lines: jsonb('lines').notNull(),
     valueMinor: bigint('value_minor', { mode: 'number' }).notNull(),
+    /**
+     * Round 37 (decision 16): true for a transfer sent «بالطريق»: the goods left the sender at once and enter
+     * the receiver when it confirms them (a row in transfer_receipts). False, as every older one, is the
+     * instant transfer: out and in together.
+     */
+    inTransit: boolean('in_transit').notNull().default(false),
     createdBy: uuid('created_by').notNull(),
     createdAt: createdAt(),
   },
@@ -2104,6 +2115,38 @@ export const transfers = pgTable(
     primaryKey({ name: 'transfers_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.fromBranchId], foreignColumns: [branches.tenantId, branches.id] }),
     foreignKey({ columns: [t.tenantId, t.toBranchId], foreignColumns: [branches.tenantId, branches.id] }),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * The receiving branch's confirmation of a transfer sent «بالطريق» (round 37, decision 16), written once.
+ * `lines` keeps, for each line, what was sent, what arrived and what is short; a shortage is written off
+ * through a stocktake (`stocktake_id`) with its reason.
+ */
+export const transferReceipts = pgTable(
+  'transfer_receipts',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    transferId: uuid('transfer_id').notNull(),
+    branchId: uuid('branch_id').notNull(),
+    businessDate: date('business_date').notNull(),
+    lines: jsonb('lines').notNull(),
+    shortPieces: bigint('short_pieces', { mode: 'number' }).notNull().default(0),
+    shortValueMinor: bigint('short_value_minor', { mode: 'number' }).notNull().default(0),
+    reason: text('reason'),
+    stocktakeId: uuid('stocktake_id'),
+    receivedBy: uuid('received_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'transfer_receipts_pkey', columns: [t.tenantId, t.id] }),
+    unique('transfer_receipts_transfer_unique').on(t.tenantId, t.transferId),
+    foreignKey({ columns: [t.tenantId, t.transferId], foreignColumns: [transfers.tenantId, transfers.id] }),
+    foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     tenantIsolation(),
   ],
 );
@@ -2581,6 +2624,11 @@ export const journalEntries = pgTable(
     entryDate: date('entry_date').notNull(),
     /** The ledger's date; differs only when a document lands in a locked period (phase 2) */
     postingDate: date('posting_date').notNull(),
+    /**
+     * Round 37 (decision 17): true when the event's date fell in a closed period, so the entry was posted on
+     * the first open day instead (entry_date keeps the document's own day)
+     */
+    postedToOpenPeriod: boolean('posted_to_open_period').notNull().default(false),
     /** auto, manual, reversal */
     kind: text('kind').notNull(),
     /** sale, shift_close, cash_movement, manual, reversal */
@@ -2601,6 +2649,34 @@ export const journalEntries = pgTable(
     unique('journal_entries_source_unique').on(t.tenantId, t.sourceType, t.sourceId, t.kind),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     index('journal_entries_date_idx').on(t.tenantId, t.entryDate),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * «إقفال الفترة» (round 37, decision 17; design in period-close-design.md): every close and every reopen of a
+ * store's books, never changed. The store is closed up to `locked_through` of its latest row (null: nothing is
+ * closed). A close moves the date forward; a reopen moves it back or clears it, and says why.
+ */
+export const periodLocks = pgTable(
+  'period_locks',
+  {
+    id: id(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** close or reopen */
+    kind: text('kind').notNull(),
+    /** Documents dated on or before this day are closed after this row; null when nothing is closed */
+    lockedThrough: date('locked_through'),
+    previousThrough: date('previous_through'),
+    reason: text('reason'),
+    createdBy: uuid('created_by').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: 'period_locks_pkey', columns: [t.tenantId, t.id] }),
+    index('period_locks_latest_idx').on(t.tenantId, t.createdAt),
     tenantIsolation(),
   ],
 );
@@ -2796,7 +2872,7 @@ export const serials = pgTable(
       .references(() => tenants.id),
     variantId: uuid('variant_id').notNull(),
     serial: text('serial').notNull(),
-    /** in_stock or sold */
+    /** in_stock, sold, rented, returned; in_transit and lost for a transfer on its way (round 37) */
     status: text('status').notNull(),
     purchaseId: uuid('purchase_id'),
     saleId: uuid('sale_id'),
@@ -3021,6 +3097,12 @@ export const onlineOrders = pgTable(
     saleId: uuid('sale_id'),
     /** A hold's deposit (source 'hold'): the code of the voucher it was paid as */
     depositCode: text('deposit_code'),
+    /**
+     * Round 37, decision 14: until when an accepted order keeps its pieces reserved. A hold at the till
+     * sets it (the store's «مدة الحجز»); null keeps them reserved until the order is sold or rejected,
+     * as every order did before. A lapsed reservation only makes the pieces available again.
+     */
+    reservedUntil: timestamp('reserved_until', { withTimezone: true }),
     /** For the courier, on top of the pieces; 0 for a pickup */
     deliveryFeeMinor: bigint('delivery_fee_minor', { mode: 'number' }).notNull().default(0),
     deliveryArea: text('delivery_area'),

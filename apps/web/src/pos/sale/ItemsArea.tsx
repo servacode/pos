@@ -81,7 +81,14 @@ export interface ItemsAreaProps {
   /** A model tile that is open in the picker */
   pickingProduct: string | null;
   multiplier: number | null;
-  notice: { tone: 'warning' | 'info'; text: string; href?: string; linkText?: string } | null;
+  notice: {
+    tone: 'warning' | 'info';
+    text: string;
+    href?: string;
+    linkText?: string;
+    actionText?: string;
+    onAction?: () => void;
+  } | null;
   onDismissNotice: () => void;
   hasLastLines: boolean;
   onRepeatLast: () => void;
@@ -360,6 +367,15 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
               <InfoIcon size={20} className="shrink-0" />
             )}
             <span className="min-w-0 flex-1 py-2 font-semibold">{props.notice.text}</span>
+            {props.notice.onAction ? (
+              <button
+                type="button"
+                onClick={props.notice.onAction}
+                className="shrink-0 rounded-card px-2 py-1 font-semibold underline"
+              >
+                {props.notice.actionText}
+              </button>
+            ) : null}
             {props.notice.href ? (
               <a
                 href={props.notice.href}

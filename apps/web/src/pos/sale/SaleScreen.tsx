@@ -5,6 +5,7 @@ import { dayText } from '../../lib/dates';
 import { CURRENCIES, type CurrencyCode } from '@serva/core/currencies';
 import { convert, lineGross } from '@serva/core/money';
 import type { Approval } from '@serva/core/contracts/documents';
+import { holdExpiryDaysOf } from '@serva/core/contracts/till';
 import { businessDateOf, packPrice, rateFor } from '@serva/core/sale';
 import { promotionActive, type PromotionAudience } from '@serva/core/promotions';
 import { parseScaleBarcode, qtyForPrice } from '@serva/core/scale';
@@ -60,6 +61,8 @@ import { CartWarnings } from './CartWarnings';
 import { BatchBanner } from './BatchBanner';
 import { QuoteDialog, type QuoteChoice } from './QuoteDialog';
 import { batchGuard, planBatches } from './batches';
+import { reservedForOthers } from './reserved';
+import { NewProductPanel } from './NewProductPanel';
 import { deviceDocuments } from '../shift/shift';
 import { bestSellers } from './bestSellers';
 import { AdjustPanel, NEED_TEXT, type AdjustMode, type AdjustValue } from './AdjustPanel';
@@ -144,6 +147,7 @@ export type SaleMode =
   | { kind: 'cancelSent'; lineNo: number }
   | { kind: 'online' }
   | { kind: 'hold' }
+  | { kind: 'newProduct'; barcode: string }
   | { kind: 'holdName' }
   | { kind: 'heldList' }
   | { kind: 'check' }
@@ -260,6 +264,39 @@ export function SaleScreen(props: SaleScreenProps) {
   // 03 › الصيدليات: what the cart takes from which batch (first expiry first), and from the shelf.
   // What this till sold and has not sent yet comes off what it last pulled, as it works offline.
   const posServices = usePos();
+  // Online orders this till sold, until the next pull says they are done
+  const [soldOnline, setSoldOnline] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void posServices.local.get<string[]>(ONLINE_SOLD_KEY).then((ids) => {
+      if (alive && ids) setSoldOnline(ids);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [posServices.local]);
+  // Decision 14: what customers' holds and the carts put aside keep back, so the same piece is not sold twice
+  const reservedNow = useMemo(
+    () =>
+      reservedForOthers({
+        orders: catalog.onlineOrders,
+        soldOnline,
+        held: props.heldList ?? [],
+        cart,
+        branchId: catalog.staff.branches.find((b) => b.code === posServices.device.branchCode)?.id ?? null,
+        till: settings.till,
+        now: Date.now(),
+      }),
+    [
+      catalog.onlineOrders,
+      catalog.staff.branches,
+      soldOnline,
+      props.heldList,
+      cart,
+      posServices.device.branchCode,
+      settings.till,
+    ],
+  );
   const [unsent, setUnsent] = useState<OutboxEntry[]>([]);
   useEffect(() => {
     let alive = true;
@@ -277,8 +314,9 @@ export function SaleScreen(props: SaleScreenProps) {
         today: businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff),
         pending: unsent,
         pharmacy: settings.pharmacy,
+        reserved: reservedNow,
       }),
-    [cart, catalog, unsent, settings.timezone, settings.businessDayCutoff, settings.pharmacy],
+    [cart, catalog, unsent, settings.timezone, settings.businessDayCutoff, settings.pharmacy, reservedNow],
   );
   const guard = useMemo(
     () => batchGuard(batchPlan, settings.pharmacy, settings.till?.blockNegativeStock === true),
@@ -332,6 +370,9 @@ export function SaleScreen(props: SaleScreenProps) {
     text: string;
     href?: string;
     linkText?: string;
+    /** A button instead of a link: runs here on the till (decision 15: «أضف صنف جديد») */
+    actionText?: string;
+    onAction?: () => void;
   } | null>(null);
   const [removed, setRemoved] = useState<{ line: Line; index: number } | null>(null);
   const [bump, setBump] = useState<number | null>(null);
@@ -469,17 +510,6 @@ export function SaleScreen(props: SaleScreenProps) {
     void pos.local.set(SELLER_KEY, { by: session.userId, id: cartSeller });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cartSeller]);
-  // Online orders this till sold, until the next pull says they are done
-  const [soldOnline, setSoldOnline] = useState<string[]>([]);
-  useEffect(() => {
-    let alive = true;
-    void pos.local.get<string[]>(ONLINE_SOLD_KEY).then((ids) => {
-      if (alive && ids) setSoldOnline(ids);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [pos.local]);
   const waitingOnline = waitingOrders(catalog.onlineOrders, soldOnline);
   const service = settings.service ?? null;
   // A café with no tables serves takeaway unless told otherwise
@@ -806,17 +836,19 @@ export function SaleScreen(props: SaleScreenProps) {
         });
         return;
       }
-      // A user who may manage the catalog (and is online) gets the new-product form with the code filled in
-      const canAdd = session.permissions.has('catalog.manage') && navigator.onLine;
+      // Decision 15: «أضف صنف جديد» right here for a user who manages the catalog, or after a manager's code
+      // (it needs the server: online only, said so when it is not)
       setNotice({
         tone: 'warning',
-        text: `الباركود ${code} غير معروف على هذا الجهاز. ابحث عن الصنف باسمه.`,
-        ...(canAdd
-          ? { href: `/products/new?barcode=${encodeURIComponent(code)}`, linkText: 'أضف الصنف' }
-          : {}),
+        text: `الباركود ${code} غير معروف على هذا الجهاز. ابحث عن الصنف باسمه، أو أضفه صنفاً جديداً.`,
+        actionText: 'أضف صنف جديد',
+        onAction: () => {
+          setNotice(null);
+          setMode({ kind: 'newProduct', barcode: code });
+        },
       });
     },
-    [catalog, add, settings.scaleBarcode, settings.till, session.permissions, ctx],
+    [catalog, add, settings.scaleBarcode, settings.till, ctx],
   );
 
   const keypadOpen =
@@ -828,6 +860,7 @@ export function SaleScreen(props: SaleScreenProps) {
     mode.kind === 'serial' ||
     mode.kind === 'rx' ||
     mode.kind === 'holdName' ||
+    mode.kind === 'newProduct' ||
     mode.kind === 'heldList';
   // While paying, amounts are typed and confirmed with Enter: only a full barcode counts as a scan.
   useScanner({
@@ -2538,6 +2571,23 @@ export function SaleScreen(props: SaleScreenProps) {
           }}
           onCancel={() => setMode({ kind: 'items' })}
         />
+      ) : effectiveMode.kind === 'newProduct' ? (
+        <NewProductPanel
+          barcode={effectiveMode.barcode}
+          currency={ctx.currency}
+          categories={catalog.categoryChoices ?? []}
+          staff={staff}
+          canManage={session.permissions.has('catalog.manage')}
+          userId={session.userId}
+          onClose={() => setMode({ kind: 'items' })}
+          onDone={(added) => {
+            setMode({ kind: 'items' });
+            setNotice({
+              tone: 'info',
+              text: `أُضيف «${added.name}». يصل إلى الكاشير مع أول مزامنة، ثم امسح الباركود مرة أخرى.`,
+            });
+          }}
+        />
       ) : effectiveMode.kind === 'hold' && priced ? (
         <HoldPanel
           cart={cart}
@@ -2548,6 +2598,7 @@ export function SaleScreen(props: SaleScreenProps) {
           timezone={settings.timezone}
           cutoff={settings.businessDayCutoff}
           onPrintDeposit={props.onPrintDeposit}
+          days={holdExpiryDaysOf(settings.till)}
           onClose={() => setMode({ kind: 'items' })}
           onDone={(hold) => {
             setCart(() => EMPTY_CART);

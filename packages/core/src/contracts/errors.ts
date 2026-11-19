@@ -24,6 +24,8 @@ export const ERROR_CODES = [
   'stale_version',
   /** The request repeats one that just happened (e.g. two tabs refreshing at once): retry */
   'conflict',
+  /** 409: the document is dated in a closed period (round 37, decision 17); the owner may reopen it */
+  'period_closed',
   /** 413: split the request (e.g. a sync batch) into smaller ones */
   'payload_too_large',
   'unsupported_media_type',

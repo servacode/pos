@@ -395,6 +395,10 @@ export interface OnlineOrderRow {
   deliveryArea: string | null;
   /** The offer the customer's code opened, as it was at the order: the till applies it when it sells it */
   couponRule?: OrderCouponRule | null;
+  /** Round 37 (decision 14): the branch a hold was made at (null: a shop order, filled at any branch) */
+  branchId?: string | null;
+  /** Round 37: the moment the order's reservation lapses (ISO); null or missing: it lasts until the order is sold or rejected */
+  reservedUntil?: string | null;
   version: number;
 }
 

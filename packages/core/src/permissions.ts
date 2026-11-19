@@ -53,6 +53,9 @@ export const PERMISSIONS = {
   'rep.targets': 'أهداف المندوبين وعمولاتهم',
   'routes.manage': 'المناطق وخطوط السير والمندوبون والسيارات',
   'sales_orders.manage': 'الطلبيات وحجزها وتسليمها',
+  // round 37 (decision 17), docs/specs/29-advanced-accounting.md › الأقفال: closing the books up to a date, and opening them again
+  'period.lock': 'إقفال الفترة المحاسبية حتى تاريخ',
+  'period.unlock': 'فتح فترة مقفلة (للمالك وحده)',
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -93,6 +96,9 @@ const OWNER_ONLY: readonly Permission[] = [
   'pharmacy.controlled',
   // 09 › rep.track: where the reps are is the owner's alone to see, and to grant to a supervisor
   'rep.track',
+  // 29 › الأقفال: the owner closes the period and the owner alone opens it again
+  'period.lock',
+  'period.unlock',
 ];
 
 /** Roles created automatically for every new store. The owner can edit them or add more. */

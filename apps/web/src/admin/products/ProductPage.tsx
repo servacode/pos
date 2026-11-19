@@ -478,6 +478,23 @@ function ProductCard() {
     }
   }
 
+  /** «اعتمد الصنف»: the owner has looked at a product made at the till; it joins the shop and leaves the review list */
+  async function approve() {
+    if (!product) return;
+    setArchiving('busy');
+    setFormError(null);
+    try {
+      const saved = await updateProduct(product.id, { version: product.version, status: 'active' });
+      setProduct(saved);
+      setDraft(draftFromDetail(saved));
+      setNotice('اعتُمد الصنف.');
+    } catch (error) {
+      setFormError(errorMessage(error));
+    } finally {
+      setArchiving(null);
+    }
+  }
+
   async function toggleArchive(archived: boolean) {
     if (!product) return;
     setArchiving('busy');
@@ -624,6 +641,16 @@ function ProductCard() {
             actions={
               canManage && product ? (
                 <>
+                  {!archived && product.status === 'temporary' ? (
+                    <Button
+                      variant="secondary"
+                      icon={<CheckIcon />}
+                      loading={archiving === 'busy'}
+                      onClick={() => void approve()}
+                    >
+                      اعتمد الصنف
+                    </Button>
+                  ) : null}
                   {!archived ? (
                     <ButtonLink to={`/labels?product=${product.id}`} icon={<PrintIcon />}>
                       اطبع الملصقات

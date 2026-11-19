@@ -358,6 +358,8 @@ export const updateProductInput = z
     taxRateId: uuidSchema.nullable().optional(),
     sellOnPos: z.boolean().optional(),
     modifiers: modifiersSchema.optional(),
+    /** Round 37: «اعتمد الصنف» — a product made at the till (temporary) is reviewed and becomes active; nothing else is set this way */
+    status: z.literal('active').optional(),
     variants: z.array(updateVariantInput).max(300, '300 متغيّر على الأكثر').optional(),
   })
   .superRefine((product, ctx) => {
@@ -412,7 +414,7 @@ export interface VariantStock {
   branchName: string;
   /** Thousandths; negative when sold below zero (10 › المخزون السالب) */
   qty: number;
-  /** Held for customer orders (phase 2); 0 until then */
+  /** Round 37: held for customers (holds at the till and accepted orders) at this branch, thousandths; available = qty - reservedQty */
   reservedQty: number;
 }
 

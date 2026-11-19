@@ -33,6 +33,8 @@ apps/api/src/services/subscription-gate.ts
 apps/api/src/services/purchase-order-receipt.ts
 apps/api/src/services/purchase-usd.ts
 packages/core/src/contracts/installments.ts
+packages/core/src/installments.ts
 apps/api/src/services/installments.ts
 apps/api/src/services/damaged-stock.ts
 apps/api/src/services/refund-drawers.ts
+apps/api/src/services/period-close.ts

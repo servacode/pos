@@ -13,6 +13,7 @@ const ProfitLossPage = lazy(() =>
   import('../ledger/ProfitLossPage').then((m) => ({ default: m.ProfitLossPage })),
 );
 const FinancialReportsPage = lazy(() => import('../financial/FinancialReportsPage'));
+const PeriodClosePage = lazy(() => import('./PeriodClosePage').then((m) => ({ default: m.PeriodClosePage })));
 
 /**
  * The accounting section's addresses (12 › المحاسبة), under /accounting: the chart, the journal, the
@@ -29,6 +30,7 @@ export default function AccountingRoutes() {
         <Route path="trial-balance" element={<TrialBalancePage />} />
         <Route path="profit-loss" element={<ProfitLossPage />} />
         <Route path="reports/:kind" element={<FinancialReportsPage />} />
+        <Route path="period-close" element={<PeriodClosePage />} />
         <Route path="*" element={<Navigate to="/accounting/accounts" replace />} />
       </Routes>
     </Suspense>

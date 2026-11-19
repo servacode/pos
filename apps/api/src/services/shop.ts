@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   convert,
   formatMoney,
+  holdExpiryDaysOf,
   promotionActive,
   promotionDiscount,
   rateFor,
@@ -16,6 +17,7 @@ import {
   type ShopOrderPlaced,
   type ShopOrderTrack,
   type ShopProduct,
+  type TillSettings,
   type TradeRate,
   type onlineOrderStatusInput,
   type holdInput,
@@ -43,6 +45,7 @@ import { AppError, isUniqueViolation } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { imageUrl } from './catalog/images';
+import { liveReservation, reservedAtBranch } from './reservations';
 
 /**
  * The online shop (26 › المتجر الإلكتروني; contracts/shop.ts): the store's goods on its own link,
@@ -264,10 +267,10 @@ function pricing(
 /** Active, for sale, and priced: an item at price 0 (a service, an unpriced piece) never reaches the public shop */
 const sellable = sql`p.archived_at is null and p.status = 'active' and p.sell_on_pos and pr.price_minor > 0`;
 const liveVariant = sql`v.archived_at is null`;
-/** Pieces held by accepted orders not sold yet, in stock units (a thousandth of a piece) */
+/** Pieces held by accepted orders not sold yet and not lapsed (reservations.ts), in stock units (a thousandth of a piece) */
 const heldSql = sql`coalesce((select sum((x->>'qty')::bigint) * 1000 from online_orders o
   cross join lateral jsonb_array_elements(o.lines) x
-  where o.status = 'accepted' and x->>'variantId' = v.id::text), 0)`;
+  where ${liveReservation} and x->>'variantId' = v.id::text), 0)`;
 /** On the shelf in any branch, less what accepted orders hold; or a service that has no stock */
 const availableSql = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0) - ${heldSql} > 0)`;
 /** What is left of the piece, in stock units; null for a service. Only «بقي 2 فقط» comes out of it. */
@@ -782,6 +785,38 @@ export function placeShopOrder(
 }
 
 /**
+ * A hold may reserve only what is available at its branch: on hand there less what other holds and
+ * orders already reserve. Refused with the number that is left, in the words of the till's own check.
+ */
+async function checkHoldAvailable(
+  tx: Transaction,
+  branchId: string,
+  lines: OnlineOrderLine[],
+): Promise<void> {
+  const ids = lines.map((l) => l.variantId);
+  const reserved = await reservedAtBranch(tx, branchId, ids);
+  const onHand = await tx.execute<{ variant_id: string; qty: string; service: boolean }>(sql`
+    select v.id as variant_id, coalesce(l.qty, 0)::text as qty, (p.type = 'service') as service
+    from variants v join products p on p.id = v.product_id
+    left join stock_levels l on l.variant_id = v.id and l.branch_id = ${branchId}
+    where v.id in (${sql.join(
+      ids.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    )})`);
+  for (const [index, line] of lines.entries()) {
+    const row = onHand.find((r) => r.variant_id === line.variantId);
+    if (!row || row.service) continue;
+    const free = Math.floor(Math.max(0, Number(row.qty) - (reserved.get(line.variantId) ?? 0)) / 1000);
+    if (line.qty > free) {
+      throw fieldError(
+        `lines.${index}`,
+        `المتاح من «${line.name}${line.label ? ` (${line.label})` : ''}» ${free} فقط، والباقي محجوز أو مباع. خفّض الكمية.`,
+      );
+    }
+  }
+}
+
+/**
  * «احجز» at the till (03 › الألبسة: الحجز بعربون): the cart held for a customer at this branch, as
  * an accepted order, so its pieces are held and it waits on the tills for pickup.
  */
@@ -796,6 +831,13 @@ export function placeHold(
     );
     const base = (settings?.base ?? 'SYP') as CurrencyCode;
     const lines = await priceLines(tx, base, input.lines, false);
+    // Decision 14: the pieces are reserved for the customer for the store's «مدة الحجز»; where the store
+    // forbids selling over the stock, a piece another hold or order already reserved cannot be held again
+    const [till] = await tx.execute<{ till: TillSettings | null }>(
+      sql`select till from tenant_settings where tenant_id = ${device.tenantId}`,
+    );
+    if (till?.till?.blockNegativeStock === true) await checkHoldAvailable(tx, device.branchId, lines);
+    const days = holdExpiryDaysOf(till?.till);
     const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
     const { seq, number } = await nextOrderNumber(tx, device.tenantId);
     const [made] = await tx
@@ -816,6 +858,7 @@ export function placeHold(
         lines,
         branchId: device.branchId,
         depositCode: input.depositCode,
+        reservedUntil: sql`now() + make_interval(days => ${days})`,
         decidedAt: sql`now()`,
       })
       .returning({ id: onlineOrders.id });

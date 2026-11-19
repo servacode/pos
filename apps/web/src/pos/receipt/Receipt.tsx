@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { CURRENCIES } from '@serva/core/currencies';
 import { convert, formatMoney } from '@serva/core/money';
-import { oldPoundText, returnWindowDays } from '@serva/core/contracts/till';
+import { oldPoundText, returnWindowDays, showOldPoundOn } from '@serva/core/contracts/till';
 import type { BranchRow, SettingsRow } from '@serva/core/contracts/catalog';
 import type {
   PaymentMethod,
@@ -487,7 +487,7 @@ export function Receipt({
     (sale.payments.some((p) => p.currency === foreignCode) || sale.change?.currency === foreignCode);
   const foreign = offered ? foreignCode : null;
   const t = sale.totals;
-  const oldPound = data.settings.till?.showOldPound === true && base === 'SYP';
+  const oldPound = showOldPoundOn(data.settings.till, data.doc.deviceTime) && base === 'SYP';
   // A discount keeps its fraction (37.5, not 38): the lines then add up to the total the same way the kernel did
   const exact = (minor: number) => (
     <ExactMoney

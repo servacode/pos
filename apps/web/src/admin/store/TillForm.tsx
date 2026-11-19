@@ -1,5 +1,12 @@
-import { useState } from 'react';
-import { returnWindowDays, warrantyAsksCustomer, type StoreResponse } from '@serva/core';
+import { useRef, useState } from 'react';
+import {
+  heldCartHoursOf,
+  holdExpiryDaysOf,
+  returnWindowDays,
+  showOldPoundOn,
+  warrantyAsksCustomer,
+  type StoreResponse,
+} from '@serva/core';
 import type { CurrencyCode } from '@serva/core/currencies';
 import { Alert, Button, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
@@ -18,7 +25,12 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   const [blockNegative, setBlockNegative] = useState(store.till?.blockNegativeStock === true);
   const [blockOverLimit, setBlockOverLimit] = useState(store.till?.creditOverLimit === 'block');
   const [belowCost, setBelowCost] = useState(store.till?.belowCostApproval === true);
-  const [oldPound, setOldPound] = useState(store.till?.showOldPound === true);
+  // A store that never set it sees it on until the end of July 2027 (decision 8); saving the form without
+  // touching it leaves the setting unset, so the default keeps following the date
+  const [oldPound, setOldPound] = useState(showOldPoundOn(store.till));
+  const oldPoundTouched = useRef(false);
+  const [holdDays, setHoldDays] = useState(String(holdExpiryDaysOf(store.till)));
+  const [cartHours, setCartHours] = useState(String(heldCartHoursOf(store.till)));
   const [beep, setBeep] = useState(store.till?.scanBeep !== false);
   const [lock, setLock] = useState(store.till?.cashierLock === true);
   const [askCustomer, setAskCustomer] = useState(warrantyAsksCustomer(store.till, store.sectors));
@@ -37,7 +49,11 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   // Typed as it is: «3.5» and «-5» are refused with the message, never silently turned into 35 or 5
   const typed = days.trim() === '' ? null : Number(days);
   const daysBad = typed !== null && (!/^\d+$/.test(days.trim()) || typed < 1 || typed > 365);
-  const bad = daysBad || emptyNotes;
+  const holdTyped = Number(holdDays);
+  const holdBad = !/^\d+$/.test(holdDays.trim()) || holdTyped < 1 || holdTyped > 90;
+  const cartTyped = Number(cartHours);
+  const cartBad = !/^\d+$/.test(cartHours.trim()) || cartTyped < 1 || cartTyped > 72;
+  const bad = daysBad || emptyNotes || holdBad || cartBad;
   // A store opened before the new pound still counts cash by old notes: one tap moves it to the built-in list
   const oldNotes = (notes.SYP ?? []).some((v) => v >= 1000);
   // What the form holds now against what was last saved: while they differ the bar says so
@@ -49,6 +65,8 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
       blockOverLimit,
       belowCost,
       oldPound,
+      holdDays,
+      cartHours,
       beep,
       lock,
       askCustomer,
@@ -84,7 +102,16 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
             : {}),
           creditOverLimit: blockOverLimit ? 'block' : 'approve',
           belowCostApproval: belowCost,
-          showOldPound: oldPound,
+          // Only a choice the owner made is stored: otherwise the default (on until July 2027) keeps following the date
+          ...(oldPoundTouched.current || store.till?.showOldPound !== undefined
+            ? { showOldPound: oldPound }
+            : {}),
+          ...(holdTyped !== holdExpiryDaysOf(null) || store.till?.holdExpiryDays !== undefined
+            ? { holdExpiryDays: holdTyped }
+            : {}),
+          ...(cartTyped !== heldCartHoursOf(null) || store.till?.heldCartHours !== undefined
+            ? { heldCartHours: cartTyped }
+            : {}),
           scanBeep: beep,
           cashierLock: lock,
           warrantyAskCustomer: askCustomer,
@@ -159,9 +186,32 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
       />
       <Switch
         label="اطبع سطر «بالقديم» تحت الإجمالي"
-        description="يُكتب المبلغ بالليرة القديمة تحت الإجمالي على الإيصال والفاتورة. للعرض فقط، ولا يغيّر أي مبلغ."
+        description="يُكتب المبلغ بالليرة القديمة تحت الإجمالي على الإيصال والفاتورة. للعرض فقط، ولا يغيّر أي مبلغ. يعمل من تلقاء نفسه حتى نهاية تموز 2027 ثم يتوقف، إلا إذا اخترت أنت."
         checked={oldPound}
-        onCheckedChange={setOldPound}
+        onCheckedChange={(on) => {
+          oldPoundTouched.current = true;
+          setOldPound(on);
+        }}
+      />
+      <TextField
+        label="أيام بقاء الحجز للزبون"
+        hint="القطع المحجوزة لا تُباع لغيره خلال هذه المدة، ثم تعود متاحة. القطعة لا تُحذف ولا تتحرك من المخزون."
+        inputMode="numeric"
+        dir="ltr"
+        value={holdDays}
+        onChange={(e) => setHoldDays(e.target.value.slice(0, 3))}
+        error={holdBad ? 'اكتب عدداً من 1 إلى 90' : undefined}
+        inputClassName="num"
+      />
+      <TextField
+        label="ساعات بقاء الفاتورة المعلّقة"
+        hint="قطع الفاتورة المعلّقة على الكاشير محجوزة لها هذه المدة، ثم تعود متاحة للبيع."
+        inputMode="numeric"
+        dir="ltr"
+        value={cartHours}
+        onChange={(e) => setCartHours(e.target.value.slice(0, 2))}
+        error={cartBad ? 'اكتب عدداً من 1 إلى 72' : undefined}
+        inputClassName="num"
       />
       <Switch
         label="صوت عند مسح الباركود"

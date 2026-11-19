@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type {
   AgentActivation,
+  AgentCodeStep,
   AgentLedgerRow,
   AgentLoginResponse,
   AgentMe,
@@ -14,7 +15,7 @@ import type {
 } from '@serva/core';
 import { hashSecret } from '../src/auth/passwords';
 import { ManualClock, DAY_MS } from '../src/clock';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
+import { closeAppDb, closeOwnerDb, codes, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
 
 /**
  * The agents program (contracts/agents.ts; 07 › برنامج الوكلاء): the owner adds agents and tops up
@@ -84,11 +85,26 @@ async function addAgent(over: Record<string, unknown> = {}): Promise<string> {
   return res.json<{ id: string }>().id;
 }
 
+const AGENT_PHONE = '+963944111222';
+
+/** Both steps of the agent's sign-in (round 37, decision 21): the password, then the code that went to his phone. */
+async function signIn(email = 'raqqa@agents.test', password = 'temp-pass-123', phone = AGENT_PHONE) {
+  const first = await app.inject({ method: 'POST', url: '/v1/agent/login', payload: { email, password } });
+  expect(first.statusCode, first.body).toBe(200);
+  const step = first.json<AgentCodeStep>();
+  expect(step.step).toBe('code');
+  const second = await app.inject({
+    method: 'POST',
+    url: '/v1/agent/login/code',
+    payload: { challengeId: step.challengeId, code: codes.last(phone) },
+  });
+  expect(second.statusCode, second.body).toBe(200);
+  return second.json<AgentLoginResponse>();
+}
+
 /** A signed-in agent whose temporary password is already changed. */
 async function agentSession(email = 'raqqa@agents.test', password = 'temp-pass-123') {
-  const login = await app.inject({ method: 'POST', url: '/v1/agent/login', payload: { email, password } });
-  expect(login.statusCode, login.body).toBe(200);
-  const body = login.json<AgentLoginResponse>();
+  const body = await signIn(email, password);
   const headers = { authorization: `Bearer ${body.token}` };
   if (body.agent.mustChangePassword) {
     const changed = await app.inject({
@@ -308,12 +324,7 @@ describe('the prepaid balance', () => {
 describe('the agent signs in on his own', () => {
   it('the temporary password opens nothing but the change of password', async () => {
     await addAgent();
-    const login = await app.inject({
-      method: 'POST',
-      url: '/v1/agent/login',
-      payload: { email: 'raqqa@agents.test', password: 'temp-pass-123' },
-    });
-    const body = login.json<AgentLoginResponse>();
+    const body = await signIn();
     expect(body.agent.mustChangePassword).toBe(true);
     const headers = { authorization: `Bearer ${body.token}` };
     expect((await app.inject({ method: 'GET', url: '/v1/agent/stores', headers })).statusCode).toBe(403);
@@ -346,15 +357,7 @@ describe('the agent signs in on his own', () => {
         })
       ).statusCode,
     ).toBe(401);
-    expect(
-      (
-        await app.inject({
-          method: 'POST',
-          url: '/v1/agent/login',
-          payload: { email: 'raqqa@agents.test', password: 'my-own-pass-1' },
-        })
-      ).json<AgentLoginResponse>().agent.mustChangePassword,
-    ).toBe(false);
+    expect((await signIn('raqqa@agents.test', 'my-own-pass-1')).agent.mustChangePassword).toBe(false);
   });
 
   it('a wrong password or an unknown email gives the same answer, and many tries are stopped', async () => {
@@ -740,5 +743,123 @@ describe('the agent’s tables are the platform’s alone', () => {
              has_table_privilege('serva_app', 'agent_ledger', 'select') as ledger,
              has_function_privilege('public', 'agent_activate(uuid, uuid, text, billing_cycle, text, timestamptz)', 'execute') as fn`;
     expect(reads[0]).toEqual({ agents: false, ledger: false, fn: false });
+  });
+});
+
+describe('the agent’s second step (round 37, decision 21)', () => {
+  const login = (password = 'temp-pass-123') =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/agent/login',
+      payload: { email: 'raqqa@agents.test', password },
+    });
+  const sendCode = (challengeId: string, code: string) =>
+    app.inject({ method: 'POST', url: '/v1/agent/login/code', payload: { challengeId, code } });
+
+  it('the password alone opens nothing: it answers a step and sends a code to his phone', async () => {
+    await addAgent();
+    const first = await login();
+    expect(first.statusCode).toBe(200);
+    const body = first.json<Record<string, unknown>>();
+    expect(body).toMatchObject({ step: 'code', expiresIn: 600, phoneHint: '222••••' });
+    expect(body.token).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain(codes.last(AGENT_PHONE)!);
+    expect(codes.sent.at(-1)).toMatchObject({ phone: AGENT_PHONE, purpose: 'agent_login' });
+  });
+
+  it('the right code opens the portal once; the same code cannot be used again', async () => {
+    await addAgent();
+    const step = (await login()).json<AgentCodeStep>();
+    const code = codes.last(AGENT_PHONE)!;
+    expect(code).toMatch(/^\d{6}$/);
+    const ok = await sendCode(step.challengeId, code);
+    expect(ok.statusCode, ok.body).toBe(200);
+    const body = ok.json<AgentLoginResponse>();
+    expect(body.agent).toMatchObject({ fullName: 'وكيل الرقة', code: 'AG-42' });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/v1/agent/me',
+          headers: { authorization: `Bearer ${body.token}` },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect((await sendCode(step.challengeId, code)).statusCode).toBe(400);
+  });
+
+  it('a wrong code is refused, five wrong ones lock the challenge even for the right code', async () => {
+    await addAgent();
+    const step = (await login()).json<AgentCodeStep>();
+    const right = codes.last(AGENT_PHONE)!;
+    const wrong = right === '000000' ? '111111' : '000000';
+    const first = await sendCode(step.challengeId, wrong);
+    expect(first.statusCode).toBe(400);
+    expect(first.json().error.code).toBe('otp_invalid');
+    let last = 0;
+    for (let i = 0; i < 4; i++) last = (await sendCode(step.challengeId, wrong)).statusCode;
+    expect(last).toBe(429);
+    expect((await sendCode(step.challengeId, right)).statusCode).toBe(429);
+    // A new sign-in sends a new code and works
+    const again = (await login()).json<AgentCodeStep>();
+    expect(again.challengeId).not.toBe(step.challengeId);
+    expect((await sendCode(again.challengeId, codes.last(AGENT_PHONE)!)).statusCode).toBe(200);
+  });
+
+  it('a code lives ten minutes', async () => {
+    await addAgent();
+    const step = (await login()).json<AgentCodeStep>();
+    const code = codes.last(AGENT_PHONE)!;
+    clock.advance(11 * 60_000);
+    const late = await sendCode(step.challengeId, code);
+    expect(late.statusCode).toBe(400);
+    expect(late.json().error.message).toContain('انتهت');
+  });
+
+  it('a wrong password sends no code at all', async () => {
+    await addAgent();
+    const before = codes.sent.length;
+    expect((await login('wrong-wrong')).statusCode).toBe(401);
+    expect(codes.sent.length).toBe(before);
+  });
+
+  it('a suspended agent is stopped at the code, not let in with a code he already had', async () => {
+    const id = await addAgent();
+    const step = (await login()).json<AgentCodeStep>();
+    const code = codes.last(AGENT_PHONE)!;
+    await app.inject({
+      method: 'PUT',
+      url: `/v1/platform/agents/${id}`,
+      headers: await platformAdmin(),
+      payload: agentBody({ status: 'suspended', password: '' }),
+    });
+    expect((await sendCode(step.challengeId, code)).statusCode).toBe(401);
+  });
+
+  it('an agent with no phone number saved is told to ask the administration, and no code is sent', async () => {
+    await addAgent({ phone: '' });
+    const before = codes.sent.length;
+    const res = await login();
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error.message).toContain('رقم جوال');
+    expect(codes.sent.length).toBe(before);
+  });
+
+  it('a code of one challenge does not open another agent’s', async () => {
+    await addAgent();
+    await addAgent({ code: 'ag-43', email: 'homs@agents.test', phone: '0955333444', fullName: 'وكيل حمص' });
+    const a = (await login()).json<AgentCodeStep>();
+    const b = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/agent/login',
+        payload: { email: 'homs@agents.test', password: 'temp-pass-123' },
+      })
+    ).json<AgentCodeStep>();
+    const codeOfB = codes.last('+963955333444')!;
+    const codeOfA = codes.last(AGENT_PHONE)!;
+    if (codeOfA !== codeOfB) expect((await sendCode(a.challengeId, codeOfB)).statusCode).toBe(400);
+    const ok = await sendCode(b.challengeId, codeOfB);
+    expect(ok.json<AgentLoginResponse>().agent.fullName).toBe('وكيل حمص');
   });
 });

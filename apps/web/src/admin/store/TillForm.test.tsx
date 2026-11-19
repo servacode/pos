@@ -1,5 +1,5 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MeResponse, StoreResponse } from '@serva/core';
 import { mockFetch, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
@@ -73,7 +73,9 @@ describe('«الصندوق» in the settings', () => {
     expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({ blockNegativeStock: true });
   });
 
-  it('saves the old-pound line, the scan sound and the cashier lock (off, on, off until turned on)', async () => {
+  it('saves the old-pound line, the scan sound and the cashier lock (on by default until July 2027, on, off)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-18T10:00:00Z'));
     const current = store(['supermarket']);
     const { requestsTo } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
@@ -86,7 +88,8 @@ describe('«الصندوق» in the settings', () => {
     const old = within(form).getByRole('switch', { name: /سطر «بالقديم»/ });
     const beep = within(form).getByRole('switch', { name: /صوت عند مسح الباركود/ });
     const lock = within(form).getByRole('switch', { name: /قفل الكاشير/ });
-    expect(old).not.toBeChecked();
+    // Round 37, decision 8: a store that never set it sees the line on by default
+    expect(old).toBeChecked();
     expect(beep).toBeChecked();
     expect(lock).not.toBeChecked();
     await user.click(old);
@@ -95,10 +98,56 @@ describe('«الصندوق» in the settings', () => {
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
     expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({
-      showOldPound: true,
+      showOldPound: false,
       scanBeep: false,
       cashierLock: true,
     });
+    vi.useRealTimers();
+  });
+
+  it('leaves the old-pound line unset when the owner never touches it, and saves the hold times only when changed', async () => {
+    const current = store(['supermarket']);
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    // 7 days and 12 hours by default; saving another change stores neither, nor the old-pound choice
+    expect(within(form).getByLabelText('أيام بقاء الحجز للزبون')).toHaveValue('7');
+    expect(within(form).getByLabelText('ساعات بقاء الفاتورة المعلّقة')).toHaveValue('12');
+    await user.click(within(form).getByRole('switch', { name: /صوت عند مسح الباركود/ }));
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    const first = requestsTo('PUT', '/v1/store/till').at(-1)?.body as Record<string, unknown>;
+    expect(first).not.toHaveProperty('showOldPound');
+    expect(first).not.toHaveProperty('holdExpiryDays');
+    expect(first).not.toHaveProperty('heldCartHours');
+
+    const days = within(form).getByLabelText('أيام بقاء الحجز للزبون');
+    await user.clear(days);
+    await user.type(days, '3');
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    await within(form).findByText(/حُفظ/);
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({ holdExpiryDays: 3 });
+  });
+
+  it('refuses a hold time outside 1 to 90 days', async () => {
+    const current = store(['supermarket']);
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    const days = within(form).getByLabelText('أيام بقاء الحجز للزبون');
+    await user.clear(days);
+    await user.type(days, '120');
+    expect(within(form).getByText('اكتب عدداً من 1 إلى 90')).toBeInTheDocument();
+    expect(within(form).getByRole('button', { name: 'احفظ' })).toBeDisabled();
   });
 
   it('refuses a window outside 1 to 365 and shows a failed save', async () => {

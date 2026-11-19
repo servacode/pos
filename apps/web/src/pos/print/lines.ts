@@ -5,7 +5,7 @@ import type {
   ReturnPayload,
   SalePayload,
 } from '@serva/core/contracts/documents';
-import { oldPoundText } from '@serva/core/contracts/till';
+import { oldPoundText, showOldPoundOn } from '@serva/core/contracts/till';
 import { formatMoney } from '@serva/core/money';
 import { stripBidiControls } from '@serva/core/text';
 import { formatQuantity } from '@serva/ui';
@@ -236,7 +236,7 @@ export function receiptLines(data: ReceiptData, copy = false): PrintLine[] {
     });
   }
   lines.push({ kind: 'pair', start: 'الإجمالي', end: money(t.totalMinor, base), bold: true });
-  const oldPound = data.settings.till?.showOldPound === true && base === 'SYP';
+  const oldPound = showOldPoundOn(data.settings.till, data.doc.deviceTime) && base === 'SYP';
   if (oldPound) lines.push({ kind: 'pair', start: 'بالقديم', end: oldPoundText(t.totalMinor) });
   lines.push({ kind: 'rule' });
   for (const p of sale.payments) {

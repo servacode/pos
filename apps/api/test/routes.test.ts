@@ -7,7 +7,7 @@ import { cartLine, documents, openStore, push, sale, shiftOpen } from './account
 import { createDevice, deviceFields, firstBranch } from './devices';
 import { hashDeviceToken } from '../src/auth/device-guard';
 import { hashSecret } from '../src/auth/passwords';
-import { closeAppDb, closeOwnerDb, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
+import { closeAppDb, closeOwnerDb, codes, makeApp, ownerDb, registerStore, resetDatabase } from './helpers';
 
 /**
  * Every route is classified here. A new route fails this file until it is: public routes are
@@ -123,6 +123,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/platform/agents/:id/balance': 'platform',
   'PUT /v1/platform/stores/:id/agent': 'platform',
   'POST /v1/agent/login': 'public',
+  'POST /v1/agent/login/code': 'public',
   'PUT /v1/agent/password': 'agent',
   'GET /v1/agent/me': 'agent',
   'GET /v1/agent/stores': 'agent',
@@ -220,6 +221,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/staff/:id/deactivate': 'signed-in',
   'POST /v1/staff/:id/reactivate': 'signed-in',
   'POST /v1/device/holds': 'device',
+  'POST /v1/device/products': 'device',
   'POST /v1/broadcasts/preview': 'signed-in',
   'POST /v1/broadcasts': 'signed-in',
   'GET /v1/broadcasts': 'signed-in',
@@ -271,6 +273,13 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/supplier-returns': 'signed-in',
   'POST /v1/supplier-returns': 'signed-in',
   'POST /v1/transfers': 'signed-in',
+  'GET /v1/transfers/settings': 'signed-in',
+  'PUT /v1/transfers/settings': 'signed-in',
+  'GET /v1/transfers/:id': 'signed-in',
+  'POST /v1/transfers/:id/receive': 'signed-in',
+  'GET /v1/period-close': 'signed-in',
+  'POST /v1/period-close/close': 'signed-in',
+  'POST /v1/period-close/reopen': 'signed-in',
   'POST /v1/prices/bulk': 'signed-in',
   'POST /v1/prices/list/preview': 'signed-in',
   'POST /v1/prices/list/apply': 'signed-in',
@@ -674,6 +683,44 @@ async function supplierOf(app: FastifyInstance, a: Stores['a']) {
     payload: { name: 'مورد أ' },
   });
   return made.json<{ id: string }>().id;
+}
+
+let transitCount = 0;
+/** A transfer of store A on its way between two of its branches */
+async function transitOf(app: FastifyInstance, a: Stores['a']) {
+  const product = await productOf(app, a);
+  const supplierId = await supplierOf(app, a);
+  const [main] = await ownerDb()<
+    { id: string }[]
+  >`select id from branches where tenant_id = ${a.tenantId} order by code limit 1`;
+  const [other] = await ownerDb()<{ id: string }[]>`
+    insert into branches (tenant_id, code, name) values (${a.tenantId}, ${`0${70 + ++transitCount}`}, 'فرع آخر') returning id`;
+  const bought = await app.inject({
+    method: 'POST',
+    url: '/v1/purchases',
+    headers: owner(a),
+    payload: {
+      supplierId,
+      date: '2026-10-30',
+      payment: 'credit',
+      lines: [{ variantId: product.variants[0]!.id, qty: 5000, costMinor: 500 }],
+    },
+  });
+  expect(bought.statusCode, bought.body).toBe(201);
+  const sent = await app.inject({
+    method: 'POST',
+    url: '/v1/transfers',
+    headers: owner(a),
+    payload: {
+      fromBranchId: main!.id,
+      toBranchId: other!.id,
+      date: '2026-10-30',
+      mode: 'transit',
+      lines: [{ variantId: product.variants[0]!.id, qty: 2000 }],
+    },
+  });
+  expect(sent.statusCode, sent.body).toBe(201);
+  return { transferId: sent.json<{ id: string }>().id };
 }
 
 /** A product of store A with one picture */
@@ -1321,6 +1368,26 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     const [row] = await ownerDb()<
       { n: string }[]
     >`select count(*)::text as n from purchase_reversals where purchase_id = ${id}`;
+    expect(row!.n).toBe('0');
+  },
+  // Round 37 (decision 16): another store's transfer on its way is not read or received by a stranger
+  'GET /v1/transfers/:id': async (app, { a, b }) => {
+    const { transferId } = await transitOf(app, a);
+    const res = await app.inject({ method: 'GET', url: `/v1/transfers/${transferId}`, headers: owner(b) });
+    expect(res.statusCode).toBe(404);
+  },
+  'POST /v1/transfers/:id/receive': async (app, { a, b }) => {
+    const { transferId } = await transitOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/transfers/${transferId}/receive`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from transfer_receipts where transfer_id = ${transferId}`;
     expect(row!.n).toBe('0');
   },
   // Another store's purchase order answers 404 for reading, editing and moving on, and stays as it was
@@ -2000,8 +2067,8 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       ['2', b.tenantId],
     ] as const) {
       const [agent] = await ownerDb()<{ id: string }[]>`
-        insert into agents (code, full_name, email, password_hash, balance_minor)
-        values (${'AG-' + n}, ${'وكيل ' + n}, ${`agent${n}@agents.test`}, ${hash}, 5000) returning id`;
+        insert into agents (code, full_name, email, phone, password_hash, balance_minor)
+        values (${'AG-' + n}, ${'وكيل ' + n}, ${`agent${n}@agents.test`}, ${`+96394400000${n}`}, ${hash}, 5000) returning id`;
       await ownerDb()`update tenants set agent_id = ${agent!.id} where id = ${tenantId}`;
       await ownerDb()`update subscriptions set trial_ends_at = '2026-10-01T00:00:00Z' where tenant_id = ${tenantId}`;
       ids.push(agent!.id);
@@ -2011,7 +2078,14 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       url: '/v1/agent/login',
       payload: { email: 'agent1@agents.test', password: 'agent-pass-123' },
     });
-    const headers = { authorization: `Bearer ${login.json<{ token: string }>().token}` };
+    // Round 37 (decision 21): the password opens a second step, the code that went to his phone
+    const step = login.json<{ challengeId: string }>();
+    const signed = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/login/code',
+      payload: { challengeId: step.challengeId, code: codes.last('+963944000001') },
+    });
+    const headers = { authorization: `Bearer ${signed.json<{ token: string }>().token}` };
     const go = (tenantId: string) =>
       app.inject({
         method: 'POST',
@@ -2277,6 +2351,30 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     });
     expect(res.statusCode).toBe(400);
     const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from online_orders`;
+    expect(n!.n).toBe(0);
+  },
+  // Store B's device naming store A's owner as the one who adds the product: refused, and neither store gets one
+  'POST /v1/device/products': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const [ownerA] = await ownerDb()<
+      { id: string }[]
+    >`select id from users where tenant_id = ${a.tenantId} limit 1`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/products',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        actorId: ownerA!.id,
+        nameAr: 'صنف دخيل',
+        priceMinor: 1000,
+        categoryId: null,
+        barcode: 'IDOR-NEW-1',
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from products where name_ar = 'صنف دخيل'`;
     expect(n!.n).toBe(0);
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {

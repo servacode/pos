@@ -76,6 +76,8 @@
 /packages/core/src/contracts/customers.ts @servacode
 /packages/core/src/contracts/cheques.ts @servacode
 /packages/core/src/contracts/installments.ts @servacode
+# the instalment fee line sale-return.ts takes back with the goods (round 37, decision 18)
+/packages/core/src/installments.ts @servacode
 /apps/api/src/services/installments.ts @servacode
 # the drawers a cash refund came out of (the dollar's, round 36)
 /apps/api/src/services/refund-drawers.ts @servacode
@@ -118,3 +120,5 @@
 # the staff the golden day posts as
 /apps/api/test/staff.ts @servacode
 
+# the period close the posting door reads (round 37, decision 17)
+/apps/api/src/services/period-close.ts @servacode

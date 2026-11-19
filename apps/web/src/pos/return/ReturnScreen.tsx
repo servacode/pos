@@ -7,12 +7,14 @@ import {
 } from '@serva/core/contracts/documents';
 import { PRICING_ENGINE_VERSION } from '@serva/core/pricing';
 import { businessDateOf } from '@serva/core/sale';
+import { INSTALMENT_FEE_VARIANT_ID } from '@serva/core/installments';
 import {
   buildReturnPayload,
   defaultForeignRefund,
   defaultRefundMethod,
   paidForeign,
   returnableLines,
+  withInstalmentFee,
 } from '@serva/core/sale-return';
 import { convert, toMinor } from '@serva/core/money';
 import type { OutboxEntry, SyncDocument } from '@serva/sync';
@@ -303,9 +305,15 @@ export function ReturnScreen({
     () => (current ? medicineRulesOf(current.sale, catalog, settings.pharmacy) : new Map()),
     [current, catalog, settings.pharmacy],
   );
-  const picks = Object.entries(qty)
+  const chosen = Object.entries(qty)
     .map(([lineNo, q]) => ({ saleLineNo: Number(lineNo), qty: q }))
     .filter((p) => p.qty > 0);
+  // Decision 18: the instalment fee goes back with the goods (in full when the whole sale returns, else in proportion)
+  const picks = current ? withInstalmentFee(current.sale, chosen, current.returned) : chosen;
+  const feeLineNo =
+    current?.sale.installmentPlan !== undefined && current.sale.installmentPlan !== null
+      ? (current.sale.lines.find((l) => l.variantId === INSTALMENT_FEE_VARIANT_ID)?.lineNo ?? null)
+      : null;
   const why = reason === 'other' ? otherReason.trim() : reason;
   const broken = brokenPicked ?? reason === DAMAGED_REASON;
   const needsReference = method !== 'cash' && method !== 'voucher' && method !== 'account';
@@ -820,6 +828,7 @@ export function ReturnScreen({
                 <ul className="flex flex-col divide-y divide-line border-t border-line">
                   {lines.map((line) => {
                     const q = qty[line.saleLineNo] ?? 0;
+                    const isFee = feeLineNo !== null && line.saleLineNo === feeLineNo;
                     const set = (next: number) =>
                       setQty((all) => ({
                         ...all,
@@ -837,7 +846,14 @@ export function ReturnScreen({
                             {line.returnedQty > 0 ? ` · رجع ${formatQuantity(line.returnedQty, digits)}` : ''}
                           </span>
                         </span>
-                        {line.remainingQty === 0 || medicineRules.get(line.saleLineNo)?.kind === 'blocked' ? (
+                        {isFee && line.remainingQty > 0 ? (
+                          <span className="text-sm text-ink-muted">
+                            {picks.some((p) => p.saleLineNo === line.saleLineNo)
+                              ? 'يُرجَع مع البضاعة'
+                              : 'يُرجَع مع إرجاع البضاعة'}
+                          </span>
+                        ) : line.remainingQty === 0 ||
+                          medicineRules.get(line.saleLineNo)?.kind === 'blocked' ? (
                           <Badge>{line.remainingQty === 0 ? 'رجع كله' : 'لا يُرجَع'}</Badge>
                         ) : (
                           <span

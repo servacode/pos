@@ -28,6 +28,7 @@ import { exportRoutes } from './routes/export';
 import { importRoutes } from './routes/import';
 import { storeRoutes } from './routes/store';
 import { customerRoutes } from './routes/customers';
+import { periodCloseRoutes } from './routes/period-close';
 import { purchaseRoutes } from './routes/purchases';
 import { pharmacyRoutes } from './routes/pharmacy';
 import { alterationRoutes } from './routes/alterations';
@@ -168,6 +169,7 @@ export async function buildApp({
   await app.register(exportRoutes);
   await app.register(storeRoutes);
   await app.register(customerRoutes);
+  await app.register(periodCloseRoutes);
   await app.register(purchaseRoutes);
   await app.register(pharmacyRoutes);
   await app.register(shopRoutes);

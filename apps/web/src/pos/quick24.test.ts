@@ -35,9 +35,9 @@ function sale(paidInDollars: boolean) {
   });
 }
 
-const dataFor = (payload: unknown, till?: Record<string, unknown>) =>
+const dataFor = (payload: unknown, till?: Record<string, unknown>, deviceTime = '2026-10-30T09:00:00.000Z') =>
   ({
-    doc: { number: 'INV-1', deviceTime: '2026-10-30T09:00:00.000Z', payload },
+    doc: { number: 'INV-1', deviceTime, payload },
     settings: { storeName: 'مركز', timezone: 'Asia/Damascus', businessDayCutoff: '00:00', till },
     branch: null,
     storeName: 'مركز',
@@ -55,12 +55,28 @@ describe('«بالقديم» on the receipt (display only)', () => {
     expect(receiptText(dataFor(sale(false), { showOldPound: true }))).toContain('بالقديم: 12,500');
   });
 
-  it('says nothing by default', () => {
-    expect(JSON.stringify(receiptLines(dataFor(sale(false))))).not.toContain('بالقديم');
+  it('says nothing for a store that turned it off, on any date', () => {
     expect(JSON.stringify(receiptLines(dataFor(sale(false), { showOldPound: false })))).not.toContain(
       'بالقديم',
     );
-    expect(receiptText(dataFor(sale(false)))).not.toContain('بالقديم');
+    expect(receiptText(dataFor(sale(false), { showOldPound: false }))).not.toContain('بالقديم');
+  });
+
+  // Round 37, decision 8: on by default for a store that never set it, off by itself after July 2027
+  it('is on by default until the end of July 2027, then off by itself', () => {
+    expect(receiptText(dataFor(sale(false)))).toContain('بالقديم: 12,500');
+    expect(JSON.stringify(receiptLines(dataFor(sale(false))))).toContain('بالقديم');
+    expect(receiptText(dataFor(sale(false), undefined, '2027-07-31T20:00:00.000Z'))).toContain('بالقديم');
+    expect(receiptText(dataFor(sale(false), undefined, '2027-08-01T09:00:00.000Z'))).not.toContain('بالقديم');
+    expect(JSON.stringify(receiptLines(dataFor(sale(false), {}, '2028-01-05T09:00:00.000Z')))).not.toContain(
+      'بالقديم',
+    );
+  });
+
+  it('keeps the choice of a store that set it, after July 2027 too', () => {
+    expect(receiptText(dataFor(sale(false), { showOldPound: true }, '2028-01-05T09:00:00.000Z'))).toContain(
+      'بالقديم: 12,500',
+    );
   });
 });
 

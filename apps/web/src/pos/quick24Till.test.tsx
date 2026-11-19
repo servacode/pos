@@ -25,18 +25,22 @@ function setsWith(till: Record<string, unknown>, extra: string[] = []) {
 }
 
 describe('unknown barcode: add the product', () => {
+  // Round 37, decision 15: «أضف صنف جديد» opens right on the till, with the code filled in
   it('offers the new-product form with the code to a user who manages the catalog', async () => {
     const { user } = await saleScreen({ sets: setsWith({}, ['catalog.manage']) });
     await scan(user, '9999999999999');
-    const link = within(screen.getByRole('alert')).getByRole('link', { name: 'أضف الصنف' });
-    expect(link).toHaveAttribute('href', '/products/new?barcode=9999999999999');
-    expect(link).toHaveAttribute('target', '_blank');
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'أضف صنف جديد' }));
+    const panel = await screen.findByRole('region', { name: 'أضف صنف جديد' });
+    expect(panel).toHaveTextContent('9999999999999');
+    expect(within(panel).getByRole('button', { name: 'أضف الصنف' })).toBeInTheDocument();
   });
 
-  it('offers nothing to a cashier without that right', async () => {
+  it('offers it to a cashier too, but only with a manager’s code', async () => {
     const { user } = await saleScreen();
     await scan(user, '9999999999999');
-    expect(within(screen.getByRole('alert')).queryByRole('link')).not.toBeInTheDocument();
+    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'أضف صنف جديد' }));
+    const panel = await screen.findByRole('region', { name: 'أضف صنف جديد' });
+    expect(within(panel).getByRole('button', { name: 'أضف الصنف برمز مدير' })).toBeInTheDocument();
   });
 });
 

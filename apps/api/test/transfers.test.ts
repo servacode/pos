@@ -28,6 +28,8 @@ async function setUp() {
   >`select id from branches where tenant_id = ${store.tenantId}`;
   const [mall] = await ownerDb()<{ id: string }[]>`
     insert into branches (tenant_id, code, name) values (${store.tenantId}, '002', 'فرع المول') returning id`;
+  // These tests are of the instant transfer; the one «بالطريق» is in transfers-transit.test.ts (round 37)
+  await ownerDb()`update tenant_settings set transfer_mode = 'instant' where tenant_id = ${store.tenantId}`;
   const product = (
     await app.inject({
       method: 'POST',
@@ -114,6 +116,9 @@ describe('transfers between branches', () => {
         toBranch: 'فرع المول',
         pieces: 4000,
         valueMinor: 160_000,
+        status: 'received',
+        fromBranchId: main,
+        toBranchId: mall,
       },
     ]);
   });

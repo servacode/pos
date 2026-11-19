@@ -29,6 +29,7 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { lockedThrough } from './period-close';
 import { postEntry, type DraftLine } from './posting';
 
 /**
@@ -529,6 +530,9 @@ async function reverseEntry(tx: Transaction, auth: AccessClaims, entryId: string
     shiftId: l.shift_id,
     party: l.party_type && l.party_id ? { type: l.party_type, id: l.party_id } : null,
   }));
+  // Round 37 (decision 17): the reversal of an entry of a closed period posts on the first open day, and says so
+  const closedThrough = await lockedThrough(tx, auth.tenantId);
+  const correction = closedThrough !== null && entry.entry_date <= closedThrough ? ' (تصحيح فترة سابقة)' : '';
   await postEntry(tx, {
     tenantId: auth.tenantId,
     branchId: entry.branch_id,
@@ -536,7 +540,7 @@ async function reverseEntry(tx: Transaction, auth: AccessClaims, entryId: string
     sourceType: 'reversal',
     sourceId: entry.id,
     sourceNumber: entry.number,
-    memo: `عكس القيد ${entry.number}: ${reason}`,
+    memo: `عكس القيد ${entry.number}: ${reason}${correction}`,
     baseCurrency: entry.base_currency,
     lines: reversalLines(original) as DraftLine[],
     kind: 'reversal',
@@ -733,7 +737,7 @@ export async function profitLoss(
       from journal_lines l
       join journal_entries e on e.tenant_id = l.tenant_id and e.id = l.entry_id
       join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
-      where e.entry_date >= ${query.from} and e.entry_date <= ${query.to}
+      where e.posting_date >= ${query.from} and e.posting_date <= ${query.to}
         and a.code ~ '^[456]' and ${inList(sql`e.branch_id`, branches)}
       group by a.code, a.name order by a.code`);
     return buildProfitLoss(

@@ -11,6 +11,7 @@ import type { TradeRate } from './contracts/common';
 import type { CurrencyCode } from './currencies';
 import { convert, QTY_SCALE, roundDiv } from './money';
 import { roundCashDue } from './pricing';
+import { INSTALMENT_FEE_VARIANT_ID } from './installments';
 
 /**
  * Returns (08 › مرتجع مبيعات، قواعد ثابتة 5): goods come back at the prices their sale charged,
@@ -324,4 +325,49 @@ export function buildReturnPayload(request: ReturnRequest): ReturnPayload {
     // Only a damaged return says so: every other return stays exactly as it was
     ...(request.damaged ? { damaged: true } : {}),
   };
+}
+
+/**
+ * Round 37, decision 18: a return of an instalment sale takes the instalment fee back with it. The fee is
+ * a line of the sale («رسم التقسيط»), so it goes back through the ordinary return and the ordinary credit
+ * to the customer's account: the plan and the customer's balance both come down by the goods and their fee.
+ *
+ *   - the whole sale returned (every goods line back in full, counting earlier returns): the fee in full;
+ *   - anything less: the fee in proportion to the value of the goods returned so far, never more than is left.
+ *
+ * `picks` are the goods lines the cashier chose; any pick of the fee line itself is replaced by what
+ * this works out. A return that picks only the fee line, or a sale with no plan, is left as it is.
+ */
+export function withInstalmentFee(
+  sale: SalePayload,
+  picks: readonly { saleLineNo: number; qty: number }[],
+  returned: readonly ReturnedLine[] = [],
+): { saleLineNo: number; qty: number }[] {
+  const fee = sale.installmentPlan
+    ? sale.lines.find((l) => l.variantId === INSTALMENT_FEE_VARIANT_ID)
+    : undefined;
+  if (!fee) return [...picks];
+  const goodsPicks = picks.filter((p) => p.saleLineNo !== fee.lineNo && p.qty > 0);
+  if (goodsPicks.length === 0) return [...picks];
+  const feeLeft = fee.qty - returnedOf(returned, fee.lineNo).qty;
+  if (feeLeft <= 0) return goodsPicks;
+
+  const goods = sale.lines.filter((l) => l.lineNo !== fee.lineNo);
+  let whole = true;
+  let valueSold = 0;
+  let valueBack = 0;
+  for (const line of goods) {
+    const before = returnedOf(returned, line.lineNo);
+    const pick = goodsPicks.find((p) => p.saleLineNo === line.lineNo)?.qty ?? 0;
+    if (before.qty + pick < line.qty) whole = false;
+    valueSold += line.priced.totalMinor;
+    valueBack += before.totalMinor + (pick > 0 ? returnAmounts(line, pick, returned).totalMinor : 0);
+  }
+  const target = whole
+    ? fee.qty
+    : valueSold > 0
+      ? Number(roundDiv(BigInt(fee.qty) * BigInt(valueBack), BigInt(valueSold)))
+      : 0;
+  const qty = Math.max(0, Math.min(feeLeft, target - returnedOf(returned, fee.lineNo).qty));
+  return qty > 0 ? [...goodsPicks, { saleLineNo: fee.lineNo, qty }] : goodsPicks;
 }

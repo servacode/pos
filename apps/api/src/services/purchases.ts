@@ -847,194 +847,237 @@ export async function inventory(
   });
 }
 
-export async function createStocktake(
+export function createStocktake(
   db: Database,
   auth: AccessClaims,
   input: StocktakeInput,
   meta: RequestMeta,
 ): Promise<StocktakeDetail> {
-  return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'inventory.adjust');
-    const branchId = await branchOf(tx, input.branchId);
-    const names = await stockedVariants(
-      tx,
-      input.lines.map((l) => l.variantId),
+  return withTenant(db, auth.tenantId, (tx) => createStocktakeIn(tx, auth, input, meta));
+}
+
+/** The count itself, inside the caller's transaction (a transfer's shortage is written off through it) */
+export async function createStocktakeIn(
+  tx: Transaction,
+  auth: AccessClaims,
+  input: StocktakeInput,
+  meta: RequestMeta,
+): Promise<StocktakeDetail> {
+  await requirePermission(tx, auth.userId, 'inventory.adjust');
+  const branchId = await branchOf(tx, input.branchId);
+  const names = await stockedVariants(
+    tx,
+    input.lines.map((l) => l.variantId),
+  );
+  const missing = input.lines.findIndex((l) => !names.has(l.variantId));
+  if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
+  await costPending(tx, auth.tenantId);
+
+  // A line with a batch counts (or writes off) that batch alone: the item's stock moves by the
+  // batch's difference. A line without one counts the whole item. An item is counted one way.
+  const isBatchLine = (l: (typeof input.lines)[number]) => Boolean(l.batchNo || l.expiryDate);
+  const wholeCounted = new Set(input.lines.filter((l) => !isBatchLine(l)).map((l) => l.variantId));
+  const mixed = input.lines.findIndex((l) => isBatchLine(l) && wholeCounted.has(l.variantId));
+  if (mixed >= 0) {
+    throw invalid({ [`lines.${mixed}.batchNo`]: 'عُدّ الصنف كاملاً أو دفعةً دفعة، لا الاثنين معاً' });
+  }
+  const batchLines = input.lines.filter(isBatchLine);
+  const pool = await batchPool(
+    tx,
+    branchId,
+    batchLines.map((l) => l.variantId),
+  );
+  const deltas: { variantId: string; batchNo: string | null; expiry: string | null; delta: number }[] = [];
+  for (const l of batchLines) {
+    const held = (pool.get(l.variantId) ?? []).find(
+      (b) => (b.batchNo ?? '') === (l.batchNo ?? '') && (b.expiry ?? null) === (l.expiryDate ?? null),
     );
-    const missing = input.lines.findIndex((l) => !names.has(l.variantId));
-    if (missing >= 0) throw invalid({ [`lines.${missing}.variantId`]: 'صنف غير موجود أو خدمة لا مخزون لها' });
-    await costPending(tx, auth.tenantId);
-
-    // A line with a batch counts (or writes off) that batch alone: the item's stock moves by the
-    // batch's difference. A line without one counts the whole item. An item is counted one way.
-    const isBatchLine = (l: (typeof input.lines)[number]) => Boolean(l.batchNo || l.expiryDate);
-    const wholeCounted = new Set(input.lines.filter((l) => !isBatchLine(l)).map((l) => l.variantId));
-    const mixed = input.lines.findIndex((l) => isBatchLine(l) && wholeCounted.has(l.variantId));
-    if (mixed >= 0) {
-      throw invalid({ [`lines.${mixed}.batchNo`]: 'عُدّ الصنف كاملاً أو دفعةً دفعة، لا الاثنين معاً' });
-    }
-    const batchLines = input.lines.filter(isBatchLine);
-    const pool = await batchPool(
-      tx,
-      branchId,
-      batchLines.map((l) => l.variantId),
-    );
-    const deltas: { variantId: string; batchNo: string | null; expiry: string | null; delta: number }[] = [];
-    for (const l of batchLines) {
-      const held = (pool.get(l.variantId) ?? []).find(
-        (b) => (b.batchNo ?? '') === (l.batchNo ?? '') && (b.expiry ?? null) === (l.expiryDate ?? null),
-      );
-      deltas.push({
-        variantId: l.variantId,
-        batchNo: l.batchNo ?? null,
-        expiry: l.expiryDate ?? null,
-        delta: l.countedQty - Math.max(0, held?.qty ?? 0),
-      });
-    }
-    const wholeLines = input.lines.filter((l) => !isBatchLine(l));
-    const sums = new Map<string, number>();
-    for (const d of deltas) sums.set(d.variantId, (sums.get(d.variantId) ?? 0) + d.delta);
-
-    const levels = await tx
-      .select({ variantId: stockLevels.variantId, qty: stockLevels.qty })
-      .from(stockLevels)
-      .where(
-        and(
-          eq(stockLevels.branchId, branchId),
-          sql`${stockLevels.variantId} = any(${uuidArray(input.lines.map((l) => l.variantId))})`,
-        ),
-      );
-    const expected = new Map(levels.map((l) => [l.variantId, l.qty]));
-    const keys: StockKey[] = [...new Set(input.lines.map((l) => l.variantId))].map((v) =>
-      stockKey(branchId, v),
-    );
-    const values = await loadValues(tx, auth.tenantId, keys);
-    const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
-
-    // One count line per item: the counted total of a whole count, or the stock plus its batches' differences
-    const countLines: { variantId: string; countedQty: number }[] = [
-      ...wholeLines.map((l) => ({ variantId: l.variantId, countedQty: l.countedQty })),
-      ...[...sums].map(([variantId, delta]) => ({
-        variantId,
-        countedQty: Math.max(0, (expected.get(variantId) ?? 0) + delta),
-      })),
-    ];
-    const rows: StocktakeLineRow[] = [];
-    const moves: { lineNo: number; variantId: string; qty: number }[] = [];
-    for (const [i, l] of countLines.entries()) {
-      const was = expected.get(l.variantId) ?? 0;
-      const diff = l.countedQty - was;
-      const key = stockKey(branchId, l.variantId);
-      let diffValue = 0;
-      if (diff < 0) {
-        const out = stockOut(values.get(key) ?? empty, -diff);
-        values.set(key, out.after);
-        diffValue = -out.costMinor;
-      } else if (diff > 0) {
-        const back = stockBack(values.get(key) ?? empty, diff);
-        values.set(key, back.after);
-        diffValue = back.valueMinor;
-      }
-      rows.push({
-        variantId: l.variantId,
-        name: names.get(l.variantId)!,
-        expectedQty: was,
-        countedQty: l.countedQty,
-        diffQty: diff,
-        diffValueMinor: diffValue,
-      });
-      moves.push({ lineNo: i + 1, variantId: l.variantId, qty: diff });
-    }
-    await saveValues(tx, auth.tenantId, values);
-
-    const id = newId();
-    const number = await nextNumber(tx, auth.tenantId, 'STK', input.date);
-    const diffValueMinor = rows.reduce((sum, r) => sum + r.diffValueMinor, 0);
-    await tx.insert(stocktakes).values({
-      tenantId: auth.tenantId,
-      id,
-      number,
-      branchId,
-      businessDate: input.date,
-      note: input.note ?? null,
-      lines: rows,
-      diffValueMinor,
-      createdBy: auth.userId,
+    deltas.push({
+      variantId: l.variantId,
+      batchNo: l.batchNo ?? null,
+      expiry: l.expiryDate ?? null,
+      delta: l.countedQty - Math.max(0, held?.qty ?? 0),
     });
-    await moveStock(tx, auth.tenantId, branchId, id, 'stocktake', input.date, moves);
-    // The batch ledger: a batch's own count or write-off, and a whole-item loss taken earliest-expiry first
-    const lineOf = new Map(moves.map((m) => [m.variantId, m.lineNo]));
-    const keepsBatches = await trackedVariants(
-      tx,
-      branchId,
-      moves.map((m) => m.variantId),
+  }
+  const wholeLines = input.lines.filter((l) => !isBatchLine(l));
+  const sums = new Map<string, number>();
+  for (const d of deltas) sums.set(d.variantId, (sums.get(d.variantId) ?? 0) + d.delta);
+
+  const levels = await tx
+    .select({ variantId: stockLevels.variantId, qty: stockLevels.qty })
+    .from(stockLevels)
+    .where(
+      and(
+        eq(stockLevels.branchId, branchId),
+        sql`${stockLevels.variantId} = any(${uuidArray(input.lines.map((l) => l.variantId))})`,
+      ),
     );
-    const ledger = [
-      ...deltas.map((d, n) => ({
-        variantId: d.variantId,
-        batchNo: d.batchNo,
-        expiry: d.expiry,
-        qty: d.delta,
-        lineNo: lineOf.get(d.variantId)!,
-        allocNo: n,
-      })),
-      ...(
-        await takeBatches(
-          tx,
-          branchId,
-          moves
-            .filter((m) => m.qty < 0 && wholeCounted.has(m.variantId))
-            .map((m) => ({ lineNo: m.lineNo, variantId: m.variantId, qty: -m.qty })),
-          () => 'lines',
-        )
-      ).map((r) => ({ ...r, qty: -r.qty })),
-      // A whole count that finds more of an item that keeps batches: the extra pieces sit on the no-batch row
-      ...moves
-        .filter((m) => m.qty > 0 && wholeCounted.has(m.variantId) && keepsBatches.has(m.variantId))
-        .map((m) => ({ variantId: m.variantId, batchNo: null, expiry: null, qty: m.qty, lineNo: m.lineNo })),
-    ];
-    await recordBatchMovements(
-      tx,
-      { tenantId: auth.tenantId, branchId, kind: 'count', docId: id, date: input.date },
-      ledger,
-    );
-    await refreshBatches(
-      tx,
-      [branchId],
-      moves.map((m) => m.variantId),
-    );
-    const currency = await baseCurrency(tx);
-    // A loss (negative difference) is Dr 6300 / Cr 1300
-    await postEntry(tx, {
-      tenantId: auth.tenantId,
-      branchId: await ledgerBranchOf(tx, branchId),
-      date: input.date,
-      sourceType: 'stocktake',
-      sourceId: id,
-      sourceNumber: number,
-      memo: `جرد ${number}${input.note ? `: ${input.note}` : ''}`,
-      baseCurrency: currency,
-      lines: costLines(-diffValueMinor, currency, '6300'),
+  const expected = new Map(levels.map((l) => [l.variantId, l.qty]));
+  const keys: StockKey[] = [...new Set(input.lines.map((l) => l.variantId))].map((v) =>
+    stockKey(branchId, v),
+  );
+  const values = await loadValues(tx, auth.tenantId, keys);
+  const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
+
+  // One count line per item: the counted total of a whole count, or the stock plus its batches' differences
+  const countLines: { variantId: string; countedQty: number }[] = [
+    ...wholeLines.map((l) => ({ variantId: l.variantId, countedQty: l.countedQty })),
+    ...[...sums].map(([variantId, delta]) => ({
+      variantId,
+      countedQty: Math.max(0, (expected.get(variantId) ?? 0) + delta),
+    })),
+  ];
+  const rows: StocktakeLineRow[] = [];
+  const moves: { lineNo: number; variantId: string; qty: number }[] = [];
+  for (const [i, l] of countLines.entries()) {
+    const was = expected.get(l.variantId) ?? 0;
+    const diff = l.countedQty - was;
+    const key = stockKey(branchId, l.variantId);
+    let diffValue = 0;
+    if (diff < 0) {
+      const out = stockOut(values.get(key) ?? empty, -diff);
+      values.set(key, out.after);
+      diffValue = -out.costMinor;
+    } else if (diff > 0) {
+      const back = stockBack(values.get(key) ?? empty, diff);
+      values.set(key, back.after);
+      diffValue = back.valueMinor;
+    }
+    rows.push({
+      variantId: l.variantId,
+      name: names.get(l.variantId)!,
+      expectedQty: was,
+      countedQty: l.countedQty,
+      diffQty: diff,
+      diffValueMinor: diffValue,
     });
-    await audit(
-      tx,
-      {
-        tenantId: auth.tenantId,
-        userId: auth.userId,
-        action: 'stocktake.create',
-        entity: 'stocktake',
-        entityId: id,
-        changes: { number: [null, number], diffValueMinor: [null, diffValueMinor] },
-      },
-      meta,
-    );
-    return { id, number, date: input.date, branchId, lines: rows, diffValueMinor, baseCurrency: currency };
+    moves.push({ lineNo: i + 1, variantId: l.variantId, qty: diff });
+  }
+  await saveValues(tx, auth.tenantId, values);
+
+  const id = newId();
+  const number = await nextNumber(tx, auth.tenantId, 'STK', input.date);
+  const diffValueMinor = rows.reduce((sum, r) => sum + r.diffValueMinor, 0);
+  await tx.insert(stocktakes).values({
+    tenantId: auth.tenantId,
+    id,
+    number,
+    branchId,
+    businessDate: input.date,
+    note: input.note ?? null,
+    lines: rows,
+    diffValueMinor,
+    createdBy: auth.userId,
   });
+  await moveStock(tx, auth.tenantId, branchId, id, 'stocktake', input.date, moves);
+  // The batch ledger: a batch's own count or write-off, and a whole-item loss taken earliest-expiry first
+  const lineOf = new Map(moves.map((m) => [m.variantId, m.lineNo]));
+  const keepsBatches = await trackedVariants(
+    tx,
+    branchId,
+    moves.map((m) => m.variantId),
+  );
+  const ledger = [
+    ...deltas.map((d, n) => ({
+      variantId: d.variantId,
+      batchNo: d.batchNo,
+      expiry: d.expiry,
+      qty: d.delta,
+      lineNo: lineOf.get(d.variantId)!,
+      allocNo: n,
+    })),
+    ...(
+      await takeBatches(
+        tx,
+        branchId,
+        moves
+          .filter((m) => m.qty < 0 && wholeCounted.has(m.variantId))
+          .map((m) => ({ lineNo: m.lineNo, variantId: m.variantId, qty: -m.qty })),
+        () => 'lines',
+      )
+    ).map((r) => ({ ...r, qty: -r.qty })),
+    // A whole count that finds more of an item that keeps batches: the extra pieces sit on the no-batch row
+    ...moves
+      .filter((m) => m.qty > 0 && wholeCounted.has(m.variantId) && keepsBatches.has(m.variantId))
+      .map((m) => ({ variantId: m.variantId, batchNo: null, expiry: null, qty: m.qty, lineNo: m.lineNo })),
+  ];
+  await recordBatchMovements(
+    tx,
+    { tenantId: auth.tenantId, branchId, kind: 'count', docId: id, date: input.date },
+    ledger,
+  );
+  await refreshBatches(
+    tx,
+    [branchId],
+    moves.map((m) => m.variantId),
+  );
+  const currency = await baseCurrency(tx);
+  // A loss (negative difference) is Dr 6300 / Cr 1300
+  await postEntry(tx, {
+    tenantId: auth.tenantId,
+    branchId: await ledgerBranchOf(tx, branchId),
+    date: input.date,
+    sourceType: 'stocktake',
+    sourceId: id,
+    sourceNumber: number,
+    memo: `جرد ${number}${input.note ? `: ${input.note}` : ''}`,
+    baseCurrency: currency,
+    lines: costLines(-diffValueMinor, currency, '6300'),
+  });
+  await audit(
+    tx,
+    {
+      tenantId: auth.tenantId,
+      userId: auth.userId,
+      action: 'stocktake.create',
+      entity: 'stocktake',
+      entityId: id,
+      changes: { number: [null, number], diffValueMinor: [null, diffValueMinor] },
+    },
+    meta,
+  );
+  return { id, number, date: input.date, branchId, lines: rows, diffValueMinor, baseCurrency: currency };
+}
+
+/**
+ * Whether a new transfer goes «بالطريق» (round 37, decision 16): when the request says so, or else by the
+ * store's setting (auto: in transit when the store has more than one branch). Only a transfer between two
+ * ordinary branches can be in transit: a van's loading and unloading, and the damaged location, stay instant
+ * (the rep's settlement is its own confirmation).
+ */
+export async function sendsInTransit(
+  tx: Transaction,
+  mode: 'instant' | 'transit' | undefined,
+  fromBranchId: string,
+  toBranchId: string,
+): Promise<boolean> {
+  const kinds = await tx.execute<{ id: string; kind: string }>(
+    sql`select id, kind from branches where id in (${fromBranchId}, ${toBranchId})`,
+  );
+  if (kinds.length < 2 || kinds.some((b) => b.kind !== 'store')) return false;
+  if (mode) return mode === 'transit';
+  return (await effectiveTransferMode(tx)) === 'transit';
+}
+
+/** The setting resolved: auto is in transit for a store with more than one ordinary branch */
+export async function effectiveTransferMode(tx: Transaction): Promise<'instant' | 'transit'> {
+  const [row] = await tx.execute<{ mode: string; stores: string }>(sql`
+    select coalesce((select transfer_mode from tenant_settings limit 1), 'auto') as mode,
+           (select count(*) from branches where kind = 'store' and is_active)::text as stores`);
+  if (row?.mode === 'instant') return 'instant';
+  if (row?.mode === 'transit') return 'transit';
+  return Number(row?.stores ?? 0) > 1 ? 'transit' : 'instant';
 }
 
 /**
  * A transfer between branches (09 › transfers): every line out of the sender at its average cost
  * and into the receiver at that value, in one transaction. A line more than the sender has is
  * sent all the same (stock may go below nothing, as at the till) and costed as a sale would be.
+ *
+ * Round 37 (decision 16), sent «بالطريق»: only the sending half happens now (the stock and batches out, and
+ * Dr 1900 / Cr 1300 at the sender); the serial numbers wait in transit. The receiving half (stock and batches
+ * in, Dr 1300 / Cr 1900 at the receiver) happens when that branch confirms, in services/transfers.ts. The goods
+ * on the way are in neither branch's stock, so each branch's stock still equals its movements and 1300.
  */
 export async function createTransfer(
   db: Database,
@@ -1046,6 +1089,7 @@ export async function createTransfer(
     await requirePermission(tx, auth.userId, 'inventory.adjust');
     const from = await branchOf(tx, input.fromBranchId);
     const to = await branchOf(tx, input.toBranchId);
+    const inTransit = await sendsInTransit(tx, input.mode, from, to);
     const names = await stockedVariants(
       tx,
       input.lines.map((l) => l.variantId),
@@ -1069,9 +1113,11 @@ export async function createTransfer(
       const inKey = stockKey(to, l.variantId);
       const out = stockOut(values.get(outKey) ?? empty, l.qty);
       values.set(outKey, out.after);
-      const into = stockIn(values.get(inKey) ?? empty, l.qty, Math.max(0, out.costMinor));
-      values.set(inKey, into.after);
-      costDiff += into.costMinor;
+      if (!inTransit) {
+        const into = stockIn(values.get(inKey) ?? empty, l.qty, Math.max(0, out.costMinor));
+        values.set(inKey, into.after);
+        costDiff += into.costMinor;
+      }
       lines.push({
         variantId: l.variantId,
         name: names.get(l.variantId)!,
@@ -1094,15 +1140,25 @@ export async function createTransfer(
       toBranchId: to,
       businessDate: input.date,
       note: input.note ?? null,
-      lines,
+      lines: inTransit ? await withSerialNumbers(tx, lines, outgoing) : lines,
       valueMinor,
+      inTransit,
       createdBy: auth.userId,
     });
-    await relocateSerials(tx, outgoing, to);
+    if (inTransit) {
+      // The pieces leave the sender's shelf and wait: nobody sells them until the receiver confirms
+      if (outgoing.length > 0)
+        await tx
+          .update(serials)
+          .set({ status: 'in_transit' })
+          .where(inArray(serials.id, [...outgoing]));
+    } else {
+      await relocateSerials(tx, outgoing, to);
+    }
     const moves = (sign: 1 | -1) =>
       input.lines.map((l, i) => ({ lineNo: i + 1, variantId: l.variantId, qty: sign * l.qty }));
     await moveStock(tx, auth.tenantId, from, id, 'transfer', input.date, moves(-1));
-    await moveStock(tx, auth.tenantId, to, inId, 'transfer', input.date, moves(1));
+    if (!inTransit) await moveStock(tx, auth.tenantId, to, inId, 'transfer', input.date, moves(1));
     // The same batches leave the sender and arrive at the receiver (earliest expiry first when none is named)
     const sent = await takeBatches(
       tx,
@@ -1115,14 +1171,16 @@ export async function createTransfer(
       { tenantId: auth.tenantId, branchId: from, kind: 'transfer_out', docId: id, date: input.date },
       sent.map((r) => ({ ...r, qty: -r.qty })),
     );
-    await recordBatchMovements(
-      tx,
-      { tenantId: auth.tenantId, branchId: to, kind: 'transfer_in', docId: inId, date: input.date },
-      sent,
-    );
+    if (!inTransit) {
+      await recordBatchMovements(
+        tx,
+        { tenantId: auth.tenantId, branchId: to, kind: 'transfer_in', docId: inId, date: input.date },
+        sent,
+      );
+    }
     await refreshBatches(
       tx,
-      [from, to],
+      inTransit ? [from] : [from, to],
       input.lines.map((l) => l.variantId),
     );
     const currency = await baseCurrency(tx);
@@ -1140,26 +1198,28 @@ export async function createTransfer(
       baseCurrency: currency,
       lines: costLines(valueMinor, currency, '1900'),
     });
-    await postEntry(tx, {
-      tenantId: auth.tenantId,
-      branchId: to,
-      date: input.date,
-      sourceType: 'transfer',
-      sourceId: inId,
-      sourceNumber: number,
-      memo,
-      baseCurrency: currency,
-      lines: [
-        ...costLines(-valueMinor, currency, '1900'),
-        ...(costDiff !== 0 ? costLines(costDiff, currency) : []),
-      ],
-    });
+    if (!inTransit) {
+      await postEntry(tx, {
+        tenantId: auth.tenantId,
+        branchId: to,
+        date: input.date,
+        sourceType: 'transfer',
+        sourceId: inId,
+        sourceNumber: number,
+        memo,
+        baseCurrency: currency,
+        lines: [
+          ...costLines(-valueMinor, currency, '1900'),
+          ...(costDiff !== 0 ? costLines(costDiff, currency) : []),
+        ],
+      });
+    }
     await audit(
       tx,
       {
         tenantId: auth.tenantId,
         userId: auth.userId,
-        action: 'transfer.create',
+        action: inTransit ? 'transfer.send' : 'transfer.create',
         entity: 'transfer',
         entityId: id,
         changes: { number: [null, number], valueMinor: [null, valueMinor] },
@@ -1175,7 +1235,25 @@ export async function createTransfer(
       lines,
       valueMinor,
       baseCurrency: currency,
+      status: inTransit ? 'in_transit' : 'received',
     };
+  });
+}
+
+/** What the transfer keeps of each line's serial numbers while the goods are on the way */
+async function withSerialNumbers(
+  tx: Transaction,
+  lines: TransferDetail['lines'],
+  serialIds: readonly string[],
+): Promise<TransferDetail['lines']> {
+  if (serialIds.length === 0) return lines;
+  const rows = await tx
+    .select({ serial: serials.serial, variantId: serials.variantId })
+    .from(serials)
+    .where(inArray(serials.id, [...serialIds]));
+  return lines.map((l) => {
+    const own = rows.filter((r) => r.variantId === l.variantId).map((r) => r.serial);
+    return own.length > 0 ? { ...l, serials: own } : l;
   });
 }
 
@@ -1190,13 +1268,20 @@ export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items
       to_name: string;
       pieces: string;
       value: string;
+      from_id: string;
+      to_id: string;
+      in_transit: boolean;
+      received: boolean;
+      short: string;
     }>(sql`
       select t.id, t.number, t.business_date::text as date, f.name as from_name, d.name as to_name,
              coalesce((select sum((l ->> 'qty')::bigint) from jsonb_array_elements(t.lines) l), 0)::text as pieces,
-             t.value_minor::text as value
+             t.value_minor::text as value, t.from_branch_id as from_id, t.to_branch_id as to_id, t.in_transit,
+             (r.id is not null) as received, coalesce(r.short_pieces, 0)::text as short
       from transfers t
       join branches f on f.id = t.from_branch_id
       join branches d on d.id = t.to_branch_id
+      left join transfer_receipts r on r.tenant_id = t.tenant_id and r.transfer_id = t.id
       order by t.business_date desc, t.created_at desc
       limit 200`);
     return {
@@ -1208,6 +1293,10 @@ export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items
         toBranch: r.to_name,
         pieces: Number(r.pieces),
         valueMinor: Number(r.value),
+        status: r.in_transit && !r.received ? ('in_transit' as const) : ('received' as const),
+        fromBranchId: r.from_id,
+        toBranchId: r.to_id,
+        ...(Number(r.short) > 0 ? { shortPieces: Number(r.short) } : {}),
       })),
     };
   });

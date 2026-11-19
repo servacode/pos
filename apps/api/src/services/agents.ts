@@ -10,10 +10,11 @@ import type {
   PlatformAgentPage,
   PriceOverrides,
 } from '@serva/core';
-import { wholesalePrice, type agentInput } from '@serva/core';
-import type { Database } from '@serva/db';
+import { normalizePhone, wholesalePrice, type AgentCodeStep, type agentInput } from '@serva/core';
+import { uuidv7, type Database } from '@serva/db';
 import type { FastifyInstance } from 'fastify';
 import type { z } from 'zod';
+import { hashOtp, isTestMode, newOtpCode, OtpDeliveryError } from '../auth/otp';
 import { AGENT_TOKEN_TTL_SECONDS, signAgentToken, type PlatformClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import { effectiveStatus } from './billing';
@@ -252,12 +253,28 @@ export async function moveStore(
 
 // ─── The agent himself ───────────────────────────────────────────────────────
 
-/** Email and password, like the platform's first step. A suspended agent or an unknown email looks the same. */
+const CODE_TTL_SECONDS = 600;
+const MAX_CODE_ATTEMPTS = 5;
+const codeUnavailable = () =>
+  new AppError(503, 'unavailable', 'لا يمكن إرسال رمز التحقق الآن. حاول بعد قليل أو تواصل مع الإدارة.');
+const wrongCode = () =>
+  new AppError(400, 'otp_invalid', 'الرمز غير صحيح. تأكد منه وأعد المحاولة.', {
+    code: 'الرمز غير صحيح. تأكد منه وأعد المحاولة.',
+  });
+
+/**
+ * Step 1 of the agent's sign-in (round 37, decision 21): email and password, like the platform's first step.
+ * A suspended agent or an unknown email looks the same. When the password is right a one-time code goes to his
+ * phone by the mechanism owners use for sign-up and password recovery, and nothing opens until it is typed
+ * (agentSignInCode). An agent with no phone number saved cannot get a code, so he is told to ask the
+ * administration, never let in without one.
+ */
 export async function agentSignIn(
   app: FastifyInstance,
   input: { email: string; password: string },
   now: Date,
-): Promise<AgentLoginResponse> {
+  meta: { ip: string | null } = { ip: null },
+): Promise<AgentCodeStep> {
   const { db, passwords } = app;
   const [found] = await db.execute<{
     id: string;
@@ -272,6 +289,71 @@ export async function agentSignIn(
     throw signInFailed();
   }
   if (!(await passwords.verify(found.password_hash, input.password))) throw signInFailed();
+  const [session] = await db.execute<{ phone: string | null }>(
+    sql`select phone from agent_session(${found.id}::uuid)`,
+  );
+  const phone = session?.phone ? normalizePhone(session.phone) : null;
+  if (!phone) {
+    throw new AppError(
+      403,
+      'forbidden',
+      'لا يوجد رقم جوال محفوظ لحسابك لإرسال رمز الدخول. اطلب من إدارة سيرفا إضافته ثم أعد المحاولة.',
+    );
+  }
+  const { env, otpSender, log } = app;
+  if (!otpSender) throw codeUnavailable();
+  const challengeId = uuidv7();
+  const code = newOtpCode();
+  await db.execute(sql`select otp_create(
+    ${challengeId}::uuid, 'agent_login', ${phone}, ${hashOtp(env.JWT_SECRET, challengeId, code)},
+    ${JSON.stringify({ agentId: found.id })}::jsonb,
+    ${new Date(now.getTime() + CODE_TTL_SECONDS * 1000).toISOString()}::timestamptz,
+    ${meta.ip}, ${now.toISOString()}::timestamptz)`);
+  try {
+    await otpSender.send({ phone, code, purpose: 'agent_login' });
+  } catch (error) {
+    if (!(error instanceof OtpDeliveryError)) throw error;
+    log.warn({ err: error.name }, 'agent sign-in code was not delivered');
+    throw codeUnavailable();
+  }
+  return {
+    step: 'code',
+    challengeId,
+    expiresIn: CODE_TTL_SECONDS,
+    phoneHint: `${phone.slice(-3)}••••`,
+    ...(isTestMode(env) ? { testCode: code } : {}),
+  };
+}
+
+/** Step 2: the code (single use, five tries, ten minutes) opens the portal, if the agent is still active. */
+export async function agentSignInCode(
+  app: FastifyInstance,
+  input: { challengeId: string; code: string },
+  now: Date,
+): Promise<AgentLoginResponse> {
+  const { db, env } = app;
+  const [result] = await db.execute<{ status: string; payload: { agentId?: string } | null }>(
+    sql`select status, payload from otp_consume(${input.challengeId}::uuid, 'agent_login',
+      ${hashOtp(env.JWT_SECRET, input.challengeId, input.code)}, ${MAX_CODE_ATTEMPTS}, ${now.toISOString()}::timestamptz)`,
+  );
+  if (result?.status === 'locked') {
+    throw new AppError(429, 'locked', 'محاولات خاطئة كثيرة. ادخل من جديد لتطلب رمزاً جديداً.');
+  }
+  if (result?.status === 'expired') {
+    throw new AppError(400, 'otp_invalid', 'انتهت صلاحية الرمز. ادخل من جديد لتطلب رمزاً جديداً.', {
+      code: 'انتهت صلاحية الرمز. ادخل من جديد لتطلب رمزاً جديداً.',
+    });
+  }
+  const agentId = result?.status === 'ok' ? result.payload?.agentId : undefined;
+  if (!agentId) throw wrongCode();
+  // He may have been suspended since the code was sent
+  const [found] = await db.execute<{
+    id: string;
+    full_name: string;
+    code: string;
+    must_change_password: boolean;
+  }>(sql`select id, full_name, code, must_change_password from agent_session(${agentId}::uuid)`);
+  if (!found) throw signInFailed();
   return {
     token: await signAgentToken({ agentId: found.id }, app.tokenKeys, now),
     expiresAt: new Date(now.getTime() + AGENT_TOKEN_TTL_SECONDS * 1000).toISOString(),

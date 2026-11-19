@@ -26,6 +26,7 @@ export function HoldPanel({
   cashierId,
   timezone,
   cutoff,
+  days = 7,
   onDone,
   onPrintDeposit,
   onClose,
@@ -37,6 +38,8 @@ export function HoldPanel({
   cashierId: string;
   timezone: string;
   cutoff: string;
+  /** How long the pieces stay reserved for the customer (the store's «مدة الحجز») */
+  days?: number;
   onDone: (hold: { number: string; depositCode: string | null }) => void;
   onPrintDeposit?: (saved: SavedGiftVoucher) => void;
   onClose: () => void;
@@ -155,7 +158,8 @@ export function HoldPanel({
     >
       <p className="text-ink-muted">
         تُحجز قطع الفاتورة (<Money minor={totalMinor} currency={currency} />) باسم الزبون، ويدفع العربون الآن
-        نقداً والباقي عند الاستلام. يظهر الحجز في «طلبات المتجر» على كل كاشير.
+        نقداً والباقي عند الاستلام. يظهر الحجز في «طلبات المتجر» على كل كاشير. تبقى القطع محجوزة له {days}{' '}
+        أيام فلا تُباع لغيره، ثم تعود متاحة.
       </p>
       {pieces.length !== cart.lines.length ? (
         <Alert tone="info">الحجز للقطع فقط: احذف الأصناف الموزونة أو الكسور من الفاتورة.</Alert>

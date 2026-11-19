@@ -92,6 +92,8 @@ export interface Catalog {
   byBarcode: Map<string, BarcodeHit>;
   /** Top-level categories for the chips, in sortOrder */
   categories: CategoryRow[];
+  /** Every live category, each with its full path as a label («الرجالي › قمصان»), for the new-product form (decision 15) */
+  categoryChoices?: { id: string; label: string }[];
   /** Each category's top-level ancestor, so a chip shows its sub-categories' products too */
   rootOf: Map<string, string>;
   settings: SettingsRow | null;
@@ -269,6 +271,17 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     .filter((c) => c.parentId === null && !c.archived)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ar'));
 
+  const categoryChoices = sets.categories
+    .filter((c) => !c.archived)
+    .map((c) => ({
+      id: c.id,
+      label: [...categoryPath(c.id)]
+        .reverse()
+        .map((id) => categoryById.get(id)?.name ?? '')
+        .join(' › '),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ar'));
+
   const { rates, collectRates } = settings
     ? currentRates(sets.exchange_rates, settings.baseCurrency, now)
     : { rates: [], collectRates: {} };
@@ -278,6 +291,7 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
     byVariant,
     byBarcode,
     categories,
+    categoryChoices,
     rootOf,
     settings,
     rates,

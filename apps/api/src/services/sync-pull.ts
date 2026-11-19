@@ -401,6 +401,9 @@ const PULL_SETS: Record<string, PullSet> = {
       deliveryFeeMinor: onlineOrders.deliveryFeeMinor,
       deliveryArea: onlineOrders.deliveryArea,
       couponRule: onlineOrders.couponRule,
+      // Round 37 (decision 14): the till counts what each hold reserves at its own branch, and until when
+      branchId: onlineOrders.branchId,
+      reservedUntil: onlineOrders.reservedUntil,
       version: onlineOrders.version,
     },
     scope: () =>

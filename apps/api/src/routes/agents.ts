@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   agentActivateInput,
   agentBalanceInput,
+  agentCodeInput,
   agentInput,
   agentLoginInput,
   agentPasswordInput,
@@ -19,6 +20,7 @@ import {
   agentLedger,
   agentMe,
   agentSignIn,
+  agentSignInCode,
   agentStores,
   changeAgentBalance,
   changeAgentPassword,
@@ -124,7 +126,25 @@ export function agentRoutes(processors: SyncProcessors = {}) {
           ]);
         },
       },
-      async (request) => agentSignIn(app, parseBody(agentLoginInput, request.body), now()),
+      async (request) =>
+        agentSignIn(app, parseBody(agentLoginInput, request.body), now(), { ip: clientIp(request) }),
+    );
+    // Step 2 (round 37, decision 21): the code that went to his phone; five tries per code, and the route is limited too
+    app.post(
+      '/v1/agent/login/code',
+      {
+        onRequest: async (request, reply) => {
+          await enforceLimits(request, reply, 60_000, [
+            { key: `agent-code:${request.ip}`, max: app.env.AUTH_RATE_LIMIT_PER_MINUTE },
+          ]);
+        },
+        preHandler: async (request, reply) => {
+          await enforceLimits(request, reply, LOGIN_WINDOW_MS, [
+            { key: `agent-code:ip:${clientIp(request)}`, max: 40 },
+          ]);
+        },
+      },
+      async (request) => agentSignInCode(app, parseBody(agentCodeInput, request.body), now()),
     );
 
     // A new agent changes his temporary password before anything else opens

@@ -470,7 +470,8 @@ describe('the rep’s day (/rep)', () => {
     // The count goes to the server for the supervisor's settlement, and the phone remembers it was sent
     await waitFor(() => expect(h.calls.vanCounts).toHaveLength(1));
     expect(h.calls.vanCounts[0]).toEqual({
-      businessDate: '2026-11-18',
+      // The shift's day: today on the device's clock
+      businessDate: new Date().toLocaleDateString('en-CA'),
       lines: [{ variantId: PRODUCTS.milk.variant.id, counted: 10_000 }],
     });
     await waitFor(async () =>

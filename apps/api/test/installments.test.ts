@@ -14,6 +14,7 @@ import {
   type PlanListItem,
   type SalePayload,
   type WorklistRow,
+  withInstalmentFee,
 } from '@serva/core';
 import { createUuidV7, payloadHash } from '@serva/sync';
 import {
@@ -487,6 +488,101 @@ describe('returning and cancelling', () => {
     expect(p!.status).toBe('cancelled');
     const notes = await ownerDb()<{ status: string }[]>`select status from promissory_notes`;
     expect(notes.every((n) => n.status === 'cancelled')).toBe(true);
+  });
+
+  // Round 37, decision 18: the till adds the instalment fee to a return of the goods (withInstalmentFee); what
+  // goes back on the account comes off the plan and the customer's balance together
+  describe('the instalment fee goes back with the goods', () => {
+    async function returnAsTill(
+      store: Store,
+      parts: {
+        doc: ReturnType<typeof documents>;
+        sold: { id: string; number: string | null };
+        open: { id: string };
+        payload: SalePayload;
+      },
+      goodsQty: number,
+      returned: Parameters<typeof withInstalmentFee>[2] = [],
+    ) {
+      const picks = withInstalmentFee(parts.payload, [{ saleLineNo: 1, qty: goodsQty }], returned);
+      const ret = buildReturnPayload({
+        sale: parts.payload,
+        saleId: parts.sold.id,
+        saleNumber: parts.sold.number!,
+        shiftId: parts.open.id,
+        cashierId: store.userId,
+        reason: 'ما أعجبه',
+        picks,
+        returned,
+        refundMethod: 'account',
+      });
+      const { hash: _hash, ...body } = parts.doc('return', ret);
+      const withDeps = { ...body, deps: [parts.sold.id] };
+      await push(app, store.device, [{ ...withDeps, hash: payloadHash(withDeps) }]);
+      return ret;
+    }
+
+    const owed = async (store: Store) => {
+      const customer = (await ownerDb()<{ id: string }[]>`select id from customers`)[0]!;
+      const balance = (
+        await app.inject({ method: 'GET', url: `/v1/customers/${customer.id}`, headers: as(store) })
+      ).json<CustomerDetail>().balanceMinor;
+      const detail = (
+        await app.inject({
+          method: 'GET',
+          url: `/v1/installment-plans/${await onlyPlanId()}`,
+          headers: as(store),
+        })
+      ).json<PlanDetail>();
+      return { balance, remaining: detail.remainingMinor, status: detail.status };
+    };
+
+    it('a part of the goods takes the fee back in proportion, and the plan equals the balance', async () => {
+      const store = await openStore(app);
+      const parts = await day(store);
+      const payload = parts.sold.payload as unknown as SalePayload;
+      const ret = await returnAsTill(store, { ...parts, payload }, 500);
+      // Half the goods (50,000) and half the fee (2,000) go back on the account
+      expect(ret.totals.totalMinor).toBe(52_000);
+      expect(ret.lines.map((l) => [l.saleLineNo, l.qty])).toEqual([
+        [1, 500],
+        [2, 500],
+      ]);
+      const after = await owed(store);
+      expect(after.balance).toBe(84_000 - 52_000);
+      expect(after.remaining).toBe(after.balance);
+      expect(after.status).toBe('active');
+    });
+
+    it('the whole sale returned takes the whole fee, and the plan closes with nothing left to pay on it', async () => {
+      const store = await openStore(app);
+      const parts = await day(store);
+      const payload = parts.sold.payload as unknown as SalePayload;
+      const ret = await returnAsTill(store, { ...parts, payload }, 1000);
+      // The goods and the full fee (4,000): 104,000 on the account, more than the 84,000 still owed
+      expect(ret.totals.totalMinor).toBe(104_000);
+      const after = await owed(store);
+      expect(after.status).toBe('cancelled');
+      expect(after.remaining).toBe(0);
+      // The 20,000 paid down is what the customer is owed back: -(104,000 - 84,000)
+      expect(after.balance).toBe(-20_000);
+    });
+
+    it('a second return that finishes the sale takes the rest of the fee, never more', async () => {
+      const store = await openStore(app);
+      const parts = await day(store);
+      const payload = parts.sold.payload as unknown as SalePayload;
+      const first = await returnAsTill(store, { ...parts, payload }, 250);
+      expect(first.totals.totalMinor).toBe(25_000 + 1_000);
+      const earlier = first.lines.map((l) => ({ saleLineNo: l.saleLineNo, qty: l.qty, ...l.refund }));
+      const second = await returnAsTill(store, { ...parts, payload }, 750, earlier);
+      // 75,000 of goods and the 3,000 of fee left: the two returns together are the whole sale
+      expect(second.totals.totalMinor).toBe(75_000 + 3_000);
+      const feeBack = [...first.lines, ...second.lines]
+        .filter((l) => l.saleLineNo === 2)
+        .reduce((n, l) => n + l.refund.totalMinor, 0);
+      expect(feeBack).toBe(4_000);
+    });
   });
 
   it('the owner cancels a plan with a reason; a closed plan cannot be collected on', async () => {

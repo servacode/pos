@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { SalePayload } from '@serva/core/contracts/documents';
 import type { CustomerRow } from '@serva/core/contracts/customers';
+import { showOldPoundOn } from '@serva/core/contracts/till';
 import { DeliveryNoteA4, InvoiceA4, type A4SaleData } from '../../lib/a4/documents';
 import { PrintSheet } from '../../lib/print';
 import type { ReceiptData } from './Receipt';
@@ -26,7 +27,7 @@ export function a4DataOfReceipt(
       address: data.branch?.address ?? null,
       phone: data.branch?.phone ?? null,
       footer: data.settings.receiptFooter ?? null,
-      showOldPound: data.settings.till?.showOldPound === true,
+      showOldPound: showOldPoundOn(data.settings.till, data.doc.deviceTime),
     },
     number: data.doc.number ?? '',
     deviceTime: data.doc.deviceTime,

@@ -446,14 +446,22 @@ describe('serial tracking at the till and on the server', () => {
     const again = await send('/v1/supplier-returns', { supplierId, refund: 'credit' }, ['OUT-1']);
     expect(again.statusCode).toBe(400);
 
-    const moved = await send('/v1/transfers', { fromBranchId: main!.id, toBranchId: mall!.id }, ['OUT-2']);
+    const moved = await send(
+      '/v1/transfers',
+      { fromBranchId: main!.id, toBranchId: mall!.id, mode: 'instant' },
+      ['OUT-2'],
+    );
     expect(moved.statusCode, moved.body).toBe(201);
     const [branch] = await owner.db.execute<{ branch_id: string }>(
       sql`select branch_id from serials where serial = 'OUT-2'`,
     );
     expect(branch!.branch_id).toBe(mall!.id);
     // It is no longer in the sender's stock
-    const lost = await send('/v1/transfers', { fromBranchId: main!.id, toBranchId: mall!.id }, ['OUT-2']);
+    const lost = await send(
+      '/v1/transfers',
+      { fromBranchId: main!.id, toBranchId: mall!.id, mode: 'instant' },
+      ['OUT-2'],
+    );
     expect(lost.statusCode).toBe(400);
   });
 });

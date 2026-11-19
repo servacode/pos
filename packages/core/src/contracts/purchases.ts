@@ -507,7 +507,7 @@ export interface SerialStockRow {
   variantId: string;
   serial: string;
   /** rented: out with a customer on a rental (03 › الأدوات الطبية: التأجير), not for sale */
-  status: 'in_stock' | 'sold' | 'rented' | 'returned';
+  status: 'in_stock' | 'sold' | 'rented' | 'returned' | 'in_transit' | 'lost';
   /** The invoice that sold it, for «هذا الرقم مباع في الفاتورة …» */
   saleNumber: string | null;
   version: number;
@@ -517,7 +517,7 @@ export interface SerialRow {
   serial: string;
   variantId: string;
   name: string;
-  status: 'in_stock' | 'sold' | 'rented' | 'returned';
+  status: 'in_stock' | 'sold' | 'rented' | 'returned' | 'in_transit' | 'lost';
   purchaseNumber: string | null;
   receivedOn: string | null;
   saleNumber: string | null;
@@ -571,6 +571,8 @@ export const transferInput = z
     toBranchId: uuidSchema,
     date: isoDateSchema,
     note: optionalText(200, 'الملاحظة طويلة'),
+    /** Round 37: send it in one step or «بالطريق»; left out, the store's setting decides (TransferMode) */
+    mode: z.enum(['instant', 'transit']).optional(),
     lines: z
       .array(
         z.object({
@@ -589,15 +591,40 @@ export const transferInput = z
   .refine((t) => t.fromBranchId !== t.toBranchId, { path: ['toBranchId'], message: 'اختر فرعاً آخر' });
 export type TransferInput = z.input<typeof transferInput>;
 
+/**
+ * Round 37, decision 16: a transfer is «بالطريق» (in transit) or instant.
+ *   in_transit  the goods left the sender; the receiving branch has not confirmed them yet
+ *   received    the goods are in the receiver (every older transfer, and an instant one, is this)
+ */
+export type TransferStatus = 'in_transit' | 'received';
+
+/** How a store sends goods between its branches. auto: in transit when the store has more than one branch. */
+export const TRANSFER_MODES = ['auto', 'instant', 'transit'] as const;
+export type TransferMode = (typeof TRANSFER_MODES)[number];
+
+/**
+ *   GET /v1/transfers/settings   inventory.adjust   → TransferSettings
+ *   PUT /v1/transfers/settings   settings.manage    transferSettingsInput → TransferSettings
+ */
+export const transferSettingsInput = z.object({ mode: z.enum(TRANSFER_MODES) });
+export type TransferSettingsInput = z.input<typeof transferSettingsInput>;
+export interface TransferSettings {
+  mode: TransferMode;
+  /** What a new transfer does now: auto resolved against the store's branches */
+  effective: 'instant' | 'transit';
+}
+
 export interface TransferDetail {
   id: string;
   number: string;
   date: string;
   fromBranchId: string;
   toBranchId: string;
-  lines: { variantId: string; name: string; qty: number; valueMinor: number }[];
+  lines: { variantId: string; name: string; qty: number; valueMinor: number; serials?: string[] }[];
   valueMinor: number;
   baseCurrency: CurrencyCode;
+  /** Absent: received (an answer from before round 37) */
+  status?: TransferStatus;
 }
 
 export interface TransferRow {
@@ -608,6 +635,71 @@ export interface TransferRow {
   toBranch: string;
   pieces: number;
   valueMinor: number;
+  /** Absent: received */
+  status?: TransferStatus;
+  fromBranchId?: string;
+  toBranchId?: string;
+  /** Pieces that did not arrive (thousandths), when the receiver confirmed less than was sent */
+  shortPieces?: number;
+}
+
+/**
+ *   POST /v1/transfers/:id/receive   inventory.adjust (at the receiving branch)   transferReceiveInput → TransferFull
+ *   GET  /v1/transfers/:id           inventory.adjust   → TransferFull
+ *
+ * The receiving branch confirms what arrived. Left out, `lines` means everything arrived. A line that arrived
+ * short is written off through a stocktake, so a reason is required; more than was sent is refused (count
+ * the surplus as a stocktake).
+ */
+export const transferReceiveInput = z.object({
+  date: isoDateSchema.optional(),
+  lines: z
+    .array(
+      z.object({
+        variantId: uuidSchema,
+        receivedQty: z.int().min(0, 'الكمية لا تكون أقل من الصفر'),
+        /** The serial numbers that arrived, for a product that tracks them */
+        serials: z.array(serialSchema).max(1000).optional(),
+      }),
+    )
+    .max(2000)
+    .optional(),
+  reason: optionalText(200, 'السبب طويل'),
+});
+export type TransferReceiveInput = z.input<typeof transferReceiveInput>;
+
+export interface TransferFullLine {
+  variantId: string;
+  name: string;
+  /** Sent, then what arrived (null while in transit) and what is short */
+  qty: number;
+  valueMinor: number;
+  receivedQty: number | null;
+  shortQty: number;
+  serials?: string[];
+}
+
+export interface TransferFull {
+  id: string;
+  number: string;
+  date: string;
+  fromBranchId: string;
+  toBranchId: string;
+  fromBranch: string;
+  toBranch: string;
+  status: TransferStatus;
+  note: string | null;
+  lines: TransferFullLine[];
+  valueMinor: number;
+  baseCurrency: CurrencyCode;
+  receipt: null | {
+    date: string;
+    shortPieces: number;
+    shortValueMinor: number;
+    reason: string | null;
+    /** The stocktake that wrote the shortage off, when there was one */
+    stocktakeNumber: string | null;
+  };
 }
 
 // ─── Returns to the supplier (09 › purchase returns) ──────────────────────────

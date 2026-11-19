@@ -366,6 +366,7 @@ describe('writing a batch off, counting it, and sending it back', () => {
       payload: {
         fromBranchId: main!.id,
         toBranchId: mall!.id,
+        mode: 'instant',
         date: '2026-10-30',
         lines: [{ variantId: d.variantId, qty: 4 * BOX, batchNo: 'C-09', expiryDate: '2027-03-01' }],
       },
@@ -386,6 +387,7 @@ describe('writing a batch off, counting it, and sending it back', () => {
       payload: {
         fromBranchId: main!.id,
         toBranchId: mall!.id,
+        mode: 'instant',
         date: '2026-10-30',
         lines: [{ variantId: d.variantId, qty: 12 * BOX }],
       },
@@ -803,6 +805,7 @@ describe('the batch ledger keeps adding up to the stock', () => {
       payload: {
         fromBranchId: main!.id,
         toBranchId: mall!.id,
+        mode: 'instant',
         date: '2026-10-30',
         lines: [{ variantId: d.variantId, qty: 5 * BOX }],
       },

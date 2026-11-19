@@ -33,6 +33,8 @@ export interface StockIssue {
   wanted: number;
   /** The shortfall counts only what can be sold: the expired and blocked batches are left out of `onHand` */
   validOnly?: true;
+  /** Decision 14: what holds and carts put aside keep for others (base units): `onHand` is already what is left after them */
+  reserved?: number;
 }
 
 export interface BatchPlan {
@@ -90,6 +92,8 @@ export function planBatches(input: {
   today: string;
   pending: readonly OutboxEntry[];
   pharmacy: PharmacySettings | null | undefined;
+  /** What is reserved for other people per variant, base units (reserved.ts); missing: nothing */
+  reserved?: ReadonlyMap<string, number>;
 }): BatchPlan {
   const { cart, catalog, today, pending, pharmacy } = input;
   const sold = soldHere(pending);
@@ -126,13 +130,14 @@ export function planBatches(input: {
   for (const [variantId, want] of wanted) {
     const item = catalog.byVariant.get(variantId)!;
     if (item.stockQty === null || item.stockQty === undefined) continue;
-    const heldHere = item.stockQty - (sold.total.get(variantId) ?? 0);
+    const keptBack = Math.max(0, input.reserved?.get(variantId) ?? 0);
+    const heldHere = item.stockQty - (sold.total.get(variantId) ?? 0) - keptBack;
     // An item that keeps batches counts only the batches that can be sold, never past the stock itself
     const valid =
       usesAutoBatch(pharmacy) && Array.isArray(item.stockBatches)
         ? sellableOf(poolOf(item.stockBatches, sold.batches.get(variantId) ?? []), today)
         : null;
-    const onHand = valid === null ? heldHere : Math.min(heldHere, valid);
+    const onHand = valid === null ? heldHere : Math.min(heldHere, valid - keptBack);
     // A shortfall only in sellable stock is already said by the line no valid batch covers
     const sayBatchOnly = !overStock(heldHere, want) && uncoveredItems.has(variantId);
     if (overStock(onHand, want) && !sayBatchOnly)
@@ -142,6 +147,7 @@ export function planBatches(input: {
         onHand: Math.max(0, onHand),
         wanted: want,
         ...(onHand < heldHere ? { validOnly: true as const } : {}),
+        ...(keptBack > 0 ? { reserved: keptBack } : {}),
       });
   }
   return {

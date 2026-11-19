@@ -15,6 +15,7 @@ const TABS = [
   { to: '/accounting/reports/ledger', label: 'دفتر الأستاذ' },
   { to: '/accounting/reports/tax', label: 'الضريبة' },
   { to: '/accounting/reports/payables', label: 'ذمم الموردين' },
+  { to: '/accounting/period-close', label: 'إقفال الفترة' },
 ] as const;
 
 /**

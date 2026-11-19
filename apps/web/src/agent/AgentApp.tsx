@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AgentActivation,
+  AgentCodeStep,
   AgentLedgerRow,
   AgentLoginResponse,
   AgentMe,
@@ -139,6 +140,72 @@ function Login({ onSignedIn }: { onSignedIn: (r: AgentLoginResponse) => void }) 
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Round 37 (decision 21): after the password, a code sent to his phone
+  const [step, setStep] = useState<AgentCodeStep | null>(null);
+  const [code, setCode] = useState('');
+  if (step) {
+    return (
+      <Shell>
+        <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center pt-8 pb-6">
+          <IconChip size="lg">
+            <PhoneIcon size={24} />
+          </IconChip>
+          <h1 className="mt-5 text-2xl font-bold text-ink sm:text-3xl">رمز التأكيد</h1>
+          <p className="mt-2 text-ink-muted">
+            أرسلنا رمزاً من ست خانات إلى جوالك الذي ينتهي بـ{' '}
+            <bdi dir="ltr" className="num font-semibold text-ink">
+              {step.phoneHint}
+            </bdi>
+            . اكتبه هنا ليكتمل دخولك. يصلح عشر دقائق.
+          </p>
+          <Card className="mt-8">
+            <form
+              className="flex flex-col gap-5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setBusy(true);
+                setError(null);
+                apiFetch<AgentLoginResponse>('/v1/agent/login/code', {
+                  method: 'POST',
+                  body: { challengeId: step.challengeId, code },
+                })
+                  .then(onSignedIn)
+                  .catch((err: unknown) => setError(errorMessage(err)))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {error ? <Alert tone="error">{error}</Alert> : null}
+              {step.testCode ? <Alert tone="info">وضع التجربة: الرمز {step.testCode}</Alert> : null}
+              <TextField
+                label="الرمز"
+                dir="ltr"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+              <Button type="submit" size="lg" fullWidth loading={busy} disabled={code.length !== 6}>
+                أكّد الدخول
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                fullWidth
+                onClick={() => {
+                  setStep(null);
+                  setCode('');
+                  setError(null);
+                }}
+              >
+                رجوع، أطلب رمزاً جديداً
+              </Button>
+            </form>
+          </Card>
+        </div>
+      </Shell>
+    );
+  }
   return (
     <Shell>
       <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center pt-8 pb-6">
@@ -154,8 +221,11 @@ function Login({ onSignedIn }: { onSignedIn: (r: AgentLoginResponse) => void }) 
               e.preventDefault();
               setBusy(true);
               setError(null);
-              apiFetch<AgentLoginResponse>('/v1/agent/login', { method: 'POST', body: { email, password } })
-                .then(onSignedIn)
+              apiFetch<AgentCodeStep>('/v1/agent/login', { method: 'POST', body: { email, password } })
+                .then((r) => {
+                  setStep(r);
+                  setCode('');
+                })
                 .catch((err: unknown) => setError(errorMessage(err)))
                 .finally(() => setBusy(false));
             }}

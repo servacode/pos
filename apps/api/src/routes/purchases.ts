@@ -18,9 +18,12 @@ import {
   supplierPaymentInput,
   supplierReturnInput,
   transferInput,
+  transferReceiveInput,
+  transferSettingsInput,
   uuidSchema,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
+import type { AccessClaims } from '../auth/tokens';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
 import {
@@ -47,6 +50,8 @@ import {
   updatePurchaseOrder,
 } from '../services/purchase-orders';
 import { correctPurchase } from '../services/purchase-correction';
+import { assertDatesOpen } from '../services/period-close';
+import { readTransfer, receiveTransfer, saveTransferSettings, transferSettings } from '../services/transfers';
 import { expiryReport } from '../services/expiry';
 import { listDamagedStock } from '../services/damaged-stock';
 import { recall, setBatchBlocked } from '../services/batches';
@@ -64,6 +69,11 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
     return parsed.data;
   };
   const opts = { preHandler: requireAuth };
+  // Round 37 (decision 17): a document dated in a closed period is refused, in plain Arabic
+  const dateOpen = (auth: AccessClaims, body: unknown) => {
+    const date = (body as { date?: unknown } | null)?.date;
+    return assertDatesOpen(app.db, auth, [typeof date === 'string' ? date : undefined]);
+  };
 
   app.get('/v1/suppliers', opts, async (request) => {
     if (!request.auth) throw unauthorized();
@@ -99,6 +109,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   });
   app.post('/v1/purchases', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const created = await createPurchase(
       app.db,
       request.auth,
@@ -114,6 +125,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   // «صحّح الفاتورة»: a full reversal document, and the draft of the invoice to write again
   app.post('/v1/purchases/:id/correct', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const done = await correctPurchase(
       app.db,
       request.auth,
@@ -174,6 +186,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/v1/supplier-payments', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const paid = await paySupplier(
       app.db,
       request.auth,
@@ -228,6 +241,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   });
   app.post('/v1/stocktakes', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     const done = await createStocktake(
       app.db,
       request.auth,
@@ -243,11 +257,43 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   });
   app.post('/v1/transfers', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     return reply
       .code(201)
       .send(
         await createTransfer(app.db, request.auth, parseBody(transferInput, request.body), meta(request)),
       );
+  });
+
+  // Round 37 (decision 16): a transfer «بالطريق», the store's setting and the receiving branch's confirmation
+  app.get('/v1/transfers/settings', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return transferSettings(app.db, request.auth);
+  });
+  app.put('/v1/transfers/settings', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return saveTransferSettings(
+      app.db,
+      request.auth,
+      parseBody(transferSettingsInput, request.body),
+      meta(request),
+    );
+  });
+  app.get('/v1/transfers/:id', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return readTransfer(app.db, request.auth, idOf(request.params, 'هذا التحويل'));
+  });
+  app.post('/v1/transfers/:id/receive', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
+    return receiveTransfer(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا التحويل'),
+      parseBody(transferReceiveInput, request.body ?? {}),
+      meta(request),
+      app.clock.now(),
+    );
   });
 
   app.get('/v1/supplier-returns', opts, async (request) => {
@@ -256,6 +302,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   });
   app.post('/v1/supplier-returns', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
     return reply
       .code(201)
       .send(

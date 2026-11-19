@@ -15,7 +15,8 @@ import { uuidSchema } from './common';
  *   PUT  /v1/platform/stores/{id}/agent          moveStoreInput → 204
  *
  * Agent (his own sign-in and token realm):
- *   POST /v1/agent/login                         agentLoginInput → AgentLoginResponse
+ *   POST /v1/agent/login                         agentLoginInput → AgentCodeStep (a code went to his phone)
+ *   POST /v1/agent/login/code                    agentCodeInput → AgentLoginResponse (round 37, decision 21)
  *   PUT  /v1/agent/password                      agentPasswordInput → 204
  *   GET  /v1/agent/me                            AgentMe
  *   GET  /v1/agent/stores                        { items: AgentStore[] }
@@ -72,6 +73,15 @@ export const moveStoreInput = z.object({ agentId: uuidSchema.nullable() });
 export const agentLoginInput = z.object({
   email: z.email('اكتب البريد الإلكتروني'),
   password: z.string().min(1, 'اكتب كلمة السر').max(200),
+});
+
+/** Step 2 of the agent's sign-in (round 37, decision 21): the code sent to his phone after the password */
+export const agentCodeInput = z.object({
+  challengeId: uuidSchema,
+  code: z
+    .string('اكتب الرمز')
+    .trim()
+    .regex(/^\d{6}$/, 'الرمز ست خانات'),
 });
 
 export const agentPasswordInput = z.object({
@@ -146,6 +156,22 @@ export interface AgentLoginResponse {
   expiresAt: string;
   agent: { id: string; fullName: string; code: string; mustChangePassword: boolean };
 }
+
+/**
+ * The password was right: a code went to the agent's phone and nothing opens until it is typed
+ * (POST /v1/agent/login/code). `testCode` is only in the local test mode, which sends no message.
+ */
+export interface AgentCodeStep {
+  step: 'code';
+  challengeId: string;
+  /** Seconds the code lives */
+  expiresIn: number;
+  /** The phone's last digits, for «أرسلنا رمزاً إلى …» */
+  phoneHint: string;
+  testCode?: string;
+}
+
+export type AgentLoginResult = AgentLoginResponse | AgentCodeStep;
 
 /** A plan he may sell and what each cycle costs him against its list price */
 export interface AgentPlanPrice {

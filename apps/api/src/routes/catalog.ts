@@ -3,6 +3,7 @@ import { z, type ZodType } from 'zod';
 import {
   barcodeCodeSchema,
   bulkPriceInput,
+  tillProductInput,
   createCategoryInput,
   createProductInput,
   createTaxRateInput,
@@ -19,7 +20,9 @@ import {
   updateTaxRateInput,
   updateUnitInput,
 } from '@serva/core';
+import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
+import { createTillProduct } from '../services/till-products';
 import { bulkPrices } from '../services/catalog/bulk-prices';
 import { applyPriceList, previewPriceList } from '../services/catalog/price-list';
 import {
@@ -101,6 +104,17 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   app.post('/v1/products', signedIn, async (request, reply) => {
     const input = parseCatalog(createProductInput, request.body);
     return reply.status(201).send(await createProduct(db, input, ctxOf(request)));
+  });
+  // «أضف صنف جديد» at the till (decision 15): the product API's own write, for an unknown barcode, by a device
+  app.post('/v1/device/products', { onRequest: requireDevice({ write: true }) }, async (request, reply) => {
+    if (!request.device) throw unauthorized();
+    const input = parseCatalog(tillProductInput, request.body);
+    return reply.status(201).send(
+      await createTillProduct(db, request.device, input, clock.now(), {
+        ip: clientIp(request),
+        userAgent: request.headers['user-agent']?.slice(0, 300) ?? null,
+      }),
+    );
   });
   app.get('/v1/products/options', signedIn, async (request) => listOptionValues(db, ctxOf(request)));
   app.get('/v1/products/:id', signedIn, async (request) =>
