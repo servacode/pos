@@ -31,6 +31,7 @@ import {
   ClockIcon,
   CloseIcon,
   cn,
+  DeleteIcon,
   displayNumber,
   formatQuantity,
   IconChip,
@@ -44,6 +45,7 @@ import {
   PercentIcon,
   PrintIcon,
   RemoveIcon,
+  SearchIcon,
   SendIcon,
   TotalPanel,
   UndoIcon,
@@ -63,6 +65,7 @@ import { QuoteDialog, type QuoteChoice } from './QuoteDialog';
 import { batchGuard, planBatches } from './batches';
 import { reservedForOthers } from './reserved';
 import { NewProductPanel } from './NewProductPanel';
+import { showsWaste } from './waste';
 import { deviceDocuments } from '../shift/shift';
 import { bestSellers } from './bestSellers';
 import { AdjustPanel, NEED_TEXT, type AdjustMode, type AdjustValue } from './AdjustPanel';
@@ -123,10 +126,14 @@ import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
 import { serialLabel } from '@serva/core/contracts/warranty';
 import { PrescriptionPanel } from './PrescriptionPanel';
+import { AlternativesPanel } from './AlternativesPanel';
+import { flushShortages } from './shortages';
 import { Kbd } from './Kbd';
 import { SalePanel } from './SalePanel';
 import { packLineText, pieceWord } from './packText';
 
+// «تالف / هدر» needs the server and is rarely opened: its own chunk keeps the cashier's size down
+const WastePanel = lazyChunk(() => import('./WastePanel').then((m) => ({ default: m.WastePanel })));
 const PaymentPanel = lazyChunk(() =>
   import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })),
 );
@@ -138,6 +145,7 @@ export type SaleMode =
   | { kind: 'invoice' }
   | { kind: 'approve'; lineNo: number | null; need: ApprovalNeed }
   | { kind: 'batchApprove' }
+  | { kind: 'alternatives'; variantId: string }
   | { kind: 'pay' }
   | { kind: 'done' }
   | { kind: 'help' }
@@ -148,6 +156,7 @@ export type SaleMode =
   | { kind: 'online' }
   | { kind: 'hold' }
   | { kind: 'newProduct'; barcode: string }
+  | { kind: 'waste' }
   | { kind: 'holdName' }
   | { kind: 'heldList' }
   | { kind: 'check' }
@@ -264,6 +273,10 @@ export function SaleScreen(props: SaleScreenProps) {
   // 03 › الصيدليات: what the cart takes from which batch (first expiry first), and from the shelf.
   // What this till sold and has not sent yet comes off what it last pulled, as it works offline.
   const posServices = usePos();
+  // A pharmacy's shortage requests kept while the till was offline go to the server once it can reach it (round 38)
+  useEffect(() => {
+    void flushShortages(posServices);
+  }, [posServices]);
   // Online orders this till sold, until the next pull says they are done
   const [soldOnline, setSoldOnline] = useState<string[]>([]);
   useEffect(() => {
@@ -318,6 +331,37 @@ export function SaleScreen(props: SaleScreenProps) {
       }),
     [cart, catalog, unsent, settings.timezone, settings.businessDayCutoff, settings.pharmacy, reservedNow],
   );
+  // The manager's code allowed an expired batch to be sold (the store's «بيع المنتهي برمز المدير»): the lines then
+  // take from it, last, and say so on the document (round 38). Approval and warnings still follow the plan above.
+  const expiredAllowed =
+    settings.pharmacy?.allowExpiredWithCode === true &&
+    batchPlan.uncovered.some((i) => i.expiredQty > 0) &&
+    cart.batchApproval?.sig === batchPlan.signature;
+  const takePlan = useMemo(
+    () =>
+      expiredAllowed
+        ? planBatches({
+            cart,
+            catalog: catalog.original ?? catalog,
+            today: businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff),
+            pending: unsent,
+            pharmacy: settings.pharmacy,
+            reserved: reservedNow,
+            allowExpired: true,
+          })
+        : batchPlan,
+    [
+      expiredAllowed,
+      batchPlan,
+      cart,
+      catalog,
+      unsent,
+      settings.timezone,
+      settings.businessDayCutoff,
+      settings.pharmacy,
+      reservedNow,
+    ],
+  );
   const guard = useMemo(
     () => batchGuard(batchPlan, settings.pharmacy, settings.till?.blockNegativeStock === true),
     [batchPlan, settings.pharmacy, settings.till],
@@ -343,7 +387,7 @@ export function SaleScreen(props: SaleScreenProps) {
       promotions: activePromotions,
       audience,
       variants: catalog.byVariant,
-      batchPlan: batchPlan.allocations,
+      batchPlan: takePlan.allocations,
     }),
     [
       settings.baseCurrency,
@@ -352,7 +396,7 @@ export function SaleScreen(props: SaleScreenProps) {
       activePromotions,
       audience,
       catalog.byVariant,
-      batchPlan.allocations,
+      takePlan.allocations,
     ],
   );
   const rules = useMemo<ApprovalRules>(
@@ -861,6 +905,7 @@ export function SaleScreen(props: SaleScreenProps) {
     mode.kind === 'rx' ||
     mode.kind === 'holdName' ||
     mode.kind === 'newProduct' ||
+    mode.kind === 'waste' ||
     mode.kind === 'heldList';
   // While paying, amounts are typed and confirmed with Enter: only a full barcode counts as a scan.
   useScanner({
@@ -1272,8 +1317,15 @@ export function SaleScreen(props: SaleScreenProps) {
     wholesaleOn ||
     Boolean(cart.contractPriced);
   const canHoldForCustomer = priced !== null && !cart.onlineOrder;
+  // Round 38 (#41): «تالف / هدر» for the stores that throw away what spoils (or that set their reasons)
+  const canWaste = showsWaste(settings.sectors, settings.till);
   const ticketTools =
-    waitingOnline.length > 0 || canHoldForCustomer || priced !== null || showWholesale || props.heldCount > 0;
+    waitingOnline.length > 0 ||
+    canHoldForCustomer ||
+    priced !== null ||
+    showWholesale ||
+    canWaste ||
+    props.heldCount > 0;
   const orderType = cart.service?.orderType ?? defaultOrderType;
   const closeButton = (label: string, onClick: () => void) => (
     <Button
@@ -1448,7 +1500,7 @@ export function SaleScreen(props: SaleScreenProps) {
               </Button>
             ) : null}
             {/* The rest of the ticket's tools in one «⋯»: hold for a customer, a quotation, the wholesale price */}
-            {canHoldForCustomer || priced || showWholesale ? (
+            {canHoldForCustomer || priced || showWholesale || canWaste ? (
               <Menu
                 label="أدوات الفاتورة"
                 align="start"
@@ -1477,6 +1529,11 @@ export function SaleScreen(props: SaleScreenProps) {
                     }
                   >
                     {wholesaleOn ? 'ارجع إلى سعر المفرق' : cart.contractPriced ? 'سعر العقد' : 'سعر الجملة'}
+                  </MenuItem>
+                ) : null}
+                {canWaste ? (
+                  <MenuItem icon={<DeleteIcon />} onSelect={() => setMode({ kind: 'waste' })}>
+                    تالف / هدر
                   </MenuItem>
                 ) : null}
               </Menu>
@@ -1669,7 +1726,7 @@ export function SaleScreen(props: SaleScreenProps) {
                   (line.packName ? line.packName : null),
                 adj?.kind === 'price' ? 'سعر معدّل' : null,
                 // A batch line says which lots it takes and their dates
-                ...(batchPlan.allocations.get(line.lineNo) ?? [])
+                ...(takePlan.allocations.get(line.lineNo) ?? [])
                   .filter((b) => b.batchNo)
                   .map((b) => (
                     <span key={`lot-${b.batchNo}`} className="whitespace-nowrap">
@@ -2011,6 +2068,17 @@ export function SaleScreen(props: SaleScreenProps) {
                 stockWarns={guard.stockWarns}
                 fmt={(q) => formatQuantity(q, digits)}
                 onApprove={() => setMode({ kind: 'batchApprove' })}
+                {...(settings.pharmacy
+                  ? {
+                      onAlternatives: (of: { lineNo: number } | { variantId: string }) => {
+                        const variantId =
+                          'variantId' in of
+                            ? of.variantId
+                            : cart.lines.find((l) => l.lineNo === of.lineNo)?.variantId;
+                        if (variantId) setMode({ kind: 'alternatives', variantId });
+                      },
+                    }
+                  : {})}
               />
             </CartWarnings>
           ) : undefined
@@ -2046,6 +2114,24 @@ export function SaleScreen(props: SaleScreenProps) {
               >
                 <PercentIcon size={20} />
                 <span>خصم</span>
+              </button>
+            ) : null}
+            {/* A pharmacy: the same medicine in another brand, in stock, for the line in hand (round 38) */}
+            {settings.pharmacy ? (
+              <button
+                type="button"
+                aria-label="بدائل الصنف"
+                title="بدائل بنفس المادة الفعالة، متوفرة الآن"
+                onClick={() => {
+                  const line =
+                    cart.lines.find((l) => l.lineNo === selected) ?? cart.lines[cart.lines.length - 1];
+                  if (line) setMode({ kind: 'alternatives', variantId: line.variantId });
+                }}
+                disabled={lineCount === 0}
+                className={CART_QUICK}
+              >
+                <SearchIcon size={20} />
+                <span>بدائل</span>
               </button>
             ) : null}
           </>
@@ -2417,7 +2503,11 @@ export function SaleScreen(props: SaleScreenProps) {
           <ManagerCode
             staff={staff}
             permission="sale.discount_over_limit"
-            reason="لا دفعة صالحة تكفي بعض الأصناف: يوافق المدير على بيعها"
+            reason={
+              batchPlan.uncovered.some((i) => i.expiredQty > 0)
+                ? 'دفعة منتهية الصلاحية: يوافق المدير على بيعها، ويُسجَّل ذلك'
+                : 'لا دفعة صالحة تكفي بعض الأصناف: يوافق المدير على بيعها'
+            }
             onApproved={(approval) => {
               setCart((c) => ({ ...c, batchApproval: { sig: batchPlan.signature, approval } }));
               setMode({ kind: 'items' });
@@ -2571,6 +2661,17 @@ export function SaleScreen(props: SaleScreenProps) {
           }}
           onCancel={() => setMode({ kind: 'items' })}
         />
+      ) : effectiveMode.kind === 'alternatives' && catalog.byVariant.get(effectiveMode.variantId) ? (
+        <AlternativesPanel
+          source={catalog.byVariant.get(effectiveMode.variantId)!}
+          catalog={catalog}
+          today={businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff)}
+          onPick={(picked) => {
+            setMode({ kind: 'items' });
+            add(picked, null);
+          }}
+          onClose={() => setMode({ kind: 'items' })}
+        />
       ) : effectiveMode.kind === 'newProduct' ? (
         <NewProductPanel
           barcode={effectiveMode.barcode}
@@ -2579,15 +2680,33 @@ export function SaleScreen(props: SaleScreenProps) {
           staff={staff}
           canManage={session.permissions.has('catalog.manage')}
           userId={session.userId}
+          businessDate={() => businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff)}
           onClose={() => setMode({ kind: 'items' })}
           onDone={(added) => {
             setMode({ kind: 'items' });
             setNotice({
               tone: 'info',
-              text: `أُضيف «${added.name}». يصل إلى الكاشير مع أول مزامنة، ثم امسح الباركود مرة أخرى.`,
+              text: added.offline
+                ? `أُضيف «${added.name}» على هذا الجهاز وصار جاهزاً للبيع. امسح الباركود مرة أخرى. يصل إلى المتجر عند عودة الاتصال.`
+                : `أُضيف «${added.name}». يصل إلى الكاشير مع أول مزامنة، ثم امسح الباركود مرة أخرى.`,
             });
           }}
         />
+      ) : effectiveMode.kind === 'waste' ? (
+        <Suspense fallback={null}>
+          <WastePanel
+            catalog={catalog}
+            reasons={settings.till?.wasteReasons}
+            staff={staff}
+            canAdjust={session.permissions.has('inventory.adjust')}
+            userId={session.userId}
+            onClose={() => setMode({ kind: 'items' })}
+            onDone={(text) => {
+              setMode({ kind: 'items' });
+              setNotice({ tone: 'info', text });
+            }}
+          />
+        </Suspense>
       ) : effectiveMode.kind === 'hold' && priced ? (
         <HoldPanel
           cart={cart}

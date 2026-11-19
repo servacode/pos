@@ -122,3 +122,6 @@
 
 # the period close the posting door reads (round 37, decision 17)
 /apps/api/src/services/period-close.ts @servacode
+
+# a product the till made offline, written by the document processor (round 38)
+/apps/api/src/services/till-products.ts @servacode

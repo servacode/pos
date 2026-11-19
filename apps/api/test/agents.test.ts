@@ -863,3 +863,163 @@ describe('the agent’s second step (round 37, decision 21)', () => {
     expect(ok.json<AgentLoginResponse>().agent.fullName).toBe('وكيل حمص');
   });
 });
+
+describe('«تذكّر هالجهاز 30 يوم» (round 38)', () => {
+  const password = 'temp-pass-123';
+  const login = (deviceToken?: string, email = 'raqqa@agents.test') =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/agent/login',
+      payload: { email, password, ...(deviceToken ? { deviceToken } : {}) },
+    });
+  /** Both steps, asking to be remembered or not; answers the portal's reply */
+  async function enter(remember: boolean, email = 'raqqa@agents.test', phone = AGENT_PHONE) {
+    const step = (await login(undefined, email)).json<AgentCodeStep>();
+    const done = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/login/code',
+      payload: { challengeId: step.challengeId, code: codes.last(phone), remember },
+    });
+    expect(done.statusCode, done.body).toBe(200);
+    return done.json<AgentLoginResponse>();
+  }
+  const needsCode = (res: Awaited<ReturnType<typeof login>>) => {
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json<AgentCodeStep>().step).toBe('code');
+  };
+
+  it('a remembered device skips the code, after the password, and the token is only for the sign-in', async () => {
+    await addAgent();
+    const first = await enter(true);
+    expect(first.deviceToken).toBeTruthy();
+    expect(new Date(first.deviceExpiresAt!).getTime() - clock.now().getTime()).toBe(30 * DAY_MS);
+    const sent = codes.sent.length;
+    const again = await login(first.deviceToken);
+    expect(again.statusCode, again.body).toBe(200);
+    const body = again.json<AgentLoginResponse>();
+    expect(body.token).toBeTruthy();
+    expect(body.deviceToken).toBeUndefined();
+    expect(codes.sent.length).toBe(sent);
+    // The session it gave works
+    const stores = await app.inject({
+      method: 'GET',
+      url: '/v1/agent/stores',
+      headers: { authorization: `Bearer ${body.token}` },
+    });
+    expect(stores.statusCode, stores.body).toBe(403); // the temporary password is still to be changed
+    // The device token alone opens nothing
+    const asSession = await app.inject({
+      method: 'GET',
+      url: '/v1/agent/me',
+      headers: { authorization: `Bearer ${first.deviceToken}` },
+    });
+    expect(asSession.statusCode).toBe(401);
+  });
+
+  it('a device he did not ask to remember gets no token and asks for the code again', async () => {
+    await addAgent();
+    const first = await enter(false);
+    expect(first.deviceToken).toBeUndefined();
+    needsCode(await login());
+  });
+
+  it('the password is still needed: a token with a wrong password opens nothing', async () => {
+    await addAgent();
+    const first = await enter(true);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/login',
+      payload: { email: 'raqqa@agents.test', password: 'wrong-pass-1', deviceToken: first.deviceToken },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('after thirty days it expires and the code is asked again', async () => {
+    await addAgent();
+    const first = await enter(true);
+    clock.advance(29 * DAY_MS);
+    expect((await login(first.deviceToken)).json<AgentLoginResponse>().token).toBeTruthy();
+    clock.advance(2 * DAY_MS);
+    needsCode(await login(first.deviceToken));
+  });
+
+  it('another agent’s device, a garbage token and a session token all ask for the code', async () => {
+    await addAgent();
+    await addAgent({ code: 'ag-43', email: 'homs@agents.test', phone: '0955333444', fullName: 'وكيل حمص' });
+    const mine = await enter(true);
+    const his = await enter(true, 'homs@agents.test', '+963955333444');
+    needsCode(await login(his.deviceToken));
+    needsCode(await login('not-a-token'));
+    needsCode(await login(mine.token));
+    // His own token still works
+    expect((await login(mine.deviceToken)).json<AgentLoginResponse>().token).toBeTruthy();
+  });
+
+  it('suspending the agent revokes his remembered devices for good, even after he is active again', async () => {
+    const id = await addAgent();
+    const first = await enter(true);
+    const admin = await platformAdmin();
+    for (const status of ['suspended', 'active']) {
+      const res = await app.inject({
+        method: 'PUT',
+        url: `/v1/platform/agents/${id}`,
+        headers: admin,
+        payload: agentBody({ password: '', status }),
+      });
+      expect(res.statusCode, res.body).toBe(204);
+    }
+    needsCode(await login(first.deviceToken));
+    // A device remembered after that works again
+    const second = await enter(true);
+    expect((await login(second.deviceToken)).json<AgentLoginResponse>().token).toBeTruthy();
+  });
+
+  it('a new password, his own or one the owner sets, revokes them', async () => {
+    const id = await addAgent();
+    const first = await enter(true);
+    const session = { authorization: `Bearer ${first.token}` };
+    const changed = await app.inject({
+      method: 'PUT',
+      url: '/v1/agent/password',
+      headers: session,
+      payload: { current: password, password: 'my-own-pass-1' },
+    });
+    expect(changed.statusCode, changed.body).toBe(204);
+    const withNew = (deviceToken: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/agent/login',
+        payload: { email: 'raqqa@agents.test', password: 'my-own-pass-1', deviceToken },
+      });
+    needsCode(await withNew(first.deviceToken!));
+    // Remembered again under the new password, then the owner sets a temporary one
+    const step = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/agent/login',
+        payload: { email: 'raqqa@agents.test', password: 'my-own-pass-1' },
+      })
+    ).json<AgentCodeStep>();
+    const second = (
+      await app.inject({
+        method: 'POST',
+        url: '/v1/agent/login/code',
+        payload: { challengeId: step.challengeId, code: codes.last(AGENT_PHONE), remember: true },
+      })
+    ).json<AgentLoginResponse>();
+    expect((await withNew(second.deviceToken!)).json<AgentLoginResponse>().token).toBeTruthy();
+    const reset = await app.inject({
+      method: 'PUT',
+      url: `/v1/platform/agents/${id}`,
+      headers: await platformAdmin(),
+      payload: agentBody({ password: 'owner-set-pass-1' }),
+    });
+    expect(reset.statusCode, reset.body).toBe(204);
+    const after = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/login',
+      payload: { email: 'raqqa@agents.test', password: 'owner-set-pass-1', deviceToken: second.deviceToken },
+    });
+    needsCode(after);
+  });
+});

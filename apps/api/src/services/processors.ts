@@ -51,7 +51,8 @@ import { returnSerials, sellSerials } from './serials';
 import { refreshExpiry } from './expiry';
 import { deliverSalesOrder } from './sales-orders';
 import { applyAllocations, reconcilePlanAfterReturn, recordPlanFromSale } from './installments';
-import { recordReturnBatches, recordSaleBatches } from './batches';
+import { auditExpiredSale, recordReturnBatches, recordSaleBatches } from './batches';
+import { processTempItem } from './till-products';
 import { inScope, permissionScope } from '../auth/permissions';
 
 /**
@@ -237,6 +238,19 @@ async function processSale({ tx, device, doc }: DocumentContext) {
     .returning({ id: invoices.id });
   if (!inserted) return { flags };
   await refreshShelf(tx, sale);
+  // An expired batch sold is audited with whoever approved it (round 38); the sale itself stands
+  await auditExpiredSale(
+    tx,
+    {
+      tenantId,
+      deviceId: device.deviceId,
+      invoiceId: doc.id,
+      date: doc.businessDate,
+      cashierId: sale.cashierId,
+    },
+    sale.lines,
+    sale.batchApproval,
+  );
 
   await tx.insert(invoiceLines).values(
     sale.lines.map((l) => ({
@@ -884,6 +898,8 @@ export const DOCUMENT_PROCESSORS: SyncProcessors = {
   gift_voucher: processGiftVoucher,
   deposit: processDeposit,
   customer: processCustomer,
+  // A product the till made offline (round 38, dfix38)
+  temp_item: processTempItem,
   shift_open: processShiftOpen,
   shift_close: processShiftClose,
   cash_movement: processCashMovement,

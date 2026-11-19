@@ -4,9 +4,14 @@ import {
   pharmacySettingsSchema,
   DEFAULT_PHARMACY_SETTINGS,
 } from './contracts/pharmacy';
+import { shortageRequestInput } from './contracts/pharmacy';
 import {
+  addMonthsISO,
   allocateFefo,
   batchState,
+  daysBetweenISO,
+  expiredAction,
+  isAlternative,
   overStock,
   sameBatch,
   uncoveredAction,
@@ -306,5 +311,147 @@ describe('batch state and FEFO allocation', () => {
       prescription: 'optional',
       blockNoBatch: true,
     });
+  });
+});
+
+describe('round 38: FEFO with an expired batch a manager allowed', () => {
+  const today = '2026-10-30';
+  const batches = [
+    { batchNo: 'OLD', expiry: '2026-09-01', qty: 5000 },
+    { batchNo: 'NEW', expiry: '2027-03-01', qty: 2000 },
+    { batchNo: 'MID', expiry: '2026-12-01', qty: 1000 },
+  ];
+
+  it('never takes an expired batch by default, and the nearest valid expiry goes first', () => {
+    const r = allocateFefo(batches, 2500, today);
+    expect(r.allocations.map((a) => [a.batchNo, a.qty])).toEqual([
+      ['MID', 1000],
+      ['NEW', 1500],
+    ]);
+    expect(r.uncovered).toBe(0);
+    const over = allocateFefo(batches, 4000, today);
+    expect(over.uncovered).toBe(1000);
+    expect(over.expiredQty).toBe(5000);
+  });
+
+  it('takes the expired batch only after the valid ones when it is allowed', () => {
+    const r = allocateFefo(batches, 4000, today, true);
+    expect(r.allocations.map((a) => [a.batchNo, a.qty])).toEqual([
+      ['MID', 1000],
+      ['NEW', 2000],
+      ['OLD', 1000],
+    ]);
+    expect(r.uncovered).toBe(0);
+    const more = allocateFefo(batches, 6500, today, true);
+    expect(more.allocations.map((a) => [a.batchNo, a.qty])).toEqual([
+      ['MID', 1000],
+      ['NEW', 2000],
+      ['OLD', 3500],
+    ]);
+    expect(more.remaining.find((b) => b.batchNo === 'OLD')!.qty).toBe(1500);
+  });
+
+  it('a blocked batch is never taken, allowed or not', () => {
+    const r = allocateFefo(
+      [{ batchNo: 'R', expiry: '2026-09-01', qty: 5000, blocked: true }],
+      1000,
+      today,
+      true,
+    );
+    expect(r.uncovered).toBe(1000);
+  });
+});
+
+describe('round 38: what the till does with an expired batch', () => {
+  it('follows the owner’s choice, and leaves a store that never chose to its older rule', () => {
+    const issue = { uncovered: 3000, expiredQty: 5000 };
+    expect(expiredAction({ prescription: 'optional', allowExpiredWithCode: true }, issue)).toBe('approve');
+    expect(expiredAction({ prescription: 'optional', allowExpiredWithCode: false }, issue)).toBe('block');
+    expect(
+      expiredAction({ prescription: 'optional', allowExpiredWithCode: true, blockNoBatch: true }, issue),
+    ).toBe('approve');
+    expect(
+      expiredAction({ prescription: 'optional', allowExpiredWithCode: false, blockNoBatch: false }, issue),
+    ).toBe('block');
+    expect(expiredAction({ prescription: 'optional' }, issue)).toBeNull();
+    expect(expiredAction(null, issue)).toBeNull();
+  });
+
+  it('applies only when the expired batches are what is missing', () => {
+    const on = { prescription: 'optional' as const, allowExpiredWithCode: true };
+    expect(expiredAction(on, { uncovered: 0, expiredQty: 5000 })).toBeNull();
+    expect(expiredAction(on, { uncovered: 3000, expiredQty: 0 })).toBeNull();
+    // Short by more than the expired batches hold: another shortage, the usual rule
+    expect(expiredAction(on, { uncovered: 6000, expiredQty: 5000 })).toBeNull();
+  });
+});
+
+describe('round 38: alternatives by active ingredient', () => {
+  const panadol = { genericName: 'باراسيتامول', strength: '500 ملغ', dosageForm: 'أقراص' };
+
+  it('matches the same ingredient, strength and form, ignoring case, spaces and Arabic spelling', () => {
+    expect(
+      isAlternative(panadol, { genericName: ' باراسيتامول ', strength: '500ملغ', dosageForm: 'أقراص' }),
+    ).toBe(true);
+    expect(isAlternative({ genericName: 'Paracetamol' }, { genericName: 'paracetamol ' })).toBe(true);
+  });
+
+  it('refuses another strength, another form or another ingredient', () => {
+    expect(isAlternative(panadol, { ...panadol, strength: '1 غ' })).toBe(false);
+    expect(isAlternative(panadol, { ...panadol, dosageForm: 'شراب' })).toBe(false);
+    expect(isAlternative(panadol, { ...panadol, genericName: 'إيبوبروفين' })).toBe(false);
+    // The other one states no strength: it cannot be said to be the same
+    expect(isAlternative(panadol, { genericName: 'باراسيتامول', dosageForm: 'أقراص' })).toBe(false);
+  });
+
+  it('asks only what the asked-for item states', () => {
+    expect(isAlternative({ genericName: 'باراسيتامول' }, panadol)).toBe(true);
+    expect(
+      isAlternative({ genericName: 'باراسيتامول', strength: '500 ملغ' }, { ...panadol, dosageForm: 'شراب' }),
+    ).toBe(true);
+  });
+
+  it('never guesses without a generic name', () => {
+    expect(isAlternative({ genericName: null }, { genericName: null })).toBe(false);
+    expect(isAlternative({ genericName: '' }, { genericName: '' })).toBe(false);
+    expect(isAlternative({ strength: '500 ملغ' }, panadol)).toBe(false);
+  });
+});
+
+describe('round 38: months for the expiring report', () => {
+  it('adds calendar months, keeping the last day of a shorter month', () => {
+    expect(addMonthsISO('2026-10-30', 3)).toBe('2027-01-30');
+    expect(addMonthsISO('2026-11-30', 3)).toBe('2027-02-28');
+    expect(addMonthsISO('2027-12-15', 1)).toBe('2028-01-15');
+    expect(addMonthsISO('2028-01-31', 1)).toBe('2028-02-29');
+    expect(addMonthsISO('2026-10-30', 0)).toBe('2026-10-30');
+  });
+
+  it('counts the days between two dates', () => {
+    expect(daysBetweenISO('2026-10-30', '2027-01-30')).toBe(92);
+    expect(daysBetweenISO('2026-10-30', '2026-10-30')).toBe(0);
+    expect(daysBetweenISO('2026-10-30', '2026-10-25')).toBe(-5);
+  });
+});
+
+describe('round 38: the shortage request', () => {
+  const id = '0192a3b4-c5d6-7e8f-9a0b-000000000001';
+  it('keeps its own id, a default of one, and no note', () => {
+    expect(shortageRequestInput.parse({ id, variantId: null, name: ' سيروم ' })).toEqual({
+      id,
+      variantId: null,
+      name: 'سيروم',
+      qty: 1000,
+      note: null,
+    });
+  });
+  it('refuses a missing name or a wrong id', () => {
+    expect(shortageRequestInput.safeParse({ id, variantId: null, name: '  ' }).success).toBe(false);
+    expect(shortageRequestInput.safeParse({ id: 'x', variantId: null, name: 'دواء' }).success).toBe(false);
+  });
+  it('the setting «بيع المنتهي برمز المدير» is kept in the pharmacy settings', () => {
+    expect(
+      pharmacySettingsSchema.parse({ prescription: 'optional', allowExpiredWithCode: true }),
+    ).toMatchObject({ allowExpiredWithCode: true });
   });
 });

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
-import type { InventoryResponse, InventoryRow, ProfitReport, StocktakeDetail } from '@serva/core';
+import { Link, useSearchParams } from 'react-router';
+import {
+  wasteReasonsOf,
+  type InventoryResponse,
+  type InventoryRow,
+  type ProfitReport,
+  type StocktakeDetail,
+} from '@serva/core';
 import {
   AlertCircleIcon,
   Alert,
@@ -71,6 +77,8 @@ export function InventoryPage() {
   // «سجّل هدراً» (03 › الخضار والمخابز: تسجيل الهدر): what spoiled, out of stock at its cost
   const [wasteKey, setWasteKey] = useState('');
   const [wasteQty, setWasteQty] = useState('');
+  // Why it was thrown away (round 38): the store's reasons, kept on the count's line for the waste report
+  const [wasteWhy, setWasteWhy] = useState('');
   // The picker narrows by typing (a store has hundreds of pieces); the write-off is confirmed first
   const [wasteQuery, setWasteQuery] = useState('');
   const [wasteAsk, setWasteAsk] = useState(false);
@@ -363,7 +371,13 @@ export function InventoryPage() {
           branchId: row.branchId,
           date: today(),
           note: 'هدر',
-          lines: [{ variantId: row.variantId, countedQty: Math.max(0, row.qty - qty) }],
+          lines: [
+            {
+              variantId: row.variantId,
+              countedQty: Math.max(0, row.qty - qty),
+              wasteReason: wasteWhy || wasteReasonsOf(stock?.wasteReasons)[0]!,
+            },
+          ],
         }),
       );
       setWasteKey('');
@@ -406,6 +420,13 @@ export function InventoryPage() {
                 >
                   سجّل هدراً
                 </Button>
+              ) : null}
+              {canCount && !counting ? (
+                <Link to="/inventory/count" className="inline-flex">
+                  <Button variant="secondary" icon={<BarcodeIcon />} tabIndex={-1}>
+                    جرد بالهاتف
+                  </Button>
+                </Link>
               ) : null}
               {canCount && !counting ? (
                 <Button icon={<ListIcon />} onClick={() => setCounting(true)}>
@@ -778,6 +799,17 @@ export function InventoryPage() {
               {wasteOptions.map((r) => (
                 <option key={`${r.branchId}:${r.variantId}`} value={`${r.branchId}:${r.variantId}`}>
                   {manyBranches ? `${r.name} · ${branchName(r.branchId)}` : r.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="السبب"
+              value={wasteWhy || wasteReasonsOf(stock?.wasteReasons)[0]!}
+              onChange={(e) => setWasteWhy(e.target.value)}
+            >
+              {wasteReasonsOf(stock?.wasteReasons).map((r) => (
+                <option key={r} value={r}>
+                  {r}
                 </option>
               ))}
             </Select>

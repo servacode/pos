@@ -29,6 +29,7 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError, isUniqueViolation } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { resyncRepPhoneStaff } from './devices';
 
 /**
  * Staff «الموظفون» (packages/core › contracts/staff-admin.ts): the store's people, each with one
@@ -181,6 +182,8 @@ async function giveRole(
   await tx.delete(userRoles).where(eq(userRoles.userId, userId));
   const targets = branchIds === null ? [null] : [...new Set(branchIds)];
   await tx.insert(userRoles).values(targets.map((branchId) => ({ tenantId, userId, roleId, branchId })));
+  // A manager or an owner may sign in on a rep's phone: its staff list is told to download again (devices.ts)
+  await resyncRepPhoneStaff(tx);
 }
 
 /** A target the caller may manage: not themselves, not the owner, nobody holding more than the caller. */

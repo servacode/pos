@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   formatMoney,
   orderLineCost,
@@ -85,7 +85,9 @@ export function PurchaseOrderFormPage() {
   const [saved, setSaved] = useState<PurchaseOrderDetail | null>(null);
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [suppliersLoaded, setSuppliersLoaded] = useState(false);
-  const [supplierId, setSupplierId] = useState('');
+  // «اطلب من المورد» in «النواقص» opens a new order for that supplier with the suggestion already asked for (round 38)
+  const [params] = useSearchParams();
+  const [supplierId, setSupplierId] = useState(() => (id ? '' : (params.get('supplier') ?? '')));
   const [expected, setExpected] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
@@ -318,6 +320,14 @@ export function PurchaseOrderFormPage() {
       setSuggesting(false);
     }
   }
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current || id || params.get('suggest') !== '1' || !supplierId || !suppliersLoaded) return;
+    asked.current = true;
+    void suggest();
+    // Once, when the page opens from the shortages list
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suppliersLoaded, supplierId]);
 
   async function write() {
     setBusy(true);
@@ -511,7 +521,11 @@ export function PurchaseOrderFormPage() {
                             <span className="truncate font-semibold text-ink">{l.name}</span>
                             {l.why ? (
                               <Badge tone={l.why.reason === 'below_min' ? 'warning' : 'info'}>
-                                {l.why.reason === 'below_min' ? 'تحت الحد الأدنى' : 'يُباع بسرعة'}
+                                {l.why.reason === 'below_min'
+                                  ? 'تحت الحد الأدنى'
+                                  : l.why.reason === 'requested'
+                                    ? 'طلبه زبون'
+                                    : 'يُباع بسرعة'}
                               </Badge>
                             ) : null}
                             {note ? <span className="text-xs text-ink-subtle">{note}</span> : null}

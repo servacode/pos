@@ -73,6 +73,8 @@ export const moveStoreInput = z.object({ agentId: uuidSchema.nullable() });
 export const agentLoginInput = z.object({
   email: z.email('اكتب البريد الإلكتروني'),
   password: z.string().min(1, 'اكتب كلمة السر').max(200),
+  /** Round 38: the token this device was given when he asked to be remembered; while it is good, no code is asked */
+  deviceToken: z.string().min(1).max(2000).optional(),
 });
 
 /** Step 2 of the agent's sign-in (round 37, decision 21): the code sent to his phone after the password */
@@ -82,6 +84,8 @@ export const agentCodeInput = z.object({
     .string('اكتب الرمز')
     .trim()
     .regex(/^\d{6}$/, 'الرمز ست خانات'),
+  /** «تذكّر هالجهاز 30 يوم»: the answer carries a device token */
+  remember: z.boolean().default(false),
 });
 
 export const agentPasswordInput = z.object({
@@ -155,6 +159,9 @@ export interface AgentLoginResponse {
   token: string;
   expiresAt: string;
   agent: { id: string; fullName: string; code: string; mustChangePassword: boolean };
+  /** Only when he asked to be remembered: kept on this device and sent with the next password step */
+  deviceToken?: string;
+  deviceExpiresAt?: string;
 }
 
 /**

@@ -343,6 +343,11 @@ export const salePayloadSchema = z
     customerId: uuidSchema.nullable(),
     /** The manager who allowed a sale on account by a cashier without «البيع بالآجل»; absent otherwise */
     creditApproval: approvalSchema.nullable().optional(),
+    /**
+     * The manager who allowed a line to be sold with no valid batch, an expired one included (round 38:
+     * the store's «بيع المنتهي برمز المدير»). The server audits a sale of an expired batch with it.
+     */
+    batchApproval: approvalSchema.nullable().optional(),
     /** What the customer owed after this sale, as the till last knew it: printed on a credit receipt */
     customerBalanceAfterMinor: minorSchema.nullable().optional(),
     /** The customer's name as printed, a snapshot */

@@ -661,6 +661,8 @@ export function PaymentPanel({
       });
       const extra = {
         ...(approved && (onCredit || onCheque) ? { creditApproval: approved } : {}),
+        // The manager who allowed a batch the till would not sell (an expired one): the server audits it (round 38)
+        ...(cart.batchApproval ? { batchApproval: cart.batchApproval.approval } : {}),
         // The balance the receipt prints under a sale on account
         ...(onCredit && owed !== null ? { customerBalanceAfterMinor: owed + creditAmount } : {}),
         ...(plan && planStands ? { installmentPlan: plan.plan } : {}),

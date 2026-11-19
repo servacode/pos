@@ -241,6 +241,52 @@ export async function recordSaleBatches(
 }
 
 /**
+ * An expired batch sold is written to the audit log (round 38): who approved it with the manager's code (null when
+ * nobody did: an older till, or one that was not to be trusted), which items and batches, on which invoice.
+ * The sale itself is never refused here (08 › قاعدة 8): it is flagged batch_blocked by recordSaleBatches.
+ */
+export async function auditExpiredSale(
+  tx: Transaction,
+  entry: { tenantId: string; deviceId: string; invoiceId: string; date: string; cashierId: string },
+  lines: readonly SaleLineBatches[],
+  approval: { userId: string; method: string; offline: boolean } | null | undefined,
+): Promise<boolean> {
+  const expired = lines.flatMap((line) => {
+    const taken: readonly BatchAllocation[] = line.batches?.length
+      ? line.batches
+      : line.batchNo
+        ? [{ batchNo: line.batchNo, expiry: line.batchExpiry ?? null, qty: line.baseQty }]
+        : [];
+    return taken
+      .filter((a) => a.expiry && a.expiry < entry.date)
+      .map((a) => ({ variantId: line.variantId, batchNo: a.batchNo, expiry: a.expiry, qty: a.qty }));
+  });
+  if (expired.length === 0) return false;
+  await audit(
+    tx,
+    {
+      tenantId: entry.tenantId,
+      userId: approval?.userId ?? entry.cashierId,
+      actorType: 'device',
+      deviceId: entry.deviceId,
+      action: 'sale.expired_batch',
+      entity: 'invoice',
+      entityId: entry.invoiceId,
+      data: {
+        approvedBy: approval?.userId ?? null,
+        method: approval?.method ?? null,
+        offline: approval?.offline ?? null,
+        cashierId: entry.cashierId,
+        batches: expired,
+      },
+      reason: approval ? 'approved with the manager code' : 'no approval on the document',
+    },
+    { ip: '', userAgent: null },
+  );
+  return true;
+}
+
+/**
  * A return puts the pieces back on the batches the sale line took them from. The line's batches
  * are filled from the last backwards, so what earlier returns of the same line already put back
  * (`before`) is skipped first. Pure; returns what goes back on each batch.

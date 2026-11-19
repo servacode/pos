@@ -38,3 +38,4 @@ apps/api/src/services/installments.ts
 apps/api/src/services/damaged-stock.ts
 apps/api/src/services/refund-drawers.ts
 apps/api/src/services/period-close.ts
+apps/api/src/services/till-products.ts

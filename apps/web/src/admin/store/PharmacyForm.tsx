@@ -49,6 +49,9 @@ export function PharmacyForm({
   // On for a pharmacy until it is turned off; off for any other store until it is turned on
   const [autoBatch, setAutoBatch] = useState(current?.autoBatch ?? store.sectors.includes('pharmacy'));
   const [blockNoBatch, setBlockNoBatch] = useState(current?.blockNoBatch === true);
+  // «بيع المنتهي برمز المدير»: what the till does now when nothing but expired batches are left (round 38)
+  const allowedBefore = current?.allowExpiredWithCode ?? current?.blockNoBatch !== true;
+  const [allowExpired, setAllowExpired] = useState(allowedBefore);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -65,6 +68,9 @@ export function PharmacyForm({
           controlledReturns: controlled,
           autoBatch,
           ...(blockNoBatch || current?.blockNoBatch !== undefined ? { blockNoBatch } : {}),
+          ...(allowExpired !== allowedBefore || current?.allowExpiredWithCode !== undefined
+            ? { allowExpiredWithCode: allowExpired }
+            : {}),
         }),
       );
       setSaved(true);
@@ -135,6 +141,12 @@ export function PharmacyForm({
           description="مطفأ: إن لم تكفِ الدفعات الصالحة (منتهية أو موقوفة أو نفد) طلب الكاشير رمز المدير. مشعل: لا يُباع."
           checked={blockNoBatch}
           onCheckedChange={setBlockNoBatch}
+        />
+        <Switch
+          label="يجوز بيع المنتهي برمز المدير"
+          description="مطفأ: الدفعة المنتهية لا تُباع أبداً. مشعل: يبيعها الكاشير برمز المدير فقط، ويُسجَّل ذلك في سجل التدقيق مع اسم المدير. الدفعة الموقوفة بسبب سحب لا تُباع في الحالتين."
+          checked={allowExpired}
+          onCheckedChange={setAllowExpired}
         />
       </div>
     </SettingsCard>

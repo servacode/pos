@@ -14,6 +14,8 @@ export function BatchBanner(props: {
   /** Quantity text for base units */
   fmt: (qty: number) => string;
   onApprove: () => void;
+  /** A pharmacy: «بدائل متوفرة» for the item a row is about (round 38) */
+  onAlternatives?: (of: { lineNo: number } | { variantId: string }) => void;
 }) {
   const { fmt } = props;
   // What can be sold, when expired or blocked batches are left out of the count
@@ -24,10 +26,16 @@ export function BatchBanner(props: {
     i.expiredQty > 0 || i.blockedQty > 0
       ? ` (${[i.expiredQty > 0 ? 'دفعات منتهية' : '', i.blockedQty > 0 ? 'دفعات موقوفة' : ''].filter(Boolean).join(' و')} لا تُباع)`
       : '';
-  const rows: { tone: 'danger' | 'warning'; text: string; key: string }[] = [
+  const rows: {
+    tone: 'danger' | 'warning';
+    text: string;
+    key: string;
+    of?: { lineNo: number } | { variantId: string };
+  }[] = [
     ...props.blocks.map((i) => ({
       tone: 'danger' as const,
       key: `b${i.lineNo}`,
+      of: { lineNo: i.lineNo },
       text:
         i.blockedQty > 0
           ? `«${i.name}»: فيه دفعة موقوفة بسبب سحب من السوق (استدعاء)، وينقص ${fmt(i.uncovered)} من الصالح. لا يُباع ولا يُتجاوز برمز المدير.`
@@ -36,16 +44,19 @@ export function BatchBanner(props: {
     ...props.approvals.map((i) => ({
       tone: 'warning' as const,
       key: `a${i.lineNo}`,
+      of: { lineNo: i.lineNo },
       text: `لا دفعة صالحة تكفي «${i.name}»: ينقص ${fmt(i.uncovered)}${why(i)}. يلزم رمز المدير.`,
     })),
     ...props.stockBlocks.map((i) => ({
       tone: 'danger' as const,
       key: `s${i.variantId}`,
+      of: { variantId: i.variantId },
       text: `«${i.name}»: ${have(i)} ${fmt(i.onHand)} فقط${kept(i)} والمطلوب ${fmt(i.wanted)}. لا يُباع فوق المخزون.`,
     })),
     ...props.stockWarns.map((i) => ({
       tone: 'warning' as const,
       key: `w${i.variantId}`,
+      of: { variantId: i.variantId },
       text: `«${i.name}»: ${have(i)} ${fmt(i.onHand)} فقط${kept(i)} والمطلوب ${fmt(i.wanted)}.`,
     })),
   ];
@@ -64,6 +75,11 @@ export function BatchBanner(props: {
         >
           <WarningIcon size={20} className="shrink-0" />
           <span className="min-w-0 flex-1">{r.text}</span>
+          {props.onAlternatives && r.of ? (
+            <Button variant="secondary" size="sm" onClick={() => props.onAlternatives!(r.of!)}>
+              بدائل متوفرة
+            </Button>
+          ) : null}
         </div>
       ))}
       {props.approvals.length > 0 ? (

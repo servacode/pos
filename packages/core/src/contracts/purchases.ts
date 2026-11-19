@@ -19,6 +19,8 @@ import { rateSchema } from './store';
  *   POST /v1/supplier-payments         supplierPaymentInput → SupplierPaymentRow
  *   GET  /v1/inventory?branchId        InventoryResponse             (cost.view)
  *   POST /v1/stocktakes                stocktakeInput → StocktakeDetail (inventory.adjust)
+ *   GET  /v1/inventory/count-sheet     countSheetQuery → CountSheet  (inventory.adjust; the phone's count, round 38)
+ *   GET  /v1/reports/waste?from&to     wasteReportQuery → WasteReport (inventory.adjust or reports.financial)
  *   GET  /v1/reports/profit?from&to    ProfitReport                  (reports.financial)
  *   GET  /v1/inventory/expiry?days     ExpiryResponse                (purchases.manage)
  */
@@ -288,9 +290,16 @@ export interface InventoryResponse {
   items: InventoryRow[];
   totalValueMinor: number;
   baseCurrency: CurrencyCode;
+  /** The reasons «سجّل هدراً» offers: the store's own, or the built-in ones; absent from older servers */
+  wasteReasons?: string[];
 }
 
 export const stocktakeInput = z.object({
+  /**
+   * Round 38: the document's own id, made by the device that counted (a phone counting offline, a till's
+   * waste). A second post of the same id answers the document already made and posts nothing again.
+   */
+  id: uuidSchema.optional(),
   branchId: uuidSchema.optional(),
   date: isoDateSchema,
   note: optionalText(200, 'الملاحظة طويلة'),
@@ -306,6 +315,11 @@ export const stocktakeInput = z.object({
          */
         batchNo: optionalText(40, 'رقم الدفعة طويل'),
         expiryDate: isoDateSchema.nullable().optional(),
+        /**
+         * Round 38: the line is a waste («تالف / هدر») and this is why («انتهت صلاحيتو»…). It only labels the
+         * line for the waste report; the posting is the count's own.
+         */
+        wasteReason: optionalText(40, 'السبب طويل'),
       }),
     )
     .min(1, 'عدّ صنفاً واحداً على الأقل')
@@ -322,7 +336,21 @@ export interface StocktakeLineRow {
   diffQty: number;
   /** Value of the difference: negative is a loss */
   diffValueMinor: number;
+  /** Round 38: the reason of a waste line; absent on a count line and on older documents */
+  reason?: string;
 }
+
+/** The reasons a store starts with at the till's «تالف / هدر» until the owner writes its own */
+export const DEFAULT_WASTE_REASONS: readonly string[] = ['انتهت صلاحيتو', 'انكسر', 'خربان', 'عينة'];
+
+/** The reasons the till offers: the store's own list, or the defaults when it never set one */
+export function wasteReasonsOf(stored: readonly string[] | null | undefined): string[] {
+  const own = (stored ?? []).map((r) => r.trim()).filter(Boolean);
+  return own.length > 0 ? own : [...DEFAULT_WASTE_REASONS];
+}
+
+/** The note an old waste (before reasons) carries; the report reads such documents as «بلا سبب» */
+export const LEGACY_WASTE_NOTE = 'هدر';
 
 export interface StocktakeDetail {
   id: string;
@@ -796,4 +824,63 @@ export interface SupplierReturnRow {
   refund: PurchasePayment;
   pieces: number;
   amountMinor: number;
+}
+
+// ─── Round 38: the count sheet (the phone's stocktake) and the waste report ────────────────────────
+
+/** The sheet a phone downloads to count by: one branch, all of it or one category (with its sub-categories) */
+export const countSheetQuery = z.object({
+  branchId: uuidSchema.optional(),
+  categoryId: uuidSchema.optional(),
+});
+
+export interface CountSheetItem {
+  variantId: string;
+  name: string;
+  categoryId: string | null;
+  /** The pieces fraction is allowed (a weighed item); false: counted in whole pieces */
+  allowsFraction: boolean;
+  /** What the books say is on the shelf, thousandths (shown only after the count) */
+  qty: number;
+  /** Every barcode of the item, with the pieces one scan stands for (thousandths) */
+  barcodes: { code: string; packQty: number }[];
+}
+
+export interface CountSheet {
+  branchId: string;
+  categoryId: string | null;
+  /** When the server made it (ISO), so a draft says how old its books are */
+  at: string;
+  items: CountSheetItem[];
+  categories: { id: string; name: string; parentId: string | null }[];
+}
+
+export const wasteReportQuery = z.object({
+  from: isoDateSchema,
+  to: isoDateSchema,
+  branchId: uuidSchema.optional(),
+});
+
+export interface WasteRow {
+  date: string;
+  number: string;
+  branchId: string;
+  variantId: string;
+  name: string;
+  /** «بلا سبب» when the document never named one (an old waste) */
+  reason: string;
+  /** Thousandths that left the stock */
+  qty: number;
+  /** What it cost, minor units of the base currency (positive) */
+  costMinor: number;
+}
+
+export interface WasteReport {
+  from: string;
+  to: string;
+  rows: WasteRow[];
+  byReason: { reason: string; qty: number; costMinor: number; count: number }[];
+  byProduct: { variantId: string; name: string; qty: number; costMinor: number; count: number }[];
+  totalCostMinor: number;
+  baseCurrency: CurrencyCode;
 }

@@ -194,6 +194,8 @@ export const SYNC_FLAGS = [
   'credit_limit_exceeded',
   'over_return',
   'duplicate_customer',
+  /** A product made at the till offline asked for a barcode another product holds now: made without it, for the owner to merge */
+  'duplicate_barcode',
   /** A sold serial number the store never received (03 › الإلكترونيات) */
   'unknown_serial',
   /** A serial number already sold by another sale */

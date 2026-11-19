@@ -1,6 +1,13 @@
 import type { BatchAllocation, SalePayload } from '@serva/core/contracts/documents';
 import type { PharmacySettings, StockBatch } from '@serva/core/contracts/pharmacy';
-import { allocateFefo, overStock, sameBatch, uncoveredAction, usesAutoBatch } from '@serva/core/pharmacy';
+import {
+  allocateFefo,
+  expiredAction,
+  overStock,
+  sameBatch,
+  uncoveredAction,
+  usesAutoBatch,
+} from '@serva/core/pharmacy';
 import { lineBaseQty } from '@serva/core/sale';
 import type { OutboxEntry } from '@serva/sync';
 import { sellableSplit } from '../../lib/sellable';
@@ -94,6 +101,8 @@ export function planBatches(input: {
   pharmacy: PharmacySettings | null | undefined;
   /** What is reserved for other people per variant, base units (reserved.ts); missing: nothing */
   reserved?: ReadonlyMap<string, number>;
+  /** A manager allowed an expired batch to be sold (round 38): the plan takes from expired batches last */
+  allowExpired?: boolean;
 }): BatchPlan {
   const { cart, catalog, today, pending, pharmacy } = input;
   const sold = soldHere(pending);
@@ -112,7 +121,7 @@ export function planBatches(input: {
     if (!tracks) continue;
     const pool =
       pools.get(line.variantId) ?? poolOf(item.stockBatches!, sold.batches.get(line.variantId) ?? []);
-    const result = allocateFefo(pool, base, today);
+    const result = allocateFefo(pool, base, today, input.allowExpired === true);
     pools.set(line.variantId, result.remaining);
     allocations.set(line.lineNo, result.allocations);
     if (result.uncovered > 0) {
@@ -165,8 +174,11 @@ export function batchGuard(
   blockNegativeStock: boolean,
 ): { blocks: BatchIssue[]; approvals: BatchIssue[]; stockBlocks: StockIssue[]; stockWarns: StockIssue[] } {
   // A batch blocked for a recall is never sold, whatever the store's setting: no manager code reaches it
+  // An expired batch follows «بيع المنتهي برمز المدير» when the owner chose it (round 38)
   const action = (i: BatchIssue) =>
-    i.blockedQty > 0 && i.uncovered > 0 ? 'block' : uncoveredAction(pharmacy, true, i.uncovered);
+    i.blockedQty > 0 && i.uncovered > 0
+      ? 'block'
+      : (expiredAction(pharmacy, i) ?? uncoveredAction(pharmacy, true, i.uncovered));
   return {
     blocks: plan.uncovered.filter((i) => action(i) === 'block'),
     approvals: plan.uncovered.filter((i) => action(i) === 'approve'),

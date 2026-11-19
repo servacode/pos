@@ -15,6 +15,7 @@ import {
   Button,
   Card,
   CashIcon,
+  Checkbox,
   Dialog,
   EmptyState,
   IconChip,
@@ -58,6 +59,25 @@ const keepToken = (token: string | null) => {
     else sessionStorage.removeItem(TOKEN_KEY);
   } catch {
     // Private window: the session lasts as long as the page
+  }
+};
+
+// «تذكّر هالجهاز 30 يوم»: the token the server gave a device he asked to remember. It lets the sign-in skip the code (after the
+// password); the server decides if it is still good, so a stale one is only dropped here
+const DEVICE_KEY = 'servaAgentDevice';
+const readDevice = () => {
+  try {
+    return localStorage.getItem(DEVICE_KEY);
+  } catch {
+    return null;
+  }
+};
+const keepDevice = (token: string | null) => {
+  try {
+    if (token) localStorage.setItem(DEVICE_KEY, token);
+    else localStorage.removeItem(DEVICE_KEY);
+  } catch {
+    // Private window: he types the code next time
   }
 };
 
@@ -143,6 +163,7 @@ function Login({ onSignedIn }: { onSignedIn: (r: AgentLoginResponse) => void }) 
   // Round 37 (decision 21): after the password, a code sent to his phone
   const [step, setStep] = useState<AgentCodeStep | null>(null);
   const [code, setCode] = useState('');
+  const [remember, setRemember] = useState(false);
   if (step) {
     return (
       <Shell>
@@ -167,9 +188,12 @@ function Login({ onSignedIn }: { onSignedIn: (r: AgentLoginResponse) => void }) 
                 setError(null);
                 apiFetch<AgentLoginResponse>('/v1/agent/login/code', {
                   method: 'POST',
-                  body: { challengeId: step.challengeId, code },
+                  body: { challengeId: step.challengeId, code, remember },
                 })
-                  .then(onSignedIn)
+                  .then((r) => {
+                    keepDevice(remember ? (r.deviceToken ?? null) : null);
+                    onSignedIn(r);
+                  })
                   .catch((err: unknown) => setError(errorMessage(err)))
                   .finally(() => setBusy(false));
               }}
@@ -184,6 +208,12 @@ function Login({ onSignedIn }: { onSignedIn: (r: AgentLoginResponse) => void }) 
                 maxLength={6}
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+              <Checkbox
+                label="تذكّر هالجهاز 30 يوم"
+                description="ما نطلب رمز التأكيد على هالجهاز إلا بعد 30 يوم أو إذا تغيّرت كلمة السر."
+                checked={remember}
+                onChange={(e) => setRemember(e.target.checked)}
               />
               <Button type="submit" size="lg" fullWidth loading={busy} disabled={code.length !== 6}>
                 أكّد الدخول
@@ -221,8 +251,19 @@ function Login({ onSignedIn }: { onSignedIn: (r: AgentLoginResponse) => void }) 
               e.preventDefault();
               setBusy(true);
               setError(null);
-              apiFetch<AgentCodeStep>('/v1/agent/login', { method: 'POST', body: { email, password } })
+              const deviceToken = readDevice();
+              apiFetch<AgentLoginResponse | AgentCodeStep>('/v1/agent/login', {
+                method: 'POST',
+                body: { email, password, ...(deviceToken ? { deviceToken } : {}) },
+              })
                 .then((r) => {
+                  // A remembered device: the password was enough
+                  if ('token' in r) {
+                    onSignedIn(r);
+                    return;
+                  }
+                  // The server did not take the device's token (expired, revoked): forget it, the code is asked
+                  if (deviceToken) keepDevice(null);
                   setStep(r);
                   setCode('');
                 })

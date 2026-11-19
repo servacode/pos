@@ -273,6 +273,9 @@ const productFields = {
   season: optionalText(40, 'اسم الموسم طويل جداً'),
   /** «الاسم العلمي» (03 › الصيدليات): the till finds the medicine by it too */
   genericName: optionalText(120, 'الاسم العلمي طويل جداً'),
+  /** «التركيز» (500 ملغ) and «الشكل الدوائي» (أقراص، شراب): with the generic name they tell the alternatives (round 38) */
+  strength: optionalText(40, 'التركيز طويل جداً'),
+  dosageForm: optionalText(40, 'الشكل الدوائي طويل جداً'),
   /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
   requiresPrescription: z.boolean().default(false),
   /** «مراقَب»: only the pharmacist sells it, with the patient's details, and it enters the register */
@@ -347,6 +350,8 @@ export const updateProductInput = z
     brand: patchText(60, 'اسم الماركة طويل جداً'),
     season: patchText(40, 'اسم الموسم طويل جداً'),
     genericName: patchText(120, 'الاسم العلمي طويل جداً'),
+    strength: patchText(40, 'التركيز طويل جداً'),
+    dosageForm: patchText(40, 'الشكل الدوائي طويل جداً'),
     requiresPrescription: z.boolean().optional(),
     controlled: z.boolean().optional(),
     requiresExpiry: z.boolean().optional(),
@@ -447,6 +452,8 @@ export interface ProductDetail {
   brand: string | null;
   season: string | null;
   genericName: string | null;
+  strength?: string | null;
+  dosageForm?: string | null;
   requiresPrescription: boolean;
   controlled: boolean;
   requiresExpiry: boolean;
@@ -679,6 +686,9 @@ export interface ProductRow {
   brand: string | null;
   /** «الاسم العلمي»; searched on the till */
   genericName: string | null;
+  /** «التركيز» and «الشكل الدوائي»: with the generic name they tell the alternatives (round 38); older rows leave them out */
+  strength?: string | null;
+  dosageForm?: string | null;
   /** «يحتاج وصفة» and «مراقَب» (03 › الصيدليات): the till asks for the prescription. Rows a device
    *  pulled before these existed leave them out: read as false. */
   requiresPrescription?: boolean;

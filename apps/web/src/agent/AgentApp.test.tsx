@@ -4,7 +4,10 @@ import type { AgentMe, AgentStore } from '@serva/core';
 import { apiError, mockFetch } from '../test/fetchMock';
 import { renderApp } from '../test/renderApp';
 
-afterEach(() => sessionStorage.clear());
+afterEach(() => {
+  sessionStorage.clear();
+  localStorage.clear();
+});
 
 const login = {
   token: 'at',
@@ -216,10 +219,58 @@ describe('the agent portal', () => {
     expect(requestsTo('POST', '/v1/agent/login/code')[0]!.body).toEqual({
       challengeId: 'c-1',
       code: '123456',
+      remember: false,
     });
+    expect(localStorage.getItem('servaAgentDevice')).toBeNull();
     // The password was never kept: going back starts again
     await user.click(screen.getByRole('button', { name: 'رجوع، أطلب رمزاً جديداً' }));
     expect(await screen.findByLabelText('كلمة السر')).toBeInTheDocument();
+  });
+
+  it('«تذكّر هالجهاز 30 يوم»: the box asks to be remembered and the device keeps the token the server gives', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/agent/login': { status: 200, body: codeStep },
+      'POST /v1/agent/login/code': {
+        status: 200,
+        body: { ...login, deviceToken: 'dev-1', deviceExpiresAt: '2026-11-30T00:00:00.000Z' },
+      },
+      'GET /v1/agent/me': { status: 200, body: me() },
+      'GET /v1/agent/stores': { status: 200, body: { items: [] } },
+    });
+    const { user } = renderApp('/agent');
+    expect(await screen.findByRole('heading', { name: 'لوحة الوكيل', level: 1 })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('البريد الإلكتروني'), 'raqqa@agents.test');
+    await user.type(screen.getByLabelText('كلمة السر'), 'agent-pass-1');
+    await user.click(screen.getByRole('button', { name: 'ادخل' }));
+    await user.type(await screen.findByLabelText('الرمز'), '123456');
+    await user.click(screen.getByRole('checkbox', { name: /تذكّر هالجهاز 30 يوم/ }));
+    await user.click(screen.getByRole('button', { name: 'أكّد الدخول' }));
+    expect(await screen.findByText('رصيدك المدفوع مسبقاً')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/agent/login/code')[0]!.body).toMatchObject({ remember: true });
+    expect(localStorage.getItem('servaAgentDevice')).toBe('dev-1');
+  });
+
+  it('a remembered device: the password alone opens the portal, and the token travels with it', async () => {
+    localStorage.setItem('servaAgentDevice', 'dev-1');
+    const { requestsTo } = mockFetch({
+      'POST /v1/agent/login': { status: 200, body: login },
+      'GET /v1/agent/me': { status: 200, body: me() },
+      'GET /v1/agent/stores': { status: 200, body: { items: [] } },
+    });
+    const { user } = renderApp('/agent');
+    await signIn(user, false);
+    expect(await screen.findByText('رصيدك المدفوع مسبقاً')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/agent/login')[0]!.body).toMatchObject({ deviceToken: 'dev-1' });
+    expect(screen.queryByLabelText('الرمز')).not.toBeInTheDocument();
+  });
+
+  it('a token the server no longer takes (expired, revoked) is forgotten and the code is asked', async () => {
+    localStorage.setItem('servaAgentDevice', 'old-token');
+    mockFetch({ 'POST /v1/agent/login': { status: 200, body: codeStep } });
+    const { user } = renderApp('/agent');
+    await signIn(user, false);
+    expect(await screen.findByLabelText('الرمز')).toBeInTheDocument();
+    expect(localStorage.getItem('servaAgentDevice')).toBeNull();
   });
 
   it('the button waits for six digits', async () => {

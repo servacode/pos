@@ -55,6 +55,9 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/supplier-payments': 'signed-in',
   'GET /v1/inventory': 'signed-in',
   'GET /v1/inventory/expiry': 'signed-in',
+  'GET /v1/inventory/count-sheet': 'signed-in',
+  'GET /v1/reports/waste': 'signed-in',
+  'POST /v1/device/waste': 'device',
   'GET /v1/damaged-stock': 'signed-in',
   'GET /v1/batches/recall': 'signed-in',
   'POST /v1/batches/block': 'signed-in',
@@ -269,6 +272,9 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'GET /v1/device/invoices/lookup': 'device',
   'GET /v1/device/invoices/search': 'device',
   'GET /v1/pharmacy/controlled-register': 'signed-in',
+  'POST /v1/device/shortages': 'device',
+  'GET /v1/pharmacy/shortages': 'signed-in',
+  'POST /v1/pharmacy/shortages/resolve': 'signed-in',
   'GET /v1/transfers': 'signed-in',
   'GET /v1/supplier-returns': 'signed-in',
   'POST /v1/supplier-returns': 'signed-in',
@@ -2334,6 +2340,20 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
       select count(*)::int as n from pin_attempts where tenant_id = ${a.tenantId}`;
     expect(attempts!.n).toBe(0);
   },
+  // Store B's device asking for store A's item as a shortage: refused, and neither store has a request
+  'POST /v1/device/shortages': async (app, { a, b }) => {
+    const product = await productOf(app, a);
+    const deviceB = await createDevice(b.tenantId);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/shortages',
+      headers: { authorization: deviceB.authorization },
+      payload: { id: createUuidV7()(), variantId: product.variants[0]!.id, name: 'دواء', qty: 1000 },
+    });
+    expect(res.statusCode).toBe(400);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from shortage_requests`;
+    expect(n!.n).toBe(0);
+  },
   // Store B's device holding store A's piece: refused, and neither store has a hold
   'POST /v1/device/holds': async (app, { a, b }) => {
     const product = await productOf(app, a);
@@ -2375,6 +2395,27 @@ const DEVICE_SCOPE_PROBES: Record<string, (app: FastifyInstance, stores: Stores)
     const [n] = await ownerDb()<
       { n: number }[]
     >`select count(*)::int as n from products where name_ar = 'صنف دخيل'`;
+    expect(n!.n).toBe(0);
+  },
+  // Store B's device naming store A's owner as the one who writes off: refused, and no stock count is made
+  'POST /v1/device/waste': async (app, { a, b }) => {
+    const deviceB = await createDevice(b.tenantId);
+    const [ownerA] = await ownerDb()<
+      { id: string }[]
+    >`select id from users where tenant_id = ${a.tenantId} limit 1`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/waste',
+      headers: { authorization: deviceB.authorization },
+      payload: {
+        id: '0192a000-0000-7000-8000-0000000000a1',
+        actorId: ownerA!.id,
+        reason: 'انكسر',
+        lines: [{ variantId: '0192a000-0000-7000-8000-0000000000a2', qty: 1000 }],
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    const [n] = await ownerDb()<{ n: number }[]>`select count(*)::int as n from stocktakes`;
     expect(n!.n).toBe(0);
   },
   'GET /v1/sync/snapshots/:id': async (app, { a, b }) => {

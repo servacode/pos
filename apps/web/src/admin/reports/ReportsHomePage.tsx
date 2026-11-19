@@ -109,6 +109,13 @@ const GROUPS: { title: string; questions: Question[] }[] = [
         page: '/reports/food-cost',
       },
       {
+        ask: 'كم خسرت تالفاً ومهدوراً؟',
+        about: 'ما خرج من المخزون بسببه وصنفه وكلفته.',
+        icon: StockIcon,
+        to: '/reports/waste',
+        page: '/reports/waste',
+      },
+      {
         ask: 'ماذا أُلغي بعد المطبخ؟',
         about: 'الأصناف الملغاة بعد وصولها المطبخ.',
         icon: ListIcon,

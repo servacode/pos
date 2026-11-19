@@ -596,6 +596,27 @@
       "when": 1795100002000,
       "tag": "0085_agent_login_code_platform_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1795100003000,
+      "tag": "0086_agent_remembered_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1795100004000,
+      "tag": "0087_pharmacy_alternatives_shortages",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1795100005000,
+      "tag": "0088_shortage_id_default",
+      "breakpoints": true
     }
   ]
 }

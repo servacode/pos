@@ -18,6 +18,8 @@ const FIELDS: { [K in keyof PullSetRows]: readonly (keyof PullSetRows[K])[] } = 
     'categoryId',
     'brand',
     'genericName',
+    'strength',
+    'dosageForm',
     'requiresPrescription',
     'controlled',
     'tracksSerial',

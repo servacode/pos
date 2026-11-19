@@ -20,6 +20,7 @@ import {
   CONTRACT_PRICE_SECTORS,
   EXPIRY_SECTORS,
   HALL_SECTORS,
+  MEDICINAL_SECTORS,
   RENTAL_SECTORS,
   SERIAL_SECTORS,
   WARRANTY_SECTORS,
@@ -55,6 +56,12 @@ const MerchandisePage = lazy(() =>
 );
 const BelowCostPage = lazy(() =>
   import('./reports/BelowCostPage').then((m) => ({ default: m.BelowCostPage })),
+);
+const StocktakePhonePage = lazy(() =>
+  import('./purchases/StocktakePhonePage').then((m) => ({ default: m.StocktakePhonePage })),
+);
+const WasteReportPage = lazy(() =>
+  import('./reports/WasteReportPage').then((m) => ({ default: m.WasteReportPage })),
 );
 const FoodCostPage = lazy(() => import('./reports/FoodCostPage').then((m) => ({ default: m.FoodCostPage })));
 const SuppliersPage = lazy(() =>
@@ -105,6 +112,12 @@ const ControlledRegisterPage = lazy(() =>
 );
 const ExpiryPage = lazy(() => import('./purchases/ExpiryPage').then((m) => ({ default: m.ExpiryPage })));
 const RecallPage = lazy(() => import('./purchases/RecallPage').then((m) => ({ default: m.RecallPage })));
+const ExpiringSoonPage = lazy(() =>
+  import('./purchases/ExpiringSoonPage').then((m) => ({ default: m.ExpiringSoonPage })),
+);
+const ShortagesPage = lazy(() =>
+  import('./purchases/ShortagesPage').then((m) => ({ default: m.ShortagesPage })),
+);
 const ChequesPage = lazy(() => import('./cheques/ChequesPage').then((m) => ({ default: m.ChequesPage })));
 // الأقساط: the plans, the due list and the store's rules
 const InstalmentPlansPage = lazy(() =>
@@ -232,6 +245,7 @@ export function AdminApp() {
           <Route path="/purchases" element={page(<PurchasesPage />)} />
           <Route path="/suppliers" element={page(<SuppliersPage />)} />
           <Route path="/inventory" element={page(<InventoryPage />)} />
+          <Route path="/inventory/count" element={page(<StocktakePhonePage />)} />
           <Route
             path="/expiry"
             element={page(
@@ -245,6 +259,22 @@ export function AdminApp() {
             element={page(
               <SectorGate sectors={EXPIRY_SECTORS}>
                 <RecallPage />
+              </SectorGate>,
+            )}
+          />
+          <Route
+            path="/expiring-soon"
+            element={page(
+              <SectorGate sectors={MEDICINAL_SECTORS}>
+                <ExpiringSoonPage />
+              </SectorGate>,
+            )}
+          />
+          <Route
+            path="/shortages"
+            element={page(
+              <SectorGate sectors={MEDICINAL_SECTORS}>
+                <ShortagesPage />
               </SectorGate>,
             )}
           />
@@ -272,6 +302,7 @@ export function AdminApp() {
           <Route path="/reports/sales" element={page(<SalesReportPage />)} />
           <Route path="/reports/below-cost" element={page(<BelowCostPage />)} />
           <Route path="/reports/food-cost" element={page(<FoodCostPage />)} />
+          <Route path="/reports/waste" element={page(<WasteReportPage />)} />
           <Route path="/reports/merchandise" element={page(<MerchandisePage />)} />
           <Route
             path="/reports/cancellations"

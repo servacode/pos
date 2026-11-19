@@ -197,3 +197,72 @@ describe('the stock warning counts only what can be sold', () => {
     ]);
   });
 });
+
+describe('round 38: an expired batch and the owner’s «بيع المنتهي برمز المدير»', () => {
+  const planFor = (allowExpired = false) =>
+    planBatches({
+      cart: cartOf(line(1, 'a', 5000)),
+      catalog: catalogOf({
+        a: {
+          stockBatches: [batch('E1', '2026-01-01', 10000), batch('G', '2027-01-01', 2000)],
+          stockQty: 12000,
+        },
+      }),
+      today: TODAY,
+      pending: [],
+      pharmacy,
+      allowExpired,
+    });
+
+  it('refuses it when the owner said no, even where the store lets a manager approve missing batches', () => {
+    const p = { prescription: 'optional' as const, blockNoBatch: false, allowExpiredWithCode: false };
+    const guard = batchGuard(planFor(), p, false);
+    expect(guard.blocks.map((i) => i.lineNo)).toEqual([1]);
+    expect(guard.approvals).toEqual([]);
+  });
+
+  it('waits for the manager’s code when the owner said yes, even where the store blocks missing batches', () => {
+    const p = { prescription: 'optional' as const, blockNoBatch: true, allowExpiredWithCode: true };
+    const guard = batchGuard(planFor(), p, false);
+    expect(guard.blocks).toEqual([]);
+    expect(guard.approvals.map((i) => i.lineNo)).toEqual([1]);
+  });
+
+  it('a store that never chose keeps its older rule', () => {
+    expect(
+      batchGuard(planFor(), { prescription: 'optional', blockNoBatch: true }, false).blocks,
+    ).toHaveLength(1);
+    expect(batchGuard(planFor(), { prescription: 'optional' }, false).approvals).toHaveLength(1);
+  });
+
+  it('takes the valid batch first and the expired one only for the rest, once it is allowed', () => {
+    expect(planFor().allocations.get(1)).toEqual([{ batchNo: 'G', expiry: '2027-01-01', qty: 2000 }]);
+    expect(planFor(true).allocations.get(1)).toEqual([
+      { batchNo: 'G', expiry: '2027-01-01', qty: 2000 },
+      { batchNo: 'E1', expiry: '2026-01-01', qty: 3000 },
+    ]);
+    expect(planFor(true).uncovered).toEqual([]);
+  });
+
+  it('a short line that is not about expired batches keeps the usual rule', () => {
+    const plan = planBatches({
+      cart: cartOf(line(1, 'a', 5000)),
+      catalog: catalogOf({ a: { stockBatches: [batch('G', '2027-01-01', 2000)], stockQty: 2000 } }),
+      today: TODAY,
+      pending: [],
+      pharmacy,
+    });
+    const guard = batchGuard(
+      plan,
+      { prescription: 'optional', blockNoBatch: false, allowExpiredWithCode: true },
+      false,
+    );
+    expect(guard.approvals).toHaveLength(1);
+    const hard = batchGuard(
+      plan,
+      { prescription: 'optional', blockNoBatch: true, allowExpiredWithCode: true },
+      false,
+    );
+    expect(hard.blocks).toHaveLength(1);
+  });
+});

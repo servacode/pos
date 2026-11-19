@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { barcodeCodeSchema, MAX_PRICE_MINOR } from './catalog';
-import { uuidSchema } from './common';
+import { isoDateSchema, uuidSchema } from './common';
 import { CURRENCY_CODES, type CurrencyCode } from '../currencies';
 import type { SectorKey } from '../sectors';
 
@@ -62,6 +62,15 @@ export const tillSettingsSchema = z.object({
   scanBeep: z.boolean().optional(),
   /** «قفل الكاشير»: a cashier cannot leave the sale screen without a manager's PIN; off by default */
   cashierLock: z.boolean().optional(),
+  /**
+   * «أسباب التالف / الهدر» (round 38, #41): the reasons the till's «تالف / هدر» offers. Left out (or empty): the
+   * built-in ones (wasteReasonsOf). Giving the list also turns the button on for a store of any type.
+   */
+  wasteReasons: z
+    .array(z.string().trim().min(1, 'سبب فارغ').max(40, 'السبب طويل'))
+    .max(12, '12 سبباً على الأكثر')
+    .refine((r) => new Set(r).size === r.length, 'سبب مكرر')
+    .optional(),
 });
 export type TillSettings = z.output<typeof tillSettingsSchema>;
 
@@ -204,7 +213,9 @@ export interface InvoiceLookup {
  *
  *   POST /v1/device/products   (Authorization: Device)   tillProductInput → TillProductPlaced (201)
  *
- * It needs the server (a product is not a sync document, there is no offline queue for it). The product
+ * With no connection the till makes the product itself and queues it as a `temp_item` document
+ * (contracts/till-products.ts, round 38), under ids it chose; the optional `productId` and `variantId` below are
+ * those ids, so a request sent online and the document queued after a lost answer make one product. The product
  * is made «بانتظار المراجعة» (status temporary): the till sells it at once, the owner reviews it, and the
  * online shop shows it only once reviewed. The price is in the store's base currency. There is no cost
  * field: a product's cost comes from its purchases, never from the product.
@@ -220,6 +231,13 @@ export const tillProductInput = z.object({
     .max(MAX_PRICE_MINOR, 'السعر كبير جداً. تحقق من الأرقام.'),
   categoryId: uuidSchema.nullable().default(null),
   barcode: barcodeCodeSchema,
+  /**
+   * Round 38: the ids the till gave the product and its one variant before it asked, the same ones it queues (as a
+   * `temp_item` document, contracts/till-products.ts) when it cannot reach the server. A repeat with the same
+   * product id answers the product that exists and creates nothing twice.
+   */
+  productId: uuidSchema.optional(),
+  variantId: uuidSchema.optional(),
 });
 export type TillProductInput = z.input<typeof tillProductInput>;
 
@@ -229,3 +247,34 @@ export interface TillProductPlaced {
   nameAr: string;
   barcode: string;
 }
+
+/**
+ * «تالف / هدر» at the till (round 38, #41): a quick write-off of what spoiled, broke or was a sample. It is the
+ * store's ordinary stock count (createStocktake: the same posting, Dr 6300 / Cr 1300, the same batch ledger)
+ * for one or more items, each reduced BY the quantity written off (not counted to a total, so a sale made
+ * a second earlier is never overwritten).
+ *
+ *   POST /v1/device/waste   (Authorization: Device)   tillWasteInput → StocktakeDetail (201)
+ *
+ * `actorId` is the user who holds inventory.adjust (the signed-in user, or the manager whose code was typed on
+ * the till); `id` is made by the till once per write-off, so a retry after a lost answer posts nothing twice.
+ * It needs the server, as «أضف صنف جديد» does.
+ */
+export const tillWasteInput = z.object({
+  id: uuidSchema,
+  actorId: uuidSchema,
+  reason: z.string('اختر السبب').trim().min(1, 'اختر السبب').max(40, 'السبب طويل'),
+  lines: z
+    .array(
+      z.object({
+        variantId: uuidSchema,
+        /** Thousandths of the unit that go out, more than zero */
+        qty: z.int('الكمية غير صحيحة').min(1, 'اكتب كمية أكبر من صفر').max(1_000_000_000),
+        batchNo: z.string().trim().max(40).nullable().optional(),
+        expiryDate: isoDateSchema.nullable().optional(),
+      }),
+    )
+    .min(1, 'اختر صنفاً واحداً على الأقل')
+    .max(50, 'حتى 50 صنفاً في المرة'),
+});
+export type TillWasteInput = z.input<typeof tillWasteInput>;

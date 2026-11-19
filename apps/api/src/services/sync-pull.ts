@@ -55,7 +55,23 @@ interface PullSet {
 export interface PullScope {
   tenantId: string;
   branchId: string;
+  /** The pulling device (a rep phone's staff list is its van's: see staffOfDevice) */
+  deviceId?: string;
 }
+
+/**
+ * Who a device's staff picker may list (round 38). A van's phone belongs to its rep, so the people it lists are the
+ * ones the server lets in (services/devices.ts › mayUseRepPhone): the van's active rep, a manager and the owner.
+ * Any other device lists everyone, as ever. `userId` is the user's id column of the set being pulled.
+ */
+const staffOfDevice = (device: PullScope, userId: SQL | PgColumn, tenantId: SQL | PgColumn) => sql`(
+  not exists (select 1 from branches b where b.tenant_id = ${tenantId} and b.id = ${device.branchId}::uuid and b.kind = 'van')
+  or exists (select 1 from sales_reps sr where sr.tenant_id = ${tenantId} and sr.user_id = ${userId} and sr.status = 'active'
+             and (sr.van_branch_id = ${device.branchId}::uuid
+                  or (${device.deviceId ?? null}::uuid is not null and sr.device_id = ${device.deviceId ?? null}::uuid)))
+  or exists (select 1 from user_roles ur join roles r on r.tenant_id = ur.tenant_id and r.id = ur.role_id
+             where ur.tenant_id = ${tenantId} and ur.user_id = ${userId} and r.key in ('owner', 'manager')
+               and (ur.branch_id is null or ur.branch_id = ${device.branchId}::uuid)))`;
 
 const archivedFlag = (column: PgColumn) => sql<boolean>`(${column} is not null)`;
 
@@ -133,6 +149,7 @@ const PULL_SETS: Record<string, PullSet> = {
       pinVersion: users.pinVersion,
       version: users.version,
     },
+    scope: (device) => staffOfDevice(device, users.id, users.tenantId),
   },
   roles: {
     table: roles,
@@ -156,6 +173,7 @@ const PULL_SETS: Record<string, PullSet> = {
       branchId: userRoles.branchId,
       version: userRoles.version,
     },
+    scope: (device) => staffOfDevice(device, userRoles.userId, userRoles.tenantId),
   },
   products: {
     table: products,
@@ -172,6 +190,8 @@ const PULL_SETS: Record<string, PullSet> = {
       taxRateId: products.taxRateId,
       sellOnPos: products.sellOnPos,
       genericName: products.genericName,
+      strength: products.strength,
+      dosageForm: products.dosageForm,
       requiresPrescription: products.requiresPrescription,
       controlled: products.controlled,
       tracksSerial: products.tracksSerial,

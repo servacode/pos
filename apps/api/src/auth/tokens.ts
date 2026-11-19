@@ -192,6 +192,54 @@ export async function verifyAgentToken(
   }
 }
 
+/**
+ * «تذكّر هالجهاز 30 يوم» (round 38): what an agent's device keeps after the code step. It is signed like his session
+ * token but says it is a device token, so it opens nothing by itself: it only lets the sign-in skip the code, after the
+ * password, while the agent's device_epoch is still the number it carries (a suspension or a new password moves it).
+ */
+export const AGENT_DEVICE_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+export function signAgentDeviceToken(
+  claims: AgentClaims & { epoch: number },
+  keys: TokenKeys,
+  now: Date,
+): Promise<string> {
+  const issuedAt = Math.floor(now.getTime() / 1000);
+  const { kid, key } = keys.signingKey('agent');
+  return new SignJWT({ rol: 'agent-device', ep: claims.epoch })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT', kid })
+    .setSubject(claims.agentId)
+    .setIssuer(ISSUER)
+    .setAudience(REALMS.agent)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(issuedAt + AGENT_DEVICE_TTL_SECONDS)
+    .sign(key);
+}
+
+export async function verifyAgentDeviceToken(
+  token: string,
+  keys: TokenKeys,
+  now: Date,
+): Promise<(AgentClaims & { epoch: number }) | null> {
+  try {
+    const { kid } = decodeProtectedHeader(token);
+    const key = typeof kid === 'string' ? keys.verificationKey('agent', kid) : undefined;
+    if (!key) return null;
+    const { payload } = await jwtVerify(token, key, {
+      issuer: ISSUER,
+      audience: REALMS.agent,
+      algorithms: ['HS256'],
+      currentDate: now,
+    });
+    if (typeof payload.sub !== 'string' || payload.rol !== 'agent-device' || typeof payload.ep !== 'number') {
+      return null;
+    }
+    return { agentId: payload.sub, epoch: payload.ep };
+  } catch {
+    return null;
+  }
+}
+
 /** A new opaque refresh token. Only its SHA-256 hash is stored. */
 export function newRefreshToken(): { token: string; hash: string } {
   const token = randomBytes(32).toString('base64url');

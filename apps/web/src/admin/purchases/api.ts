@@ -1,4 +1,5 @@
 import type {
+  CountSheet,
   DamagedStock,
   BatchBlockInput,
   BatchBlockResult,
@@ -40,6 +41,14 @@ export const sendBackDamaged = (input: SupplierReturnInput) =>
   apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });
 export const createStocktake = (input: StocktakeInput) =>
   apiFetch<StocktakeDetail>('/v1/stocktakes', { method: 'POST', body: input, auth: true });
+/** `GET /v1/inventory/count-sheet`: what the phone counts by: the branch's items (or one category's) with their barcodes */
+export const getCountSheet = (branchId?: string, categoryId?: string) => {
+  const query = new URLSearchParams();
+  if (branchId) query.set('branchId', branchId);
+  if (categoryId) query.set('categoryId', categoryId);
+  const text = query.toString();
+  return apiFetch<CountSheet>(`/v1/inventory/count-sheet${text ? `?${text}` : ''}`, { auth: true });
+};
 export const getProfit = (from: string, to: string) =>
   apiFetch<ProfitReport>(`/v1/reports/profit?from=${from}&to=${to}`, { auth: true });
 

@@ -4,6 +4,7 @@ import {
   stockIn,
   stockBack,
   stockOut,
+  wasteReasonsOf,
   type CurrencyCode,
   type InventoryResponse,
   type ProfitReport,
@@ -839,12 +840,32 @@ export async function inventory(
         typicalCostMinor: r.typical_cost === null ? null : Math.round(Number(r.typical_cost) * 100) / 100,
       };
     });
+    // Round 38: the reasons «سجّل هدراً» offers, the store's own list or the built-in one
+    const [till] = await tx.execute<{ reasons: string[] | null }>(
+      sql`select (till->'wasteReasons') as reasons from tenant_settings`,
+    );
     return {
       items,
       totalValueMinor: items.reduce((sum, i) => sum + i.valueMinor, 0),
       baseCurrency: await baseCurrency(tx),
+      wasteReasons: wasteReasonsOf(till?.reasons),
     };
   });
+}
+
+/** A stocktake already made with this id, as its detail; null when there is none */
+export async function stocktakeById(tx: Transaction, id: string): Promise<StocktakeDetail | null> {
+  const [row] = await tx.select().from(stocktakes).where(eq(stocktakes.id, id)).limit(1);
+  if (!row) return null;
+  return {
+    id: row.id,
+    number: row.number,
+    date: row.businessDate,
+    branchId: row.branchId,
+    lines: row.lines as StocktakeLineRow[],
+    diffValueMinor: row.diffValueMinor,
+    baseCurrency: await baseCurrency(tx),
+  };
 }
 
 export function createStocktake(
@@ -864,6 +885,13 @@ export async function createStocktakeIn(
   meta: RequestMeta,
 ): Promise<StocktakeDetail> {
   await requirePermission(tx, auth.userId, 'inventory.adjust');
+  // Round 38: a count with an id the device made (a phone's offline count, a till's waste) posts once: the
+  // same id again answers the document it made
+  if (input.id) {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`stocktake:${input.id}`}, 0))`);
+    const made = await stocktakeById(tx, input.id);
+    if (made) return made;
+  }
   const branchId = await branchOf(tx, input.branchId);
   const names = await stockedVariants(
     tx,
@@ -929,6 +957,10 @@ export async function createStocktakeIn(
   ];
   const rows: StocktakeLineRow[] = [];
   const moves: { lineNo: number; variantId: string; qty: number }[] = [];
+  // A waste line says why (round 38): the reason rides on the item's count line for the waste report
+  const reasonOf = new Map<string, string>();
+  for (const l of input.lines)
+    if (l.wasteReason && !reasonOf.has(l.variantId)) reasonOf.set(l.variantId, l.wasteReason);
   for (const [i, l] of countLines.entries()) {
     const was = expected.get(l.variantId) ?? 0;
     const diff = l.countedQty - was;
@@ -950,12 +982,13 @@ export async function createStocktakeIn(
       countedQty: l.countedQty,
       diffQty: diff,
       diffValueMinor: diffValue,
+      ...(reasonOf.has(l.variantId) ? { reason: reasonOf.get(l.variantId)! } : {}),
     });
     moves.push({ lineNo: i + 1, variantId: l.variantId, qty: diff });
   }
   await saveValues(tx, auth.tenantId, values);
 
-  const id = newId();
+  const id = input.id ?? newId();
   const number = await nextNumber(tx, auth.tenantId, 'STK', input.date);
   const diffValueMinor = rows.reduce((sum, r) => sum + r.diffValueMinor, 0);
   await tx.insert(stocktakes).values({

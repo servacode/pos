@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  DEFAULT_WASTE_REASONS,
   heldCartHoursOf,
   holdExpiryDaysOf,
   returnWindowDays,
@@ -35,6 +36,16 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   const [lock, setLock] = useState(store.till?.cashierLock === true);
   const [askCustomer, setAskCustomer] = useState(warrantyAsksCustomer(store.till, store.sectors));
   const [terms, setTerms] = useState(store.till?.warrantyTerms ?? '');
+  // «أسباب التالف / الهدر»: separated by «،»; the till's built-in ones until the owner writes their own
+  const [reasons, setReasons] = useState((store.till?.wasteReasons ?? DEFAULT_WASTE_REASONS).join('، '));
+  const reasonList = reasons
+    .split(/[،,]+/)
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const reasonsBad =
+    reasonList.length > 12 ||
+    reasonList.some((r) => r.length > 40) ||
+    new Set(reasonList).size !== reasonList.length;
   const currencies = noteCurrencies(store);
   const [notes, setNotes] = useState<Record<string, number[]>>(() =>
     Object.fromEntries(
@@ -53,7 +64,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
   const holdBad = !/^\d+$/.test(holdDays.trim()) || holdTyped < 1 || holdTyped > 90;
   const cartTyped = Number(cartHours);
   const cartBad = !/^\d+$/.test(cartHours.trim()) || cartTyped < 1 || cartTyped > 72;
-  const bad = daysBad || emptyNotes || holdBad || cartBad;
+  const bad = daysBad || emptyNotes || holdBad || cartBad || reasonsBad;
   // A store opened before the new pound still counts cash by old notes: one tap moves it to the built-in list
   const oldNotes = (notes.SYP ?? []).some((v) => v >= 1000);
   // What the form holds now against what was last saved: while they differ the bar says so
@@ -71,6 +82,7 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
       lock,
       askCustomer,
       terms,
+      reasons,
       n,
     ]);
   const now = snap(notes);
@@ -116,6 +128,11 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
           cashierLock: lock,
           warrantyAskCustomer: askCustomer,
           warrantyTerms: terms.trim() || null,
+          // Only a list that differs from the built-in one (or one already stored) is kept
+          ...(reasonList.join('|') !== DEFAULT_WASTE_REASONS.join('|') ||
+          store.till?.wasteReasons !== undefined
+            ? { wasteReasons: reasonList.length > 0 ? reasonList : [...DEFAULT_WASTE_REASONS] }
+            : {}),
         }),
       );
       setSavedSnap(snap(notesNow));
@@ -236,6 +253,13 @@ export function TillForm({ store, onSaved }: { store: StoreResponse; onSaved: (s
         hint="تُطبع أسفل شهادة الكفالة A4. اتركها فارغة لتُطبع الشروط المعتادة."
         value={terms}
         onChange={(e) => setTerms(e.target.value.slice(0, 600))}
+      />
+      <TextField
+        label="أسباب التالف / الهدر"
+        hint="يختار منها الكاشير عند زر «تالف / هدر»، مفصولة بفاصلة. حتى 12 سبباً."
+        value={reasons}
+        error={reasonsBad ? 'سبب مكرر أو طويل، أو أكثر من 12 سبباً' : undefined}
+        onChange={(e) => setReasons(e.target.value.slice(0, 400))}
       />
       {currencies.length > 0 ? (
         <div className="flex flex-col gap-3">

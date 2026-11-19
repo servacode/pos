@@ -1,19 +1,24 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { CurrencyCode } from '@serva/core';
 import type { Approval } from '@serva/core/contracts/documents';
+import { uuidv7 } from '@serva/sync';
 import { Alert, Button, CloseIcon, AddIcon, Select, TextField } from '@serva/ui';
 import { parseAmount } from '../pay/payment';
 import { usePos } from '../services';
 import { ManagerCode } from '../staff/ManagerCode';
 import type { StaffMember } from '../staff/staff';
-import { postNewProduct } from './newProduct';
+import { postNewProduct, queueNewProduct } from './newProduct';
 import { SalePanel } from './SalePanel';
 
 /**
  * «أضف صنف جديد» (decision 15): the barcode the till does not know, with a name, a price and a category.
  * Whoever holds catalog.manage adds it on their own; anyone else asks for a manager's code first (the till's
- * ordinary manager-code layer). It needs the server: a product is not a document the till can queue. The
- * product starts «بانتظار المراجعة»: it sells here at once, the owner reviews it later.
+ * ordinary manager-code layer). The product starts «بانتظار المراجعة»: it sells here at once, the owner reviews it
+ * later.
+ *
+ * Round 38: with no connection (or when the server does not answer) the till makes the product itself under ids it chose,
+ * sells it at once and queues it as a document, like every other offline document (newProduct.ts › queueNewProduct). The
+ * same ids go to the server when it is reached, so asking twice, online then offline, makes one product.
  */
 export function NewProductPanel({
   barcode,
@@ -22,6 +27,7 @@ export function NewProductPanel({
   staff,
   canManage,
   userId,
+  businessDate,
   onDone,
   onClose,
 }: {
@@ -32,7 +38,10 @@ export function NewProductPanel({
   /** The signed-in user holds catalog.manage */
   canManage: boolean;
   userId: string;
-  onDone: (added: { name: string }) => void;
+  /** The business day a document saved now belongs to */
+  businessDate: () => string;
+  /** `offline`: it was queued on this device and reaches the store with the next sync */
+  onDone: (added: { name: string; offline: boolean }) => void;
   onClose: () => void;
 }) {
   const pos = usePos();
@@ -42,45 +51,70 @@ export function NewProductPanel({
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One product, one pair of ids, however many times it is tried
+  const ids = useRef({ productId: uuidv7(), variantId: uuidv7() });
 
   const priceMinor = price.trim() ? parseAmount(price, currency) : null;
   const priceBad = price.trim() !== '' && (priceMinor === null || priceMinor < 1);
   const ready = name.trim().length > 0 && priceMinor !== null && priceMinor >= 1;
 
-  async function add(actorId: string) {
+  async function add(actorId: string, approval: Approval | null) {
     const token = pos.device.token;
-    if (!pos.online() || !token) {
-      setError('إضافة صنف تحتاج اتصالاً بالخادم. جرّب بعد عودة الاتصال، أو ابحث عن الصنف باسمه.');
-      setAsking(false);
-      return;
-    }
     setSaving(true);
     setError(null);
-    const answer = await postNewProduct(
-      {
-        actorId,
-        nameAr: name.trim(),
-        priceMinor: priceMinor!,
-        categoryId: categoryId || null,
-        barcode,
-      },
-      token,
-      pos.fetch,
-    );
-    setSaving(false);
-    if (answer.kind === 'ok') {
-      onDone({ name: answer.body.nameAr });
-      return;
+    if (token && pos.online()) {
+      const answer = await postNewProduct(
+        {
+          actorId,
+          nameAr: name.trim(),
+          priceMinor: priceMinor!,
+          categoryId: categoryId || null,
+          barcode,
+          ...ids.current,
+        },
+        token,
+        pos.fetch,
+      );
+      if (answer.kind === 'ok') {
+        setSaving(false);
+        onDone({ name: answer.body.nameAr, offline: false });
+        return;
+      }
+      if (answer.kind === 'refused') {
+        setSaving(false);
+        setAsking(false);
+        setError(answer.message);
+        return;
+      }
+      // No answer from the server: the same product goes to the queue under the same ids
     }
-    setAsking(false);
-    setError(
-      answer.kind === 'refused' ? answer.message : 'لم يصل الطلب إلى الخادم. لم يُضف الصنف، أعد المحاولة.',
-    );
+    try {
+      await queueNewProduct(
+        pos,
+        {
+          ...ids.current,
+          nameAr: name.trim(),
+          priceMinor: priceMinor!,
+          currency,
+          categoryId: categoryId || null,
+          barcode,
+          actorId,
+          approval,
+        },
+        businessDate(),
+      );
+      setSaving(false);
+      onDone({ name: name.trim(), offline: true });
+    } catch {
+      setSaving(false);
+      setAsking(false);
+      setError('لم يُحفظ الصنف. أعد المحاولة.');
+    }
   }
 
   function start() {
     if (!ready) return;
-    if (canManage) void add(userId);
+    if (canManage) void add(userId, null);
     else setAsking(true);
   }
 
@@ -90,7 +124,7 @@ export function NewProductPanel({
         staff={staff}
         permission="catalog.manage"
         reason={`إضافة صنف جديد «${name.trim()}» تحتاج رمز مدير.`}
-        onApproved={(_approval: Approval, approver: StaffMember) => void add(approver.id)}
+        onApproved={(approval: Approval, approver: StaffMember) => void add(approver.id, approval)}
         onCancel={() => setAsking(false)}
       />
     );

@@ -156,6 +156,19 @@ export async function mayUseRepPhone(
   return Boolean(rep);
 }
 
+/**
+ * A rep phone lists only the people the server lets in (sync-pull › staffOfDevice). A person who becomes (or stops
+ * being) a van's rep, or a manager, is a row that starts (or stops) matching a phone's scope without changing, so
+ * the pull never says «add» or «delete»: every rep phone of the store is told to download the two staff sets again
+ * (devices.resync_sets, read by the next pull as `commands.resync`).
+ */
+export async function resyncRepPhoneStaff(tx: Transaction): Promise<void> {
+  await tx.execute(sql`
+    update devices
+    set resync_sets = (select coalesce(array_agg(distinct s), '{}') from unnest(resync_sets || array['users', 'user_roles']::text[]) s)
+    where kind = 'rep_phone' and revoked_at is null`);
+}
+
 /** A branch of this store the user may link devices to: 403 without the permission, else 404. */
 async function branchToManage(tx: Transaction, auth: AccessClaims, branchId: string) {
   const scope = await requirePermission(tx, auth.userId, 'devices.manage');

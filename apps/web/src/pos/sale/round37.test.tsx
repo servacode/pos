@@ -226,6 +226,9 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
         priceMinor: 450_000,
         categoryId: null,
         barcode: newBarcode,
+        // Round 38: the ids the till gave it, the same ones it would queue offline
+        productId: expect.any(String),
+        variantId: expect.any(String),
       },
     ]);
   });
@@ -250,12 +253,7 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
     expect(bodies).toEqual([expect.objectContaining({ actorId: ids.maryam })]);
   });
 
-  it('says it needs the server when the till is offline, and sends nothing', async () => {
-    const local = memoryLocal();
-    await openShift(local, ids.maryam);
-    const sets = setsWithManager();
-    const { fetch, bodies } = server(placed, sets);
-    const { user, setOnline } = renderPos({ local, fetch, sets });
+  async function openPanel(user: ReturnType<typeof renderPos>['user']) {
     const list = await screen.findByRole('list', { name: 'الموظفون' });
     await user.click(within(list).getByRole('button', { name: /مريم/ }));
     await user.keyboard(PINS[ids.maryam]!);
@@ -265,10 +263,92 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
     const panel = await screen.findByRole('region', { name: 'أضف صنف جديد' });
     await user.type(within(panel).getByLabelText('اسم الصنف'), 'قميص أزرق');
     await user.type(within(panel).getByLabelText('السعر'), '4500');
+    return panel;
+  }
+
+  it('offline: queues the product as a document, sells it at once, and the sale already points at its id', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const sets = setsWithManager();
+    const { fetch, bodies } = server(placed, sets);
+    const { user, setOnline, outbox } = renderPos({ local, fetch, sets });
+    const panel = await openPanel(user);
     setOnline(false);
     await user.click(within(panel).getByRole('button', { name: 'أضف الصنف' }));
-    expect(await within(panel).findByText(/تحتاج اتصالاً بالخادم/)).toBeInTheDocument();
+    expect(await screen.findByText(/جاهزاً للبيع/)).toBeInTheDocument();
+    // Nothing went to the server; the product waits in the outbox under the ids the till chose
     expect(bodies).toEqual([]);
+    const queued = outbox.filter((e) => e.type === 'temp_item');
+    expect(queued).toHaveLength(1);
+    const made = queued[0]!.doc.payload as Record<string, unknown>;
+    expect(made).toMatchObject({
+      actorId: ids.maryam,
+      nameAr: 'قميص أزرق',
+      priceMinor: 450_000,
+      currency: 'SYP',
+      barcode: newBarcode,
+      approval: null,
+    });
+    // The same barcode now finds it, with its price, and it sells
+    await scan(user, newBarcode);
+    expect((await screen.findAllByText('قميص أزرق')).length).toBeGreaterThan(0);
+    await user.keyboard('{F12}');
+    await screen.findByRole('region', { name: 'الدفع' });
+    await user.keyboard('4500{Enter}');
+    await screen.findByRole('region', { name: 'تمت البيعة' });
+    const soldDoc = outbox.find((e) => e.type === 'sale')!;
+    const lines = (soldDoc.doc.payload as { lines: { variantId: string; productId: string }[] }).lines;
+    expect(lines.map((l) => [l.productId, l.variantId])).toEqual([[made.productId, made.variantId]]);
+    // The queue keeps its order: the product first, then the sale that uses it
+    expect(outbox.findIndex((e) => e.type === 'temp_item')).toBeLessThan(
+      outbox.findIndex((e) => e.type === 'sale'),
+    );
+  });
+
+  it('a cashier needs a manager’s code here too, and the queued document carries who approved it', async () => {
+    const local = memoryLocal();
+    await openShift(local);
+    const sets = setsWithManager();
+    // The manager's code is checked while the server answers; then the server stops answering
+    const { fetch, bodies } = server(() => new Response('', { status: 503 }), sets);
+    const { user, outbox } = renderPos({ local, fetch, sets });
+    const list = await screen.findByRole('list', { name: 'الموظفون' });
+    await user.click(within(list).getByRole('button', { name: /سامر/ }));
+    await user.keyboard(PINS[ids.samer]!);
+    await screen.findByRole('list', { name: 'الأصناف' });
+    await scan(user, newBarcode);
+    await user.click(within(await screen.findByRole('alert')).getByRole('button', { name: 'أضف صنف جديد' }));
+    const panel = await screen.findByRole('region', { name: 'أضف صنف جديد' });
+    await user.type(within(panel).getByLabelText('اسم الصنف'), 'قميص أزرق');
+    await user.type(within(panel).getByLabelText('السعر'), '4500');
+    await user.click(within(panel).getByRole('button', { name: 'أضف الصنف برمز مدير' }));
+    // Still nothing queued before the code
+    expect(outbox.filter((e) => e.type === 'temp_item')).toEqual([]);
+    await screen.findByRole('region', { name: 'رمز المدير' });
+    await user.keyboard(PINS[ids.maryam]!);
+    expect(await screen.findByText(/جاهزاً للبيع/)).toBeInTheDocument();
+    expect(bodies).toHaveLength(1);
+    const made = outbox.find((e) => e.type === 'temp_item')!.doc.payload as {
+      actorId: string;
+      approval: { userId: string; method: string; offline: boolean } | null;
+    };
+    expect(made.actorId).toBe(ids.maryam);
+    expect(made.approval).toMatchObject({ userId: ids.maryam, method: 'pin' });
+  });
+
+  it('when the server does not answer, the same ids go to the queue; a refusal is not queued', async () => {
+    const local = memoryLocal();
+    await openShift(local, ids.maryam);
+    const sets = setsWithManager();
+    const { fetch, bodies } = server(() => new Response('', { status: 503 }), sets);
+    const { user, outbox } = renderPos({ local, fetch, sets });
+    const panel = await openPanel(user);
+    await user.click(within(panel).getByRole('button', { name: 'أضف الصنف' }));
+    expect(await screen.findByText(/جاهزاً للبيع/)).toBeInTheDocument();
+    // Asked once with its ids, then queued under the very same ones
+    expect(bodies).toHaveLength(1);
+    const made = outbox.find((e) => e.type === 'temp_item')!.doc.payload as Record<string, unknown>;
+    expect(made).toMatchObject({ productId: bodies[0]!.productId, variantId: bodies[0]!.variantId });
   });
 
   it('shows the server’s own refusal (a barcode already used) and keeps what was typed', async () => {
@@ -283,7 +363,7 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
         ),
       sets,
     );
-    const { user } = renderPos({ local, fetch, sets });
+    const { user, outbox } = renderPos({ local, fetch, sets });
     const list = await screen.findByRole('list', { name: 'الموظفون' });
     await user.click(within(list).getByRole('button', { name: /مريم/ }));
     await user.keyboard(PINS[ids.maryam]!);
@@ -296,6 +376,8 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
     await user.click(within(panel).getByRole('button', { name: 'أضف الصنف' }));
     expect(await within(panel).findByText('هذا الباركود مستخدم لصنف آخر.')).toBeInTheDocument();
     expect(within(panel).getByLabelText('اسم الصنف')).toHaveValue('قميص أزرق');
+    // A refusal is the server's answer: nothing is queued behind it
+    expect(outbox.filter((e) => e.type === 'temp_item')).toEqual([]);
     // The known products still sell as before
     expect(PRODUCTS.oil.barcode!.code).toBeTruthy();
   });

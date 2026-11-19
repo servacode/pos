@@ -47,6 +47,7 @@ export * from './contracts/import';
 export * from './contracts/price-list';
 export * from './contracts/pharmacy';
 export * from './contracts/till';
+export * from './contracts/till-products';
 export * from './contracts/catalog-options';
 export * from './contracts/damaged-stock';
 export * from './contracts/period-close';

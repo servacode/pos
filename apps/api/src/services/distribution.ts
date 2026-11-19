@@ -47,6 +47,7 @@ import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { nextBranchCode } from './branches';
 import { fieldError, staleVersion } from './catalog/common';
+import { resyncRepPhoneStaff } from './devices';
 import { assertRepsEnabled, assertWithinPlanLimit } from './subscription-gate';
 
 /**
@@ -548,6 +549,7 @@ export function createRep(
       },
       meta,
     );
+    await resyncRepPhoneStaff(tx);
     return readRep(tx, id);
   });
 }
@@ -615,6 +617,7 @@ export function updateRep(
       },
       meta,
     );
+    await resyncRepPhoneStaff(tx);
     return readRep(tx, id);
   });
 }
@@ -648,6 +651,7 @@ export function setRepActive(
       },
       meta,
     );
+    await resyncRepPhoneStaff(tx);
     return readRep(tx, id);
   });
 }

@@ -10,12 +10,19 @@ import type {
   PlatformAgentPage,
   PriceOverrides,
 } from '@serva/core';
-import { normalizePhone, wholesalePrice, type AgentCodeStep, type agentInput } from '@serva/core';
+import { normalizePhone, wholesalePrice, type AgentLoginResult, type agentInput } from '@serva/core';
 import { uuidv7, type Database } from '@serva/db';
 import type { FastifyInstance } from 'fastify';
 import type { z } from 'zod';
 import { hashOtp, isTestMode, newOtpCode, OtpDeliveryError } from '../auth/otp';
-import { AGENT_TOKEN_TTL_SECONDS, signAgentToken, type PlatformClaims } from '../auth/tokens';
+import {
+  AGENT_DEVICE_TTL_SECONDS,
+  AGENT_TOKEN_TTL_SECONDS,
+  signAgentDeviceToken,
+  signAgentToken,
+  verifyAgentDeviceToken,
+  type PlatformClaims,
+} from '../auth/tokens';
 import { AppError } from '../errors';
 import { effectiveStatus } from './billing';
 
@@ -271,10 +278,10 @@ const wrongCode = () =>
  */
 export async function agentSignIn(
   app: FastifyInstance,
-  input: { email: string; password: string },
+  input: { email: string; password: string; deviceToken?: string | undefined },
   now: Date,
   meta: { ip: string | null } = { ip: null },
-): Promise<AgentCodeStep> {
+): Promise<AgentLoginResult> {
   const { db, passwords } = app;
   const [found] = await db.execute<{
     id: string;
@@ -289,6 +296,10 @@ export async function agentSignIn(
     throw signInFailed();
   }
   if (!(await passwords.verify(found.password_hash, input.password))) throw signInFailed();
+  // «تذكّر هالجهاز»: a device he asked to remember skips the code, after the password, while its token is good
+  if (input.deviceToken && (await rememberedDevice(app, found.id, input.deviceToken, now))) {
+    return openPortal(app, found.id, now, false);
+  }
   const [session] = await db.execute<{ phone: string | null }>(
     sql`select phone from agent_session(${found.id}::uuid)`,
   );
@@ -328,7 +339,7 @@ export async function agentSignIn(
 /** Step 2: the code (single use, five tries, ten minutes) opens the portal, if the agent is still active. */
 export async function agentSignInCode(
   app: FastifyInstance,
-  input: { challengeId: string; code: string },
+  input: { challengeId: string; code: string; remember?: boolean | undefined },
   now: Date,
 ): Promise<AgentLoginResponse> {
   const { db, env } = app;
@@ -346,6 +357,32 @@ export async function agentSignInCode(
   }
   const agentId = result?.status === 'ok' ? result.payload?.agentId : undefined;
   if (!agentId) throw wrongCode();
+  return openPortal(app, agentId, now, input.remember === true);
+}
+
+/** A device token that is his, not expired, and of the number his account holds now (a suspension or a new password moves it) */
+async function rememberedDevice(
+  app: FastifyInstance,
+  agentId: string,
+  token: string,
+  now: Date,
+): Promise<boolean> {
+  const claims = await verifyAgentDeviceToken(token, app.tokenKeys, now);
+  if (!claims || claims.agentId !== agentId) return false;
+  const [row] = await app.db.execute<{ epoch: number | null }>(
+    sql`select agent_device_epoch(${agentId}::uuid) as epoch`,
+  );
+  return row?.epoch === claims.epoch;
+}
+
+/** The portal's session for an agent who passed every step; with `remember`, also the token this device keeps for 30 days */
+async function openPortal(
+  app: FastifyInstance,
+  agentId: string,
+  now: Date,
+  remember: boolean,
+): Promise<AgentLoginResponse> {
+  const { db } = app;
   // He may have been suspended since the code was sent
   const [found] = await db.execute<{
     id: string;
@@ -354,6 +391,18 @@ export async function agentSignInCode(
     must_change_password: boolean;
   }>(sql`select id, full_name, code, must_change_password from agent_session(${agentId}::uuid)`);
   if (!found) throw signInFailed();
+  let device: { deviceToken: string; deviceExpiresAt: string } | undefined;
+  if (remember) {
+    const [row] = await db.execute<{ epoch: number | null }>(
+      sql`select agent_device_epoch(${agentId}::uuid) as epoch`,
+    );
+    if (row?.epoch !== null && row?.epoch !== undefined) {
+      device = {
+        deviceToken: await signAgentDeviceToken({ agentId, epoch: row.epoch }, app.tokenKeys, now),
+        deviceExpiresAt: new Date(now.getTime() + AGENT_DEVICE_TTL_SECONDS * 1000).toISOString(),
+      };
+    }
+  }
   return {
     token: await signAgentToken({ agentId: found.id }, app.tokenKeys, now),
     expiresAt: new Date(now.getTime() + AGENT_TOKEN_TTL_SECONDS * 1000).toISOString(),
@@ -363,6 +412,7 @@ export async function agentSignInCode(
       code: found.code,
       mustChangePassword: found.must_change_password,
     },
+    ...device,
   };
 }
 

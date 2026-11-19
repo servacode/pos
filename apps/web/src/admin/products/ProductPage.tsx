@@ -101,6 +101,8 @@ const TOP_FIELDS = [
   'brand',
   'season',
   'genericName',
+  'strength',
+  'dosageForm',
   'requiresPrescription',
   'controlled',
   'requiresExpiry',
@@ -727,6 +729,26 @@ function ProductCard() {
                       onChange={(event) => update({ genericName: event.target.value })}
                       error={errors.genericName}
                     />
+                  ) : null}
+                  {fits(['pharmacy']) || draft.genericName ? (
+                    <>
+                      <TextField
+                        name="strength"
+                        label="التركيز (اختياري)"
+                        hint="مثل 500 ملغ: به تُعرف البدائل"
+                        value={draft.strength ?? ''}
+                        onChange={(event) => update({ strength: event.target.value })}
+                        error={errors.strength}
+                      />
+                      <TextField
+                        name="dosageForm"
+                        label="الشكل الدوائي (اختياري)"
+                        hint="مثل أقراص أو شراب أو حقن"
+                        value={draft.dosageForm ?? ''}
+                        onChange={(event) => update({ dosageForm: event.target.value })}
+                        error={errors.dosageForm}
+                      />
+                    </>
                   ) : null}
                   {fits(['pharmacy']) || draft.requiresPrescription || draft.controlled ? (
                     <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">

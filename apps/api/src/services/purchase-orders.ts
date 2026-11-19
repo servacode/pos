@@ -24,6 +24,7 @@ import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { nextNumber } from './purchases';
+import { OPEN_REQUEST } from './shortages';
 
 /**
  * «طلبيات الشراء»: an order to a supplier, a promise that posts nothing and moves no stock. It is
@@ -360,6 +361,7 @@ export function suggestPurchaseOrder(
       min: string | null;
       sold: string;
       on_order: string;
+      asked: string;
       order_numbers: string[] | null;
       last_supplier: string | null;
       last_cost: string | null;
@@ -388,6 +390,11 @@ export function suggestPurchaseOrder(
         from purchase_lines pl join purchases p on p.tenant_id = pl.tenant_id and p.id = pl.purchase_id
         order by pl.variant_id, p.business_date desc, p.created_at desc, pl.line_no desc
       ),
+      asked as (
+        select r.variant_id, sum(r.qty) as qty from shortage_requests r
+        where r.variant_id is not null and ${OPEN_REQUEST}
+        group by r.variant_id
+      ),
       ordered as (
         select (l->>'variantId')::uuid as variant_id,
                sum(greatest((l->>'qty')::bigint - (l->>'receivedQty')::bigint, 0)) as qty,
@@ -401,6 +408,7 @@ export function suggestPurchaseOrder(
              coalesce(k.qty, 0)::text as stock, v.min_stock_qty::text as min,
              (coalesce(s.qty, 0) - coalesce(b.qty, 0))::text as sold,
              coalesce(o.qty, 0)::text as on_order, o.numbers as order_numbers,
+             coalesce(q.qty, 0)::text as asked,
              lb.supplier_id::text as last_supplier, lb.cost_minor::text as last_cost, lb.qty::text as last_qty,
              (select (percentile_cont(0.5) within group (order by t.c))::text from (
                 select pl.cost_minor * 1000.0 / pl.qty as c from purchase_lines pl
@@ -414,6 +422,7 @@ export function suggestPurchaseOrder(
       left join sold s on s.variant_id = v.id
       left join back b on b.variant_id = v.id
       left join ordered o on o.variant_id = v.id
+      left join asked q on q.variant_id = v.id
       left join lastbuy lb on lb.variant_id = v.id
       left join prices pr on pr.tenant_id = v.tenant_id and pr.id = v.id and pr.currency = ${base}
       where v.archived_at is null and p.archived_at is null and p.type = 'stock'
@@ -430,8 +439,10 @@ export function suggestPurchaseOrder(
       const perDay = sold / PERIOD_DAYS;
       const below = min !== null && stock <= min;
       const fast = sold > 0 && stock <= perDay * FAST_DAYS;
-      if (!below && !fast) continue;
-      const wanted = (min ?? 0) + perDay * COVER_DAYS - stock;
+      // A customer asked for it and the shelf lacked it («النواقص»): it is on the list, for at least what was asked
+      const asked = Number(r.asked);
+      if (!below && !fast && asked <= 0) continue;
+      const wanted = Math.max((min ?? 0) + perDay * COVER_DAYS - stock, asked);
       const need = wanted - onOrder;
       if (need <= 0) {
         // Short, but a waiting order already owes it: said, so the list does not look broken
@@ -469,7 +480,7 @@ export function suggestPurchaseOrder(
         unitCostMinor,
         costDoubtful,
         priceMinor,
-        reason: below ? 'below_min' : 'selling_fast',
+        reason: below ? 'below_min' : fast ? 'selling_fast' : 'requested',
         lastSupplierId: r.last_supplier,
       });
     }

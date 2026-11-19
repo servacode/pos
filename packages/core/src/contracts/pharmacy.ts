@@ -8,6 +8,9 @@ import { isoDateSchema } from './common';
  *   PUT /v1/store/pharmacy                  pharmacySettingsSchema → StoreResponse (settings.manage)
  *   GET /v1/pharmacy/controlled-register    controlledRegisterQuery → ControlledRegisterResponse
  *                                           (pharmacy.controlled)
+ *   POST /v1/device/shortages               shortageRequestInput → ShortageRequestPlaced (a till, round 38)
+ *   GET  /v1/pharmacy/shortages             → ShortagesResponse (purchases.manage)
+ *   POST /v1/pharmacy/shortages/resolve {ids}  → ShortagesResponse (purchases.manage)
  */
 
 export const PRESCRIPTION_MODES = ['required', 'optional'] as const;
@@ -36,6 +39,12 @@ export const pharmacySettingsSchema = z.object({
   autoBatch: z.boolean().optional(),
   /** «امنع البيع بلا دفعة صالحة»: no sale when no valid batch covers it (off: a manager approves) */
   blockNoBatch: z.boolean().optional(),
+  /**
+   * «بيع المنتهي برمز المدير» (round 38, FEFO): an expired batch is never sold, unless the owner turns
+   * this on: then the manager's code lets the cashier sell it, and the sale is audited. Off or absent:
+   * an expired batch is refused (whatever `blockNoBatch` says); a batch blocked for a recall never sells.
+   */
+  allowExpiredWithCode: z.boolean().optional(),
 });
 export type PharmacySettings = z.output<typeof pharmacySettingsSchema>;
 
@@ -106,4 +115,54 @@ export interface ControlledRegisterResponse {
   balances: ControlledRegisterBalance[];
   /** false when any item's register balance differs from its stock */
   matches: boolean;
+}
+
+// ─── Shortages «النواقص» (round 38) ────────────────────────────────────────────
+
+/**
+ * «طلبو زبون وما كان موجود»: a customer asked for an item the shelf did not have. The till writes it
+ * with its own id, so a retry creates nothing twice. `variantId` is null for an item the catalogue
+ * does not know (then `name` is what the customer asked for).
+ */
+export const shortageRequestInput = z.object({
+  id: z.uuid(),
+  variantId: z.uuid().nullable(),
+  name: z.string().trim().min(1, 'اكتب اسم الصنف').max(160),
+  /** Base units, thousandths: how much was asked for (default one) */
+  qty: z.int().min(1).max(1_000_000_000).default(1000),
+  note: z.string().trim().min(1).max(200).nullable().default(null),
+});
+export type ShortageRequestInput = z.output<typeof shortageRequestInput>;
+
+export interface ShortageRequestPlaced {
+  id: string;
+  /** false when the same id had already been written (a retry) */
+  created: boolean;
+}
+
+export const SHORTAGE_REASONS = ['below_min', 'requested', 'both'] as const;
+export type ShortageReason = (typeof SHORTAGE_REASONS)[number];
+
+/** One line of «النواقص»: an item at or under its minimum, or one a customer asked for and the shelf lacked */
+export interface ShortageRow {
+  /** null for a request of an item the catalogue does not know */
+  variantId: string | null;
+  name: string;
+  genericName: string | null;
+  /** Base units, thousandths, over every branch but the damaged one; null for an unknown item */
+  stockQty: number | null;
+  minStockQty: number | null;
+  /** How many times customers asked for it, and the total asked, while it is still unresolved */
+  requestCount: number;
+  requestedQty: number;
+  lastRequestedAt: string | null;
+  /** The open request ids: «تم توفيره» closes them */
+  requestIds: string[];
+  reason: ShortageReason;
+  lastSupplierId: string | null;
+  lastSupplierName: string | null;
+}
+
+export interface ShortagesResponse {
+  items: ShortageRow[];
 }

@@ -148,7 +148,8 @@ export interface PurchaseOrderListResponse {
   items: PurchaseOrderRow[];
 }
 
-export type PurchaseOrderSuggestReason = 'below_min' | 'selling_fast';
+/** `requested`: a customer asked for it and the shelf lacked it (round 38, «النواقص») */
+export type PurchaseOrderSuggestReason = 'below_min' | 'selling_fast' | 'requested';
 
 export interface PurchaseOrderSuggestionLine {
   variantId: string;

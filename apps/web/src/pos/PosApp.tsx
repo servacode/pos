@@ -5,6 +5,7 @@ import { deviceStore } from '../offline/database';
 import { dexieLocal } from '../offline/local';
 import { useDevice } from '../offline/useDevice';
 import { loadCatalog, type Catalog } from './catalog';
+import { withPendingProducts } from './sale/localProducts';
 import { PosProvider, saveWith, type PosServices } from './services';
 import {
   DEFAULT_IDLE_MINUTES,
@@ -56,24 +57,29 @@ export function PosSession({ services, persisted }: { services: PosServices; per
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [session, setSession] = useState<StaffSession | null>(null);
   const [tick, setTick] = useState(0);
+  // A product made at the till offline joins the catalog at once (sale/localProducts.ts)
+  const [productsTick, setProductsTick] = useState(0);
 
   // Read the pulled sets on start and again after every sync cycle (new prices, new staff).
   useEffect(() => {
     let alive = true;
-    void loadCatalog(services.store, services.now()).then(
+    void loadCatalog(services.store, services.now(), (sets) =>
+      withPendingProducts(services.local, services.store, sets),
+    ).then(
       (loaded) => alive && setCatalog(loaded),
       () => undefined,
     );
     return () => {
       alive = false;
     };
-  }, [services]);
+  }, [services, productsTick]);
 
   const pos = useMemo<PosServices>(
     () => ({
       ...services,
       save: async (input) => {
         const entry = await services.save(input);
+        if (input.type === 'temp_item') setProductsTick((t) => t + 1);
         setTick((t) => t + 1);
         return entry;
       },

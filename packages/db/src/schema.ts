@@ -166,6 +166,8 @@ export const agents = pgTable('agents', {
   email: text('email').unique(),
   passwordHash: text('password_hash'),
   mustChangePassword: boolean('must_change_password').notNull().default(false),
+  /** Round 38 «تذكّر هالجهاز»: a remembered device's token carries this number; a suspension or a new password moves it, so every remembered device asks for the code again */
+  deviceEpoch: integer('device_epoch').notNull().default(0),
   /** Wholesale discount off the plan's list price, in basis points (2000 = 20%) */
   discountBp: integer('discount_bp').notNull().default(2000),
   /** Wholesale price per plan and cycle in USD minor, replacing the discount: { basic: { monthly, yearly } } */
@@ -422,6 +424,9 @@ export const tenantSettings = pgTable(
       itemDigits: number;
       valueKind: 'weight' | 'price';
       valueDecimals: number;
+      /** Round 38: digits of the value and whether a check digit ends the label (left out: the 13-digit default) */
+      valueDigits?: number;
+      checkDigit?: boolean;
     }>(),
     /** «الصالة والمطبخ» (packages/core › contracts/store.ts ServiceSettings); null for a shop */
     service: jsonb('service').$type<{ tables: string[]; orderNumbers: boolean; kitchenTickets: boolean }>(),
@@ -1071,6 +1076,9 @@ export const products = pgTable(
     season: text('season'),
     /** «الاسم العلمي» of a medicine (03 › الصيدليات): the till finds the product by it too */
     genericName: text('generic_name'),
+    /** «التركيز» (500 ملغ) and «الشكل الدوائي» (أقراص): with the generic name they tell the alternatives (round 38) */
+    strength: text('strength'),
+    dosageForm: text('dosage_form'),
     /** «يحتاج وصفة» (03 › الصيدليات): the till asks for the prescription number and the doctor */
     requiresPrescription: boolean('requires_prescription').notNull().default(false),
     /** «مراقَب»: only the pharmacist sells it; every movement enters the controlled-drug register */
@@ -2677,6 +2685,39 @@ export const periodLocks = pgTable(
   (t) => [
     primaryKey({ name: 'period_locks_pkey', columns: [t.tenantId, t.id] }),
     index('period_locks_latest_idx').on(t.tenantId, t.createdAt),
+    tenantIsolation(),
+  ],
+);
+
+/**
+ * «النواقص» (round 38, pharmacy): a customer asked for an item the shelf did not have. The till writes it
+ * with its own id (a retry writes nothing twice). `variant_id` is null for an item the catalogue does not
+ * know. A request closes by hand («تم توفيره»), or by itself when a purchase of the item is received after it.
+ */
+export const shortageRequests = pgTable(
+  'shortage_requests',
+  {
+    id: uuid('id')
+      .notNull()
+      .default(sql`uuid_generate_v7()`),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    branchId: uuid('branch_id').notNull(),
+    variantId: uuid('variant_id'),
+    /** What the customer asked for, as the cashier saw it */
+    name: text('name').notNull(),
+    /** Thousandths of the base unit */
+    qty: bigint('qty', { mode: 'number' }).notNull().default(1000),
+    note: text('note'),
+    requestedBy: uuid('requested_by'),
+    createdAt: createdAt(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedBy: uuid('resolved_by'),
+  },
+  (t) => [
+    primaryKey({ name: 'shortage_requests_pkey', columns: [t.tenantId, t.id] }),
+    index('shortage_requests_open_idx').on(t.tenantId, t.resolvedAt, t.createdAt),
     tenantIsolation(),
   ],
 );

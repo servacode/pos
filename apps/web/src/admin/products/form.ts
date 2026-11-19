@@ -71,6 +71,9 @@ export interface ProductDraft {
   season?: string;
   /** «الاسم العلمي» (pharmacies); "" = none */
   genericName?: string;
+  /** «التركيز» and «الشكل الدوائي» (pharmacies, round 38); "" = none */
+  strength?: string;
+  dosageForm?: string;
   /** «يحتاج وصفة» and «مراقَب» (pharmacies) */
   requiresPrescription?: boolean;
   controlled?: boolean;
@@ -213,6 +216,8 @@ export function draftFromDetail(detail: ProductDetail): ProductDraft {
     brand: detail.brand ?? '',
     season: detail.season ?? '',
     genericName: detail.genericName ?? '',
+    strength: detail.strength ?? '',
+    dosageForm: detail.dosageForm ?? '',
     requiresPrescription: detail.requiresPrescription ?? false,
     controlled: detail.controlled ?? false,
     requiresExpiry: detail.requiresExpiry ?? false,
@@ -378,6 +383,8 @@ export function buildCreate(draft: ProductDraft): Built<CreateProductInput> {
       brand: textOrNull(draft.brand),
       ...(textOrNull(draft.season ?? '') ? { season: textOrNull(draft.season ?? '') } : {}),
       ...(textOrNull(draft.genericName ?? '') ? { genericName: textOrNull(draft.genericName ?? '') } : {}),
+      ...(textOrNull(draft.strength ?? '') ? { strength: textOrNull(draft.strength ?? '') } : {}),
+      ...(textOrNull(draft.dosageForm ?? '') ? { dosageForm: textOrNull(draft.dosageForm ?? '') } : {}),
       ...(draft.requiresPrescription ? { requiresPrescription: true } : {}),
       ...(draft.controlled ? { controlled: true } : {}),
       ...(draft.requiresExpiry ? { requiresExpiry: true } : {}),
@@ -471,6 +478,12 @@ export function buildUpdate(draft: ProductDraft, original: ProductDetail): Built
   }
   if (textOrNull(draft.genericName ?? '') !== (original.genericName ?? null)) {
     body.genericName = textOrNull(draft.genericName ?? '');
+  }
+  if (textOrNull(draft.strength ?? '') !== (original.strength ?? null)) {
+    body.strength = textOrNull(draft.strength ?? '');
+  }
+  if (textOrNull(draft.dosageForm ?? '') !== (original.dosageForm ?? null)) {
+    body.dosageForm = textOrNull(draft.dosageForm ?? '');
   }
   if ((draft.categoryId || null) !== original.categoryId) body.categoryId = draft.categoryId || null;
   if (draft.type !== original.type) body.type = draft.type;

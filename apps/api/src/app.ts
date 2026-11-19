@@ -30,6 +30,7 @@ import { storeRoutes } from './routes/store';
 import { customerRoutes } from './routes/customers';
 import { periodCloseRoutes } from './routes/period-close';
 import { purchaseRoutes } from './routes/purchases';
+import { stockWasteRoutes } from './routes/stock-waste';
 import { pharmacyRoutes } from './routes/pharmacy';
 import { alterationRoutes } from './routes/alterations';
 import { hallRoutes } from './routes/hall';
@@ -171,6 +172,7 @@ export async function buildApp({
   await app.register(customerRoutes);
   await app.register(periodCloseRoutes);
   await app.register(purchaseRoutes);
+  await app.register(stockWasteRoutes);
   await app.register(pharmacyRoutes);
   await app.register(shopRoutes);
   await app.register(alterationRoutes);

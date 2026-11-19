@@ -1,6 +1,7 @@
 import type { Prescription } from './contracts/documents';
 import type { MedicineReturnPolicy, PharmacySettings, ShelfBatch, StockBatch } from './contracts/pharmacy';
 import type { BatchAllocation } from './contracts/documents';
+import { normalizeArabic } from './text';
 
 /**
  * The pharmacy rules the till and the server share (03 › الصيدليات): which batch a sale takes,
@@ -143,7 +144,13 @@ export interface FefoResult {
  * `today`) nor blocked. When one batch is short the line is split onto the next. Pure: the batches
  * given are not changed; `remaining` is what is left for the next line.
  */
-export function allocateFefo(batches: readonly StockBatch[], qty: number, today: string): FefoResult {
+export function allocateFefo(
+  batches: readonly StockBatch[],
+  qty: number,
+  today: string,
+  /** A manager allowed an expired batch to be sold (round 38): expired ones count as good, still after the others */
+  allowExpired = false,
+): FefoResult {
   const remaining = batches.map((b) => ({ ...b }));
   let expiredQty = 0;
   let blockedQty = 0;
@@ -154,9 +161,12 @@ export function allocateFefo(batches: readonly StockBatch[], qty: number, today:
   }
   const allocations: BatchAllocation[] = [];
   let left = Math.max(0, qty);
-  for (const b of [...remaining].sort(byExpiry)) {
+  // The valid batches first, nearest expiry first; an expired one a manager allowed only after them
+  const expiredLast = (b: StockBatch) => (batchState(b, today) === 'expired' ? 1 : 0);
+  for (const b of [...remaining].sort((a, c) => expiredLast(a) - expiredLast(c) || byExpiry(a, c))) {
     if (left === 0) break;
-    if (b.qty <= 0 || batchState(b, today) !== 'ok') continue;
+    const state = batchState(b, today);
+    if (b.qty <= 0 || (state !== 'ok' && !(allowExpired && state === 'expired'))) continue;
     const take = Math.min(left, b.qty);
     allocations.push({ batchNo: b.batchNo, expiry: b.expiry, qty: take });
     b.qty -= take;
@@ -187,4 +197,69 @@ export function uncoveredAction(
 ): 'none' | 'block' | 'approve' {
   if (!tracksBatches || uncovered <= 0) return 'none';
   return settings?.blockNoBatch ? 'block' : 'approve';
+}
+
+// ─── Expired batches at the till (round 38) ───────────────────────────────────
+
+/**
+ * What the till does with a line that only expired batches cover, when the owner has said so with
+ * `allowExpiredWithCode`: `true` lets the manager's code sell it (the sale is audited), `false` refuses
+ * it whatever `blockNoBatch` says. A store that never chose (`undefined`) keeps its older rule, which
+ * `uncoveredAction` gives (a pharmacy's default is to refuse): null here. A line short for any other
+ * reason keeps the usual rule too, and a batch blocked for a recall is never sold (the caller checks that first).
+ */
+export function expiredAction(
+  settings: PharmacySettings | null | undefined,
+  issue: { uncovered: number; expiredQty: number },
+): 'block' | 'approve' | null {
+  if (issue.uncovered <= 0 || issue.expiredQty <= 0) return null;
+  // Only when the expired batches are what is missing: some other shortage keeps the usual rule
+  if (issue.uncovered > issue.expiredQty) return null;
+  if (settings?.allowExpiredWithCode === undefined) return null;
+  return settings.allowExpiredWithCode ? 'approve' : 'block';
+}
+
+/** The day `months` calendar months after `today` (the last day of a shorter month when the day is not there) */
+export function addMonthsISO(today: string, months: number): string {
+  const [y, m, d] = today.split('-').map(Number) as [number, number, number];
+  const total = y * 12 + (m - 1) + months;
+  const year = Math.floor(total / 12);
+  const month = (total % 12) + 1;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+
+/** Whole days from `from` to `to` (negative when `to` is earlier) */
+export function daysBetweenISO(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+}
+
+// ─── Alternatives by active ingredient (round 38) ─────────────────────────────
+
+/** What tells one medicine from another with the same active ingredient: its strength and its form */
+export interface MedicineKey {
+  genericName?: string | null | undefined;
+  /** «500 ملغ» */
+  strength?: string | null | undefined;
+  /** «أقراص», «شراب» */
+  dosageForm?: string | null | undefined;
+}
+
+const keyText = (text: string | null | undefined): string =>
+  normalizeArabic(text ?? '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+
+/**
+ * Whether `other` can stand in for `source`: the same active ingredient, and the same strength and
+ * form wherever the source states them (a source with no strength matches any). Without a generic
+ * name nothing is an alternative: the till never guesses.
+ */
+export function isAlternative(source: MedicineKey, other: MedicineKey): boolean {
+  const generic = keyText(source.genericName);
+  if (generic === '' || generic !== keyText(other.genericName)) return false;
+  const strength = keyText(source.strength);
+  if (strength !== '' && strength !== keyText(other.strength)) return false;
+  const form = keyText(source.dosageForm);
+  return form === '' || form === keyText(other.dosageForm);
 }

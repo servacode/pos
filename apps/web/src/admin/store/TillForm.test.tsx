@@ -277,3 +277,42 @@ describe('«الصندوق» in the settings', () => {
     expect(within(form).queryByText('عندك تعديلات غير محفوظة')).not.toBeInTheDocument();
   });
 });
+
+describe('«أسباب التالف / الهدر» in the till settings', () => {
+  it('shows the built-in reasons, and saves the owner’s own list', async () => {
+    const current = store(['supermarket']);
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    const box = within(form).getByLabelText('أسباب التالف / الهدر');
+    expect(box).toHaveValue('انتهت صلاحيتو، انكسر، خربان، عينة');
+    await user.clear(box);
+    await user.type(box, 'سرقة، تنظيف');
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).toMatchObject({
+      wasteReasons: ['سرقة', 'تنظيف'],
+    });
+  });
+
+  it('leaves the list unset when the owner never changed it', async () => {
+    const current = store(['supermarket']);
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/store': () => ({ status: 200, body: current }),
+      'PUT /v1/store/till': (r: MockRequest) => ({ status: 200, body: { ...current, till: r.body } }),
+    });
+    const { user } = renderApp('/settings');
+    const form = await screen.findByRole('form', { name: 'الصندوق' });
+    await user.type(within(form).getByLabelText('أيام قبول المرتجع'), '10');
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/حُفظ/)).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/store/till').at(-1)?.body).not.toHaveProperty('wasteReasons');
+  });
+});

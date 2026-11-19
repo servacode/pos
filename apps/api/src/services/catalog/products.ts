@@ -129,6 +129,8 @@ export async function productDetail(tx: Transaction, id: string): Promise<Produc
     brand: product.brand,
     season: product.season,
     genericName: product.genericName,
+    strength: product.strength,
+    dosageForm: product.dosageForm,
     requiresPrescription: product.requiresPrescription,
     requiresExpiry: product.requiresExpiry,
     controlled: product.controlled,
@@ -620,6 +622,8 @@ export async function createProductTx(
   tx: Transaction,
   input: CreateProductData,
   ctx: CatalogContext,
+  /** Round 38: ids a till already sold the product under (a product made there offline); left out, the database gives them */
+  ids?: { productId: string; variantIds: readonly string[] },
 ): Promise<ProductDetail> {
   const { tenantId } = ctx.auth;
   await checkReferences(tx, input);
@@ -636,6 +640,7 @@ export async function createProductTx(
     .insert(products)
     .values({
       tenantId,
+      ...(ids ? { id: ids.productId } : {}),
       nameAr: input.nameAr,
       nameEn: input.nameEn,
       searchName: searchNameOf(input.nameAr, input.nameEn),
@@ -643,6 +648,8 @@ export async function createProductTx(
       brand: input.brand,
       season: input.season,
       genericName: input.genericName,
+      strength: input.strength,
+      dosageForm: input.dosageForm,
       requiresPrescription: input.requiresPrescription,
       requiresExpiry: input.requiresExpiry,
       controlled: input.controlled,
@@ -662,6 +669,7 @@ export async function createProductTx(
       .insert(variants)
       .values({
         tenantId,
+        ...(ids?.variantIds[i] ? { id: ids.variantIds[i] } : {}),
         productId,
         sku: v.sku,
         label: labelOf(v.attributes),
@@ -766,6 +774,8 @@ export async function updateProductTx(
     brand: input.brand,
     season: input.season,
     genericName: input.genericName,
+    strength: input.strength,
+    dosageForm: input.dosageForm,
     requiresPrescription: input.requiresPrescription,
     requiresExpiry: input.requiresExpiry,
     controlled: input.controlled,

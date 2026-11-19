@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router';
 import type {
   PurchaseRow,
   SupplierListResponse,
@@ -41,6 +42,7 @@ import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } fro
 import { PackQty } from './PackQty';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
 import { BatchSelect, type BatchChoice, type BatchSuggestion } from './BatchSelect';
+import { prefillOf } from './returnPrefill';
 import { VariantPicker, type PickedVariant } from './VariantPicker';
 
 const listReturns = () => apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier-returns', { auth: true });
@@ -88,20 +90,33 @@ export function SupplierReturnsPage() {
   const digits = useDigits();
   const branches = me.branches;
   const base = me.settings.baseCurrency;
+  // «رجّعو للمورد» from the expiring-soon report opens the form already filled (round 38)
+  const prefill = prefillOf(useLocation().state);
   const [suppliers, setSuppliers] = useState<SupplierListResponse | null>(null);
   const [items, setItems] = useState<SupplierReturnRow[] | null>(null);
-  const [supplierId, setSupplierId] = useState('');
-  const [branchId, setBranchId] = useState(branches[0]?.id ?? '');
+  const [supplierId, setSupplierId] = useState(prefill?.supplierId ?? '');
+  const [branchId, setBranchId] = useState(prefill?.branchId ?? branches[0]?.id ?? '');
   const [refund, setRefund] = useState<SupplierReturnRow['refund']>('credit');
   const [reference, setReference] = useState('');
-  const [note, setNote] = useState('');
-  const [lines, setLines] = useState<Line[]>([]);
+  const [note, setNote] = useState(prefill?.note ?? '');
+  const [lines, setLines] = useState<Line[]>(() =>
+    (prefill?.lines ?? []).map((l) => ({
+      variantId: l.variantId,
+      name: l.name,
+      qty: String(l.qty / 1000),
+      packQty: 1000,
+      amount: '',
+      ...(l.batchNo || l.expiryDate
+        ? { batch: { batchNo: l.batchNo, expiryDate: l.expiryDate } as BatchChoice }
+        : {}),
+    })),
+  );
   // «من فاتورة شراء» (round 36, decision 13): the supplier credits each line at what the invoice cost
   const [invoices, setInvoices] = useState<PurchaseRow[]>([]);
   const [purchaseId, setPurchaseId] = useState('');
   const [saving, setSaving] = useState(false);
   // The list of returns comes first; the form opens from «مرتجع جديد»
-  const [formOpen, setFormOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(prefill !== null);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const errorBox = useRef<HTMLDivElement>(null);

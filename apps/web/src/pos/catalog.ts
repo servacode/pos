@@ -51,6 +51,10 @@ export interface CatalogItem {
   shelfBatches?: readonly ShelfBatch[] | null;
   /** What is left of each batch in this branch, expired ones included, as last pulled (03 › الصيدليات); null: none */
   stockBatches?: readonly StockBatch[] | null;
+  /** «الاسم العلمي», «التركيز» and «الشكل الدوائي»: what tells the alternatives of a medicine (round 38) */
+  genericName?: string | null;
+  strength?: string | null;
+  dosageForm?: string | null;
   /** «يحتاج وصفة» and «مراقَب» (03 › الصيدليات) */
   requiresPrescription?: boolean;
   controlled?: boolean;
@@ -229,6 +233,13 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
       nearestExpiry: variant.nearestExpiry ?? null,
       shelfBatches: variant.shelfBatches ?? null,
       stockBatches: stockBatches.get(variant.id) ?? null,
+      ...(product.genericName
+        ? {
+            genericName: product.genericName,
+            strength: product.strength ?? null,
+            dosageForm: product.dosageForm ?? null,
+          }
+        : {}),
       requiresPrescription: product.requiresPrescription ?? false,
       controlled: product.controlled ?? false,
       imageUrl: variant.imageUrl ?? null,
@@ -309,8 +320,14 @@ export function buildCatalog(sets: CatalogSets, now: number = Date.now()): Catal
   };
 }
 
-export async function loadCatalog(store: SyncStore, now?: number): Promise<Catalog> {
-  return buildCatalog(await readCatalogSets(store), now);
+/** `extend` adds what only this device holds to the pulled sets (a product made at the till offline: sale/localProducts.ts) */
+export async function loadCatalog(
+  store: SyncStore,
+  now?: number,
+  extend?: (sets: CatalogSets) => Promise<CatalogSets>,
+): Promise<Catalog> {
+  const sets = await readCatalogSets(store);
+  return buildCatalog(extend ? await extend(sets) : sets, now);
 }
 
 /** A scanned or typed code as stored: Latin digits, no spaces. */
