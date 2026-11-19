@@ -546,3 +546,59 @@ describe('a cash refund from the dollar drawer', () => {
     expect(returnPayloadSchema.safeParse(sameCurrency).success).toBe(false);
   });
 });
+
+describe('the default dollar part of a refund is whole pounds when the store rounds its cash (round 39)', () => {
+  const USD_120 = { unit: 'USD', quote: 'SYP', rate: '120' } as const;
+  // 638 ل.س sold, paid 2.00 $ (240) and 398 ل.س, the trial's sale
+  const sale = (): SalePayload =>
+    buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [USD_120],
+      shiftId: SHIFT,
+      cashierId: CASHIER,
+      cashSteps: {},
+      lines: [line(1, 63_800)],
+      payments: [
+        { method: 'cash', currency: 'SYP', amountMinor: 39_800 },
+        { method: 'cash', currency: 'USD', amountMinor: 200 },
+      ],
+    } as never);
+
+  it('gives 0.75 $ (90 ل.س) instead of 0.76 $ (91.20 ل.س) so no fraction of a pound is paid or shown', () => {
+    const s = sale();
+    expect(defaultForeignRefund(s, 24_300)).toEqual([{ currency: 'USD', amountMinor: 76 }]);
+    expect(defaultForeignRefund(s, 24_300, 100)).toEqual([{ currency: 'USD', amountMinor: 75 }]);
+    const ret = buildReturnPayload({
+      sale: s,
+      saleId: SALE_ID,
+      saleNumber: 'INV-1',
+      shiftId: SHIFT,
+      cashierId: CASHIER,
+      reason: 'x',
+      picks: [{ saleLineNo: 1, qty: 1000 }],
+      refundMethod: 'cash',
+      cashStepMinor: 500,
+      foreignRefund: defaultForeignRefund(s, 24_300, 100),
+    });
+    // every amount in pounds is whole: the refund and the dollars' worth
+    const r = ret.refunds[0]!;
+    expect(r.amountMinor % 100).toBe(0);
+    expect(r.foreign![0]!.baseAmountMinor % 100).toBe(0);
+    expect(returnPayloadSchema.safeParse(ret).success).toBe(true);
+  });
+
+  it('keeps a sale paid only in dollars exactly as before', () => {
+    const usdOnly = buildSalePayload({
+      currency: 'SYP',
+      taxInclusive: true,
+      exchangeRates: [USD_120],
+      shiftId: SHIFT,
+      cashierId: CASHIER,
+      cashSteps: {},
+      lines: [line(1, 63_800)],
+      payments: [{ method: 'cash', currency: 'USD', amountMinor: 532 }],
+    } as never);
+    expect(defaultForeignRefund(usdOnly, 24_300, 100)).toEqual(defaultForeignRefund(usdOnly, 24_300));
+  });
+});

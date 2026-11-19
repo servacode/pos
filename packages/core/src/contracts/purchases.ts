@@ -393,6 +393,8 @@ export interface ExpiryRow {
   supplierId: string | null;
   supplierName: string | null;
   receivedOn: string | null;
+  /** The one purchase invoice this batch came on; null when none, or when it came on more than one (round 39) */
+  purchaseId?: string | null;
   /** What is left of the batch in this branch, base units, thousandths */
   qty: number;
   /** Days from today; negative when it has expired; null when it has no date */

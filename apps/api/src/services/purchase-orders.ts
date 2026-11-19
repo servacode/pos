@@ -24,7 +24,7 @@ import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { nextNumber } from './purchases';
-import { OPEN_REQUEST } from './shortages';
+import { OPEN_REQUEST, UNSELLABLE_CTE } from './shortages';
 
 /**
  * «طلبيات الشراء»: an order to a supplier, a promise that posts nothing and moves no stock. It is
@@ -385,6 +385,7 @@ export function suggestPurchaseOrder(
         select variant_id, sum(qty) as qty from stock_levels
         where branch_id not in (select id from branches where kind = 'damaged') group by variant_id
       ),
+      ${UNSELLABLE_CTE},
       lastbuy as (
         select distinct on (pl.variant_id) pl.variant_id, p.supplier_id, pl.cost_minor, pl.qty
         from purchase_lines pl join purchases p on p.tenant_id = pl.tenant_id and p.id = pl.purchase_id
@@ -405,7 +406,7 @@ export function suggestPurchaseOrder(
       )
       select v.id as variant_id, v.product_id, p.name_ar as product_name,
              trim(p.name_ar || ' ' || coalesce(v.label, '')) as name, v.attributes,
-             coalesce(k.qty, 0)::text as stock, v.min_stock_qty::text as min,
+             greatest(coalesce(k.qty, 0) - coalesce(u.qty, 0), 0)::text as stock, v.min_stock_qty::text as min,
              (coalesce(s.qty, 0) - coalesce(b.qty, 0))::text as sold,
              coalesce(o.qty, 0)::text as on_order, o.numbers as order_numbers,
              coalesce(q.qty, 0)::text as asked,
@@ -419,6 +420,7 @@ export function suggestPurchaseOrder(
       from variants v
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
       left join stock k on k.variant_id = v.id
+      left join unsellable u on u.variant_id = v.id
       left join sold s on s.variant_id = v.id
       left join back b on b.variant_id = v.id
       left join ordered o on o.variant_id = v.id

@@ -134,6 +134,10 @@ export function returnReasons(sectors: SettingsRow['sectors']): string[] {
   return [...FASHION_REASONS, ...(expiry ? ['تالف أو منتهي الصلاحية'] : []), 'خطأ في الفاتورة'];
 }
 
+/** The reason a return starts on: never «تالف»: sellable is the default, damaged is the cashier's own choice (round 39) */
+export const defaultReason = (reasons: readonly string[]): string =>
+  reasons.find((r) => r !== DAMAGED_REASON) ?? reasons[0]!;
+
 export type InvoiceSearch = { found: InvoiceLookup } | { found: null; reason: 'missing' | 'offline' };
 
 /**

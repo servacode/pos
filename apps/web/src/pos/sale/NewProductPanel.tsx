@@ -28,6 +28,7 @@ export function NewProductPanel({
   canManage,
   userId,
   businessDate,
+  pharmacy = false,
   onDone,
   onClose,
 }: {
@@ -40,14 +41,22 @@ export function NewProductPanel({
   userId: string;
   /** The business day a document saved now belongs to */
   businessDate: () => string;
-  /** `offline`: it was queued on this device and reaches the store with the next sync */
-  onDone: (added: { name: string; offline: boolean }) => void;
+  /** A pharmacy store (round 39): the generic name, strength and form are asked too (all optional) */
+  pharmacy?: boolean;
+  /**
+   * `offline`: it was queued on this device and reaches the store with the next sync. `variantId` is the item to put in
+   * the cart at once (round 39)
+   */
+  onDone: (added: { name: string; offline: boolean; variantId: string }) => void;
   onClose: () => void;
 }) {
   const pos = usePos();
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [genericName, setGenericName] = useState('');
+  const [strength, setStrength] = useState('');
+  const [dosageForm, setDosageForm] = useState('');
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +66,15 @@ export function NewProductPanel({
   const priceMinor = price.trim() ? parseAmount(price, currency) : null;
   const priceBad = price.trim() !== '' && (priceMinor === null || priceMinor < 1);
   const ready = name.trim().length > 0 && priceMinor !== null && priceMinor >= 1;
+
+  // Only a pharmacy asks for these; left empty they are not sent
+  const medicine = pharmacy
+    ? {
+        ...(genericName.trim() ? { genericName: genericName.trim() } : {}),
+        ...(strength.trim() ? { strength: strength.trim() } : {}),
+        ...(dosageForm.trim() ? { dosageForm: dosageForm.trim() } : {}),
+      }
+    : {};
 
   async function add(actorId: string, approval: Approval | null) {
     const token = pos.device.token;
@@ -71,13 +89,31 @@ export function NewProductPanel({
           categoryId: categoryId || null,
           barcode,
           ...ids.current,
+          ...medicine,
         },
         token,
         pos.fetch,
       );
       if (answer.kind === 'ok') {
+        // The device keeps it too (the same ids, so the document makes no second product): it is in the catalog now,
+        // and the sale screen puts it in the cart without waiting for the next pull
+        await queueNewProduct(
+          pos,
+          {
+            ...ids.current,
+            nameAr: name.trim(),
+            priceMinor: priceMinor!,
+            currency,
+            categoryId: categoryId || null,
+            barcode,
+            actorId,
+            approval,
+            ...medicine,
+          },
+          businessDate(),
+        ).catch(() => undefined);
         setSaving(false);
-        onDone({ name: answer.body.nameAr, offline: false });
+        onDone({ name: answer.body.nameAr, offline: false, variantId: ids.current.variantId });
         return;
       }
       if (answer.kind === 'refused') {
@@ -100,11 +136,12 @@ export function NewProductPanel({
           barcode,
           actorId,
           approval,
+          ...medicine,
         },
         businessDate(),
       );
       setSaving(false);
-      onDone({ name: name.trim(), offline: true });
+      onDone({ name: name.trim(), offline: true, variantId: ids.current.variantId });
     } catch {
       setSaving(false);
       setAsking(false);
@@ -173,6 +210,23 @@ export function NewProductPanel({
           error={priceBad ? 'اكتب سعراً صحيحاً أكبر من صفر' : undefined}
           inputClassName="num"
         />
+        {pharmacy
+          ? (
+              [
+                ['الاسم العلمي', genericName, setGenericName, 120],
+                ['التركيز', strength, setStrength, 40],
+                ['الشكل الدوائي', dosageForm, setDosageForm, 40],
+              ] as const
+            ).map(([label, value, set, max]) => (
+              <TextField
+                key={label}
+                label={label}
+                hint="اختياري"
+                value={value}
+                onChange={(e) => set(e.target.value.slice(0, max))}
+              />
+            ))
+          : null}
         <Select label="التصنيف" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
           <option value="">بدون تصنيف</option>
           {categories.map((c) => (

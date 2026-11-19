@@ -62,9 +62,8 @@ import type { StaffMember, StaffSession } from '../staff/staff';
 import { CartWarnings } from './CartWarnings';
 import { BatchBanner } from './BatchBanner';
 import { QuoteDialog, type QuoteChoice } from './QuoteDialog';
-import { batchGuard, planBatches } from './batches';
+import { batchGuard, blockText, planBatches } from './batches';
 import { reservedForOthers } from './reserved';
-import { NewProductPanel } from './NewProductPanel';
 import { showsWaste } from './waste';
 import { deviceDocuments } from '../shift/shift';
 import { bestSellers } from './bestSellers';
@@ -126,13 +125,19 @@ import { ONLINE_SOLD_KEY, orderCart, waitingOrders } from './onlineOrders';
 import { SerialPanel } from './SerialPanel';
 import { serialLabel } from '@serva/core/contracts/warranty';
 import { PrescriptionPanel } from './PrescriptionPanel';
-import { AlternativesPanel } from './AlternativesPanel';
 import { flushShortages } from './shortages';
 import { Kbd } from './Kbd';
 import { SalePanel } from './SalePanel';
 import { packLineText, pieceWord } from './packText';
 
 // «تالف / هدر» needs the server and is rarely opened: its own chunk keeps the cashier's size down
+// «أضف صنف جديد» and «بدائل متوفرة» (a pharmacy only) are rarely opened: their own chunks too
+const NewProductPanel = lazyChunk(() =>
+  import('./NewProductPanel').then((m) => ({ default: m.NewProductPanel })),
+);
+const AlternativesPanel = lazyChunk(() =>
+  import('./AlternativesPanel').then((m) => ({ default: m.AlternativesPanel })),
+);
 const WastePanel = lazyChunk(() => import('./WastePanel').then((m) => ({ default: m.WastePanel })));
 const PaymentPanel = lazyChunk(() =>
   import('../pay/PaymentPanel').then((m) => ({ default: m.PaymentPanel })),
@@ -145,7 +150,11 @@ export type SaleMode =
   | { kind: 'invoice' }
   | { kind: 'approve'; lineNo: number | null; need: ApprovalNeed }
   | { kind: 'batchApprove' }
-  | { kind: 'alternatives'; variantId: string }
+  | {
+      kind: 'alternatives';
+      variantId: string;
+      /** The blocked line a pick replaces (round 39) */ lineNo?: number;
+    }
   | { kind: 'pay' }
   | { kind: 'done' }
   | { kind: 'help' }
@@ -310,6 +319,14 @@ export function SaleScreen(props: SaleScreenProps) {
       settings.till,
     ],
   );
+  // The tiles read the reserved map: keep the same object while its content is the same, so a cart edit does not redraw the grid
+  const reservedStable = useRef(reservedNow);
+  if (
+    reservedStable.current !== reservedNow &&
+    (reservedStable.current.size !== reservedNow.size ||
+      [...reservedNow].some(([id, qty]) => reservedStable.current.get(id) !== qty))
+  )
+    reservedStable.current = reservedNow;
   const [unsent, setUnsent] = useState<OutboxEntry[]>([]);
   useEffect(() => {
     let alive = true;
@@ -654,6 +671,10 @@ export function SaleScreen(props: SaleScreenProps) {
     choice: ItemChoice | undefined;
   } | null>(null);
   const outOk = useRef(false);
+  // A product just made at the till (round 39): it joins the cart once the catalog holds it
+  const [justMade, setJustMade] = useState<{ variantId: string; name: string; offline: boolean } | null>(
+    null,
+  );
   // A question is open (no stock, price 0): «أُضيف ✓» must not sit behind it before the cashier has decided
   const asking = outAsk !== null || zeroAsk !== null;
   useEffect(() => {
@@ -836,6 +857,24 @@ export function SaleScreen(props: SaleScreenProps) {
       digits,
     ],
   );
+
+  useEffect(() => {
+    if (!justMade) return;
+    const item = catalog.byVariant.get(justMade.variantId);
+    if (!item) return;
+    setJustMade(null);
+    // The cashier made it to sell it: no «لا يوجد مخزون» question for a product that has no stock yet
+    outOk.current = true;
+    try {
+      add(item, null);
+    } finally {
+      outOk.current = false;
+    }
+    setNotice({
+      tone: 'info',
+      text: `أُضيف «${justMade.name}» وصار في السلة.${justMade.offline ? ' يصل إلى المتجر عند عودة الاتصال.' : ' يراجعه المالك لاحقاً.'}`,
+    });
+  }, [justMade, catalog, add]);
 
   const scan = useCallback(
     (raw: string) => {
@@ -1372,6 +1411,13 @@ export function SaleScreen(props: SaleScreenProps) {
         ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
     }, 30);
   };
+  // The line a chosen alternative replaces: the one the panel was opened for, when it is blocked
+  const replacedLine =
+    mode.kind === 'alternatives' &&
+    mode.lineNo !== undefined &&
+    guard.blocks.some((b) => b.lineNo === mode.lineNo)
+      ? cart.lines.find((l) => l.lineNo === mode.lineNo)
+      : undefined;
   const payBlock: { text: string; go: () => void } | null = (() => {
     if (canPay || lineCount === 0) return null;
     const serial = unnumbered[0];
@@ -1401,7 +1447,7 @@ export function SaleScreen(props: SaleScreenProps) {
         go: () => setMode({ kind: 'batchApprove' }),
       };
     const bad = guard.blocks[0] ?? null;
-    if (bad) return { text: 'راجع تنبيه الدفعة في السلة', go: () => jumpToLine(bad.lineNo) };
+    if (bad) return { text: blockText(bad), go: () => jumpToLine(bad.lineNo) };
     const out = guard.stockBlocks[0];
     const outLine = out ? cart.lines.find((l) => l.variantId === out.variantId) : undefined;
     if (outLine)
@@ -2071,11 +2117,15 @@ export function SaleScreen(props: SaleScreenProps) {
                 {...(settings.pharmacy
                   ? {
                       onAlternatives: (of: { lineNo: number } | { variantId: string }) => {
-                        const variantId =
-                          'variantId' in of
-                            ? of.variantId
-                            : cart.lines.find((l) => l.lineNo === of.lineNo)?.variantId;
-                        if (variantId) setMode({ kind: 'alternatives', variantId });
+                        const line =
+                          'lineNo' in of ? cart.lines.find((l) => l.lineNo === of.lineNo) : undefined;
+                        const variantId = 'variantId' in of ? of.variantId : line?.variantId;
+                        if (variantId)
+                          setMode({
+                            kind: 'alternatives',
+                            variantId,
+                            ...(line ? { lineNo: line.lineNo } : {}),
+                          });
                       },
                     }
                   : {})}
@@ -2125,7 +2175,7 @@ export function SaleScreen(props: SaleScreenProps) {
                 onClick={() => {
                   const line =
                     cart.lines.find((l) => l.lineNo === selected) ?? cart.lines[cart.lines.length - 1];
-                  if (line) setMode({ kind: 'alternatives', variantId: line.variantId });
+                  if (line) setMode({ kind: 'alternatives', variantId: line.variantId, lineNo: line.lineNo });
                 }}
                 disabled={lineCount === 0}
                 className={CART_QUICK}
@@ -2166,6 +2216,7 @@ export function SaleScreen(props: SaleScreenProps) {
       check={check}
       onStopChecking={stopChecking}
       onStartChecking={startChecking}
+      reserved={reservedStable.current}
     />
   );
   /** A picker over the grid it was opened from: the grid stays in view behind a scrim, the panel centred on the screen */
@@ -2254,6 +2305,19 @@ export function SaleScreen(props: SaleScreenProps) {
               <Button variant="secondary" onClick={() => setOutAsk(null)}>
                 لا، لا تُضفه
               </Button>
+              {/* A pharmacy: the same medicine in another brand, in stock (round 39: also on a phone) */}
+              {settings.pharmacy ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const ask = outAsk;
+                    setOutAsk(null);
+                    setMode({ kind: 'alternatives', variantId: ask.item.variantId });
+                  }}
+                >
+                  بدائل
+                </Button>
+              ) : null}
               <Button
                 onClick={() => {
                   const ask = outAsk;
@@ -2662,36 +2726,49 @@ export function SaleScreen(props: SaleScreenProps) {
           onCancel={() => setMode({ kind: 'items' })}
         />
       ) : effectiveMode.kind === 'alternatives' && catalog.byVariant.get(effectiveMode.variantId) ? (
-        <AlternativesPanel
-          source={catalog.byVariant.get(effectiveMode.variantId)!}
-          catalog={catalog}
-          today={businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff)}
-          onPick={(picked) => {
-            setMode({ kind: 'items' });
-            add(picked, null);
-          }}
-          onClose={() => setMode({ kind: 'items' })}
-        />
+        <Suspense fallback={null}>
+          <AlternativesPanel
+            source={catalog.byVariant.get(effectiveMode.variantId)!}
+            catalog={catalog}
+            today={businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff)}
+            replacing={replacedLine?.name}
+            onPick={(picked, available) => {
+              setMode({ kind: 'items' });
+              // The blocked line (no valid batch, expired) goes: the alternative takes its place with its quantity,
+              // as much as the alternative has (round 39)
+              if (replacedLine) {
+                const without = removeLine(cartRef.current, replacedLine.lineNo);
+                cartRef.current = without;
+                setCart(() => without);
+                setSelected(null);
+                const same = replacedLine.packQty === 1000 ? replacedLine.qty : 1000;
+                add(picked, null, Math.max(1000, Math.min(same, available)));
+                return;
+              }
+              add(picked, null);
+            }}
+            onClose={() => setMode({ kind: 'items' })}
+          />
+        </Suspense>
       ) : effectiveMode.kind === 'newProduct' ? (
-        <NewProductPanel
-          barcode={effectiveMode.barcode}
-          currency={ctx.currency}
-          categories={catalog.categoryChoices ?? []}
-          staff={staff}
-          canManage={session.permissions.has('catalog.manage')}
-          userId={session.userId}
-          businessDate={() => businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff)}
-          onClose={() => setMode({ kind: 'items' })}
-          onDone={(added) => {
-            setMode({ kind: 'items' });
-            setNotice({
-              tone: 'info',
-              text: added.offline
-                ? `أُضيف «${added.name}» على هذا الجهاز وصار جاهزاً للبيع. امسح الباركود مرة أخرى. يصل إلى المتجر عند عودة الاتصال.`
-                : `أُضيف «${added.name}». يصل إلى الكاشير مع أول مزامنة، ثم امسح الباركود مرة أخرى.`,
-            });
-          }}
-        />
+        <Suspense fallback={null}>
+          <NewProductPanel
+            barcode={effectiveMode.barcode}
+            currency={ctx.currency}
+            categories={catalog.categoryChoices ?? []}
+            staff={staff}
+            canManage={session.permissions.has('catalog.manage')}
+            userId={session.userId}
+            businessDate={() => businessDateOf(Date.now(), settings.timezone, settings.businessDayCutoff)}
+            pharmacy={Boolean(settings.pharmacy)}
+            onClose={() => setMode({ kind: 'items' })}
+            onDone={(added) => {
+              setMode({ kind: 'items' });
+              // It goes into the cart as soon as the catalog holds it (the effect above), so the cashier scans nothing twice
+              setJustMade({ variantId: added.variantId, name: added.name, offline: added.offline });
+            }}
+          />
+        </Suspense>
       ) : effectiveMode.kind === 'waste' ? (
         <Suspense fallback={null}>
           <WastePanel

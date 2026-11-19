@@ -64,6 +64,9 @@ interface Placing {
   /** The ids the till sells it under; left out, the database gives them */
   productId?: string | undefined;
   variantId?: string | undefined;
+  genericName?: string | null | undefined;
+  strength?: string | null | undefined;
+  dosageForm?: string | null | undefined;
 }
 
 /**
@@ -123,6 +126,9 @@ async function placeProduct(
   const data = createProductInput.parse({
     nameAr: input.nameAr,
     categoryId: input.categoryId,
+    genericName: input.genericName,
+    strength: input.strength,
+    dosageForm: input.dosageForm,
     variants: [
       {
         price: { currency: base, priceMinor: input.priceMinor },

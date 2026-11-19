@@ -31,12 +31,15 @@ export function AlternativesPanel({
   today,
   onPick,
   onClose,
+  replacing,
 }: {
   source: CatalogItem;
   catalog: Pick<Catalog, 'items'>;
   today: string;
-  onPick: (item: CatalogItem) => void;
+  onPick: (item: CatalogItem, available: number) => void;
   onClose: () => void;
+  /** The blocked line a pick takes the place of (round 39) */
+  replacing?: string | undefined;
 }) {
   const pos = usePos();
   const digits = useDigits();
@@ -66,6 +69,7 @@ export function AlternativesPanel({
         </Button>
       }
     >
+      {replacing ? <Alert tone="info">البديل الذي تختاره يحل محل «{replacing}» في السلة.</Alert> : null}
       {!source.genericName ? (
         <Alert tone="info">
           لم يُكتب الاسم العلمي لهذا الدواء، فلا بدائل له. يكتبه صاحب المحل في صفحة المنتج.
@@ -78,7 +82,7 @@ export function AlternativesPanel({
             <li key={item.variantId}>
               <button
                 type="button"
-                onClick={() => onPick(item)}
+                onClick={() => onPick(item, available)}
                 className="flex min-h-14 w-full items-center gap-3 rounded-card border border-line bg-surface px-4 py-2 text-start transition-colors duration-120 ease-standard hover:bg-surface-muted"
               >
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">

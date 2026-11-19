@@ -60,7 +60,14 @@ describe('planBatches', () => {
     expect(plan.allocations.get(1)).toEqual([{ batchNo: 'N', expiry: '2027-01-01', qty: 3000 }]);
     expect(plan.allocations.get(2)).toEqual([{ batchNo: 'N', expiry: '2027-01-01', qty: 1000 }]);
     expect(plan.uncovered).toEqual([
-      { lineNo: 2, name: expect.any(String), uncovered: 2000, expiredQty: 0, blockedQty: 0 },
+      {
+        lineNo: 2,
+        variantId: expect.any(String),
+        name: expect.any(String),
+        uncovered: 2000,
+        expiredQty: 0,
+        blockedQty: 0,
+      },
     ]);
     expect(plan.signature).toBe('2:2000');
   });

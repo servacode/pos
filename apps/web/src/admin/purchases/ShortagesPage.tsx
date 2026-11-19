@@ -39,6 +39,10 @@ export function groupShortages(items: readonly ShortageRow[]) {
   return [...groups.values()].sort((a, b) => Number(a.supplierId === null) - Number(b.supplierId === null));
 }
 
+/** Sent or part-received orders already owe it: the card says so and does not push a second order */
+const isOrdered = (r: ShortageRow) => (r.orderNumbers?.length ?? 0) > 0 && (r.onOrderQty ?? 0) > 0;
+const allOrdered = (rows: readonly ShortageRow[]) => rows.length > 0 && rows.every(isOrdered);
+
 const REASON: Record<ShortageRow['reason'], { text: string; tone: 'warning' | 'info' | 'danger' }> = {
   below_min: { text: 'تحت الحد الأدنى', tone: 'warning' },
   requested: { text: 'طلبه زبون', tone: 'info' },
@@ -107,13 +111,13 @@ export function ShortagesPage() {
                   action={
                     group.supplierId ? (
                       <Button
-                        variant="primary"
+                        variant={allOrdered(group.rows) ? 'secondary' : 'primary'}
                         size="md"
                         onClick={() =>
                           void navigate(`/purchase-orders/new?supplier=${group.supplierId}&suggest=1`)
                         }
                       >
-                        اطلب من المورد
+                        {allOrdered(group.rows) ? 'اطلب مرة تانية' : 'اطلب من المورد'}
                       </Button>
                     ) : null
                   }
@@ -131,6 +135,9 @@ export function ShortagesPage() {
                         ) : null}
                       </span>
                       <Badge tone={REASON[r.reason].tone}>{REASON[r.reason].text}</Badge>
+                      {isOrdered(r) ? (
+                        <Badge tone="success">{`انطلبت ب${(r.orderNumbers ?? []).join('، ')}`}</Badge>
+                      ) : null}
                       <span className="text-sm text-ink-muted">
                         {r.stockQty === null ? (
                           'غير معرَّف في الأصناف'
@@ -148,6 +155,12 @@ export function ShortagesPage() {
                             ) : null}
                           </>
                         )}
+                        {r.expiredQty ? (
+                          <>
+                            {' '}
+                            · منتهي أو موقوف <bdi className="num">{formatQuantity(r.expiredQty, digits)}</bdi>
+                          </>
+                        ) : null}
                         {r.requestCount > 0 ? (
                           <>
                             {' '}

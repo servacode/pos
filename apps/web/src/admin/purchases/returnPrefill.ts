@@ -13,6 +13,8 @@ export interface ReturnPrefill {
     qty: number;
     batchNo: string | null;
     expiryDate: string | null;
+    /** The one purchase invoice this batch came on (round 39): the supplier credits it at that invoice's cost */
+    purchaseId?: string | null;
   }[];
 }
 

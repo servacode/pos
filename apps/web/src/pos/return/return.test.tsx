@@ -48,6 +48,8 @@ describe('«مرتجع» on the till', () => {
     expect(record).toBeDisabled();
     await user.click(screen.getByRole('button', { name: /زد زيت/ }));
     expect(screen.getByRole('status', { name: 'المبلغ المردود' })).toHaveTextContent('250');
+    // Round 39: the goods start sellable; damaged is the cashier's own choice
+    await user.click(screen.getByRole('button', { name: 'تالفة: لا تُباع' }));
     await user.click(record);
     // A cashier without «المرتجعات» needs the manager
     expect(screen.getByRole('region', { name: 'رمز المدير' })).toBeInTheDocument();
@@ -65,13 +67,13 @@ describe('«مرتجع» on the till', () => {
       saleNumber: 'INV-001-002-0000001',
       shiftId: SHIFT_ID,
       cashierId: ids.samer,
-      reason: 'تالف أو منتهي الصلاحية',
+      reason: 'الزبون غيّر رأيه',
       lines: [{ saleLineNo: 1, qty: 1000 }],
       totals: { totalMinor: 25_000 },
       refunds: [{ method: 'cash', currency: 'SYP', amountMinor: 25_000, reference: null }],
       approval: { userId: ids.maryam, method: 'pin' },
     });
-    // The reason is «تالف أو منتهي الصلاحية»: the goods go to the damaged stock, not back on the shelf
+    // The cashier chose «تالفة»: the goods go to the damaged stock, not back on the shelf
     expect(payload.damaged).toBe(true);
 
     // The second piece is all that is left; then nothing is
@@ -168,8 +170,15 @@ describe('the damaged goods of a return (round 35, D7)', () => {
     expect(validateDocumentPayload('return', second)).toEqual({ ok: true, checked: true });
   });
 
-  it('starts on «تالفة» when the reason is damaged or expired, and can be taken back to the shelf', async () => {
+  it('starts on «سليمة» whatever the store, and damaged is an explicit choice (round 39)', async () => {
     const { user, outbox } = await toReturn();
+    expect(screen.getByRole('button', { name: 'سليمة: تعود إلى الرف' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'تالفة: لا تُباع' })).toHaveAttribute('aria-pressed', 'false');
+    // Picking the damaged reason moves the goods to the damaged stock by itself, and the cashier can still take it back
+    await user.click(screen.getByRole('button', { name: 'تالف أو منتهي الصلاحية' }));
     expect(screen.getByRole('button', { name: 'تالفة: لا تُباع' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByRole('button', { name: 'سليمة: تعود إلى الرف' }));
     await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));

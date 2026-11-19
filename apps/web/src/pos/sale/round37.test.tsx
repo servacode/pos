@@ -275,7 +275,7 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
     const panel = await openPanel(user);
     setOnline(false);
     await user.click(within(panel).getByRole('button', { name: 'أضف الصنف' }));
-    expect(await screen.findByText(/جاهزاً للبيع/)).toBeInTheDocument();
+    expect(await screen.findByText(/وصار في السلة/)).toBeInTheDocument();
     // Nothing went to the server; the product waits in the outbox under the ids the till chose
     expect(bodies).toEqual([]);
     const queued = outbox.filter((e) => e.type === 'temp_item');
@@ -289,8 +289,7 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
       barcode: newBarcode,
       approval: null,
     });
-    // The same barcode now finds it, with its price, and it sells
-    await scan(user, newBarcode);
+    // Round 39: it is already in the cart, with its price, and it sells
     expect((await screen.findAllByText('قميص أزرق')).length).toBeGreaterThan(0);
     await user.keyboard('{F12}');
     await screen.findByRole('region', { name: 'الدفع' });
@@ -326,7 +325,7 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
     expect(outbox.filter((e) => e.type === 'temp_item')).toEqual([]);
     await screen.findByRole('region', { name: 'رمز المدير' });
     await user.keyboard(PINS[ids.maryam]!);
-    expect(await screen.findByText(/جاهزاً للبيع/)).toBeInTheDocument();
+    expect(await screen.findByText(/وصار في السلة/)).toBeInTheDocument();
     expect(bodies).toHaveLength(1);
     const made = outbox.find((e) => e.type === 'temp_item')!.doc.payload as {
       actorId: string;
@@ -344,7 +343,7 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
     const { user, outbox } = renderPos({ local, fetch, sets });
     const panel = await openPanel(user);
     await user.click(within(panel).getByRole('button', { name: 'أضف الصنف' }));
-    expect(await screen.findByText(/جاهزاً للبيع/)).toBeInTheDocument();
+    expect(await screen.findByText(/وصار في السلة/)).toBeInTheDocument();
     // Asked once with its ids, then queued under the very same ones
     expect(bodies).toHaveLength(1);
     const made = outbox.find((e) => e.type === 'temp_item')!.doc.payload as Record<string, unknown>;

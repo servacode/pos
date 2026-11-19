@@ -490,12 +490,13 @@ export function expiryReport(
       supplier_id: string | null;
       supplier_name: string | null;
       received_on: string | null;
+      purchase_id: string | null;
       blocked: boolean;
       reason: string | null;
     }>(sql`
       select b.variant_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name, b.branch_id, br.name as branch_name,
              b.batch_no, b.expiry_date::text as expiry_date, b.qty::text,
-             r.number, r.supplier_id, r.supplier_name, r.received_on,
+             r.number, r.supplier_id, r.supplier_name, r.received_on, r.purchase_id,
              (bl.id is not null) as blocked, bl.reason
       from (select variant_id, branch_id, batch_no, expiry_date, sum(qty) as qty
             from batch_movements group by variant_id, branch_id, batch_no, expiry_date
@@ -506,7 +507,11 @@ export function expiryReport(
       join branches br on br.tenant_id = ${auth.tenantId} and br.id = b.branch_id
       left join batch_blocks bl on bl.variant_id = b.variant_id and bl.batch_no = b.batch_no and bl.released_at is null
       left join lateral (
-        select pu.number, pu.supplier_id, s.name as supplier_name, pu.business_date::text as received_on
+        select pu.number, pu.supplier_id, s.name as supplier_name, pu.business_date::text as received_on,
+               -- the invoice only when this batch came on exactly one (a return against it is then at that invoice's cost)
+               (select case when count(distinct l2.purchase_id) = 1 then min(l2.purchase_id::text) end
+                from purchase_lines l2 where l2.variant_id = b.variant_id and coalesce(l2.batch_no, '') = b.batch_no
+                  and l2.expiry_date is not distinct from b.expiry_date) as purchase_id
         from purchase_lines l
         join purchases pu on pu.tenant_id = l.tenant_id and pu.id = l.purchase_id
         join suppliers s on s.tenant_id = pu.tenant_id and s.id = pu.supplier_id
@@ -537,6 +542,7 @@ export function expiryReport(
         supplierId: r.supplier_id,
         supplierName: r.supplier_name,
         receivedOn: r.received_on,
+        purchaseId: r.purchase_id,
         qty: Number(r.qty),
         daysLeft: r.expiry_date
           ? Math.round((Date.parse(`${r.expiry_date}T00:00:00Z`) - day) / 86_400_000)

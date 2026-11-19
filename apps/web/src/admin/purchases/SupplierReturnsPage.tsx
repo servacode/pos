@@ -75,6 +75,8 @@ interface Line extends PickedVariant {
   batch?: BatchChoice | null;
   /** Serial numbers of a device sent back, one per piece (shown when the product tracks them) */
   serials?: string;
+  /** The one invoice this batch came on (from the expiring-soon report): its return is credited at that invoice's cost */
+  purchaseId?: string | null;
 }
 
 /** The grid of a return line: the item, its quantity, what the supplier credits and the bin. */
@@ -109,11 +111,16 @@ export function SupplierReturnsPage() {
       ...(l.batchNo || l.expiryDate
         ? { batch: { batchNo: l.batchNo, expiryDate: l.expiryDate } as BatchChoice }
         : {}),
+      purchaseId: l.purchaseId ?? null,
     })),
   );
   // «من فاتورة شراء» (round 36, decision 13): the supplier credits each line at what the invoice cost
   const [invoices, setInvoices] = useState<PurchaseRow[]>([]);
-  const [purchaseId, setPurchaseId] = useState('');
+  const [purchaseId, setPurchaseId] = useState(() => {
+    // Every batch of the prefill came on the same invoice: the return is against it, at its cost (round 39)
+    const ids = new Set((prefill?.lines ?? []).map((l) => l.purchaseId ?? ''));
+    return ids.size === 1 ? ([...ids][0] ?? '') : '';
+  });
   const [saving, setSaving] = useState(false);
   // The list of returns comes first; the form opens from «مرتجع جديد»
   const [formOpen, setFormOpen] = useState(prefill !== null);
@@ -125,6 +132,7 @@ export function SupplierReturnsPage() {
     if (error) errorBox.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   }, [error]);
   const [done, setDone] = useState<SupplierReturnDetail | null>(null);
+  const [doneCount, setDoneCount] = useState<string[]>([]);
 
   const load = useCallback(() => {
     listReturns()
@@ -208,37 +216,56 @@ export function SupplierReturnsPage() {
     supplierId && lines.length > 0 && parsed.every((p) => p.qty !== null && p.qty > 0 && p.amount !== null);
   const pieces = parsed.reduce<number>((sum, p) => sum + (p.qty ?? 0), 0);
 
+  /** Lines to send, one return each: against the chosen invoice, or per invoice the batches came on, the rest at the average */
+  const batches = purchaseId
+    ? [{ purchaseId, rows: lines.map((_, i) => i) }]
+    : [...new Set(lines.map((l) => l.purchaseId ?? ''))].map((id) => ({
+        purchaseId: id,
+        rows: lines.flatMap((l, i) => ((l.purchaseId ?? '') === id ? [i] : [])),
+      }));
+  const splitByInvoice = !purchaseId && batches.length > 1 && lines.some((l) => l.purchaseId);
+
   async function save() {
     if (!ready) return;
     setSaving(true);
     setError(null);
     setFields({});
+    const made: SupplierReturnDetail[] = [];
     try {
-      setDone(
-        await createReturn({
+      for (const part of batches) {
+        const mine = part.rows.map((i) => lines[i]!);
+        const created = await createReturn({
           supplierId,
           branchId: branchId || undefined,
           date: today(),
           refund,
-          ...(purchaseId ? { purchaseId } : {}),
+          ...(part.purchaseId ? { purchaseId: part.purchaseId } : {}),
           reference: reference.trim() || null,
           note: note.trim() || null,
-          lines: lines.map((l, i) => ({
-            variantId: l.variantId,
-            qty: parsed[i]!.qty!,
-            amountMinor: parsed[i]!.amount ?? null,
-            ...(l.batch ? { batchNo: l.batch.batchNo, expiryDate: l.batch.expiryDate } : {}),
-            ...(l.serials?.trim()
-              ? {
-                  serials: l.serials
-                    .split(/[\n,،]+/)
-                    .map((x) => x.trim())
-                    .filter(Boolean),
-                }
-              : {}),
-          })),
-        }),
-      );
+          lines: part.rows.map((i) => {
+            const l = lines[i]!;
+            return {
+              variantId: l.variantId,
+              qty: parsed[i]!.qty!,
+              amountMinor: parsed[i]!.amount ?? null,
+              ...(l.batch ? { batchNo: l.batch.batchNo, expiryDate: l.batch.expiryDate } : {}),
+              ...(l.serials?.trim()
+                ? {
+                    serials: l.serials
+                      .split(/[\n,،]+/)
+                      .map((x) => x.trim())
+                      .filter(Boolean),
+                  }
+                : {}),
+            };
+          }),
+        });
+        made.push(created);
+        // What is saved leaves the form, so a retry after a later failure never sends it twice
+        setLines((list) => list.filter((l) => !mine.includes(l)));
+      }
+      setDone(made[made.length - 1] ?? null);
+      setDoneCount(made.map((m) => m.number));
       setLines([]);
       setPurchaseId('');
       setReference('');
@@ -252,13 +279,16 @@ export function SupplierReturnsPage() {
       // The connection may drop after the server saved the return: read the list again and say so,
       // so a second press does not send the same pieces back twice
       const dropped = e instanceof ApiError && (e.code === 'network_error' || e.status >= 500);
-      if (dropped) load();
+      if (dropped || made.length > 0) load();
+      const saved =
+        made.length > 0 ? `سُجّل منها ${made.map((m) => m.number).join('، ')} وبقي الباقي في النموذج. ` : '';
       setError(
-        reasons.length > 0
-          ? reasons.join(' · ')
-          : dropped
-            ? `${errorMessage(e)} قد يكون المرتجع حُفظ: تحقّق من القائمة أسفل الصفحة قبل الإعادة.`
-            : errorMessage(e),
+        saved +
+          (reasons.length > 0
+            ? reasons.join(' · ')
+            : dropped
+              ? `${errorMessage(e)} قد يكون المرتجع حُفظ: تحقّق من القائمة أسفل الصفحة قبل الإعادة.`
+              : errorMessage(e)),
       );
       setFields(named);
     } finally {
@@ -321,7 +351,10 @@ export function SupplierReturnsPage() {
         />
         {done && !formOpen ? (
           <Alert tone="success">
-            سُجّل المرتجع {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
+            {doneCount.length > 1
+              ? `سُجّلت ${doneCount.length} مرتجعات (${doneCount.join('، ')}) كل واحد بفاتورته. آخرها `
+              : 'سُجّل المرتجع '}
+            {done.number}: <Money minor={done.amountMinor} currency={base} />{' '}
             {done.refund === 'credit' ? 'نزلت من رصيد المورد.' : 'استرددتها منه.'} خرجت القطع من المخزون.
             {done.purchaseNumber ? (
               <>
@@ -396,6 +429,12 @@ export function SupplierReturnsPage() {
                     ))}
                   </Select>
                 </div>
+                {splitByInvoice ? (
+                  <Alert tone="info">
+                    هالدفعات جاءت على أكثر من فاتورة شراء، فيُسجَّل مرتجع لكل فاتورة بكلفتها فيها. والدفعة
+                    التي لا فاتورة لها تُحسب بمتوسط الكلفة.
+                  </Alert>
+                ) : null}
                 {invoices.length > 0 ? (
                   <div className="flex flex-col gap-3">
                     <Select

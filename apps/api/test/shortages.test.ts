@@ -71,6 +71,7 @@ async function receive(
   boxes: number,
   batch?: string,
   expiry?: string,
+  boxCost = 10_000,
 ) {
   const res = await app.inject({
     method: 'POST',
@@ -84,7 +85,7 @@ async function receive(
         {
           variantId,
           qty: boxes * BOX,
-          costMinor: boxes * 10_000,
+          costMinor: boxes * boxCost,
           ...(batch ? { batchNo: batch, expiryDate: expiry } : {}),
         },
       ],
@@ -260,6 +261,154 @@ describe('«النواقص»', () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ variantId: med.variantId, reason: 'requested' });
     expect(items[0]!.suggestedQty).toBe(4 * BOX);
+  });
+});
+
+describe('«النواقص» counts only what can be sold (round 39)', () => {
+  it('treats an all-expired shelf as empty: listed with the minimum short, and the suggestion orders up to it', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { nameAr: 'أموكسيل', min: 10 * BOX });
+    await receive(store, s.id, med.variantId, 20, 'AM-EXP', '2020-01-01');
+    await ask(store, { id: uuidv7(), variantId: med.variantId, name: med.name, qty: BOX });
+    const row = (await list(store)).items.find((r) => r.variantId === med.variantId)!;
+    expect(row).toMatchObject({ stockQty: 0, expiredQty: 20 * BOX, reason: 'both', orderNumbers: [] });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/v1/purchase-orders/suggest?supplierId=${s.id}`,
+      headers: as(store),
+    });
+    const item = res.json<PurchaseOrderSuggestion>().items.find((i) => i.variantId === med.variantId)!;
+    expect(item.stockQty).toBe(0);
+    expect(item.suggestedQty).toBe(10 * BOX);
+  });
+
+  it('counts a good batch beside the expired one, and says which orders already owe it', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { nameAr: 'بانادول', min: 10 * BOX });
+    await receive(store, s.id, med.variantId, 6, 'OLD', '2020-01-01');
+    await receive(store, s.id, med.variantId, 4, 'NEW', '2099-01-01');
+    const before = (await list(store)).items.find((r) => r.variantId === med.variantId)!;
+    expect(before).toMatchObject({ stockQty: 4 * BOX, expiredQty: 6 * BOX });
+    const order = await app.inject({
+      method: 'POST',
+      url: '/v1/purchase-orders',
+      headers: as(store),
+      payload: { supplierId: s.id, lines: [{ variantId: med.variantId, qty: 10 * BOX, costMinor: 100_000 }] },
+    });
+    expect(order.statusCode, order.body).toBe(201);
+    const placed = order.json<{ id: string; version: number }>();
+    const sent = await app.inject({
+      method: 'POST',
+      url: `/v1/purchase-orders/${placed.id}/status`,
+      headers: as(store),
+      payload: { status: 'sent', version: placed.version },
+    });
+    expect(sent.statusCode, sent.body).toBe(200);
+    const after = (await list(store)).items.find((r) => r.variantId === med.variantId)!;
+    expect(after.orderNumbers).toHaveLength(1);
+    expect(after.onOrderQty).toBe(10 * BOX);
+  });
+});
+
+describe('a supplier return from the batches (round 39)', () => {
+  const expiring = async (store: Store, variantId: string) =>
+    (
+      await app.inject({
+        method: 'GET',
+        url: `/v1/inventory/expiry?days=3650&variantId=${variantId}`,
+        headers: as(store),
+      })
+    ).json<{ items: { batchNo: string | null; purchaseId?: string | null }[] }>().items;
+
+  it('names the one invoice a batch came on, so the return is credited at the invoice cost, not the average', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { nameAr: 'أبيمول' });
+    const cheap = await receive(store, s.id, med.variantId, 10, 'AB-EXP', '2020-01-01', 9_000);
+    const dear = await receive(store, s.id, med.variantId, 10, 'AB-NEW', '2099-01-01', 10_000);
+    const rows = await expiring(store, med.variantId);
+    expect(rows.find((r) => r.batchNo === 'AB-EXP')!.purchaseId).toBe(cheap.id);
+    expect(rows.find((r) => r.batchNo === 'AB-NEW')!.purchaseId).toBe(dear.id);
+    const send = (extra: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/supplier-returns',
+        headers: as(store),
+        payload: {
+          supplierId: s.id,
+          date: '2026-10-30',
+          refund: 'credit',
+          lines: [{ variantId: med.variantId, qty: 10 * BOX, batchNo: 'AB-EXP', expiryDate: '2020-01-01' }],
+          ...extra,
+        },
+      });
+    // The average is 9,500 a box; the batch cost 9,000
+    const withInvoice = await send({ purchaseId: cheap.id });
+    expect(withInvoice.statusCode, withInvoice.body).toBe(201);
+    expect(withInvoice.json<{ amountMinor: number }>().amountMinor).toBe(90_000);
+  });
+
+  it('names no invoice for a batch that came on two, and for one with no purchase (as before)', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { nameAr: 'بانادول' });
+    await receive(store, s.id, med.variantId, 5, 'PA-1', '2020-01-01');
+    await receive(store, s.id, med.variantId, 5, 'PA-1', '2020-01-01');
+    const rows = await expiring(store, med.variantId);
+    expect(rows.find((r) => r.batchNo === 'PA-1')!.purchaseId).toBeNull();
+  });
+
+  it('two batches of one item on one invoice go back together against it', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { nameAr: 'سيتال' });
+    const bought = await app.inject({
+      method: 'POST',
+      url: '/v1/purchases',
+      headers: as(store),
+      payload: {
+        supplierId: s.id,
+        date: '2026-10-28',
+        payment: 'credit',
+        lines: [
+          {
+            variantId: med.variantId,
+            qty: 4 * BOX,
+            costMinor: 36_000,
+            batchNo: 'X-1',
+            expiryDate: '2020-01-01',
+          },
+          {
+            variantId: med.variantId,
+            qty: 6 * BOX,
+            costMinor: 60_000,
+            batchNo: 'X-2',
+            expiryDate: '2020-02-01',
+          },
+        ],
+      },
+    });
+    expect(bought.statusCode, bought.body).toBe(201);
+    const inv = bought.json<PurchaseDetail>();
+    const back = await app.inject({
+      method: 'POST',
+      url: '/v1/supplier-returns',
+      headers: as(store),
+      payload: {
+        supplierId: s.id,
+        date: '2026-10-30',
+        refund: 'credit',
+        purchaseId: inv.id,
+        lines: [
+          { variantId: med.variantId, qty: 4 * BOX, batchNo: 'X-1', expiryDate: '2020-01-01' },
+          { variantId: med.variantId, qty: 6 * BOX, batchNo: 'X-2', expiryDate: '2020-02-01' },
+        ],
+      },
+    });
+    expect(back.statusCode, back.body).toBe(201);
+    expect(back.json<{ amountMinor: number }>().amountMinor).toBe(96_000);
   });
 });
 

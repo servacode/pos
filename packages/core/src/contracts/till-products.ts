@@ -24,5 +24,9 @@ export const tempItemPayloadSchema = z.object({
   categoryId: uuidSchema.nullable(),
   barcode: barcodeCodeSchema,
   approval: approvalSchema.nullable().default(null),
+  /** Round 39 (a pharmacy): optional, so a document from an older till still reads */
+  genericName: z.string().trim().max(120).nullable().optional(),
+  strength: z.string().trim().max(40).nullable().optional(),
+  dosageForm: z.string().trim().max(40).nullable().optional(),
 });
 export type TempItemPayload = z.output<typeof tempItemPayloadSchema>;

@@ -52,6 +52,18 @@ function typeDigits(count: DrawerCount, key: CountKey, digits: string): DrawerCo
   return next === null ? count : { ...count, totalMinor: next };
 }
 
+/** The cents typed after the point on the keypad (round 39): the drawer's whole part stays, the fraction is the typed digits */
+function withFraction(count: DrawerCount, fraction: string): DrawerCount {
+  const unit = 10 ** CURRENCIES[count.currency].decimals;
+  return {
+    ...count,
+    totalMinor: Math.trunc(count.totalMinor / unit) * unit + Number(fraction.padEnd(2, '0').slice(0, 2)),
+  };
+}
+
+/** Only the dollar is counted with cents: the pound drawer stays in whole pounds */
+const countsCents = (currency: CurrencyCode) => currency === 'USD';
+
 /** The keypad's backspace: the last digit of the count or of the total goes. */
 function eraseDigit(count: DrawerCount, key: CountKey): DrawerCount {
   if (key !== 'total') {
@@ -77,6 +89,8 @@ export function useCountKeypad(
   const [target, setTarget] = useState<{ currency: CurrencyCode; key: CountKey } | null>(() =>
     counts[0] ? { currency: counts[0].currency, key: firstKey(counts[0], till) } : null,
   );
+  // The cents typed after the «.» key (null: the point was not pressed); kept apart because «51.0» is «51» as a number
+  const [fraction, setFraction] = useState<string | null>(null);
 
   const edit = useCallback(
     (change: (count: DrawerCount, key: CountKey) => DrawerCount) => {
@@ -85,6 +99,30 @@ export function useCountKeypad(
     },
     [target, setCounts],
   );
+
+  const pressDigit = useCallback(
+    (digit: string) => {
+      if (fraction !== null && target?.key === 'total') {
+        if (fraction.length >= 2) return;
+        const next = `${fraction}${digit}`;
+        setFraction(next);
+        edit((c) => withFraction(c, next));
+      } else edit((c, key) => typeDigits(c, key, digit));
+    },
+    [edit, fraction, target],
+  );
+  const pressBackspace = useCallback(() => {
+    if (fraction !== null && target?.key === 'total') {
+      const next = fraction.slice(0, -1);
+      setFraction(fraction === '' ? null : next);
+      if (fraction !== '') edit((c) => withFraction(c, next));
+    } else edit(eraseDigit);
+  }, [edit, fraction, target]);
+  const pressPoint = useCallback(() => {
+    if (target?.key !== 'total' || !countsCents(target.currency)) return;
+    const own = counts.find((c) => c.currency === target.currency);
+    if (own && !own.notes && fraction === null) setFraction('');
+  }, [counts, fraction, target]);
 
   // The physical keyboard types into the picked row too (digits, Arabic-Indic digits, Backspace),
   // unless the cashier is typing in a field of their own
@@ -96,15 +134,18 @@ export function useCountKeypad(
       const digit = /^[0-9٠-٩]$/.test(e.key) ? toLatinDigits(e.key) : null;
       if (digit !== null) {
         e.preventDefault();
-        edit((c, key) => typeDigits(c, key, digit));
+        pressDigit(digit);
       } else if (e.key === 'Backspace') {
         e.preventDefault();
-        edit(eraseDigit);
+        pressBackspace();
+      } else if (e.key === '.' || e.key === '٫') {
+        e.preventDefault();
+        pressPoint();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [edit]);
+  }, [pressDigit, pressBackspace, pressPoint]);
 
   const count = target ? counts.find((c) => c.currency === target.currency) : undefined;
   const typingTotal = target?.key === 'total';
@@ -112,7 +153,13 @@ export function useCountKeypad(
     /** The row the keypad types into, for one drawer */
     activeIn: (currency: CurrencyCode): CountKey | null =>
       target?.currency === currency ? target.key : null,
-    activate: (currency: CurrencyCode, key: CountKey) => setTarget({ currency, key }),
+    activate: (currency: CurrencyCode, key: CountKey) => {
+      setFraction(null);
+      setTarget({ currency, key });
+    },
+    /** The cents typed so far in this drawer's total, «» right after the point; null when no point was pressed */
+    fractionIn: (currency: CurrencyCode): string | null =>
+      target?.currency === currency && target.key === 'total' ? fraction : null,
     /** «درج الليرة · 500 ل.س», what the keypad types into now */
     targetText:
       target && count
@@ -121,10 +168,12 @@ export function useCountKeypad(
           }`
         : null,
     keypad: {
-      onDigit: (digit: string) => edit((c, key) => typeDigits(c, key, digit)),
-      onBackspace: () => edit(eraseDigit),
-      extraKey: typingTotal ? ('00' as const) : null,
-      onExtraKey: () => edit((c, key) => typeDigits(c, key, '00')),
+      onDigit: pressDigit,
+      onBackspace: pressBackspace,
+      // The dollar's total is counted with cents («.»); the pound's with «00»
+      extraKey:
+        target && typingTotal ? (countsCents(target.currency) ? ('.' as const) : ('00' as const)) : null,
+      onExtraKey: () => (target && countsCents(target.currency) ? pressPoint() : pressDigit('00')),
       disabled: !target,
     },
   };
@@ -140,6 +189,7 @@ export function DrawerCounter({
   onChange,
   active = null,
   onActivate,
+  fraction = null,
   till,
 }: {
   count: DrawerCount;
@@ -149,8 +199,12 @@ export function DrawerCounter({
   /** The row the keypad types into, when it is in this drawer */
   active?: CountKey | null;
   onActivate?: (key: CountKey) => void;
+  /** The cents typed on the keypad's «.» so far (shown after the point), when the point was pressed */
+  fraction?: string | null;
 }) {
   const { currency } = count;
+  // What is being typed in the field, kept as typed so «51.» and «51.0» stay on screen until the field is left
+  const [typedText, setTypedText] = useState<string | null>(null);
   const byNote = count.notes !== null;
   const total = countTotal(count);
   const offered = notesFor(till, currency);
@@ -266,15 +320,27 @@ export function DrawerCounter({
             label="المجموع"
             inputMode="decimal"
             dir="ltr"
-            value={count.totalMinor ? grouped(amountText(count.totalMinor, currency)) : ''}
+            value={
+              typedText ??
+              (fraction !== null
+                ? `${grouped(String(Math.trunc(count.totalMinor / 10 ** CURRENCIES[currency].decimals)))}.${fraction}`
+                : count.totalMinor
+                  ? grouped(amountText(count.totalMinor, currency))
+                  : '')
+            }
             placeholder="0"
             onFocus={() => onActivate?.('total')}
-            onChange={(e) =>
-              onChange({
-                ...count,
-                totalMinor: parseAmount(toLatinDigits(e.target.value).replace(/[^\d.]/g, ''), currency) ?? 0,
-              })
-            }
+            onBlur={() => setTypedText(null)}
+            onChange={(e) => {
+              // Cents only for the dollar; the pound drawer is whole pounds, so what follows a point is not taken
+              const text = toLatinDigits(e.target.value.replace(/,/g, '')).replace(/[٫]/g, '.');
+              const [whole = '', ...rest] = text.replace(/[^\d.]/g, '').split('.');
+              const shown = rest.length > 0 ? `${whole}.${rest.join('').slice(0, 2)}` : whole;
+              // The pound keeps what was typed on screen (so the digits after a point are seen, not glued on), counts the whole
+              const typed = countsCents(currency) ? shown : whole;
+              setTypedText(shown.includes('.') ? grouped(shown) : null);
+              onChange({ ...count, totalMinor: parseAmount(typed.replace(/\.$/, ''), currency) ?? 0 });
+            }}
             inputClassName="num text-2xl font-bold"
             endAdornment={<span className="me-4 shrink-0 text-base">{CURRENCIES[currency].symbolAr}</span>}
           />

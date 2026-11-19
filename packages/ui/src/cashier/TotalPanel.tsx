@@ -163,6 +163,8 @@ export function TotalPanel({
               currency={currency}
               decimals={exactDecimals(totalMinor, currency)}
               unitClassName="text-base"
+              // On a phone the quiet actions leave the button little room, and the total sits right above it
+              className="max-sm:hidden"
             />
           </Button>
           {payDisabled && onBlockedTap ? (

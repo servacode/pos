@@ -26,6 +26,23 @@ export const OPEN_REQUEST = sql`r.resolved_at is null and (r.variant_id is null 
   select 1 from purchase_lines pl join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
   where pl.tenant_id = r.tenant_id and pl.variant_id = r.variant_id and pu.created_at > r.created_at))`;
 
+/**
+ * What an item holds that cannot be sold: the balance of each batch (per branch, damaged location left out) that is
+ * past its expiry or stopped by hand (a recall), summed per item. A CTE named `unsellable`, so both lists count only
+ * the sellable stock (round 39): an item whose shelf is all expired is short, not «20 available».
+ */
+export const UNSELLABLE_CTE = sql`unsellable as (
+  select b.variant_id, sum(b.bal) as qty from (
+    select m.variant_id, m.branch_id, m.batch_no, m.expiry_date, sum(m.qty) as bal
+    from batch_movements m
+    where m.branch_id not in (select id from branches where kind = 'damaged')
+    group by m.variant_id, m.branch_id, m.batch_no, m.expiry_date) b
+  where b.bal > 0
+    and (b.expiry_date < (now() at time zone (select timezone from tenants where id = app_current_tenant()))::date
+         or exists (select 1 from batch_blocks bb where bb.variant_id = b.variant_id
+                    and bb.batch_no = b.batch_no and bb.released_at is null))
+  group by b.variant_id)`;
+
 export function recordShortageRequest(
   db: Database,
   device: DeviceClaims,
@@ -69,6 +86,9 @@ type Raw = {
   ids: string[] | null;
   supplier_id: string | null;
   supplier_name: string | null;
+  expired: string | null;
+  order_numbers: string[] | null;
+  on_order: string | null;
 };
 
 export function listShortages(db: Database, auth: AccessClaims): Promise<ShortagesResponse> {
@@ -78,6 +98,15 @@ export function listShortages(db: Database, auth: AccessClaims): Promise<Shortag
       with stock as (
         select variant_id, sum(qty) as qty from stock_levels
         where branch_id not in (select id from branches where kind = 'damaged') group by variant_id
+      ),
+      ${UNSELLABLE_CTE},
+      ordered as (
+        select (l->>'variantId')::uuid as variant_id,
+               sum(greatest((l->>'qty')::bigint - (l->>'receivedQty')::bigint, 0)) as qty,
+               array_agg(distinct o.number order by o.number) as numbers
+        from purchase_orders o, jsonb_array_elements(o.lines) l
+        where o.status in ('sent', 'partial')
+        group by 1
       ),
       asked as (
         select r.variant_id, case when r.variant_id is null then min(r.name) end as free_name,
@@ -94,19 +123,23 @@ export function listShortages(db: Database, auth: AccessClaims): Promise<Shortag
         order by pl.variant_id, pu.business_date desc, pu.created_at desc, pl.line_no desc
       )
       select v.id as variant_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name, p.generic_name,
-             coalesce(k.qty, 0)::text as stock, v.min_stock_qty::text as min,
+             greatest(coalesce(k.qty, 0) - coalesce(u.qty, 0), 0)::text as stock, v.min_stock_qty::text as min,
              coalesce(a.cnt, 0)::text as req_count, coalesce(a.qty, 0)::text as req_qty,
              a.last_at::text as last_at, a.ids,
-             lb.supplier_id::text as supplier_id, lb.supplier_name
+             lb.supplier_id::text as supplier_id, lb.supplier_name,
+             coalesce(u.qty, 0)::text as expired, o.numbers as order_numbers, coalesce(o.qty, 0)::text as on_order
       from variants v
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
       left join stock k on k.variant_id = v.id
+      left join unsellable u on u.variant_id = v.id
+      left join ordered o on o.variant_id = v.id
       left join asked a on a.variant_id = v.id
       left join lastbuy lb on lb.variant_id = v.id
       where v.archived_at is null and p.archived_at is null and p.type = 'stock'
-        and ((v.min_stock_qty is not null and coalesce(k.qty, 0) <= v.min_stock_qty) or a.variant_id is not null)
+        and ((v.min_stock_qty is not null and greatest(coalesce(k.qty, 0) - coalesce(u.qty, 0), 0) <= v.min_stock_qty)
+           or a.variant_id is not null)
       union all
-      select null, a.free_name, null, null, null, a.cnt::text, a.qty::text, a.last_at::text, a.ids, null, null
+      select null, a.free_name, null, null, null, a.cnt::text, a.qty::text, a.last_at::text, a.ids, null, null, null, null, null
       from asked a where a.variant_id is null
       order by name`);
     const items: ShortageRow[] = rows.map((r) => {
@@ -127,6 +160,9 @@ export function listShortages(db: Database, auth: AccessClaims): Promise<Shortag
         reason: below && requested ? 'both' : requested ? 'requested' : 'below_min',
         lastSupplierId: r.supplier_id,
         lastSupplierName: r.supplier_name,
+        expiredQty: Number(r.expired ?? 0),
+        onOrderQty: Number(r.on_order ?? 0),
+        orderNumbers: r.order_numbers ?? [],
       };
     });
     return { items };

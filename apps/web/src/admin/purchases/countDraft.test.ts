@@ -5,6 +5,7 @@ import {
   clearSaved,
   countedItems,
   countOf,
+  editRowsOf,
   findInSheet,
   linesOf,
   loadSaved,
@@ -111,5 +112,28 @@ describe('the phone count draft', () => {
     expect(loadSaved(null)).toBeNull();
     store.data.set('serva.count.draft', '{not json');
     expect(loadSaved(store)).toBeNull();
+  });
+});
+
+describe('the rows on screen keep their place while typing (round 39)', () => {
+  it('editing three rows in turn never moves a row, so each count lands on its own product', () => {
+    let d = newDraft(sheet, 'id-order');
+    d = addCount(d, 'v-tea', 1000);
+    d = addCount(d, 'v-milk', 1000);
+    d = addCount(d, 'v-rice', 1000);
+    const names = (x: typeof d) => editRowsOf(x, sheet).map((r) => r.item.variantId);
+    expect(names(d)).toEqual(['v-tea', 'v-milk', 'v-rice']);
+    // 10 in the first row, 20 in the second, 30 in the third: the diffs differ so a sort by difference would shuffle
+    d = setCount(d, 'v-tea', 10_000);
+    expect(names(d)).toEqual(['v-tea', 'v-milk', 'v-rice']);
+    d = setCount(d, 'v-milk', 20_000);
+    expect(names(d)).toEqual(['v-tea', 'v-milk', 'v-rice']);
+    d = setCount(d, 'v-rice', 30_000);
+    expect(names(d)).toEqual(['v-tea', 'v-milk', 'v-rice']);
+    expect(d.counts).toEqual({ 'v-tea': 10_000, 'v-milk': 20_000, 'v-rice': 30_000 });
+    // a further scan of the first item does not move it either, and an old draft with no order still lists its items
+    expect(names(addCount(d, 'v-tea', 1000))).toEqual(['v-tea', 'v-milk', 'v-rice']);
+    const { order: _o, ...old } = d;
+    expect(names(old)).toHaveLength(3);
   });
 });

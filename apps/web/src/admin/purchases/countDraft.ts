@@ -15,6 +15,8 @@ export interface CountDraft {
   sheetAt: string;
   /** The counted pieces per item, thousandths; an item never counted has no entry */
   counts: Record<string, number>;
+  /** The order the items were first counted in: the list on screen follows it, so a row never moves while typing */
+  order?: string[];
   /** The owner pressed «أرسل»: it goes by itself when the connection returns */
   queued: boolean;
   /** Items not counted are taken as zero (a full count of the part counted) */
@@ -60,6 +62,7 @@ export function addCount(draft: CountDraft, variantId: string, add: number): Cou
   return {
     ...draft,
     queued: false,
+    order: withInOrder(draft, variantId),
     counts: { ...draft.counts, [variantId]: (draft.counts[variantId] ?? 0) + add },
   };
 }
@@ -67,7 +70,35 @@ export function addCount(draft: CountDraft, variantId: string, add: number): Cou
 /** The counted figure typed by hand (thousandths); null clears the item's count */
 export function setCount(draft: CountDraft, variantId: string, qty: number | null): CountDraft {
   const { [variantId]: _gone, ...rest } = draft.counts;
-  return { ...draft, queued: false, counts: qty === null ? rest : { ...rest, [variantId]: qty } };
+  return {
+    ...draft,
+    queued: false,
+    order: qty === null ? (draft.order ?? []).filter((v) => v !== variantId) : withInOrder(draft, variantId),
+    counts: qty === null ? rest : { ...rest, [variantId]: qty },
+  };
+}
+
+/** The scan order with this item in it (added at the end the first time, never moved after) */
+function withInOrder(draft: CountDraft, variantId: string): string[] {
+  const order = orderOf(draft);
+  return order.includes(variantId) ? order : [...order, variantId];
+}
+
+/** The counted items in the order they were first counted (a draft saved before the order existed keeps its keys' order) */
+function orderOf(draft: CountDraft): string[] {
+  const known = (draft.order ?? []).filter((v) => draft.counts[v] !== undefined);
+  const rest = Object.keys(draft.counts).filter((v) => !known.includes(v));
+  return [...known, ...rest];
+}
+
+/** The rows to edit on screen: the counted items in scan order, fixed while typing */
+export function editRowsOf(draft: CountDraft, sheet: Pick<CountSheet, 'items'>): CountLine[] {
+  const byId = new Map(sheet.items.map((i) => [i.variantId, i]));
+  return orderOf(draft).flatMap((id) => {
+    const item = byId.get(id);
+    const counted = draft.counts[id];
+    return item && counted !== undefined ? [{ item, counted, diff: counted - item.qty }] : [];
+  });
 }
 
 /** A figure typed as «12.5»: whole pieces for a piece item, up to three decimals for a weighed one; null otherwise */

@@ -29,6 +29,7 @@ import {
   clearSaved,
   countedItems,
   countOf,
+  editRowsOf,
   findInSheet,
   linesOf,
   loadSaved,
@@ -138,6 +139,8 @@ export function StocktakePhonePage() {
   }, [sheet, needle, isCode]);
 
   const lines = useMemo(() => (sheet && draft ? linesOf(draft, sheet) : []), [sheet, draft]);
+
+  const editRows = useMemo(() => (sheet && draft ? editRowsOf(draft, sheet) : []), [sheet, draft]);
 
   const send = useCallback(async () => {
     if (!sheet || !draft || sending) return;
@@ -319,32 +322,30 @@ export function StocktakePhonePage() {
               <>
                 <Card className="flex flex-col gap-2 p-4">
                   <h2 className="text-base font-semibold text-ink">ما عددته</h2>
-                  {lines.filter((l) => draft.counts[l.item.variantId] !== undefined).length === 0 ? (
+                  {editRows.length === 0 ? (
                     <p className="text-ink-muted">لم تعدّ شيئاً بعد. امسح أول قطعة.</p>
                   ) : (
                     <ul className="grid gap-3">
-                      {lines
-                        .filter((l) => draft.counts[l.item.variantId] !== undefined)
-                        .map((l) => (
-                          <li key={l.item.variantId} className="flex items-end gap-3">
-                            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
-                              {l.item.name}
-                            </span>
-                            <TextField
-                              label="المعدود"
-                              className="w-28 shrink-0"
-                              dir="ltr"
-                              inputMode={l.item.allowsFraction ? 'decimal' : 'numeric'}
-                              inputClassName="num"
-                              defaultValue={String(l.counted / 1000)}
-                              key={`${l.item.variantId}:${l.counted}`}
-                              onBlur={(e) => {
-                                const qty = countOf(e.target.value, l.item.allowsFraction);
-                                if (qty !== null) keep(setCount(draft, l.item.variantId, qty));
-                              }}
-                            />
-                          </li>
-                        ))}
+                      {editRows.map((l) => (
+                        <li key={l.item.variantId} className="flex items-end gap-3">
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+                            {l.item.name}
+                          </span>
+                          <TextField
+                            label="المعدود"
+                            className="w-28 shrink-0"
+                            dir="ltr"
+                            inputMode={l.item.allowsFraction ? 'decimal' : 'numeric'}
+                            inputClassName="num"
+                            defaultValue={String(l.counted / 1000)}
+                            key={`${l.item.variantId}:${l.counted}`}
+                            onBlur={(e) => {
+                              const qty = countOf(e.target.value, l.item.allowsFraction);
+                              if (qty !== null) keep(setCount(draft, l.item.variantId, qty));
+                            }}
+                          />
+                        </li>
+                      ))}
                     </ul>
                   )}
                 </Card>

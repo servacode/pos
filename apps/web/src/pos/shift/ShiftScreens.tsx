@@ -49,6 +49,7 @@ import {
   LAST_CLOSED_KEY,
   netMethodRows,
   refundVouchers,
+  returnedGoodsIn,
   shiftActivity,
   shiftClosePayload,
   shiftKey,
@@ -123,6 +124,7 @@ function CountLayout({
               till={till}
               onChange={(next) => setCounts((list) => list.map((c, j) => (j === i ? next : c)))}
               active={keypad.activeIn(count.currency)}
+              fraction={keypad.fractionIn(count.currency)}
               onActivate={(key) => keypad.activate(count.currency, key)}
             />
           ))}
@@ -601,7 +603,7 @@ export function ShiftCloseScreen({
                 {activity.salesTotals
                   .filter((t) => t.totalMinor !== 0)
                   .map((t) => {
-                    const back = returnedByCurrency.get(t.currency) ?? 0;
+                    const back = activity ? returnedGoodsIn(activity, t.currency) : 0;
                     return (
                       <Fragment key={t.currency}>
                         <li className="flex flex-wrap items-center gap-x-1">

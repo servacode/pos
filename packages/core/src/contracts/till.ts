@@ -238,6 +238,10 @@ export const tillProductInput = z.object({
    */
   productId: uuidSchema.optional(),
   variantId: uuidSchema.optional(),
+  /** Round 39, a pharmacy: the generic name, strength and form, all optional, so the product shows in the alternatives */
+  genericName: z.string().trim().max(120, 'الاسم العلمي طويل جداً').nullable().optional(),
+  strength: z.string().trim().max(40, 'التركيز طويل جداً').nullable().optional(),
+  dosageForm: z.string().trim().max(40, 'الشكل الدوائي طويل جداً').nullable().optional(),
 });
 export type TillProductInput = z.input<typeof tillProductInput>;
 

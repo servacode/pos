@@ -473,6 +473,11 @@ export function PaymentPanel({
             : null);
   const tenders = [...parts.map((p) => p.tender), ...(current ? [current] : [])];
   const settlement = settleWith(tenders);
+  // What this sale puts on the customer's account, in the store's currency (paid now = the total less it)
+  const onAccountMinor =
+    'error' in settlement || !settlement.covered
+      ? 0
+      : tenders.filter((t) => t.method === 'credit').reduce((sum, t) => sum + t.amountMinor, 0);
   // A sale on account against the customer's limit: what it takes them over by, before any code is asked
   const creditAmount = tenders
     .filter((t) => t.method === 'credit')
@@ -528,7 +533,11 @@ export function PaymentPanel({
                 : 'error' in settlement
                   ? 'تحقّق من المبلغ المكتوب.'
                   : !settlement.covered
-                    ? 'المبلغ لا يغطي الفاتورة كلها بعد.'
+                    ? customer &&
+                      options.some((o) => o.method === 'credit') &&
+                      !tenders.some((t) => t.method === 'credit')
+                      ? 'المبلغ لا يغطي الفاتورة كلها. اضغط «آجل على الحساب» ليُسجَّل المتبقي ديناً على الزبون.'
+                      : 'المبلغ لا يغطي الفاتورة كلها بعد.'
                     : null;
 
   const extrasRef = useRef<HTMLDivElement>(null);
@@ -571,9 +580,25 @@ export function PaymentPanel({
   }
 
   function pick(next: PayOption) {
+    // A part typed and short of the total, then «آجل على الحساب»: the typed cash is kept as a part and the account
+    // takes the rest, never the whole invoice in its place (round 39)
+    const toCredit =
+      !split &&
+      next.method === 'credit' &&
+      option.method === 'cash' &&
+      !('error' in settlement) &&
+      !settlement.covered;
     // A split part typed and not yet added is kept: choosing another method adds it first
-    if (split && text && current && !voucherProblem && !needsReference && next.key !== option.key) {
+    if (
+      (split || toCredit) &&
+      text &&
+      current &&
+      !voucherProblem &&
+      !needsReference &&
+      next.key !== option.key
+    ) {
       setParts((list) => [...list, { option, tender: current }]);
+      if (toCredit) setSplit(true);
     }
     setOption(next);
     setText('');
@@ -1207,6 +1232,13 @@ export function PaymentPanel({
                 </button>
               ))}
             </div>
+            {onAccountMinor > 0 && onAccountMinor < totalMinor ? (
+              <p role="status" aria-label="ملخص الدفع" className="text-sm font-semibold text-ink-muted">
+                مدفوع الآن <Money minor={totalMinor - onAccountMinor} currency={base} className="text-ink" />{' '}
+                · آجل على الحساب <Money minor={onAccountMinor} currency={base} className="text-ink" /> ·
+                المجموع <Money minor={totalMinor} currency={base} className="text-ink" />
+              </p>
+            ) : null}
             {parts.length > 0 ? (
               <ul
                 aria-label="الأجزاء المدفوعة"

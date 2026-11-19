@@ -4,6 +4,8 @@ import { toLatinDigits } from '@serva/core/text';
 /** A scanner types a whole code within a few dozen milliseconds and ends it with Enter. */
 export const SCAN_GAP_MS = 60;
 export const SCAN_MIN_LENGTH = 3;
+/** A scan this many keys in is let to pause a little (up to four gaps) between two keys */
+export const SCAN_STALL_FROM = 6;
 
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -74,7 +76,11 @@ export function useScanner({
       }
       if (event.key.length !== 1) return;
       const ch = toLatinDigits(event.key);
-      b.burst = b.burst && t - b.last <= SCAN_GAP_MS ? b.burst + ch : ch;
+      // A busy page can stall one key of a scan past the gap (round 39): a code already this long and moving at a
+      // scanner's pace goes on, instead of starting over and losing the scan. Nobody types six keys that fast by hand.
+      const gap = t - b.last;
+      const goesOn = b.burst.length >= SCAN_STALL_FROM && gap <= SCAN_GAP_MS * 4;
+      b.burst = b.burst && (gap <= SCAN_GAP_MS || goesOn) ? b.burst + ch : ch;
       b.digits = /\d/.test(ch) ? b.digits + ch : '';
       b.last = t;
     }

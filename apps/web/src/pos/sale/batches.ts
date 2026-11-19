@@ -23,6 +23,7 @@ import type { Cart } from './cart';
 /** A line no valid batch covers (all gone, expired or blocked) */
 export interface BatchIssue {
   lineNo: number;
+  variantId: string;
   name: string;
   /** Base units no valid batch covers */
   uncovered: number;
@@ -128,6 +129,7 @@ export function planBatches(input: {
       uncoveredItems.add(line.variantId);
       uncovered.push({
         lineNo: line.lineNo,
+        variantId: line.variantId,
         name: line.name,
         uncovered: result.uncovered,
         expiredQty: result.expiredQty,
@@ -179,10 +181,27 @@ export function batchGuard(
     i.blockedQty > 0 && i.uncovered > 0
       ? 'block'
       : (expiredAction(pharmacy, i) ?? uncoveredAction(pharmacy, true, i.uncovered));
+  const blocks = plan.uncovered.filter((i) => action(i) === 'block');
+  const approvals = plan.uncovered.filter((i) => action(i) === 'approve');
+  // One warning per item (round 39): the line no valid batch covers already says it is short, so the
+  // same item is not warned about again as out of stock; a stock block still blocks when the line only waits for a manager
+  const said = new Set(blocks.map((i) => i.variantId));
+  const warned = new Set([...said, ...approvals.map((i) => i.variantId)]);
   return {
-    blocks: plan.uncovered.filter((i) => action(i) === 'block'),
-    approvals: plan.uncovered.filter((i) => action(i) === 'approve'),
-    stockBlocks: blockNegativeStock ? plan.stock : [],
-    stockWarns: blockNegativeStock ? [] : plan.stock,
+    blocks,
+    approvals,
+    stockBlocks: blockNegativeStock ? plan.stock.filter((i) => !said.has(i.variantId)) : [],
+    stockWarns: blockNegativeStock ? [] : plan.stock.filter((i) => !warned.has(i.variantId)),
   };
+}
+
+/** Why the payment is held for a line no valid batch covers, in plain words: the line and the reason */
+export function blockText(i: Pick<BatchIssue, 'name' | 'expiredQty' | 'blockedQty'>): string {
+  const why =
+    i.blockedQty > 0
+      ? 'دفعته موقوفة بسبب سحب من السوق'
+      : i.expiredQty > 0
+        ? 'دفعاته منتهية الصلاحية ولا تكفي'
+        : 'لا توجد دفعة صالحة منه';
+  return `«${i.name}»: ${why}، لا يُباع. احذفه أو اختر بديلاً.`;
 }

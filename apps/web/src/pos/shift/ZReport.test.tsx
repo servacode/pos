@@ -85,6 +85,43 @@ describe('the Z report (the till’s closing slip)', () => {
     expect(text).toMatch(/20\.00\s?\$ مستلمة − باقي 800 ل\.س/);
   });
 
+  it('takes the returned goods off the sales, not only the pounds paid back (a refund part in dollars)', () => {
+    // The trial: 833 sold, goods worth 243 returned and paid 150 ل.س + 0.76 $ (91.20): net is 590, never 683
+    const text = renderZ([
+      doc(
+        'sale',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 83_300, discountMinor: 0 },
+          payments: [{ method: 'cash', currency: 'SYP', amountMinor: 83_300 }],
+          change: null,
+        },
+        1,
+      ),
+      doc(
+        'return',
+        {
+          shiftId: SHIFT_ID,
+          currency: 'SYP',
+          totals: { totalMinor: 24_300 },
+          refunds: [
+            {
+              method: 'cash',
+              currency: 'SYP',
+              amountMinor: 24_120,
+              roundingMinor: -180,
+              foreign: [{ currency: 'USD', amountMinor: 76, baseAmountMinor: 9_120 }],
+            },
+          ],
+        },
+        2,
+      ),
+    ]);
+    expect(text).toMatch(/صافي المبيعات بعد المرتجعات\s*590/);
+    expect(text).not.toMatch(/صافي المبيعات بعد المرتجعات\s*683/);
+  });
+
   it('names a deposit on its own line, apart from gift vouchers', () => {
     const text = renderZ([
       doc('deposit', { shiftId: SHIFT_ID, method: 'cash', currency: 'SYP', amountMinor: 50_000_00 }, 1),

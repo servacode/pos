@@ -104,6 +104,8 @@ export interface ItemsAreaProps {
   check: PriceCheck | null;
   onStopChecking: () => void;
   onStartChecking: () => void;
+  /** Pieces kept back for other people (held carts, accepted orders), per variant in base units: a tile shows what is left after them */
+  reserved?: ReadonlyMap<string, number>;
 }
 
 /**
@@ -465,25 +467,27 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
         <BranchStock.Provider
           value={(catalog.staff.branches?.filter((b) => (b.kind ?? 'store') === 'store').length ?? 0) > 1}
         >
-          <Grid
-            entries={entries}
-            best={best}
-            inCart={inCart}
-            pickingProduct={pickingProduct}
-            today={today}
-            photos={photos}
-            compact={compact}
-            stockTracked={stockTracked}
-            fx={fx}
-            iconOf={iconOf}
-            // Taps on tiles only: right after a dialog closes, its second click must not pick a tile
-            onPickItem={(item, hit) => {
-              if (!clicksSwallowed()) onPickItem(item, hit);
-            }}
-            onPickModel={(productId, size) => {
-              if (!clicksSwallowed()) props.onPickModel(productId, size);
-            }}
-          />
+          <ReservedStock.Provider value={props.reserved ?? NO_RESERVED}>
+            <Grid
+              entries={entries}
+              best={best}
+              inCart={inCart}
+              pickingProduct={pickingProduct}
+              today={today}
+              photos={photos}
+              compact={compact}
+              stockTracked={stockTracked}
+              fx={fx}
+              iconOf={iconOf}
+              // Taps on tiles only: right after a dialog closes, its second click must not pick a tile
+              onPickItem={(item, hit) => {
+                if (!clicksSwallowed()) onPickItem(item, hit);
+              }}
+              onPickModel={(productId, size) => {
+                if (!clicksSwallowed()) props.onPickModel(productId, size);
+              }}
+            />
+          </ReservedStock.Provider>
         </BranchStock.Provider>
       )}
       {hasMore ? (
@@ -502,6 +506,9 @@ export const ItemsArea = memo(function ItemsArea(props: ItemsAreaProps) {
 
 /** More than one branch: a tile's «متوفر N» is this branch's stock, and says «هنا» */
 const BranchStock = createContext(false);
+const NO_RESERVED: ReadonlyMap<string, number> = new Map();
+/** What other people's holds keep back, per variant: a tile says what is left for this sale */
+const ReservedStock = createContext<ReadonlyMap<string, number>>(NO_RESERVED);
 
 /** The tiles. A tile is memoised on what it shows, so the grid re-renders only what changed. */
 const Grid = memo(function Grid({
@@ -782,6 +789,7 @@ function TileMarks({
 }) {
   const digits = useDigits();
   const here = useContext(BranchStock);
+  const reservedMap = useContext(ReservedStock);
   const info = tileInfo(pieces, today);
   const unsellable = info.expiredQty + info.blockedQty;
   if (none && info.stockQty === null && !pieces.every((p) => p.isService)) {
@@ -798,12 +806,21 @@ function TileMarks({
   // «المتوفر للبيع» leaves out what is rented out as well as the expired and the blocked: one sentence for all of them
   const onShelf = info.stockQty === null ? null : Math.max(0, info.stockQty - info.rentedCount * 1000);
   const nothingSellable = (onShelf ?? 0) <= 0;
+  // Round 39: what is held for someone else is not for sale here: the tile says what is left, and what is kept back
+  const kept = pieces.reduce((n, p) => n + (reservedMap.get(p.variantId) ?? 0), 0);
+  const left = onShelf === null ? null : Math.max(0, onShelf - kept);
   const why = info.blockedQty === 0 ? 'منتهية' : info.expiredQty === 0 ? 'موقوفة' : 'غير صالحة';
   return (
     <>
       {onShelf !== null ? (
         <span className={cn('num text-xs font-medium', nothingSellable ? 'text-ink-muted' : 'text-ink')}>
-          {nothingSellable ? 'نفد' : `المتوفر ${formatQuantity(onShelf, digits)}${here ? ' هنا' : ''}`}
+          {nothingSellable
+            ? 'نفد'
+            : `المتوفر ${formatQuantity(left ?? 0, digits)}${here ? ' هنا' : ''}${
+                kept > 0 && onShelf !== null
+                  ? ` · محجوز ${formatQuantity(Math.min(kept, onShelf), digits)}`
+                  : ''
+              }`}
         </span>
       ) : null}
       {/* What is left out of the count (halted, expired): one small «⚠ 3 موقوفة» chip, never a second sentence */}

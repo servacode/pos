@@ -183,16 +183,24 @@ export function paidForeign(sale: SalePayload): PaidForeign[] {
 /**
  * The default split of a cash refund (round 36, decision 10): the same share in each foreign drawer as the
  * sale took, never more than what it took there. `refundTotalMinor` is the refund in the invoice currency.
+ *
+ * Round 39: `wholeMinor` (the invoice currency's pound, when the store rounds its cash) keeps the foreign part worth a
+ * whole number of pounds on a sale that was also paid in the invoice currency, so the pound drawer never has to pay
+ * «241.20» for the sake of a few cents of a dollar. Missing or 0: exactly as before.
  */
 export function defaultForeignRefund(
   sale: SalePayload,
   refundTotalMinor: number,
+  wholeMinor = 0,
 ): { currency: CurrencyCode; amountMinor: number }[] {
   const saleTotal = sale.totals.totalMinor;
   if (saleTotal <= 0 || refundTotalMinor <= 0) return [];
   const out: { currency: CurrencyCode; amountMinor: number }[] = [];
   let left = refundTotalMinor;
-  for (const paid of paidForeign(sale)) {
+  const paidAll = paidForeign(sale);
+  // Also paid in the invoice currency: only then is there a pound part to keep whole
+  const mixed = paidAll.reduce((n, p) => n + p.baseAmountMinor, 0) < saleTotal;
+  for (const paid of paidAll) {
     const shareBase = Math.min(
       left,
       Number(roundDiv(BigInt(paid.baseAmountMinor) * BigInt(refundTotalMinor), BigInt(saleTotal))),
@@ -200,6 +208,13 @@ export function defaultForeignRefund(
     // Whole foreign minor units, rounded down so the drawer never pays more than the share
     let amount = Math.min(paid.amountMinor, convert(shareBase, sale.currency, paid.currency, paid.rate));
     while (convert(amount, paid.currency, sale.currency, paid.rate) > shareBase) amount -= 1;
+    if (wholeMinor > 0 && mixed && amount > 0) {
+      // a few cents less, until the dollars are worth whole pounds (never to zero: then the exact share stays)
+      let whole = amount;
+      while (whole > 0 && convert(whole, paid.currency, sale.currency, paid.rate) % wholeMinor !== 0)
+        whole -= 1;
+      if (whole > 0) amount = whole;
+    }
     if (amount <= 0) continue;
     left -= convert(amount, paid.currency, sale.currency, paid.rate);
     out.push({ currency: paid.currency, amountMinor: amount });

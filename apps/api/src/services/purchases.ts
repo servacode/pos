@@ -1573,6 +1573,7 @@ async function invoiceForReturn(
     }
   }
   const sent = new Map<string, number>();
+  const sentByBatch = new Map<string, number>();
   const credits: { baseMinor: number; foreignMinor?: number }[] = [];
   let foreignTotal = 0;
   for (const [index, l] of returned.entries()) {
@@ -1586,12 +1587,18 @@ async function invoiceForReturn(
       throw invalid({ [`lines.${index}.variantId`]: 'هذا الصنف ليس في الفاتورة المذكورة' });
     }
     const qtyBought = own.reduce((sum, b) => sum + b.qty, 0);
+    // Earlier returns do not say which batch they took, so the invoice's quantity is checked per item (all its
+    // batches on the invoice); a line that names a batch is also held to what that batch came with, in this request
+    const itemBought = bought.filter((b) => b.variantId === l.variantId).reduce((sum, b) => sum + b.qty, 0);
     const already = (taken.get(l.variantId) ?? 0) + (sent.get(l.variantId) ?? 0);
-    if (already + l.qty > qtyBought) {
+    const batchKey = `${l.variantId}|${l.batchNo ?? ''}|${l.expiryDate ?? ''}`;
+    const sameBatch = sentByBatch.get(batchKey) ?? 0;
+    if (already + l.qty > itemBought || sameBatch + l.qty > qtyBought) {
       throw invalid({
-        [`lines.${index}.qty`]: `اشتريت من هذا الصنف ${qtyBought / 1000} بهذه الفاتورة، وأُرجع منها ${already / 1000}. المتبقي ${Math.max(0, qtyBought - already) / 1000}`,
+        [`lines.${index}.qty`]: `اشتريت من هذا الصنف ${itemBought / 1000} بهذه الفاتورة، وأُرجع منها ${already / 1000}. المتبقي ${Math.max(0, itemBought - already) / 1000}`,
       });
     }
+    sentByBatch.set(batchKey, sameBatch + l.qty);
     sent.set(l.variantId, (sent.get(l.variantId) ?? 0) + l.qty);
     const share = (cost: number) =>
       l.qty === qtyBought ? cost : Number(roundDiv(BigInt(cost) * BigInt(l.qty), BigInt(qtyBought)));

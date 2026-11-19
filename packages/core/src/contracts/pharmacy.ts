@@ -161,6 +161,11 @@ export interface ShortageRow {
   reason: ShortageReason;
   lastSupplierId: string | null;
   lastSupplierName: string | null;
+  /** Expired or recalled stock still on the shelf, not counted in stockQty (round 39) */
+  expiredQty?: number;
+  /** What sent or part-received purchase orders still owe, and their numbers (round 39) */
+  onOrderQty?: number;
+  orderNumbers?: string[];
 }
 
 export interface ShortagesResponse {

@@ -66,6 +66,7 @@ export function prefillOfGroup(group: ExpiringGroup, months: number): ReturnPref
       qty: r.qty,
       batchNo: r.batchNo,
       expiryDate: r.expiryDate,
+      purchaseId: r.purchaseId ?? null,
     })),
   };
 }

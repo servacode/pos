@@ -172,7 +172,16 @@ export interface ShiftActivity {
   terms: Map<Code, Terms>;
   byMethod: ShiftClosePayload['summary']['byMethod'];
   /** Returns saved in this shift, and what each paid back, per refund method and currency */
-  returns: { count: number; byMethod: { method: string; currency: Code; amountMinor: number }[] };
+  returns: {
+    count: number;
+    byMethod: { method: string; currency: Code; amountMinor: number }[];
+    /**
+     * Round 39: what the returned goods came to, per invoice currency: the return's own total, the figure the books
+     * take off the sales. A refund paid partly in dollars lists only its pounds in `byMethod`, so the net of the
+     * sales reads this (display only). Missing on an activity read before it existed.
+     */
+    goods?: { currency: Code; totalMinor: number }[];
+  };
   /** Gift vouchers sold in this shift, per currency */
   vouchers: { count: number; byCurrency: { currency: Code; amountMinor: number }[] };
   /** Deposits («عربون») taken in this shift, per currency; gift-voucher deposits of older tills stay in `vouchers` */
@@ -229,6 +238,7 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
   const bySeller = new Map<string, { sellerId: string; currency: Code; count: number; totalMinor: number }>();
   const refunds = new Map<string, { method: string; currency: Code; amountMinor: number }>();
   let returnCount = 0;
+  const returnedGoods = new Map<Code, number>();
   const gifts = new Map<Code, number>();
   const deposits = new Map<Code, number>();
   const depositsCash = new Map<Code, number>();
@@ -329,6 +339,9 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     } else if (doc.type === 'return') {
       // Cash paid back for goods returned comes out of this drawer
       returnCount += 1;
+      const goods = payload as unknown as ReturnPayload;
+      if (goods.totals && goods.currency)
+        returnedGoods.set(goods.currency, (returnedGoods.get(goods.currency) ?? 0) + goods.totals.totalMinor);
       for (const r of (payload as unknown as ReturnPayload).refunds) {
         // Round 36: the dollar's part of a cash refund comes out of the dollar drawer, in dollars; the invoice
         // currency's drawer pays the rest. A refund with no foreign part is all of it, as it always was.
@@ -408,7 +421,11 @@ export function shiftActivity(shiftId: string, entries: readonly OutboxEntry[]):
     saleCount,
     terms,
     byMethod: [...byMethod.values()],
-    returns: { count: returnCount, byMethod: [...refunds.values()] },
+    returns: {
+      count: returnCount,
+      byMethod: [...refunds.values()],
+      goods: [...returnedGoods].map(([currency, totalMinor]) => ({ currency, totalMinor })),
+    },
     vouchers: {
       count: giftCount,
       byCurrency: [...gifts].map(([currency, amountMinor]) => ({ currency, amountMinor })),
@@ -556,4 +573,11 @@ export function shiftClosePayload(input: {
     summary: { saleCount: input.activity.saleCount, byMethod: input.activity.byMethod },
     forced: false,
   };
+}
+
+/** What the returned goods came to in an invoice currency: the books' own figure (falls back to the pounds paid back for an older activity) */
+export function returnedGoodsIn(activity: ShiftActivity, currency: string): number {
+  const goods = activity.returns.goods?.filter((g) => g.currency === currency) ?? [];
+  if (goods.length > 0) return goods.reduce((n, g) => n + g.totalMinor, 0);
+  return activity.returns.byMethod.reduce((n, r) => (r.currency === currency ? n + r.amountMinor : n), 0);
 }

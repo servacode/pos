@@ -20,6 +20,10 @@ export interface LocalProduct {
   currency: CurrencyCode;
   categoryId: string | null;
   barcode: string;
+  /** A pharmacy (round 39): what makes it an alternative of another medicine */
+  genericName?: string | null;
+  strength?: string | null;
+  dosageForm?: string | null;
   /** The queued document: if the server refuses it the local copy is dropped */
   docId: string;
 }
@@ -76,7 +80,9 @@ export async function withPendingProducts(
     nameEn: null,
     categoryId: p.categoryId,
     brand: null,
-    genericName: null,
+    genericName: p.genericName ?? null,
+    strength: p.strength ?? null,
+    dosageForm: p.dosageForm ?? null,
     tracksSerial: false,
     warrantyMonths: null,
     type: 'stock',

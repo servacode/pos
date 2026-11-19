@@ -56,6 +56,7 @@ import { hasBlockedPick, medicineRulesOf, MedicineReturnNote, sealedConfirmed } 
 import {
   matchesInvoice,
   DAMAGED_REASON,
+  defaultReason,
   returnableSales,
   returnReasons,
   returnWindowOf,
@@ -169,7 +170,7 @@ export function ReturnScreen({
   // «العلبة مغلقة»: the sealed-box tick of a medicine line (03 › الصيدليات)
   const [sealed, setSealed] = useState<Record<number, boolean>>({});
   const [reason, setReason] = useState<string>(
-    startExchange && REASONS.includes('تبديل') ? 'تبديل' : REASONS[0]!,
+    startExchange && REASONS.includes('تبديل') ? 'تبديل' : defaultReason(REASONS),
   );
   // «استبدال»: the piece goes back on a voucher and the sale of the other piece follows at once
   const [exchange, setExchange] = useState(startExchange);
@@ -340,9 +341,11 @@ export function ReturnScreen({
       );
       if (foreignText === null) {
         return (
-          defaultForeignRefund(current.sale, plain.totals.totalMinor).find(
-            (f) => f.currency === foreignPaid.currency,
-          )?.amountMinor ?? 0
+          defaultForeignRefund(
+            current.sale,
+            plain.totals.totalMinor,
+            (settings.cashRoundingSteps[current.sale.currency] ?? 0) > 0 ? 100 : 0,
+          ).find((f) => f.currency === foreignPaid.currency)?.amountMinor ?? 0
         );
       }
       let typed = 0;
@@ -362,7 +365,16 @@ export function ReturnScreen({
     } catch {
       return 0;
     }
-  }, [current, foreignPaid, method, picks, shift.id, session.userId, foreignText]);
+  }, [
+    current,
+    foreignPaid,
+    method,
+    picks,
+    shift.id,
+    session.userId,
+    foreignText,
+    settings.cashRoundingSteps,
+  ]);
 
   const draft = useMemo((): ReturnPayload | null => {
     if (!current || picks.length === 0) return null;

@@ -4,7 +4,7 @@ import { cn, useDigits } from '@serva/ui';
 import { ExactMoney } from '../ExactMoney';
 import { clockText, counted, dateText, INVOICES } from '../format';
 import { PAPER } from '../receipt/Receipt';
-import { netMethodRows, refundVouchers, type OpenShift, type ShiftActivity } from './shift';
+import { netMethodRows, refundVouchers, returnedGoodsIn, type OpenShift, type ShiftActivity } from './shift';
 
 const METHOD_NAMES: Record<string, string> = {
   cash: 'نقد',
@@ -80,8 +80,7 @@ export function ZReport({
     `${METHOD_NAMES[method] ?? method}${method === 'cash' && currency !== baseCurrency ? ' بالدولار' : ''}`;
   const hasReturns = activity.returns.count > 0;
   // What the returns paid back, per currency: the sales' net is the gross less it (display only)
-  const returnedIn = (currency: string) =>
-    activity.returns.byMethod.reduce((n, r) => (r.currency === currency ? n + r.amountMinor : n), 0);
+  const returnedIn = (currency: string) => returnedGoodsIn(activity, currency);
   const refundedVouchers = refundVouchers(activity);
   const cashIn = activity.cashIn;
   const hasDrawerLines =

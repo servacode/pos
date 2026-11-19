@@ -79,8 +79,22 @@ describe('groupExpiring', () => {
       branchId: 'br-1',
       note: 'منتهية أو تنتهي خلال 3 أشهر',
       lines: [
-        { variantId: 'v-2', name: 'أموكسيل', qty: 2000, batchNo: 'B-1', expiryDate: '2026-12-25' },
-        { variantId: 'v-1', name: 'بانادول 500', qty: 10_000, batchNo: 'A-01', expiryDate: '2026-12-25' },
+        {
+          variantId: 'v-2',
+          name: 'أموكسيل',
+          qty: 2000,
+          batchNo: 'B-1',
+          expiryDate: '2026-12-25',
+          purchaseId: null,
+        },
+        {
+          variantId: 'v-1',
+          name: 'بانادول 500',
+          qty: 10_000,
+          batchNo: 'A-01',
+          expiryDate: '2026-12-25',
+          purchaseId: null,
+        },
       ],
     });
     expect(prefillOfGroup(unknown!, 3)).toBeNull();
@@ -194,6 +208,42 @@ describe('«بينتهي قريباً»', () => {
     });
   });
 
+  const lateRow = (purchaseId: string) =>
+    row({ variantId: 'v-2', name: 'أموكسيل 250', batchNo: 'B-1', daysLeft: -3, qty: 2000, purchaseId });
+
+  it('names the invoice the batches came on: all on one invoice go back against it, at its cost (round 39)', async () => {
+    const { returns } = server([row({ purchaseId: 'pu-1' }), lateRow('pu-1')]);
+    const { user } = renderApp('/expiring-soon');
+    await user.click(await screen.findByRole('button', { name: 'رجّعو للمورد مستودع الشفاء' }));
+    await screen.findByRole('list', { name: 'أصناف المرتجع' });
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await waitFor(() => expect(returns).toHaveLength(1));
+    expect(returns[0]).toMatchObject({ purchaseId: 'pu-1' });
+  });
+
+  it('batches from several invoices make one return each, every one against its own invoice (round 39)', async () => {
+    const { returns } = server([row({ purchaseId: 'pu-1' }), lateRow('pu-2')]);
+    const { user } = renderApp('/expiring-soon');
+    await user.click(await screen.findByRole('button', { name: 'رجّعو للمورد مستودع الشفاء' }));
+    await screen.findByRole('list', { name: 'أصناف المرتجع' });
+    expect(screen.getByText(/يُسجَّل مرتجع لكل فاتورة/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await waitFor(() => expect(returns).toHaveLength(2));
+    expect(returns.map((r) => (r as { purchaseId?: string }).purchaseId).sort()).toEqual(['pu-1', 'pu-2']);
+    // Each return carries only its own invoice's batch
+    expect((returns[0] as { lines: unknown[] }).lines).toHaveLength(1);
+  });
+
+  it('a batch with no purchase link is returned as before, at the average (no invoice)', async () => {
+    const { returns } = server(report);
+    const { user } = renderApp('/expiring-soon');
+    await user.click(await screen.findByRole('button', { name: 'رجّعو للمورد مستودع الشفاء' }));
+    await screen.findByRole('list', { name: 'أصناف المرتجع' });
+    await user.click(screen.getByRole('button', { name: 'سجّل المرتجع' }));
+    await waitFor(() => expect(returns).toHaveLength(1));
+    expect(returns[0]).not.toHaveProperty('purchaseId');
+  });
+
   it('narrows to a month, and says so when nothing ends in the window', async () => {
     server([row({ daysLeft: 200 })]);
     const { user } = renderApp('/expiring-soon');
@@ -274,6 +324,33 @@ describe('«النواقص»', () => {
     await waitFor(() => expect(within(list).queryByText('أموكسيل 250')).toBeNull());
     expect(requestsTo('POST', '/v1/pharmacy/shortages/resolve')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'اطلب من المورد' })).toBeInTheDocument();
+  });
+
+  it('says an order was sent for an item, and offers a second one only quietly (round 39)', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: buyer() }),
+      'GET /v1/pharmacy/shortages': () => ({
+        status: 200,
+        body: {
+          items: [
+            shortage({
+              stockQty: 0,
+              expiredQty: 20_000,
+              onOrderQty: 10_000,
+              orderNumbers: ['PO-2026-000001'],
+            }),
+          ],
+        } satisfies ShortagesResponse,
+      }),
+    });
+    renderApp('/shortages');
+    const list = await screen.findByRole('list', { name: 'نواقص مستودع الشفاء' });
+    expect(within(list).getByText('انطلبت بPO-2026-000001')).toBeInTheDocument();
+    expect(list).toHaveTextContent(/منتهي أو موقوف\s*20/);
+    // The primary «اطلب من المورد» is gone: only «اطلب مرة تانية» is left
+    expect(screen.queryByRole('button', { name: 'اطلب من المورد' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'اطلب مرة تانية' })).toBeInTheDocument();
   });
 
   it('is empty with a clear sentence', async () => {

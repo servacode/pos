@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { memoryLocal, type LocalStore } from '../offline/local';
@@ -85,7 +85,11 @@ export async function saleScreen(options: RenderPosOptions = {}) {
 }
 
 /** What a scanner does: the whole code fast, then Enter, wherever the focus is. */
-export async function scan(user: ReturnType<typeof renderPos>['user'], code: string) {
+export async function scan(_user: ReturnType<typeof renderPos>['user'], code: string) {
   (document.activeElement as HTMLElement | null)?.blur();
-  await user.keyboard(`${code}{Enter}`);
+  // Every key in one go, as a scanner sends them: typed key by key, a busy test machine can pause past the
+  // scanner's gap and the code starts over (a lost scan the test did not mean to test).
+  await act(async () => {
+    for (const key of [...code, 'Enter']) fireEvent.keyDown(document.activeElement ?? document.body, { key });
+  });
 }

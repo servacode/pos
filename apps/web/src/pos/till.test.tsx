@@ -528,6 +528,8 @@ describe('closing the shift', () => {
         { method: 'card', currency: 'SYP', amountMinor: 1_000 },
         { method: 'cash', currency: 'SYP', amountMinor: 700 },
       ],
+      // These returns carry no goods totals, so the summary falls back to the money paid back.
+      goods: [],
     });
     expect(activity.vouchers).toEqual({ count: 2, byCurrency: [{ currency: 'SYP', amountMinor: 6_000 }] });
     expect(activity.movements).toEqual([
