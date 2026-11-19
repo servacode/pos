@@ -40,6 +40,7 @@ import {
 } from './api';
 import { FormFooter, ROUTE_NOUN, saveFailure, useLoad } from './parts';
 import { RepDebtDialog } from './RepDebtDialog';
+const PICK_STAFF = 'اختر الموظف';
 
 /** «5» → 500 basis points; '' → null (his role's limit); NaN when it is not 0 to 100 */
 function percentToBp(text: string): number | null {
@@ -97,7 +98,7 @@ function RepDialog({
     if (Number.isNaN(bp)) found.maxDiscountBp = 'اكتب نسبة من 0 إلى 100، أو اتركها فارغة';
     if (creditMinor !== null && (!Number.isFinite(creditMinor) || creditMinor < 0))
       found.dailyCreditLimitMinor = 'اكتب مبلغاً صحيحاً، أو اتركه فارغاً';
-    if (!rep && !userId) found.userId = 'اختر الموظف';
+    if (!rep && !userId) found.userId = PICK_STAFF;
     if (Object.keys(found).length > 0) {
       setFields(found);
       return;

@@ -73,8 +73,13 @@ export function setCount(draft: CountDraft, variantId: string, qty: number | nul
 /** A figure typed as «12.5»: whole pieces for a piece item, up to three decimals for a weighed one; null otherwise */
 export function countOf(text: string, allowsFraction: boolean): number | null {
   const clean = cleanCode(text).replace('٫', '.');
-  const pattern = allowsFraction ? /^\d{1,7}(\.\d{1,3})?$/ : /^\d{1,7}$/;
-  return pattern.test(clean) ? Math.round(Number(clean) * 1000) : null;
+  const [whole = '', fraction, extra] = clean.split('.');
+  const digitsOnly = (part: string) => [...part].every((ch) => ch >= '0' && ch <= '9');
+  if (extra !== undefined || whole.length < 1 || whole.length > 7 || !digitsOnly(whole)) return null;
+  if (fraction !== undefined) {
+    if (!allowsFraction || fraction.length < 1 || fraction.length > 3 || !digitsOnly(fraction)) return null;
+  }
+  return Math.round(Number(clean) * 1000);
 }
 
 export interface CountLine {
