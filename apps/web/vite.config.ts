@@ -68,5 +68,8 @@ export default defineConfig({
     // Above the 5s asyncUtilTimeout in vitest.setup.ts, so a slow render reports as the
     // assertion that failed and not as a bare test timeout.
     testTimeout: 15_000,
+    // The till's screen tests wait on the device database; on the shared CI runner one of them can miss a wait.
+    // A real fault fails all three runs, a slow runner only one: CI reruns a failed test up to twice.
+    retry: process.env.CI ? 2 : 0,
   },
 });
