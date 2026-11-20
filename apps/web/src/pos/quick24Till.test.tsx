@@ -38,8 +38,10 @@ describe('unknown barcode: add the product', () => {
   it('offers it to a cashier too, but only with a manager’s code', async () => {
     const { user } = await saleScreen();
     await scan(user, '9999999999999');
-    await user.click(within(screen.getByRole('alert')).getByRole('button', { name: 'أضف صنف جديد' }));
-    const panel = await screen.findByRole('region', { name: 'أضف صنف جديد' });
+    // The unknown code is looked up on the device, and the panel is loaded when first opened: wait for both
+    const alert = await screen.findByRole('alert', {}, { timeout: 5000 });
+    await user.click(within(alert).getByRole('button', { name: 'أضف صنف جديد' }));
+    const panel = await screen.findByRole('region', { name: 'أضف صنف جديد' }, { timeout: 5000 });
     expect(within(panel).getByRole('button', { name: 'أضف الصنف برمز مدير' })).toBeInTheDocument();
   });
 });

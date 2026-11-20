@@ -88,7 +88,7 @@ describe('serial numbers at the till', () => {
   it('keeps the list of numbers showing after an unknown number is refused', async () => {
     const { user, panel } = await startPhone();
     await typeSerial(user, panel, 'ZZZ999');
-    expect(within(panel).getByText('هذا الرقم غير موجود في مخزون هذا الفرع.')).toBeInTheDocument();
+    expect(await within(panel).findByText('هذا الرقم غير موجود في مخزون هذا الفرع.')).toBeInTheDocument();
     const list = within(panel).getByRole('list', { name: 'الأرقام المتوفرة' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(2);
   });
@@ -155,6 +155,10 @@ describe('serial numbers at the till', () => {
     const ctx = await saleScreen({ sets });
     await scan(ctx.user, PRODUCTS.oil.barcode!.code);
     const panel = await screen.findByRole('region', { name: 'الرقم التسلسلي' });
+    // The numbers in the store come from the device's database: a number typed before they load reads as unknown
+    if (sets.serials.some((r) => r.status === 'in_stock' && r.variantId === PRODUCTS.oil.variant.id)) {
+      await within(panel).findByRole('button', { name: 'IMEI351' }, { timeout: 5000 });
+    }
     return { ...ctx, panel };
   }
   const typeSerial = async (
@@ -177,7 +181,10 @@ describe('serial numbers at the till', () => {
   it('refuses another product’s number', async () => {
     const { user, panel } = await startPhone();
     await typeSerial(user, panel, 'GL2003');
-    expect(within(panel).getByText('هذا الرقم لصنف آخر في المحل. تأكد من الجهاز.')).toBeInTheDocument();
+    // The number is looked up on the device: wait for the answer
+    expect(
+      await within(panel).findByText('هذا الرقم لصنف آخر في المحل. تأكد من الجهاز.'),
+    ).toBeInTheDocument();
   });
 
   it('refuses an unknown number but offers the manager’s code', async () => {
@@ -191,7 +198,7 @@ describe('serial numbers at the till', () => {
   it('hints when the product’s own barcode is scanned as the serial', async () => {
     const { user, panel } = await startPhone();
     await typeSerial(user, panel, PRODUCTS.oil.barcode!.code);
-    expect(within(panel).getByText(/هذا باركود الصنف لا الرقم التسلسلي/)).toBeInTheDocument();
+    expect(await within(panel).findByText(/هذا باركود الصنف لا الرقم التسلسلي/)).toBeInTheDocument();
   });
 
   it('asks who the customer is before paying for a device with a warranty (electronics)', async () => {
