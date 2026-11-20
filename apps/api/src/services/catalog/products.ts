@@ -215,7 +215,9 @@ interface ListRow extends Record<string, unknown> {
 }
 
 const encodeCursor = (name: string, id: string, stock?: string) =>
-  Buffer.from(JSON.stringify(stock === undefined ? [name, id] : [name, id, stock]), 'utf8').toString('base64url');
+  Buffer.from(JSON.stringify(stock === undefined ? [name, id] : [name, id, stock]), 'utf8').toString(
+    'base64url',
+  );
 
 function decodeCursor(cursor: string): [string, string, string?] {
   try {
@@ -470,12 +472,17 @@ export async function listProducts(
     }
     // The tiles over the list count the whole store, whatever the search or the page shows (first page only)
     let totals: ProductListTotals | undefined;
-    if (!query.cursor && query.status === 'active' && unfiltered) totals = await storeTotals(tx, ctx.auth.tenantId);
+    if (!query.cursor && query.status === 'active' && unfiltered)
+      totals = await storeTotals(tx, ctx.auth.tenantId);
     return {
       items,
       nextCursor:
         rows.length > limit && last
-          ? encodeCursor(last.name_ar, last.id, byStock ? String(Math.trunc(Number(last.stock_qty))) : undefined)
+          ? encodeCursor(
+              last.name_ar,
+              last.id,
+              byStock ? String(Math.trunc(Number(last.stock_qty))) : undefined,
+            )
           : null,
       ...(attention ? { attention } : {}),
       ...(totals ? { totals } : {}),
@@ -523,7 +530,10 @@ async function checkKindChange(
     where v.product_id = ${current.id} and s.qty <> 0`);
   if ((held?.n ?? 0) === 0) return;
   const path = serial ? 'tracksSerial' : kind ? 'type' : 'unitId';
-  throw fieldError(path, 'لا يمكن تغيير هذا الخيار والمنتج فيه مخزون. صفّر المخزون أولاً أو أنشئ منتجاً جديداً.');
+  throw fieldError(
+    path,
+    'لا يمكن تغيير هذا الخيار والمنتج فيه مخزون. صفّر المخزون أولاً أو أنشئ منتجاً جديداً.',
+  );
 }
 
 async function pieceUnit(tx: Transaction): Promise<string> {
@@ -690,7 +700,9 @@ export async function createProductTx(
 ): Promise<ProductDetail> {
   const { tenantId } = ctx.auth;
   await checkReferences(tx, input);
-  input.variants.forEach((v, i) => checkFloor(`variants.${i}.minPriceMinor`, v.price.priceMinor, v.minPriceMinor));
+  input.variants.forEach((v, i) =>
+    checkFloor(`variants.${i}.minPriceMinor`, v.price.priceMinor, v.minPriceMinor),
+  );
   const writes: BarcodeWrite[] = input.variants.flatMap((v, i) =>
     v.barcodes.map((data, b) => ({ path: `variants.${i}.barcodes.${b}.code`, variantIndex: i, data })),
   );

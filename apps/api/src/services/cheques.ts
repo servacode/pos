@@ -7,7 +7,9 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { assertDateOpen } from './period-close';
 import { postEntry } from './posting';
+import { branchOf } from './purchases';
 
 /**
  * Cheques (packages/core › contracts/cheques.ts). A cheque is a payment with method `cheque` of a
@@ -35,6 +37,8 @@ type Row = {
   note: string | null;
   cheque: { bank?: string; number?: string; dueDate?: string; drawer?: string | null } | null;
   supplier_name: string | null;
+  supplier_id: string | null;
+  payable: boolean;
 };
 
 const all = sql`
@@ -43,7 +47,7 @@ const all = sql`
          p.amount_minor::text as amount, p.currency,
          (select e->'cheque' from jsonb_array_elements(i.payload->'payments') e
            where (e->>'paymentNo')::int = p.payment_no limit 1) as cheque,
-         null::text as supplier_name
+         null::text as supplier_name, null::uuid as supplier_id, false as payable
   from invoice_payments p
   join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
   left join customers c on c.tenant_id = i.tenant_id and c.id = i.customer_id
@@ -51,7 +55,7 @@ const all = sql`
   union all
   select 'receipt', r.id, 1, r.number, r.business_date::text, r.branch_id, r.customer_id,
          coalesce(c.name, r.payload->>'customerName'), r.reference, r.amount_minor::text, r.currency,
-         r.payload->'cheque', null::text
+         r.payload->'cheque', null::text, null::uuid, false
   from receipts r
   left join customers c on c.tenant_id = r.tenant_id and c.id = r.customer_id
   where r.method = 'cheque'
@@ -59,7 +63,7 @@ const all = sql`
   select 'supplier_payment', sp.id, 1, sp.number, sp.business_date::text,
          (select id from branches where kind = 'store' order by id limit 1), null::uuid, null::text,
          sp.cheque->>'number', sp.amount_minor::text, (select base_currency from tenant_settings limit 1),
-         sp.cheque, s.name
+         sp.cheque, s.name, sp.supplier_id, sp.cheque_payable
   from supplier_payments sp
   join suppliers s on s.tenant_id = sp.tenant_id and s.id = sp.supplier_id
   where sp.cheque is not null`;
@@ -84,6 +88,7 @@ const view = (r: Row): Cheque => ({
   drawer: r.cheque?.drawer ?? null,
   number: r.cheque?.number ?? null,
   supplierName: r.supplier_name,
+  ...(r.payable ? { payable: true } : {}),
 });
 
 async function rows(tx: Transaction, where = sql`true`): Promise<Row[]> {
@@ -113,7 +118,7 @@ export function actOnCheque(
   db: Database,
   auth: AccessClaims,
   input: {
-    sourceType: 'sale' | 'receipt';
+    sourceType: 'sale' | 'receipt' | 'supplier_payment';
     sourceId: string;
     paymentNo: number;
     action: 'cleared' | 'bounced';
@@ -123,13 +128,15 @@ export function actOnCheque(
   meta: RequestMeta,
 ): Promise<Cheque> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'customers.manage');
+    // Round 47: a supplier's cheque held in 2150 is the purchasing manager's, not the customers'
+    const supplierSide = input.sourceType === 'supplier_payment';
+    await requirePermission(tx, auth.userId, supplierSide ? 'purchases.manage' : 'customers.manage');
     const [row] = await rows(
       tx,
       sql`x.source_type = ${input.sourceType} and x.source_id = ${input.sourceId}
           and x.payment_no = ${input.paymentNo}`,
     );
-    if (!row || row.source_type === 'supplier_payment') {
+    if (!row || (row.source_type === 'supplier_payment') !== supplierSide || (supplierSide && !row.payable)) {
       throw new AppError(404, 'not_found', 'هذا الشيك غير موجود.');
     }
     if (row.action) {
@@ -139,6 +146,14 @@ export function actOnCheque(
       throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
         date: 'التاريخ قبل يوم استلام الشيك',
       });
+    }
+    if (supplierSide) {
+      await assertDateOpen(tx, auth.tenantId, input.date);
+      if (input.action === 'cleared' && row.cheque?.dueDate && input.date < row.cheque.dueDate) {
+        throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+          date: `لم يحن موعد الصرف بعد (${row.cheque.dueDate})`,
+        });
+      }
     }
     const id = newId();
     await tx.insert(chequeActions).values({
@@ -153,6 +168,68 @@ export function actOnCheque(
       createdBy: auth.userId,
     });
     const amount = Number(row.amount);
+    if (supplierSide) {
+      // Cleared: the cheque left the bank (Dr 2150 / Cr 1130). Cancelled or returned before that: the
+      // supplier is owed again (Dr 2150 / Cr 2100 for the supplier)
+      const supplier = { type: 'supplier' as const, id: row.supplier_id! };
+      const memo = `شيك ${row.reference ?? ''} إلى ${row.supplier_name ?? 'مورد'}`.replace(/\s+/g, ' ');
+      const entryId = await postEntry(tx, {
+        tenantId: auth.tenantId,
+        branchId: await branchOf(tx, undefined),
+        date: input.date,
+        sourceType: 'cheque',
+        sourceId: id,
+        sourceNumber: row.number,
+        memo: `${input.action === 'cleared' ? 'صرف' : 'إلغاء'} ${memo}`,
+        baseCurrency: row.currency,
+        lines: [
+          {
+            account: { code: '2150' },
+            baseMinor: amount,
+            currency: row.currency,
+            amountMinor: amount,
+            rate: null,
+            memo,
+          },
+          input.action === 'cleared'
+            ? {
+                account: { code: '1130' },
+                baseMinor: -amount,
+                currency: row.currency,
+                amountMinor: -amount,
+                rate: null,
+                memo,
+              }
+            : {
+                account: { code: '2100' },
+                baseMinor: -amount,
+                currency: row.currency,
+                amountMinor: -amount,
+                rate: null,
+                party: supplier,
+                memo,
+              },
+        ],
+      });
+      await tx.execute(sql`update cheque_actions set entry_id = ${entryId} where id = ${id}`);
+      await audit(
+        tx,
+        {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: `supplier_cheque.${input.action}`,
+          entity: 'cheque',
+          entityId: id,
+          data: { sourceId: input.sourceId, amount },
+        },
+        meta,
+      );
+      const [after] = await rows(
+        tx,
+        sql`x.source_type = 'supplier_payment' and x.source_id = ${input.sourceId}`,
+      );
+      return view(after!);
+    }
     const party = row.customer_id ? { type: 'customer' as const, id: row.customer_id } : null;
     const memo = `شيك ${row.reference ?? ''} من ${row.customer_name ?? 'زبون'}`.replace(/\s+/g, ' ');
     const entryId = await postEntry(tx, {

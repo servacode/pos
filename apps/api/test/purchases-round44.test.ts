@@ -223,7 +223,9 @@ describe('the purchases list in pages', () => {
     const found = (await get(store, '/v1/purchases?q=inv-1')).json<PurchaseListResponse>();
     expect(found.items).toHaveLength(1);
     expect(found.items[0]!.reference).toBe('INV-1');
-    expect((await get(store, '/v1/purchases?payment=cash')).json<PurchaseListResponse>().items).toHaveLength(1);
+    expect((await get(store, '/v1/purchases?payment=cash')).json<PurchaseListResponse>().items).toHaveLength(
+      1,
+    );
     expect((await get(store, '/v1/purchases?cursor=bad')).statusCode).toBe(400);
     // without a limit the list is whole, as before
     const all = (await get(store, '/v1/purchases')).json<PurchaseListResponse>();

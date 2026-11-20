@@ -2007,6 +2007,12 @@ export const supplierPayments = pgTable(
     /** A payment by cheque: its bank, number and due date (paid from the bank account) */
     cheque: jsonb('cheque').$type<{ bank: string; number: string; dueDate: string } | null>(),
     /**
+     * Round 47: a cheque dated after the day it was given sits in 2150 «شيكات مستحقة الدفع» (Dr the supplier,
+     * Cr 2150) until the owner marks it cleared (Dr 2150, Cr the bank) or bounced (Dr 2150, Cr the supplier).
+     * False on every older cheque, which left the bank at once.
+     */
+    chequePayable: boolean('cheque_payable').notNull().default(false),
+    /**
      * Round 36, decision 11: a payment in dollars. amount_minor is then what it cost in the base
      * currency (at `rate`), `foreign_minor` the dollars paid, `fx_minor` the exchange difference
      * against the books' value of that debt (positive is a loss, posted to 6510). All null otherwise.

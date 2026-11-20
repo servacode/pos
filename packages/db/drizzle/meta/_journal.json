@@ -645,6 +645,13 @@
       "when": 1795165966887,
       "tag": "0092_inventory_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1795165967887,
+      "tag": "0093_supplier_cheque_payable",
+      "breakpoints": true
     }
   ]
 }

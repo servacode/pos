@@ -75,9 +75,7 @@ export function PurchaseDetailDialog({
       actions={
         <>
           {detail?.correctedBy && onRewrite ? (
-            <Button
-              onClick={() => onRewrite(draftOfDetail(detail), detail.correctedBy!.number)}
-            >
+            <Button onClick={() => onRewrite(draftOfDetail(detail), detail.correctedBy!.number)}>
               أعد كتابتها
             </Button>
           ) : null}
@@ -121,8 +119,8 @@ export function PurchaseDetailDialog({
               <bdi dir="ltr" className="num font-semibold">
                 {detail.correctedBy.number}
               </bdi>{' '}
-              بتاريخ {dayText(detail.correctedBy.date)}. أثرها على المخزون وعلى حساب المورد انتهى. إن أردت فاكتبها من جديد
-              بالقيم الصحيحة.
+              بتاريخ {dayText(detail.correctedBy.date)}. أثرها على المخزون وعلى حساب المورد انتهى. إن أردت
+              فاكتبها من جديد بالقيم الصحيحة.
             </Alert>
           ) : null}
           {asking ? (
@@ -163,7 +161,13 @@ export function PurchaseDetailDialog({
                     <>
                       {' · '}كلفة الوحدة{' '}
                       <Money
-                        minor={Math.round(((dollars && typeof l.foreignCostMinor === 'number' ? l.foreignCostMinor : l.costMinor) * 1000) / l.qty)}
+                        minor={Math.round(
+                          ((dollars && typeof l.foreignCostMinor === 'number'
+                            ? l.foreignCostMinor
+                            : l.costMinor) *
+                            1000) /
+                            l.qty,
+                        )}
                         currency={dollars ? 'USD' : detail.baseCurrency}
                       />
                     </>

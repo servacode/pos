@@ -61,6 +61,7 @@ import {
   listSuppliers,
   moneyOf,
   newDocumentId,
+  openSupplierBalance,
   paySupplier,
   qtyOf,
   storeToday,
@@ -86,6 +87,13 @@ import { findSupplierDuplicate, isAdvance, paymentProblem } from './supplierRule
 import { downloadCsv } from '../exportCsv';
 import { useUsdRate, usdToBase } from '../../lib/useUsdRate';
 import { CurrencyTerms } from './CurrencyTerms';
+import {
+  OpeningBalanceFields,
+  emptyOpening,
+  openingInput,
+  openingRateOk,
+  type OpeningState,
+} from './OpeningBalanceFields';
 
 /**
  * Each way of paying as a card and as a state in the list (هوية 4 › Badge): on the supplier's
@@ -767,11 +775,19 @@ export function SupplierForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const me = useMe();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const s = useSaving();
   const duplicate = findSupplierDuplicate(suppliers, name, phone);
+  // Round 47: «رصيد افتتاحي», posted once the supplier is saved; its own id keeps a retry from posting it twice
+  const [opening, setOpening] = useState<OpeningState>(emptyOpening);
+  const [openingId] = useState(newDocumentId);
+  const [createdId, setCreatedId] = useState<string | null>(null);
+  const openingWanted = opening.amount.trim() !== '';
+  const openingReady =
+    !openingWanted || (openingInput(opening, openingId) !== null && openingRateOk(opening));
   return (
     <Dialog
       open
@@ -796,7 +812,17 @@ export function SupplierForm({
             s.setFields({ phone: wrong.error.issues[0]?.message ?? 'رقم الهاتف غير صحيح' });
             return;
           }
-          void s.run(() => createSupplier({ name, phone })).then((r) => r && onSaved());
+          if (!openingReady) return;
+          void s
+            .run(async () => {
+              // The supplier is saved once; when the balance then fails, only the balance is tried again
+              const id = createdId ?? (await createSupplier({ name, phone })).id;
+              setCreatedId(id);
+              const input = openingInput(opening, openingId);
+              if (input) await openSupplierBalance(id, input);
+              return id;
+            })
+            .then((r) => r && onSaved());
         }}
       >
         {s.error && !Object.keys(s.fields).length ? <Alert tone="error">{s.error}</Alert> : null}
@@ -829,11 +855,22 @@ export function SupplierForm({
           }}
           error={s.fields.phone}
         />
+        <OpeningBalanceFields
+          value={opening}
+          onChange={setOpening}
+          base={me.settings.baseCurrency}
+          errors={s.fields}
+        />
+        {createdId ? (
+          <Alert tone="info">
+            حُفظ المورد. اضغط «احفظ» لتسجيل رصيده الافتتاحي، أو «إلغاء» لتركه بلا رصيد.
+          </Alert>
+        ) : null}
         <div className="flex flex-wrap items-center justify-end gap-3 pt-1">
           <Button variant="secondary" onClick={onCancel}>
             إلغاء
           </Button>
-          <Button type="submit" loading={s.saving}>
+          <Button type="submit" loading={s.saving} disabled={!openingReady}>
             {duplicate && confirmed ? 'أضِفه رغم ذلك' : 'احفظ'}
           </Button>
         </div>
@@ -1743,6 +1780,12 @@ function PaymentForm({
               required
               className="sm:col-span-2"
             />
+            {dueDate > todayDay ? (
+              <Alert tone="info" className="sm:col-span-2">
+                الشيك مؤجّل: ينقص من دين المورد الآن، ويبقى المبلغ في «شيكات مستحقة الدفع» ولا يخرج من البنك
+                حتى تسجّله «صُرف» من صفحة الشيكات.
+              </Alert>
+            ) : null}
             {dueDate !== '' && dueDate < todayDay ? (
               <Alert tone="warning" className="sm:col-span-2">
                 تاريخ الاستحقاق مضى. تأكّد من التاريخ قبل أن تسجّل الدفعة.

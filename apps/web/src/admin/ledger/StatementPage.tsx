@@ -240,7 +240,9 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
       className: 'sm:hidden',
       cell: (l) => (
         <div className="flex flex-col items-end">
-          <span className="text-xs text-ink-muted">{l.debitMinor ? SIDES[type].debit : SIDES[type].credit}</span>
+          <span className="text-xs text-ink-muted">
+            {l.debitMinor ? SIDES[type].debit : SIDES[type].credit}
+          </span>
           <Money minor={l.debitMinor || l.creditMinor} currency={base} />
         </div>
       ),

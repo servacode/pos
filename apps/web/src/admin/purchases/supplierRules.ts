@@ -29,7 +29,9 @@ export function findSupplierDuplicate(
 export function paymentProblem(text: string, minor: number | null): string | null {
   if (text.trim() === '') return null;
   // A minus sign is never silently dropped: a payment is written positive, and the owner is told
-  if (/[-−–]/.test(text)) return 'لا تكتب إشارة ناقص. الدفعة تُكتب بمبلغ موجب';
+  if ([...text].some((ch) => ch === '-' || ch === '−' || ch === '–')) {
+    return 'لا تكتب إشارة ناقص. الدفعة تُكتب بمبلغ موجب';
+  }
   const clean = text.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[٫]/g, '.');
   if (/\.\d{3,}$/.test(clean.replace(/[,\s،٬]/g, ''))) return 'المبلغ بمنزلتين عشريتين على الأكثر';
   if (minor === null) {

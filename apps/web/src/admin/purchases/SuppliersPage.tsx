@@ -21,7 +21,14 @@ import { useIsPhone } from '../../lib/useIsPhone';
 import { downloadCsv } from '../exportCsv';
 import { ReportScreen } from '../reports/parts';
 import { Amt, DownloadGlyph, PageTop, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
-import { listSuppliers, storeToday, updateSupplier } from './api';
+import { listSuppliers, newDocumentId, openSupplierBalance, storeToday, updateSupplier } from './api';
+import {
+  OpeningBalanceFields,
+  emptyOpening,
+  openingInput,
+  openingRateOk,
+  type OpeningState,
+} from './OpeningBalanceFields';
 import { SupplierForm } from './PurchasesPage';
 import './purchases.css';
 
@@ -316,6 +323,11 @@ export function SuppliersPage() {
               load();
             }}
             onCancel={() => setEditing(null)}
+            onOpened={(name) => {
+              setEditing(null);
+              setNotice(`سُجّل الرصيد الافتتاحي للمورد ${name}.`);
+              load();
+            }}
           />
         ) : null}
       </SalesPage>
@@ -328,13 +340,37 @@ function SupplierEditDialog({
   supplier,
   others,
   onSaved,
+  onOpened,
   onCancel,
 }: {
   supplier: SupplierRow;
   others: SupplierRow[];
   onSaved: (saved: SupplierRow) => void;
+  onOpened: (supplierName: string) => void;
   onCancel: () => void;
 }) {
+  const me = useMe();
+  // «رصيد افتتاحي»: its own button and its own id, so a retry never posts it twice
+  const [opening, setOpening] = useState<OpeningState>(emptyOpening);
+  const [openingId] = useState(newDocumentId);
+  const [openingBusy, setOpeningBusy] = useState(false);
+  const [openingError, setOpeningError] = useState<string | null>(null);
+  const [openingFields, setOpeningFields] = useState<Record<string, string>>({});
+  const openingBody = openingInput(opening, openingId);
+  async function recordOpening() {
+    if (!openingBody || !openingRateOk(opening)) return;
+    setOpeningBusy(true);
+    setOpeningError(null);
+    setOpeningFields({});
+    try {
+      await openSupplierBalance(supplier.id, openingBody);
+      onOpened(supplier.name);
+    } catch (e) {
+      if (e instanceof ApiError && e.fields) setOpeningFields(e.fields);
+      setOpeningError(errorMessage(e));
+      setOpeningBusy(false);
+    }
+  }
   const [name, setName] = useState(supplier.name);
   const [phone, setPhone] = useState(supplier.phone ?? '');
   const [notes, setNotes] = useState(supplier.notes ?? '');
@@ -435,6 +471,27 @@ function SupplierEditDialog({
           </Button>
         </div>
       </form>
+      <div className="mt-4 flex flex-col gap-3">
+        {openingError && Object.keys(openingFields).length === 0 ? (
+          <Alert tone="error">{openingError}</Alert>
+        ) : null}
+        <OpeningBalanceFields
+          value={opening}
+          onChange={setOpening}
+          base={me.settings.baseCurrency}
+          errors={openingFields}
+        />
+        <div className="flex justify-end">
+          <Button
+            variant="secondary"
+            loading={openingBusy}
+            disabled={!openingBody || !openingRateOk(opening)}
+            onClick={() => void recordOpening()}
+          >
+            سجّل الرصيد الافتتاحي
+          </Button>
+        </div>
+      </div>
     </Dialog>
   );
 }

@@ -272,6 +272,42 @@ export interface SupplierPaymentRow {
   fxMinor?: number;
 }
 
+/**
+ * Round 47: a supplier's opening balance, the debt (or the advance) the store had with it before it started on the
+ * system. `debt`: the store owes the supplier (Dr 3900 الأرصدة الافتتاحية, Cr 2100 for the supplier); `credit`: the
+ * supplier owes the store (Dr 2100, Cr 3900). In dollars (`currency` USD) the amount is cents of dollars, kept like
+ * any dollar debt at `rate` (left out, the store's).
+ *
+ *   POST /v1/suppliers/{id}/opening-balance   supplierOpeningBalanceInput → SupplierOpeningBalanceResult (purchases.manage)
+ */
+export const supplierOpeningBalanceInput = z.object({
+  /** The form's own id: the same id again answers the entry already made */
+  id: uuidSchema.optional(),
+  kind: z.enum(['debt', 'credit']),
+  amountMinor: positiveMinorSchema.max(MAX_PAYMENT_MINOR, 'المبلغ كبير جداً. تحقّق من الأصفار'),
+  /** The store's day by default */
+  date: isoDateSchema.optional(),
+  currency: z.enum(PURCHASE_CURRENCY_CODES).optional(),
+  rate: rateSchema.optional(),
+});
+export type SupplierOpeningBalanceInput = z.output<typeof supplierOpeningBalanceInput>;
+
+export interface SupplierOpeningBalanceResult {
+  id: string;
+  /** The journal entry's number */
+  number: string;
+  supplierId: string;
+  supplierName: string;
+  kind: 'debt' | 'credit';
+  date: string;
+  /** In the currency of the balance */
+  amountMinor: number;
+  currency: PurchaseCurrencyCode;
+  /** The supplier's balance (base currency, what the store owes) before and after */
+  balanceBeforeMinor: number;
+  balanceAfterMinor: number;
+}
+
 export const inventoryQuery = z.object({ branchId: uuidSchema.optional() });
 
 export interface InventoryRow {

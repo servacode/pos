@@ -41,6 +41,13 @@ const STATUS_TONE: Record<ChequeStatus, BadgeTone> = {
   bounced: 'danger',
 };
 
+/** A supplier cheque held in «شيكات مستحقة الدفع» until the bank pays it (round 47) */
+const OUT_TEXT: Record<ChequeStatus, string> = {
+  pending: 'مستحق الدفع',
+  cleared: 'صُرف',
+  bounced: 'مُلغى',
+};
+
 /** What an empty list says, per filter. */
 const EMPTY_TITLE: Record<ChequeStatus | 'all', string> = {
   pending: 'لا شيكات تحت التحصيل.',
@@ -122,6 +129,7 @@ export function ChequesPage() {
   const me = useMe();
   const digits = me.settings.numberFormat;
   const canManage = me.user.permissions.includes('customers.manage');
+  const canPay = me.user.permissions.includes('purchases.manage');
   const [filter, setFilter] = useState<ChequeStatus | 'all'>('pending');
   // Until the person picks one: the cheques waiting for the bank read by what falls due first, the rest by what is newest
   const [picked, setOrder] = useState<'recent' | 'due' | null>(null);
@@ -146,7 +154,6 @@ export function ChequesPage() {
   useEffect(load, [load]);
 
   async function mark(c: Cheque, action: 'cleared' | 'bounced') {
-    if (c.sourceType === 'supplier_payment') return;
     const key = `${c.sourceId}-${c.paymentNo}`;
     setBusy(key);
     setError(null);
@@ -184,8 +191,8 @@ export function ChequesPage() {
   // The status: its badge, and the day it was marked under it.
   const status = (c: Cheque) => (
     <span className="flex flex-col items-start gap-0.5">
-      <Badge tone={c.direction === 'out' ? 'neutral' : STATUS_TONE[c.status]}>
-        {c.direction === 'out' ? 'صادر للمورد' : STATUS_TEXT[c.status]}
+      <Badge tone={c.direction === 'out' && !c.payable ? 'neutral' : STATUS_TONE[c.status]}>
+        {c.direction === 'out' ? (c.payable ? OUT_TEXT[c.status] : 'صادر للمورد') : STATUS_TEXT[c.status]}
       </Badge>
       {c.actionDate ? (
         <span className="ps-1 text-xs whitespace-nowrap text-ink-subtle">
@@ -353,6 +360,28 @@ export function ChequesPage() {
               مرتجع
             </Button>
           </span>
+        ) : c.direction === 'out' && c.payable && c.status === 'pending' ? (
+          canPay ? (
+            <span className="flex flex-col items-stretch gap-1.5 py-2 sm:flex-row sm:justify-end sm:py-0">
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<CheckIcon size={16} />}
+                loading={busy === `${c.sourceId}-${c.paymentNo}`}
+                onClick={() => setAsking({ cheque: c, action: 'cleared' })}
+              >
+                صُرف
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<UndoIcon size={16} />}
+                onClick={() => setAsking({ cheque: c, action: 'bounced' })}
+              >
+                ألغِ
+              </Button>
+            </span>
+          ) : null
         ) : c.direction === 'out' ? (
           <span className="block max-w-28 py-2 text-xs leading-snug text-ink-muted sm:max-w-none sm:min-w-32 sm:py-0 sm:text-end">
             خُصم من البنك يوم الدفع
@@ -360,6 +389,12 @@ export function ChequesPage() {
         ) : null,
     },
   ];
+
+  // A supplier's cheque is marked paid on or after its due day, not before
+  const supplierNotDue =
+    asking?.cheque.direction === 'out' &&
+    asking.action === 'cleared' &&
+    (dueDayOf(asking.cheque) ?? '') > today();
 
   return (
     <AppShell>
@@ -465,7 +500,15 @@ export function ChequesPage() {
       <Dialog
         open={asking !== null}
         onOpenChange={(o) => !o && setAsking(null)}
-        title={asking?.action === 'bounced' ? 'سجّل الشيك مرتجعاً' : 'سجّل الشيك محصّلاً'}
+        title={
+          asking?.cheque.direction === 'out'
+            ? asking.action === 'bounced'
+              ? 'ألغِ الشيك'
+              : 'سجّل الشيك مصروفاً'
+            : asking?.action === 'bounced'
+              ? 'سجّل الشيك مرتجعاً'
+              : 'سجّل الشيك محصّلاً'
+        }
         description={asking?.cheque.reference ?? asking?.cheque.documentNumber}
         actions={
           <>
@@ -473,19 +516,35 @@ export function ChequesPage() {
               تراجع
             </Button>
             <Button
+              disabled={supplierNotDue}
               onClick={() => {
                 const a = asking;
                 setAsking(null);
                 if (a) void mark(a.cheque, a.action);
               }}
             >
-              {asking?.action === 'bounced' ? 'نعم، مرتجع' : 'نعم، حُصّل'}
+              {asking?.cheque.direction === 'out'
+                ? asking.action === 'bounced'
+                  ? 'نعم، ألغِ'
+                  : 'نعم، صُرف'
+                : asking?.action === 'bounced'
+                  ? 'نعم، مرتجع'
+                  : 'نعم، حُصّل'}
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-3">
-          {asking?.action === 'cleared' && (dueDayOf(asking.cheque) ?? '') > today() ? (
+          {supplierNotDue ? (
+            <Alert tone="error">
+              موعد صرفه{' '}
+              <span className="whitespace-nowrap">{dayText(dueDayOf(asking!.cheque)!, digits)}</span> لم يحن
+              بعد. سجّله مصروفاً يوم استحقاقه أو بعده.
+            </Alert>
+          ) : null}
+          {asking?.cheque.direction !== 'out' &&
+          asking?.action === 'cleared' &&
+          (dueDayOf(asking.cheque) ?? '') > today() ? (
             <Alert tone="warning">
               تاريخ استحقاقه{' '}
               <span className="whitespace-nowrap">{dayText(dueDayOf(asking.cheque)!, digits)}</span> لم يأتِ
@@ -493,9 +552,13 @@ export function ChequesPage() {
             </Alert>
           ) : null}
           <p className="text-sm text-ink-muted">
-            {asking?.action === 'bounced'
-              ? 'يعود المبلغ ديناً على الزبون في كشف حسابه، ولا يمكن التراجع عن هذا من هنا.'
-              : 'ينتقل المبلغ إلى البنك، ولا يمكن التراجع عن هذا من هنا.'}
+            {asking?.cheque.direction === 'out'
+              ? asking.action === 'bounced'
+                ? 'يعود المبلغ ديناً للمورد في كشف حسابه، ولا يخرج شيء من البنك. لا يمكن التراجع عن هذا من هنا.'
+                : 'يخرج المبلغ من البنك اليوم، ولا يمكن التراجع عن هذا من هنا.'
+              : asking?.action === 'bounced'
+                ? 'يعود المبلغ ديناً على الزبون في كشف حسابه، ولا يمكن التراجع عن هذا من هنا.'
+                : 'ينتقل المبلغ إلى البنك، ولا يمكن التراجع عن هذا من هنا.'}
           </p>
         </div>
       </Dialog>

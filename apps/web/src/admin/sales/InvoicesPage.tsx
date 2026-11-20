@@ -61,9 +61,11 @@ const CSV_PAGE = 200;
 const SEARCH_MAX = 60;
 const PAGE_SIZE = 50;
 
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const dayParam = (value: string | null, fallback: string) =>
-  value && ISO_DAY.test(value) ? value : fallback;
+/** A day written as YYYY-MM-DD (checked character by character, no pattern on typed text) */
+const isIsoDay = (value: string): boolean =>
+  value.length === 10 &&
+  [...value].every((ch, i) => (i === 4 || i === 7 ? ch === '-' : ch >= '0' && ch <= '9'));
+const dayParam = (value: string | null, fallback: string) => (value && isIsoDay(value) ? value : fallback);
 
 /** What the server's field names mean on this screen, in the words of its fields. */
 const SERVER_FIELD_TEXT: Record<string, string> = {

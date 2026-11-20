@@ -297,3 +297,87 @@ describe('a cheque typed as one line', () => {
     });
   });
 });
+
+describe('«الشيكات»: a supplier cheque held in «شيكات مستحقة الدفع» (round 47)', () => {
+  const payable = (over: Partial<Cheque> = {}): Cheque =>
+    cheque({
+      sourceType: 'supplier_payment',
+      sourceId: 'sp-1',
+      paymentNo: 1,
+      direction: 'out',
+      payable: true,
+      reference: 'OUT-5',
+      customerName: null,
+      supplierName: 'مورد المواد',
+      dueDate: todayText(),
+      ...over,
+    });
+  const me = (): MeResponse => {
+    const base = owner();
+    return { ...base, user: { ...base.user, permissions: [...base.user.permissions, 'purchases.manage'] } };
+  };
+
+  it('marks it «صُرف» on its due day, posting the supplier-side action', async () => {
+    const items = [payable()];
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: me() }),
+      'GET /v1/cheques?status=pending': () => ({ status: 200, body: { items, baseCurrency: 'SYP' } }),
+      'POST /v1/cheques/actions': () => ({ status: 200, body: { ...items[0], status: 'cleared' } }),
+    });
+    const { user } = renderApp('/cheques');
+    const table = await screen.findByRole('table', { name: 'الشيكات' });
+    const row = (await within(table).findByText('OUT-5')).closest('tr') as HTMLElement;
+    expect(within(row).getAllByText('مستحق الدفع').length).toBeGreaterThan(0);
+    await user.click(within(row).getByRole('button', { name: 'صُرف' }));
+    const sure = await screen.findByRole('dialog');
+    await user.click(within(sure).getByRole('button', { name: 'نعم، صُرف' }));
+    await waitFor(() => expect(requestsTo('POST', '/v1/cheques/actions')).toHaveLength(1));
+    expect(requestsTo('POST', '/v1/cheques/actions')[0]?.body).toMatchObject({
+      sourceType: 'supplier_payment',
+      sourceId: 'sp-1',
+      paymentNo: 1,
+      action: 'cleared',
+      date: todayText(),
+    });
+  });
+
+  it('refuses «صُرف» before its due day, but lets it be cancelled', async () => {
+    const items = [payable({ dueDate: addDays(todayText(), 10) })];
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: me() }),
+      'GET /v1/cheques?status=pending': () => ({ status: 200, body: { items, baseCurrency: 'SYP' } }),
+      'POST /v1/cheques/actions': () => ({ status: 200, body: { ...items[0], status: 'bounced' } }),
+    });
+    const { user } = renderApp('/cheques');
+    const table = await screen.findByRole('table', { name: 'الشيكات' });
+    const row = (await within(table).findByText('OUT-5')).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: 'صُرف' }));
+    const early = await screen.findByRole('dialog');
+    expect(within(early).getByText(/لم يحن بعد/)).toBeInTheDocument();
+    expect(within(early).getByRole('button', { name: 'نعم، صُرف' })).toBeDisabled();
+    await user.click(within(early).getByRole('button', { name: 'تراجع' }));
+    await user.click(within(row).getByRole('button', { name: 'ألغِ' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، ألغِ' }));
+    await waitFor(() => expect(requestsTo('POST', '/v1/cheques/actions')).toHaveLength(1));
+    expect(requestsTo('POST', '/v1/cheques/actions')[0]?.body).toMatchObject({
+      sourceType: 'supplier_payment',
+      action: 'bounced',
+    });
+  });
+
+  it('shows no buttons without purchases.manage, and none on an older supplier cheque', async () => {
+    const items = [payable(), payable({ sourceId: 'sp-0', reference: 'OLD-1', payable: false })];
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/cheques?status=pending': () => ({ status: 200, body: { items, baseCurrency: 'SYP' } }),
+    });
+    renderApp('/cheques');
+    const table = await screen.findByRole('table', { name: 'الشيكات' });
+    await within(table).findByText('OUT-5');
+    expect(within(table).queryByRole('button', { name: 'صُرف' })).not.toBeInTheDocument();
+    expect(within(table).getAllByText('خُصم من البنك يوم الدفع').length).toBe(1);
+  });
+});

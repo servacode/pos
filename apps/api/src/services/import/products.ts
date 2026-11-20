@@ -539,7 +539,8 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
           results.fail(g.line, [
             {
               field: 'name',
-              message: 'الاسم مكرر في الملف بلا باركود. أضف باركوداً أو مقاساً ليتميز الصنف، أو احذف الصف المكرر',
+              message:
+                'الاسم مكرر في الملف بلا باركود. أضف باركوداً أو مقاساً ليتميز الصنف، أو احذف الصف المكرر',
             },
           ]);
         }
@@ -820,7 +821,10 @@ async function processGroup(
   let current = productId ? await productDetail(tx, productId) : null;
   // A new product whose name a live product already carries: allowed, but said in the preview
   if (productId === null && !byNameAllowed && (await productOfName(tx, first.name)) !== null) {
-    results.note(first.line, 'يوجد منتج بالاسم نفسه ببارکود آخر: تأكد أنه صنف مختلف وليس مكرراً'.replace('ببارکود','بباركود'));
+    results.note(
+      first.line,
+      'يوجد منتج بالاسم نفسه ببارکود آخر: تأكد أنه صنف مختلف وليس مكرراً'.replace('ببارکود', 'بباركود'),
+    );
   }
   if (current) {
     for (const p of group) {
@@ -972,7 +976,11 @@ async function processGroup(
       } else stock.set(branchId, qty);
     }
     if (stock.size === 0) continue;
-    if (o.parsed.costMinor === null) results.note(o.parsed.line, 'لا تكلفة في الصف: يدخل المخزون بقيمة صفر ويظهر هامش الربح 100٪ حتى أول فاتورة شراء. أضف عمود التكلفة');
+    if (o.parsed.costMinor === null)
+      results.note(
+        o.parsed.line,
+        'لا تكلفة في الصف: يدخل المخزون بقيمة صفر ويظهر هامش الربح 100٪ حتى أول فاتورة شراء. أضف عمود التكلفة',
+      );
     else if (o.parsed.costNote !== null) results.note(o.parsed.line, o.parsed.costNote);
     if (results.statusOf(o.parsed.line) === 'skip')
       results.set(o.parsed.line, 'update', ['تُضاف الكمية الافتتاحية فقط']);

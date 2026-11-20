@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { mockFetch } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
@@ -82,6 +82,67 @@ describe('«الموردون»: edit and archive (round 44)', () => {
       name: 'النور للتجارة',
       phone: '0944123456',
       archived: true,
+    });
+  });
+});
+
+describe('«الموردون»: رصيد افتتاحي (round 47)', () => {
+  it('records the debt a supplier had before the system, once, with its own id', async () => {
+    const me = makeMe();
+    const supplier = {
+      id: 's-1',
+      name: 'مستودع النور',
+      phone: null,
+      notes: null,
+      balanceMinor: 0,
+      archived: false,
+    };
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: { ...me, user: { ...me.user, permissions: ['purchases.manage'] } } },
+      'GET /v1/suppliers': {
+        status: 200,
+        body: { baseCurrency: 'SYP', totalOwedMinor: 0, items: [supplier] },
+      },
+      'POST /v1/suppliers/s-1/opening-balance': {
+        status: 201,
+        body: { id: 'x', number: '2026-0000001', supplierId: 's-1', kind: 'debt', amountMinor: 250_000 },
+      },
+    });
+    const { user } = renderApp('/suppliers');
+    await user.click(await screen.findByRole('button', { name: 'عدّل مستودع النور' }));
+    const record = screen.getByRole('button', { name: 'سجّل الرصيد الافتتاحي' });
+    expect(record).toBeDisabled();
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '2500');
+    await user.click(record);
+    expect(await screen.findByText('سُجّل الرصيد الافتتاحي للمورد مستودع النور.')).toBeInTheDocument();
+    const body = requestsTo('POST', '/v1/suppliers/s-1/opening-balance')[0]?.body as Record<string, unknown>;
+    expect(body).toMatchObject({ kind: 'debt', amountMinor: 250_000 });
+    expect(typeof body.id).toBe('string');
+  });
+
+  it('adds the opening balance together with a new supplier', async () => {
+    const me = makeMe();
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: { ...me, user: { ...me.user, permissions: ['purchases.manage'] } } },
+      'GET /v1/suppliers': { status: 200, body: { baseCurrency: 'SYP', totalOwedMinor: 0, items: [] } },
+      'POST /v1/suppliers': {
+        status: 201,
+        body: { id: 's-9', name: 'جديد', balanceMinor: 0, archived: false },
+      },
+      'POST /v1/suppliers/s-9/opening-balance': { status: 201, body: { id: 'x', number: '1' } },
+    });
+    const { user } = renderApp('/suppliers');
+    await user.click(await screen.findByRole('button', { name: 'مورد جديد' }));
+    await user.type(screen.getByLabelText('اسم المورد'), 'جديد');
+    await user.click(screen.getByRole('radio', { name: 'له عندك دفعة مقدّمة' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '100');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await waitFor(() => expect(requestsTo('POST', '/v1/suppliers/s-9/opening-balance')).toHaveLength(1));
+    expect(requestsTo('POST', '/v1/suppliers/s-9/opening-balance')[0]?.body).toMatchObject({
+      kind: 'credit',
+      amountMinor: 10_000,
     });
   });
 });

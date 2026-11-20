@@ -9,6 +9,10 @@ import { isoDateSchema, uuidSchema } from './common';
  *
  *   GET  /v1/cheques?status=        customers.view    → { items: Cheque[]; baseCurrency }
  *   POST /v1/cheques/actions        customers.manage  chequeActionInput → Cheque
+ *
+ * Round 47: a supplier cheque dated after the day it is given posts Dr 2100 the supplier / Cr 2150
+ * «شيكات مستحقة الدفع»; «صُرف» (on or after its due day) posts Dr 2150 / Cr 1130 the bank; cancelled or
+ * returned before that, Dr 2150 / Cr 2100 (the supplier is owed again). It then needs purchases.manage.
  */
 
 export const CHEQUE_STATUSES = ['pending', 'cleared', 'bounced'] as const;
@@ -39,8 +43,11 @@ export const CHEQUE_DUE_SOON_DAYS = 7;
 
 export const chequeListQuery = z.object({ status: z.enum(CHEQUE_STATUSES).optional() });
 
+/** What an action may be taken on: the customers' cheques, and (round 47) a supplier's cheque dated ahead */
+export const CHEQUE_ACTION_SOURCES = ['sale', 'receipt', 'supplier_payment'] as const;
+
 export const chequeActionInput = z.object({
-  sourceType: z.enum(CHEQUE_SOURCES),
+  sourceType: z.enum(CHEQUE_ACTION_SOURCES),
   sourceId: uuidSchema,
   paymentNo: z.int().min(1),
   action: z.enum(['cleared', 'bounced']),
@@ -77,4 +84,10 @@ export interface Cheque {
   number?: string | null;
   /** The supplier an outgoing cheque was given to */
   supplierName?: string | null;
+  /**
+   * Round 47: an outgoing cheque dated ahead of the day it was given, held in 2150 «شيكات مستحقة الدفع»: the owner
+   * marks it «صُرف» (cleared) or cancels it («مرتجع»: bounced). False on every older cheque and on one that
+   * left the bank at once.
+   */
+  payable?: boolean;
 }

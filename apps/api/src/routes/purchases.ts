@@ -18,6 +18,7 @@ import {
   recallQuery,
   stocktakeInput,
   supplierInput,
+  supplierOpeningBalanceInput,
   supplierPaymentInput,
   supplierReturnInput,
   transferInput,
@@ -40,6 +41,7 @@ import {
   listSuppliers,
   listSupplierReturns,
   listTransfers,
+  openSupplierBalance,
   paySupplier,
   profitReport,
   readPurchase,
@@ -111,6 +113,20 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       meta(request),
       app.clock.now(),
     );
+  });
+
+  // Round 47: the debt (or advance) a supplier had before the system (Dr/Cr 3900); a closed period refuses it
+  app.post('/v1/suppliers/:id/opening-balance', opts, async (request, reply) => {
+    if (!request.auth) throw unauthorized();
+    const opened = await openSupplierBalance(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا المورد'),
+      parseBody(supplierOpeningBalanceInput, request.body),
+      meta(request),
+      app.clock.now(),
+    );
+    return reply.code(201).send(opened);
   });
 
   app.get('/v1/purchases', opts, async (request) => {
@@ -202,6 +218,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       request.auth,
       parseBody(supplierPaymentInput, request.body),
       meta(request),
+      app.clock.now(),
     );
     return reply.code(201).send(paid);
   });

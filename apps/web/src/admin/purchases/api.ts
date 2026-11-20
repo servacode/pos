@@ -20,6 +20,8 @@ import type {
   SupplierReturnInput,
   SupplierInput,
   SupplierListResponse,
+  SupplierOpeningBalanceInput,
+  SupplierOpeningBalanceResult,
   SupplierPaymentInput,
   SupplierPaymentRow,
   SupplierRow,
@@ -52,6 +54,13 @@ export const updateSupplier = (id: string, input: Partial<SupplierInput>) =>
   apiFetch<SupplierRow>(`/v1/suppliers/${id}`, { method: 'PUT', body: input, auth: true });
 export const createPurchase = (input: PurchaseInput) =>
   apiFetch<PurchaseDetail>('/v1/purchases', { method: 'POST', body: input, auth: true });
+/** `POST /v1/suppliers/{id}/opening-balance` (purchases.manage): what the store owed (or had paid) a supplier before the system */
+export const openSupplierBalance = (id: string, input: SupplierOpeningBalanceInput) =>
+  apiFetch<SupplierOpeningBalanceResult>(`/v1/suppliers/${id}/opening-balance`, {
+    method: 'POST',
+    body: input,
+    auth: true,
+  });
 export const paySupplier = (input: SupplierPaymentInput) =>
   apiFetch<SupplierPaymentRow>('/v1/supplier-payments', { method: 'POST', body: input, auth: true });
 export const getInventory = () => apiFetch<InventoryResponse>('/v1/inventory', { auth: true });
