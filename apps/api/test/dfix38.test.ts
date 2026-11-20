@@ -57,7 +57,12 @@ describe('a rep phone lists only the people the server lets in', () => {
   });
   let n = 0;
   const phone = () => `0955${String(++n).padStart(6, '0')}`;
-  const ok = async <T>(method: 'GET' | 'POST' | 'PUT', url: string, payload?: unknown, status = 200) => {
+  const ok = async <T>(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+    url: string,
+    payload?: unknown,
+    status = 200,
+  ) => {
     const res = await app.inject({
       method,
       url,
@@ -184,6 +189,48 @@ describe('a rep phone lists only the people the server lets in', () => {
       201,
     );
     expect(await flagged()).toEqual(['user_roles', 'users']);
+  });
+
+  it('a person stopped or started again, and a role or branch change, flag the rep phones too', async () => {
+    const v1 = await van('1');
+    const device = await repPhone(v1.id, '002');
+    const flagged = async () =>
+      (
+        await ownerDb()<
+          { resync_sets: string[] }[]
+        >`select resync_sets from devices where id = ${device.deviceId}`
+      )[0]!.resync_sets.toSorted();
+    const clear = () => ownerDb()`update devices set resync_sets = '{}' where id = ${device.deviceId}`;
+    const manager = await staffUser(app, s, 'manager', phone(), { fullName: 'مدير' });
+    await clear();
+    await ok('POST', `/v1/staff/${manager.userId}/deactivate`);
+    expect(await flagged()).toEqual(['user_roles', 'users']);
+    await clear();
+    await ok('POST', `/v1/staff/${manager.userId}/reactivate`);
+    expect(await flagged()).toEqual(['user_roles', 'users']);
+    await clear();
+    await ok('PATCH', `/v1/staff/${manager.userId}`, { roleKey: 'cashier', branchIds: [s.branchId] });
+    expect(await flagged()).toEqual(['user_roles', 'users']);
+  });
+
+  it('a till standing on a van branch is not a rep phone: it still lists everyone', async () => {
+    const v1 = await van('1');
+    const cashier = await staffUser(app, s, 'cashier', phone(), { fullName: 'كاشير' });
+    const token = `sdt_${randomBytes(32).toString('base64url')}`;
+    const [row] = await ownerDb()<{ id: string }[]>`
+      insert into devices (tenant_id, branch_id, code, name, status, token_hash)
+      values (${s.tenantId}, ${v1.id}, '009', 'كاشير السيارة', 'active', ${hashDeviceToken(token)})
+      returning id`;
+    const till: TestDevice = {
+      deviceId: row!.id,
+      tenantId: s.tenantId,
+      branchId: v1.id,
+      code: '009',
+      token,
+      authorization: `Device ${token}`,
+    };
+    const ids = (await pull(till)).sets.users!.upserts.map((u) => u.id);
+    expect(ids).toContain(cashier.userId);
   });
 });
 

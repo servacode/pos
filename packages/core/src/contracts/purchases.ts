@@ -302,6 +302,12 @@ export const stocktakeInput = z.object({
   id: uuidSchema.optional(),
   branchId: uuidSchema.optional(),
   date: isoDateSchema,
+  /**
+   * When the sheet the count was made against was downloaded (a phone counts against a sheet it keeps). The
+   * server then counts what the stock has moved by since that moment (a sale after the download) as already
+   * gone from the shelf, so the count does not bring those pieces back. Without it the counts are taken as of now.
+   */
+  countedAt: z.iso.datetime({ offset: true }).optional(),
   note: optionalText(200, 'الملاحظة طويلة'),
   lines: z
     .array(
@@ -804,6 +810,9 @@ export interface SupplierReturnDetail {
     invoiceCostMinor?: number | null;
     /** On a dollar invoice, what the supplier credits for the line in dollars (cents) */
     foreignAmountMinor?: number | null;
+    /** The batch the line took back, when it named one (so a later return against the invoice can count it) */
+    batchNo?: string | null;
+    expiryDate?: string | null;
   }[];
   /** What the supplier credits, base currency */
   amountMinor: number;

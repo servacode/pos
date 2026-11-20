@@ -874,7 +874,11 @@ export function createStocktake(
   input: StocktakeInput,
   meta: RequestMeta,
 ): Promise<StocktakeDetail> {
-  return withTenant(db, auth.tenantId, (tx) => createStocktakeIn(tx, auth, input, meta));
+  return withTenant(db, auth.tenantId, async (tx) => {
+    // The count is of one branch: the permission must hold there, not only somewhere
+    await requirePermission(tx, auth.userId, 'inventory.adjust', await branchOf(tx, input.branchId));
+    return createStocktakeIn(tx, auth, input, meta);
+  });
 }
 
 /** The count itself, inside the caller's transaction (a transfer's shortage is written off through it) */
@@ -948,8 +952,21 @@ export async function createStocktakeIn(
   const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
 
   // One count line per item: the counted total of a whole count, or the stock plus its batches' differences
+  // A count made against an older sheet: what moved since (a sale) is already off the shelf the phone counted
+  const movedSince = new Map<string, number>();
+  if (input.countedAt && wholeLines.length > 0) {
+    const moved = await tx.execute<{ variant_id: string; qty: string }>(sql`
+      select variant_id, sum(qty)::text as qty from stock_movements
+      where branch_id = ${branchId} and created_at > ${input.countedAt}::timestamptz
+        and variant_id = any(${uuidArray(wholeLines.map((l) => l.variantId))})
+      group by variant_id`);
+    for (const m of moved) movedSince.set(m.variant_id, Number(m.qty));
+  }
   const countLines: { variantId: string; countedQty: number }[] = [
-    ...wholeLines.map((l) => ({ variantId: l.variantId, countedQty: l.countedQty })),
+    ...wholeLines.map((l) => ({
+      variantId: l.variantId,
+      countedQty: Math.max(0, l.countedQty + (movedSince.get(l.variantId) ?? 0)),
+    })),
     ...[...sums].map(([variantId, delta]) => ({
       variantId,
       countedQty: Math.max(0, (expected.get(variantId) ?? 0) + delta),
@@ -1410,6 +1427,8 @@ export async function createSupplierReturn(
         costMinor,
         ...(credit ? { invoiceCostMinor: credit.baseMinor } : {}),
         ...(credit?.foreignMinor !== undefined ? { foreignAmountMinor: credit.foreignMinor } : {}),
+        ...(l.batchNo ? { batchNo: l.batchNo } : {}),
+        ...(l.expiryDate ? { expiryDate: l.expiryDate } : {}),
       });
     }
     // A tracked product goes back with its serial numbers: they leave the store's stock
@@ -1567,9 +1586,29 @@ async function invoiceForReturn(
     .from(supplierReturns)
     .where(eq(supplierReturns.purchaseId, purchaseId));
   const taken = new Map<string, number>();
+  // …and, for the lines that named a batch, per batch (an earlier return with no batch counts against the item only)
+  const takenBatches: {
+    variantId: string;
+    batchNo: string | null;
+    expiryDate: string | null;
+    qty: number;
+  }[] = [];
   for (const r of earlier) {
-    for (const l of r.lines as { variantId: string; qty: number }[]) {
+    for (const l of r.lines as {
+      variantId: string;
+      qty: number;
+      batchNo?: string | null;
+      expiryDate?: string | null;
+    }[]) {
       taken.set(l.variantId, (taken.get(l.variantId) ?? 0) + l.qty);
+      if (l.batchNo || l.expiryDate) {
+        takenBatches.push({
+          variantId: l.variantId,
+          batchNo: l.batchNo ?? null,
+          expiryDate: l.expiryDate ?? null,
+          qty: l.qty,
+        });
+      }
     }
   }
   const sent = new Map<string, number>();
@@ -1592,13 +1631,21 @@ async function invoiceForReturn(
     const itemBought = bought.filter((b) => b.variantId === l.variantId).reduce((sum, b) => sum + b.qty, 0);
     const already = (taken.get(l.variantId) ?? 0) + (sent.get(l.variantId) ?? 0);
     const batchKey = `${l.variantId}|${l.batchNo ?? ''}|${l.expiryDate ?? ''}`;
-    const sameBatch = sentByBatch.get(batchKey) ?? 0;
+    const earlierOfBatch = takenBatches
+      .filter(
+        (t) =>
+          t.variantId === l.variantId &&
+          (!l.batchNo || t.batchNo === l.batchNo) &&
+          (!l.expiryDate || t.expiryDate === l.expiryDate),
+      )
+      .reduce((sum, t) => sum + t.qty, 0);
+    const sameBatch = (sentByBatch.get(batchKey) ?? 0) + earlierOfBatch;
     if (already + l.qty > itemBought || sameBatch + l.qty > qtyBought) {
       throw invalid({
         [`lines.${index}.qty`]: `اشتريت من هذا الصنف ${itemBought / 1000} بهذه الفاتورة، وأُرجع منها ${already / 1000}. المتبقي ${Math.max(0, itemBought - already) / 1000}`,
       });
     }
-    sentByBatch.set(batchKey, sameBatch + l.qty);
+    sentByBatch.set(batchKey, (sentByBatch.get(batchKey) ?? 0) + l.qty);
     sent.set(l.variantId, (sent.get(l.variantId) ?? 0) + l.qty);
     const share = (cost: number) =>
       l.qty === qtyBought ? cost : Number(roundDiv(BigInt(cost) * BigInt(l.qty), BigInt(qtyBought)));

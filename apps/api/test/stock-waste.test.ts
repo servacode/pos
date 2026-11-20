@@ -9,6 +9,8 @@ import type {
   WasteReport,
 } from '@serva/core';
 import { openStore, type Store } from './accounting-fixtures';
+import { firstBranch } from './devices';
+import { staffUser } from './staff';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 
 /**
@@ -278,5 +280,119 @@ describe('the phone count', () => {
   it('the sheet needs a signed-in user', async () => {
     const none = await app.inject({ method: 'GET', url: '/v1/inventory/count-sheet' });
     expect(none.statusCode).toBe(401);
+  });
+});
+
+describe('branch scope, the sheet time and the till audit (round 40)', () => {
+  const secondBranch = async (store: Store) => {
+    const [b] = await ownerDb()<{ id: string }[]>`
+      insert into branches (tenant_id, code, name) values (${store.tenantId}, '002', 'فرع المول') returning id`;
+    return b!.id;
+  };
+
+  it('a count against an older sheet does not bring back what was taken off the shelf since', async () => {
+    const { store, milk } = await world();
+    const sheet = (
+      await app.inject({ method: 'GET', url: '/v1/inventory/count-sheet', headers: as(store) })
+    ).json<CountSheet>();
+    expect(sheet.items.find((i) => i.variantId === milk)!.qty).toBe(10_000);
+    await new Promise((r) => setTimeout(r, 50));
+    // 2 go off the shelf after the sheet was made (a sale on a till would move the stock the same way)
+    const moved = await app.inject({
+      method: 'POST',
+      url: '/v1/stocktakes',
+      headers: as(store),
+      payload: { date: '2026-10-30', lines: [{ variantId: milk, countedQty: 8000 }] },
+    });
+    expect(moved.statusCode, moved.body).toBe(201);
+    // The phone counted the 10 it saw
+    const posted = await app.inject({
+      method: 'POST',
+      url: '/v1/stocktakes',
+      headers: as(store),
+      payload: { date: '2026-10-30', countedAt: sheet.at, lines: [{ variantId: milk, countedQty: 10_000 }] },
+    });
+    expect(posted.statusCode, posted.body).toBe(201);
+    expect(posted.json<StocktakeDetail>().lines[0]).toMatchObject({
+      expectedQty: 8000,
+      countedQty: 8000,
+      diffQty: 0,
+    });
+    expect(await levelOf(milk)).toBe(8000);
+  });
+
+  it('counts, count sheets and the waste report keep to the branches the permission is held in', async () => {
+    const { store, milk } = await world();
+    const other = await secondBranch(store);
+    const keeper = await staffUser(
+      app,
+      { tenantId: store.tenantId, userId: store.userId, accessToken: store.accessToken, branchId: other },
+      'storekeeper',
+      '0922222222',
+      { branchId: other },
+    );
+    const h = { authorization: `Bearer ${keeper.accessToken}` };
+    const body = { date: '2026-10-30', lines: [{ variantId: milk, countedQty: 9000 }] };
+    // The main branch is not his
+    const sheetMain = await app.inject({ method: 'GET', url: '/v1/inventory/count-sheet', headers: h });
+    expect(sheetMain.statusCode).toBe(403);
+    const countMain = await app.inject({ method: 'POST', url: '/v1/stocktakes', headers: h, payload: body });
+    expect(countMain.statusCode).toBe(403);
+    expect(await levelOf(milk)).toBe(10_000);
+    // His own branch is
+    const sheetOwn = await app.inject({
+      method: 'GET',
+      url: `/v1/inventory/count-sheet?branchId=${other}`,
+      headers: h,
+    });
+    expect(sheetOwn.statusCode, sheetOwn.body).toBe(200);
+    // The owner wastes in the main branch; the keeper's report does not show it, and asking for it is refused
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/v1/stocktakes',
+          headers: as(store),
+          payload: {
+            date: '2026-10-30',
+            lines: [{ variantId: milk, countedQty: 9000, wasteReason: 'عينة' }],
+          },
+        })
+      ).statusCode,
+    ).toBe(201);
+    const report = await app.inject({
+      method: 'GET',
+      url: '/v1/reports/waste?from=2026-10-01&to=2026-10-31',
+      headers: h,
+    });
+    expect(report.statusCode, report.body).toBe(200);
+    expect(report.json<WasteReport>().rows).toEqual([]);
+    const asked = await app.inject({
+      method: 'GET',
+      url: `/v1/reports/waste?from=2026-10-01&to=2026-10-31&branchId=${await firstBranch(store.tenantId)}`,
+      headers: h,
+    });
+    expect(asked.statusCode).toBe(403);
+  });
+
+  it('a waste at the till records which device made it', async () => {
+    const { store, milk } = await world();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/device/waste',
+      headers: { authorization: store.device.authorization },
+      payload: {
+        id: wasteId(9),
+        actorId: store.userId,
+        reason: 'كسر',
+        lines: [{ variantId: milk, qty: 1000 }],
+      },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    const rows = await ownerDb()<{ device_id: string | null; user_id: string }[]>`
+      select device_id, user_id from audit_logs where action = 'stocktake.till_waste'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.device_id).not.toBeNull();
+    expect(rows[0]!.user_id).toBe(store.userId);
   });
 });

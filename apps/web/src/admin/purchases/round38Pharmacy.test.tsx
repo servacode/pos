@@ -346,7 +346,7 @@ describe('«النواقص»', () => {
     });
     renderApp('/shortages');
     const list = await screen.findByRole('list', { name: 'نواقص مستودع الشفاء' });
-    expect(within(list).getByText('انطلبت بPO-2026-000001')).toBeInTheDocument();
+    expect(within(list).getByText(/انطلبت بالطلبية PO-2026-000001 · 10/)).toBeInTheDocument();
     expect(list).toHaveTextContent(/منتهي أو موقوف\s*20/);
     // The primary «اطلب من المورد» is gone: only «اطلب مرة تانية» is left
     expect(screen.queryByRole('button', { name: 'اطلب من المورد' })).toBeNull();

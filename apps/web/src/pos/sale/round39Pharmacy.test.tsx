@@ -94,6 +94,23 @@ describe('a blocked line and the alternative chosen for it', () => {
     expect(await screen.findByRole('region', { name: 'الدفع' })).toBeInTheDocument();
   });
 
+  it('an expired line that only waits for the manager’s code is replaced too (the store allows it with a code)', async () => {
+    const s = sets([EXPIRED]);
+    s.settings = s.settings.map((x) => ({
+      ...x,
+      pharmacy: { ...PHARMACY, allowExpiredWithCode: true },
+    }));
+    const { user } = await saleScreen({ sets: s });
+    await scan(user, PRODUCTS.tea.barcode!.code);
+    await user.click(screen.getByRole('button', { name: 'بدائل الصنف' }));
+    const panel = await screen.findByRole('region', { name: 'بدائل متوفرة' });
+    expect(within(panel).getByText(/يحل محل «أموكسيل 500»/)).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: /أوسباموكس 500/ }));
+    const cart = await screen.findByRole('list', { name: 'أسطر الفاتورة' });
+    expect(within(cart).getByText(/أوسباموكس 500/)).toBeInTheDocument();
+    expect(within(cart).queryByText(/أموكسيل 500/)).toBeNull();
+  });
+
   it('keeps a line that is not blocked when an alternative is added beside it', async () => {
     const { user } = await saleScreen({
       sets: sets([{ batchNo: 'G-1', expiry: '2099-01-31', qty: 3000, blocked: false }]),

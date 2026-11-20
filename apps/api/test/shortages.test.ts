@@ -226,6 +226,17 @@ describe('«النواقص»', () => {
     expect(audits[0]!.n).toBe(1);
   });
 
+  it('stays open until what was received (in its branch) covers the asked quantity', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const a = await medicine(store, { nameAr: 'دواء ج' });
+    await ask(store, { id: uuidv7(), variantId: a.variantId, name: a.name, qty: 5 * BOX });
+    await receive(store, s.id, a.variantId, 2);
+    expect((await list(store)).items.map((r) => r.name)).toEqual(['دواء ج']);
+    await receive(store, s.id, a.variantId, 3);
+    expect((await list(store)).items).toEqual([]);
+  });
+
   it('is for whoever manages purchases only', async () => {
     const store = await openStore(app);
     const cashier = await staffUser(app, { ...store, branchId: '' }, 'cashier', '0955000111');
@@ -410,13 +421,66 @@ describe('a supplier return from the batches (round 39)', () => {
     expect(back.statusCode, back.body).toBe(201);
     expect(back.json<{ amountMinor: number }>().amountMinor).toBe(96_000);
   });
+
+  it('does not take one batch of an invoice twice: earlier returns count per batch', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store, { nameAr: 'سيتال 2' });
+    const bought = await app.inject({
+      method: 'POST',
+      url: '/v1/purchases',
+      headers: as(store),
+      payload: {
+        supplierId: s.id,
+        date: '2026-10-28',
+        payment: 'credit',
+        lines: [
+          {
+            variantId: med.variantId,
+            qty: 4 * BOX,
+            costMinor: 36_000,
+            batchNo: 'Y-1',
+            expiryDate: '2020-01-01',
+          },
+          {
+            variantId: med.variantId,
+            qty: 6 * BOX,
+            costMinor: 60_000,
+            batchNo: 'Y-2',
+            expiryDate: '2020-02-01',
+          },
+        ],
+      },
+    });
+    const inv = bought.json<PurchaseDetail>();
+    const back = (qty: number, batchNo: string, expiryDate: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/supplier-returns',
+        headers: as(store),
+        payload: {
+          supplierId: s.id,
+          date: '2026-10-30',
+          refund: 'credit',
+          purchaseId: inv.id,
+          lines: [{ variantId: med.variantId, qty, batchNo, expiryDate }],
+        },
+      });
+    expect((await back(3 * BOX, 'Y-1', '2020-01-01')).statusCode).toBe(201);
+    // 3 + 3 > the 4 that batch came with, though the item's total on the invoice (10) still has room
+    const twice = await back(3 * BOX, 'Y-1', '2020-01-01');
+    expect(twice.statusCode, twice.body).toBe(400);
+    // The one piece left of it, and the other batch, still go
+    expect((await back(1 * BOX, 'Y-1', '2020-01-01')).statusCode).toBe(201);
+    expect((await back(6 * BOX, 'Y-2', '2020-02-01')).statusCode).toBe(201);
+  });
 });
 
 describe('an expired batch sold', () => {
   async function soldWith(
     store: Store,
     med: { productId: string; variantId: string; name: string },
-    approved: boolean,
+    approved: boolean | string,
   ) {
     const doc = documents(store.device);
     const open = doc('shift_open', shiftOpen(store.userId));
@@ -436,7 +500,7 @@ describe('an expired batch sold', () => {
       ? {
           ...payload,
           batchApproval: {
-            userId: store.userId,
+            userId: typeof approved === 'string' ? approved : store.userId,
             method: 'pin',
             at: '2026-10-30T08:59:00.000Z',
             offline: false,
@@ -463,6 +527,7 @@ describe('an expired batch sold', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.entity_id).toBe(sold.id);
     expect(rows[0]!.data.approvedBy).toBe(store.userId);
+    expect((rows[0]!.data as { approverVerified?: boolean }).approverVerified).toBe(true);
     expect(rows[0]!.data.batches).toEqual([
       { variantId: med.variantId, batchNo: 'OLD-1', expiry: '2026-10-25', qty: BOX },
     ]);
@@ -477,6 +542,24 @@ describe('an expired batch sold', () => {
     const again = await ownerDb()<{ n: number }[]>`
       select count(*)::int as n from audit_logs where action = 'sale.expired_batch'`;
     expect(again[0]!.n).toBe(1);
+  });
+
+  it('keeps the sale but records that the claimed approver is not a real manager of the store', async () => {
+    const store = await openStore(app);
+    const s = await supplier(store);
+    const med = await medicine(store);
+    await receive(store, s.id, med.variantId, 5, 'OLD-1', '2026-10-25');
+    const stranger = uuidv7();
+    const sold = await soldWith(store, med, stranger);
+    const rows = await ownerDb()<{ data: { approvedBy: string; approverVerified: boolean } }[]>`
+      select data from audit_logs where action = 'sale.expired_batch'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.data.approvedBy).toBe(stranger);
+    expect(rows[0]!.data.approverVerified).toBe(false);
+    const [inv] = await ownerDb()<
+      { n: number }[]
+    >`select count(*)::int as n from invoices where id = ${sold.id}`;
+    expect(inv!.n).toBe(1);
   });
 
   it('is audited with no approver when the document carries none', async () => {

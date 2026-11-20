@@ -1,4 +1,5 @@
 import type { CountSheet, CountSheetItem, StocktakeInput } from '@serva/core';
+import { isoDay } from '../../lib/dates';
 
 /**
  * The phone's stocktake (round 38, #29): a count made on the shelves with no connection needed. The sheet (what
@@ -13,6 +14,8 @@ export interface CountDraft {
   categoryId: string | null;
   /** When the sheet was downloaded: what «the books say» is as of then */
   sheetAt: string;
+  /** The business day the count was made on (the store's time zone, from the sheet's time), kept so a late send keeps it */
+  date?: string;
   /** The counted pieces per item, thousandths; an item never counted has no entry */
   counts: Record<string, number>;
   /** The order the items were first counted in: the list on screen follows it, so a row never moves while typing */
@@ -45,12 +48,13 @@ export function findInSheet(sheet: Pick<CountSheet, 'items'>, raw: string): Scan
   return null;
 }
 
-export function newDraft(sheet: CountSheet, id: string): CountDraft {
+export function newDraft(sheet: CountSheet, id: string, timeZone = 'Asia/Damascus'): CountDraft {
   return {
     id,
     branchId: sheet.branchId,
     categoryId: sheet.categoryId,
     sheetAt: sheet.at,
+    date: isoDay(Date.parse(sheet.at), timeZone),
     counts: {},
     queued: false,
     restZero: false,
@@ -141,7 +145,10 @@ export function stocktakeOf(
   return {
     id: draft.id,
     branchId: draft.branchId,
-    date,
+    // The day the count was made, not the day the phone got a connection; the sheet's time lets the server
+    // leave out of the count what was sold since
+    date: draft.date ?? date,
+    countedAt: draft.sheetAt,
     note: draft.categoryId ? 'جرد بالهاتف لجزء من المخزون' : 'جرد بالهاتف',
     lines: linesOf(draft, sheet).map((l) => ({ variantId: l.item.variantId, countedQty: l.counted })),
   };

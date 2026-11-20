@@ -104,7 +104,7 @@ export function StocktakePhonePage() {
     setError(null);
     try {
       const got = await getCountSheet(branchId || undefined, categoryId || undefined);
-      const fresh = newDraft(got, uuidv7());
+      const fresh = newDraft(got, uuidv7(), me.tenant.timezone);
       setRoomWarning(!save(fresh, got));
       setSheet(got);
       setDraft(fresh);
@@ -341,7 +341,10 @@ export function StocktakePhonePage() {
                             key={`${l.item.variantId}:${l.counted}`}
                             onBlur={(e) => {
                               const qty = countOf(e.target.value, l.item.allowsFraction);
-                              if (qty !== null) keep(setCount(draft, l.item.variantId, qty));
+                              if (qty === null) return;
+                              keep(setCount(draft, l.item.variantId, qty));
+                              // The «last scanned» note follows the figure typed by hand
+                              setLast((was) => (was?.name === l.item.name ? { ...was, counted: qty } : was));
                             }}
                           />
                         </li>

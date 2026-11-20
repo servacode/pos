@@ -21,10 +21,15 @@ import { audit } from './audit';
  * suggestion (purchase-orders.ts) reads the same open requests, so the shortage list feeds it.
  */
 
-/** The open requests of a variant: not resolved, and no purchase of it received since the request */
-export const OPEN_REQUEST = sql`r.resolved_at is null and (r.variant_id is null or not exists (
-  select 1 from purchase_lines pl join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
-  where pl.tenant_id = r.tenant_id and pl.variant_id = r.variant_id and pu.created_at > r.created_at))`;
+/**
+ * The open requests of a variant: not resolved, and not yet covered by a purchase received in the request's own
+ * branch after it whose received quantity reaches what was asked for (a purchase of a few pieces for another
+ * branch, or of fewer pieces than the customer wanted, leaves it open).
+ */
+export const OPEN_REQUEST = sql`r.resolved_at is null and (r.variant_id is null or coalesce((
+  select sum(pl.qty) from purchase_lines pl join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
+  where pl.tenant_id = r.tenant_id and pl.variant_id = r.variant_id and pu.branch_id = r.branch_id
+    and pu.created_at > r.created_at), 0) < r.qty)`;
 
 /**
  * What an item holds that cannot be sold: the balance of each batch (per branch, damaged location left out) that is

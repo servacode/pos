@@ -152,7 +152,7 @@ export function SaleDone({
             <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
               قُرّب المبلغ إلى{' '}
               <ExactMoney
-                minor={sale.cashRounding.dueMinor}
+                minor={Math.abs(sale.cashRounding.dueMinor)}
                 currency={sale.cashRounding.currency}
                 className="font-semibold text-ink"
               />{' '}

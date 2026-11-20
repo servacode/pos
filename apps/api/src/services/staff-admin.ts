@@ -439,6 +439,8 @@ export async function setStaffActive(
       },
       meta,
     );
+    // A rep phone lists only people the server lets in: it downloads the staff sets again (devices.ts)
+    await resyncRepPhoneStaff(tx);
     const [member] = await loadMembers(tx, id);
     return { member: member!, families: ended.map((s) => s.familyId) };
   });

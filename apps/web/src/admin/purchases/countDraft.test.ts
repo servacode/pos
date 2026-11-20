@@ -91,6 +91,19 @@ describe('the phone count draft', () => {
     expect(linesOf(d, sheet).map((l) => l.item.variantId)).toEqual(['v-rice', 'v-tea', 'v-milk']);
   });
 
+  it('takes the day the count was made in the store zone and sends the sheet time with it', () => {
+    // 22:30 UTC is already the next day in Damascus
+    const late = { ...sheet, at: '2026-11-18T22:30:00.000Z' };
+    const d = addCount(newDraft(late, 'id-day'), 'v-milk', 1000);
+    expect(d.date).toBe('2026-11-19');
+    // Sent the next week from another place: the day does not move, and the server learns the sheet's time
+    const body = stocktakeOf(d, late, '2026-11-26');
+    expect(body.date).toBe('2026-11-19');
+    expect(body.countedAt).toBe('2026-11-18T22:30:00.000Z');
+    // A zone behind UTC gives the day before
+    expect(newDraft(late, 'id-x', 'America/New_York').date).toBe('2026-11-18');
+  });
+
   it('keeps the draft and the sheet on the phone, and survives a full phone or a broken one', () => {
     const store = memory();
     const d = addCount(newDraft(sheet, 'id-3'), 'v-tea', 1000);

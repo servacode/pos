@@ -1415,7 +1415,9 @@ export function SaleScreen(props: SaleScreenProps) {
   const replacedLine =
     mode.kind === 'alternatives' &&
     mode.lineNo !== undefined &&
-    guard.blocks.some((b) => b.lineNo === mode.lineNo)
+    // (an expired line that only waits for the manager's code is replaced too: «بيع المنتهي برمز المدير»)
+    (guard.blocks.some((b) => b.lineNo === mode.lineNo) ||
+      guard.approvals.some((b) => b.lineNo === mode.lineNo && b.expiredQty > 0))
       ? cart.lines.find((l) => l.lineNo === mode.lineNo)
       : undefined;
   const payBlock: { text: string; go: () => void } | null = (() => {

@@ -57,6 +57,24 @@ describe('the WhatsApp receipt text (round 18)', () => {
     expect(text).toContain('قُرّب المبلغ إلى');
   });
 
+  it('puts the minus sign on the rounding difference only, never on the rounded amount of a refund', () => {
+    const refund = data();
+    (refund.doc.payload as { cashRounding?: unknown }).cashRounding = {
+      currency: 'SYP',
+      stepMinor: 500,
+      exactMinor: -6_500,
+      dueMinor: -7_000,
+      roundingMinor: -500,
+    };
+    const line = receiptText(refund)
+      .split('\n')
+      .find((l) => l.includes('قُرّب المبلغ إلى'))!;
+    const [rounded, diff] = line.split('(فرق');
+    expect(rounded).not.toContain('−');
+    expect(rounded).not.toContain('-');
+    expect(diff).toContain('−');
+  });
+
   it('says none of them when the sale has none', () => {
     const plain = data();
     (plain.doc.payload as { lines: object[] }).lines = [

@@ -136,7 +136,10 @@ export function ShortagesPage() {
                       </span>
                       <Badge tone={REASON[r.reason].tone}>{REASON[r.reason].text}</Badge>
                       {isOrdered(r) ? (
-                        <Badge tone="success">{`انطلبت ب${(r.orderNumbers ?? []).join('، ')}`}</Badge>
+                        <Badge tone="success">
+                          {`انطلبت بالطلبية ${(r.orderNumbers ?? []).join('، ')}`}
+                          {r.onOrderQty ? ` · ${formatQuantity(r.onOrderQty, digits)}` : ''}
+                        </Badge>
                       ) : null}
                       <span className="text-sm text-ink-muted">
                         {r.stockQty === null ? (

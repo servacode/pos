@@ -791,7 +791,13 @@ export function PaymentPanel({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-2 @3xl/pay:py-3">
+      <div
+        className={cn(
+          'min-h-0 flex-1 overflow-y-auto px-5 py-2 @3xl/pay:py-3',
+          // A phone: room under the last tile equal to the bar's height, so none of them sits behind it
+          phone && 'pb-16',
+        )}
+      >
         <div className="grid gap-4 @lg/pay:grid-cols-2 @lg/pay:grid-rows-[auto_1fr] @3xl/pay:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] @3xl/pay:gap-5">
           {/* How the customer pays, who the customer is, and the parts paid so far */}
           <div
@@ -874,7 +880,8 @@ export function PaymentPanel({
             {option.method === 'cash' && option.currency === base && dueHere !== remainingBase ? (
               <p role="status" aria-label="تقريب النقد" className="text-sm text-ink-muted">
                 قُرّب المبلغ إلى{' '}
-                <ExactMoney minor={dueHere} currency={base} className="font-semibold text-ink" /> (فرق{' '}
+                <ExactMoney minor={Math.abs(dueHere)} currency={base} className="font-semibold text-ink" />{' '}
+                (فرق{' '}
                 <bdi dir="ltr" className="num">
                   {dueHere < remainingBase ? '−' : '+'}
                   <Money

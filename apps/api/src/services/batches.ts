@@ -12,7 +12,7 @@ import {
 } from '@serva/core';
 import { batchBlocks, batchMovements, withTenant, type Database, type Transaction } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
-import { requirePermission } from '../auth/permissions';
+import { inScope, permissionScope, requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
@@ -247,7 +247,14 @@ export async function recordSaleBatches(
  */
 export async function auditExpiredSale(
   tx: Transaction,
-  entry: { tenantId: string; deviceId: string; invoiceId: string; date: string; cashierId: string },
+  entry: {
+    tenantId: string;
+    deviceId: string;
+    invoiceId: string;
+    date: string;
+    cashierId: string;
+    branchId?: string;
+  },
   lines: readonly SaleLineBatches[],
   approval: { userId: string; method: string; offline: boolean } | null | undefined,
 ): Promise<boolean> {
@@ -262,6 +269,15 @@ export async function auditExpiredSale(
       .map((a) => ({ variantId: line.variantId, batchNo: a.batchNo, expiry: a.expiry, qty: a.qty }));
   });
   if (expired.length === 0) return false;
+  // The sale stands either way; the audit says whether the approver the till named is a real, active user of the
+  // store who holds the manager's permission here (an offline till cannot check it, so the server does, after)
+  let approverVerified: boolean | null = null;
+  if (approval) {
+    const scope = await permissionScope(tx, approval.userId, 'sale.discount_over_limit');
+    approverVerified = entry.branchId
+      ? inScope(scope, entry.branchId)
+      : scope.all || scope.branchIds.size > 0;
+  }
   await audit(
     tx,
     {
@@ -274,6 +290,7 @@ export async function auditExpiredSale(
       entityId: entry.invoiceId,
       data: {
         approvedBy: approval?.userId ?? null,
+        approverVerified,
         method: approval?.method ?? null,
         offline: approval?.offline ?? null,
         cashierId: entry.cashierId,

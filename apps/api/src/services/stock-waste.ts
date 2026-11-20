@@ -18,6 +18,7 @@ import { forbidden, permissionScope, requirePermission } from '../auth/permissio
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
+import { audit } from './audit';
 import { batchPool } from './batches';
 import { uuidArray } from './costing';
 import { assertDateOpen } from './period-close';
@@ -87,7 +88,7 @@ export function tillWaste(
     );
     const date = businessDateOf(now, zone?.timezone ?? 'Asia/Damascus');
     await assertDateOpen(tx, device.tenantId, date);
-    return createStocktakeIn(
+    const posted = await createStocktakeIn(
       tx,
       auth,
       {
@@ -106,6 +107,22 @@ export function tillWaste(
       },
       meta,
     );
+    // Which till made the waste, and under whose name: the count's own entry carries only the user
+    await audit(
+      tx,
+      {
+        tenantId: device.tenantId,
+        userId: input.actorId,
+        actorType: 'device',
+        deviceId: device.deviceId,
+        action: 'stocktake.till_waste',
+        entity: 'stocktake',
+        entityId: posted.id,
+        data: { branchId, reason: input.reason, number: posted.number },
+      },
+      meta,
+    );
+    return posted;
   });
 }
 
@@ -124,6 +141,10 @@ export function wasteReport(
       await permissionScope(tx, auth.userId, 'reports.financial'),
     ];
     if (!mayRead.some((scope) => scope.all || scope.branchIds.size > 0)) throw forbidden();
+    // Only the branches where one of those permissions is held (every branch when one is held everywhere)
+    const everywhere = mayRead.some((scope) => scope.all);
+    const allowed = [...new Set(mayRead.flatMap((scope) => [...scope.branchIds]))];
+    if (query.branchId && !everywhere && !allowed.includes(query.branchId)) throw forbidden();
     if (query.from > query.to) throw invalid({ from: 'تاريخ البداية بعد تاريخ النهاية' });
     // A line is a waste when it names a reason; a document an older version recorded says «هدر» in its note
     const found = await tx.execute<{
@@ -142,6 +163,7 @@ export function wasteReport(
       from stocktakes s, jsonb_array_elements(s.lines) l
       where s.business_date between ${query.from} and ${query.to}
         ${query.branchId ? sql`and s.branch_id = ${query.branchId}` : sql``}
+        ${everywhere ? sql`` : sql`and s.branch_id = any(${uuidArray(allowed)})`}
         and (l->>'diffQty')::bigint < 0
         and (nullif(l->>'reason', '') is not null or s.note like ${`${LEGACY_WASTE_NOTE}%`})
       order by s.business_date desc, s.number desc, l->>'name'
@@ -228,8 +250,12 @@ export function countSheet(
   now: Date,
 ): Promise<CountSheet> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'inventory.adjust');
     const branchId = await branchOf(tx, query.branchId);
+    await requirePermission(tx, auth.userId, 'inventory.adjust', branchId);
+    // The sheet's time is the database's clock, the one stock movements are stamped with: a count made against
+    // it (countedAt) then leaves out exactly what moved after it, whatever the app server's clock says
+    const [clock] = await tx.execute<{ at: Date | string }>(sql`select now() as at`);
+    const stamp = new Date(clock?.at ?? now).toISOString();
     const tree = await categoryTree(tx, query.categoryId);
     if (query.categoryId && !tree.list.some((c) => c.id === query.categoryId)) {
       throw new AppError(404, 'not_found', 'هذا التصنيف غير موجود.');
@@ -272,7 +298,7 @@ export function countSheet(
     return {
       branchId,
       categoryId: query.categoryId ?? null,
-      at: now.toISOString(),
+      at: stamp,
       items,
       categories: tree.list,
     };

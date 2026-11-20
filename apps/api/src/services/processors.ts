@@ -247,6 +247,7 @@ async function processSale({ tx, device, doc }: DocumentContext) {
       invoiceId: doc.id,
       date: doc.businessDate,
       cashierId: sale.cashierId,
+      branchId: device.branchId,
     },
     sale.lines,
     sale.batchApproval,

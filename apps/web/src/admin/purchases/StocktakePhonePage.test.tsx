@@ -102,6 +102,22 @@ describe('«الجرد بالهاتف»', () => {
     expect(localStorage.getItem('serva.count.draft')).toBeNull();
   });
 
+  it('the last-scanned note follows a figure typed by hand', async () => {
+    mockFetch({ ...baseRoutes, 'GET /v1/inventory/count-sheet': () => ({ status: 200, body: sheet }) });
+    const { user } = renderApp('/inventory/count');
+    await user.click(await screen.findByRole('button', { name: 'حمّل قائمة الجرد' }));
+    await user.type(await screen.findByLabelText('باركود أو اسم صنف'), '6281000000011{Enter}');
+    const note = await screen.findByText('حليب 1 لتر', { selector: 'b' });
+    expect(note.closest('p')).toHaveTextContent('1');
+    const field = await screen.findByLabelText('المعدود');
+    await user.clear(field);
+    await user.type(field, '7');
+    await user.tab();
+    await waitFor(() =>
+      expect(screen.getByText('حليب 1 لتر', { selector: 'b' }).closest('p')).toHaveTextContent('7'),
+    );
+  });
+
   it('a barcode that is not in the sheet is said so and counts nothing', async () => {
     mockFetch({ ...baseRoutes, 'GET /v1/inventory/count-sheet': () => ({ status: 200, body: sheet }) });
     const { user } = renderApp('/inventory/count');

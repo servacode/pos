@@ -60,12 +60,13 @@ export interface PullScope {
 }
 
 /**
- * Who a device's staff picker may list (round 38). A van's phone belongs to its rep, so the people it lists are the
+ * Who a device's staff picker may list (round 38). A rep's phone belongs to its rep, so the people it lists are the
  * ones the server lets in (services/devices.ts › mayUseRepPhone): the van's active rep, a manager and the owner.
- * Any other device lists everyone, as ever. `userId` is the user's id column of the set being pulled.
+ * Any other device (a till on a van branch too) lists everyone, as ever. `userId` is the user's id column of the set being pulled.
  */
 const staffOfDevice = (device: PullScope, userId: SQL | PgColumn, tenantId: SQL | PgColumn) => sql`(
-  not exists (select 1 from branches b where b.tenant_id = ${tenantId} and b.id = ${device.branchId}::uuid and b.kind = 'van')
+  not exists (select 1 from devices d where d.tenant_id = ${tenantId} and d.id = ${device.deviceId ?? null}::uuid
+              and d.kind = 'rep_phone')
   or exists (select 1 from sales_reps sr where sr.tenant_id = ${tenantId} and sr.user_id = ${userId} and sr.status = 'active'
              and (sr.van_branch_id = ${device.branchId}::uuid
                   or (${device.deviceId ?? null}::uuid is not null and sr.device_id = ${device.deviceId ?? null}::uuid)))
