@@ -4,7 +4,7 @@ import type { OutboxEntry } from '@serva/sync';
 import type { OnlineOrderRow } from '@serva/core/contracts/shop';
 import { memoryLocal } from '../../offline/local';
 import { ids, PINS, posSets, PRODUCTS, staffServer } from '../../test/pos';
-import { openShift, renderPos, scan } from '../../test/renderPos';
+import { openShift, renderPos, scan, catalogueReady } from '../../test/renderPos';
 import { planBatches, batchGuard } from './batches';
 import { EMPTY_CART, type Cart, type CartLine } from './cart';
 import { reservedForOthers } from './reserved';
@@ -182,7 +182,7 @@ describe('decision 15: «أضف صنف جديد» at the till', () => {
     const list = await screen.findByRole('list', { name: 'الموظفون' });
     await user.click(within(list).getByRole('button', { name: /سامر/ }));
     await user.keyboard(PINS[ids.samer]!);
-    await screen.findByRole('list', { name: 'الأصناف' });
+    await catalogueReady();
   }
 
   /** The store's manager may manage the catalog; the cashier may not */
