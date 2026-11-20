@@ -67,7 +67,7 @@ describe('«كود الخصم» on a promotion', () => {
     await user.clear(within(form).getByLabelText('الكود (اختياري)'));
     await user.type(within(form).getByLabelText('الكود (اختياري)'), 'summer10');
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
-    const list = await screen.findByRole('list', { name: 'العروض' });
+    const list = await screen.findByRole('table', { name: 'العروض' });
     expect(await within(list).findByText('SUMMER10')).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/promotions').at(-1)?.body).toMatchObject({ couponCode: 'summer10' });
   });

@@ -62,6 +62,8 @@ export const purchaseOrderLineInput = z.object({
 });
 
 const orderFields = {
+  /** Round 44: the order's own id, made by the form (a retry answers the order already made) */
+  id: uuidSchema.optional(),
   supplierId: uuidSchema,
   branchId: uuidSchema.optional(),
   expectedDate: isoDateSchema.nullable().optional(),

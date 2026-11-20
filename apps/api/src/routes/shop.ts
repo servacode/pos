@@ -11,6 +11,7 @@ import {
   shopCodeInput,
   shopCouponQuery,
   shopOrderInput,
+  shopQuoteInput,
   stockAlertInput,
   uuidSchema,
 } from '@serva/core';
@@ -18,6 +19,7 @@ import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
+import { enforceLimits } from '../http/rate-limit';
 import {
   getOnlineStore,
   listOnlineOrders,
@@ -43,6 +45,7 @@ import {
   setOrderDelivery,
   setStoreImage,
   shopCoupon,
+  shopQuote,
   type StoreImageSlot,
 } from '../services/shop-extras';
 import { parseBody } from './validation';
@@ -61,7 +64,11 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   };
 
   // ─── Public: anyone with the link ────────────────────────────────────────
-  app.get('/v1/shop/:slug', async (request) => shopHome(app.db, slugOf(request.params)));
+  // The catalogue is the same for everyone: a customer's browser (and a shared link's preview) may keep it half a minute
+  app.get('/v1/shop/:slug', async (request, reply) => {
+    reply.header('cache-control', 'public, max-age=30');
+    return shopHome(app.db, slugOf(request.params));
+  });
   app.get('/v1/shop/:slug/products/:id', async (request) =>
     shopProduct(app.db, slugOf(request.params), idOf(request.params, 'هذا الصنف غير موجود.')),
   );
@@ -103,8 +110,21 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/v1/shop/:slug/orders/code',
     { config: { rateLimit: { max: 5, timeWindow: 60_000 } } },
-    async (request) =>
-      requestShopCode(app, slugOf(request.params), parseBody(shopCodeInput, request.body), meta(request)),
+    async (request, reply) => {
+      const input = parseBody(shopCodeInput, request.body);
+      // A message costs money and reaches a stranger: a few per number, and a ceiling per store
+      await enforceLimits(request, reply, 10 * 60_000, [{ key: `shop-code:phone:${input.phone}`, max: 4 }]);
+      await enforceLimits(request, reply, 60 * 60_000, [
+        { key: `shop-code:store:${slugOf(request.params)}`, max: 120 },
+      ]);
+      return requestShopCode(app, slugOf(request.params), input, meta(request));
+    },
+  );
+  // What the cart really costs, priced by the server (the offers and the code, as the order will be)
+  app.post(
+    '/v1/shop/:slug/quote',
+    { config: { rateLimit: { max: 30, timeWindow: 60_000 } } },
+    async (request) => shopQuote(app.db, slugOf(request.params), parseBody(shopQuoteInput, request.body)),
   );
   app.get('/v1/shop/:slug/orders/:token', async (request) =>
     shopOrderTrack(
@@ -144,7 +164,7 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   });
   app.get('/v1/online-orders', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
-    return listOnlineOrders(app.db, request.auth, parseBody(onlineOrderListQuery, request.query).status);
+    return listOnlineOrders(app.db, request.auth, parseBody(onlineOrderListQuery, request.query));
   });
   app.get('/v1/online-orders/cod', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();

@@ -312,7 +312,7 @@ describe('catalog pull sets', () => {
       headers: { authorization: `Bearer ${body.accessToken}` },
       payload: {
         version: tea.version,
-        variants: [{ id: tea.variants[0]!.id, price: { currency: 'SYP', priceMinor: 1 } }],
+        variants: [{ id: tea.variants[0]!.id, price: { currency: 'SYP', priceMinor: 4_600_000 } }],
       },
     });
     await ownerDb()`update tenants set name = 'سوبرماركت الفرات' where id = ${body.tenant.id}`;
@@ -323,7 +323,7 @@ describe('catalog pull sets', () => {
       headers: { authorization: device.authorization },
     });
     const next = res.json<PullResponse>();
-    expect(next.sets.prices!.upserts.map((p) => p.priceMinor)).toEqual([1]);
+    expect(next.sets.prices!.upserts.map((p) => p.priceMinor)).toEqual([4_600_000]);
     expect(next.sets.variants!.upserts).toEqual([]);
     expect(next.sets.barcodes!.upserts).toEqual([]);
     expect(next.sets.settings!.upserts.map((s) => s.storeName)).toEqual(['سوبرماركت الفرات']);

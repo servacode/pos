@@ -1,0 +1,446 @@
+/*
+ * The Customers section (الزبائن، الأقساط، الرسائل): the pieces the Sales stylesheet does not have.
+ * Loaded only by the lazy pages of this section, always under the `.sx` scope of SalesPage, so it
+ * takes the same tokens and the same rhythm (4 8 12 16 24 32, radii 8/10/16).
+ */
+
+/* a strip of three figures: the first is the one to read */
+.sx-strip.cx3 {
+  grid-template-columns: 1.3fr 1fr 1fr;
+}
+.cx-sub {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-subtle);
+}
+.cx-zero {
+  color: var(--ink-subtle);
+  font-weight: 400;
+}
+
+/* page tabs: links that look like a segmented underline */
+.cx-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.cx-tabs::-webkit-scrollbar {
+  display: none;
+}
+.cx-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cx-tab:hover {
+  color: var(--ink);
+}
+.cx-tab[aria-selected='true'],
+.cx-tab[aria-current='page'] {
+  color: var(--brand-ink);
+  border-bottom-color: var(--brand);
+}
+.cx-tab:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+.cx-tab .cnt {
+  font-size: 12px;
+  min-width: 20px;
+  height: 20px;
+  line-height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  text-align: center;
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+}
+
+/* name cell: avatar and the name with what is under it */
+.cx-who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.cx-who .nm {
+  font-weight: 600;
+  color: var(--ink);
+}
+.cx-who a.nm:hover {
+  color: var(--brand-ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.cx-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+/* customer page: hero balance beside the facts, the statement under it */
+.cx-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  gap: 24px;
+  align-items: start;
+}
+.cx-side {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.cx-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.cx-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px;
+}
+.cx-hero .lbl {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-muted);
+}
+.cx-hero .big {
+  font-size: 40px;
+  line-height: 48px;
+  font-weight: 700;
+}
+.cx-hero .big [data-money-unit] {
+  font-size: 16px;
+}
+.cx-hero .owe {
+  color: var(--warning-ink);
+}
+.cx-hero .over {
+  color: var(--danger-ink);
+}
+.cx-hero .cred {
+  color: var(--success-ink);
+}
+.cx-meter {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+.cx-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--brand);
+}
+.cx-meter.warn i {
+  background: var(--warning);
+}
+.cx-meter.bad i {
+  background: var(--danger);
+}
+.cx-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  min-height: 32px;
+}
+.cx-line dt {
+  color: var(--ink-muted);
+}
+.cx-line dd {
+  margin: 0;
+  font-weight: 600;
+}
+.cx-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cx-sizes li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 4px 10px;
+  background: var(--surface-muted);
+}
+.cx-sizes li.top {
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+.cx-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 24px;
+  margin: 0;
+}
+.cx-facts dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+.cx-facts dd {
+  margin: 2px 0 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cx-notes {
+  margin: 16px 0 0;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--ink-muted);
+}
+.cx-inv {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cx-inv li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+/* a statement line as a card on a phone */
+.cx-stm {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cx-stm li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 12px 16px;
+}
+.cx-stm li + li {
+  border-top: 1px solid var(--line);
+}
+.cx-stm .what {
+  font-weight: 600;
+}
+.cx-stm .num {
+  white-space: nowrap;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.cx-stm .end {
+  text-align: end;
+}
+.cx-stm .row2 {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+.cx-more {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* a bar of actions that stays at the bottom of a phone screen */
+.cx-dock {
+  display: none;
+}
+
+/* the instalment plan: its facts */
+.cx-plan {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px 24px;
+  margin: 0;
+}
+.cx-plan dt {
+  font-size: 12px;
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+.cx-plan dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+.cx-late {
+  color: var(--danger-ink);
+  font-size: 12px;
+}
+.cx-ok {
+  color: var(--success-ink);
+}
+.cx-icbtn {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  color: var(--brand-ink);
+}
+.cx-icbtn:hover {
+  background: var(--brand-soft);
+}
+.cx-form {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.cx-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+}
+.cx-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+.cx-sec {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: 16px 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+.cx-sec h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+.cx-sec p {
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+}
+.cx-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+.cx-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+.cx-bubble {
+  background: var(--brand-soft);
+  color: var(--ink);
+  border-radius: 16px 16px 4px 16px;
+  padding: 12px 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cx-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+.cx-bar i {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+}
+.cx-pager {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 1023px) {
+  .cx-head,
+  .cx-compose {
+    grid-template-columns: 1fr;
+  }
+  .cx-side {
+    order: -1;
+  }
+  .cx-sec {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 639px) {
+  .sx-strip.cx3 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sx-strip.cx3 > div:first-child {
+    grid-column: 1 / -1;
+  }
+  .cx-hero {
+    padding: 16px;
+  }
+  .cx-hero .big {
+    font-size: 32px;
+    line-height: 40px;
+  }
+  .cx-facts,
+  .cx-grid2,
+  .cx-grid3 {
+    grid-template-columns: 1fr;
+  }
+  .cx-form {
+    padding: 16px;
+  }
+  .cx-dock {
+    display: flex;
+    gap: 8px;
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding: 12px 0;
+    background: var(--canvas);
+    border-top: 1px solid var(--line);
+  }
+  .cx-dock > * {
+    flex: 1 1 0;
+  }
+}
+
+/* a fact said under the name only where its own column is hidden (under 1280px) */
+@media (min-width: 1280px) {
+  .cx-lt-lg {
+    display: none;
+  }
+}
+.cx-inv .sx-st {
+  width: fit-content;
+  flex: none;
+}
+.cx-inv li {
+  border: 0;
+}

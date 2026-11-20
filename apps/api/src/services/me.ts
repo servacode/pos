@@ -66,11 +66,17 @@ export async function loadMe(
     const granted = new Set(roleRows.flatMap((r) => r.permissions));
     const permissions = ALL_PERMISSIONS.filter((p): p is Permission => granted.has(p));
 
-    const branchRows = await tx
+    const allBranchRows = await tx
       .select({ id: branches.id, code: branches.code, name: branches.name })
       .from(branches)
       .where(and(eq(branches.isActive, true), eq(branches.kind, 'store')))
       .orderBy(branches.code);
+    // A user whose every role is given for one branch only sees those branches, not the whole chain
+    const limitedTo =
+      roleRows.length > 0 && roleRows.every((r) => r.branchId !== null)
+        ? new Set(roleRows.map((r) => r.branchId))
+        : null;
+    const branchRows = limitedTo ? allBranchRows.filter((b) => limitedTo.has(b.id)) : allBranchRows;
 
     const s = sub.subscription;
     const periodEnd = s.status === 'trialing' ? s.trialEndsAt : s.currentPeriodEnd;

@@ -381,7 +381,7 @@ describe('coupon codes', () => {
       app.inject({ method: 'GET', url: `/v1/shop/nour-fashion/coupon?code=${encodeURIComponent(code)}` });
     const ok = await check('Summer10');
     expect(ok.statusCode, ok.body).toBe(200);
-    expect(ok.json<ShopCoupon>()).toEqual({ name: 'خصم الصيف', percentBp: 1000 });
+    expect(ok.json<ShopCoupon>()).toEqual({ name: 'خصم الصيف', percentBp: 1000, kind: 'percent' });
     expect((await check('NOPE')).statusCode).toBe(400);
     expect((await check('')).statusCode).toBe(400);
 
@@ -418,7 +418,7 @@ describe('coupon codes', () => {
     ).toBe(400);
     await coupon(store, { name: 'مفتوح', couponCode: 'OPEN5', percentBp: 500 });
     const ok = await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion/coupon?code=OPEN5' });
-    expect(ok.json<ShopCoupon>()).toEqual({ name: 'مفتوح', percentBp: null });
+    expect(ok.json<ShopCoupon>()).toEqual({ name: 'مفتوح', percentBp: null, kind: 'percent' });
     const placed = await placeOrder(p.variant, { coupon: 'OPEN5' });
     expect(hasMoney(placed.json())).toBe(false);
     expect(placed.json<ShopOrderPlaced>().message).not.toMatch(/ل\.س|SYP|\d{3},/);
@@ -774,5 +774,196 @@ describe('the price-change history', () => {
     const b = await testStore(app, '0966000111');
     expect((await history(b)).items).toEqual([]);
     expect((await history(a)).items).toHaveLength(1);
+  });
+});
+
+describe('round 44: what the customer is told, what a code is worth, who decides', () => {
+  const promo = (store: Pick<Store, 'accessToken'>, extra: Record<string, unknown> = {}) =>
+    app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: as(store),
+      payload: { name: 'عرض', kind: 'percent', percentBp: 1000, scope: 'all', ...extra },
+    });
+  const quote = (lines: { variantId: string; qty: number }[], coupon: string | null) =>
+    app.inject({ method: 'POST', url: '/v1/shop/nour-fashion/quote', payload: { lines, coupon } });
+  type Refused = { error: { message: string; fields: Record<string, string> } };
+
+  it('puts the refusal in the alert itself, not only in the field', async () => {
+    const store = await testStore(app);
+    const p = await item(store, 'قميص كتان', 1);
+    await saveShop(store);
+    const tooMany = await placeOrder(p.variant, { lines: [{ variantId: p.variant, qty: 3 }] });
+    expect(tooMany.statusCode).toBe(400);
+    const body = tooMany.json<Refused>().error;
+    expect(body.message).toContain('المتوفر');
+    expect(body.fields['lines.0']).toBe(body.message);
+    const bad = await placeOrder(p.variant, { coupon: 'NOPE', lines: [{ variantId: p.variant, qty: 1 }] });
+    const badBody = bad.json<Refused>().error;
+    expect(badBody.message).toBe(badBody.fields.coupon);
+  });
+
+  it('quotes the code as the order will be priced: a better offer already on the line leaves it at nothing', async () => {
+    const store = await testStore(app);
+    const p = await item(store);
+    await saveShop(store);
+    // The shop's own 15% offer, and two codes: 10% (worse) and 20% (better)
+    expect((await promo(store, { name: 'تنزيلات', percentBp: 1500 })).statusCode).toBe(201);
+    expect((await promo(store, { name: 'عشرة', couponCode: 'TEN' })).statusCode).toBe(201);
+    expect((await promo(store, { name: 'عشرون', percentBp: 2000, couponCode: 'TWENTY' })).statusCode).toBe(
+      201,
+    );
+    const lines = [{ variantId: p.variant, qty: 2 }];
+    // 460,000 less 15% is 391,000 a piece
+    const plain = (await quote(lines, null)).json<{ subtotalMinor: number; discountMinor: number }>();
+    expect(plain).toMatchObject({ subtotalMinor: 782_000, discountMinor: 0 });
+    const ten = (await quote(lines, 'ten')).json<{ discountMinor: number; totalMinor: number }>();
+    expect(ten).toMatchObject({ discountMinor: 0, totalMinor: 782_000 });
+    const twenty = (await quote(lines, 'TWENTY')).json<{ discountMinor: number; totalMinor: number }>();
+    expect(twenty.discountMinor).toBe(782_000 - 736_000);
+    // ...and the order carries the very same total
+    const placed = await placeOrder(p.variant, { coupon: 'TWENTY' });
+    expect(placed.json<ShopOrderPlaced>().totalMinor).toBe(twenty.totalMinor);
+    expect((await quote(lines, 'WRONG')).statusCode).toBe(400);
+    await saveShop(store, { showPrices: false });
+    expect((await quote(lines, null)).json()).toMatchObject({ showPrices: false, totalMinor: 0 });
+  });
+
+  it('says what kind of offer a code opens, and refuses a code on an offer for some customers only', async () => {
+    const store = await testStore(app);
+    await item(store);
+    await saveShop(store);
+    const buyGet = await promo(store, {
+      kind: 'buy_get',
+      percentBp: null,
+      buyQty: 2,
+      getQty: 1,
+      couponCode: 'BGX',
+    });
+    expect(buyGet.statusCode).toBe(201);
+    const open = await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion/coupon?code=BGX' });
+    expect(open.json<ShopCoupon>().kind).toBe('buy_get');
+    const audience = await promo(store, { name: 'جملة', couponCode: 'WHOLE', priceTiers: ['wholesale'] });
+    expect(audience.statusCode).toBe(400);
+    expect(audience.json<Refused>().error.fields.couponCode).toBeTruthy();
+    const rep = await promo(store, { name: 'مندوب', couponCode: 'REP1', repOnly: true });
+    expect(rep.statusCode).toBe(400);
+    // A stopped offer with both is let through: an old row must still be stoppable
+    const old = await promo(store, { name: 'قديم', couponCode: 'OLD1', repOnly: true, archived: true });
+    expect(old.statusCode).toBe(201);
+  });
+
+  it('stops and restarts an offer without reading the rest of it, once per version', async () => {
+    const store = await testStore(app);
+    const made = (await promo(store)).json<{ id: string; version: number }>();
+    const stop = (version: number, archived: boolean) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/promotions/${made.id}/archive`,
+        headers: as(store),
+        payload: { version, archived },
+      });
+    const stopped = await stop(made.version, true);
+    expect(stopped.statusCode, stopped.body).toBe(200);
+    expect(stopped.json<{ archived: boolean }>().archived).toBe(true);
+    // The same click again with the old version: stale, not a second change
+    expect((await stop(made.version, true)).statusCode).toBe(409);
+    const again = await stop(stopped.json<{ version: number }>().version, false);
+    expect(again.json<{ archived: boolean }>().archived).toBe(false);
+    const cashier = await staffUser(app, store, 'cashier', '0955000555');
+    const denied = await app.inject({
+      method: 'POST',
+      url: `/v1/promotions/${made.id}/archive`,
+      headers: bearer(cashier.accessToken),
+      payload: { version: 1, archived: true },
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+
+  it('lets only a manager decide orders and see the couriers cash; a rep may look', async () => {
+    const store = await testStore(app);
+    const p = await item(store);
+    await saveShop(store);
+    await placeOrder(p.variant);
+    const [pending] = await orders(store, 'pending');
+    const rep = await staffUser(app, store, 'rep', '0955000666');
+    const list = await app.inject({
+      method: 'GET',
+      url: '/v1/online-orders',
+      headers: bearer(rep.accessToken),
+    });
+    expect(list.statusCode).toBe(200);
+    const decide = await app.inject({
+      method: 'POST',
+      url: `/v1/online-orders/${pending!.id}/status`,
+      headers: bearer(rep.accessToken),
+      payload: { status: 'accepted', version: pending!.version },
+    });
+    expect(decide.statusCode).toBe(403);
+    const cod = await app.inject({
+      method: 'GET',
+      url: '/v1/online-orders/cod',
+      headers: bearer(rep.accessToken),
+    });
+    expect(cod.statusCode).toBe(403);
+    expect(await orders(store, 'pending')).toHaveLength(1);
+  });
+
+  it('refuses to accept what the shelf cannot cover, unless told the pieces are coming', async () => {
+    const store = await testStore(app);
+    const p = await item(store, 'قميص كتان', 2);
+    await saveShop(store);
+    await placeOrder(p.variant, { lines: [{ variantId: p.variant, qty: 2 }] });
+    // Another order for the same two pieces: placing it is fine (a pending order holds nothing)
+    await placeOrder(p.variant, { lines: [{ variantId: p.variant, qty: 2 }], phone: '0944777888' });
+    const [second, first] = await orders(store, 'pending');
+    const take = (o: OnlineOrder, extra: Record<string, unknown> = {}) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/online-orders/${o.id}/status`,
+        headers: as(store),
+        payload: { status: 'accepted', version: o.version, ...extra },
+      });
+    expect((await take(first!)).statusCode).toBe(200);
+    const refused = await take(second!);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<Refused>().error.fields.stock).toContain('قميص كتان');
+    expect((await take(second!, { force: true })).statusCode).toBe(200);
+  });
+
+  it('pages the orders by a cursor and keeps the shop page cacheable', async () => {
+    const store = await testStore(app);
+    const p = await item(store, 'قميص كتان', 9);
+    await saveShop(store);
+    for (const phone of ['0944000001', '0944000002', '0944000003']) {
+      await placeOrder(p.variant, { phone, lines: [{ variantId: p.variant, qty: 1 }] });
+    }
+    const page = (cursor = '') =>
+      app
+        .inject({ method: 'GET', url: `/v1/online-orders?limit=2${cursor}`, headers: as(store) })
+        .then((r) => r.json<{ items: OnlineOrder[]; nextCursor: string | null }>());
+    const one = await page();
+    expect(one.items).toHaveLength(2);
+    expect(one.nextCursor).toBe('2');
+    const two = await page('&cursor=2');
+    expect(two.items).toHaveLength(1);
+    expect(two.nextCursor).toBeNull();
+    expect(new Set([...one.items, ...two.items].map((o) => o.id)).size).toBe(3);
+    const home = await app.inject({ method: 'GET', url: '/v1/shop/nour-fashion' });
+    expect(home.headers['cache-control']).toBe('public, max-age=30');
+  });
+
+  it('answers a repeated tap with the first order, and a different order with a new one', async () => {
+    const store = await testStore(app);
+    const p = await item(store, 'قميص كتان', 9);
+    await saveShop(store);
+    const first = (await placeOrder(p.variant)).json<ShopOrderPlaced>();
+    const second = (await placeOrder(p.variant)).json<ShopOrderPlaced>();
+    expect(second.number).toBe(first.number);
+    expect(second.trackPath).toBe(first.trackPath);
+    expect(await orders(store)).toHaveLength(1);
+    const lines = [{ variantId: p.variant, qty: 3 }];
+    const other = (await placeOrder(p.variant, { lines })).json<ShopOrderPlaced>();
+    expect(other.number).not.toBe(first.number);
   });
 });

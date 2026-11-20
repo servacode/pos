@@ -1,7 +1,8 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { feeOf } from './OnlineStorePage';
 import type { MeResponse, OnlineOrder, OnlineStoreSettings } from '@serva/core';
-import { mockFetch, type MockRequest } from '../../test/fetchMock';
+import { apiError, mockFetch, type MockRequest } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 
@@ -9,7 +10,10 @@ function owner(): MeResponse {
   const base = makeMe();
   return {
     ...base,
-    user: { ...base.user, permissions: [...base.user.permissions, 'settings.manage', 'customers.view'] },
+    user: {
+      ...base.user,
+      permissions: [...base.user.permissions, 'settings.manage', 'customers.view', 'customers.manage'],
+    },
   };
 }
 
@@ -277,5 +281,98 @@ describe('deciding an order', () => {
       status: 'rejected',
       version: 1,
     });
+  });
+});
+
+describe('round 44: who decides, the server’s stock check, pages and fees', () => {
+  const viewer = (): MeResponse => {
+    const base = makeMe();
+    return {
+      ...base,
+      user: { ...base.user, permissions: [...base.user.permissions, 'customers.view'] },
+    };
+  };
+
+  it('shows the orders to one who may only look, with no way to decide them', async () => {
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: viewer() },
+      'GET /v1/online-orders?status=pending': { status: 200, body: { items: [order('pending')] } },
+    });
+    renderApp('/online-store');
+    const one = await screen.findByRole('listitem', { name: 'الطلب ONL-000001' });
+    expect(within(one).queryByRole('button', { name: 'اقبل' })).toBeNull();
+    expect(within(one).queryByRole('button', { name: 'ارفض' })).toBeNull();
+    expect(screen.queryByText(/النقد عند المندوبين|المندوبين/)).toBeNull();
+  });
+
+  it('takes the server’s refusal for the same warning, then accepts with the pieces on their way', async () => {
+    let current = order('pending');
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: owner() },
+      'GET /v1/online-store': { status: 200, body: settings },
+      'GET /v1/online-orders?status=pending': () => ({
+        status: 200,
+        body: { items: current.status === 'pending' ? [current] : [] },
+      }),
+      'GET /v1/inventory': { status: 200, body: { items: [], totalValueMinor: 0, baseCurrency: 'SYP' } },
+      'POST /v1/online-orders/o-1/status': (r: MockRequest) => {
+        if (!(r.body as { force?: boolean }).force) {
+          return apiError(409, 'conflict', 'لا يكفي المخزون', { stock: '«قميص كتان»' });
+        }
+        current = { ...current, status: 'accepted', version: 2 };
+        return { status: 200, body: current };
+      },
+    });
+    const { user } = renderApp('/online-store');
+    const one = await screen.findByRole('listitem', { name: 'الطلب ONL-000001' });
+    await user.click(within(one).getByRole('button', { name: 'اقبل' }));
+    expect(await within(one).findByText(/«قميص كتان»/)).toBeInTheDocument();
+    await user.click(within(one).getByRole('button', { name: 'اقبل رغم النقص' }));
+    expect(await screen.findByText('لا طلبات هنا.')).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/online-orders/o-1/status').map((r) => r.body)).toEqual([
+      { status: 'accepted', version: 1 },
+      { status: 'accepted', version: 1, force: true },
+    ]);
+  });
+
+  it('pages the orders: the next page is asked with its cursor, never more than the filter on screen', async () => {
+    const second = { ...order('pending'), id: 'o-2', number: 'ONL-000002' };
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: owner() },
+      'GET /v1/online-store': { status: 200, body: settings },
+      'GET /v1/online-orders?status=pending': {
+        status: 200,
+        body: { items: [order('pending')], nextCursor: '50' },
+      },
+      'GET /v1/online-orders?status=pending&cursor=50': {
+        status: 200,
+        body: { items: [second], nextCursor: null },
+      },
+      'GET /v1/online-orders/cod': { status: 200, body: { currency: 'SYP', couriers: [] } },
+    });
+    const { user } = renderApp('/online-store');
+    await screen.findByRole('listitem', { name: 'الطلب ONL-000001' });
+    await user.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
+    expect(await screen.findByRole('listitem', { name: 'الطلب ONL-000002' })).toBeInTheDocument();
+    expect(requestsTo('GET', '/v1/online-orders?status=pending&cursor=50')).toHaveLength(1);
+  });
+});
+
+describe('a delivery fee as typed', () => {
+  it('reads digits (Arabic too) and refuses what is not a fee instead of making it free or tenfold', () => {
+    expect(feeOf('1500', 0)).toBe(1500);
+    expect(feeOf('1,500', 0)).toBe(1500);
+    expect(feeOf('١٥٠٠', 0)).toBe(1500);
+    expect(feeOf('', 0)).toBe(0);
+    expect(feeOf('12.5', 2)).toBe(1250);
+    expect(feeOf('١٢٫٥', 2)).toBe(1250);
+    expect(feeOf('abc', 0)).toBeNull();
+    expect(feeOf('1,5', 0)).toBeNull();
+    expect(feeOf('1.5', 0)).toBeNull();
+    expect(feeOf('-3', 0)).toBeNull();
+    expect(feeOf('1..5', 2)).toBeNull();
   });
 });

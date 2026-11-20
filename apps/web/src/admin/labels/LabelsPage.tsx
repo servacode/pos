@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { GatedPage } from '../products/CatalogGate';
 import { useSearchParams } from 'react-router';
 import type { ProductDetail, ProductListItem } from '@serva/core';
 import {
@@ -12,7 +13,6 @@ import {
   EmptyState,
   IconButton,
   Money,
-  PageHeader,
   PrintIcon,
   SearchField,
   Select,
@@ -23,6 +23,7 @@ import {
   CONTROL_HEIGHT,
   useDensity,
 } from '@serva/ui';
+import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { storeSells } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
@@ -30,7 +31,7 @@ import { errorMessage } from '../../lib/api';
 import { getProduct, listProducts, updateProduct } from '../catalog/api';
 import { getPurchase, listPurchases } from '../purchases/api';
 import { takeLabelQueue } from '../products/priceList';
-import { Label, LABEL_LAYOUTS, PrintableLabels, type LabelItem, type LabelLayout } from './Label';
+import { Label, LABEL_LAYOUTS, MAX_COPIES, PrintableLabels, type LabelItem, type LabelLayout } from './Label';
 
 const LAYOUT_KEY = 'serva.labels.layout';
 
@@ -76,6 +77,14 @@ export function itemsOf(
  * (every piece once), from a purchase (as many as came in), or filled by searching here.
  */
 export function LabelsPage() {
+  return (
+    <GatedPage>
+      <LabelsContent />
+    </GatedPage>
+  );
+}
+
+function LabelsContent() {
   const me = useMe();
   const density = useDensity();
   const [params] = useSearchParams();
@@ -234,16 +243,16 @@ export function LabelsPage() {
     }
   }
 
-  const total = items.reduce((n, i) => n + Math.max(0, i.copies), 0);
+  const total = items.reduce((n, i) => n + Math.min(MAX_COPIES, Math.max(0, i.copies)), 0);
   const spec = LABEL_LAYOUTS[layout];
 
   return (
     <AppShell>
       <title>طباعة الملصقات · SERVA</title>
-      <div className="flex flex-col gap-6">
-        <PageHeader
+      <SalesPage>
+        <PageTop
           title="طباعة الملصقات"
-          description={`ملصق لكل قطعة: اسمها${storeSells(me.tenant.sectors, ['clothing']) ? ' ومقاسها ولونها' : ''} وسعرها وباركودها، على لفة طابعة الملصقات أو ورق A4.`}
+          subtitle={`ملصق لكل قطعة: اسمها${storeSells(me.tenant.sectors, ['clothing']) ? ' ومقاسها ولونها' : ''} وسعرها وباركودها، على لفة طابعة الملصقات أو ورق A4.`}
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -462,11 +471,27 @@ export function LabelsPage() {
                       </div>
                     ))
                   ) : (
-                    <div
-                      className="grid shrink-0 place-items-center rounded-small border border-dashed border-line-control/50 bg-surface text-xs text-ink-subtle"
-                      style={{ width: `${spec.width}mm`, height: `${spec.height}mm` }}
-                    >
-                      الملصق هنا
+                    <div className="flex shrink-0 flex-col items-center gap-2">
+                      <div
+                        className="overflow-hidden rounded-small opacity-70 shadow-e2 ring-1 ring-line"
+                        style={{ width: `${spec.width}mm`, height: `${spec.height}mm` }}
+                      >
+                        <Label
+                          item={{
+                            key: 'sample',
+                            name: 'مثال: قميص كتان',
+                            options: 'M · أبيض',
+                            priceMinor: 5_000_000,
+                            currency: me.settings.baseCurrency,
+                            code: '2900000000018',
+                            copies: 1,
+                          }}
+                          store={me.tenant.name}
+                          showStore={showStore}
+                          qr={qr}
+                        />
+                      </div>
+                      <span className="text-xs text-ink-subtle">هكذا يبدو الملصق. أضف قطعة لتراها هنا.</span>
                     </div>
                   )}
                 </div>
@@ -484,7 +509,7 @@ export function LabelsPage() {
             </div>
           </Card>
         </div>
-      </div>
+      </SalesPage>
       {printing ? (
         <PrintableLabels items={items} layout={layout} store={me.tenant.name} showStore={showStore} qr={qr} />
       ) : null}

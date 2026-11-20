@@ -527,7 +527,26 @@ export async function importProducts(ctx: ImportContext, rows: ImportRow[], resu
 
   const openings: Opening[] = [];
   const createdCategories: string[] = [];
+  // A name with no barcode and no size, repeated in the file: the second row would «update» the product
+  // the first one made, and its price would be lost without a word
+  const plainNames = new Set<string>();
   for (const group of groupRows(parsed)) {
+    const head = group[0]!;
+    if (head.barcode === null && head.attributes.length === 0) {
+      const key = normalizeArabic(head.name);
+      if (plainNames.has(key)) {
+        for (const g of group) {
+          results.fail(g.line, [
+            {
+              field: 'name',
+              message: 'الاسم مكرر في الملف بلا باركود. أضف باركوداً أو مقاساً ليتميز الصنف، أو احذف الصف المكرر',
+            },
+          ]);
+        }
+        continue;
+      }
+      plainNames.add(key);
+    }
     const keep = createdCategories.length;
     const state: GroupState = { sent: group };
     const groupOpenings: Opening[] = [];
@@ -799,6 +818,10 @@ async function processGroup(
   if (productId === null && byNameAllowed) productId = await productOfName(tx, first.name);
 
   let current = productId ? await productDetail(tx, productId) : null;
+  // A new product whose name a live product already carries: allowed, but said in the preview
+  if (productId === null && !byNameAllowed && (await productOfName(tx, first.name)) !== null) {
+    results.note(first.line, 'يوجد منتج بالاسم نفسه ببارکود آخر: تأكد أنه صنف مختلف وليس مكرراً'.replace('ببارکود','بباركود'));
+  }
   if (current) {
     for (const p of group) {
       if (matched.has(p) || p.barcode !== null) continue;
@@ -949,7 +972,7 @@ async function processGroup(
       } else stock.set(branchId, qty);
     }
     if (stock.size === 0) continue;
-    if (o.parsed.costMinor === null) results.note(o.parsed.line, 'لا تكلفة في الصف: يدخل المخزون بقيمة صفر');
+    if (o.parsed.costMinor === null) results.note(o.parsed.line, 'لا تكلفة في الصف: يدخل المخزون بقيمة صفر ويظهر هامش الربح 100٪ حتى أول فاتورة شراء. أضف عمود التكلفة');
     else if (o.parsed.costNote !== null) results.note(o.parsed.line, o.parsed.costNote);
     if (results.statusOf(o.parsed.line) === 'skip')
       results.set(o.parsed.line, 'update', ['تُضاف الكمية الافتتاحية فقط']);

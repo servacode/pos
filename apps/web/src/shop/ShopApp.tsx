@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, Route, Routes, useNavigate, useParams } from 'react-router';
+import { Link, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import type {
+  CurrencyCode,
   ShopCodeSent,
   ShopCoupon,
   ShopHome,
   ShopOrderPlaced,
   ShopOrderTrack,
   ShopProduct,
+  ShopQuote,
 } from '@serva/core';
 import {
   AddIcon,
@@ -22,7 +24,6 @@ import {
   cn,
   CONTROL_HEIGHT,
   EmptyState,
-  FullScreenLoader,
   IconButton,
   IconChip,
   InfoIcon,
@@ -78,6 +79,11 @@ export function ShopApp() {
   const [error, setError] = useState<string | null>(null);
   const cart = useShopCart(slug);
   const density = useDensity();
+  const { pathname } = useLocation();
+  // Every page of the shop opens at its top (a product opened from far down the list, the cart)
+  useEffect(() => {
+    document.scrollingElement?.scrollTo?.({ top: 0 });
+  }, [pathname]);
 
   useEffect(() => {
     let alive = true;
@@ -102,7 +108,7 @@ export function ShopApp() {
       </main>
     );
   }
-  if (!home) return <FullScreenLoader />;
+  if (!home) return <ShopSkeleton />;
   const base = `/shop/${slug}`;
   const count = cartCount(cart.lines);
   const { store } = home;
@@ -224,6 +230,61 @@ function linkButton(variant: keyof typeof LINK_BUTTON, density: Density) {
 }
 
 /** A piece without a picture: a soft tile with the goods' sign, never an empty box. */
+/** The first paint while the shop loads: a header and tiles in the shape of the real ones, not a spinner */
+function ShopSkeleton() {
+  return (
+    <div dir="rtl" aria-busy="true" className="flex min-h-dvh flex-col bg-canvas text-ink">
+      <span role="status" className="sr-only">
+        جارٍ التحميل…
+      </span>
+      <div className="border-b border-line bg-surface">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
+          <Skeleton className="size-10 rounded-control" />
+          <Skeleton className="h-5 w-32" />
+        </div>
+      </div>
+      <div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-x-3 gap-y-4 px-4 pt-8 sm:grid-cols-3 sm:px-6 lg:grid-cols-4">
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((n) => (
+          <div key={n} aria-hidden="true" className="flex flex-col gap-2">
+            <Skeleton className="aspect-[4/3] w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/3" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The price before the markdown: struck through, its figure and unit kept together so the unit never jumps sides */
+function WasPrice({
+  minor,
+  currency,
+  className = 'text-xs',
+}: {
+  minor: number;
+  currency: CurrencyCode;
+  className?: string;
+}) {
+  return (
+    <s aria-label="السعر قبل التنزيل" className={cn('whitespace-nowrap text-ink-subtle', className)}>
+      <bdi dir="rtl">
+        <Money minor={minor} currency={currency} />
+      </bdi>
+    </s>
+  );
+}
+
+/** What the tile's ribbon says: the saving when the card has a before and an after («خصم 15%»), else the offer's name */
+function ribbonOf(p: { offer: string | null; priceMinor: number | null; wasPriceMinor: number | null }) {
+  if (!p.offer) return null;
+  if (p.priceMinor !== null && p.wasPriceMinor && p.wasPriceMinor > p.priceMinor) {
+    const percent = Math.round((1 - p.priceMinor / p.wasPriceMinor) * 100);
+    if (percent >= 1) return `خصم ${percent}%`;
+  }
+  return p.offer;
+}
+
 /** Where the price would be, when the store keeps its prices to itself */
 function PriceOnRequest({ className }: { className?: string }) {
   return <span className={cn('font-semibold text-ink-muted', className)}>السعر عند الطلب</span>;
@@ -254,10 +315,18 @@ function NoPicture({
 }
 
 /** The running offer's name (هوية 4 › Accent: the highlight chip), on the card and the page. */
-function OfferTag({ children, className }: { children: ReactNode; className?: string }) {
+function OfferTag({
+  children,
+  className,
+  title,
+}: {
+  children: ReactNode;
+  className?: string;
+  title?: string;
+}) {
   return (
     <span
-      title={typeof children === 'string' ? children : undefined}
+      title={title ?? (typeof children === 'string' ? children : undefined)}
       className={cn(
         'inline-flex items-start gap-1 rounded-2xl bg-accent px-2.5 py-0.5 text-xs/5 font-semibold text-on-accent',
         className,
@@ -398,9 +467,12 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                       categoryName={home.categories.find((c) => c.id === p.categoryId)?.name ?? null}
                     />
                   )}
-                  {p.offer ? (
-                    <OfferTag className="absolute start-2 top-2 max-w-[calc(100%-1rem)] shadow-e1">
-                      {p.offer}
+                  {ribbonOf(p) ? (
+                    <OfferTag
+                      title={p.offer ?? undefined}
+                      className="absolute start-2 top-2 max-w-[calc(100%-1rem)] shadow-e1"
+                    >
+                      {ribbonOf(p)}
                     </OfferTag>
                   ) : null}
                   {!p.available ? (
@@ -429,11 +501,7 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                         />
                       </span>
                     )}
-                    {p.wasPriceMinor ? (
-                      <s aria-label="السعر قبل التنزيل" className="text-xs text-ink-subtle">
-                        <Money minor={p.wasPriceMinor} currency={p.currency} />
-                      </s>
-                    ) : null}
+                    {p.wasPriceMinor ? <WasPrice minor={p.wasPriceMinor} currency={p.currency} /> : null}
                   </span>
                 </span>
               </Link>
@@ -580,11 +648,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
                   unitClassName="text-base font-semibold text-ink-subtle"
                 />
               )}
-              {was ? (
-                <s aria-label="السعر قبل التنزيل" className="text-base text-ink-subtle">
-                  <Money minor={was} currency={product.currency} />
-                </s>
-              ) : null}
+              {was ? <WasPrice minor={was} currency={product.currency} className="text-base" /> : null}
             </p>
           </div>
           {product.options.length > 0 ? (
@@ -743,22 +807,31 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
         </div>
 
         {home.store.whatsapp ? (
-          <p className="flex items-center gap-2 text-sm text-ink-muted">
-            <SendIcon size={16} className="text-ink-subtle" />
-            عندك سؤال؟
-            <TextLink
-              href={`https://wa.me/${home.store.whatsapp}?text=${encodeURIComponent(`مرحباً، أسأل عن ${product.name}`)}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              اسأل المحل على واتساب
-            </TextLink>
-          </p>
+          <a
+            href={`https://wa.me/${home.store.whatsapp}?text=${encodeURIComponent(`مرحباً، أسأل عن ${product.name}`)}`}
+            target="_blank"
+            rel="noreferrer"
+            className={linkButton('secondary', density)}
+          >
+            <SendIcon size={16} />
+            اسأل المحل على واتساب
+          </a>
         ) : null}
         <ProductNotes product={product} />
       </article>
     </>
   );
+}
+
+/** The fields the cart marks itself; a refusal about any other field is read out in the alert */
+const MARKED = /^(name|phone|area|address|code|fulfilment|coupon|lines\.\d+)$/;
+
+/** The alert's sentence: the server's own, plus the refused fields the form has no box for */
+function refusalText(e: unknown, fields: Record<string, string>): string {
+  const loose = Object.entries(fields)
+    .filter(([key]) => !MARKED.test(key))
+    .map(([, text]) => text);
+  return loose.length > 0 ? loose.join(' · ') : errorMessage(e);
 }
 
 function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; base: string; cart: Cart }) {
@@ -786,6 +859,37 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const [challenge, setChallenge] = useState<ShopCodeSent | null>(null);
   const [code, setCode] = useState('');
   const [coupon, setCoupon] = useState<{ code: string; coupon: ShopCoupon } | null>(null);
+  // What the server says the cart costs with the code (its offers and the code's, as the order is priced)
+  const [quote, setQuote] = useState<{ key: string; quote: ShopQuote } | null>(null);
+  const [couponRefused, setCouponRefused] = useState<string | null>(null);
+  const quoteKey = coupon
+    ? `${coupon.code}|${cart.lines.map((l) => `${l.variantId}:${l.qty}`).join(',')}`
+    : '';
+  useEffect(() => {
+    if (!coupon || coupon.coupon.percentBp === null || !store.showPrices) return;
+    let current = true;
+    apiFetch<ShopQuote>(`/v1/shop/${encodeURIComponent(slug)}/quote`, {
+      method: 'POST',
+      body: { lines: cart.lines.map((l) => ({ variantId: l.variantId, qty: l.qty })), coupon: coupon.code },
+    }).then(
+      (answer) => {
+        if (current) setQuote({ key: quoteKey, quote: answer });
+      },
+      (e: unknown) => {
+        if (!current) return;
+        // The code ran out since it was applied: take it off and say so
+        if (e instanceof ApiError && e.fields?.coupon) {
+          setCouponRefused(e.fields.coupon);
+          setCoupon(null);
+        }
+      },
+    );
+    return () => {
+      current = false;
+    };
+    // The key stands for the code and the lines
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteKey, slug, store.showPrices]);
   const byCode = store.orderMode === 'shop';
   // A mobile number: 9 to 15 digits, with an optional + and spaces or dashes between them
   const phoneDigits = phone.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[\s-]/g, '');
@@ -941,17 +1045,41 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
       setPlaced({ ...done, whatsappUrl });
       if (whatsappUrl) openWhatsApp(whatsappUrl);
     } catch (e) {
-      setError(errorMessage(e));
-      setFields(e instanceof ApiError ? (e.fields ?? {}) : {});
+      const refused = e instanceof ApiError ? (e.fields ?? {}) : {};
+      setError(refusalText(e, refused));
+      setFields(refused);
+      // The code the server no longer accepts comes off the cart, with its reason beside the box
+      if (refused.coupon) {
+        setCouponRefused(refused.coupon);
+        setCoupon(null);
+      }
+      // Locked or lapsed: the typed code is no use, a new one is asked for
+      if (e instanceof ApiError && (e.code === 'locked' || /انتهت صلاحية الرمز/.test(refused.code ?? ''))) {
+        setChallenge(null);
+        setCode('');
+      }
     } finally {
       setSending(false);
     }
   }
 
   const subtotal = cartTotal(cart.lines);
-  // What the code takes off, as the cart can tell it (the store's own figure on the order is exact)
-  const percentBp = showPrices ? (coupon?.coupon.percentBp ?? null) : null;
-  const discount = percentBp ? Math.round((subtotal * percentBp) / 10_000) : 0;
+  // What the code takes off: the server's own figure for these lines (the order carries the same one)
+  const quoted = quote && quote.key === quoteKey ? quote.quote : null;
+  const discount = coupon && quoted ? quoted.discountMinor : 0;
+  const waitingQuote =
+    Boolean(coupon) &&
+    showPrices &&
+    coupon?.coupon.percentBp !== null &&
+    coupon?.coupon.percentBp !== undefined &&
+    !quoted;
+  const couponNote = !coupon
+    ? null
+    : coupon.coupon.kind === 'buy_get'
+      ? 'هذا الكود يُطبّق عند استلام الطلب.'
+      : quoted && quoted.discountMinor === 0
+        ? 'الكود لم يزد الخصم: عرض أفضل مطبّق على هذه القطع.'
+        : null;
 
   return (
     <div className="flex flex-col gap-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] md:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] lg:gap-8">
@@ -965,7 +1093,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           <p className="text-sm text-ink-muted">{counted(cartCount(cart.lines), PIECES)}</p>
         </div>
         <ul className="flex flex-col divide-y divide-line px-5 sm:px-6">
-          {cart.lines.map((line) => (
+          {cart.lines.map((line, index) => (
             <li key={line.variantId} className="flex items-start gap-3 py-4">
               <span className="size-14 shrink-0 overflow-hidden rounded-small border border-line">
                 {line.imageUrl ? (
@@ -978,6 +1106,11 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate font-semibold">{line.name}</span>
                   {line.label ? <span className="text-sm text-ink-muted">{line.label}</span> : null}
+                  {fields[`lines.${index}`] ? (
+                    <span role="alert" className="text-xs font-semibold text-danger-ink">
+                      {fields[`lines.${index}`]}
+                    </span>
+                  ) : null}
                   {typeof line.maxQty === 'number' &&
                   line.maxQty > 0 &&
                   line.qty >= capOf(line) &&
@@ -1025,9 +1158,10 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           ))}
         </ul>
         <div className="flex flex-col gap-2 rounded-b-card border-t border-line bg-surface-total px-5 py-4 sm:px-6">
+          {waitingQuote ? <p className="text-sm text-ink-muted">نحسب خصم الكود…</p> : null}
           {discount > 0 ? (
             <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
-              <span>خصم الكود (تقريباً)</span>
+              <span>خصم الكود</span>
               <Money minor={-discount} currency={store.currency} />
             </div>
           ) : null}
@@ -1088,6 +1222,11 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             hint="مثال: 0944555666"
           />
         </div>
+        {fields.fulfilment ? (
+          <p role="alert" className="text-sm font-semibold text-danger-ink">
+            {fields.fulfilment}
+          </p>
+        ) : null}
         {store.delivery && store.pickup ? (
           <div className="flex flex-col gap-1.5">
             <p aria-hidden="true" className="text-sm font-semibold text-ink-muted">
@@ -1153,7 +1292,17 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
           value={note}
           onChange={(e) => setNote(e.target.value.slice(0, 300))}
         />
-        <CouponBox slug={slug} applied={coupon} onApplied={setCoupon} onClear={() => setCoupon(null)} />
+        <CouponBox
+          slug={slug}
+          applied={coupon}
+          onApplied={(value) => {
+            setCouponRefused(null);
+            setCoupon(value);
+          }}
+          onClear={() => setCoupon(null)}
+          refused={couponRefused}
+          note={couponNote}
+        />
         {byCode && challenge ? (
           <TextField
             label="رمز التأكيد"

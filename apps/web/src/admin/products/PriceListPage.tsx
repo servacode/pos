@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { CatalogGate } from './CatalogGate';
 import {
   PRICE_LIST_CHUNK_MAX,
   PRICE_LIST_FIELDS,
@@ -16,7 +17,6 @@ import {
   DataTable,
   EmptyState,
   Money,
-  PageHeader,
   PercentIcon,
   PrintIcon,
   ProgressBar,
@@ -25,6 +25,7 @@ import {
   Tabs,
   type DataColumn,
 } from '@serva/ui';
+import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
@@ -70,7 +71,9 @@ type Tab = 'change' | 'same' | 'rest';
 export function PriceListPage() {
   return (
     <AppShell>
-      <PriceList />
+      <CatalogGate>
+        <PriceList />
+      </CatalogGate>
     </AppShell>
   );
 }
@@ -315,11 +318,10 @@ function PriceList() {
   return (
     <>
       <title>تحديث الأسعار من ملف · SERVA</title>
-      <div className="flex flex-col gap-6">
-        <PageHeader
-          icon={<PercentIcon />}
+      <SalesPage>
+        <PageTop
           title="تحديث الأسعار من ملف"
-          description="ارفع نشرة الأسعار من المستودع أو الوزارة: نطابق كل صف مع صنفك بالباركود ثم بالاسم، وترى السعر القديم والجديد قبل أن يتغيّر شيء."
+          subtitle="ارفع نشرة الأسعار من المستودع أو الوزارة: نطابق كل صف مع صنفك بالباركود ثم بالاسم، وترى السعر القديم والجديد قبل أن يتغيّر شيء."
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
 
@@ -547,7 +549,7 @@ function PriceList() {
             </div>
           </div>
         ) : null}
-      </div>
+      </SalesPage>
     </>
   );
 }

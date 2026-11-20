@@ -55,11 +55,11 @@ describe('the products tiles', () => {
       runOutProducts: 2,
       lowest: { nameAr: 'شاي', qty: -2 * PIECE },
     });
-    // A search narrows the rows, never the tiles
+    // A search narrows the rows and is not asked for the tiles: the page keeps the ones it has
     const found = await list(store, `&q=${encodeURIComponent('حليب')}`);
     expect(found.items.map((i) => i.nameAr)).toEqual(['حليب']);
-    expect(found.totals).toEqual(all.totals);
-    // Only the first page of the active list carries them
+    expect(found.totals).toBeUndefined();
+    // Only the first page of the unfiltered active list carries them
     expect((await list(store, `&limit=1`)).totals).toEqual(all.totals);
     const archived = await app.inject({
       method: 'GET',

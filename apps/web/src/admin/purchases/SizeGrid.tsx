@@ -260,10 +260,13 @@ export function SizeGrid({
   onAdd,
   onCancel,
   initialUnit = '',
+  noCost = false,
 }: {
   product: ProductDetail;
   onAdd: (lines: GridLine[]) => void;
   onCancel: () => void;
+  /** No cost box: the document does not take a cost (a transfer moves pieces at the cost the books hold) */
+  noCost?: boolean;
   /** The last known cost of one piece, to start the cost box with (the owner changes it) */
   initialUnit?: string;
 }) {
@@ -275,7 +278,7 @@ export function SizeGrid({
     .map((v) => ({ v, n: qtyOf(qty[v.id] ?? '') }))
     .filter((x): x is { v: Variant; n: number } => x.n !== null && x.n > 0);
   const totalPieces = pieces.reduce((n, x) => n + x.n / 1000, 0);
-  const unitOk = moneyOf(unit) !== null;
+  const unitOk = noCost || moneyOf(unit) !== null;
 
   return (
     <div
@@ -289,7 +292,9 @@ export function SizeGrid({
         </IconChip>
         <div className="flex min-w-0 flex-col">
           <p className="truncate font-semibold text-ink">{product.nameAr}</p>
-          <p className="text-sm text-ink-muted">اكتب كمية كل قطعة، ثم كلفة القطعة الواحدة.</p>
+          <p className="text-sm text-ink-muted">
+            {noCost ? 'اكتب كمية كل قطعة.' : 'اكتب كمية كل قطعة، ثم كلفة القطعة الواحدة.'}
+          </p>
         </div>
       </div>
       <SizeRuns
@@ -355,14 +360,16 @@ export function SizeGrid({
         </table>
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <NumberField
-          label="كلفة القطعة الواحدة"
-          decimals={2}
-          value={unit}
-          onValueChange={(v) => setUnit(v.slice(0, 14))}
-          className="w-full sm:w-48"
-          unit="ل.س"
-        />
+        {noCost ? null : (
+          <NumberField
+            label="كلفة القطعة الواحدة"
+            decimals={2}
+            value={unit}
+            onValueChange={(v) => setUnit(v.slice(0, 14))}
+            className="w-full sm:w-48"
+            unit="ل.س"
+          />
+        )}
         <Button
           icon={<AddIcon />}
           disabled={pieces.length === 0 || !unitOk}
@@ -372,8 +379,8 @@ export function SizeGrid({
                 variantId: v.id,
                 name: v.label ? `${product.nameAr} ${v.label}` : product.nameAr,
                 qty: qty[v.id]!.trim(),
-                cost: costText(unit, n / 1000),
-                unit: unit.trim(),
+                cost: noCost ? '' : costText(unit, n / 1000),
+                unit: noCost ? '' : unit.trim(),
               })),
             )
           }

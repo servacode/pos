@@ -48,7 +48,7 @@ describe('«رمز الدخول للكاشير»', () => {
     await user.click(await screen.findByRole('link', { name: 'رمز الدخول للكاشير' }));
 
     expect(await screen.findByRole('heading', { name: 'رمز الدخول للكاشير', level: 1 })).toBeInTheDocument();
-    expect(screen.getByText(/الكاشير يكفيه 4 أرقام. المالك والمدير ومن يوافق/)).toBeInTheDocument();
+    expect(screen.getByText(/الكاشير يكفيه 4 أرقام، والمالك والمدير 6 أرقام/)).toBeInTheDocument();
     expect(screen.getByText('رمزك 6 أرقام.')).toBeInTheDocument();
     expect(screen.getByLabelText('رمز الدخول الجديد')).toHaveAttribute('type', 'password');
     expect(screen.getByLabelText('رمز الدخول الجديد')).toHaveAttribute('inputmode', 'numeric');

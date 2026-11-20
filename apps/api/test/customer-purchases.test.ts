@@ -101,7 +101,9 @@ describe('a customer’s purchases', () => {
     expect([got.pieces, got.spentMinor]).toEqual([3000, 300_000]);
 
     // The customers list carries the same facts, read-only
-    const listed = (await app.inject({ method: 'GET', url: '/v1/customers', headers: as(store) })).json<{
+    const listed = (
+      await app.inject({ method: 'GET', url: '/v1/customers?limit=50', headers: as(store) })
+    ).json<{
       items: {
         id: string;
         lastPurchaseDate: string | null;

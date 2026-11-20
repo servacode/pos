@@ -7,6 +7,7 @@ import { listCheques } from '../admin/cheques/api';
 import { listRentals } from '../admin/contracts/api';
 import { holdsAny, type AccessRule } from '../admin/reports/access';
 import { apiFetch } from '../lib/api';
+import { matchesArabic } from '../lib/arabicSearch';
 import { dayText } from '../lib/dates';
 import { listSales } from '../admin/sales/api';
 import { listQuotations } from '../admin/quotations/api';
@@ -125,7 +126,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
       ? quiet(
           kept(me, 'suppliers', () => listSuppliers()).then((r) =>
             r.items
-              .filter((s) => s.name.includes(q) || (s.phone ?? '').includes(q))
+              .filter((s) => matchesArabic(s.name, q, s.phone ?? undefined))
               .slice(0, FEW)
               .map((s): RecordHit => ({
                 key: `s:${s.id}`,
@@ -170,13 +171,8 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
     can(['purchases.manage'])
       ? quiet(
           kept(me, 'purchases', () => listPurchases()).then((r) => {
-            const needle = q.toLowerCase();
             return r.items
-              .filter(
-                (p) =>
-                  p.number.toLowerCase().includes(needle) ||
-                  (p.reference ?? '').toLowerCase().includes(needle),
-              )
+              .filter((p) => matchesArabic(p.number, q, p.reference ?? undefined))
               .slice(0, FEW)
               .map((p): RecordHit => ({
                 key: `u:${p.id}`,
@@ -193,12 +189,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
       ? quiet(
           kept(me, 'online-orders', onlineOrders).then((r) =>
             r.items
-              .filter(
-                (o) =>
-                  o.number.toLowerCase().includes(q.toLowerCase()) ||
-                  o.customerName.includes(q) ||
-                  o.phone.includes(q),
-              )
+              .filter((o) => matchesArabic(o.number, q, o.customerName, o.phone))
               .slice(0, FEW)
               .map((o): RecordHit => ({
                 key: `o:${o.id}`,
@@ -215,12 +206,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
       ? quiet(
           kept(me, 'rentals', () => listRentals('all')).then((r) =>
             r.items
-              .filter(
-                (x) =>
-                  x.number.toLowerCase().includes(q.toLowerCase()) ||
-                  x.customerName.includes(q) ||
-                  x.item.includes(q),
-              )
+              .filter((x) => matchesArabic(x.number, q, x.customerName, x.item))
               .slice(0, FEW)
               .map((x): RecordHit => ({
                 key: `r:${x.id}`,
@@ -236,10 +222,8 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
       ? quiet(
           kept(me, 'cheques', () => listCheques(undefined)).then((r) =>
             r.items
-              .filter(
-                (c) =>
-                  (c.reference ?? '').toLowerCase().includes(q.toLowerCase()) ||
-                  c.documentNumber.toLowerCase().includes(q.toLowerCase()),
+              .filter((c) =>
+                matchesArabic(c.documentNumber, q, c.reference ?? undefined, c.customerName ?? undefined),
               )
               .slice(0, FEW)
               .map((c): RecordHit => ({
@@ -258,12 +242,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
       ? quiet(
           kept(me, 'claims', () => listClaims('all')).then((r) =>
             r.items
-              .filter(
-                (c) =>
-                  c.number.toLowerCase().includes(q.toLowerCase()) ||
-                  c.serial.toLowerCase().includes(q.toLowerCase()) ||
-                  (c.customerName ?? '').includes(q),
-              )
+              .filter((c) => matchesArabic(c.number, q, c.serial, c.customerName ?? undefined))
               .slice(0, FEW)
               .map((c): RecordHit => ({
                 key: `w:${c.id}`,
@@ -279,7 +258,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
       ? quiet(
           kept(me, 'supplier-returns', supplierReturns).then((r) =>
             r.items
-              .filter((x) => x.number.toLowerCase().includes(q.toLowerCase()) || x.supplierName.includes(q))
+              .filter((x) => matchesArabic(x.number, q, x.supplierName))
               .slice(0, FEW)
               .map((x): RecordHit => ({
                 key: `t:${x.id}`,

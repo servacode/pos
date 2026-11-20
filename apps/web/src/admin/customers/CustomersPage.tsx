@@ -1,103 +1,75 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
   CUSTOMER_KIND_LABELS,
   CUSTOMER_KINDS,
   type CurrencyCode,
   type CustomerKind,
   type CustomerListItem,
-  type CustomerListResponse,
 } from '@serva/core';
 import {
   AddIcon,
-  Avatar,
-  Badge,
+  Alert,
   BookIcon,
   Button,
   CalendarIcon,
   CashIcon,
   CustomersIcon,
-  DataTable,
-  EmptyState,
   IconButton,
   Menu,
   MenuItem,
   MenuSeparator,
   MoreIcon,
-  Money,
-  PageHeader,
   PhoneIcon,
   SearchField,
   SearchIcon,
   Select,
   SendIcon,
-  Skeleton,
-  KpiStrip,
-  StatTile,
-  ToggleChip,
   Tooltip,
-  UserIcon,
-  WarningIcon,
   useDigits,
-  type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
-import { storeSells } from '../../lib/sectors';
-import { dayText, isoDay } from '../../lib/dates';
-import { countWord } from '../../lib/plural';
-
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
-import { recallAnswer, rememberAnswer, SLOW_AFTER_MS } from '../reports/useReport';
-import { listCustomers } from './api';
+import { dayText, isoDay } from '../../lib/dates';
+import { storeSells } from '../../lib/sectors';
+import { useIsPhone } from '../../lib/useIsPhone';
+import { countWord } from '../../lib/plural';
+import { downloadText } from '../accounting/csv';
+import { Pager, useCursorPages } from '../pager';
+import { Amt, DownloadGlyph, PageTop, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
+import { listCustomerPage, type CustomerPageQuery } from './api';
+import { customersCsv } from './csv';
 import { CustomerForm, KIND_SECTORS } from './CustomerForm';
+import { debtReminderLink } from './debtReminder';
+import { BalanceCell, CheckChip, CountLine, Empty, Who } from './parts';
 
-/** Owes more than the limit set for them: the till still sells, with a warning. */
-const overLimit = (c: CustomerListItem) => c.creditLimitMinor !== null && c.balanceMinor > c.creditLimitMinor;
+const VouchersPanel = lazy(() => import('./VouchersPanel').then((m) => ({ default: m.VouchersPanel })));
 
-/**
- * What a customer owes, coloured by its state and never by colour alone: owed in the warning ink,
- * past the limit in the danger ink with the words «فوق الحد», what the store owes them in the
- * success ink with «له», nothing owed in the subtle ink.
- */
-function BalanceCell({ customer, currency }: { customer: CustomerListItem; currency: CurrencyCode }) {
-  const { balanceMinor } = customer;
-  if (balanceMinor < 0) {
-    return (
-      <span className="inline-flex items-center gap-1.5 font-semibold text-success-ink">
-        <span className="text-xs">له</span>
-        <Money minor={balanceMinor} currency={currency} signDisplay="never" />
-      </span>
-    );
-  }
-  if (overLimit(customer)) {
-    return (
-      <span className="inline-flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
-        <Badge tone="danger">فوق الحد</Badge>
-        <Money minor={balanceMinor} currency={currency} className="font-bold text-danger-ink" />
-      </span>
-    );
-  }
-  return (
-    <Money
-      minor={balanceMinor}
-      currency={currency}
-      className={balanceMinor > 0 ? 'font-semibold text-warning-ink' : 'text-ink-subtle'}
-    />
-  );
-}
+const PAGE = 50;
+/** The longest search the server takes */
+const SEARCH_MAX = 60;
 
-/** The row's «⋯»: the statement, and a call or a WhatsApp chat when the customer has a phone. */
-function RowMenu({ customer }: { customer: CustomerListItem }) {
+/** The row's «⋯»: the customer's page, a call, a WhatsApp chat, and the debt reminder with the amount. */
+function RowMenu({ customer, store }: { customer: CustomerListItem; store: string }) {
+  const me = useMe();
   const label = `خيارات ${customer.name}`;
   const phone = customer.phone;
+  const reminder = customer.noMessages
+    ? null
+    : debtReminderLink(phone, {
+        name: customer.name,
+        balanceMinor: customer.balanceMinor,
+        currency: me.settings.baseCurrency,
+        store,
+      });
   return (
     <Menu
       label={label}
       align="end"
       trigger={
         <Tooltip content="خيارات">
-          <IconButton label={label} icon={<MoreIcon />} size="sm" />
+          <IconButton label={label} icon={<MoreIcon />} size="md" />
         </Tooltip>
       }
     >
@@ -127,166 +99,199 @@ function RowMenu({ customer }: { customer: CustomerListItem }) {
               راسله على واتساب
             </MenuItem>
           )}
+          {reminder ? (
+            <MenuItem
+              icon={<CashIcon />}
+              render={({ children, ...props }) => (
+                <a href={reminder} target="_blank" rel="noreferrer" {...props}>
+                  {children}
+                </a>
+              )}
+            >
+              ذكّره بالدين على واتساب
+            </MenuItem>
+          ) : null}
         </>
       ) : null}
     </Menu>
   );
 }
 
+/** A customer as a card on a phone: name and balance, then what else is known */
+function CustomerCard({
+  customer,
+  base,
+  clothing,
+  store,
+}: {
+  customer: CustomerListItem;
+  base: CurrencyCode;
+  clothing: boolean;
+  store: string;
+}) {
+  const digits = useDigits();
+  return (
+    <li className="sx-scard">
+      <Link to={`/customers/${customer.id}`} className="cx-who">
+        <Who name={customer.name}>
+          <span className="nm">{customer.name}</span>
+          <span className="cx-badges">
+            {customer.priceTier === 'wholesale' ? <StatusPill kind="ok">جملة</StatusPill> : null}
+            {customer.archived ? <StatusPill kind="open">مؤرشف</StatusPill> : null}
+            {customer.approvalStatus === 'pending' ? (
+              <StatusPill kind="warn">بانتظار الموافقة</StatusPill>
+            ) : null}
+          </span>
+        </Who>
+      </Link>
+      <span className="justify-self-end text-end">
+        <BalanceCell customer={customer} currency={base} />
+      </span>
+      <span className="x">
+        <span>
+          {customer.lastPurchaseDate
+            ? `آخر شراء ${dayText(customer.lastPurchaseDate, digits)}`
+            : 'لم يشترِ بعد'}
+          {clothing && customer.favouriteSize ? ` · المقاس ${customer.favouriteSize}` : ''}
+        </span>
+        <RowMenu customer={customer} store={store} />
+      </span>
+    </li>
+  );
+}
+
 /**
- * «الزبائن» (12 › الزبائن): every customer with what they owe, read from the books. The owner adds
- * customers and sets their credit limit here; tills find them to sell on credit and take payments.
+ * «الزبائن» (12 › الزبائن): every customer with what they owe, read from the books, a page at a time.
+ * The search, «من عليه دين» and «لم يزر منذ 90 يوماً» are answered by the server (they are in the
+ * address), so the list and the numbers above it stay right however many customers there are.
  */
 export function CustomersPage() {
   const me = useMe();
   const digits = useDigits();
+  const phone = useIsPhone();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const canManage = me.user.permissions.includes('customers.manage');
-  // The last list is on screen at once while the new one loads (kept in memory, wiped at sign-out)
-  const [list, setList] = useState<CustomerListResponse | null>(() =>
-    recallAnswer<CustomerListResponse>('customers||0|'),
-  );
-  const [error, setError] = useState<string | null>(null);
-  const shown = useRef(list !== null);
-  shown.current = list !== null;
-  const [search, setSearch] = useState('');
-  const [owing, setOwing] = useState(false);
-  const [away, setAway] = useState(false);
-  const [waiting, setWaiting] = useState(false);
-  const [kind, setKind] = useState<CustomerKind | ''>('');
+  const view = params.get('view') === 'vouchers' ? 'vouchers' : 'customers';
+  const search = params.get('q') ?? '';
+  const owing = params.get('owing') === '1';
+  const away = params.get('away') === '1';
+  const waiting = params.get('waiting') === '1';
+  const kind = (CUSTOMER_KINDS as readonly string[]).includes(params.get('kind') ?? '')
+    ? (params.get('kind') as CustomerKind)
+    : '';
   const [adding, setAdding] = useState(false);
-  // Every customer, whatever the search says, for the duplicate warning of the new-customer form
-  const [everyone, setEveryone] = useState<CustomerListItem[]>([]);
-  useEffect(() => {
-    if (!adding) return;
-    listCustomers()
-      .then((all) => setEveryone(all.items))
-      .catch(() => setEveryone([]));
-  }, [adding]);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    setError(null);
-    // Ten seconds without an answer and nothing older to show: say so, with a retry
-    const slow = setTimeout(() => {
-      if (!shown.current) setError((was) => was ?? 'تأخّر الرد أكثر من المعتاد. أعد المحاولة.');
-    }, SLOW_AFTER_MS);
-    listCustomers(search.trim(), owing, kind || undefined)
-      .then((answer) => {
-        clearTimeout(slow);
-        rememberAnswer(`customers|${search.trim()}|${owing ? 1 : 0}|${kind}`, answer);
-        setList(answer);
-        setError(null);
-      })
-      .catch((e: unknown) => {
-        clearTimeout(slow);
-        setError(errorMessage(e));
-      });
-  }, [search, owing, kind]);
+  const setFilter = (name: string, value: string | null) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(name, value);
+    else next.delete(name);
+    setParams(next, { replace: true });
+  };
+
+  // The server is asked once the owner stops typing
+  const [typed, setTyped] = useState(search);
   useEffect(() => {
-    const timer = setTimeout(load, 200);
+    const timer = setTimeout(() => {
+      if (typed.trim() !== search) setFilter('q', typed.trim() || null);
+    }, 250);
     return () => clearTimeout(timer);
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the typed text starts a search
+  }, [typed]);
 
-  const base = list?.baseCurrency ?? 'SYP';
   const today = isoDay(Date.now(), me.tenant.timezone);
   const cutoff = new Date(Date.parse(`${today}T00:00:00Z`) - 90 * 86_400_000).toISOString().slice(0, 10);
-  // «لم يزر منذ 90 يوماً»: bought before, but not in the last 90 days
-  const items = (list?.items ?? []).filter(
-    (c) =>
-      (!away || (!!c.lastPurchaseDate && c.lastPurchaseDate < cutoff)) &&
-      (!waiting || c.approvalStatus === 'pending'),
+  const query = useMemo<Omit<CustomerPageQuery, 'cursor'>>(
+    () => ({
+      q: search.slice(0, SEARCH_MAX),
+      owing,
+      kind,
+      ...(away ? { lastBefore: cutoff } : {}),
+      ...(waiting ? { approval: 'pending' as const } : {}),
+      limit: PAGE,
+    }),
+    [search, owing, kind, away, waiting, cutoff],
   );
-  const waitingCount = (list?.items ?? []).filter((c) => c.approvalStatus === 'pending').length;
-  const owingCount = items.filter((c) => c.balanceMinor > 0).length;
-  // The debt tile follows the same filter as the other tiles (all of them say so below when it is on)
-  const owedMinor = away
-    ? items.reduce((sum, c) => sum + Math.max(0, c.balanceMinor), 0)
-    : (list?.totalOwedMinor ?? 0);
-  const overCount = items.filter(overLimit).length;
-  // A number of the tiles: a placeholder while the list loads, a dash when it could not.
-  const kpi = (value: ReactNode) => (list ? value : error ? '—' : <Skeleton className="h-9 w-24" />);
+  const key = JSON.stringify(query);
+  const { data, error, loading, retry, pager, topRef } = useCursorPages(
+    key,
+    (cursor) => listCustomerPage({ ...query, cursor }),
+    { pageSize: PAGE },
+  );
 
+  // The figures above the list stay on screen while the next answer loads
+  const [strip, setStrip] = useState(data);
+  useEffect(() => {
+    if (data) setStrip(data);
+  }, [data]);
+
+  const base = data?.baseCurrency ?? strip?.baseCurrency ?? me.settings.baseCurrency;
   const clothing = storeSells(me.tenant.sectors, ['clothing']);
-  const columns: DataColumn<CustomerListItem>[] = [
+  const items = data?.items ?? [];
+  const anyLimit = items.some((c) => c.creditLimitMinor !== null);
+  const pendingCount = strip?.pendingCount ?? 0;
+  const filtered = search !== '' || owing || away || waiting || kind !== '';
+
+  const columns: SxColumn<CustomerListItem>[] = [
     {
       key: 'name',
       header: 'الزبون',
-      // On a phone the name takes what the balance leaves (long lines cut with «…»), so the balance
-      // is never pushed out of the screen
-      className: 'w-full max-w-0 md:max-w-none',
+      lead: true,
       cell: (c) => (
-        <span className="flex min-w-0 items-center gap-3 py-2">
-          <Avatar name={c.name} size="sm" />
-          <span className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <Link
-                to={`/customers/${c.id}`}
-                className="rounded-sm font-semibold text-ink underline decoration-transparent underline-offset-4 transition-[color,text-decoration-color] duration-120 ease-standard hover:text-brand-ink hover:decoration-current"
-              >
-                {c.name}
-              </Link>
-              {c.priceTier === 'wholesale' ? <Badge tone="brand">جملة</Badge> : null}
-              {c.kind ? <Badge tone="info">{CUSTOMER_KIND_LABELS[c.kind]}</Badge> : null}
-              {c.archived ? <Badge>مؤرشف</Badge> : null}
-              {c.approvalStatus === 'pending' ? <Badge tone="warning">بانتظار الموافقة</Badge> : null}
-            </span>
-            {c.phone && !((clothing && c.favouriteSize) || c.lastPurchaseDate) ? (
-              <span className="text-xs text-ink-muted md:hidden">
-                <bdi dir="ltr" className="num">
-                  {c.phone}
-                </bdi>
-              </span>
-            ) : null}
-            {(clothing && c.favouriteSize) || c.lastPurchaseDate ? (
-              // The columns that are hidden on a phone, said under the name: two short facts that wrap
-              // to a second line rather than being cut (the phone is in the row's «⋯»: call or WhatsApp)
-              <span className="flex flex-wrap gap-x-3 text-xs text-ink-muted md:hidden">
-                {clothing && c.favouriteSize ? (
-                  <span className="whitespace-nowrap">المقاس المفضّل {c.favouriteSize}</span>
-                ) : null}
-                {c.lastPurchaseDate ? (
-                  <span className="whitespace-nowrap">آخر شراء {dayText(c.lastPurchaseDate, digits)}</span>
-                ) : null}
-              </span>
-            ) : null}
+        <Who name={c.name}>
+          <span className="cx-badges">
+            <Link to={`/customers/${c.id}`} className="nm">
+              {c.name}
+            </Link>
+            {c.priceTier === 'wholesale' ? <StatusPill kind="ok">جملة</StatusPill> : null}
+            {c.kind ? <StatusPill kind="ok">{CUSTOMER_KIND_LABELS[c.kind]}</StatusPill> : null}
+            {c.archived ? <StatusPill kind="open">مؤرشف</StatusPill> : null}
+            {c.approvalStatus === 'pending' ? <StatusPill kind="warn">بانتظار الموافقة</StatusPill> : null}
           </span>
-        </span>
+          {c.phone ? (
+            <span className="sx-subline">
+              <bdi dir="ltr" className="sx-n">
+                {c.phone}
+              </bdi>
+            </span>
+          ) : null}
+          {(clothing && c.favouriteSize) || c.lastPurchaseDate ? (
+            // What the narrow screens hide, said under the name
+            <span className="sx-subline cx-lt-lg">
+              {clothing && c.favouriteSize ? (
+                <span className="whitespace-nowrap">المقاس المفضّل {c.favouriteSize} </span>
+              ) : null}
+              {c.lastPurchaseDate ? (
+                <span className="whitespace-nowrap">آخر شراء {dayText(c.lastPurchaseDate, digits)}</span>
+              ) : null}
+            </span>
+          ) : null}
+        </Who>
       ),
-    },
-    {
-      key: 'phone',
-      header: 'الجوال',
-      className: 'hidden md:table-cell',
-      cell: (c) =>
-        c.phone ? (
-          <bdi dir="ltr" className="num text-ink-muted">
-            {c.phone}
-          </bdi>
-        ) : (
-          <span className="text-ink-subtle">—</span>
-        ),
     },
     {
       key: 'last',
       header: 'آخر شراء',
-      className: 'hidden lg:table-cell',
+      hideBelowLg: true,
       cell: (c) =>
         c.lastPurchaseDate ? (
-          <bdi className="num whitespace-nowrap text-ink-muted">{dayText(c.lastPurchaseDate, digits)}</bdi>
+          <span className="sx-n sx-mute">{dayText(c.lastPurchaseDate, digits)}</span>
         ) : (
-          <span className="text-ink-subtle">—</span>
+          <span className="sx-z">—</span>
         ),
     },
     {
       key: 'spent',
       header: 'مجموع المشتريات',
       numeric: true,
-      className: 'hidden lg:table-cell',
+      hideBelowLg: true,
       cell: (c) =>
         c.spentMinor ? (
-          <Money minor={c.spentMinor} currency={base} className="text-ink-muted" />
+          <Amt minor={c.spentMinor} currency={base} className="sx-mute" />
         ) : (
-          <span className="text-ink-subtle">—</span>
+          <span className="sx-z">—</span>
         ),
     },
     ...(clothing
@@ -294,171 +299,243 @@ export function CustomersPage() {
           {
             key: 'size',
             header: 'المقاس المفضّل',
-            className: 'hidden xl:table-cell',
+            hideBelowLg: true,
             cell: (c: CustomerListItem) =>
-              c.favouriteSize ? <Badge>{c.favouriteSize}</Badge> : <span className="text-ink-subtle">—</span>,
-          } satisfies DataColumn<CustomerListItem>,
+              c.favouriteSize ? (
+                <StatusPill kind="ok">{c.favouriteSize}</StatusPill>
+              ) : (
+                <span className="sx-z">—</span>
+              ),
+          } satisfies SxColumn<CustomerListItem>,
         ]
       : []),
-    {
-      key: 'limit',
-      header: 'حد الدين',
-      numeric: true,
-      className: 'hidden sm:table-cell',
-      cell: (c) =>
-        c.creditLimitMinor === null ? (
-          <span className="text-ink-subtle">—</span>
-        ) : (
-          <Money minor={c.creditLimitMinor} currency={base} className="text-ink-muted" />
-        ),
-    },
+    ...(anyLimit
+      ? [
+          {
+            key: 'limit',
+            header: 'حد الدين',
+            numeric: true,
+            hideBelowLg: true,
+            cell: (c: CustomerListItem) =>
+              c.creditLimitMinor === null ? (
+                <span className="sx-z">—</span>
+              ) : (
+                <Amt minor={c.creditLimitMinor} currency={base} className="sx-mute" />
+              ),
+          } satisfies SxColumn<CustomerListItem>,
+        ]
+      : []),
     {
       key: 'balance',
       header: 'الرصيد',
       numeric: true,
+      strong: true,
       cell: (c) => <BalanceCell customer={c} currency={base} />,
     },
     {
       key: 'actions',
       header: <span className="sr-only">خيارات</span>,
-      className: 'relative w-px',
-      cell: (c) => <RowMenu customer={c} />,
+      cell: (c) => <RowMenu customer={c} store={me.tenant.name} />,
     },
   ];
 
-  const typed = search.trim() !== '';
   const empty = owing ? (
-    <EmptyState icon={CashIcon} title="لا أحد عليه دين." description="كل زبائنك سدّدوا ما عليهم." />
+    <Empty icon={<CashIcon size={24} />} title="لا أحد عليه دين.">
+      <p>كل زبائنك سدّدوا ما عليهم.</p>
+    </Empty>
   ) : away ? (
-    <EmptyState
-      icon={CalendarIcon}
-      title="لا زبون غاب أكثر من 90 يوماً."
-      description="كل من اشترى منك اشترى خلال آخر 90 يوماً."
-    />
-  ) : typed ? (
-    <EmptyState
-      icon={SearchIcon}
-      title="لا زبون بهذا الاسم أو الجوال."
-      description="جرّب جزءاً من الاسم، أو آخر أرقام الجوال."
-    />
+    <Empty icon={<CalendarIcon size={24} />} title="لا زبون غاب أكثر من 90 يوماً.">
+      <p>كل من اشترى منك اشترى خلال آخر 90 يوماً.</p>
+    </Empty>
+  ) : search !== '' ? (
+    <Empty icon={<SearchIcon size={24} />} title="لا زبون بهذا الاسم أو الجوال.">
+      <p>جرّب جزءاً من الاسم، أو آخر أرقام الجوال.</p>
+    </Empty>
   ) : (
-    <EmptyState
-      icon={CustomersIcon}
-      title="لا زبائن بعد."
-      description="أضف أول زبون، أو يضيفه الكاشير من شاشة البيع."
-      action={
-        canManage && !adding ? (
-          <Button icon={<AddIcon />} onClick={() => setAdding(true)}>
-            أضف أول زبون
-          </Button>
-        ) : undefined
-      }
-    />
+    <Empty icon={<CustomersIcon size={24} />} title="لا زبائن بعد.">
+      <p>أضف أول زبون، أو يضيفه الكاشير من شاشة البيع.</p>
+      {canManage && !adding ? (
+        <Button icon={<AddIcon />} onClick={() => setAdding(true)}>
+          أضف أول زبون
+        </Button>
+      ) : null}
+    </Empty>
   );
+
+  /** Every customer of the current filters, a page of 200 at a time, into a file for Excel */
+  async function exportAll() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const all: CustomerListItem[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 500; guard += 1) {
+        const page = await listCustomerPage({ ...query, limit: 200, cursor });
+        all.push(...page.items);
+        cursor = page.nextCursor;
+        if (!cursor) break;
+      }
+      downloadText(`customers-${today}.csv`, customersCsv(all, base));
+    } catch (e) {
+      setExportError(errorMessage(e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const kpi = (value: ReactNode) => (strip ? value : <span className="sx-z">—</span>);
+  const owingN = strip?.owingCount ?? 0;
 
   return (
     <AppShell>
       <title>الزبائن · SERVA</title>
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <PageHeader
+      <SalesPage>
+        <PageTop
           title="الزبائن"
-          description="ما على كل زبون وحدّ دينه، كما في دفاتر المتجر."
+          subtitle="ما على كل زبون وحدّ دينه، كما في دفاتر المتجر."
           actions={
-            canManage && !adding ? (
+            canManage && !adding && view === 'customers' ? (
               <Button icon={<AddIcon />} onClick={() => setAdding(true)}>
                 زبون جديد
               </Button>
             ) : null
           }
         />
-        {adding ? (
-          <CustomerForm
-            existing={everyone}
-            onSaved={(c) => navigate(`/customers/${c.id}`)}
-            onCancel={() => setAdding(false)}
-          />
-        ) : null}
-        {away ? <p className="text-sm text-ink-muted">الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.</p> : null}
-        {/* On a phone the money tile takes the first row and the two counts sit side by side below it */}
-        <KpiStrip columns={3} className="max-sm:*:first:col-span-2 max-sm:*:last:odd:col-span-1!">
-          <StatTile
-            label="الديون على الزبائن"
-            icon={<CashIcon />}
-            value={kpi(<Money minor={owedMinor} currency={base} />)}
-          />
-          <StatTile
-            label="عليهم دين"
-            icon={<UserIcon />}
-            iconTone={owingCount > 0 ? 'warning' : 'neutral'}
-            value={kpi(<bdi className="num">{owingCount}</bdi>)}
-          />
-          <StatTile
-            label="فوق حد الدين"
-            icon={<WarningIcon />}
-            iconTone={overCount > 0 ? 'danger' : 'neutral'}
-            value={kpi(<bdi className="num">{overCount}</bdi>)}
-          />
-        </KpiStrip>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <SearchField
-              label="ابحث بالاسم أو الجوال"
-              value={search}
-              onValueChange={setSearch}
-              className="min-w-0 flex-1 basis-64 sm:max-w-md"
-            />
-            {/* Clinics, hospitals and offices: only for shops that sell to them */}
-            {storeSells(me.tenant.sectors, KIND_SECTORS) ? (
-              <Select
-                label="نوع الزبون"
-                hideLabel
-                value={kind}
-                onChange={(e) => setKind(e.target.value as CustomerKind | '')}
-              >
-                <option value="">كل الأنواع</option>
-                {CUSTOMER_KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {CUSTOMER_KIND_LABELS[k]}
-                  </option>
-                ))}
-              </Select>
-            ) : null}
-            <ToggleChip
-              label="من عليه دين فقط"
-              checked={owing}
-              onChange={(e) => setOwing(e.target.checked)}
-            />
-            <ToggleChip
-              label="لم يزر منذ 90 يوماً"
-              checked={away}
-              onChange={(e) => setAway(e.target.checked)}
-            />
-            {waitingCount > 0 ? (
-              <ToggleChip
-                label={`بانتظار الموافقة (${waitingCount})`}
-                checked={waiting}
-                onChange={(e) => setWaiting(e.target.checked)}
+        <div className="cx-tabs print:hidden" role="tablist" aria-label="أقسام الزبائن">
+          <button
+            type="button"
+            role="tab"
+            className="cx-tab"
+            aria-selected={view === 'customers'}
+            onClick={() => setFilter('view', null)}
+          >
+            الزبائن
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="cx-tab"
+            aria-selected={view === 'vouchers'}
+            onClick={() => setFilter('view', 'vouchers')}
+          >
+            القسائم
+          </button>
+        </div>
+        {view === 'vouchers' ? (
+          <Suspense fallback={<p className="sx-wait">نحمّل القسائم…</p>}>
+            <VouchersPanel />
+          </Suspense>
+        ) : (
+          <>
+            {adding ? (
+              <CustomerForm
+                onSaved={(c) => navigate(`/customers/${c.id}`)}
+                onCancel={() => setAdding(false)}
               />
             ) : null}
-          </div>
-          {/* The count is a line over the list, not a card of its own */}
-          {list ? (
-            <p className="text-sm text-ink-muted">
-              <bdi className="num font-semibold text-ink">{items.length}</bdi>{' '}
-              {countWord(items.length, { one: 'زبون', two: 'زبونان', few: 'زبائن' })}
-            </p>
-          ) : null}
-          <DataTable
-            caption="الزبائن وأرصدتهم"
-            columns={columns}
-            rows={items}
-            rowKey={(c) => c.id}
-            loading={!list && !error}
-            {...(error ? { error, onRetry: load } : {})}
-            empty={empty}
-          />
-        </div>
-      </div>
+            {away ? <p className="sx-wait">الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.</p> : null}
+            <div className="sx-card sx-strip cx3">
+              <div>
+                <span className="sx-eyebrow">الديون على الزبائن</span>
+                <span className="v">{kpi(<Amt minor={strip?.totalOwedMinor ?? 0} currency={base} />)}</span>
+              </div>
+              <div>
+                <span className="sx-eyebrow">عليهم دين</span>
+                <span className="v">{kpi(<span className="sx-n">{owingN}</span>)}</span>
+              </div>
+              <div>
+                <span className="sx-eyebrow">كل الزبائن</span>
+                <span className="v">{kpi(<span className="sx-n">{strip?.allCount ?? 0}</span>)}</span>
+              </div>
+            </div>
+            <div className="sx-card sx-filterbar print:hidden">
+              <div className="sx-search">
+                <SearchField
+                  label="ابحث بالاسم أو الجوال"
+                  value={typed}
+                  onValueChange={(v) => setTyped(v.slice(0, SEARCH_MAX))}
+                />
+              </div>
+              {storeSells(me.tenant.sectors, KIND_SECTORS) ? (
+                <Select
+                  label="نوع الزبون"
+                  hideLabel
+                  value={kind}
+                  onChange={(e) => setFilter('kind', e.target.value || null)}
+                >
+                  <option value="">كل الأنواع</option>
+                  {CUSTOMER_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {CUSTOMER_KIND_LABELS[k]}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+              <div className="sx-chips">
+                <CheckChip
+                  label="من عليه دين فقط"
+                  checked={owing}
+                  onChange={(v) => setFilter('owing', v ? '1' : null)}
+                />
+                <CheckChip
+                  label="لم يزر منذ 90 يوماً"
+                  checked={away}
+                  onChange={(v) => setFilter('away', v ? '1' : null)}
+                />
+                {pendingCount > 0 ? (
+                  <CheckChip
+                    label={`بانتظار الموافقة (${pendingCount})`}
+                    checked={waiting}
+                    onChange={(v) => setFilter('waiting', v ? '1' : null)}
+                  />
+                ) : null}
+              </div>
+              <Button
+                variant="secondary"
+                icon={<DownloadGlyph />}
+                loading={exporting}
+                onClick={() => void exportAll()}
+              >
+                صدّر إلى إكسل
+              </Button>
+            </div>
+            {exportError ? <Alert tone="error">{exportError}</Alert> : null}
+            <div ref={topRef} />
+            {data ? (
+              <CountLine>
+                <bdi className="sx-n font-semibold">{data.totalCount ?? items.length}</bdi>{' '}
+                {countWord(data.totalCount ?? items.length, { one: 'زبون', two: 'زبونان', few: 'زبائن' })}
+                {filtered ? ' بحسب البحث' : ''}
+              </CountLine>
+            ) : null}
+            {phone && data && items.length > 0 ? (
+              <ul className="sx-cards" aria-label="الزبائن وأرصدتهم">
+                {items.map((c) => (
+                  <CustomerCard
+                    key={c.id}
+                    customer={c}
+                    base={base}
+                    clothing={clothing}
+                    store={me.tenant.name}
+                  />
+                ))}
+              </ul>
+            ) : (
+              <SxTable
+                caption="الزبائن وأرصدتهم"
+                columns={columns}
+                rows={items}
+                rowKey={(c) => c.id}
+                loading={loading}
+                {...(error ? { error, onRetry: retry } : {})}
+                empty={empty}
+                onRowClick={(c) => navigate(`/customers/${c.id}`)}
+              />
+            )}
+            <Pager noun="الزبائن" pager={pager} />
+          </>
+        )}
+      </SalesPage>
     </AppShell>
   );
 }

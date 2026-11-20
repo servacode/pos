@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  businessDateOf,
   CUSTOMER_PAYMENT_LABEL,
   type CurrencyCode,
   type CustomerMoneyResult,
@@ -37,7 +38,14 @@ async function customerFor(tx: Transaction, id: string) {
   return { id: row.id, name: row.name, balance: Number(row.balance) };
 }
 
-const dayOf = (now: Date, date?: string) => date ?? now.toISOString().slice(0, 10);
+/** The store's business day (its timezone and day cutoff), not the UTC date: a payment at 01:30 is today's */
+async function dayOf(tx: Transaction, now: Date, date?: string): Promise<string> {
+  if (date) return date;
+  const [row] = await tx.execute<{ timezone: string; cutoff: string }>(sql`
+    select t.timezone, s.business_day_cutoff as cutoff
+    from tenant_settings s join tenants t on t.id = s.tenant_id`);
+  return row ? businessDateOf(now, row.timezone, row.cutoff) : now.toISOString().slice(0, 10);
+}
 
 /** A payment from a customer, into the safe or the method's account, against what they owe. */
 export async function receiveCustomerPayment(
@@ -64,8 +72,36 @@ export async function receiveCustomerPayment(
     }
     const customer = await customerFor(tx, customerId);
     const currency: CurrencyCode = await baseCurrency(tx);
-    const date = dayOf(now, input.date);
+    const date = await dayOf(tx, now, input.date);
     const id = input.id ?? newId();
+    // The same id sent again (a lost answer): answer with the receipt already posted, burn no number
+    if (input.id) {
+      const [again] = await tx.execute<{ number: string | null; date: string; amount: string }>(sql`
+        select e.source_number as number, e.entry_date::text as date,
+               (select coalesce(sum(l.credit_minor), 0)::text from journal_lines l
+                 join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+                 where l.tenant_id = e.tenant_id and l.entry_id = e.id and a.code = '1200') as amount
+        from journal_entries e
+        where e.source_type = 'manual' and e.source_id = ${id} and e.kind = 'manual'`);
+      if (again?.number) {
+        const now2 = await customerFor(tx, customerId);
+        return {
+          kind: 'payment',
+          number: again.number,
+          date: again.date,
+          customerId: customer.id,
+          customerName: customer.name,
+          amountMinor: Number(again.amount) || input.amountMinor,
+          method: input.method,
+          reference: input.reference ?? null,
+          note: input.note ?? null,
+          balanceBeforeMinor: now2.balance + (Number(again.amount) || input.amountMinor),
+          balanceAfterMinor: now2.balance,
+          baseCurrency: currency,
+          ...(branchId ? { branchId } : {}),
+        };
+      }
+    }
     const memoTail = [input.reference, input.note].filter(Boolean).join(' — ');
     const number = await nextNumber(tx, auth.tenantId, 'RCA', date);
     const account: DraftLine['account'] =
@@ -150,8 +186,15 @@ export async function openCustomerDebt(
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'accounting.post');
     const customer = await customerFor(tx, customerId);
+    // An archived customer is off the till and out of the lists: a new debt there would be lost from view
+    const [state] = await tx.execute<{ archived_at: string | null }>(
+      sql`select archived_at from customers where id = ${customerId}`,
+    );
+    if (state?.archived_at) {
+      throw new AppError(409, 'conflict', 'هذا الزبون مؤرشف. أعده أولاً ثم سجّل الدين.');
+    }
     const currency: CurrencyCode = await baseCurrency(tx);
-    const date = dayOf(now, input.date);
+    const date = await dayOf(tx, now, input.date);
     await postOpeningBalance(tx, auth, meta, {
       party: 'customer',
       partyId: customer.id,

@@ -28,7 +28,6 @@ import {
   MoneyField,
   MoreIcon,
   PackageOpenIcon,
-  PageHeader,
   PrintIcon,
   ProductsIcon,
   SearchField,
@@ -40,10 +39,12 @@ import {
   textLinkClass,
   type DataColumn,
 } from '@serva/ui';
+import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
+import { CatalogGate } from './CatalogGate';
 import { Pager, useCursorPages } from '../pager';
 import { listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
 import { LiraCaption } from '../../lib/LiraCaption';
@@ -56,7 +57,7 @@ import {
   searchTerm,
 } from '../catalog/catalog';
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
-import { downloadCsv } from '../exportCsv';
+import { downloadCsv, TextCell } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
@@ -71,6 +72,8 @@ import { ButtonLink } from './parts';
 export const SEARCH_DEBOUNCE_MS = 250;
 /** One page of the list (17 › القوائم: up to 200). */
 export const PRODUCTS_PAGE_SIZE = 50;
+/** The most rows «صدّر الجدول» writes; a bigger catalogue is cut and told so */
+const EXPORT_CAP = 50_000;
 
 type ListStatus = 'active' | 'temporary' | 'archived';
 
@@ -80,6 +83,12 @@ const STATUS_OPTIONS: { value: ListStatus; label: string }[] = [
   { value: 'archived', label: 'المؤرشفة' },
 ];
 
+const EMPTY_STATUS_TITLE: Record<ListStatus, string> = {
+  active: 'لا منتجات بعد.',
+  temporary: 'لا منتجات أُضيفت من الكاشير.',
+  archived: 'لا منتجات مؤرشفة.',
+};
+
 interface Filters {
   q: string;
   categoryId: string;
@@ -88,9 +97,21 @@ interface Filters {
   status: ListStatus;
   /** «ينتهي قريباً» (30 days) or «منتهية»; "" = all */
   expiry: '' | 'soon' | 'expired';
+  /** «نفد»: only what ran out */
+  stock: '' | 'out';
+  /** The order of the list */
+  sort: 'name' | 'stock';
 }
 
-const NO_FILTERS: Filters = { q: '', categoryId: '', season: '', status: 'active', expiry: '' };
+const NO_FILTERS: Filters = {
+  q: '',
+  categoryId: '',
+  season: '',
+  status: 'active',
+  expiry: '',
+  stock: '',
+  sort: 'name',
+};
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -200,6 +221,7 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   const [editing, setEditing] = useState(false);
   const [priceMinor, setPriceMinor] = useState<number | null>(item.price?.minMinor ?? null);
   const [error, setError] = useState<string | undefined>();
+  const [freeAsked, setFreeAsked] = useState(false);
   const [saving, setSaving] = useState(false);
   const price = item.price;
   const variantId = item.singleVariantId;
@@ -233,6 +255,12 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
       setError('اكتب السعر');
       return;
     }
+    // A zero price sells free at every till: ask once, the second press of «احفظ» confirms
+    if (priceMinor === 0 && item.type !== 'service' && !freeAsked) {
+      setFreeAsked(true);
+      setError(`سيُباع «${item.nameAr}» مجاناً. اضغط «احفظ» مرة أخرى إن كان هذا مقصوداً.`);
+      return;
+    }
     setSaving(true);
     try {
       const detail = await updateProduct(item.id, {
@@ -261,23 +289,39 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   }
 
   return (
-    <form noValidate onSubmit={save} className="flex flex-wrap items-start justify-end gap-2 py-2">
-      <MoneyField
-        label={`السعر الجديد لـ«${item.nameAr}»`}
-        hideLabel
-        currency={price.currency}
-        valueMinor={priceMinor}
-        onValueChange={setPriceMinor}
-        error={error}
-        className="w-36"
-      />
-      <Button type="submit" loading={saving}>
-        احفظ
-      </Button>
-      <Button variant="ghost" onClick={() => setEditing(false)}>
-        تراجع
-      </Button>
-    </form>
+    <div
+      role="presentation"
+      className="contents"
+      onKeyDown={(event) => {
+        // A price is never negative: the field would drop the sign and save a positive one
+        if (event.key === '-' || event.key === '−') {
+          event.preventDefault();
+          setError('السعر لا يكون سالباً. اكتب الرقم بلا إشارة ناقص.');
+        }
+      }}
+    >
+      <form noValidate onSubmit={save} className="flex flex-wrap items-start justify-end gap-2 py-2">
+        <MoneyField
+          label={`السعر الجديد لـ«${item.nameAr}»`}
+          hideLabel
+          currency={price.currency}
+          valueMinor={priceMinor}
+          onValueChange={(value) => {
+            setPriceMinor(value);
+            setFreeAsked(false);
+            setError(undefined);
+          }}
+          error={error}
+          className="w-36"
+        />
+        <Button type="submit" loading={saving}>
+          احفظ
+        </Button>
+        <Button variant="ghost" onClick={() => setEditing(false)}>
+          تراجع
+        </Button>
+      </form>
+    </div>
   );
 }
 
@@ -383,7 +427,9 @@ export function ProductsPage() {
   // the top bar.
   return (
     <AppShell>
-      <ProductsList />
+      <CatalogGate>
+        <ProductsList />
+      </CatalogGate>
     </AppShell>
   );
 }
@@ -428,6 +474,8 @@ function ProductsList() {
     season: filters.season || undefined,
     status: filters.status,
     expiry: filters.expiry || undefined,
+    stock: filters.stock || undefined,
+    sort: filters.sort === 'name' ? undefined : filters.sort,
   } satisfies ProductListQuery);
 
   const {
@@ -477,21 +525,40 @@ function ProductsList() {
         });
         all.push(...page.items);
         cursor = page.nextCursor;
-      } while (cursor && all.length < 50_000);
+      } while (cursor && all.length < EXPORT_CAP);
+      // A catalogue bigger than the cap is cut: say so instead of handing over a short file unannounced
+      const cut = cursor !== null;
       downloadCsv(
         'products',
-        ['المنتج', 'الباركود', 'التصنيف', 'المتغيّرات', 'العملة', 'أدنى سعر', 'أعلى سعر', 'الكمية'],
+        [
+          'المنتج',
+          'الباركود',
+          'التصنيف',
+          'المتغيّرات',
+          'العملة',
+          'أدنى سعر',
+          'أعلى سعر',
+          'الكمية الصافية',
+          'المتوفر للبيع',
+        ],
         all.map((i) => [
           i.nameAr,
-          i.barcode ?? '',
+          i.barcode ? new TextCell(i.barcode) : '',
           i.categoryName ?? '',
           i.variantCount,
           i.price?.currency ?? '',
           i.price ? i.price.minMinor / 10 ** getCurrency(i.price.currency).decimals : '',
           i.price ? i.price.maxMinor / 10 ** getCurrency(i.price.currency).decimals : '',
           i.type === 'service' ? '' : i.stockQty / 1000,
+          i.type === 'service' ? '' : availableOf(i) / 1000,
         ]),
       );
+      if (cut) {
+        setNotice({
+          tone: 'error',
+          text: `الملف يحوي أول ${String(EXPORT_CAP)} منتج فقط. صفِّ القائمة بتصنيف أو بحث ثم صدّر الباقي.`,
+        });
+      }
     } catch (error) {
       setNotice({ tone: 'error', text: errorMessage(error) });
     } finally {
@@ -524,12 +591,24 @@ function ProductsList() {
     filters.categoryId !== '' ||
     filters.season !== '' ||
     filters.status !== 'active' ||
+    filters.stock !== '' ||
+    filters.sort !== 'name' ||
     filters.expiry !== '';
+  // A tab with nothing in it and nothing typed: the empty tab, not a failed search
+  const noSearch =
+    filters.status !== 'active' &&
+    filters.q.trim() === '' &&
+    filters.categoryId === '' &&
+    filters.season === '' &&
+    filters.stock === '' &&
+    filters.expiry === '';
   // What the «تصفية» sheet holds that is not at its default (the search box is on the page itself)
   const activeFilters =
     (filters.categoryId ? 1 : 0) +
     (filters.season ? 1 : 0) +
     (filters.expiry ? 1 : 0) +
+    (filters.stock ? 1 : 0) +
+    (filters.sort !== 'name' ? 1 : 0) +
     (filters.status !== 'active' ? 1 : 0);
   const tree = categoryTree(categories.filter((c) => !c.archivedAt || c.id === filters.categoryId));
   // What the shown list needs done: a price of 0 sells for nothing, and a missing picture shows as a letter
@@ -816,11 +895,10 @@ function ProductsList() {
   return (
     <>
       <title>المنتجات · SERVA</title>
-      <div className="flex flex-col gap-6">
-        <PageHeader
-          icon={<ProductsIcon />}
+      <SalesPage>
+        <PageTop
           title="المنتجات"
-          description={phone ? undefined : 'ابحث بالاسم، أو امسح باركوداً في أي وقت لتفتح منتجه.'}
+          subtitle={phone ? undefined : 'ابحث بالاسم، أو امسح باركوداً في أي وقت لتفتح منتجه.'}
           actions={canManage ? addProduct : null}
         />
 
@@ -892,6 +970,18 @@ function ProductsList() {
                 note: !summary?.lowest ? undefined : summary.runOut > 0 ? (
                   <>
                     {soldOutSentence(summary.runOut, summary.runOutProducts, clothingStore)}
+                    {filters.stock !== 'out' ? (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          className={textLinkClass}
+                          onClick={() => setFilter('stock', 'out')}
+                        >
+                          اعرضها
+                        </button>
+                      </>
+                    ) : null}
                     {summary.negative > 0 ? <> · {negativeNote(summary.negative)}</> : null}
                     {summary.negative > 0 && canManage ? (
                       <>
@@ -1031,6 +1121,24 @@ function ProductsList() {
                     <option value="expired">منتهية</option>
                   </Select>
                 ) : null}
+                <Select
+                  label="المخزون"
+                  value={filters.stock}
+                  onChange={(event) => setFilter('stock', event.target.value as Filters['stock'])}
+                  className="w-full"
+                >
+                  <option value="">كل المخزون</option>
+                  <option value="out">نفد فقط</option>
+                </Select>
+                <Select
+                  label="الترتيب"
+                  value={filters.sort}
+                  onChange={(event) => setFilter('sort', event.target.value as Filters['sort'])}
+                  className="w-full"
+                >
+                  <option value="name">بالاسم</option>
+                  <option value="stock">الأقل مخزوناً أولاً</option>
+                </Select>
                 <SegmentedControl
                   label="حالة المنتج"
                   options={STATUS_OPTIONS}
@@ -1100,6 +1208,26 @@ function ProductsList() {
                   <option value="expired">منتهية</option>
                 </Select>
               ) : null}
+              <Select
+                label="المخزون"
+                hideLabel
+                value={filters.stock}
+                onChange={(event) => setFilter('stock', event.target.value as Filters['stock'])}
+                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+              >
+                <option value="">كل المخزون</option>
+                <option value="out">نفد فقط</option>
+              </Select>
+              <Select
+                label="الترتيب"
+                hideLabel
+                value={filters.sort}
+                onChange={(event) => setFilter('sort', event.target.value as Filters['sort'])}
+                className="min-w-40 flex-1 lg:w-48 lg:flex-none"
+              >
+                <option value="name">بالاسم</option>
+                <option value="stock">الأقل مخزوناً أولاً</option>
+              </Select>
               <SegmentedControl
                 label="حالة المنتج"
                 options={STATUS_OPTIONS}
@@ -1276,8 +1404,8 @@ function ProductsList() {
                   filtered ? (
                     <EmptyState
                       icon={ProductsIcon}
-                      title="لا منتجات تطابق بحثك."
-                      description="جرّب كلمة أخرى أو تصنيفاً آخر."
+                      title={noSearch ? EMPTY_STATUS_TITLE[filters.status] : 'لا منتجات تطابق بحثك.'}
+                      description={noSearch ? undefined : 'جرّب كلمة أخرى أو تصنيفاً آخر.'}
                       action={
                         <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
                           امسح البحث والتصفية
@@ -1317,7 +1445,7 @@ function ProductsList() {
 
           {items ? <Pager noun="المنتجات" pager={pager} /> : null}
         </div>
-      </div>
+      </SalesPage>
       {canManage ? (
         <BulkPhotos open={photosOpen} onClose={() => setPhotosOpen(false)} onDone={() => load()} />
       ) : null}

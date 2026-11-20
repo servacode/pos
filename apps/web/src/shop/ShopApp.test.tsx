@@ -168,7 +168,8 @@ describe('the online shop', () => {
     expect(within(grid).getAllByRole('listitem')).toHaveLength(1);
     expect(grid).toHaveTextContent('من');
     // The offer and the price before it, struck through
-    expect(grid).toHaveTextContent('تنزيلات الصيف');
+    // The ribbon says the saving (4,800 against 6,000 is 20%); the offer's name is its tooltip
+    expect(grid).toHaveTextContent('خصم 25%');
     expect(within(grid).getByLabelText('السعر قبل التنزيل')).toHaveTextContent('6,000');
     await user.click(within(grid).getByRole('link', { name: /قميص كتان/ }));
 

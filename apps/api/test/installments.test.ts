@@ -358,6 +358,30 @@ describe('collecting instalments', () => {
   });
 });
 
+describe('collecting twice with the same id', () => {
+  it('posts once and answers the same plan', async () => {
+    const store = await openStore(app);
+    await day(store);
+    const planId = await onlyPlanId();
+    const id = '0198f1a0-0000-7000-8000-00000000c0de';
+    const collect = () =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/installment-plans/${planId}/collect`,
+        headers: as(store),
+        payload: { amountMinor: 10_000, method: 'cash', id },
+      });
+    const first = await collect();
+    expect(first.statusCode, first.body).toBe(200);
+    const again = await collect();
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json<PlanDetail>().remainingMinor).toBe(first.json<PlanDetail>().remainingMinor);
+    const receipts = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from journal_entries where source_type = 'manual' and source_id = ${id}`;
+    expect(receipts[0]!.n).toBe('1');
+  });
+});
+
 describe('a customer’s plans', () => {
   it('lists only that customer’s plans, for the customer page', async () => {
     const store = await openStore(app);

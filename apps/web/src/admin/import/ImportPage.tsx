@@ -18,7 +18,6 @@ import {
   DataTable,
   EmptyState,
   PackageOpenIcon,
-  PageHeader,
   ProgressBar,
   SegmentedControl,
   Select,
@@ -26,10 +25,11 @@ import {
   type BadgeTone,
   type DataColumn,
 } from '@serva/ui';
+import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
-import { MONTHS } from '../../lib/dates';
+import { isoDay, MONTHS } from '../../lib/dates';
 import { downloadText } from '../accounting/csv';
 import { postImport } from './api';
 import { applyOldPound, OldPoundSwitch } from './oldPound';
@@ -86,11 +86,6 @@ const arabicDate = (iso: string) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   return m ? `${String(Number(m[3]))} ${MONTHS[Number(m[2]) - 1] ?? ''} ${m[1]}` : undefined;
 };
-const todayText = () => {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${String(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
 
 /** «استيراد البيانات»: products, customers or suppliers from an Excel or CSV file, checked before it is applied. */
 export function ImportPage() {
@@ -125,7 +120,7 @@ function Import() {
   const [table, setTable] = useState<Table>({ headers: [], body: [] });
   const [mapping, setMapping] = useState<Mapping>([]);
   const [existing, setExisting] = useState<'skip' | 'update'>('skip');
-  const [date, setDate] = useState(todayText);
+  const [date, setDate] = useState(() => isoDay(Date.now(), me.tenant.timezone));
   const [branchId, setBranchId] = useState(me.branches[0]?.id ?? '');
   const [phase, setPhase] = useState<Phase>('idle');
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -135,11 +130,12 @@ function Import() {
   const [oldPound, setOldPound] = useState(false);
   const cancel = useRef(false);
 
-  const branches = me.branches.map((b) => ({ id: b.id, name: b.name }));
+  const branches = useMemo(() => me.branches.map((b) => ({ id: b.id, name: b.name })), [me.branches]);
   const targets = useMemo(
     () => targetsOf(type, branches, me.tenant.sectors),
-    [type, me.branches, me.tenant.sectors],
-  ); // eslint-disable-line react-hooks/exhaustive-deps
+    [type, branches, me.tenant.sectors],
+  );
+  const [costOk, setCostOk] = useState(false);
   const fromFile = useMemo(() => prepareRows(type, table, mapping), [type, table, mapping]);
   const prepared = useMemo(() => (oldPound ? applyOldPound(fromFile) : fromFile), [fromFile, oldPound]);
   const byLine = useMemo(() => new Map(prepared.map((r) => [r.line, r])), [prepared]);
@@ -250,6 +246,7 @@ function Import() {
   const send = async (mode: 'dry_run' | 'commit') => {
     cancel.current = false;
     setError(null);
+    if (mode === 'dry_run') setCostOk(false);
     setPhase(mode === 'dry_run' ? 'checking' : 'importing');
     const next = mode === 'dry_run' ? duplicates(prepared) : new Map(results);
     if (mode === 'dry_run') setResults(next);
@@ -302,6 +299,11 @@ function Import() {
 
   const chosen = fieldsFor(type, me.tenant.sectors);
   const finished = phase === 'done';
+  // Rows that bring stock but no cost: the owner agrees to them before the import starts
+  const noCost =
+    type === 'products'
+      ? [...results.values()].filter((r) => r.notes.some((n) => n.startsWith('لا تكلفة'))).length
+      : 0;
   const sheetPick = sheets.length > 1;
   const nameOf = (line: number) => String(byLine.get(line)?.values.name ?? '—');
   const shown = [...results.values()]
@@ -355,11 +357,10 @@ function Import() {
   return (
     <>
       <title>استيراد البيانات · SERVA</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <PageHeader
-          icon={<PackageOpenIcon />}
+      <SalesPage>
+        <PageTop
           title="استيراد البيانات"
-          description="انقل المنتجات والزبائن والموردين من ملف إكسل أو ملف نصي مفصول بفواصل. يُفحص الملف كله قبل أن يتغيّر شيء."
+          subtitle="انقل المنتجات والزبائن والموردين من ملف إكسل أو ملف نصي مفصول بفواصل. يُفحص الملف كله قبل أن يتغيّر شيء."
         />
         <ol className="flex flex-wrap gap-2" aria-label="خطوات الاستيراد">
           {(program || step === 'program' ? MOVE_STEPS : STEPS).map((s) => (
@@ -390,46 +391,6 @@ function Import() {
               options={allowed.map((t) => ({ value: t, label: IMPORT_TYPE_LABELS[t] }))}
               onValueChange={(t) => reset(t)}
             />
-            {program ? (
-              <ExportSteps
-                program={program}
-                type={type}
-                done={movedTypes}
-                onChange={() => setStep('program')}
-              />
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button variant="secondary" onClick={() => setStep('program')}>
-                  انقل من برنامجك القديم
-                </Button>
-                <p className="text-sm text-ink-muted">الأمين، الميزان، الرشيد أو أي برنامج يصدّر إلى إكسل.</p>
-              </div>
-            )}
-            {program ? null : (
-              <>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant="secondary"
-                    onClick={() => downloadText(templateName(type), templateCsv(type, me.tenant.sectors))}
-                  >
-                    نزّل القالب الجاهز
-                  </Button>
-                  <p className="text-sm text-ink-muted">
-                    أعمدة {IMPORT_TYPE_LABELS[type]}: {chosen.map((f) => f.label).join('، ')}.
-                  </p>
-                </div>
-                <ul className="list-disc ps-5 text-sm text-ink-muted">
-                  {chosen
-                    .filter((f) => f.hint)
-                    .slice(0, 6)
-                    .map((f) => (
-                      <li key={f.key}>
-                        <b className="text-ink">{f.label}:</b> {f.hint}
-                      </li>
-                    ))}
-                </ul>
-              </>
-            )}
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-control/60 px-6 py-10 text-center hover:bg-surface-muted">
               <span className="font-semibold text-ink">اختر ملف إكسل أو ملفاً نصياً مفصولاً بفواصل</span>
               <span className="text-sm text-ink-muted">حتى 15 ميغابايت و20 ألف صف</span>
@@ -446,6 +407,49 @@ function Import() {
               />
               {reading ? <span className="text-sm text-ink-muted">نقرأ الملف…</span> : null}
             </label>
+            {program ? (
+              <ExportSteps
+                program={program}
+                type={type}
+                done={movedTypes}
+                onChange={() => setStep('program')}
+              />
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={() => setStep('program')}>انقل من برنامجك القديم</Button>
+                <p className="text-sm text-ink-muted">الأمين، الميزان، الرشيد أو أي برنامج يصدّر إلى إكسل.</p>
+              </div>
+            )}
+            {program ? null : (
+              <>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="secondary"
+                    onClick={() => downloadText(templateName(type), templateCsv(type, me.tenant.sectors))}
+                  >
+                    نزّل القالب الجاهز
+                  </Button>
+                  <p className="text-sm text-ink-muted">
+                    أعمدة {IMPORT_TYPE_LABELS[type]}: {chosen.map((f) => f.label).join('، ')}.
+                  </p>
+                </div>
+                <details className="text-sm text-ink-muted">
+                  <summary className="w-fit cursor-pointer rounded-small font-semibold text-brand-ink">
+                    اعرض شرح الأعمدة
+                  </summary>
+                  <ul className="mt-2 flex max-w-prose list-disc flex-col gap-1 ps-5">
+                    {chosen
+                      .filter((f) => f.hint)
+                      .slice(0, 6)
+                      .map((f) => (
+                        <li key={f.key}>
+                          <b className="text-ink">{f.label}:</b> {f.hint}
+                        </li>
+                      ))}
+                  </ul>
+                </details>
+              </>
+            )}
           </Card>
         ) : null}
 
@@ -758,6 +762,23 @@ function Import() {
                     نعرض أول {SHOWN_ROWS} صفاً. الباقي في ملف الأخطاء إن وُجدت أخطاء.
                   </p>
                 ) : null}
+                {phase === 'checked' && noCost > 0 ? (
+                  <Alert tone="warning">
+                    <label className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={costOk}
+                        onChange={(e) => setCostOk(e.target.checked)}
+                        className="mt-1"
+                      />
+                      <span>
+                        {countNoun(noCost, COUNT_NOUNS.row)} بكمية افتتاحية وبلا تكلفة: ستدخل المخزون بقيمة
+                        صفر ويظهر هامش ربحها 100٪ حتى أول فاتورة شراء. أضف عمود «التكلفة» وأعد الفحص، أو اعتمد
+                        الاستيراد كما هو.
+                      </span>
+                    </label>
+                  </Alert>
+                ) : null}
                 {phase === 'checked' ? (
                   <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 ps-5 shadow-e3">
                     <p className="text-sm text-ink-muted">
@@ -771,7 +792,7 @@ function Import() {
                       </bdi>
                     </p>
                     <Button
-                      disabled={totals.create + totals.update === 0}
+                      disabled={totals.create + totals.update === 0 || (noCost > 0 && !costOk)}
                       onClick={() => void send('commit')}
                     >
                       ابدأ الاستيراد
@@ -789,7 +810,7 @@ function Import() {
             ) : null}
           </>
         ) : null}
-      </div>
+      </SalesPage>
     </>
   );
 }

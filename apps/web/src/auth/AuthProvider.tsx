@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AuthResponse, LoginInput, MeResponse } from '@serva/core';
 import {
   apiFetch,
@@ -21,6 +21,8 @@ function fetchMe(): Promise<MeResponse> {
 // reload starts from it, so the real shell and the last numbers show at once while the session is
 // confirmed in the background. A lost session still ends at the login page.
 const ME_KEY = 'serva.me';
+/** A «me» older than this is read again when the tab comes back (a role or plan changed elsewhere) */
+const ME_STALE_MS = 5 * 60_000;
 
 function readKeptMe(): MeResponse | null {
   try {
@@ -96,11 +98,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // When «me» was last read: a tab left open for hours reads it again when it comes back into focus
+  const readAt = useRef(Date.now());
+
   const refreshMe = useCallback(async () => {
     const me = await fetchMe();
+    readAt.current = Date.now();
     keepMe(me);
     setState({ status: 'signedIn', me });
   }, []);
+
+  const signedIn = state.status === 'signedIn';
+  useEffect(() => {
+    if (!signedIn) return;
+    const again = () => {
+      if (document.visibilityState === 'hidden' || Date.now() - readAt.current < ME_STALE_MS) return;
+      readAt.current = Date.now();
+      fetchMe().then(
+        (me) => {
+          keepMe(me);
+          // The same answer keeps the same object, so nothing below asks again
+          setState((now) =>
+            now.status === 'signedIn' && JSON.stringify(now.me) === JSON.stringify(me)
+              ? now
+              : { status: 'signedIn', me },
+          );
+        },
+        // Offline or a hiccup: what is on screen stays; a real «no» ends the session by itself
+        () => undefined,
+      );
+    };
+    window.addEventListener('focus', again);
+    document.addEventListener('visibilitychange', again);
+    return () => {
+      window.removeEventListener('focus', again);
+      document.removeEventListener('visibilitychange', again);
+    };
+  }, [signedIn]);
 
   const startSession = useCallback(
     async (auth: AuthResponse) => {

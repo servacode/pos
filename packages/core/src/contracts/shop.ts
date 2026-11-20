@@ -99,6 +99,8 @@ export interface OnlineStoreSettings {
   /** The logo and the cover banner (the pictures of the store); null: none */
   logoUrl?: string | null;
   coverUrl?: string | null;
+  /** True: more pieces are for sale than the public page carries, so the last ones (by name) do not show */
+  catalogueCut?: boolean;
 }
 
 export interface DeliveryArea {
@@ -230,6 +232,26 @@ export interface ShopCoupon {
   name: string;
   /** Null when the store hides its prices, or the offer is a buy-and-get one */
   percentBp: number | null;
+  /** What the offer is: a buy-and-get code gives nothing off the order, the till applies it at hand-over */
+  kind?: 'percent' | 'buy_get';
+}
+
+/**
+ *   POST /v1/shop/{slug}/quote   { lines, coupon } → ShopQuote   (what the order would cost, as the server prices it)
+ */
+export const shopQuoteInput = z.object({
+  lines: shopOrderInput.shape.lines,
+  coupon: z.string().trim().max(20).nullable().default(null),
+});
+export type ShopQuoteInput = z.input<typeof shopQuoteInput>;
+export interface ShopQuote {
+  /** The pieces at the shop's prices (its own offers taken off), before the code */
+  subtotalMinor: number;
+  /** What the code really takes off; 0 when a better offer is already on every line it touches */
+  discountMinor: number;
+  totalMinor: number;
+  /** Null when prices are hidden */
+  showPrices: boolean;
 }
 export const stockAlertInput = z.object({ variantId: uuidSchema, phone: phoneSchema });
 
@@ -354,10 +376,21 @@ export interface CodSummary {
   couriers: { courier: string; expectedMinor: number; orders: CodOrder[] }[];
 }
 
-export const onlineOrderListQuery = z.object({ status: z.enum(ONLINE_ORDER_STATUSES).optional() });
+export const onlineOrderListQuery = z.object({
+  status: z.enum(ONLINE_ORDER_STATUSES).optional(),
+  /** Where the next page starts (the `nextCursor` of the page before); absent: the first page */
+  cursor: z
+    .string()
+    .regex(/^\d{1,6}$/)
+    .optional(),
+  /** A page's size; absent: 200 */
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
 export const onlineOrderStatusInput = z.object({
   status: z.enum(['accepted', 'rejected', 'done']),
   version: versionSchema,
+  /** Accept an order although the shelf cannot cover it now (the pieces are on their way) */
+  force: z.boolean().optional(),
 });
 
 /** The shape of core's PromotionRule without its clock: what the till needs of a coupon's offer */

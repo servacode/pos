@@ -65,28 +65,15 @@ export const PriceMatrix = memo(function PriceMatrix({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end gap-2 rounded-control border border-line bg-surface-muted p-3">
-        <MoneyField
-          label="السعر نفسه لكل المتغيّرات"
-          currency={currency}
-          valueMinor={same}
-          onValueChange={setSame}
-          className="w-52"
-        />
-        <LiraCaption minor={same} currency={currency} />
-        <Button
-          variant="secondary"
-          disabled={same === null}
-          onClick={() => onChange(applyToVariants(variants, { all: true }, 'priceMinor', same))}
-        >
-          طبّق على الكل
-        </Button>
-      </div>
-      <div className="relative -mx-5 overflow-x-auto px-5 sm:-mx-6 sm:px-6">
-        <table aria-label="أسعار المتغيّرات" className="border-separate border-spacing-1.5">
+      <div
+        className="relative min-w-0 overflow-x-auto rounded-control border border-line"
+        role="region"
+        aria-label="جدول الأسعار، مرّر جانباً لترى الباقي"
+      >
+        <table aria-label="أسعار المتغيّرات" className="w-max min-w-full border-separate border-spacing-1.5">
           <thead>
             <tr>
-              <th className="pe-3 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle">
+              <th className="sticky start-0 z-10 bg-surface pe-3 ps-2 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle">
                 {rowAxis.name}
                 {colAxis ? ` / ${colAxis.name}` : ''}
               </th>
@@ -104,7 +91,10 @@ export const PriceMatrix = memo(function PriceMatrix({
           <tbody>
             {rowAxis.values.map((row) => (
               <tr key={row}>
-                <th scope="row" className="pe-3 text-start font-semibold whitespace-nowrap text-ink">
+                <th
+                  scope="row"
+                  className="sticky start-0 z-10 bg-surface pe-3 ps-2 text-start font-semibold whitespace-nowrap text-ink"
+                >
                   {row}
                 </th>
                 {cols.map((col) => {
@@ -113,14 +103,14 @@ export const PriceMatrix = memo(function PriceMatrix({
                     return (
                       <td
                         key={col || '_'}
-                        className="min-w-28 rounded-small border border-dashed border-line text-center text-ink-subtle"
+                        className="w-32 min-w-32 rounded-small border border-dashed border-line text-center text-ink-subtle"
                       >
                         —
                       </td>
                     );
                   }
                   return (
-                    <td key={col || '_'} className="min-w-28">
+                    <td key={col || '_'} className="w-32 min-w-32">
                       <MoneyField
                         label={`سعر ${[row, col].filter(Boolean).join(' · ')}`}
                         hideLabel
@@ -140,6 +130,26 @@ export const PriceMatrix = memo(function PriceMatrix({
             ))}
           </tbody>
         </table>
+      </div>
+      {cols.length > 3 ? (
+        <p className="text-xs text-ink-subtle">مرّر الجدول جانباً لترى كل الألوان.</p>
+      ) : null}
+      <div className="flex flex-wrap items-end gap-2 rounded-control border border-line bg-surface-muted p-3">
+        <MoneyField
+          label="السعر نفسه لكل المتغيّرات"
+          currency={currency}
+          valueMinor={same}
+          onValueChange={setSame}
+          className="w-52"
+        />
+        <LiraCaption minor={same} currency={currency} />
+        <Button
+          variant="secondary"
+          disabled={same === null}
+          onClick={() => onChange(applyToVariants(variants, { all: true }, 'priceMinor', same))}
+        >
+          طبّق على الكل
+        </Button>
       </div>
       <Switch
         label="ولّد باركود لكل متغيّر جديد عند الحفظ"

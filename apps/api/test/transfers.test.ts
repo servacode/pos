@@ -119,6 +119,8 @@ describe('transfers between branches', () => {
         status: 'received',
         fromBranchId: main,
         toBranchId: mall,
+        canReceive: false,
+        canCancel: false,
       },
     ]);
   });

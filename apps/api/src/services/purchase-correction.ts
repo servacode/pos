@@ -20,7 +20,7 @@ import {
   type Transaction,
 } from '@serva/db';
 import { createUuidV7 } from '@serva/sync';
-import { requirePermission } from '../auth/permissions';
+import { inScope, requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError, isUniqueViolation } from '../errors';
 import type { RequestMeta } from '../types';
@@ -62,9 +62,11 @@ export async function correctPurchase(
   now: Date,
 ): Promise<PurchaseCorrection> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const [purchase] = await tx.select().from(purchases).where(eq(purchases.id, purchaseId));
-    if (!purchase) throw new AppError(404, 'not_found', 'هذه الفاتورة غير موجودة.');
+    if (!purchase || !inScope(scope, purchase.branchId)) {
+      throw new AppError(404, 'not_found', 'هذه الفاتورة غير موجودة.');
+    }
     const [done] = await tx
       .select({ number: purchaseReversals.number })
       .from(purchaseReversals)

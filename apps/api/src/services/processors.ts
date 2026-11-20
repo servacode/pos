@@ -503,6 +503,14 @@ async function processReturn({ tx, device, doc }: DocumentContext) {
     },
     postedAs,
   );
+  // Loyalty: the points the returned part earned are taken back (never below zero)
+  await reverseLoyalty(
+    tx,
+    tenantId,
+    original?.customerId ?? ret.customerId ?? null,
+    original?.payload as SalePayload | undefined,
+    ret.totals.totalMinor,
+  );
   // Instalments: what went back on the customer's account shortens the plan of that sale
   await reconcilePlanAfterReturn(
     tx,
@@ -540,6 +548,39 @@ async function applyLoyalty(tx: Transaction, tenantId: string, sale: SalePayload
     .returning({ points: customers.loyaltyPoints });
   // What they had before this sale is what they have now, less what it earned, plus what it spent
   return spent > 0 && (!row || row.points - earned < 0) ? ['points_overdrawn'] : [];
+}
+
+/**
+ * A return takes back the points its part of the sale earned: a point per `earnEveryMinor` of what
+ * went back, never more than the sale earned in all and never below zero points. Without it a
+ * customer could buy, return for cash and spend the points on the next sale.
+ */
+async function reverseLoyalty(
+  tx: Transaction,
+  tenantId: string,
+  customerId: string | null,
+  sale: SalePayload | undefined,
+  returnedMinor: number,
+): Promise<void> {
+  if (!customerId || returnedMinor <= 0) return;
+  const [settings] = await tx
+    .select({ loyalty: tenantSettings.loyalty })
+    .from(tenantSettings)
+    .where(eq(tenantSettings.tenantId, tenantId));
+  const loyalty = settings?.loyalty ?? null;
+  if (!loyalty) return;
+  const paidWithPoints = sale
+    ? sale.payments.filter((p) => p.method === 'points').reduce((n, p) => n + p.baseAmountMinor, 0)
+    : 0;
+  const earnedBySale = sale
+    ? Math.floor(Math.max(0, sale.totals.totalMinor - paidWithPoints) / loyalty.earnEveryMinor)
+    : Number.MAX_SAFE_INTEGER;
+  const back = Math.min(Math.floor(returnedMinor / loyalty.earnEveryMinor), earnedBySale);
+  if (back <= 0) return;
+  await tx
+    .update(customers)
+    .set({ loyaltyPoints: sql`greatest(0, ${customers.loyaltyPoints} - ${back})` })
+    .where(and(eq(customers.tenantId, tenantId), eq(customers.id, customerId)));
 }
 
 /** A sale's voucher payments against the vouchers they name: their redeemed amount grows. */

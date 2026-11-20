@@ -107,9 +107,12 @@ export function Label({
   );
 }
 
+/** The most copies of one item in a print: the page's total counts the same cap */
+export const MAX_COPIES = 500;
+
 /** Every copy of every item, in order. */
 export function expand(items: readonly LabelItem[]): LabelItem[] {
-  return items.flatMap((item) => Array.from({ length: Math.max(0, Math.min(item.copies, 500)) }, () => item));
+  return items.flatMap((item) => Array.from({ length: Math.max(0, Math.min(item.copies, MAX_COPIES)) }, () => item));
 }
 
 /** What `window.print()` prints: the labels at their size, alone on the page. */

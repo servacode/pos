@@ -283,6 +283,15 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'PUT /v1/transfers/settings': 'signed-in',
   'GET /v1/transfers/:id': 'signed-in',
   'POST /v1/transfers/:id/receive': 'signed-in',
+  'GET /v1/me/home-summary': 'signed-in',
+  'GET /v1/products/:id/costs': 'signed-in',
+  'GET /v1/sales/summary': 'signed-in',
+  'GET /v1/stocktakes': 'signed-in',
+  'GET /v1/vouchers': 'signed-in',
+  'POST /v1/products/:id/opening-stock': 'signed-in',
+  'POST /v1/promotions/:id/archive': 'signed-in',
+  'POST /v1/shop/:slug/quote': 'public',
+  'POST /v1/transfers/:id/cancel': 'signed-in',
   'GET /v1/period-close': 'signed-in',
   'POST /v1/period-close/close': 'signed-in',
   'POST /v1/period-close/reopen': 'signed-in',
@@ -1381,6 +1390,78 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
     const { transferId } = await transitOf(app, a);
     const res = await app.inject({ method: 'GET', url: `/v1/transfers/${transferId}`, headers: owner(b) });
     expect(res.statusCode).toBe(404);
+  },
+  // Another store's product: its costs are not read and no opening stock is posted to it
+  'GET /v1/products/:id/costs': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}/costs`),
+  'POST /v1/products/:id/opening-stock': async (app, { a, b }) => {
+    const record = await productOf(app, a);
+    const [branch] = await ownerDb()<
+      { id: string }[]
+    >`select id from branches where tenant_id = ${b.tenantId} order by code limit 1`;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/products/${record.id}/opening-stock`,
+      headers: owner(b),
+      payload: {
+        date: '2026-10-30',
+        branchId: branch!.id,
+        lines: [{ variantId: record.variants[0]!.id, qty: 1000, unitCostMinor: 100 }],
+      },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { n: string }[]
+    >`select count(*)::text as n from stock_movements where variant_id = ${record.variants[0]!.id}`;
+    expect(row!.n).toBe('0');
+  },
+  // Another store's offer is not archived
+  'POST /v1/promotions/:id/archive': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: owner(a),
+      payload: { name: 'عرض أ', kind: 'percent', percentBp: 500, scope: 'all' },
+    });
+    const { id } = made.json<{ id: string }>();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/promotions/${id}/archive`,
+      headers: owner(b),
+      payload: { version: 1, archived: true },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { archived_at: Date | null }[]
+    >`select archived_at from promotions where id = ${id}`;
+    expect(row!.archived_at).toBeNull();
+  },
+  // A product of one shop is not priced through another shop's address
+  'POST /v1/shop/:slug/quote': async (app, stores) => {
+    const product = await twoShops(app, stores);
+    const at = (slug: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/shop/${slug}/quote`,
+        payload: { lines: [{ variantId: product.variants[0]!.id, qty: 1 }], coupon: null },
+      });
+    expect((await at('a-shop')).statusCode).toBe(200);
+    // B's shop does not sell A's piece: refused, nothing priced
+    expect((await at('b-shop')).statusCode).toBe(400);
+  },
+  // Another store's transfer on the way is not cancelled and stays on the way
+  'POST /v1/transfers/:id/cancel': async (app, { a, b }) => {
+    const { transferId } = await transitOf(app, a);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/transfers/${transferId}/cancel`,
+      headers: owner(b),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { in_transit: boolean }[]
+    >`select in_transit from transfers where id = ${transferId}`;
+    expect(row!.in_transit).toBe(true);
   },
   'POST /v1/transfers/:id/receive': async (app, { a, b }) => {
     const { transferId } = await transitOf(app, a);

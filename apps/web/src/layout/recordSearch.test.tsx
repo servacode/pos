@@ -29,12 +29,12 @@ describe('the search box finds records as well as pages', () => {
     // The page's own shell replaces the loading shell once its code arrives: open the box after that
     await screen.findByRole('heading', { level: 1, name: 'المنتجات' });
     await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    const box = await screen.findByRole('textbox', { name: 'اسم الصفحة' });
+    const box = await screen.findByRole('combobox', { name: 'اسم الصفحة' });
     await user.type(box, 'ش');
     expect(requests.some((r) => r.path.startsWith('/v1/products?q='))).toBe(false);
     await user.type(box, 'اش');
-    expect(await screen.findByRole('button', { name: /شاش طبي/ })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('button', { name: /مشفى الشاش/ })).toBeInTheDocument());
+    expect(await screen.findByRole('option', { name: /شاش طبي/ })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('option', { name: /مشفى الشاش/ })).toBeInTheDocument());
   });
 });
 
@@ -58,10 +58,10 @@ describe('the search box finds purchase invoices', () => {
     });
     const { user } = renderApp('/products');
     await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    await user.type(await screen.findByRole('textbox', { name: 'اسم الصفحة' }), 'PUR-000012');
-    const hit = await screen.findByRole('button', { name: /PUR-000012/ });
+    await user.type(await screen.findByRole('combobox', { name: 'اسم الصفحة' }), 'PUR-000012');
+    const hit = await screen.findByRole('option', { name: /PUR-000012/ });
     expect(hit).toHaveTextContent('مورد الشفاء');
-    expect(screen.queryByRole('button', { name: /PUR-000013/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /PUR-000013/ })).not.toBeInTheDocument();
   });
 });
 
@@ -97,10 +97,10 @@ describe('the search box finds online orders, rentals and cheques', () => {
     });
     const { user } = renderApp('/products');
     await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    await user.type(await screen.findByRole('textbox', { name: 'اسم الصفحة' }), '11');
-    expect(await screen.findByRole('button', { name: /ONL-1100/ })).toHaveTextContent('ريم');
-    expect(await screen.findByRole('button', { name: /RNT-1101/ })).toHaveTextContent('كرسي');
-    expect(await screen.findByRole('button', { name: /CH-1102/ })).toHaveTextContent('سامر');
+    await user.type(await screen.findByRole('combobox', { name: 'اسم الصفحة' }), '11');
+    expect(await screen.findByRole('option', { name: /ONL-1100/ })).toHaveTextContent('ريم');
+    expect(await screen.findByRole('option', { name: /RNT-1101/ })).toHaveTextContent('كرسي');
+    expect(await screen.findByRole('option', { name: /CH-1102/ })).toHaveTextContent('سامر');
   });
 });
 
@@ -136,11 +136,11 @@ describe('the search box keeps numbers and dates readable in Arabic', () => {
     });
     const { user } = renderApp('/products');
     await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    await user.type(await screen.findByRole('textbox', { name: 'اسم الصفحة' }), '11');
+    await user.type(await screen.findByRole('combobox', { name: 'اسم الصفحة' }), '11');
     const phone = await screen.findByText('+963944555222');
     expect(phone.closest('bdi')).toHaveAttribute('dir', 'ltr');
     expect(await screen.findByText('ONL-1100')).toHaveAttribute('dir', 'ltr');
-    const cheque = await screen.findByRole('button', { name: /بنك سورية/ });
+    const cheque = await screen.findByRole('option', { name: /بنك سورية/ });
     expect(cheque).toHaveTextContent('1 كانون الأول 2026');
     expect(cheque).not.toHaveTextContent('2026-12-01');
   });
@@ -171,14 +171,14 @@ describe('the search box is quick', () => {
     const { user } = renderApp('/products');
     await screen.findByRole('heading', { level: 1, name: 'المنتجات' });
     await user.click((await screen.findAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' }))[0]!);
-    const box = await screen.findByRole('textbox', { name: 'اسم الصفحة' });
+    const box = await screen.findByRole('combobox', { name: 'اسم الصفحة' });
     await user.type(box, 'ري');
 
     // The customer shows while the orders list is still on its way
-    expect(await screen.findByRole('button', { name: /ريم/ })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /ريم/ })).toBeInTheDocument();
     finishOrders({ status: 200, body: { items: [] } });
     await user.type(box, 'م');
-    await screen.findByRole('button', { name: /ريم/ });
+    await screen.findByRole('option', { name: /ريم/ });
     // One more letter did not fetch the whole lists again
     expect(requestsTo('GET', '/v1/online-orders')).toHaveLength(1);
     expect(requestsTo('GET', '/v1/rentals?status=all')).toHaveLength(1);
@@ -189,12 +189,21 @@ describe('the trial banner', () => {
   it('can be hidden on this device', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
-      'GET /v1/me': { status: 200, body: makeMe({ status: 'trialing', daysLeft: 12 }) },
+      'GET /v1/me': {
+        status: 200,
+        body: (() => {
+          const me = makeMe({ status: 'trialing', daysLeft: 12 });
+          return {
+            ...me,
+            user: { ...me.user, permissions: [...me.user.permissions, 'subscription.manage'] },
+          };
+        })(),
+      },
     });
     const { user } = renderApp('/');
     expect(await screen.findByText('باقي 12 يوماً من الباقة المجانية')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'أخفِ هذا الشريط' }));
     expect(screen.queryByText('باقي 12 يوماً من الباقة المجانية')).not.toBeInTheDocument();
-    expect(localStorage.getItem('serva.trialBannerDismissed')).toBe('1');
+    expect(localStorage.getItem('serva.trialBannerDismissed.tenant-1')).toBe('1');
   });
 });

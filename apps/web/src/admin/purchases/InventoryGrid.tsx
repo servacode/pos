@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { InventoryRow } from '@serva/core';
 import { Button, cn, formatQuantity, SegmentedControl } from '@serva/ui';
 import { negativePieces } from '../stockWords';
+import { ChevDown, ChevLeft } from '../sales/ui';
 import { gridOf } from './SizeGrid';
 
 type Piece = Pick<InventoryRow, 'variantId' | 'qty'> & { attributes: { name: string; value: string }[] };
@@ -73,6 +74,9 @@ export function InventoryGrid({
           </span>
         ) : null}
       </div>
+      <p className="text-xs text-ink-muted">
+        الأحمر: نفد أو سالب (والسالب مكتوب بكلمته) · الأصفر: قليل (2 أو أقل) · «—»: لا توجد هذه القطعة.
+      </p>
       {models.length === 0 ? <p className="text-sm text-ink-muted">لا صنف في هذه المجموعة.</p> : null}
       {models.map((m, index) => {
         const grid = gridOf(m.pieces as never);
@@ -101,10 +105,10 @@ export function InventoryGrid({
                 type="button"
                 aria-expanded={open}
                 onClick={() => flip(m.id, index)}
-                className="flex min-h-9 items-center gap-2 rounded-small text-start"
+                className="flex min-h-11 items-center gap-2 rounded-small text-start"
               >
                 <span aria-hidden="true" className="text-ink-subtle">
-                  {open ? '▾' : '◂'}
+                  {open ? <ChevDown size={20} /> : <ChevLeft size={20} />}
                 </span>
                 {m.name}
               </button>
@@ -117,13 +121,9 @@ export function InventoryGrid({
                 </span>
               ) : null}
               {minus > 0 && onCount ? (
-                <button
-                  type="button"
-                  onClick={() => onCount(minusIds)}
-                  className="rounded-small text-sm font-semibold text-brand-ink underline-offset-4 hover:underline"
-                >
+                <Button size="sm" variant="secondary" onClick={() => onCount(minusIds)}>
                   صحّح بالجرد
-                </button>
+                </Button>
               ) : null}
             </h3>
             {open ? (
@@ -179,7 +179,13 @@ export function InventoryGrid({
                               key={col || '_'}
                               className={cn(
                                 'num min-w-16 rounded-small px-3 py-2.5 text-center font-semibold',
-                                qty <= 0 ? 'bg-danger-soft text-danger-ink' : 'bg-surface-muted text-ink',
+                                qty < 0
+                                  ? 'bg-danger-soft text-danger-ink ring-1 ring-danger'
+                                  : qty === 0
+                                    ? 'bg-danger-soft text-danger-ink'
+                                    : qty <= 2000
+                                      ? 'bg-warning-soft text-warning-ink'
+                                      : 'bg-surface-muted text-ink',
                               )}
                             >
                               {rawQty < 0 ? (

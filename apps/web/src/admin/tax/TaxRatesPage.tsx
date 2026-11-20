@@ -6,16 +6,17 @@ import {
   Alert,
   Badge,
   Button,
+  Card,
   DataTable,
   Dialog,
   EmptyState,
-  PageHeader,
   PercentIcon,
   Select,
   Switch,
   TextField,
   type DataColumn,
 } from '@serva/ui';
+import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';
 import { ApiError, errorMessage } from '../../lib/api';
@@ -240,11 +241,10 @@ export function TaxRatesPage() {
 
   return (
     <ReportScreen me={me} access={['settings.manage', 'catalog.manage']} title="الضرائب">
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
+      <SalesPage>
+        <PageTop
           title="الضرائب"
-          description="نسب الضريبة التي تختار منها لكل منتج. الحساب والقيد كما هما: هذه الصفحة تسمّي النسب فقط."
-          icon={<PercentIcon />}
+          subtitle="نسب الضريبة التي تختار منها لكل منتج. الحساب والقيد كما هما: هذه الصفحة تسمّي النسب فقط."
           actions={
             canEdit ? (
               <Button icon={<AddIcon />} onClick={() => setDialog({ rate: null })}>
@@ -280,13 +280,8 @@ export function TaxRatesPage() {
             ))}
           </Select>
         ) : null}
-        <DataTable
-          caption="نسب الضريبة"
-          columns={columns}
-          rows={rates ?? []}
-          rowKey={(r) => r.id}
-          loading={rates === null && !error}
-          empty={
+        {rates !== null && rates.length === 0 && !error ? (
+          <Card>
             <EmptyState
               icon={PercentIcon}
               title="لا ضرائب بعد"
@@ -296,9 +291,17 @@ export function TaxRatesPage() {
                   : 'لم يضف المالك نسب ضريبة بعد.'
               }
             />
-          }
-        />
-      </div>
+          </Card>
+        ) : (
+          <DataTable
+            caption="نسب الضريبة"
+            columns={columns}
+            rows={rates ?? []}
+            rowKey={(r) => r.id}
+            loading={rates === null && !error}
+          />
+        )}
+      </SalesPage>
       {dialog ? (
         <RateDialog
           rate={dialog.rate}

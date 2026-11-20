@@ -41,7 +41,27 @@ function open(repsEnabled: boolean, items: CustomerListItem[] = []) {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': { status: 200, body: meOf(repsEnabled) },
     'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
-    'GET /v1/customers': { status: 200, body: { items, totalOwedMinor: 0, baseCurrency: 'SYP' } },
+    // The list is paged and filtered by the server: the first page, and the page of those waiting for approval
+    'GET /v1/customers?limit=50': {
+      status: 200,
+      body: {
+        items,
+        totalOwedMinor: 0,
+        pendingCount: items.filter((c) => c.approvalStatus === 'pending').length,
+        nextCursor: null,
+        baseCurrency: 'SYP',
+      },
+    },
+    'GET /v1/customers?approval=pending&limit=50': {
+      status: 200,
+      body: {
+        items: items.filter((c) => c.approvalStatus === 'pending'),
+        totalOwedMinor: 0,
+        pendingCount: items.filter((c) => c.approvalStatus === 'pending').length,
+        nextCursor: null,
+        baseCurrency: 'SYP',
+      },
+    },
     'GET /v1/regions': {
       status: 200,
       body: [

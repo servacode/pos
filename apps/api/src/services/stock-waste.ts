@@ -167,8 +167,9 @@ export function wasteReport(
         and (l->>'diffQty')::bigint < 0
         and (nullif(l->>'reason', '') is not null or s.note like ${`${LEGACY_WASTE_NOTE}%`})
       order by s.business_date desc, s.number desc, l->>'name'
-      limit 5000`);
-    const rows: WasteRow[] = found.map((r) => ({
+      limit 5001`);
+    const truncated = found.length > 5000;
+    const rows: WasteRow[] = found.slice(0, 5000).map((r) => ({
       date: r.date,
       number: r.number,
       branchId: r.branch_id,
@@ -211,6 +212,7 @@ export function wasteReport(
       byProduct: byCost(byProduct.values()),
       totalCostMinor: rows.reduce((sum, r) => sum + r.costMinor, 0),
       baseCurrency: await baseCurrency(tx),
+      ...(truncated ? { truncated } : {}),
     };
   });
 }

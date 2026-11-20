@@ -7,37 +7,26 @@ import {
   type SerialRow,
   type UnassignedSerialSale,
 } from '@serva/core';
-import {
-  Alert,
-  Badge,
-  DataTable,
-  EmptyState,
-  Button,
-  PageHeader,
-  SearchField,
-  SegmentedControl,
-  BarcodeIcon,
-  useDigits,
-  type DataColumn,
-} from '@serva/ui';
+import { Alert, Button, SearchField, BarcodeIcon, useDigits } from '@serva/ui';
 import { dayText } from '../../lib/dates';
-import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { useMe } from '../../auth/useAuth';
+import { ReportScreen } from '../reports/parts';
+import { PageTop, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { fixSerialRow, serialsOf, unassignedSerialSales } from '../warranty/api';
 import { getInventory } from './api';
-import { SectionHead } from './parts';
+import './inventory.css';
 
 /** A document number over its date, or a dash when there is none. */
 function DocCell({ number, date }: { number: string | null; date: string | null }) {
   const digits = useDigits();
-  if (!number) return <span className="text-ink-subtle">—</span>;
+  if (!number) return <span className="sx-sub">—</span>;
   return (
     <span className="flex flex-col items-start">
-      <bdi dir="ltr" className="num text-sm">
+      <bdi dir="ltr" className="sx-n">
         {number}
       </bdi>
-      {date ? <span className="num text-xs text-ink-subtle">{dayText(date, digits)}</span> : null}
+      {date ? <span className="sx-n sx-subline">{dayText(date, digits)}</span> : null}
     </span>
   );
 }
@@ -146,29 +135,29 @@ export function SerialsPage() {
 
   function statusBadge(r: SerialRow) {
     return r.status === 'sold' ? (
-      <Badge tone="neutral">مباع</Badge>
+      <StatusPill kind="ok">مباع</StatusPill>
     ) : r.status === 'returned' ? (
-      <Badge tone="neutral">أُعيد للمورد</Badge>
+      <StatusPill kind="ok">أُعيد للمورد</StatusPill>
     ) : r.status === 'rented' ? (
-      <Badge tone="warning">مؤجَّر</Badge>
+      <StatusPill kind="warn">مؤجَّر</StatusPill>
     ) : (
-      <Badge tone="success">في المحل</Badge>
+      <StatusPill kind="open">في المحل</StatusPill>
     );
   }
 
   function flagsCell(r: SerialRow) {
-    if (r.flags.length === 0 && r.sales.length <= 1) return <span className="text-ink-subtle">—</span>;
+    if (r.flags.length === 0 && r.sales.length <= 1) return <span className="sx-sub">—</span>;
     return (
       <span className="flex flex-col items-start gap-1">
         {r.flags.map((f) => (
-          <Badge key={f} tone={f === 'override' ? 'info' : 'warning'}>
+          <StatusPill key={f} kind={f === 'override' ? 'open' : 'warn'}>
             {SERIAL_FLAG_LABELS[f]}
-          </Badge>
+          </StatusPill>
         ))}
-        <span className="text-xs text-ink-muted">
+        <span className="sx-subline">
           {r.sales.map((s, i) => (
             <span key={i} className="block">
-              <bdi dir="ltr" className="num">
+              <bdi dir="ltr" className="sx-n">
                 {s.saleNumber ?? '—'}
               </bdi>
               {s.customerName ? ` · ${s.customerName}` : ' · بدون زبون'}
@@ -240,65 +229,49 @@ export function SerialsPage() {
     );
   }
 
-  const columns: DataColumn<SerialRow>[] = [
+  const columns: SxColumn<SerialRow>[] = [
     {
       key: 'serial',
-      className: 'whitespace-nowrap',
       header: label === 'IMEI' ? 'IMEI' : 'الرقم',
+      lead: true,
       cell: (r) => (
-        <bdi dir="ltr" className="num font-semibold">
+        <bdi dir="ltr" className="sx-n">
           {r.serial}
         </bdi>
       ),
     },
-    {
-      key: 'status',
-      header: 'الحالة',
-      cell: (r) => statusBadge(r),
-    },
-    { key: 'name', className: 'whitespace-nowrap', header: 'الجهاز', cell: (r) => r.name },
+    { key: 'status', header: 'الحالة', cell: (r) => statusBadge(r) },
+    { key: 'name', header: 'الجهاز', cell: (r) => r.name },
     {
       key: 'in',
-      className: 'whitespace-nowrap',
       header: 'الاستلام',
       cell: (r) => <DocCell number={r.purchaseNumber} date={r.receivedOn} />,
     },
     {
       key: 'out',
-      className: 'whitespace-nowrap',
       header: 'البيع',
       cell: (r) => <DocCell number={r.saleNumber} date={r.soldOn} />,
     },
     {
       key: 'warranty',
-      className: 'whitespace-nowrap',
       header: 'الكفالة حتى',
       cell: (r) =>
         r.warrantyUntil ? (
-          <span className="num">{dayText(r.warrantyUntil, digits)}</span>
+          <span className="sx-n">{dayText(r.warrantyUntil, digits)}</span>
         ) : (
-          <span className="text-ink-subtle">—</span>
+          <span className="sx-sub">—</span>
         ),
     },
-    {
-      key: 'flags',
-      header: 'للمراجعة',
-      cell: (r) => flagsCell(r),
-    },
-    {
-      key: 'fix',
-      header: '',
-      cell: (r) => fixCell(r),
-    },
+    { key: 'flags', header: 'للمراجعة', cell: (r) => flagsCell(r) },
+    { key: 'fix', header: '', cell: (r) => fixCell(r) },
   ];
 
   return (
-    <AppShell>
-      <title>الأرقام التسلسلية · SERVA</title>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
+    <ReportScreen me={me} access={['catalog.manage']} title="الأرقام التسلسلية">
+      <SalesPage>
+        <PageTop
           title="الأرقام التسلسلية"
-          description="كل جهاز برقمه: في المحل أو مباع، متى استُلم ومتى بيع، والكفالة حتى متى."
+          subtitle="كل جهاز برقمه: في المحل أو مباع، متى استُلم ومتى بيع، والكفالة حتى متى."
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
         {unassigned.length > 0 ? (
@@ -365,40 +338,43 @@ export function SerialsPage() {
           </Alert>
         ) : null}
         <section aria-label="الأجهزة" className="flex flex-col gap-3">
-          <SectionHead
-            title="الأجهزة"
-            description={q.trim() ? 'ما يطابق بحثك.' : 'آخر ما استُلم أولاً. ابحث برقم الجهاز لتجده.'}
-          >
-            <SegmentedControl
-              label="العرض"
-              value={view}
-              onValueChange={setView}
-              options={[
-                { value: 'all', label: 'الكل' },
-                { value: 'flagged', label: 'للمراجعة' },
-              ]}
-            />
-            <SearchField
-              label={`ابحث بـ${label === 'IMEI' ? 'IMEI' : 'الرقم التسلسلي'}`}
-              value={q}
-              onValueChange={setQ}
-              className="w-full sm:w-80"
-            />
-          </SectionHead>
-          <ul className="flex flex-col gap-3 sm:hidden" aria-label="الأجهزة بأرقامها">
+          <div className="sx-card sx-filterbar">
+            <div className="sx-search">
+              <SearchField
+                label={`ابحث بـ${label === 'IMEI' ? 'IMEI' : 'الرقم التسلسلي'}`}
+                value={q}
+                onValueChange={setQ}
+              />
+            </div>
+            <div role="radiogroup" aria-label="العرض" className="sx-chips">
+              {(
+                [
+                  ['all', 'الكل'],
+                  ['flagged', 'للمراجعة'],
+                ] as const
+              ).map(([key, text]) => (
+                <label key={key} className="sx-chip">
+                  <input
+                    type="radio"
+                    name="serial-view"
+                    checked={view === key}
+                    onChange={() => setView(key)}
+                  />
+                  {text}
+                </label>
+              ))}
+            </div>
+            <span className="sx-wait">{q.trim() ? 'ما يطابق بحثك.' : 'آخر ما استُلم أولاً.'}</span>
+          </div>
+          <ul className="sx-cards sm:hidden" aria-label="الأجهزة بأرقامها">
             {(items ?? []).map((r) => (
-              <li
-                key={r.serial}
-                className="flex flex-col gap-2 rounded-card border border-line bg-surface p-4 shadow-e1"
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <bdi dir="ltr" className="num font-semibold">
-                    {r.serial}
-                  </bdi>
-                  {statusBadge(r)}
-                </span>
-                <span className="text-sm">{r.name}</span>
-                <span className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-ink-muted">
+              <li key={r.serial} className="ix-icard">
+                <bdi dir="ltr" className="n sx-n">
+                  {r.serial}
+                </bdi>
+                <span className="v">{statusBadge(r)}</span>
+                <span className="q">{r.name}</span>
+                <span className="q" style={{ gridColumn: '1 / -1' }}>
                   {r.purchaseNumber ? (
                     <span className="flex items-center gap-1">
                       استُلم <DocCell number={r.purchaseNumber} date={r.receivedOn} />
@@ -411,38 +387,36 @@ export function SerialsPage() {
                   ) : null}
                   {r.warrantyUntil ? <span>الكفالة حتى {dayText(r.warrantyUntil, digits)}</span> : null}
                 </span>
-                {r.flags.length > 0 ? flagsCell(r) : null}
-                {fixCell(r) ? <div className="border-t border-line pt-2">{fixCell(r)}</div> : null}
+                {r.flags.length > 0 ? <span className="c">{flagsCell(r)}</span> : null}
+                {fixCell(r) ? <div className="c">{fixCell(r)}</div> : null}
               </li>
             ))}
             {items && items.length === 0 ? (
-              <li>
-                <EmptyState
-                  icon={BarcodeIcon}
-                  title="لا رقم مطابق."
-                  description="الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
-                />
+              <li className="sx-card ix-empty">
+                <BarcodeIcon size={32} />
+                <h3>لا رقم مطابق.</h3>
+                <p>الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع.</p>
               </li>
             ) : null}
           </ul>
           <div className="hidden sm:block">
-            <DataTable
+            <SxTable
               caption="الأجهزة بأرقامها"
               columns={columns}
               rows={items ?? []}
               rowKey={(r) => r.serial}
               loading={!items && !error}
               empty={
-                <EmptyState
-                  icon={BarcodeIcon}
-                  title="لا رقم مطابق."
-                  description="الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع."
-                />
+                <div className="ix-empty">
+                  <BarcodeIcon size={32} />
+                  <h3>لا رقم مطابق.</h3>
+                  <p>الأرقام تُكتب في فاتورة الشراء وتُمسح على الكاشير عند البيع.</p>
+                </div>
               }
             />
           </div>
         </section>
-      </div>
-    </AppShell>
+      </SalesPage>
+    </ReportScreen>
   );
 }

@@ -452,6 +452,28 @@ describe('editing a price in place', () => {
     expect(shownText(screen.getByRole('table'))).toContain('175 ل.س');
   });
 
+  it('asks before a price of zero is saved from the list: the second «احفظ» confirms', async () => {
+    const { user, requestsTo } = openProducts({
+      [`PATCH /v1/products/${ids.milk}`]: {
+        status: 200,
+        body: product({ version: 4, variants: [] }),
+      },
+    });
+    await screen.findByText('حليب المراعي 1 لتر');
+
+    await user.click(screen.getByRole('button', { name: 'عدّل سعر «حليب المراعي 1 لتر»' }));
+    const field = screen.getByLabelText('السعر الجديد لـ«حليب المراعي 1 لتر»');
+    await user.clear(field);
+    await user.type(field, '0');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/سيُباع «حليب المراعي 1 لتر» مجاناً/)).toBeInTheDocument();
+    expect(requestsTo('PATCH', `/v1/products/${ids.milk}`)).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText(/حُفظ سعر «حليب المراعي 1 لتر»/)).toBeInTheDocument();
+    expect(requestsTo('PATCH', `/v1/products/${ids.milk}`)).toHaveLength(1);
+  });
+
   it('reloads the list when someone changed the product first', async () => {
     const { user, requestsTo } = openProducts({
       [`PATCH /v1/products/${ids.milk}`]: apiError(409, 'stale_version', 'تغيّر السجل.'),

@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockFetch } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
-import { daysAgo } from '../admin/reports/MerchandisePage';
 import { clearReportCache } from '../admin/reports/useReport';
 import { dayReport, meWith, OWNER_KEYS, TODAY, NOW } from '../test/reports';
 
@@ -13,6 +12,21 @@ const shiftWeek = (day: string) => {
   d.setUTCDate(d.getUTCDate() - 6);
   return d.toISOString().slice(0, 10);
 };
+
+/** The home summary the page asks for instead of the heavy lists: the low pieces, debts and photos */
+const summaryOf = (parts: {
+  lowStock?: unknown[];
+  debts?: { totalOwedMinor: number; overLimitCount: number; overLimitOne: unknown } | null;
+  photos?: { goodsCount: number; withoutPhoto: number } | null;
+}) => ({
+  status: 200,
+  body: {
+    baseCurrency: 'SYP',
+    debts: parts.debts ?? null,
+    photos: parts.photos ?? null,
+    lowStock: parts.lowStock ? { total: parts.lowStock.length, items: parts.lowStock } : null,
+  },
+});
 
 const dayBack = (back: number) => {
   const d = new Date(`${TODAY}T00:00:00Z`);
@@ -38,13 +52,25 @@ describe('HomePage', () => {
   it('shows the trial days left, the store and its sectors', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
-      'GET /v1/me': { status: 200, body: makeMe({ status: 'trialing', daysLeft: 12 }) },
+      'GET /v1/me': {
+        status: 200,
+        body: (() => {
+          const me = makeMe({ status: 'trialing', daysLeft: 12 });
+          return {
+            ...me,
+            user: { ...me.user, permissions: [...me.user.permissions, 'subscription.manage'] },
+          };
+        })(),
+      },
     });
     renderApp('/');
 
     expect(await screen.findByText('باقي 12 يوماً من الباقة المجانية')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'أهلاً، أحمد' })).toBeInTheDocument();
-    expect(screen.getByText('سوبرماركت الياسمين')).toBeInTheDocument();
+    // the store's name is in the breadcrumb and the sidebar's store card: read it from the breadcrumb
+    expect(
+      within(screen.getByRole('navigation', { name: 'أنت هنا' })).getByText('سوبرماركت الياسمين'),
+    ).toBeInTheDocument();
     const sectors = within(screen.getByRole('list', { name: 'نشاط المتجر' }));
     expect(sectors.getByText('سوبرماركت ومولات')).toBeInTheDocument();
     expect(sectors.getByText('مقهى وكافتيريا')).toBeInTheDocument();
@@ -101,22 +127,19 @@ describe('HomePage', () => {
           status: 200,
           body: { items: [order('o-1', 'shop'), order('o-2', 'shop'), order('o-3', 'hold')] },
         },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
-          status: 200,
-          body: {
-            lowStock: [
-              {
-                variantId: 'v-1',
-                productId: 'p-1',
-                name: 'قميص كتان',
-                label: 'M · أبيض',
-                stockQty: 1000,
-                soldQty: 6000,
-                minStockQty: null,
-              },
-            ],
-          },
-        },
+        'GET /v1/me/home-summary': summaryOf({
+          lowStock: [
+            {
+              variantId: 'v-1',
+              productId: 'p-1',
+              name: 'قميص كتان',
+              label: 'M · أبيض',
+              stockQty: 1000,
+              soldQty: 6000,
+              minStockQty: null,
+            },
+          ],
+        }),
       });
       renderApp('/');
 
@@ -150,7 +173,7 @@ describe('HomePage', () => {
         },
       });
       renderApp('/');
-      expect(await screen.findByText('طلبات مقبولة تنتظر البيع على الكاشير')).toBeInTheDocument();
+      expect(await screen.findByText('طلبات مقبولة تنتظر الكاشير')).toBeInTheDocument();
     });
 
     it('explains a negative margin with a link to the products sold under their cost', async () => {
@@ -208,26 +231,23 @@ describe('HomePage', () => {
             baseCurrency: 'SYP',
           },
         },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
-          status: 200,
-          body: {
-            lowStock: [
-              {
-                variantId: 'v-1',
-                productId: 'p-1',
-                name: 'قميص كتان',
-                label: 'M · أبيض',
-                attributes: [
-                  { name: 'المقاس', value: 'M' },
-                  { name: 'اللون', value: 'أبيض' },
-                ],
-                stockQty: 0,
-                soldQty: 6000,
-                minStockQty: null,
-              },
-            ],
-          },
-        },
+        'GET /v1/me/home-summary': summaryOf({
+          lowStock: [
+            {
+              variantId: 'v-1',
+              productId: 'p-1',
+              name: 'قميص كتان',
+              label: 'M · أبيض',
+              attributes: [
+                { name: 'المقاس', value: 'M' },
+                { name: 'اللون', value: 'أبيض' },
+              ],
+              stockQty: 0,
+              soldQty: 6000,
+              minStockQty: null,
+            },
+          ],
+        }),
       });
       renderApp('/');
 
@@ -339,15 +359,12 @@ describe('HomePage', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: { ...me, tenant: { ...me.tenant, sectors: ['clothing'] } } },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
-          status: 200,
-          body: {
-            lowStock: [
-              piece('v-1', 'S', 0),
-              ...['M', 'L', 'XL', 'XXL', '3XL'].map((size, i) => piece(`v-${i + 2}`, size, 1000)),
-            ],
-          },
-        },
+        'GET /v1/me/home-summary': summaryOf({
+          lowStock: [
+            piece('v-1', 'S', 0),
+            ...['M', 'L', 'XL', 'XXL', '3XL'].map((size, i) => piece(`v-${i + 2}`, size, 1000)),
+          ],
+        }),
       });
       renderApp('/');
 
@@ -393,19 +410,6 @@ describe('HomePage', () => {
     });
 
     it('lists money that waits (customers over their limit, debts, supplier dues) under «المال»', async () => {
-      const customer = (id: string, balanceMinor: number, creditLimitMinor: number | null) => ({
-        id,
-        name: id,
-        phone: null,
-        creditLimitMinor,
-        balanceMinor,
-        priceTier: 'retail',
-        noMessages: false,
-        archived: false,
-        kind: null,
-        contactName: null,
-        contactPhone: null,
-      });
       mockFetch({
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': {
@@ -413,14 +417,13 @@ describe('HomePage', () => {
           body: meWith([...OWNER_KEYS, 'customers.view', 'purchases.manage']),
         },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
-        'GET /v1/customers?owing=true': {
-          status: 200,
-          body: {
-            items: [customer('a', 500_000, 300_000), customer('b', 100_000, null)],
+        'GET /v1/me/home-summary': summaryOf({
+          debts: {
             totalOwedMinor: 600_000,
-            baseCurrency: 'SYP',
+            overLimitCount: 1,
+            overLimitOne: { name: 'a', balanceMinor: 500_000, creditLimitMinor: 300_000 },
           },
-        },
+        }),
         'GET /v1/suppliers': {
           status: 200,
           body: { items: [], totalOwedMinor: 2_500_000, baseCurrency: 'SYP' },
@@ -432,7 +435,7 @@ describe('HomePage', () => {
       // One customer over: named, with what they owe and their limit
       expect(await screen.findByText(/a: فوق الحدّ/)).toBeInTheDocument();
       expect(screen.getByText(/ديون الزبائن عندنا/)).toBeInTheDocument();
-      expect(screen.getByText(/مستحقات الموردين علينا/)).toBeInTheDocument();
+      expect(screen.getByText(/ما علينا للموردين/)).toBeInTheDocument();
     });
 
     it('puts the cheques due within a week under «المال», and the tab badge equals «عرض الكل»', async () => {
@@ -462,18 +465,14 @@ describe('HomePage', () => {
           body: meWith([...OWNER_KEYS, 'customers.view', 'purchases.manage', 'catalog.manage']),
         },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
+        'GET /v1/me/home-summary': summaryOf({
+          lowStock: [piece(1), piece(2), piece(3)],
+          debts: { totalOwedMinor: 600_000, overLimitCount: 0, overLimitOne: null },
+          photos: { goodsCount: 5, withoutPhoto: 1 },
+        }),
+        'GET /v1/cheques?status=pending': {
           status: 200,
-          body: { lowStock: [piece(1), piece(2), piece(3)] },
-        },
-        'GET /v1/products?limit=100': {
-          status: 200,
-          body: { items: [{ id: 'p-9', nameAr: 'قميص', hasImage: false }], nextCursor: null },
-        },
-        'GET /v1/cheques': { status: 200, body: { items: [cheque('c1', 'in'), cheque('c2', 'out')] } },
-        'GET /v1/customers?owing=true': {
-          status: 200,
-          body: { items: [], totalOwedMinor: 600_000, baseCurrency: 'SYP' },
+          body: { items: [cheque('c1', 'in'), cheque('c2', 'out')] },
         },
         'GET /v1/suppliers': { status: 200, body: { items: [], totalOwedMinor: 0, baseCurrency: 'SYP' } },
       });
@@ -507,11 +506,10 @@ describe('HomePage', () => {
             outstandingMinor: 9_000_000,
           },
         },
-        'GET /v1/cheques': { status: 200, body: { items: [] } },
-        'GET /v1/customers?owing=true': {
-          status: 200,
-          body: { items: [], totalOwedMinor: 0, baseCurrency: 'SYP' },
-        },
+        'GET /v1/cheques?status=pending': { status: 200, body: { items: [] } },
+        'GET /v1/me/home-summary': summaryOf({
+          debts: { totalOwedMinor: 0, overLimitCount: 0, overLimitOne: null },
+        }),
       });
       const { user } = renderApp('/');
       await user.click(await screen.findByRole('tab', { name: /المال/ }));
@@ -593,20 +591,10 @@ describe('HomePage', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: { ...me, tenant: { ...me.tenant, sectors: ['clothing'] } } },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
-          status: 200,
-          body: { lowStock: [piece('v-1', 'S'), piece('v-2', 'M'), piece('v-3', 'L')] },
-        },
-        'GET /v1/products?limit=100': {
-          status: 200,
-          body: {
-            items: [
-              { id: 'p-1', nameAr: 'جاكيت شتوي', hasImage: false },
-              { id: 'p-2', nameAr: 'قميص', hasImage: false },
-            ],
-            nextCursor: null,
-          },
-        },
+        'GET /v1/me/home-summary': summaryOf({
+          lowStock: [piece('v-1', 'S'), piece('v-2', 'M'), piece('v-3', 'L')],
+          photos: { goodsCount: 40, withoutPhoto: 2 },
+        }),
       });
       renderApp('/');
 
@@ -632,10 +620,9 @@ describe('HomePage', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
-          status: 200,
-          body: { lowStock: [piece(1, 2000), piece(2, 0), piece(3, 3000), piece(4, 1000), piece(5, 4000)] },
-        },
+        'GET /v1/me/home-summary': summaryOf({
+          lowStock: [piece(1, 2000), piece(2, 0), piece(3, 3000), piece(4, 1000), piece(5, 4000)],
+        }),
       });
       const { user } = renderApp('/');
 
@@ -668,10 +655,9 @@ describe('HomePage', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
-          status: 200,
-          body: { lowStock: [piece('v-1', 'p-1', 'قميص', 2), piece('v-2', 'p-2', 'بنطال', 0)] },
-        },
+        'GET /v1/me/home-summary': summaryOf({
+          lowStock: [piece('v-1', 'p-1', 'قميص', 2), piece('v-2', 'p-2', 'بنطال', 0)],
+        }),
       });
       renderApp('/');
 
@@ -753,10 +739,7 @@ describe('HomePage', () => {
         'POST /v1/auth/refresh': signedInRefresh,
         'GET /v1/me': { status: 200, body: { ...me, tenant: { ...me.tenant, sectors: ['clothing'] } } },
         [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
-        [`GET /v1/reports/merchandise?from=${daysAgo(30)}&to=${daysAgo(0)}&idleDays=60`]: {
-          status: 200,
-          body: { lowStock: [low] },
-        },
+        'GET /v1/me/home-summary': summaryOf({ lowStock: [low] }),
       });
       renderApp('/');
 
@@ -791,11 +774,46 @@ describe('HomePage', () => {
           status: 200,
           body: dayReport({ invoiceCount: 0, totalMinor: 0, topProducts: [], byMethod: [] }),
         },
+        [WEEK]: weekOf({}),
       });
       renderApp('/');
 
       expect(await screen.findByText('لا مبيعات بعد')).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'ابدأ أول عملية بيع' })).toHaveAttribute('href', '/pos');
+    });
+
+    it('does not take a failed week for a brand-new store: it says so and offers a retry', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(OWNER_KEYS) },
+        [`GET /v1/reports/day?date=${TODAY}`]: {
+          status: 200,
+          body: dayReport({ invoiceCount: 0, totalMinor: 0, topProducts: [], byMethod: [] }),
+        },
+        [WEEK]: { status: 500, body: { error: { code: 'server_error', message: 'تعذّر الاتصال' } } },
+      });
+      renderApp('/');
+
+      expect(await screen.findByText('تعذّر تحميل أيام هذه الفترة.')).toBeInTheDocument();
+      expect(screen.queryByText('ابدأ أول عملية بيع')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'حاول مرة ثانية' })).toBeInTheDocument();
+    });
+
+    it('asks the light summary, not the customers, merchandise and products lists', async () => {
+      const { requestsTo } = mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'customers.view', 'catalog.manage']) },
+        [`GET /v1/reports/day?date=${TODAY}`]: { status: 200, body: dayReport() },
+        'GET /v1/me/home-summary': summaryOf({
+          photos: { goodsCount: 300, withoutPhoto: 120 },
+          lowStock: [],
+        }),
+      });
+      renderApp('/');
+
+      expect(await screen.findByRole('link', { name: /120 منتجاً بلا صورة/ })).toBeInTheDocument();
+      expect(requestsTo('GET', '/v1/me/home-summary')).toHaveLength(1);
+      expect(requestsTo('GET', '/v1/customers?owing=true')).toHaveLength(0);
     });
 
     it('offers a retry when the day report fails', async () => {
@@ -806,6 +824,7 @@ describe('HomePage', () => {
           status: 500,
           body: { error: { code: 'server_error', message: 'تعذّر الاتصال' } },
         },
+        [WEEK]: weekOf({}),
       });
       renderApp('/');
 

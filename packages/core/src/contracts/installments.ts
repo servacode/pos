@@ -259,6 +259,8 @@ export const collectInput = z
     date: isoDateSchema.optional(),
     /** Round 36 (X1): the branch the instalment was taken at; missing: no branch, as before */
     branchId: uuidSchema.nullable().optional(),
+    /** Created once per dialog: sent again after a lost answer, it posts once */
+    id: uuidSchema.optional(),
   })
   .refine((p) => p.method === 'cash' || !!p.reference, {
     path: ['reference'],

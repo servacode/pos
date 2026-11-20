@@ -3,23 +3,28 @@ import type { DamagedStock, DamagedStockItem, DamagedStockLocation, SupplierList
 import {
   Alert,
   Button,
-  Card,
-  CardHeader,
   Dialog,
-  EmptyState,
   formatQuantity,
-  Money,
   PackageOpenIcon,
-  PageHeader,
   Select,
   Skeleton,
   TextField,
   useDigits,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
-import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
-import { createStocktake, getDamagedStock, listSuppliers, qtyOf, sendBackDamaged, today } from './api';
+import { ReportScreen } from '../reports/parts';
+import { Amt, PageTop, Panel, SalesPage } from '../sales/ui';
+import {
+  createStocktake,
+  getDamagedStock,
+  listSuppliers,
+  newDocumentId,
+  qtyOf,
+  sendBackDamaged,
+  storeToday,
+} from './api';
+import './inventory.css';
 
 type Way = 'send_back' | 'write_off';
 type Refund = 'credit' | 'cash' | 'bank';
@@ -60,6 +65,7 @@ export function DamagedStockPage() {
   );
 
   const load = useCallback(() => {
+    setError(null);
     getDamagedStock()
       .then(setData)
       .catch((e: unknown) => setError(errorMessage(e)));
@@ -67,47 +73,70 @@ export function DamagedStockPage() {
   useEffect(load, [load]);
 
   const total = (data?.locations ?? []).reduce((sum, l) => sum + l.totalValueMinor, 0);
+  const kinds = (data?.locations ?? []).reduce((sum, l) => sum + l.items.length, 0);
   return (
-    <AppShell>
-      <title>البضاعة التالفة · SERVA</title>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
+    <ReportScreen me={me} access={['inventory.adjust', 'purchases.manage']} title="البضاعة التالفة">
+      <SalesPage>
+        <PageTop
           title="البضاعة التالفة"
-          description="قطع رجعت تالفة أو منتهية: لا تُباع، وتبقى بكلفتها حتى تُرجعها للمورد أو تشطبها."
+          subtitle="قطع رجعت تالفة أو منتهية: لا تُباع، وتبقى بكلفتها حتى تُرجعها للمورد أو تشطبها."
         />
-        {error ? <Alert tone="error">{error}</Alert> : null}
+        {error ? (
+          <Alert tone="error">
+            <span className="flex flex-wrap items-center gap-3">
+              {error}
+              <Button variant="secondary" size="sm" onClick={load}>
+                حاول مرة أخرى
+              </Button>
+            </span>
+          </Alert>
+        ) : null}
         {done ? <Alert tone="success">{done}</Alert> : null}
         {!data && !error ? <Skeleton className="h-40 w-full" /> : null}
         {data && data.locations.length === 0 ? (
-          <EmptyState
-            icon={PackageOpenIcon}
-            title="لا بضاعة تالفة الآن."
-            description="القطع التي تُرجَع تالفة من الكاشير أو من المندوب تظهر هنا بدل أن تعود إلى الرف."
-          />
+          <section className="sx-card ix-empty" aria-label="لا بضاعة تالفة">
+            <PackageOpenIcon size={32} />
+            <h3>لا بضاعة تالفة الآن.</h3>
+            <p>القطع التي تُرجَع تالفة من الكاشير أو من المندوب تظهر هنا بدل أن تعود إلى الرف.</p>
+          </section>
         ) : null}
         {data && data.locations.length > 0 ? (
-          <p className="text-sm text-ink-muted">
-            قيمتها بكلفتها: <Money minor={total} currency={base} />
-          </p>
+          <section aria-label="قيمة التالف" className="sx-card sx-strip ix-hero">
+            <div>
+              <span className="sx-eyebrow">قيمة التالف بكلفته</span>
+              <span className="v big">
+                <Amt minor={total} currency={base} />
+              </span>
+              <span className="note">لا تُحسب من مخزون البيع</span>
+            </div>
+            <div>
+              <span className="sx-eyebrow">أصناف تالفة</span>
+              <span className="v sx-n">{formatQuantity(kinds * 1000, digits)}</span>
+              <span className="note">في {data.locations.length.toLocaleString('en-US')} مكان</span>
+            </div>
+            <div>
+              <span className="sx-eyebrow">ماذا تفعل بها</span>
+              <span className="note">ترجعها للمورد فتنقص من دينك له، أو تشطبها فتصير خسارة.</span>
+            </div>
+          </section>
         ) : null}
         {(data?.locations ?? []).map((location) => (
-          <Card key={location.branchId}>
-            <CardHeader
-              title={location.ownerName}
-              description="بكلفتها في المخزون"
-              action={<Money minor={location.totalValueMinor} currency={base} />}
-            />
-            <ul className="flex flex-col divide-y divide-line">
+          <Panel
+            key={location.branchId}
+            title={location.ownerName}
+            aside={<Amt minor={location.totalValueMinor} currency={base} />}
+          >
+            <ul className="ix-list" aria-label={`التالف في ${location.ownerName}`}>
               {location.items.map((item) => (
-                <li key={item.variantId} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <span className="font-semibold text-ink">{item.name}</span>
-                    <span className="text-sm text-ink-muted">
-                      <bdi className="num">{formatQuantity(item.qty, digits)}</bdi> قطعة ·{' '}
-                      <Money minor={item.valueMinor} currency={base} />
+                <li key={item.variantId}>
+                  <div className="ix-main">
+                    <span className="t">{item.name}</span>
+                    <span className="d">
+                      <bdi className="sx-n">{formatQuantity(item.qty, digits)}</bdi> قطعة ·{' '}
+                      <Amt minor={item.valueMinor} currency={base} />
                     </span>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="ix-acts">
                     {canSendBack ? (
                       <Button
                         size="sm"
@@ -120,7 +149,7 @@ export function DamagedStockPage() {
                     {canWriteOff ? (
                       <Button
                         size="sm"
-                        variant="secondary"
+                        variant="danger-soft"
                         onClick={() => setAct({ way: 'write_off', location, item })}
                       >
                         اشطبها
@@ -130,13 +159,14 @@ export function DamagedStockPage() {
                 </li>
               ))}
             </ul>
-          </Card>
+          </Panel>
         ))}
-      </div>
+      </SalesPage>
       {act ? (
         <ActDialog
           key={`${act.way}:${act.item.variantId}`}
           act={act}
+          asOf={data?.asOf}
           onClose={() => setAct(null)}
           onDone={(message) => {
             setAct(null);
@@ -145,17 +175,20 @@ export function DamagedStockPage() {
           }}
         />
       ) : null}
-    </AppShell>
+    </ReportScreen>
   );
 }
 
 /** The question of one item: how many, and for the supplier whom and how he pays back */
 function ActDialog({
   act,
+  asOf,
   onClose,
   onDone,
 }: {
   act: { way: Way; location: DamagedStockLocation; item: DamagedStockItem };
+  /** When the list the owner is looking at was read: a write-off counts what moved after it */
+  asOf?: string | undefined;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
@@ -169,6 +202,8 @@ function ActDialog({
   const [refund, setRefund] = useState<Refund>('credit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One id per opening of the dialog: a second press (or a retry) answers the document already made
+  const [docId] = useState(newDocumentId);
 
   useEffect(() => {
     if (way !== 'send_back') return;
@@ -197,7 +232,7 @@ function ActDialog({
         const made = await sendBackDamaged({
           supplierId,
           branchId: location.branchId,
-          date: today(),
+          date: storeToday(me.tenant.timezone),
           refund,
           note: 'بضاعة تالفة',
           lines: [{ variantId: item.variantId, qty: amount }],
@@ -205,8 +240,10 @@ function ActDialog({
         onDone(`سُجّل المرتجع ${made.number} إلى المورد، وخرجت «${item.name}» من البضاعة التالفة.`);
       } else {
         await createStocktake({
+          id: docId,
           branchId: location.branchId,
-          date: today(),
+          date: storeToday(me.tenant.timezone),
+          ...(asOf ? { countedAt: asOf } : {}),
           note: 'شطب بضاعة تالفة',
           lines: [{ variantId: item.variantId, countedQty: item.qty - amount }],
         });
@@ -269,7 +306,7 @@ function ActDialog({
               {amount !== null ? (
                 <>
                   {' '}
-                  <Money minor={shareOf(item, amount)} currency={base} />
+                  <Amt minor={shareOf(item, amount)} currency={base} />
                 </>
               ) : null}
               ، ويُحسب للمورد هذا المبلغ.
@@ -281,7 +318,7 @@ function ActDialog({
             {amount !== null ? (
               <>
                 {' '}
-                وتصير خسارة <Money minor={shareOf(item, amount)} currency={base} />
+                وتصير خسارة <Amt minor={shareOf(item, amount)} currency={base} />
               </>
             ) : null}
             . لا يُسترجع هذا الشطب من هنا.
@@ -292,7 +329,7 @@ function ActDialog({
           <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
             رجوع
           </Button>
-          <Button type="submit" loading={saving}>
+          <Button type="submit" variant={way === 'send_back' ? 'primary' : 'danger'} loading={saving}>
             {way === 'send_back' ? 'سجّل المرتجع' : 'اشطب'}
           </Button>
         </div>

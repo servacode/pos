@@ -66,6 +66,13 @@ function open(path: string, initial: Promotion[] = [promo()]) {
       items = items.map((p) => (p.id === 'p-1' ? { ...p, ...body, version: p.version + 1 } : p));
       return { status: 200, body: items[0] };
     },
+    'POST /v1/promotions/p-1/archive': (r: MockRequest) => {
+      const body = r.body as { archived: boolean };
+      items = items.map((p) =>
+        p.id === 'p-1' ? { ...p, archived: body.archived, version: p.version + 1 } : p,
+      );
+      return { status: 200, body: items[0] };
+    },
   });
   return { ...mock, ...renderApp(path) };
 }
@@ -83,15 +90,18 @@ describe('«العروض»', () => {
   it('lists promotions with what they give and when, and stops one', async () => {
     const { user, requestsTo } = open('/promotions');
     expect(await screen.findByRole('heading', { name: 'العروض', level: 1 })).toBeInTheDocument();
-    // One card per promotion, in a list named «العروض».
-    const list = await screen.findByRole('list', { name: 'العروض' });
+    // One row per promotion, in a table named «العروض».
+    const list = await screen.findByRole('table', { name: 'العروض' });
     expect(await within(list).findByText('خصم الألبان')).toBeInTheDocument();
     expect(list).toHaveTextContent('خصم 10% على 1 تصنيف');
-    expect(list).toHaveTextContent('من 2026-11-01 · حتى 2026-11-30 · الخميس، الجمعة · 18:00–22:00');
+    expect(list).toHaveTextContent(
+      'من 1 تشرين الثاني 2026 · حتى 30 تشرين الثاني 2026 · الخميس، الجمعة · 18:00–22:00',
+    );
     expect(bannedWordsIn(userFacingText(document.body))).toEqual([]);
     await user.click(within(list).getByRole('button', { name: 'أوقف' }));
     expect(await within(list).findByText('متوقف')).toBeInTheDocument();
-    expect(requestsTo('PUT', '/v1/promotions/p-1').at(-1)?.body).toMatchObject({
+    // Only the stop is sent (not the whole offer), so an old row can always be stopped
+    expect(requestsTo('POST', '/v1/promotions/p-1/archive').at(-1)?.body).toEqual({
       version: 1,
       archived: true,
     });
@@ -228,9 +238,80 @@ describe('trade promotions', () => {
         repOnly: true,
       }),
     ]);
-    const list = await screen.findByRole('list', { name: 'العروض' });
+    const list = await screen.findByRole('table', { name: 'العروض' });
     expect(await within(list).findByText('كميات')).toBeInTheDocument();
     expect(list).toHaveTextContent('خصم حسب الكمية: من 10 5% على كل المنتجات · للمندوب فقط');
+  });
+});
+
+describe('round 44: the offer form and the list', () => {
+  it('refuses a code on an offer for some customers only, then saves the offer stopped', async () => {
+    const { user, requestsTo } = open('/promotions', []);
+    await user.click(await screen.findByRole('button', { name: 'عرض جديد' }));
+    const form = screen.getByRole('form', { name: 'عرض جديد' });
+    await user.type(within(form).getByLabelText('اسم العرض كما يُطبع على الإيصال'), 'عرض الجملة');
+    await user.type(within(form).getByLabelText('نسبة الخصم %'), '10');
+    await user.type(within(form).getByLabelText('الكود (اختياري)'), 'WHOLE');
+    await user.click(within(form).getByRole('checkbox', { name: 'زبائن الجملة' }));
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    expect(await within(form).findByText(/الكود لا يعمل مع عرض مخصص/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/promotions')).toHaveLength(0);
+    // Without the audience, and kept stopped: nothing goes live
+    await user.click(within(form).getByRole('checkbox', { name: 'زبائن الجملة' }));
+    await user.click(within(form).getByRole('checkbox', { name: 'احفظه متوقفاً' }));
+    expect(within(form).getByText(/يُحفظ متوقفاً/)).toBeInTheDocument();
+    await user.click(within(form).getByRole('button', { name: 'احفظ' }));
+    await screen.findByText('عرض الجملة');
+    expect(requestsTo('POST', '/v1/promotions').at(-1)?.body).toMatchObject({
+      couponCode: 'WHOLE',
+      archived: true,
+      repOnly: false,
+    });
+  });
+
+  it('says an offer ends soon, flags two that overlap, and sends one stop for a double click', async () => {
+    const soon = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const open1 = promo({
+      id: 'p-1',
+      name: 'تنزيلات',
+      scope: 'all',
+      categoryIds: [],
+      startsAt: null,
+      endsAt: soon,
+      daysOfWeek: [],
+      fromTime: null,
+      toTime: null,
+    });
+    const open2 = promo({
+      id: 'p-2',
+      name: 'عرض الشتاء',
+      scope: 'all',
+      categoryIds: [],
+      startsAt: null,
+      endsAt: null,
+      daysOfWeek: [],
+      fromTime: null,
+      toTime: null,
+    });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/promotions': () => ({ status: 200, body: { items: [open1, open2] } }),
+      'POST /v1/promotions/p-1/archive': async () => {
+        await gate;
+        return { status: 200, body: { ...open1, archived: true, version: 2 } };
+      },
+    });
+    const { user } = renderApp('/promotions');
+    const table = await screen.findByRole('table', { name: 'العروض' });
+    expect(await within(table).findByText(/ينتهي (اليوم|غداً|بعد \d أيام)/)).toBeInTheDocument();
+    expect(table).toHaveTextContent('يتقاطع مع «عرض الشتاء»');
+    await user.dblClick(within(table).getAllByRole('button', { name: 'أوقف' })[0]!);
+    release();
+    await screen.findByRole('table', { name: 'العروض' });
+    expect(requestsTo('POST', '/v1/promotions/p-1/archive')).toHaveLength(1);
   });
 });
 

@@ -135,7 +135,7 @@ describe('«بينتهي قريباً»', () => {
         },
       },
       'GET /v1/supplier-returns': { status: 200, body: { items: [] } },
-      'GET /v1/purchases': { status: 200, body: { items: [] } },
+      'GET /v1/purchases?limit=50': { status: 200, body: { items: [] } },
       'GET /v1/inventory/expiry?days=3650&variantId=v-1&branchId=br-1': {
         status: 200,
         body: { today: t, items: [row({})] },

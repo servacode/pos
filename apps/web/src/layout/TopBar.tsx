@@ -1,685 +1,179 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
-import {
-  Avatar,
-  Badge,
-  CardIcon,
-  CashIcon,
-  ConnectionPill,
-  CONTROL_HEIGHT,
-  Dialog,
-  IconButton,
-  IconChip,
-  KeyIcon,
-  ShieldCheckIcon,
-  LogoutIcon,
-  Menu,
-  MenuIcon,
-  MenuItem,
-  MenuSeparator,
-  NextIcon,
-  NotificationsIcon,
-  PanelCollapseIcon,
-  PanelExpandIcon,
-  SearchIcon,
-  SegmentedControl,
-  Spinner,
-  TextField,
-  ThemeToggle,
-  Tooltip,
-  cn,
-  useThemePreference,
-  type Icon,
-  type MenuItemRenderProps,
-  type SegmentOption,
-  type ThemePreference,
-} from '@serva/ui';
-import { useMe } from '../auth/useAuth';
+import { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router';
+import { CashIcon, ConnectionPill, MenuIcon, NextIcon, SearchIcon, StoreIcon, ThemeToggle } from '@serva/ui';
+import type { NumberFormat } from '../lib/format';
 import { useOnline } from '../pos/useOnline';
-import { useRecordSearch, warmRecordSearch } from './recordSearch';
+import { CommandPalette, type PaletteIntent } from './CommandPalette';
 import { pageOwns, type NavSection } from './nav';
+import { Notifications, type Notice } from './Notifications';
 
-/** One line of the bell's list: something that waits for the user, and where to deal with it. */
-export interface Notice {
-  key: string;
-  to: string;
-  icon: Icon;
-  tone: 'brand' | 'warning' | 'danger' | 'info';
-  title: string;
-  detail?: string;
-  /** How many: the shop's orders, the holds. */
-  count?: number;
-  /** What counts toward the bell's dot (0 for news that asks for nothing yet). */
-  attention: number;
-}
+export type { Notice } from './Notifications';
 
 /** A menu this short belongs to a cashier: no keyboard hint for the page search */
 const SHORTCUT_MIN_PAGES = 5;
 
 /**
- * The admin top bar (هوية 4): where you are (store › section › page) and the sidebar's fold at the
- * start, a quick jump to any page (Ctrl K) in the middle, and at the end the connection (only when
- * it is lost), the notices, the theme, the till and the account. Under 1024 px the sidebar opens
- * from the menu button here.
+ * The admin top bar (هوية 4, round 45), the same on every page and in this order from the start:
+ * where you are (store › section › page), the search field (Ctrl K), the branch scope, the bell, the
+ * theme, and last, filled, «افتح الكاشير» (F2). The account lives in the sidebar's footer. Under 768 px
+ * it is 56 high: the menu button, the title over its section, the search and the bell.
  */
 export function TopBar({
   storeName,
-  storeInitials,
-  userName,
-  roleName,
-  planName,
+  userId,
+  timeZone,
+  numberFormat,
   sections,
   current,
   canSell,
-  canSeePlan,
   notices,
-  collapsed,
-  onToggleSidebar,
+  branchLabel,
   onOpenMenu,
-  onLogout,
 }: {
   storeName: string;
-  storeInitials: string;
-  userName: string;
-  roleName: string | undefined;
-  planName: string;
+  userId: string;
+  timeZone: string;
+  numberFormat: NumberFormat;
   sections: NavSection[];
   current: NavSection | undefined;
   canSell: boolean;
-  canSeePlan: boolean;
   /** The bell's list; null for whoever gets no notices (no bell). */
   notices: Notice[] | null;
-  /** The sidebar is folded to its rail of icons. */
-  collapsed: boolean;
-  onToggleSidebar: () => void;
-  /** Opens the sidebar as a drawer (under 1024 px). */
+  /** The branch the data is of: the user's own branch, or «كل الفروع» for a store with several. */
+  branchLabel: string | null;
+  /** Opens the sidebar as a drawer (under 768 px). */
   onOpenMenu: () => void;
-  onLogout: () => Promise<void>;
 }) {
   const { pathname } = useLocation();
   const online = useOnline();
   const page = current?.pages.find((p) => pageOwns(p, pathname));
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [palette, setPalette] = useState<{ open: boolean; intent: PaletteIntent }>({
+    open: false,
+    intent: 'search',
+  });
   // The keyboard hint is for people who run the store from a desk; a cashier whose menu is a handful
   // of pages never needs it
   const showShortcut = sections.reduce((n, section) => n + section.pages.length, 0) > SHORTCUT_MIN_PAGES;
-  const foldLabel = collapsed ? 'توسيع القائمة' : 'طيّ القائمة';
+  const stacked = current !== undefined && current.key !== 'home';
+  const pageDiffers = current !== undefined && page !== undefined && page.label !== current.label;
 
-  // Ctrl K (or ⌘K) opens the page search from anywhere in the admin.
+  // Ctrl K opens the search, Ctrl N the list of new things, F2 the till: from anywhere in the admin.
   useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setSearchOpen(true);
+        setPalette({ open: true, intent: 'search' });
+      } else if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        setPalette({ open: true, intent: 'new' });
+      } else if (canSell && event.key === 'F2') {
+        event.preventDefault();
+        window.location.assign('/pos');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [canSell]);
 
   return (
-    <>
-      {/* The start: the sidebar's button, and where you are */}
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <IconButton
-          label="افتح القائمة"
-          icon={<MenuIcon />}
-          className="-ms-2 lg:hidden"
-          onClick={onOpenMenu}
-        />
-        <span className="-ms-2 hidden lg:flex">
-          <Tooltip content={foldLabel} side="bottom">
-            <IconButton
-              label={foldLabel}
-              icon={collapsed ? <PanelExpandIcon /> : <PanelCollapseIcon />}
-              onClick={onToggleSidebar}
-            />
-          </Tooltip>
-        </span>
-        <nav aria-label="أنت هنا" className="min-w-0">
-          <ol className="flex min-w-0 items-center gap-1.5 text-[0.9375rem]">
-            <li className="flex min-w-0 items-center">
-              <Link
-                to="/"
-                className="flex min-w-0 items-center gap-2.5 rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
-              >
-                <IconChip size="sm">
-                  <span className="text-xs font-bold">{storeInitials}</span>
-                </IconChip>
-                <span title={storeName} className="line-clamp-2 leading-tight">
-                  {storeName}
-                </span>
-              </Link>
-            </li>
-            {current && current.key !== 'home' ? (
-              <Crumb>
-                {page && page.label !== current.label ? (
-                  <Link
-                    to={current.pages[0]!.to}
-                    title={current.label}
-                    className="line-clamp-2 leading-tight text-ink-muted transition-colors duration-120 ease-standard hover:text-ink"
-                  >
-                    {current.label}
-                  </Link>
+    <div className="sh-top">
+      <nav aria-label="أنت هنا" className="sh-crumb">
+        <ol className={stacked ? 'has-stack' : undefined}>
+          <li className="sh-menu-li">
+            <button
+              type="button"
+              className="sh-ibtn sh-menu-btn"
+              aria-label="افتح القائمة"
+              onClick={onOpenMenu}
+            >
+              <MenuIcon />
+            </button>
+          </li>
+          <li className="sh-crumb-store">
+            <Link to="/">
+              <span title={storeName} className="line-clamp-2 leading-tight">
+                {storeName}
+              </span>
+            </Link>
+          </li>
+          {stacked && current ? (
+            <>
+              <li className="sh-crumb-sep" aria-hidden="true">
+                <NextIcon size={16} />
+              </li>
+              <li className="sh-crumb-stack">
+                {pageDiffers && page ? (
+                  <>
+                    <Link to={current.pages[0]!.to} title={current.label}>
+                      {current.label}
+                    </Link>
+                    <NextIcon size={16} className="sh-crumb-in" aria-hidden="true" />
+                    <span aria-current="page" title={page.label}>
+                      {page.label}
+                    </span>
+                  </>
                 ) : (
-                  <span
-                    aria-current="page"
-                    title={current.label}
-                    className="line-clamp-2 leading-tight font-semibold text-ink"
-                  >
+                  <span aria-current="page" title={current.label}>
                     {current.label}
                   </span>
                 )}
-              </Crumb>
-            ) : null}
-            {current && page && page.label !== current.label ? (
-              <Crumb>
-                <span
-                  aria-current="page"
-                  title={page.label}
-                  className="line-clamp-2 leading-tight font-semibold text-ink"
-                >
-                  {page.label}
-                </span>
-              </Crumb>
-            ) : null}
-          </ol>
-        </nav>
-      </div>
+              </li>
+            </>
+          ) : null}
+        </ol>
+      </nav>
 
-      {/* The middle: jump to a page */}
+      {online ? null : (
+        <span className="sh-offline">
+          <ConnectionPill online={false}>دون إنترنت</ConnectionPill>
+        </span>
+      )}
+
       <button
         type="button"
-        onClick={() => setSearchOpen(true)}
+        className="sh-search"
         aria-label="ابحث عن منتج أو زبون أو دفعة"
         aria-keyshortcuts="Control+K"
-        className={cn(
-          CONTROL_HEIGHT.comfortable,
-          'hidden w-64 shrink items-center gap-2.5 rounded-control border border-line bg-surface ps-3 pe-2 text-start text-sm text-ink-subtle shadow-e1 transition-[border-color,color] duration-120 ease-standard hover:border-line-control/50 hover:text-ink-muted @min-[59rem]:flex @6xl:w-80',
-        )}
+        onClick={() => setPalette({ open: true, intent: 'search' })}
       >
-        <SearchIcon size={16} />
-        <span className="min-w-0 flex-1 truncate">ابحث في المتجر…</span>
-        {showShortcut ? (
-          <kbd
-            dir="ltr"
-            className="rounded-small border border-line bg-surface-muted px-1.5 font-sans pointer-coarse:hidden text-xs/5 font-semibold text-ink-muted"
-          >
-            Ctrl K
-          </kbd>
-        ) : null}
+        <SearchIcon size={20} />
+        <span className="sh-lbl">ابحث عن منتج أو زبون أو فاتورة…</span>
+        {showShortcut ? <kbd className="sh-kbd">Ctrl K</kbd> : null}
       </button>
 
-      {/* The end: the connection, the notices, the theme, the till, the account */}
-      <div className="flex shrink-0 items-center justify-end gap-1">
-        {online ? null : (
-          <span className="me-1 hidden sm:flex">
-            <ConnectionPill online={false}>دون إنترنت</ConnectionPill>
+      <div className="sh-tb">
+        {branchLabel ? (
+          <span className="sh-branch" role="group" aria-label={`الفرع: ${branchLabel}`}>
+            <StoreIcon size={20} />
+            <span>{branchLabel}</span>
           </span>
-        )}
-        <IconButton
-          label="ابحث عن منتج أو زبون أو دفعة"
-          icon={<SearchIcon />}
-          className="@min-[59rem]:hidden"
-          onClick={() => setSearchOpen(true)}
-        />
-        {notices ? <Notifications notices={notices} /> : null}
-        {/* On a phone the theme moves into the account panel, to keep the bar uncrowded. */}
-        <span className="hidden sm:flex">
+        ) : null}
+        {branchLabel ? <span className="sh-vr" aria-hidden="true" /> : null}
+        {notices ? (
+          <Notifications notices={notices} userId={userId} timeZone={timeZone} numberFormat={numberFormat} />
+        ) : null}
+        <span className="sh-themewrap">
           <ThemeToggle />
         </span>
-        {/* The home page has its own big «افتح الكاشير» */}
-        {canSell && pathname !== '/' ? (
-          <a
-            href="/pos"
-            className={cn(
-              CONTROL_HEIGHT.comfortable,
-              'ms-1.5 hidden shrink-0 items-center gap-2 rounded-control border border-line-control/50 bg-surface px-3.5 text-sm font-semibold text-ink shadow-e1 transition-colors duration-120 ease-standard hover:bg-surface-muted sm:inline-flex',
-            )}
-          >
-            <CashIcon size={20} className="text-brand-ink" />
-            افتح الكاشير
-          </a>
-        ) : null}
-        <span aria-hidden="true" className="mx-2 hidden h-6 w-px shrink-0 bg-line sm:block" />
-        <AccountMenu
-          userName={userName}
-          roleName={roleName}
-          storeName={storeName}
-          planName={planName}
-          canSeePlan={canSeePlan}
-          onLogout={onLogout}
-        />
-      </div>
-      <PageSearch open={searchOpen} onOpenChange={setSearchOpen} sections={sections} />
-    </>
-  );
-}
-
-function Crumb({ children }: { children: ReactNode }) {
-  return (
-    <li className="hidden min-w-0 items-center gap-1.5 sm:flex">
-      <NextIcon size={16} className="shrink-0 text-ink-subtle" />
-      {children}
-    </li>
-  );
-}
-
-// ── The notices ──────────────────────────────────────────────────────────────────────────────────
-
-/**
- * The bell (هوية 4 › Menu): a dot when something waits, and the list of what waits, each line a
- * link to where it is dealt with. It asks the server nothing: the frame hands it what it knows.
- */
-function Notifications({ notices }: { notices: Notice[] }) {
-  const waiting = notices.reduce((sum, notice) => sum + notice.attention, 0);
-  return (
-    <Menu
-      label="التنبيهات"
-      align="end"
-      className="w-80"
-      trigger={
-        <Tooltip content="التنبيهات" side="bottom">
-          <IconButton
-            label={waiting > 0 ? `التنبيهات (${waiting})` : 'التنبيهات'}
-            icon={
-              <span className="relative flex">
-                <NotificationsIcon />
-                {waiting > 0 ? (
-                  <span className="absolute -end-0.5 -top-0.5 size-2.5 rounded-full bg-danger ring-2 ring-canvas" />
-                ) : null}
-              </span>
-            }
-          />
-        </Tooltip>
-      }
-    >
-      <div className="flex items-center justify-between gap-3 px-2.5 pt-1.5 pb-2">
-        <p className="text-[0.9375rem] font-semibold text-ink">التنبيهات</p>
-        {waiting > 0 ? (
-          <Badge tone="danger">
-            <bdi className="num">{waiting}</bdi> جديدة
-          </Badge>
+        {canSell ? (
+          <>
+            <span className="sh-vr" aria-hidden="true" />
+            <a href="/pos" className="sh-primary" aria-keyshortcuts="F2">
+              <CashIcon size={20} />
+              افتح الكاشير
+              <kbd className="sh-kbd">F2</kbd>
+            </a>
+          </>
         ) : null}
       </div>
-      <MenuSeparator />
-      {notices.length > 0 ? (
-        <div className="flex flex-col gap-0.5 pt-1">
-          {notices.map((notice) => {
-            const NoticeIcon = notice.icon;
-            return (
-              <MenuItem
-                key={notice.key}
-                className="py-2"
-                icon={
-                  <IconChip tone={notice.tone} size="sm">
-                    <NoticeIcon size={16} />
-                  </IconChip>
-                }
-                trailing={
-                  notice.count ? (
-                    <span className="num shrink-0 text-sm font-bold text-ink">{notice.count}</span>
-                  ) : undefined
-                }
-                render={(props) => <Link to={notice.to} {...props} />}
-              >
-                <span className="block truncate text-sm font-semibold text-ink">{notice.title}</span>
-                {notice.detail ? (
-                  <span className="block truncate text-xs text-ink-muted">{notice.detail}</span>
-                ) : null}
-              </MenuItem>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-1.5 px-6 pt-6 pb-7 text-center">
-          <IconChip size="lg" className="mb-1.5">
-            <NotificationsIcon size={24} />
-          </IconChip>
-          <p className="font-semibold text-ink">لا تنبيهات جديدة</p>
-          <p className="text-sm text-ink-muted">هنا يظهر كل ما ينتظرك.</p>
-        </div>
-      )}
-    </Menu>
-  );
-}
-
-// ── The account ──────────────────────────────────────────────────────────────────────────────────
-
-/**
- * A Menu item's look on a plain link or button. The account panel is a disclosure of links and
- * buttons, not an application menu: its rows keep their own roles, and Tab moves through them.
- */
-function plain({
-  role: _role,
-  tabIndex: _tabIndex,
-  onPointerMove: _onPointerMove,
-  onPointerLeave: _onPointerLeave,
-  ...props
-}: MenuItemRenderProps) {
-  return props;
-}
-
-/** The theme's three choices, in ThemeToggle's words (tab 14 › الوضع الداكن). */
-const THEME_CHOICES: readonly SegmentOption<ThemePreference>[] = [
-  { value: 'light', label: 'فاتح' },
-  { value: 'dark', label: 'داكن' },
-  { value: 'system', label: 'حسب الجهاز' },
-];
-
-function AccountMenu({
-  userName,
-  roleName,
-  storeName,
-  planName,
-  canSeePlan,
-  onLogout,
-}: {
-  userName: string;
-  roleName: string | undefined;
-  storeName: string;
-  planName: string;
-  canSeePlan: boolean;
-  onLogout: () => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-  const [theme, setTheme] = useThemePreference();
-  const box = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const panelId = useId();
-  const { pathname } = useLocation();
-
-  useEffect(() => setOpen(false), [pathname]);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      setOpen(false);
-      if (box.current?.contains(document.activeElement)) trigger.current?.focus();
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  async function logout() {
-    setSigningOut(true);
-    await onLogout();
-  }
-
-  return (
-    <div ref={box} className="relative shrink-0">
-      <Tooltip content={open ? null : 'حسابي'} side="bottom">
-        <button
-          ref={trigger}
-          type="button"
-          aria-expanded={open}
-          aria-controls={open ? panelId : undefined}
-          aria-label={`حسابي: ${userName}`}
-          onClick={() => setOpen((v) => !v)}
-          className={cn(
-            'grid size-10 place-items-center rounded-full transition-[background-color,box-shadow] duration-120 ease-standard hover:bg-surface-muted pointer-coarse:size-12',
-            open && 'bg-surface-muted',
-          )}
-        >
-          <Avatar name={userName} size="sm" className="ring-2 ring-surface" />
-        </button>
-      </Tooltip>
-      {open ? (
-        <div
-          id={panelId}
-          className="absolute end-0 top-full z-30 mt-2 flex w-72 flex-col rounded-card border border-line bg-surface p-1.5 text-ink shadow-e3 motion-safe:animate-rise"
-        >
-          <div className="flex items-center gap-3 px-2.5 pt-2 pb-3">
-            <Avatar name={userName} />
-            <div className="flex min-w-0 flex-col">
-              <p className="truncate font-semibold text-ink">{userName}</p>
-              <p className="truncate text-sm text-ink-muted">
-                {roleName ? `${roleName} · ` : ''}
-                {storeName}
-              </p>
-            </div>
-          </div>
-          <MenuSeparator />
-          <div className="flex flex-col gap-0.5 py-1">
-            <MenuItem icon={<KeyIcon />} render={(props) => <Link to="/me/pin" {...plain(props)} />}>
-              رمز الدخول للكاشير
-            </MenuItem>
-            {canSeePlan ? (
-              <MenuItem
-                icon={<CardIcon />}
-                trailing={
-                  <Badge tone="brand" dot={false}>
-                    {planName}
-                  </Badge>
-                }
-                render={(props) => <Link to="/subscription" {...plain(props)} />}
-              >
-                الاشتراك
-              </MenuItem>
-            ) : null}
-            <MenuItem
-              icon={<ShieldCheckIcon />}
-              render={(props) => (
-                <a href="/terms" target="_blank" rel="noopener" {...plain(props)}>
-                  {props.children}
-                </a>
-              )}
-            >
-              الشروط والخصوصية
-            </MenuItem>
-          </div>
-          {/* A phone's top bar has no theme button: the choice is here instead. */}
-          <div className="sm:hidden">
-            <MenuSeparator />
-            <div className="flex flex-col gap-2 px-2.5 pt-2 pb-2.5">
-              <p aria-hidden="true" className="text-xs font-semibold text-ink-muted">
-                المظهر
-              </p>
-              <SegmentedControl
-                label="المظهر"
-                fullWidth
-                options={THEME_CHOICES}
-                value={theme}
-                onValueChange={setTheme}
-              />
-            </div>
-          </div>
-          <MenuSeparator />
-          <div className="pt-1">
-            <MenuItem
-              tone="danger"
-              icon={signingOut ? <Spinner /> : <LogoutIcon />}
-              disabled={signingOut}
-              onSelect={() => void logout()}
-              render={(props) => <button type="button" {...plain(props)} />}
-            >
-              تسجيل الخروج
-            </MenuItem>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Jump to a page (Ctrl K) ──────────────────────────────────────────────────────────────────────
-
-function PageSearch({
-  open,
-  onOpenChange,
-  sections,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  sections: NavSection[];
-}) {
-  const navigate = useNavigate();
-  const me = useMe();
-  const [query, setQuery] = useState('');
-  const [active, setActive] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (open) {
-      setQuery('');
-      setActive(0);
-      // The lists the search matches by hand start loading now, while the first letters are typed
-      warmRecordSearch(me);
-      const focus = window.setTimeout(() => input.current?.focus(), 0);
-      return () => window.clearTimeout(focus);
-    }
-    return undefined;
-  }, [open, me]);
-
-  const results = useMemo(() => {
-    const q = query.trim();
-    return sections.flatMap((section) =>
-      section.pages
-        .filter((page) => !q || page.label.includes(q) || section.label.includes(q))
-        .map((page) => ({ section, page })),
-    );
-  }, [sections, query]);
-
-  const { hits, searching } = useRecordSearch(me, query, open);
-  // The keyboard walks the pages first, then the records found
-  const total = results.length + hits.length;
-
-  function go(to: string) {
-    onOpenChange(false);
-    void navigate(to);
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setActive((i) => Math.min(i + 1, total - 1));
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setActive((i) => Math.max(i - 1, 0));
-    } else if (event.key === 'Enter' && (results[active] || hits[active - results.length])) {
-      event.preventDefault();
-      go((results[active]?.page ?? hits[active - results.length]!).to);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="ابحث في المتجر">
-      <TextField
-        ref={input}
-        label="اسم الصفحة"
-        hideLabel
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          setActive(0);
-        }}
-        onKeyDown={onKeyDown}
-        autoComplete="off"
-        placeholder="صفحة، منتج، زبون، مورد، فاتورة، طلب، تأجير، شيك، رقم تسلسلي…"
-        startAdornment={<SearchIcon size={20} className="ms-3" />}
+      <CommandPalette
+        open={palette.open}
+        onOpenChange={(open) => setPalette((state) => ({ ...state, open }))}
+        intent={palette.intent}
+        sections={sections}
       />
-      {results.length ? (
-        <ul aria-label="الصفحات" className="-mx-2 flex max-h-80 flex-col gap-0.5 overflow-y-auto px-0.5">
-          {results.map(({ section, page }, i) => {
-            const PageIcon = page.icon;
-            const chosen = i === active;
-            return (
-              <li key={page.to}>
-                <button
-                  type="button"
-                  onClick={() => go(page.to)}
-                  onMouseEnter={() => setActive(i)}
-                  className={cn(
-                    CONTROL_HEIGHT.comfortable,
-                    'flex w-full items-center gap-3 rounded-small px-2.5 text-start text-[0.9375rem] transition-colors duration-120 ease-standard',
-                    chosen ? 'bg-brand-soft text-brand-ink' : 'text-ink hover:bg-surface-muted',
-                  )}
-                >
-                  <PageIcon size={20} className={chosen ? 'text-brand-ink' : 'text-ink-subtle'} />
-                  <span className="min-w-0 flex-1 truncate font-semibold">{page.label}</span>
-                  {section.label !== page.label ? (
-                    <span className={cn('shrink-0 text-sm', chosen ? 'text-brand-ink' : 'text-ink-muted')}>
-                      {section.label}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : hits.length === 0 ? (
-        <p className="py-6 text-center text-ink-muted">
-          {searching ? 'جارٍ البحث…' : 'لا صفحة ولا سجل بهذا الاسم.'}
-        </p>
-      ) : null}
-      {hits.length > 0 || (searching && results.length > 0) ? (
-        <ul aria-label="السجلات" className="-mx-2 flex max-h-72 flex-col gap-0.5 overflow-y-auto px-0.5">
-          {hits.map((hit, n) => {
-            const i = results.length + n;
-            const chosen = i === active;
-            return (
-              <li key={hit.key}>
-                {n === 0 || hits[n - 1]!.group !== hit.group ? (
-                  <p className="px-2.5 pt-2 pb-1 text-xs font-semibold text-ink-muted">{hit.group}</p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => go(hit.to)}
-                  onMouseEnter={() => setActive(i)}
-                  className={cn(
-                    CONTROL_HEIGHT.comfortable,
-                    'flex w-full items-center gap-3 rounded-small px-2.5 text-start text-[0.9375rem] transition-colors duration-120 ease-standard',
-                    chosen ? 'bg-brand-soft text-brand-ink' : 'text-ink hover:bg-surface-muted',
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate font-semibold">
-                    {hit.labelLtr ? <bdi dir="ltr">{hit.label}</bdi> : hit.label}
-                  </span>
-                  {hit.detail ? (
-                    <span className={cn('shrink-0 text-sm', chosen ? 'text-brand-ink' : 'text-ink-muted')}>
-                      {hit.detailLtr ? <bdi dir="ltr">{hit.detail}</bdi> : hit.detail}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-      <p className="hidden items-center gap-4 border-t border-line pt-4 text-xs text-ink-muted pointer-fine:flex">
-        <span className="flex items-center gap-1.5">
-          <Key>↑</Key>
-          <Key>↓</Key>
-          للتنقّل
-        </span>
-        <span className="flex items-center gap-1.5">
-          <Key>Enter</Key>
-          للفتح
-        </span>
-        <span className="flex items-center gap-1.5">
-          <Key>Esc</Key>
-          للإغلاق
-        </span>
-      </p>
-    </Dialog>
-  );
-}
-
-function Key({ children }: { children: ReactNode }) {
-  return (
-    <kbd
-      dir="ltr"
-      className="min-w-6 rounded-small border border-line bg-surface-muted px-1.5 text-center font-sans text-xs/5 font-semibold text-ink-muted"
-    >
-      {children}
-    </kbd>
+    </div>
   );
 }

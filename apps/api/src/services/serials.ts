@@ -185,10 +185,16 @@ export async function sellSerials(
         flags.add('serial_other_product');
         await remember(serial, line.variantId, 'other_product');
       } else if (row.status === 'in_stock') {
-        await tx.execute(sql`
+        // Guarded by the status: two tills syncing the same number together, only the first one sells it
+        const took = await tx.execute<{ id: string }>(sql`
           update serials set status = 'sold', sale_id = ${saleId}, sold_on = ${date}, warranty_until = ${until}
-          where id = ${row.id}`);
-        await remember(serial, line.variantId, null);
+          where id = ${row.id} and status = 'in_stock' returning id`);
+        if (took.length > 0) {
+          await remember(serial, line.variantId, null);
+        } else {
+          flags.add('serial_sold_twice');
+          await remember(serial, line.variantId, 'duplicate');
+        }
       } else if (row.saleId !== saleId) {
         flags.add('serial_sold_twice');
         await remember(serial, line.variantId, 'duplicate');
@@ -258,7 +264,7 @@ export function lookupSerials(
       left join purchases pu on pu.tenant_id = s.tenant_id and pu.id = s.purchase_id
       left join invoices i on i.tenant_id = s.tenant_id and i.id = s.sale_id
       left join customers c on c.tenant_id = i.tenant_id and c.id = i.customer_id
-      where ${typed ? sql`s.serial like ${`%${typed}%`}` : sql`true`}
+      where ${typed ? sql`s.serial like ${`%${typed.replace(/[\\%_]/g, (c) => `\\${c}`)}%`}` : sql`true`}
         and ${query.saleId ? sql`exists (select 1 from serial_sales ss where ss.tenant_id = s.tenant_id and ss.serial = s.serial and ss.sale_id = ${query.saleId})` : sql`true`}
         and ${query.customerId ? sql`i.customer_id = ${query.customerId}` : sql`true`}
         and ${query.flagged ? sql`exists (select 1 from serial_sales ss where ss.tenant_id = s.tenant_id and ss.serial = s.serial and ss.flag is not null)` : sql`true`}
@@ -337,9 +343,11 @@ export function unassignedSales(
     await requirePermission(tx, auth.userId, 'catalog.manage');
     const sales = await tx.execute<{ id: string; number: string; business_date: string }>(sql`
       select id, number, business_date::text as business_date from invoices
-      where 'serial_missing' = any(flags) order by business_date desc, number desc limit 50`);
+      where 'serial_missing' = any(flags) order by business_date desc, number desc limit 500`);
     const items: UnassignedSerialSale[] = [];
     for (const sale of sales) {
+      // The list shows the 50 newest sales still missing a number: the resolved ones are skipped, not counted
+      if (items.length >= 50) break;
       for (const [variantId, missing] of await missingBySale(tx, sale.id)) {
         const [named] = await tx.execute<{ name: string }>(sql`
           select p.name_ar || coalesce(' ' || v.label, '') as name from variants v

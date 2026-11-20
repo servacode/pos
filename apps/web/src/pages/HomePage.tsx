@@ -18,7 +18,6 @@ import {
   Button,
   CalendarIcon,
   Card,
-  CardHeader,
   CartIcon,
   CloseIcon,
   CustomersIcon,
@@ -32,7 +31,6 @@ import {
   InboxIcon,
   Money,
   NextIcon,
-  PageHeader,
   PrintIcon,
   ProductsIcon,
   RetryIcon,
@@ -53,10 +51,8 @@ import {
 } from '@serva/ui';
 import { ButtonLink } from '../admin/products/parts';
 import { getProfit, listExpiry, listSuppliers } from '../admin/purchases/api';
-import { listCustomers } from '../admin/customers/api';
 import { listCheques } from '../admin/cheques/api';
 import { getSummary as getInstalmentSummary } from '../admin/installments/api';
-import { listProducts } from '../admin/catalog/api';
 import { dueSoon } from '../admin/cheques/ChequesPage';
 import { holdsAny, DAY_REPORT_ACCESS } from '../admin/reports/access';
 import { ContractAttention, seesContractAttention } from './ContractAttention';
@@ -68,12 +64,13 @@ import {
   type OpenFromYesterday,
 } from '../admin/reports/openShift';
 import { getSalesBreakdown } from '../admin/reports/SalesReportPage';
-import { daysAgo, getMerchandise } from '../admin/reports/MerchandisePage';
+import { Amt, BarList, PageTop, Panel, SalesPage } from '../admin/sales/ui';
+import { getHomeSummary, type HomeSummary } from './homeSummary';
 import type { DayReport } from '../admin/reports/contracts';
 import { methodLabel } from '../admin/reports/labels';
 import { useReport, type ReportState } from '../admin/reports/useReport';
 import { useMe } from '../auth/useAuth';
-import { AppShell } from '../layout/AppShell';
+import { AppShell, splitPending } from '../layout/AppShell';
 import { apiFetch } from '../lib/api';
 import { dayText, isoDay } from '../lib/dates';
 import { products } from '../lib/plural';
@@ -84,12 +81,13 @@ function trialMessage(daysLeft: number, numberFormat: MeResponse['settings']['nu
   return `باقي ${formatDays(daysLeft, numberFormat)} من الباقة المجانية`;
 }
 
-const TRIAL_DISMISSED_KEY = 'serva.trialBannerDismissed';
+/** One key per store: hiding the banner on a shared PC does not hide it for another store */
+const trialKey = (me: MeResponse) => `serva.trialBannerDismissed.${me.tenant.id}`;
 
-/** Whether this device has hidden the trial banner (per device; a banner about the last days always shows) */
-function trialDismissed(): boolean {
+/** Whether this device has hidden this store's trial banner (a banner about the last days always shows) */
+function trialDismissed(me: MeResponse): boolean {
   try {
-    return localStorage.getItem(TRIAL_DISMISSED_KEY) === '1';
+    return localStorage.getItem(trialKey(me)) === '1';
   } catch {
     return false;
   }
@@ -97,11 +95,13 @@ function trialDismissed(): boolean {
 
 function TrialBanner({ me }: { me: MeResponse }) {
   const { status, daysLeft } = me.subscription;
-  const [hidden, setHidden] = useState(trialDismissed);
+  // The one who cannot act on the plan is not shown a banner about it
+  const canSeePlan = holdsAny(me, ['subscription.manage']);
+  const [hidden, setHidden] = useState(() => trialDismissed(me));
   if (status !== 'trialing') return null;
   const endingSoon = daysLeft !== null && daysLeft <= 3;
   // The last days are said once, by the warning bar of every page (SubscriptionBanner)
-  if (endingSoon || hidden) return null;
+  if (endingSoon || hidden || !canSeePlan) return null;
 
   return (
     <div
@@ -123,7 +123,7 @@ function TrialBanner({ me }: { me: MeResponse }) {
         className="ms-auto grid size-9 shrink-0 place-items-center rounded-full hover:bg-surface/60 pointer-coarse:size-12"
         onClick={() => {
           try {
-            localStorage.setItem(TRIAL_DISMISSED_KEY, '1');
+            localStorage.setItem(trialKey(me), '1');
           } catch {
             // The banner just comes back next time
           }
@@ -161,24 +161,25 @@ interface DayPoint {
   count: number | null;
 }
 
-/** The days from `from` to `to` in one request; a day without sales is a day of zero. A failure is a gap. */
+/**
+ * The days from `from` to `to` in one request; a day without sales is a day of zero. A failure is
+ * not swallowed: the page shows the error with a retry, and never takes a week it could not load
+ * for a week without sales.
+ */
 const loadDays = (from: string, to: string): Promise<DayPoint[]> =>
-  getDayTotals({ from, to }).then(
-    ({ items }) => {
-      const byDate = new Map(items.map((d) => [d.date, d]));
-      const points: DayPoint[] = [];
-      for (let date = from; date <= to; date = shiftDay(date, -1)) {
-        const day = byDate.get(date);
-        points.push({
-          date,
-          total: day ? day.totalMinor - day.returnsMinor : 0,
-          count: day?.invoiceCount ?? 0,
-        });
-      }
-      return points;
-    },
-    () => [],
-  );
+  getDayTotals({ from, to }).then(({ items }) => {
+    const byDate = new Map(items.map((d) => [d.date, d]));
+    const points: DayPoint[] = [];
+    for (let date = from; date <= to; date = shiftDay(date, -1)) {
+      const day = byDate.get(date);
+      points.push({
+        date,
+        total: day ? day.totalMinor - day.returnsMinor : 0,
+        count: day?.invoiceCount ?? 0,
+      });
+    }
+    return points;
+  });
 
 /** The change of `current` against `previous` as a tile's pill; none when it cannot be told. */
 function changeOf(
@@ -293,8 +294,11 @@ function HeroTile({
   noHistory = false,
   zeroMorning = false,
   openShift = null,
+  yesterday = null,
   digits,
 }: {
+  /** Yesterday's net sales, said beside «لا مبيعات بعد» so the morning has a figure to look at */
+  yesterday?: number | null;
   /** A shift opened yesterday and still open: its invoices are dated yesterday, said in words */
   openShift?: OpenFromYesterday | null;
   /** No sales in the days before today: say it once here instead of on every tile */
@@ -327,12 +331,19 @@ function HeroTile({
         </div>
         {data ? (
           <>
-            <p className="num text-total font-bold tracking-tight [&_[data-money-unit]]:text-base [&_[data-money-unit]]:font-semibold [&_[data-money-unit]]:opacity-80">
+            <p className="num text-total font-bold tracking-tight [&_[data-money-unit]]:text-base [&_[data-money-unit]]:font-semibold [&_[data-money-unit]]:text-on-brand! [&_[data-money-unit]]:opacity-80">
               <Money minor={netOfReturns(data)} currency={data.baseCurrency} />
             </p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               {zeroMorning ? (
-                <span className="opacity-85">لا مبيعات بعد</span>
+                <>
+                  <span className="opacity-85">لا مبيعات بعد</span>
+                  {yesterday !== null && yesterday > 0 ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold">
+                      أمس <Money minor={yesterday} currency={data.baseCurrency} />
+                    </span>
+                  ) : null}
+                </>
               ) : trend ? (
                 // A fall is amber (never green on the green hero), a rise stays the hero's own white
                 <span
@@ -373,10 +384,12 @@ function HeroTile({
                   ) : null}
                 </span>
               ) : null}
-              <span className="opacity-85">
-                الحسم{' '}
-                <Money minor={data.discountMinor} currency={data.baseCurrency} className="font-semibold" />
-              </span>
+              {data.discountMinor > 0 ? (
+                <span className="opacity-85">
+                  الحسم{' '}
+                  <Money minor={data.discountMinor} currency={data.baseCurrency} className="font-semibold" />
+                </span>
+              ) : null}
             </div>
           </>
         ) : (
@@ -468,6 +481,7 @@ function KpiBand({
         data={data}
         trend={data && !partialDay ? changeOf(netOfReturns(data), yesterday?.total, digits, thin) : undefined}
         openShift={openShift}
+        yesterday={yesterday?.total ?? null}
         digits={digits}
         week={weekReady && data && !noHistory && !thin ? totals : null}
         noHistory={noHistory}
@@ -575,7 +589,11 @@ function SalesTrend({
   loading,
   range,
   onRange,
+  failed,
+  onRetry,
 }: {
+  failed: boolean;
+  onRetry: () => void;
   me: MeResponse;
   points: readonly DayPoint[];
   base: CurrencyCode;
@@ -596,35 +614,44 @@ function SalesTrend({
   // Under three days with sales a line says nothing: the card waits until it has a shape
   if (loaded.length === points.length && points.filter((p) => (p.total ?? 0) > 0).length < 3) return null;
   return (
-    <Card className="flex flex-col gap-1">
-      <CardHeader
-        className="mb-2 flex-wrap"
-        icon={<TrendUpIcon size={20} />}
-        title="اتجاه المبيعات"
-        description={range === '7' ? 'مبيعات آخر 7 أيام' : 'مبيعات آخر 30 يوماً'}
-        action={
-          <>
-            <SegmentedControl
-              label="العرض"
-              value={view}
-              onValueChange={setView}
-              options={[
-                { value: 'chart', label: 'رسم' },
-                { value: 'table', label: 'جدول' },
-              ]}
-            />
-            <SegmentedControl
-              label="الفترة"
-              value={range}
-              onValueChange={onRange}
-              options={[
-                { value: '7', label: '7 أيام' },
-                { value: '30', label: '30 يوماً' },
-              ]}
-            />
-          </>
-        }
-      />
+    <Panel
+      title="اتجاه المبيعات"
+      aside={
+        <span className="flex flex-wrap items-center gap-2">
+          <SegmentedControl
+            label="العرض"
+            value={view}
+            onValueChange={setView}
+            options={[
+              { value: 'chart', label: 'رسم' },
+              { value: 'table', label: 'جدول' },
+            ]}
+          />
+          <SegmentedControl
+            label="الفترة"
+            value={range}
+            onValueChange={onRange}
+            options={[
+              { value: '7', label: '7 أيام' },
+              { value: '30', label: '30 يوماً' },
+            ]}
+          />
+        </span>
+      }
+    >
+      <p className="mb-2 text-sm text-ink-muted">
+        {range === '7' ? 'مبيعات آخر 7 أيام' : 'مبيعات آخر 30 يوماً'}
+      </p>
+      {failed ? (
+        <Alert tone="warning">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            تعذّر تحميل أيام هذه الفترة.
+            <Button size="xs" variant="secondary" icon={<RetryIcon size={16} />} onClick={onRetry}>
+              حاول مرة ثانية
+            </Button>
+          </span>
+        </Alert>
+      ) : null}
       <AreaChart
         label={range === '7' ? 'المبيعات آخر 7 أيام' : 'المبيعات آخر 30 يوماً'}
         labels={points.map((p) => `${weekdayOf(p.date)} ${dayText(p.date, digits)}`)}
@@ -648,18 +675,23 @@ function SalesTrend({
         labelHeader="اليوم"
         loading={loading}
         empty={
-          <p className="py-10 text-center text-sm text-ink-muted">
-            {allZero ? 'لا مبيعات في هذه الفترة بعد.' : 'تعذّر تحميل أيام هذه الفترة.'}
-          </p>
+          <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-ink-muted">
+            <p>{allZero ? 'لا مبيعات في هذه الفترة بعد.' : 'تعذّر تحميل أيام هذه الفترة.'}</p>
+            {!allZero && !failed ? (
+              <Button size="xs" variant="secondary" icon={<RetryIcon size={16} />} onClick={onRetry}>
+                حاول مرة ثانية
+              </Button>
+            ) : null}
+          </div>
         }
       />
       {points.at(-1)?.total !== null && points.at(-1)?.total !== undefined && !loading ? (
         <p className="text-sm text-ink-muted">
           آخر نقطة هي اليوم، وما بيع حتى الآن:{' '}
-          <Money minor={points.at(-1)!.total!} currency={base} className="font-semibold text-ink" />
+          <Amt minor={points.at(-1)!.total!} currency={base} className="font-semibold text-ink" />
         </p>
       ) : null}
-    </Card>
+    </Panel>
   );
 }
 
@@ -668,9 +700,9 @@ function SalesTrend({
 function BestSellers({ report }: { report: DayState }) {
   const top = report.data?.topProducts.slice(0, 5) ?? [];
   const biggest = Math.max(...top.map((p) => p.totalMinor), 1);
+  const base = report.data?.baseCurrency ?? 'SYP';
   return (
-    <Card className="flex flex-col gap-4">
-      <SectionTitle icon={<TrendUpIcon size={20} />}>الأكثر مبيعاً اليوم</SectionTitle>
+    <Panel title="الأكثر مبيعاً اليوم">
       {report.loading && !report.data ? (
         <div className="flex flex-col gap-4">
           <Skeleton className="h-9" />
@@ -680,32 +712,19 @@ function BestSellers({ report }: { report: DayState }) {
       ) : top.length === 0 ? (
         <p className="text-ink-muted">لا مبيعات بعد اليوم. ستظهر هنا أول فاتورة.</p>
       ) : (
-        <ol className="flex flex-col gap-4">
-          {top.map((product, index) => (
-            <li key={product.productId} className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-3">
-                <span className="num grid size-6 shrink-0 place-items-center rounded-small bg-surface-muted text-xs font-bold text-ink-muted">
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-semibold text-ink">{product.name}</span>
-                <span className="num text-sm text-ink-muted">×{formatQuantity(product.qty)}</span>
-                <Money
-                  minor={product.totalMinor}
-                  currency={report.data?.baseCurrency ?? 'SYP'}
-                  className="text-sm font-semibold"
-                />
-              </div>
-              <span aria-hidden="true" className="block h-1.5 overflow-hidden rounded-full bg-surface-muted">
-                <span
-                  className="block h-full rounded-full bg-chart-1"
-                  style={{ width: `${Math.max(3, Math.round((product.totalMinor / biggest) * 100))}%` }}
-                />
-              </span>
-            </li>
-          ))}
-        </ol>
+        <BarList
+          label="الأكثر مبيعاً اليوم"
+          color="var(--color-chart-1)"
+          items={top.map((product) => ({
+            key: product.productId,
+            name: product.name,
+            small: <>×{formatQuantity(product.qty)}</>,
+            value: <Amt minor={product.totalMinor} currency={base} />,
+            w: Math.max(3, Math.round((product.totalMinor / biggest) * 100)),
+          }))}
+        />
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -716,38 +735,23 @@ function BestSellersWeek({ report }: { report: ReportState<SalesBreakdown> }) {
   if (top.length === 0) return null;
   const biggest = Math.max(...top.map((p) => p.totalMinor), 1);
   return (
-    <Card className="flex flex-col gap-4">
-      <SectionTitle icon={<TrendUpIcon size={20} />}>الأكثر مبيعاً هذا الأسبوع</SectionTitle>
-      <ol aria-label="الأكثر مبيعاً هذا الأسبوع" className="flex flex-col gap-4">
-        {top.map((row, index) => (
-          <li key={row.key} className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-3">
-              <span className="num grid size-6 shrink-0 place-items-center rounded-small bg-surface-muted text-xs font-bold text-ink-muted">
-                {index + 1}
-              </span>
-              <Link
-                to={`/products/${row.key}`}
-                className="min-w-0 flex-1 truncate font-semibold text-ink hover:text-brand-ink"
-              >
-                {row.name}
-              </Link>
-              <span className="num text-sm text-ink-muted">×{formatQuantity(row.qty)}</span>
-              <Money
-                minor={row.totalMinor}
-                currency={report.data!.baseCurrency}
-                className="text-sm font-semibold"
-              />
-            </div>
-            <span aria-hidden="true" className="block h-1.5 overflow-hidden rounded-full bg-surface-muted">
-              <span
-                className="block h-full rounded-full bg-chart-2"
-                style={{ width: `${Math.max(3, Math.round((row.totalMinor / biggest) * 100))}%` }}
-              />
-            </span>
-          </li>
-        ))}
-      </ol>
-    </Card>
+    <Panel title="الأكثر مبيعاً هذا الأسبوع">
+      <BarList
+        label="الأكثر مبيعاً هذا الأسبوع"
+        color="var(--color-chart-1)"
+        items={top.map((row) => ({
+          key: row.key,
+          name: (
+            <Link to={`/products/${row.key}`} className="hover:text-brand-ink">
+              {row.name}
+            </Link>
+          ),
+          small: <>×{formatQuantity(row.qty)}</>,
+          value: <Amt minor={row.totalMinor} currency={report.data!.baseCurrency} />,
+          w: Math.max(3, Math.round((row.totalMinor / biggest) * 100)),
+        }))}
+      />
+    </Panel>
   );
 }
 
@@ -771,8 +775,7 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
     .filter((m) => m.method === 'voucher')
     .reduce((sum, m) => sum + m.baseAmountMinor, 0);
   return (
-    <Card className="flex flex-col gap-4">
-      <SectionTitle icon={<SalesIcon size={20} />}>طرق الدفع اليوم</SectionTitle>
+    <Panel title="طرق الدفع اليوم">
       {returnedMinor > 0 ? (
         <p className="text-sm text-ink-muted">
           المبالغ قبل المرتجعات؛ المرتجعات اليوم{' '}
@@ -791,7 +794,7 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
           منها قسائم مستردّة <Money minor={voucherMinor} currency={base} className="font-semibold" />
         </p>
       ) : null}
-    </Card>
+    </Panel>
   );
 }
 
@@ -928,7 +931,11 @@ function groupText(name: string, items: readonly LowItem[]): string {
 }
 
 type OrdersState = ReportState<{ items: OnlineOrder[] }>;
-type MerchState = ReportState<Awaited<ReturnType<typeof getMerchandise>>>;
+/** The pieces that ran low, from the home summary: `total` counts all of them, `lowStock` the first 100 */
+type MerchState = ReportState<{
+  lowStock: NonNullable<HomeSummary['lowStock']>['items'];
+  total: number;
+}>;
 type ExpiryState = ReportState<Awaited<ReturnType<typeof listExpiry>>>;
 type ChequesState = ReportState<Awaited<ReturnType<typeof listCheques>>>;
 
@@ -944,6 +951,8 @@ interface WaitingArgs {
   cheques?: ChequesState | null;
   today?: string;
   noPhoto?: number;
+  /** Pieces that ran low in all, when the list holds only the first 100 of them */
+  lowTotal?: number;
 }
 
 /** What «ما ينتظرك» counts, shared by its list and by the tab that carries its total */
@@ -957,9 +966,7 @@ function waitingFigures({
   seesExpiry,
   noPhoto = 0,
 }: WaitingArgs) {
-  const count = orders.data?.items.length ?? 0;
-  const holds = orders.data?.items.filter((order) => order.source === 'hold').length ?? 0;
-  const online = count - holds;
+  const { newOrders: online, cancelRequests, holds } = splitPending(orders.data?.items ?? []);
   const accepted = toSell?.data?.items.length ?? 0;
   // Every low product is one group, whatever the store sells; a piece below zero is named once, in
   // «المخزون», where its chip opens the count
@@ -975,6 +982,7 @@ function waitingFigures({
   // The tab counts rows, as the list shows them; «بلا صورة» is a suggestion, shown but not counted
   const total =
     (online > 0 ? 1 : 0) +
+    (cancelRequests > 0 ? 1 : 0) +
     (accepted > 0 ? 1 : 0) +
     (holds > 0 ? 1 : 0) +
     stock.length +
@@ -984,6 +992,7 @@ function waitingFigures({
   return {
     holds,
     online,
+    cancelRequests,
     accepted,
     stock,
     expiring,
@@ -1010,8 +1019,19 @@ const WAITING_ROWS = 3;
 
 function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   const [all, setAll] = useState(false);
-  const { holds, online, accepted, stock, expiring, expired, recalled, loading, noPhoto, empty } =
-    waitingFigures(args);
+  const {
+    holds,
+    online,
+    cancelRequests,
+    accepted,
+    stock,
+    expiring,
+    expired,
+    recalled,
+    loading,
+    noPhoto,
+    empty,
+  } = waitingFigures(args);
   const batches = args.expiry.data?.items ?? [];
   const recalledRows = batches.filter((row) => row.blocked);
   const expiredRows = batches.filter((row) => !row.blocked && row.daysLeft !== null && row.daysLeft < 0);
@@ -1069,6 +1089,12 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
     );
   };
   for (const group of stock.filter((g) => g.allOut)) rows.push(rowOf(group));
+  if (cancelRequests > 0)
+    rows.push(
+      <WaitingRow key="cancels" to="/online-store" count={cancelRequests} tone="warning" icon={<StoreIcon />}>
+        {cancelRequests === 1 ? 'زبون يطلب إلغاء طلبه' : 'زبائن يطلبون إلغاء طلباتهم'}
+      </WaitingRow>,
+    );
   if (online > 0)
     rows.push(
       <WaitingRow key="online" to="/online-store" count={online} tone="brand" icon={<StoreIcon />}>
@@ -1078,7 +1104,7 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   if (accepted > 0)
     rows.push(
       <WaitingRow key="accepted" to="/online-store" count={accepted} tone="brand" icon={<StoreIcon />}>
-        {accepted === 1 ? 'طلب مقبول ينتظر البيع على الكاشير' : 'طلبات مقبولة تنتظر البيع على الكاشير'}
+        {accepted === 1 ? 'طلب مقبول ينتظر الكاشير' : 'طلبات مقبولة تنتظر الكاشير'}
       </WaitingRow>,
     );
   if (holds > 0)
@@ -1088,6 +1114,14 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
       </WaitingRow>,
     );
   for (const group of stock.filter((g) => !g.allOut)) rows.push(rowOf(group));
+  // The list holds the first 100 low pieces: when there are more, the row says so instead of looking complete
+  const lowMore = (args.lowTotal ?? 0) - (args.merch.data?.lowStock.length ?? 0);
+  if (lowMore > 0)
+    rows.push(
+      <WaitingRow key="low-more" to="/reports/merchandise" count={null} tone="warning" icon={<WarningIcon />}>
+        وهناك {lowMore} قطعة أخرى على وشك النفاد
+      </WaitingRow>,
+    );
   if (expiring > 0)
     rows.push(
       <WaitingRow key="expiring" to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
@@ -1255,7 +1289,7 @@ function RunningLow({
  */
 // ─── Money that waits ─────────────────────────────────────────────────────────
 
-type CustomerDebts = ReportState<Awaited<ReturnType<typeof listCustomers>>>;
+type CustomerDebts = ReportState<NonNullable<HomeSummary['debts']> & { baseCurrency: CurrencyCode }>;
 type SupplierDues = ReportState<Awaited<ReturnType<typeof listSuppliers>>>;
 
 interface MoneyArgs {
@@ -1271,26 +1305,17 @@ interface MoneyArgs {
 }
 
 /** What the store is owed and owes, from the customers' and suppliers' own lists: the rows and how many */
-function moneyFigures({
-  customers,
-  suppliers,
-  seesCustomers,
-  seesSuppliers,
-  cheques,
-  instalments,
-  today,
-}: MoneyArgs) {
+function moneyFigures(
+  me: MeResponse,
+  { customers, suppliers, seesCustomers, seesSuppliers, cheques, instalments, today }: MoneyArgs,
+) {
   const dueToday = instalments?.data?.dueTodayCount ?? 0;
   const lateInstalments = instalments?.data?.lateCount ?? 0;
   const chequesDue = seesCustomers && cheques?.data && today ? dueSoon(cheques.data.items, today).length : 0;
   const chequesOut =
     seesCustomers && cheques?.data && today ? dueSoon(cheques.data.items, today, 'out').length : 0;
-  const list = seesCustomers ? (customers.data?.items ?? []) : [];
-  const over = list.filter(
-    (c) => !c.archived && c.creditLimitMinor !== null && c.balanceMinor > c.creditLimitMinor,
-  );
-  const overLimit = over.length;
-  const overOne = over.length === 1 ? (over[0] ?? null) : null;
+  const overLimit = seesCustomers ? (customers.data?.overLimitCount ?? 0) : 0;
+  const overOne = seesCustomers && overLimit === 1 ? (customers.data?.overLimitOne ?? null) : null;
   const owedByCustomers = seesCustomers ? (customers.data?.totalOwedMinor ?? 0) : 0;
   const owedToSuppliers = seesSuppliers ? (suppliers.data?.totalOwedMinor ?? 0) : 0;
   const total =
@@ -1317,19 +1342,20 @@ function moneyFigures({
       (seesCustomers && customers.loading && !customers.data) ||
       (seesSuppliers && suppliers.loading && !suppliers.data),
     customersBase: customers.data?.baseCurrency,
+    base: me.settings.baseCurrency,
     suppliersBase: suppliers.data?.baseCurrency,
   };
 }
 
-function MoneyRows(args: MoneyArgs) {
-  const f = moneyFigures(args);
+function MoneyRows({ me, ...args }: MoneyArgs & { me: MeResponse }) {
+  const f = moneyFigures(me, args);
   if (f.loading && f.total === 0) return <Skeleton className="h-14" />;
   if (f.total === 0) return <p className="text-ink-muted">لا ديون ولا مستحقات الآن.</p>;
   return (
     <ul className="flex flex-col gap-2">
       {f.overLimit > 0 ? (
         <WaitingRow to="/customers" count={f.overLimit} tone="danger" icon={<WarningIcon />}>
-          {f.overOne && f.overOne.creditLimitMinor !== null && f.customersBase ? (
+          {f.overOne && f.customersBase ? (
             <>
               {f.overOne.name}: فوق الحدّ{' '}
               <Money minor={f.overOne.balanceMinor} currency={f.customersBase} className="font-bold" />
@@ -1348,13 +1374,13 @@ function MoneyRows(args: MoneyArgs) {
       {f.lateInstalments > 0 ? (
         <WaitingRow to="/installments/due" count={f.lateInstalments} tone="danger" icon={<CalendarIcon />}>
           {f.lateInstalments === 1 ? 'قسط متأخر' : 'أقساط متأخرة'}{' '}
-          <Money minor={f.lateInstalmentsMinor} currency={f.customersBase ?? 'SYP'} className="font-bold" />
+          <Money minor={f.lateInstalmentsMinor} currency={f.base} className="font-bold" />
         </WaitingRow>
       ) : null}
       {f.dueToday > 0 ? (
         <WaitingRow to="/installments/due" count={f.dueToday} tone="warning" icon={<CalendarIcon />}>
           {f.dueToday === 1 ? 'قسط مستحق اليوم' : 'أقساط مستحقة اليوم'}{' '}
-          <Money minor={f.dueTodayMinor} currency={f.customersBase ?? 'SYP'} className="font-bold" />
+          <Money minor={f.dueTodayMinor} currency={f.base} className="font-bold" />
         </WaitingRow>
       ) : null}
       {f.chequesDue > 0 ? (
@@ -1371,14 +1397,14 @@ function MoneyRows(args: MoneyArgs) {
       ) : null}
       {f.owedByCustomers > 0 && f.customersBase ? (
         <WaitingRow to="/customers" count={null} tone="warning" icon={<CustomersIcon />}>
-          ديون الزبائن عندنا{' '}
-          <Money minor={f.owedByCustomers} currency={f.customersBase} className="font-bold" />
+          ديون الزبائن عندنا
+          <Money minor={f.owedByCustomers} currency={f.customersBase} className="block text-base font-bold" />
         </WaitingRow>
       ) : null}
       {f.owedToSuppliers > 0 && f.suppliersBase ? (
         <WaitingRow to="/suppliers" count={null} tone="warning" icon={<TruckIcon />}>
-          مستحقات الموردين علينا{' '}
-          <Money minor={f.owedToSuppliers} currency={f.suppliersBase} className="font-bold" />
+          ما علينا للموردين
+          <Money minor={f.owedToSuppliers} currency={f.suppliersBase} className="block text-base font-bold" />
         </WaitingRow>
       ) : null}
     </ul>
@@ -1386,12 +1412,14 @@ function MoneyRows(args: MoneyArgs) {
 }
 
 function AttentionPanel({
+  me,
   waiting,
   merch,
   skip,
   showStock,
   money,
 }: {
+  me: MeResponse;
   waiting: WaitingArgs;
   merch: MerchState;
   skip?: ReadonlySet<string> | undefined;
@@ -1399,7 +1427,7 @@ function AttentionPanel({
   money: MoneyArgs;
 }) {
   const [picked, setPicked] = useState<'now' | 'stock' | 'money' | null>(null);
-  const moneyFigs = moneyFigures(money);
+  const moneyFigs = moneyFigures(me, money);
   const moneyTab = (money.seesCustomers || money.seesSuppliers) && (moneyFigs.total > 0 || moneyFigs.loading);
   const figures = waitingFigures(waiting);
   const stockRows = showStock ? lowRows(merch, skip).length : 0;
@@ -1431,22 +1459,19 @@ function AttentionPanel({
             value: 'money' as const,
             label: 'المال',
             ...(moneyFigs.total > 0 ? { count: moneyFigs.total } : {}),
-            content: <MoneyRows {...money} />,
+            content: <MoneyRows me={me} {...money} />,
           },
         ]
       : []),
   ];
   return (
-    <Card className="flex flex-col gap-3">
-      <SectionTitle icon={<InboxIcon size={20} />} tone="warning">
-        تحتاج انتباهك
-      </SectionTitle>
+    <Panel title="تحتاج انتباهك">
       {items.length > 1 ? (
         <Tabs label="تحتاج انتباهك" variant="pill" items={items} value={active} onValueChange={setPicked} />
       ) : (
         items[0]?.content
       )}
-    </Card>
+    </Panel>
   );
 }
 
@@ -1461,13 +1486,10 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function StoreCard({ me }: { me: MeResponse }) {
+function StoreCard({ me, className }: { me: MeResponse; className?: string }) {
   const base = CURRENCIES[me.settings.baseCurrency];
   return (
-    <Card className="flex flex-col gap-5">
-      <SectionTitle icon={<StoreIcon size={20} />} tone="neutral">
-        متجرك
-      </SectionTitle>
+    <Panel title="متجرك" className={className}>
       <dl className="flex flex-col gap-5">
         <InfoRow label="نشاط المتجر">
           <ul className="flex flex-wrap gap-2" aria-label="نشاط المتجر">
@@ -1493,7 +1515,7 @@ function StoreCard({ me }: { me: MeResponse }) {
           </InfoRow>
         ) : null}
       </dl>
-    </Card>
+    </Panel>
   );
 }
 
@@ -1513,6 +1535,11 @@ export function HomePage() {
   const seesExpiry = holdsAny(me, ['purchases.manage']);
   const seesCheques = holdsAny(me, ['customers.view']);
   const today = isoDay(Date.now(), me.tenant.timezone);
+  // A person given his branch only sees that branch's figures: the page says so in words
+  const branchOnly =
+    me.user.roles.length > 0 && me.user.roles.every((role) => role.branchId !== null)
+      ? me.branches.map((branch) => branch.name).join('، ')
+      : null;
   // After midnight a shift that opened yesterday may still be open: its sales are said in words
   const openShift = useOpenShiftFromYesterday(seesSales, today, me.tenant.timezone, 'home');
 
@@ -1540,9 +1567,21 @@ export function HomePage() {
   );
   const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrders, { cache: 'home' });
   const toSell = useReport(seesOrders ? 'orders:accepted' : null, getAcceptedOrders, { cache: 'home' });
-  const merch = useReport(seesStock ? 'home:low' : null, () => getMerchandise(daysAgo(30), daysAgo(0), 60), {
-    cache: 'home',
-  });
+  // What the page needs from the heavy lists, in one light request: the low pieces, who owes, the photos
+  const canCatalogView = holdsAny(me, ['catalog.manage']);
+  const summary = useReport(
+    seesStock || seesCheques || canCatalogView ? 'home:summary' : null,
+    getHomeSummary,
+    { cache: 'home' },
+  );
+  const merch: MerchState = {
+    ...summary,
+    data: summary.data?.lowStock
+      ? { lowStock: summary.data.lowStock.items, total: summary.data.lowStock.total }
+      : seesStock && summary.data
+        ? { lowStock: [], total: 0 }
+        : null,
+  };
   // «الأكثر مبيعاً» of the last seven days, from the sales report (it needs report.view)
   const weekTop = useReport(
     seesStock ? `home:top:${today}` : null,
@@ -1550,18 +1589,20 @@ export function HomePage() {
     { cache: 'home' },
   );
   const expiry = useReport(seesExpiry ? 'home:expiry' : null, () => listExpiry(30), { cache: 'home' });
-  const canCatalogView = holdsAny(me, ['catalog.manage']);
-  const catalog = useReport(canCatalogView ? 'home:photos' : null, () => listProducts({ limit: 100 }), {
-    cache: 'home',
-  });
-  const noPhoto = (catalog.data?.items ?? []).filter((p) => p.hasImage === false).length;
-  const cheques = useReport(seesCheques ? 'home:cheques' : null, () => listCheques(undefined), {
+  // Goods (not services) still without a photo, counted by the server over the whole catalogue
+  const noPhoto = summary.data?.photos?.withoutPhoto ?? 0;
+  // Only the cheques still waiting: «due within a week» is never about one already cashed
+  const cheques = useReport(seesCheques ? 'home:cheques' : null, () => listCheques('pending'), {
     cache: 'home',
   });
   // Money that waits: what customers owe (and who is over their limit) and what suppliers are owed
-  const customers = useReport(seesCheques ? 'home:debts' : null, () => listCustomers('', true), {
-    cache: 'home',
-  });
+  const customers: CustomerDebts = {
+    ...summary,
+    data:
+      summary.data?.debts && seesCheques
+        ? { ...summary.data.debts, baseCurrency: summary.data.baseCurrency }
+        : null,
+  };
   const suppliers = useReport(seesExpiry ? 'home:dues' : null, () => listSuppliers(), { cache: 'home' });
   const instalments = useReport(
     holdsAny(me, ['installments.view']) ? 'home:instalments' : null,
@@ -1590,11 +1631,13 @@ export function HomePage() {
   const base = day.data?.baseCurrency ?? me.settings.baseCurrency;
 
   // Nothing sold yet, today or in the week behind: a brand-new store gets a way in, not empty charts.
+  // Only when the week really loaded and every day of it is a day of zero: a day that failed to load is
+  // a gap (null), never a day without sales, so a failed request cannot make an old store look new.
   const brandNew =
     day.data !== null &&
     week.data !== null &&
     day.data.invoiceCount === 0 &&
-    weekPoints.every((p) => !p.total);
+    weekPoints.every((p) => p.total === 0);
 
   const canCatalog = holdsAny(me, ['catalog.manage']);
   const showWaiting = seesOrders || seesStock || seesExpiry || seesCheques || canCatalogView;
@@ -1610,7 +1653,7 @@ export function HomePage() {
 
   return (
     <AppShell>
-      <div className="flex flex-col gap-6 motion-safe:animate-rise">
+      <SalesPage className="motion-safe:animate-rise">
         {/* The last numbers are on screen while the new ones load: a thin bar says so */}
         {day.loading && day.data ? (
           <div
@@ -1633,9 +1676,11 @@ export function HomePage() {
           </Alert>
         ) : null}
         <TrialBanner me={me} />
-        <PageHeader
+        <PageTop
           title={`أهلاً، ${firstName(me.user.fullName)}`}
-          description={`${weekdayOf(today)} ${dayText(today, me.settings.numberFormat)} · هذه صورة متجرك اليوم.`}
+          subtitle={`${weekdayOf(today)} ${dayText(today, me.settings.numberFormat)} · ${
+            branchOnly ? `أرقام ${branchOnly} فقط.` : 'هذه صورة متجرك اليوم.'
+          }`}
           actions={<QuickActions me={me} />}
         />
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
@@ -1710,6 +1755,11 @@ export function HomePage() {
                 loading={chartLoading}
                 range={range}
                 onRange={setRange}
+                failed={!!week.error || (range === '30' && !!month.error)}
+                onRetry={() => {
+                  if (week.error) week.retry();
+                  if (month.error) month.retry();
+                }}
               />
             ) : null}
             {seesStock && !brandNew ? <BestSellersWeek report={weekTop} /> : null}
@@ -1725,6 +1775,7 @@ export function HomePage() {
             <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] max-md:order-[-3] xl:order-none">
               {showWaiting ? (
                 <AttentionPanel
+                  me={me}
                   waiting={{
                     orders,
                     toSell,
@@ -1734,6 +1785,7 @@ export function HomePage() {
                     seesStock,
                     seesExpiry,
                     noPhoto,
+                    lowTotal: merch.data?.total ?? 0,
                   }}
                   merch={merch}
                   showStock={seesStock}
@@ -1743,10 +1795,11 @@ export function HomePage() {
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
             </div>
-            {seesSales ? <StoreCard me={me} /> : null}
+            {/* The shop's card is for the first days: on a phone it is left to the settings page */}
+            {seesSales ? <StoreCard me={me} className="max-md:hidden" /> : null}
           </div>
         </div>
-      </div>
+      </SalesPage>
     </AppShell>
   );
 }

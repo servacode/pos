@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type {
   DeliveryArea,
   InventoryResponse,
@@ -29,8 +29,6 @@ import {
   IconChip,
   InboxIcon,
   LinkIcon,
-  Money,
-  PageHeader,
   SegmentedControl,
   SendIcon,
   SkeletonText,
@@ -39,27 +37,34 @@ import {
   TextField,
   Tooltip,
   TruckIcon,
-  type BadgeTone,
 } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { zonedDateTime } from '../../lib/dates';
+import { Pager, type PagerState } from '../pager';
+import { Amt, PageTop, SalesPage, StatusPill, type BadgeKind } from '../sales/ui';
 import { CodCard, DeliveryActions } from './DeliveryPanel';
 import { ShopLook } from './ShopLook';
 
 const getSettings = () => apiFetch<OnlineStoreSettings>('/v1/online-store', { auth: true });
 const saveSettings = (input: OnlineStoreInput) =>
   apiFetch<OnlineStoreSettings>('/v1/online-store', { method: 'PUT', body: input, auth: true });
-const listOrders = (status: OnlineOrderStatus | 'all') =>
-  apiFetch<{ items: OnlineOrder[] }>(`/v1/online-orders${status === 'all' ? '' : `?status=${status}`}`, {
-    auth: true,
-  });
+/** Orders a page: the first page keeps the plain address, the next ones carry the cursor */
+const listOrders = (status: OnlineOrderStatus | 'all', cursor: string | null = null) => {
+  const query = [status === 'all' ? '' : `status=${status}`, cursor ? `cursor=${cursor}` : '']
+    .filter(Boolean)
+    .join('&');
+  return apiFetch<{ items: OnlineOrder[]; nextCursor?: string | null }>(
+    `/v1/online-orders${query ? `?${query}` : ''}`,
+    { auth: true },
+  ).then((r) => ({ items: r.items, nextCursor: r.nextCursor ?? null }));
+};
 const getStock = () => apiFetch<InventoryResponse>('/v1/inventory', { auth: true });
-const setStatus = (order: OnlineOrder, status: 'accepted' | 'rejected' | 'done') =>
+const setStatus = (order: OnlineOrder, status: 'accepted' | 'rejected' | 'done', force = false) =>
   apiFetch<OnlineOrder>(`/v1/online-orders/${order.id}/status`, {
     method: 'POST',
-    body: { status, version: order.version },
+    body: { status, version: order.version, ...(force ? { force: true } : {}) },
     auth: true,
   });
 
@@ -71,12 +76,13 @@ const STATUS_TEXT: Record<OnlineOrderStatus, string> = {
   done: 'سُلّم',
 };
 
-const STATUS_TONE: Record<OnlineOrderStatus, BadgeTone> = {
-  pending: 'warning',
+/** An order waiting for the store is the exception worth a fill; a decided one is quiet */
+const STATUS_KIND: Record<OnlineOrderStatus, BadgeKind> = {
+  pending: 'open',
   cancel_requested: 'danger',
-  accepted: 'success',
+  accepted: 'ok',
   rejected: 'danger',
-  done: 'success',
+  done: 'ok',
 };
 
 /**
@@ -88,31 +94,42 @@ export function OnlineStorePage() {
   const permissions = new Set<string>(me.user.permissions);
   const canSettings = permissions.has('settings.manage');
   const canOrders = permissions.has('customers.view');
+  // Accepting, delivering and the couriers' cash are a manager's (the server asks for the same)
+  const canDecide = permissions.has('customers.manage');
   const both = canSettings && canOrders;
   // The orders wait here every day, the settings once: orders come first, settings behind a tab
   const [tab, setTab] = useState<'orders' | 'settings'>('orders');
+  const [settingsSeen, setSettingsSeen] = useState(false);
   return (
     <AppShell>
       <title>المتجر الإلكتروني · SERVA</title>
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
-        <PageHeader
+      <SalesPage className="mx-auto w-full max-w-6xl">
+        <PageTop
           title="المتجر الإلكتروني"
-          description="بضاعتك بصورها وأسعارها على رابط خاص بمحلك، والطلبات تصلك هنا."
+          subtitle="بضاعتك بصورها وأسعارها على رابط خاص بمحلك، والطلبات تصلك هنا."
         />
         {both ? (
           <SegmentedControl
             label="القسم"
             value={tab}
-            onValueChange={setTab}
+            onValueChange={(next) => {
+              setTab(next);
+              if (next === 'settings') setSettingsSeen(true);
+            }}
             options={[
               { value: 'orders', label: 'الطلبات' },
               { value: 'settings', label: 'إعدادات المتجر' },
             ]}
           />
         ) : null}
-        {canSettings && (!both || tab === 'settings') ? <SettingsCard /> : null}
-        {canOrders && (!both || tab === 'orders') ? <OrdersCard /> : null}
-      </div>
+        {/* Once opened, the settings stay mounted behind the tab: switching to the orders keeps what was typed */}
+        {canSettings && (!both || settingsSeen || tab === 'settings') ? (
+          <div hidden={both && tab !== 'settings'}>
+            <SettingsCard />
+          </div>
+        ) : null}
+        {canOrders && (!both || tab === 'orders') ? <OrdersCard canDecide={canDecide} /> : null}
+      </SalesPage>
     </AppShell>
   );
 }
@@ -132,6 +149,28 @@ export function minorOf(text: string, decimals: number): number | null {
   return Math.round(n * 10 ** decimals);
 }
 
+/**
+ * A fee as typed, strictly: digits (Arabic too), a point or «٫» for the decimals, a comma only as a
+ * thousands mark (groups of three). «abc» or «1,5» is null, never a silent 0 or a tenfold fee.
+ */
+export function feeOf(text: string, decimals: number): number | null {
+  const typed = text.trim();
+  if (typed === '') return 0;
+  const plain = [...typed]
+    .map((ch) => {
+      const arabic = '٠١٢٣٤٥٦٧٨٩'.indexOf(ch);
+      return arabic >= 0 ? String(arabic) : ch === '٫' ? '.' : ch === '٬' ? ',' : ch;
+    })
+    .join('');
+  const [whole = '', ...rest] = plain.split('.');
+  if (rest.length > 1 || (rest.length === 1 && (rest[0] === '' || rest[0]!.length > decimals))) return null;
+  const groups = whole.split(',');
+  if (groups.some((g) => g === '' || ![...g].every((ch) => ch >= '0' && ch <= '9'))) return null;
+  if (groups.length > 1 && (groups[0]!.length > 3 || groups.slice(1).some((g) => g.length !== 3)))
+    return null;
+  return Math.round(Number(`${groups.join('')}${rest.length ? `.${rest[0]}` : ''}`) * 10 ** decimals);
+}
+
 /** The currency symbol at the end of a fee field, in the subtle ink the field gives its units. */
 function Unit({ children }: { children: string }) {
   return (
@@ -149,11 +188,14 @@ function DeliveryFees({
   feeMinor,
   areas,
   onChange,
+  onInvalid,
   error,
 }: {
   feeMinor: number;
   areas: DeliveryArea[];
   onChange: (feeMinor: number, areas: DeliveryArea[]) => void;
+  /** Told when a fee is not a number, so the page does not save it as free delivery */
+  onInvalid?: (invalid: boolean) => void;
   error?: string;
 }) {
   const me = useMe();
@@ -166,14 +208,23 @@ function DeliveryFees({
   const text = (minor: number) => (minor === 0 ? '' : String(minor / 10 ** decimals));
   const [flat, setFlat] = useState(text(feeMinor));
   const [rows, setRows] = useState(areas.map((a) => ({ name: a.name, fee: text(a.feeMinor) })));
+  const [bad, setBad] = useState<ReadonlySet<string>>(new Set());
   const push = (nextFlat: string, nextRows: { name: string; fee: string }[]) => {
-    onChange(
-      minorOf(nextFlat, decimals) ?? 0,
-      nextRows
-        .filter((r) => r.name.trim())
-        .map((r) => ({ name: r.name.trim(), feeMinor: minorOf(r.fee, decimals) ?? 0 })),
-    );
+    const wrong = new Set<string>();
+    const flatMinor = nextRows.length === 0 ? feeOf(nextFlat, decimals) : (feeOf(nextFlat, decimals) ?? 0);
+    if (flatMinor === null) wrong.add('flat');
+    const kept: DeliveryArea[] = [];
+    nextRows.forEach((r, i) => {
+      const fee = feeOf(r.fee, decimals);
+      if (fee === null) wrong.add(String(i));
+      if (r.name.trim()) kept.push({ name: r.name.trim(), feeMinor: fee ?? 0 });
+    });
+    setBad(wrong);
+    onInvalid?.(wrong.size > 0);
+    onChange(flatMinor ?? 0, kept);
   };
+  const fieldError = (key: string) =>
+    bad.has(key) ? 'اكتب رقماً صحيحاً، مثل 1500 (الفاصلة للآلاف فقط)' : undefined;
   return (
     <div
       role="group"
@@ -203,6 +254,7 @@ function DeliveryFees({
           endAdornment={<Unit>{unit}</Unit>}
           inputClassName="num"
           className="sm:max-w-60"
+          error={fieldError('flat')}
         />
       ) : (
         <div className="overflow-hidden rounded-control border border-line bg-surface">
@@ -247,6 +299,7 @@ function DeliveryFees({
                   endAdornment={<Unit>{unit}</Unit>}
                   inputClassName="num"
                   className="w-24 shrink-0 sm:w-40"
+                  error={fieldError(String(i))}
                 />
                 <Tooltip content="احذف المنطقة">
                   <IconButton
@@ -390,6 +443,7 @@ function SettingsCard() {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [feeBad, setFeeBad] = useState(false);
   // What the server holds, to tell an unsaved change from none
   const [kept, setKept] = useState('');
 
@@ -437,7 +491,7 @@ function SettingsCard() {
   };
 
   async function save() {
-    if (!form || whatsappError) return;
+    if (!form || whatsappError || feeBad) return;
     setSaving(true);
     setError(null);
     setFields({});
@@ -457,6 +511,12 @@ function SettingsCard() {
   return (
     <section aria-label="الإعداد" className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
       <div className="flex min-w-0 flex-col gap-6">
+        {form.catalogueCut ? (
+          <Alert tone="warning">
+            في محلك قطع أكثر مما تتسع له صفحة المتجر (5000 قطعة بمقاساتها وألوانها)، فالأخيرة حسب الاسم لا
+            تظهر للزبائن. أخفِ ما لا تبيعه من المتجر أو قلّل المتغيرات.
+          </Alert>
+        ) : null}
         <Card>
           <CardHeader
             icon={<StoreIcon />}
@@ -477,6 +537,9 @@ function SettingsCard() {
                 value={form.slug}
                 onChange={(e) => set({ slug: e.target.value.toLowerCase().slice(0, 40) })}
                 error={fields.slug}
+                {...(form.version !== null && form.slug !== JSON.parse(kept).slug
+                  ? { hint: 'تغيير الرابط يُبطل الروابط التي شاركتها وروابط تتبع الطلبات السابقة.' }
+                  : {})}
                 {...(fields.slug ? {} : { 'aria-describedby': linkId })}
               />
               <ShopLink id={linkId} link={link} />
@@ -539,6 +602,7 @@ function SettingsCard() {
                   feeMinor={form.deliveryFeeMinor}
                   areas={form.deliveryAreas}
                   onChange={(deliveryFeeMinor, deliveryAreas) => set({ deliveryFeeMinor, deliveryAreas })}
+                  onInvalid={setFeeBad}
                   error={fields.deliveryAreas ?? fields.deliveryFeeMinor}
                 />
               </div>
@@ -620,7 +684,11 @@ function SettingsCard() {
               )}
             </div>
             {dirty ? (
-              <Button loading={saving} disabled={Boolean(whatsappError)} onClick={() => void save()}>
+              <Button
+                loading={saving}
+                disabled={Boolean(whatsappError) || feeBad}
+                onClick={() => void save()}
+              >
                 احفظ
               </Button>
             ) : null}
@@ -634,18 +702,76 @@ function SettingsCard() {
   );
 }
 
-function OrdersCard() {
+const ORDERS_PAGE = 50;
+
+/**
+ * The orders a page at a time. Only the newest answer for the filter and page on screen lands (a slow
+ * one for another filter never does); `refresh` asks again without emptying the list, so the cards
+ * and what they say (an error under a button) stay while the new answer comes.
+ */
+function useOrderPages(status: OnlineOrderStatus | 'all') {
+  const [stack, setStack] = useState<string[]>([]);
+  const [tick, setTick] = useState(0);
+  const [answer, setAnswer] = useState<{
+    key: string;
+    items: OnlineOrder[];
+    nextCursor: string | null;
+  } | null>(null);
+  const [error, setError] = useState<{ key: string; text: string } | null>(null);
+  const cursor = stack.length > 0 ? stack[stack.length - 1]! : null;
+  const key = `${status}|${cursor ?? ''}`;
+  useEffect(() => {
+    let current = true;
+    listOrders(status, cursor).then(
+      (page) => {
+        if (!current) return;
+        setError(null);
+        setAnswer({ key, ...page });
+      },
+      (e: unknown) => current && setError({ key, text: errorMessage(e) }),
+    );
+    return () => {
+      current = false;
+    };
+  }, [status, cursor, key, tick]);
+  const fresh = answer?.key === key;
+  const topRef = useRef<HTMLDivElement>(null);
+  const page = stack.length + 1;
+  const from = (page - 1) * ORDERS_PAGE + 1;
+  const items = fresh ? answer.items : null;
+  const pager: PagerState = {
+    page,
+    from,
+    to: from + (items?.length ?? 0) - 1,
+    hasNext: Boolean(fresh && answer.nextCursor),
+    moving: 0,
+    error: null,
+    onPrev: () => setStack((s) => s.slice(0, -1)),
+    onNext: () => {
+      if (fresh && answer.nextCursor) setStack((s) => [...s, answer.nextCursor!]);
+      topRef.current?.scrollIntoView?.({ block: 'start' });
+    },
+    onRetry: () => setTick((n) => n + 1),
+    loading: !fresh && !error,
+    wasPaged: stack.length > 0,
+  };
+  return {
+    items,
+    error: error?.key === key ? error.text : null,
+    /** Asks again without emptying the list */
+    refresh: useCallback(() => setTick((n) => n + 1), []),
+    /** Back to the first page (a new filter) */
+    first: useCallback(() => setStack([]), []),
+    topRef,
+    pager,
+  };
+}
+
+function OrdersCard({ canDecide }: { canDecide: boolean }) {
   const me = useMe();
   const [status, setFilter] = useState<OnlineOrderStatus | 'all'>('pending');
-  const [items, setItems] = useState<OnlineOrder[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => {
-    setError(null);
-    listOrders(status)
-      .then((r) => setItems(r.items))
-      .catch((e: unknown) => setError(errorMessage(e)));
-  }, [status]);
-  useEffect(load, [load]);
+  const { items, error, refresh: load, first, topRef, pager } = useOrderPages(status);
+  const [moveError, setError] = useState<string | null>(null);
 
   // The delivery card below asks again whenever an order changes
   const [changes, setChanges] = useState(0);
@@ -672,6 +798,7 @@ function OrdersCard() {
   async function move(order: OnlineOrder, next: 'accepted' | 'rejected' | 'done') {
     if (busy.has(order.id)) return;
     setBusy((b) => new Set(b).add(order.id));
+    setError(null);
     try {
       if (next === 'accepted' && order.status === 'pending' && !short[order.id]) {
         const lacking = await shortLines(order);
@@ -680,8 +807,14 @@ function OrdersCard() {
           return;
         }
       }
-      await setStatus(order, next);
+      // The second press after the warning accepts anyway: the server holds the pieces only when told so
+      await setStatus(order, next, Boolean(short[order.id]));
     } catch (e) {
+      // The server's own check (another desk took the last piece): the same warning, accepted on the next press
+      if (e instanceof ApiError && e.fields?.stock && next === 'accepted') {
+        setShort((m) => ({ ...m, [order.id]: [e.fields!.stock!] }));
+        return;
+      }
       setError(errorMessage(e));
     } finally {
       setBusy((b) => {
@@ -706,7 +839,10 @@ function OrdersCard() {
         <SegmentedControl
           label="الحالة"
           value={status}
-          onValueChange={setFilter}
+          onValueChange={(next) => {
+            setFilter(next);
+            first();
+          }}
           options={[
             { value: 'pending', label: 'بانتظار المحل' },
             { value: 'accepted', label: 'مقبولة' },
@@ -714,7 +850,7 @@ function OrdersCard() {
           ]}
         />
       </div>
-      {error ? <Alert tone="error">{error}</Alert> : null}
+      {error || moveError ? <Alert tone="error">{error ?? moveError}</Alert> : null}
       {items === null && !error ? (
         <Card aria-busy="true">
           <SkeletonText lines={4} />
@@ -728,168 +864,175 @@ function OrdersCard() {
         />
       ) : null}
       {items && items.length > 0 ? (
-        <ul aria-label="طلبات المتجر" className="grid gap-4 xl:grid-cols-2">
-          {items.map((o) => (
-            <li
-              key={o.id}
-              aria-label={`الطلب ${o.number}`}
-              className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1"
-            >
-              <div className="flex flex-wrap items-start gap-3">
-                <IconChip
-                  tone={o.status === 'pending' || o.status === 'cancel_requested' ? 'warning' : 'brand'}
-                >
-                  {o.fulfilment === 'delivery' ? <TruckIcon /> : <StoreIcon />}
-                </IconChip>
-                <div className="flex min-w-0 flex-1 flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <bdi dir="ltr" className="num font-bold text-ink">
-                      {o.number}
-                    </bdi>
-                    <Badge tone={STATUS_TONE[o.status]}>{STATUS_TEXT[o.status]}</Badge>
-                    {o.source === 'shop' ? <Badge tone="neutral">رقم مؤكَّد</Badge> : null}
-                    {o.couponCode ? (
-                      <Badge tone="brand">
-                        كود <bdi dir="ltr">{o.couponCode}</bdi>
-                      </Badge>
-                    ) : null}
-                    {o.source === 'hold' ? (
-                      <Badge tone="neutral">
-                        حجز في المحل{o.depositCode ? ` · عربون ${o.depositCode}` : ''}
-                      </Badge>
-                    ) : null}
+        <div ref={topRef} className="flex flex-col gap-4">
+          <ul aria-label="طلبات المتجر" className="grid gap-4 xl:grid-cols-2">
+            {items.map((o) => (
+              <li
+                key={o.id}
+                aria-label={`الطلب ${o.number}`}
+                className="flex flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1"
+              >
+                <div className="flex flex-wrap items-start gap-3">
+                  <IconChip
+                    tone={o.status === 'pending' || o.status === 'cancel_requested' ? 'warning' : 'brand'}
+                  >
+                    {o.fulfilment === 'delivery' ? <TruckIcon /> : <StoreIcon />}
+                  </IconChip>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <bdi dir="ltr" className="num font-bold text-ink">
+                        {o.number}
+                      </bdi>
+                      <StatusPill kind={STATUS_KIND[o.status]}>{STATUS_TEXT[o.status]}</StatusPill>
+                      {o.source === 'shop' ? <Badge tone="neutral">رقم مؤكَّد</Badge> : null}
+                      {o.couponCode ? (
+                        <Badge tone="brand">
+                          كود <bdi dir="ltr">{o.couponCode}</bdi>
+                        </Badge>
+                      ) : null}
+                      {o.source === 'hold' ? (
+                        <Badge tone="neutral">
+                          حجز في المحل{o.depositCode ? ` · عربون ${o.depositCode}` : ''}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-sm text-ink-muted">
+                      {o.customerName} ·{' '}
+                      <a
+                        href={`https://wa.me/${o.phone.replace('+', '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        dir="ltr"
+                        className="num font-semibold text-brand-ink underline decoration-transparent underline-offset-4 hover:decoration-current"
+                      >
+                        {o.phone}
+                      </a>
+                    </p>
+                    <p className="text-xs text-ink-muted">
+                      وصل في{' '}
+                      <span className="whitespace-nowrap">
+                        {zonedDateTime(o.createdAt, me.tenant.timezone, me.settings.numberFormat)}
+                      </span>
+                    </p>
                   </div>
-                  <p className="text-sm text-ink-muted">
-                    {o.customerName} ·{' '}
-                    <a
-                      href={`https://wa.me/${o.phone.replace('+', '')}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      dir="ltr"
-                      className="num font-semibold text-brand-ink underline decoration-transparent underline-offset-4 hover:decoration-current"
-                    >
-                      {o.phone}
-                    </a>
-                  </p>
-                  <p className="text-xs text-ink-muted">
-                    وصل في{' '}
-                    <span className="whitespace-nowrap">
-                      {zonedDateTime(o.createdAt, me.tenant.timezone, me.settings.numberFormat)}
+                  <Amt minor={o.totalMinor} currency={o.currency} className="text-lg font-bold text-ink" />
+                </div>
+                <p className="text-sm text-ink">
+                  {o.fulfilment === 'delivery' ? `توصيل إلى ${o.address ?? ''}` : 'استلام من المحل'}
+                  {o.deliveryFeeMinor > 0 ? (
+                    <span className="text-ink-muted">
+                      {' '}
+                      · أجرة التوصيل{o.deliveryArea ? ` (${o.deliveryArea})` : ''}{' '}
+                      <Amt minor={o.deliveryFeeMinor} currency={o.currency} /> للمندوب
                     </span>
-                  </p>
-                </div>
-                <Money minor={o.totalMinor} currency={o.currency} className="text-lg font-bold text-ink" />
-              </div>
-              <p className="text-sm text-ink">
-                {o.fulfilment === 'delivery' ? `توصيل إلى ${o.address ?? ''}` : 'استلام من المحل'}
-                {o.deliveryFeeMinor > 0 ? (
-                  <span className="text-ink-muted">
-                    {' '}
-                    · أجرة التوصيل{o.deliveryArea ? ` (${o.deliveryArea})` : ''}{' '}
-                    <Money minor={o.deliveryFeeMinor} currency={o.currency} /> للمندوب
-                  </span>
-                ) : null}
-              </p>
-              <ul className="flex flex-col divide-y divide-line rounded-control bg-surface-muted/60 px-3 text-sm">
-                {o.lines.map((l) => (
-                  <li key={l.variantId} className="flex items-center justify-between gap-3 py-2">
-                    <span className="min-w-0 text-ink">
-                      {l.name}
-                      {l.label ? ` (${l.label})` : ''}
-                    </span>{' '}
-                    <span className="num shrink-0 text-ink-muted">× {l.qty}</span>
-                  </li>
-                ))}
-              </ul>
-              {o.note ? (
-                <p className="text-sm text-ink-muted">
-                  <span className="font-semibold text-ink">ملاحظة: </span>
-                  {o.note}
+                  ) : null}
                 </p>
-              ) : null}
-              {short[o.id] && o.status === 'pending' ? (
-                <Alert tone="warning">
-                  لا يكفي المخزون لهذه القطع: {short[o.id]!.join('، ')}. اقبل الطلب رغم ذلك إن كانت البضاعة في
-                  الطريق، أو ارفضه.
-                </Alert>
-              ) : null}
-              {o.fulfilment === 'delivery' && (o.status === 'accepted' || o.status === 'done') ? (
-                <DeliveryActions
-                  order={o}
-                  store={me.tenant.name}
-                  onChanged={() => {
-                    load();
-                    setChanges((n) => n + 1);
-                  }}
-                />
-              ) : null}
-              {o.status === 'pending' || o.status === 'cancel_requested' || o.status === 'accepted' ? (
-                <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-4">
-                  {o.status === 'cancel_requested' ? (
-                    <>
-                      <span className="min-w-0 basis-full text-sm font-semibold text-danger-ink">
-                        الزبون يطلب إلغاء هذا الطلب.
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        loading={busy.has(o.id)}
-                        disabled={busy.has(o.id)}
-                        onClick={() => void move(o, 'rejected')}
-                      >
-                        وافق على الإلغاء
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={busy.has(o.id)}
-                        onClick={() => void move(o, 'accepted')}
-                      >
-                        أبقِ الطلب واقبله
-                      </Button>
-                    </>
-                  ) : o.status === 'pending' ? (
-                    <>
-                      <Button
-                        size="sm"
-                        icon={<CheckIcon size={16} />}
-                        loading={busy.has(o.id)}
-                        disabled={busy.has(o.id)}
-                        onClick={() => void move(o, 'accepted')}
-                      >
-                        {short[o.id] ? 'اقبل رغم النقص' : 'اقبل'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={busy.has(o.id)}
-                        onClick={() => void move(o, 'rejected')}
-                      >
-                        ارفض
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="min-w-0 flex-1 text-sm text-ink-muted">
-                        قطعه محجوزة، ويبيعه الكاشير من «طلبات المتجر».
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={busy.has(o.id)}
-                        onClick={() => void move(o, 'done')}
-                      >
-                        سُلّم دون بيع على الكاشير
-                      </Button>
-                    </>
-                  )}
-                </div>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+                <ul className="flex flex-col divide-y divide-line rounded-control bg-surface-muted/60 px-3 text-sm">
+                  {o.lines.map((l) => (
+                    <li key={l.variantId} className="flex items-center justify-between gap-3 py-2">
+                      <span className="min-w-0 text-ink">
+                        {l.name}
+                        {l.label ? ` (${l.label})` : ''}
+                      </span>{' '}
+                      <span className="num shrink-0 text-ink-muted">× {l.qty}</span>
+                    </li>
+                  ))}
+                </ul>
+                {o.note ? (
+                  <p className="text-sm text-ink-muted">
+                    <span className="font-semibold text-ink">ملاحظة: </span>
+                    {o.note}
+                  </p>
+                ) : null}
+                {short[o.id] && o.status === 'pending' ? (
+                  <Alert tone="warning">
+                    لا يكفي المخزون لهذه القطع: {short[o.id]!.join('، ')}. اقبل الطلب رغم ذلك إن كانت البضاعة
+                    في الطريق، أو ارفضه.
+                  </Alert>
+                ) : null}
+                {canDecide &&
+                o.fulfilment === 'delivery' &&
+                (o.status === 'accepted' || o.status === 'done') ? (
+                  <DeliveryActions
+                    order={o}
+                    store={me.tenant.name}
+                    onChanged={() => {
+                      load();
+                      setChanges((n) => n + 1);
+                    }}
+                  />
+                ) : null}
+                {canDecide &&
+                (o.status === 'pending' || o.status === 'cancel_requested' || o.status === 'accepted') ? (
+                  <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line pt-4">
+                    {o.status === 'cancel_requested' ? (
+                      <>
+                        <span className="min-w-0 basis-full text-sm font-semibold text-danger-ink">
+                          الزبون يطلب إلغاء هذا الطلب.
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          loading={busy.has(o.id)}
+                          disabled={busy.has(o.id)}
+                          onClick={() => void move(o, 'rejected')}
+                        >
+                          وافق على الإلغاء
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy.has(o.id)}
+                          onClick={() => void move(o, 'accepted')}
+                        >
+                          أبقِ الطلب واقبله
+                        </Button>
+                      </>
+                    ) : o.status === 'pending' ? (
+                      <>
+                        <Button
+                          size="sm"
+                          icon={<CheckIcon size={16} />}
+                          loading={busy.has(o.id)}
+                          disabled={busy.has(o.id)}
+                          onClick={() => void move(o, 'accepted')}
+                        >
+                          {short[o.id] ? 'اقبل رغم النقص' : 'اقبل'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy.has(o.id)}
+                          onClick={() => void move(o, 'rejected')}
+                        >
+                          ارفض
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="min-w-0 flex-1 text-sm text-ink-muted">
+                          قطعه محجوزة، ويبيعه الكاشير من «طلبات المتجر». «سُلّم دون بيع» يغلقه بلا فاتورة ولا
+                          خصم من المخزون.
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy.has(o.id)}
+                          onClick={() => void move(o, 'done')}
+                        >
+                          سُلّم دون بيع على الكاشير
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <Pager noun="الطلبات" pager={pager} />
+        </div>
       ) : null}
-      <CodCard refreshKey={changes} />
+      {canDecide ? <CodCard refreshKey={changes} /> : null}
     </section>
   );
 }

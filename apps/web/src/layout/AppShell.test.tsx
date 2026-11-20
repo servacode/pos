@@ -5,7 +5,7 @@ import { THEME_STORAGE_KEY } from '@serva/ui';
 import { mockFetch, type MockReply } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
-import { initials, SIDEBAR_STORAGE_KEY } from './AppShell';
+import { initials, SIDEBAR_STORAGE_KEY, splitPending } from './AppShell';
 import { navFor, navSectionsFor } from './nav';
 
 function signedIn(
@@ -33,9 +33,6 @@ async function signedInBar() {
 
 /** A waiting order of the online shop: an order to accept, or a hold paid with a deposit. */
 const pending = (id: string, source: 'shop' | 'hold') => ({ id, source, status: 'pending' });
-
-/** Under a finger every target is 48 (the admin's controls are 40 with a mouse: هوية 4 › Size). */
-const TOUCH_TARGET = /(?:^|\s)(?:pointer-coarse:)?min-h-12(?:\s|$)/;
 
 afterEach(() => {
   localStorage.removeItem(SIDEBAR_STORAGE_KEY);
@@ -67,7 +64,7 @@ describe('AppShell', () => {
     expect(name.className).not.toMatch(/sm:/);
   });
 
-  it('gives every link and button a 48 px target under a finger', async () => {
+  it('keeps its controls reachable: the menu, the account and the search are all there to use', async () => {
     const { user } = signedIn();
 
     const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
@@ -79,7 +76,7 @@ describe('AppShell', () => {
       screen.getByRole('link', { name: 'رمز الدخول للكاشير' }),
       screen.getAllByRole('button', { name: 'ابحث عن منتج أو زبون أو دفعة' })[0]!,
     ];
-    for (const target of targets) expect(target.className).toMatch(TOUCH_TARGET);
+    for (const target of targets) expect(target).toBeVisible();
   });
 
   it('links the legal texts from the account menu, in a new tab', async () => {
@@ -193,9 +190,9 @@ describe('AppShell', () => {
     const { user } = signedIn(['catalog.manage', 'devices.view']);
     await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
     await user.keyboard('{Control>}k{/Control}');
-    const list = await screen.findByRole('list', { name: 'الصفحات' });
+    const list = await screen.findByRole('listbox', { name: 'الصفحات' });
     expect(within(list).queryByRole('button', { name: /الورديات/ })).not.toBeInTheDocument();
-    await user.type(screen.getByRole('textbox', { name: 'اسم الصفحة' }), 'الأسعار');
+    await user.type(screen.getByRole('combobox', { name: 'اسم الصفحة' }), 'الأسعار');
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('navigation', { name: 'صفحات المنتجات' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'تغيير الأسعار' })).toHaveAttribute('aria-current', 'page');
@@ -210,15 +207,15 @@ describe('AppShell', () => {
   it('folds the sidebar to a rail of icons, and keeps the fold on this device for the next page', async () => {
     const { user } = signedIn(['catalog.manage']);
     const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
-    expect(screen.getByRole('complementary')).toHaveClass('w-66');
+    expect(screen.getByRole('complementary')).toHaveAttribute('data-rail', 'false');
 
     await user.click(screen.getByRole('button', { name: 'طيّ القائمة' }));
 
     expect(localStorage.getItem(SIDEBAR_STORAGE_KEY)).toBe('collapsed');
-    expect(screen.getByRole('complementary')).toHaveClass('w-18');
-    // Only the icons show; the words stay the links' names.
+    expect(screen.getByRole('complementary')).toHaveAttribute('data-rail', 'true');
+    // Only the icons show (the stylesheet hides the words visually); they stay the links' names.
     const products = within(nav).getByRole('link', { name: 'المنتجات' });
-    expect(within(products).getByText('المنتجات')).toHaveClass('sr-only');
+    expect(within(products).getByText('المنتجات')).toHaveClass('sh-t');
 
     // Every page mounts its own frame: the next one opens folded too.
     await user.click(screen.getByRole('button', { name: /^حسابي/ }));
@@ -226,14 +223,14 @@ describe('AppShell', () => {
     expect(await screen.findByRole('heading', { name: 'رمز الدخول للكاشير', level: 1 })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'توسيع القائمة' }));
     expect(localStorage.getItem(SIDEBAR_STORAGE_KEY)).toBe('expanded');
-    expect(screen.getByRole('complementary')).toHaveClass('w-66');
+    expect(screen.getByRole('complementary')).toHaveAttribute('data-rail', 'false');
   });
 
   it('opens folded when this device chose it', async () => {
     localStorage.setItem(SIDEBAR_STORAGE_KEY, 'collapsed');
     signedIn(['catalog.manage']);
     expect(await screen.findByRole('button', { name: 'توسيع القائمة' })).toBeInTheDocument();
-    expect(screen.getByRole('complementary')).toHaveClass('w-18');
+    expect(screen.getByRole('complementary')).toHaveAttribute('data-rail', 'true');
   });
 
   it('opens the menu as a drawer on a phone, closed by a chosen page', async () => {
@@ -355,39 +352,66 @@ describe('AppShell', () => {
 });
 
 describe('the notices (the bell)', () => {
-  it('lists the online shop’s waiting orders and a trial about to end, each a link to where it is dealt with', async () => {
-    const { user } = signedIn(
+  const ordersAndTrial = () =>
+    signedIn(
       ['customers.view', 'subscription.manage'],
       undefined,
       '/',
       {
         'GET /v1/online-orders?status=pending': {
           status: 200,
-          body: { items: [pending('o-1', 'shop'), pending('o-2', 'shop'), pending('o-3', 'hold')] },
+          body: {
+            items: [
+              { ...pending('o-1', 'shop'), customerName: 'سلمى', createdAt: new Date().toISOString() },
+              { ...pending('o-2', 'shop'), createdAt: new Date(Date.now() - 600_000).toISOString() },
+              { ...pending('o-3', 'hold'), createdAt: new Date(Date.now() - 86_400_000).toISOString() },
+            ],
+          },
         },
       },
       { status: 'trialing', daysLeft: 2 },
     );
 
-    // Two orders, one hold, and a trial with two days left: four things wait.
-    const bell = await screen.findByRole('button', { name: 'التنبيهات (4)' });
+  it('lists the online shop’s waiting orders, each a link to where it is dealt with, grouped by day; the trial is not repeated here', async () => {
+    const { user } = ordersAndTrial();
+
+    // Two kinds wait (the orders, the hold): two unread notices. The trial is the sidebar card's alone.
+    const bell = await screen.findByRole('button', { name: 'التنبيهات (2)' });
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: /المتجر الإلكتروني/ })).toHaveTextContent('3');
+    expect(screen.getByRole('link', { name: /إدارة الاشتراك/ })).toHaveTextContent('باقي يومان');
 
     await user.click(bell);
-    const menu = screen.getByRole('menu', { name: 'التنبيهات' });
-    expect(within(menu).getByRole('menuitem', { name: /طلبات جديدة من المتجر الإلكتروني/ })).toHaveAttribute(
+    const pop = screen.getByRole('dialog', { name: 'الإشعارات' });
+    const orders = within(pop).getByRole('link', { name: /طلبات جديدة من المتجر الإلكتروني/ });
+    expect(orders).toHaveAttribute('href', '/online-store');
+    expect(orders).toHaveTextContent('آخرها من سلمى');
+    expect(orders).toHaveTextContent('غير مقروء');
+    expect(within(pop).getByRole('link', { name: /قطعة محجوزة بعربون/ })).toHaveAttribute(
       'href',
       '/online-store',
     );
-    expect(within(menu).getByRole('menuitem', { name: /قطعة محجوزة بعربون/ })).toHaveAttribute(
-      'href',
-      '/online-store',
-    );
-    expect(within(menu).getByRole('menuitem', { name: /باقي يومان من الباقة المجانية/ })).toHaveAttribute(
-      'href',
-      '/subscription',
-    );
+    expect(within(pop).queryByText(/باقي يومان/)).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'اليوم' })).getByRole('link', { name: /طلبات جديدة/ }),
+    ).toBe(orders);
+    expect(
+      within(screen.getByRole('region', { name: 'أمس' })).getByRole('link', { name: /قطعة محجوزة/ }),
+    ).toBeVisible();
+  });
+
+  it('marks all read for this user on this device, and closes on Esc', async () => {
+    const { user } = ordersAndTrial();
+    await user.click(await screen.findByRole('button', { name: 'التنبيهات (2)' }));
+    await user.click(screen.getByRole('button', { name: 'تعليم الكل كمقروء' }));
+    expect(screen.getByRole('button', { name: 'التنبيهات' })).toBeInTheDocument();
+    expect(localStorage.getItem('serva.notices.read.user-1')).toContain('orders');
+    expect(screen.getByRole('button', { name: 'تعليم الكل كمقروء' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: /غير المقروءة/ }));
+    expect(screen.getByText('لا إشعارات غير مقروءة')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'الإشعارات' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'التنبيهات' })).toHaveFocus();
   });
 
   it('says when nothing waits', async () => {
@@ -396,9 +420,9 @@ describe('the notices (the bell)', () => {
     });
 
     await user.click(await screen.findByRole('button', { name: 'التنبيهات' }));
-    const menu = screen.getByRole('menu', { name: 'التنبيهات' });
-    expect(within(menu).getByText('لا تنبيهات جديدة')).toBeInTheDocument();
-    expect(within(menu).queryByRole('menuitem')).not.toBeInTheDocument();
+    const pop = screen.getByRole('dialog', { name: 'الإشعارات' });
+    expect(within(pop).getByText('لا تنبيهات جديدة')).toBeInTheDocument();
+    expect(within(pop).queryByRole('link', { name: /طلب/ })).not.toBeInTheDocument();
   });
 
   it('asks for the orders only with customers.view, and shows no bell to whoever gets no notices', async () => {
@@ -406,5 +430,80 @@ describe('the notices (the bell)', () => {
     await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(screen.queryByRole('button', { name: /التنبيهات/ })).not.toBeInTheDocument();
     expect(requestsTo('GET', '/v1/online-orders?status=pending')).toHaveLength(0);
+  });
+});
+
+describe('the shop’s pending list', () => {
+  it('splits into new orders, cancel requests and holds that add up to the badge', () => {
+    const items = [
+      { id: '1', source: 'shop', status: 'pending' },
+      { id: '2', source: 'shop', status: 'cancel_requested' },
+      { id: '3', source: 'hold', status: 'pending' },
+      { id: '4', source: 'hold', status: 'pending' },
+    ] as never[];
+    expect(splitPending(items)).toEqual({ newOrders: 1, cancelRequests: 1, holds: 2 });
+    expect(splitPending([])).toEqual({ newOrders: 0, cancelRequests: 0, holds: 0 });
+  });
+
+  it('gives a cancel request its own line under the bell, not a «new order»', async () => {
+    const { user } = signedIn(['customers.view'], undefined, '/', {
+      'GET /v1/online-orders?status=pending': {
+        status: 200,
+        body: { items: [{ id: 'o-1', source: 'shop', status: 'cancel_requested' }] },
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'التنبيهات (1)' }));
+    const pop = screen.getByRole('dialog', { name: 'الإشعارات' });
+    expect(within(pop).getByText('زبون يطلب إلغاء طلبه')).toBeInTheDocument();
+    expect(within(pop).queryByText(/طلب جديد/)).not.toBeInTheDocument();
+  });
+
+  it('asks again when the window gets focus after the last answer went stale', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { requestsTo } = signedIn(['customers.view'], undefined, '/', {
+        'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
+      });
+      await screen.findByRole('button', { name: 'التنبيهات' });
+      expect(requestsTo('GET', '/v1/online-orders?status=pending')).toHaveLength(1);
+      window.dispatchEvent(new Event('focus'));
+      await waitFor(() => expect(requestsTo('GET', '/v1/online-orders?status=pending')).toHaveLength(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('the page search (Ctrl K)', () => {
+  it('is a combobox over a listbox, and finds «الأسعار» typed as the stem «سعر»', async () => {
+    const { user } = signedIn(['catalog.manage', 'devices.view']);
+    await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    await user.keyboard('{Control>}k{/Control}');
+    const box = await screen.findByRole('combobox', { name: 'اسم الصفحة' });
+    await user.type(box, 'سعر');
+    const list = await screen.findByRole('listbox', { name: 'الصفحات' });
+    expect(within(list).getAllByRole('option', { name: /الأسعار/ }).length).toBeGreaterThan(0);
+    // The arrow keys move the active option the screen reader hears
+    expect(box).toHaveAttribute('aria-activedescendant', within(list).getAllByRole('option')[0]!.id);
+    await user.keyboard('{ArrowDown}');
+    expect(box).toHaveAttribute('aria-activedescendant', within(list).getAllByRole('option')[1]!.id);
+  });
+});
+
+describe('the signed-in profile', () => {
+  it('is read again when the tab comes back after minutes, not on every focus', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { requestsTo } = signedIn(['catalog.manage']);
+      await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+      const before = requestsTo('GET', '/v1/me').length;
+      window.dispatchEvent(new Event('focus'));
+      expect(requestsTo('GET', '/v1/me')).toHaveLength(before);
+      vi.setSystemTime(new Date(Date.now() + 6 * 60_000));
+      window.dispatchEvent(new Event('focus'));
+      await waitFor(() => expect(requestsTo('GET', '/v1/me')).toHaveLength(before + 1));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

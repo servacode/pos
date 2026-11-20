@@ -9,7 +9,7 @@ import type {
   CustomerPurchases,
   StatementLine,
 } from '@serva/core';
-import { normalizeArabic } from '@serva/core/text';
+import { normalizeArabic, toLatinDigits } from '@serva/core/text';
 import { customers, withTenant, type Database, type Transaction } from '@serva/db';
 import { createUuidV7 } from '@serva/sync';
 import { eq } from 'drizzle-orm';
@@ -81,6 +81,28 @@ const item = (r: Row): CustomerListItem => ({
   lng: r.lng,
 });
 
+const decodeOffset = (cursor: string | undefined): number => {
+  if (!cursor) return 0;
+  const m = /^o:(\d{1,7})$/.exec(Buffer.from(cursor, 'base64url').toString());
+  if (!m) throw invalid({ cursor: 'صفحة غير صالحة. ارجع إلى أول القائمة' });
+  return Number(m[1]);
+};
+const encodeOffset = (offset: number) => Buffer.from(`o:${offset}`).toString('base64url');
+
+const uuidList = (ids: string[]) =>
+  sql`array[${sql.join(
+    ids.map((i) => sql`${i}::uuid`),
+    sql`, `,
+  )}]::uuid[]`;
+
+/**
+ * The list: one page at a time when `limit` is sent (balance high first, then name), the search and
+ * «من عليه دين» applied here. What a customer bought (last day, spend, size) is worked out only for
+ * the rows of the page, and only when `limit` is sent: a picker (no `limit`) gets the name, phone and
+ * balance and nothing that costs a query over the invoices.
+ * `totalOwedMinor` is every debt of the store (the filters of kind, region and approval apply, the
+ * search does not), so the tile does not shrink while the owner types.
+ */
 export async function listCustomers(
   db: Database,
   auth: AccessClaims,
@@ -90,61 +112,134 @@ export async function listCustomers(
     kind?: CustomerKind;
     regionId?: string;
     approval?: 'approved' | 'pending' | 'rejected';
+    limit?: number;
+    cursor?: string;
+    lite?: boolean;
+    /** Only customers who bought before and not since this day (YYYY-MM-DD): «لم يزر منذ 90 يوماً» */
+    lastBefore?: string;
   },
 ): Promise<CustomerListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
-    const rows = await tx.execute<Row>(sql`
+    const offset = decodeOffset(query.cursor);
+    const filter = sql`${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
+        and ${query.regionId ? sql`c.region_id = ${query.regionId}` : sql`true`}
+        and ${query.approval ? sql`c.approval_status = ${query.approval}` : sql`true`}`;
+    const base = await tx.execute<Omit<Row, 'balance'>>(sql`
       select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at,
              c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
-             c.approval_status, c.lat, c.lng, coalesce(b.balance, 0)::text as balance
-      from customers c left join (${balances}) b on b.customer_id = c.id
+             c.approval_status, c.lat, c.lng
+      from customers c
       left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
-      where ${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
-        and ${query.regionId ? sql`c.region_id = ${query.regionId}` : sql`true`}
-        and ${query.approval ? sql`c.approval_status = ${query.approval}` : sql`true`}
-      order by coalesce(b.balance, 0) desc, c.name, c.id`);
-    // What each customer bought: the last day, the total net of returns, and the size they take most
-    const sold = await tx.execute<{ customer_id: string; last: string; spent: string }>(sql`
-      select i.customer_id, max(i.business_date)::text as last,
-             (sum(i.total_minor) - coalesce(sum((select sum(r.total_minor) from sale_returns r
-                                                 where r.tenant_id = i.tenant_id and r.sale_id = i.id)), 0))::text as spent
-      from invoices i where i.customer_id is not null group by i.customer_id`);
-    const sizes = await tx.execute<{ customer_id: string; value: string }>(sql`
-      select distinct on (customer_id) customer_id, value from (
-        select i.customer_id, a->>'value' as value,
-               sum(l.base_qty - coalesce((select sum(rl.base_qty) from sale_return_lines rl
-                 join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
-                 where r.sale_id = l.invoice_id and rl.sale_line_no = l.line_no), 0)) as qty
-        from invoice_lines l
-        join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
-        join variants v on v.id = l.variant_id
-        cross join lateral jsonb_array_elements(v.attributes) a
-        where i.customer_id is not null and coalesce(a->>'name', '') <> '' and coalesce(a->>'value', '') <> ''
-          and a->>'name' not like '%لون%'
-        group by 1, 2) t
-      where qty > 0 order by customer_id, qty desc, value`);
-    const soldBy = new Map(sold.map((r) => [r.customer_id, r]));
-    const sizeBy = new Map(sizes.map((r) => [r.customer_id, r.value]));
+      where ${filter}
+        and ${
+          query.lastBefore
+            ? sql`exists (select 1 from invoices i where i.customer_id = c.id)
+                and not exists (select 1 from invoices i where i.customer_id = c.id
+                  and i.business_date >= ${query.lastBefore}::date)`
+            : sql`true`
+        }`);
     const q = query.q ? normalizeArabic(query.q) : '';
-    const digits = query.q?.replace(/\D/g, '') ?? '';
-    const items = rows
-      .map((r) => ({
-        ...item(r),
-        lastPurchaseDate: soldBy.get(r.id)?.last ?? null,
-        spentMinor: Number(soldBy.get(r.id)?.spent ?? 0),
-        favouriteSize: sizeBy.get(r.id) ?? null,
-      }))
-      .filter(
-        (c) =>
-          !q ||
-          normalizeArabic(c.name).includes(q) ||
-          (digits.length >= 3 && (c.phone ?? '').replace(/\D/g, '').includes(digits.replace(/^0/, ''))),
-      )
-      .filter((c) => !query.owing || c.balanceMinor > 0);
+    // Arabic-Indic digits are digits too: «٠٩٤٤…» finds the same phone as «0944…»
+    const digits = query.q ? toLatinDigits(query.q).replace(/\D/g, '') : '';
+    const phoneNeedle = digits.replace(/^0/, '');
+    const matched = base.filter(
+      (c) =>
+        !q ||
+        normalizeArabic(c.name).includes(q) ||
+        (digits.length >= 3 && (c.phone ?? '').replace(/\D/g, '').includes(phoneNeedle)),
+    );
+    // The balances of the matches only; the whole store's when nothing narrows the list
+    const narrowed = q !== '' && matched.length < base.length;
+    const owed =
+      narrowed && matched.length === 0
+        ? []
+        : await tx.execute<{ customer_id: string; balance: string }>(
+            narrowed
+              ? sql`select customer_id, balance::text from (${balances}) b where b.customer_id = any(${uuidList(matched.map((c) => c.id))})`
+              : sql`select customer_id, balance::text from (${balances}) b`,
+          );
+    const balanceBy = new Map(owed.map((r) => [r.customer_id, r.balance]));
+    const baseIds = new Set(base.map((c) => c.id));
+    let totalOwedMinor = 0;
+    let owingCount = 0;
+    if (!narrowed) {
+      for (const r of owed) {
+        if (baseIds.has(r.customer_id) && Number(r.balance) > 0) {
+          totalOwedMinor += Number(r.balance);
+          owingCount += 1;
+        }
+      }
+    } else {
+      const [all] = await tx.execute<{ owed: string; n: string }>(sql`
+        select coalesce(sum(b.balance) filter (where b.balance > 0), 0)::text as owed,
+               count(*) filter (where b.balance > 0)::text as n
+        from customers c join (${balances}) b on b.customer_id = c.id
+        where ${filter}`);
+      totalOwedMinor = Number(all?.owed ?? 0);
+      owingCount = Number(all?.n ?? 0);
+    }
+    const [pending] = await tx.execute<{ n: string }>(
+      sql`select count(*)::text as n from customers where approval_status = 'pending'`,
+    );
+    const ranked = matched
+      .map((r) => item({ ...r, balance: balanceBy.get(r.id) ?? '0' }))
+      .filter((c) => !query.owing || c.balanceMinor > 0)
+      .sort(
+        (x, y) =>
+          y.balanceMinor - x.balanceMinor ||
+          (x.name < y.name ? -1 : x.name > y.name ? 1 : 0) ||
+          (x.id < y.id ? -1 : x.id > y.id ? 1 : 0),
+      );
+    const page = query.limit ? ranked.slice(offset, offset + query.limit) : ranked;
+    const nextCursor =
+      query.limit && offset + query.limit < ranked.length ? encodeOffset(offset + query.limit) : null;
+
+    // The last purchase, spend and size cost a query over the invoices: only the paged list (`limit`) asks for them
+    const extras = query.limit !== undefined && !query.lite;
+    const soldBy = new Map<string, { last: string; spent: string }>();
+    const sizeBy = new Map<string, string>();
+    if (extras && page.length > 0) {
+      const ids = uuidList(page.map((c) => c.id));
+      // What each customer bought: the last day, the total net of returns, and the size they take most
+      const sold = await tx.execute<{ customer_id: string; last: string; spent: string }>(sql`
+        select i.customer_id, max(i.business_date)::text as last,
+               (sum(i.total_minor) - coalesce(sum((select sum(r.total_minor) from sale_returns r
+                                                   where r.tenant_id = i.tenant_id and r.sale_id = i.id)), 0))::text as spent
+        from invoices i where i.customer_id = any(${ids}) group by i.customer_id`);
+      for (const r of sold) soldBy.set(r.customer_id, r);
+      const sizes = await tx.execute<{ customer_id: string; value: string }>(sql`
+        select distinct on (customer_id) customer_id, value from (
+          select i.customer_id, a->>'value' as value,
+                 sum(l.base_qty - coalesce((select sum(rl.base_qty) from sale_return_lines rl
+                   join sale_returns r on r.tenant_id = rl.tenant_id and r.id = rl.return_id
+                   where r.sale_id = l.invoice_id and rl.sale_line_no = l.line_no), 0)) as qty
+          from invoice_lines l
+          join invoices i on i.tenant_id = l.tenant_id and i.id = l.invoice_id
+          join variants v on v.id = l.variant_id
+          cross join lateral jsonb_array_elements(v.attributes) a
+          where i.customer_id = any(${ids}) and coalesce(a->>'name', '') <> '' and coalesce(a->>'value', '') <> ''
+            and a->>'name' not like '%لون%'
+          group by 1, 2) t
+        where qty > 0 order by customer_id, qty desc, value`);
+      for (const r of sizes) sizeBy.set(r.customer_id, r.value);
+    }
+    const items = !extras
+      ? page
+      : page.map((c) => ({
+          ...c,
+          lastPurchaseDate: soldBy.get(c.id)?.last ?? null,
+          spentMinor: Number(soldBy.get(c.id)?.spent ?? 0),
+          favouriteSize: sizeBy.get(c.id) ?? null,
+        }));
     return {
       items,
-      totalOwedMinor: items.reduce((sum, c) => sum + Math.max(0, c.balanceMinor), 0),
+      totalOwedMinor,
+      totalCount: ranked.length,
+      allCount: base.length,
+      owingCount,
+      pendingCount: Number(pending?.n ?? 0),
+      nextCursor,
       baseCurrency: await baseCurrency(tx),
     };
   });
@@ -152,12 +247,18 @@ export async function listCustomers(
 
 async function detail(tx: Transaction, id: string): Promise<CustomerDetail> {
   const [row] = await tx.execute<
-    Row & { tax_number: string | null; address: string | null; notes: string | null; created_at: string }
+    Row & {
+      tax_number: string | null;
+      address: string | null;
+      notes: string | null;
+      created_at: string;
+      loyalty_points: number;
+    }
   >(sql`
     select c.id, c.name, c.phone, c.credit_limit_minor::text, c.price_tier, c.no_messages, c.archived_at, c.tax_number, c.address,
            c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
            c.approval_status, c.lat, c.lng,
-           c.notes, c.created_at, coalesce(b.balance, 0)::text as balance
+           c.notes, c.created_at, c.loyalty_points, coalesce(b.balance, 0)::text as balance
     from customers c left join (${balances}) b on b.customer_id = c.id
     left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
     where c.id = ${id}`);
@@ -198,6 +299,7 @@ async function detail(tx: Transaction, id: string): Promise<CustomerDetail> {
     address: row.address,
     notes: row.notes,
     createdAt: new Date(row.created_at).toISOString(),
+    loyaltyPoints: row.loyalty_points,
     statement,
     baseCurrency: await baseCurrency(tx),
   };
@@ -306,6 +408,8 @@ export async function updateCustomerTx(
 ): Promise<CustomerDetail> {
   const before = await detail(tx, id);
   await checkPlace(tx, input);
+  // «أرشفه» is the same act as archiving a duplicate: a debt, a credit, an uncashed cheque or points stop it
+  if (input.archived === true && !before.archived) await assertCanArchive(tx, id);
   await tx
     .update(customers)
     .set({ ...fields(input, now), updatedAt: now })
@@ -448,6 +552,48 @@ export function customerPurchasesForDevice(
 // ─── The duplicate customer (no merge: posted rows are never moved) ─────────────
 
 /**
+ * What stands in the way of archiving a customer, the reason in Arabic: an open balance (either
+ * way), a cheque not cashed yet, loyalty points. Returns true when the customer is archived already.
+ * Archiving never moves posted rows, so what is owed has to be settled first.
+ */
+async function assertCanArchive(tx: Transaction, id: string): Promise<boolean> {
+  const [row] = await tx.execute<{
+    archived_at: string | null;
+    loyalty_points: number;
+    balance: string;
+  }>(sql`
+    select c.archived_at, c.loyalty_points, coalesce(b.balance, 0)::text as balance
+    from customers c left join (${balances}) b on b.customer_id = c.id
+    where c.id = ${id}`);
+  if (!row) throw notFound();
+  if (row.archived_at !== null) return true;
+  const refuse = (reason: string) => new AppError(409, 'conflict', reason);
+  if (Number(row.balance) !== 0) {
+    throw refuse(
+      Number(row.balance) > 0
+        ? 'عليه دين غير مسدّد. سدّد حسابه أو حوّله قبل الأرشفة.'
+        : 'له رصيد عندنا. اصرفه له قبل الأرشفة.',
+    );
+  }
+  const [open] = await tx.execute<{ n: string }>(sql`
+    select count(*)::text as n from (
+      select i.id from invoice_payments p
+        join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
+        where p.method = 'cheque' and i.customer_id = ${id}
+          and not exists (select 1 from cheque_actions a where a.source_type = 'sale'
+            and a.source_id = i.id and a.payment_no = p.payment_no)
+      union all
+      select r.id from receipts r
+        where r.method = 'cheque' and r.customer_id = ${id}
+          and not exists (select 1 from cheque_actions a where a.source_type = 'receipt'
+            and a.source_id = r.id and a.payment_no = 1)
+    ) x`);
+  if (Number(open?.n ?? 0) > 0) throw refuse('عنده شيك لم يُصرف بعد. أنهِ أمره قبل الأرشفة.');
+  if (row.loyalty_points > 0) throw refuse('عنده نقاط ولاء. استعملها أو انقلها قبل الأرشفة.');
+  return false;
+}
+
+/**
  * «أرشف هذا الزبون المكرر»: archives a customer entered twice. Two customers are never merged (their
  * invoices and ledger lines are posted and stay as they are), so a duplicate that still owes or is
  * owed, holds a cheque not yet cashed or keeps loyalty points is refused, with the reason: it has
@@ -462,39 +608,8 @@ export async function archiveDuplicateCustomer(
 ): Promise<CustomerDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
-    const [row] = await tx.execute<{
-      archived_at: string | null;
-      loyalty_points: number;
-      balance: string;
-    }>(sql`
-      select c.archived_at, c.loyalty_points, coalesce(b.balance, 0)::text as balance
-      from customers c left join (${balances}) b on b.customer_id = c.id
-      where c.id = ${id}`);
-    if (!row) throw notFound();
-    const refuse = (reason: string) => new AppError(409, 'conflict', reason);
-    if (row.archived_at !== null) throw refuse('هذا الزبون مؤرشف من قبل.');
-    if (Number(row.balance) !== 0) {
-      throw refuse(
-        Number(row.balance) > 0
-          ? 'عليه دين غير مسدّد. سدّد حسابه أو حوّله قبل الأرشفة.'
-          : 'له رصيد عندنا. اصرفه له قبل الأرشفة.',
-      );
-    }
-    const [open] = await tx.execute<{ n: string }>(sql`
-      select count(*)::text as n from (
-        select i.id from invoice_payments p
-          join invoices i on i.tenant_id = p.tenant_id and i.id = p.invoice_id
-          where p.method = 'cheque' and i.customer_id = ${id}
-            and not exists (select 1 from cheque_actions a where a.source_type = 'sale'
-              and a.source_id = i.id and a.payment_no = p.payment_no)
-        union all
-        select r.id from receipts r
-          where r.method = 'cheque' and r.customer_id = ${id}
-            and not exists (select 1 from cheque_actions a where a.source_type = 'receipt'
-              and a.source_id = r.id and a.payment_no = 1)
-      ) x`);
-    if (Number(open?.n ?? 0) > 0) throw refuse('عنده شيك لم يُصرف بعد. أنهِ أمره قبل الأرشفة.');
-    if (row.loyalty_points > 0) throw refuse('عنده نقاط ولاء. استعملها أو انقلها قبل الأرشفة.');
+    const archivedBefore = await assertCanArchive(tx, id);
+    if (archivedBefore) throw new AppError(409, 'conflict', 'هذا الزبون مؤرشف من قبل.');
     await tx.update(customers).set({ archivedAt: now, updatedAt: now }).where(eq(customers.id, id));
     await audit(
       tx,

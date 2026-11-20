@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { GatedPage } from '../products/CatalogGate';
 import { Link } from 'react-router';
 import { createCategoryInput, updateCategoryInput, type Category } from '@serva/core';
 import {
@@ -18,7 +19,6 @@ import {
   MenuSeparator,
   MoreIcon,
   NumberField,
-  PageHeader,
   RetryIcon,
   Select,
   Skeleton,
@@ -27,6 +27,7 @@ import {
   UndoIcon,
   cn,
 } from '@serva/ui';
+import { PageTop, SalesPage } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { categoryExamples } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
@@ -330,6 +331,14 @@ function TreeSkeleton() {
  * renaming, moving and archiving. An archived category keeps its products (09 › categories).
  */
 export function CategoriesPage() {
+  return (
+    <GatedPage>
+      <CategoriesContent />
+    </GatedPage>
+  );
+}
+
+function CategoriesContent() {
   const me = useMe();
   const canManage = canManageCatalog(me);
   const [categories, setCategories] = useState<Category[] | null>(null);
@@ -380,10 +389,10 @@ export function CategoriesPage() {
   return (
     <AppShell>
       <title>التصنيفات · SERVA</title>
-      <div className="flex flex-col gap-6">
-        <PageHeader
+      <SalesPage>
+        <PageTop
           title="التصنيفات"
-          description="تجمع منتجاتك على شاشة البيع وفي التقارير. اضغط اسم التصنيف لترى منتجاته."
+          subtitle="تجمع منتجاتك على شاشة البيع وفي التقارير. اضغط اسم التصنيف لترى منتجاته."
           actions={
             canManage ? (
               <Button icon={<AddIcon />} onClick={() => setEditing({ mode: 'new', parentId: '' })}>
@@ -444,7 +453,7 @@ export function CategoriesPage() {
             ))}
           </ul>
         ) : null}
-      </div>
+      </SalesPage>
 
       <Dialog
         open={editing !== null}

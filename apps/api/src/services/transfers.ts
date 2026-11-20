@@ -4,6 +4,7 @@ import {
   stockIn,
   type StockValue,
   type TransferFull,
+  type TransferCancelInput,
   type TransferFullLine,
   type TransferReceiveInput,
   type TransferSettings,
@@ -19,7 +20,7 @@ import {
   type Transaction,
 } from '@serva/db';
 import { createUuidV7 } from '@serva/sync';
-import { requirePermission } from '../auth/permissions';
+import { inScope, requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError, isUniqueViolation } from '../errors';
 import type { RequestMeta } from '../types';
@@ -106,12 +107,19 @@ export function saveTransferSettings(
   });
 }
 
+/** A transfer cancelled while on the way is closed by a receipt at the SENDER: the goods came back to where they left */
+export const cancelledReceipt = (t: { fromBranchId: string }, receipt: { branchId: string }): boolean =>
+  receipt.branchId === t.fromBranchId;
+
 // ─── Reading one transfer ────────────────────────────────────────────────────
 
 export function readTransfer(db: Database, auth: AccessClaims, id: string): Promise<TransferFull> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'inventory.adjust');
-    return full(tx, id);
+    const scope = await requirePermission(tx, auth.userId, 'inventory.adjust');
+    const done = await full(tx, id);
+    // A branch-scoped manager reads the transfers of his own branches only
+    if (!inScope(scope, done.fromBranchId) && !inScope(scope, done.toBranchId)) throw notFound();
+    return done;
   });
 }
 
@@ -132,7 +140,13 @@ async function full(tx: Transaction, id: string): Promise<TransferFull> {
       qty: l.qty,
       valueMinor: l.valueMinor,
       // An instant transfer arrived whole
-      receivedQty: receipt ? (r?.receivedQty ?? l.qty) : t.inTransit ? null : l.qty,
+      receivedQty: receipt
+        ? cancelledReceipt(t, receipt)
+          ? null
+          : (r?.receivedQty ?? l.qty)
+        : t.inTransit
+          ? null
+          : l.qty,
       shortQty: r?.shortQty ?? 0,
       ...(l.serials ? { serials: l.serials } : {}),
     };
@@ -152,7 +166,13 @@ async function full(tx: Transaction, id: string): Promise<TransferFull> {
     toBranchId: t.toBranchId,
     fromBranch: names?.from_name ?? '',
     toBranch: names?.to_name ?? '',
-    status: t.inTransit && !receipt ? 'in_transit' : 'received',
+    status: !receipt
+      ? t.inTransit
+        ? 'in_transit'
+        : 'received'
+      : cancelledReceipt(t, receipt)
+        ? 'cancelled'
+        : 'received',
     note: t.note,
     lines,
     valueMinor: t.valueMinor,
@@ -196,6 +216,7 @@ export async function receiveTransfer(
       sql`select timezone from tenants where id = ${auth.tenantId}`,
     );
     const date = input.date ?? businessDateOf(now, zone[0]?.timezone ?? 'Asia/Damascus');
+    if (date < t.businessDate) throw invalid({ date: 'تاريخ الاستلام قبل تاريخ إرسال التحويل' });
 
     // What arrived: nothing said means all of it
     const said = new Map<string, { receivedQty: number; serials?: string[] | undefined }>();
@@ -407,6 +428,160 @@ export async function receiveTransfer(
           shortValueMinor: [null, shortValueMinor],
           reason: [null, reason],
         },
+      },
+      meta,
+    );
+    return full(tx, transferId);
+  });
+}
+
+// ─── Cancelling a transfer that is still on the way ──────────────────────────
+
+/**
+ * A transfer sent «بالطريق» that nobody has received can be cancelled by the sender (a wrong quantity, a wrong
+ * branch): everything that left comes back to the sender at the value it left with (Dr 1300 / Cr 1900 at the
+ * sender, so account 1900 closes), its batches and serial numbers with it. It is closed by a receipt at the
+ * SENDER's branch (see cancelledReceipt), whose unique key also makes a receive and a cancel exclude each other.
+ */
+export async function cancelTransfer(
+  db: Database,
+  auth: AccessClaims,
+  transferId: string,
+  input: TransferCancelInput,
+  meta: RequestMeta,
+  now: Date,
+): Promise<TransferFull> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    // Two clicks together: one cancels, the other is told it is done
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`transfer:${transferId}`}, 0))`);
+    const [t] = await tx.select().from(transfers).where(eq(transfers.id, transferId));
+    if (!t) throw notFound();
+    await requirePermission(tx, auth.userId, 'inventory.adjust', t.fromBranchId);
+    if (!t.inTransit) throw conflict('هذا التحويل تمّ في خطوة واحدة، لا يُلغى من هنا.');
+    const [done] = await tx
+      .select({ id: transferReceipts.id })
+      .from(transferReceipts)
+      .where(eq(transferReceipts.transferId, transferId));
+    if (done) throw conflict('انتهى أمر هذا التحويل من قبل: استُلم أو أُلغي.');
+
+    const zone = await tx.execute<{ timezone: string }>(
+      sql`select timezone from tenants where id = ${auth.tenantId}`,
+    );
+    const date = input.date ?? businessDateOf(now, zone[0]?.timezone ?? 'Asia/Damascus');
+    if (date < t.businessDate) throw invalid({ date: 'تاريخ الإلغاء قبل تاريخ إرسال التحويل' });
+    const sent = t.lines as StoredLine[];
+    const sender = t.fromBranchId;
+
+    const values = await loadValues(
+      tx,
+      auth.tenantId,
+      sent.map((l) => stockKey(sender, l.variantId)),
+    );
+    const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
+    let costDiff = 0;
+    for (const l of sent) {
+      const key = stockKey(sender, l.variantId);
+      const into = stockIn(values.get(key) ?? empty, l.qty, Math.max(0, l.valueMinor));
+      values.set(key, into.after);
+      costDiff += into.costMinor;
+    }
+    await saveValues(tx, auth.tenantId, values);
+    await moveStock(
+      tx,
+      auth.tenantId,
+      sender,
+      t.inId,
+      'transfer',
+      date,
+      sent.map((l, i) => ({ lineNo: i + 1, variantId: l.variantId, qty: l.qty })),
+    );
+    const left = await tx.execute<{
+      variant_id: string;
+      batch_no: string;
+      expiry: string | null;
+      qty: string;
+      line_no: number;
+      alloc_no: number;
+    }>(sql`
+      select variant_id, batch_no, expiry_date::text as expiry, (-qty)::text as qty, line_no, alloc_no
+      from batch_movements where kind = 'transfer_out' and doc_id = ${transferId}`);
+    await recordBatchMovements(
+      tx,
+      { tenantId: auth.tenantId, branchId: sender, kind: 'transfer_in', docId: t.inId, date },
+      left.map((r) => ({
+        variantId: r.variant_id,
+        batchNo: r.batch_no === '' ? null : r.batch_no,
+        expiry: r.expiry,
+        qty: Number(r.qty),
+        lineNo: r.line_no,
+        allocNo: r.alloc_no,
+      })),
+    );
+    await refreshBatches(
+      tx,
+      [sender],
+      sent.map((l) => l.variantId),
+    );
+    const back = sent.flatMap((l) => l.serials ?? []);
+    if (back.length > 0) {
+      await tx
+        .update(serials)
+        .set({ status: 'in_stock', branchId: sender })
+        .where(and(inArray(serials.serial, back), eq(serials.status, 'in_transit')));
+    }
+
+    const currency = await baseCurrency(tx);
+    const valueMinor = sent.reduce((sum, l) => sum + l.valueMinor, 0);
+    await postEntry(tx, {
+      tenantId: auth.tenantId,
+      branchId: sender,
+      date,
+      sourceType: 'transfer',
+      sourceId: t.inId,
+      sourceNumber: t.number,
+      memo: `إلغاء تحويل ${t.number}`,
+      baseCurrency: currency,
+      lines: [
+        ...costLines(-valueMinor, currency, '1900'),
+        ...(costDiff !== 0 ? costLines(costDiff, currency) : []),
+      ],
+      createdBy: auth.userId,
+    });
+    const reason = input.reason?.trim() || null;
+    try {
+      await tx.insert(transferReceipts).values({
+        tenantId: auth.tenantId,
+        id: newId(),
+        transferId,
+        branchId: sender,
+        businessDate: date,
+        lines: sent.map((l) => ({
+          variantId: l.variantId,
+          name: l.name,
+          sentQty: l.qty,
+          receivedQty: 0,
+          shortQty: 0,
+        })),
+        shortPieces: 0,
+        shortValueMinor: 0,
+        reason,
+        stocktakeId: null,
+        receivedBy: auth.userId,
+      });
+    } catch (error) {
+      if (isUniqueViolation(error, 'transfer_receipts_transfer_unique'))
+        throw conflict('انتهى أمر هذا التحويل من قبل: استُلم أو أُلغي.');
+      throw error;
+    }
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'transfer.cancel',
+        entity: 'transfer',
+        entityId: transferId,
+        changes: { number: [null, t.number], valueMinor: [null, valueMinor], reason: [null, reason] },
       },
       meta,
     );

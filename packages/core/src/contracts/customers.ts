@@ -16,10 +16,10 @@ import type { CustomerApproval } from './distribution';
  * add one while offline (the `customer` document). A balance is never stored: it is the sum of
  * the journal lines of 1200 that name the customer.
  *
- *   GET  /v1/customers?q=          CustomerListResponse   (customer.view)
- *   POST /v1/customers             customerInput → CustomerDetail (customer.manage)
- *   PUT  /v1/customers/{id}        customerInput → CustomerDetail (customer.manage)
- *   GET  /v1/customers/{id}        CustomerDetail with its statement (customer.view)
+ *   GET  /v1/customers?q=          CustomerListResponse   (customers.view)
+ *   POST /v1/customers             customerInput → CustomerDetail (customers.manage)
+ *   PUT  /v1/customers/{id}        customerInput → CustomerDetail (customers.manage)
+ *   GET  /v1/customers/{id}        CustomerDetail with its statement (customers.view)
  */
 
 /** Which price a customer buys at */
@@ -104,6 +104,17 @@ export const customerListQuery = z.object({
   regionId: uuidSchema.optional(),
   /** Only customers with this approval: `pending` is the ones a rep added and the supervisor has not approved */
   approval: z.enum(['approved', 'pending', 'rejected']).optional(),
+  /** One page of this many (balance high first), with the last purchase, spend and size of each; missing: every customer, as before but without those three */
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  /** What the last page gave as `nextCursor` */
+  cursor: z.string().max(64).optional(),
+  /** Only those who bought before and not since this day: «لم يزر منذ 90 يوماً» */
+  lastBefore: isoDateSchema.optional(),
+  /** With `limit`: name, phone and balance only; the last purchase, spend and size are left out */
+  lite: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
 });
 
 /** `customers` pull set: what a till needs to find a customer and sell to them on credit */
@@ -156,8 +167,17 @@ export interface CustomerListItem {
 
 export interface CustomerListResponse {
   items: CustomerListItem[];
-  /** Sum of every positive balance */
+  /** Sum of every positive balance of the store (the search and «من عليه دين» do not narrow it) */
   totalOwedMinor: number;
+  /** How many customers match the search and filters (all pages) */
+  totalCount?: number;
+  /** Customers of the kind/region/approval filters, and how many of them owe; every search leaves them out */
+  allCount?: number;
+  owingCount?: number;
+  /** Customers a rep added that wait for approval, store-wide */
+  pendingCount?: number;
+  /** The next page's cursor when `limit` was sent; null on the last page */
+  nextCursor?: string | null;
   baseCurrency: CurrencyCode;
 }
 
@@ -180,6 +200,8 @@ export interface CustomerDetail extends CustomerListItem {
   address: string | null;
   notes: string | null;
   createdAt: string;
+  /** «نقاط الولاء» earned and not spent; absent from older answers */
+  loyaltyPoints?: number;
   statement: StatementLine[];
   baseCurrency: CurrencyCode;
 }
@@ -294,4 +316,36 @@ export interface CustomerPurchases {
   spentMinor: number;
   /** What the customer owes the store now, base currency (negative: the store owes them) */
   balanceMinor?: number;
+}
+
+// ─── Vouchers (a liability the owner can see) ──────────────────────────────────
+
+/**
+ *   GET /v1/vouchers?status=open|all&cursor=&limit=   customers.view → VoucherList
+ *
+ * The exchange vouchers (a return refunded on a voucher) and the gift vouchers sold at the till,
+ * with what is left on each: the owner reads here what the store still owes in 2310.
+ */
+export const voucherListQuery = z.object({
+  status: z.enum(['open', 'all']).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().max(64).optional(),
+});
+
+export interface VoucherListRow {
+  code: string;
+  /** exchange, gift or deposit */
+  kind: string;
+  currency: CurrencyCode;
+  amountMinor: number;
+  redeemedMinor: number;
+  remainingMinor: number;
+  createdAt: string;
+}
+
+export interface VoucherList {
+  items: VoucherListRow[];
+  nextCursor: string | null;
+  /** What all open vouchers still hold, per currency */
+  outstanding: { currency: CurrencyCode; amountMinor: number; count: number }[];
 }

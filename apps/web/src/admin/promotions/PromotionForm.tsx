@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   CUSTOMER_KINDS,
   CUSTOMER_KIND_LABELS,
@@ -26,6 +26,7 @@ import {
   CONTROL_HEIGHT,
   useDensity,
 } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
 import { DateField } from '../../lib/DateField';
 import { getProduct, listCategories, listProducts } from '../catalog/api';
@@ -101,6 +102,14 @@ export function PromotionForm({
   const [priceTiers, setPriceTiers] = useState<('retail' | 'wholesale')[]>(promotion?.priceTiers ?? []);
   const [repOnly, setRepOnly] = useState(promotion?.repOnly ?? false);
   const [couponCode, setCouponCode] = useState(promotion?.couponCode ?? '');
+  // A new offer may be kept stopped until the owner is ready: it then touches no till and no shop page
+  const [startStopped, setStartStopped] = useState(false);
+  const me = useMe();
+  // Business customer kinds mean nothing to a shop that sells to people only (clothes, coffee, cosmetics...)
+  const retailOnly = me.tenant.sectors.every((k) =>
+    ['clothing', 'cafe', 'cosmetics', 'electronics', 'bakery'].includes(k),
+  );
+  const showKinds = !retailOnly || customerKinds.length > 0;
   const [categories, setCategories] = useState<Category[]>([]);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +124,18 @@ export function PromotionForm({
       .then((r) => setNames(new Map(r.items.map((p) => [p.id, p.nameAr]))))
       .catch(() => undefined);
   }, []);
+
+  // The offer's products the first 200 did not name: asked one by one, so no chip reads just «منتج»
+  const askedNames = useRef(new Set<string>());
+  useEffect(() => {
+    for (const id of productIds) {
+      if (names.has(id) || askedNames.current.has(id) || askedNames.current.size >= 40) continue;
+      askedNames.current.add(id);
+      getProduct(id)
+        .then((p) => setNames((m) => new Map(m).set(id, p.nameAr)))
+        .catch(() => undefined);
+    }
+  }, [productIds, names]);
 
   useEffect(() => {
     if (scope !== 'products' || search.trim().length < 2) {
@@ -193,6 +214,16 @@ export function PromotionForm({
       setFields({ freeVariantId: 'اختر الصنف المجاني' });
       return;
     }
+    if (
+      (kind === 'percent' || kind === 'buy_get') &&
+      couponCode.trim() &&
+      (repOnly || customerKinds.length > 0 || priceTiers.length > 0)
+    ) {
+      setFields({
+        couponCode: 'الكود لا يعمل مع عرض مخصص لفئة من الزبائن أو للمندوب. أزل أحدهما',
+      });
+      return;
+    }
     const input: PromotionInput = {
       name,
       kind,
@@ -214,7 +245,7 @@ export function PromotionForm({
       fromTime: fromTime || null,
       toTime: toTime || null,
       couponCode: kind === 'percent' || kind === 'buy_get' ? couponCode.trim() || null : null,
-      archived: promotion?.archived ?? false,
+      archived: promotion ? promotion.archived : startStopped,
     };
     setSaving(true);
     setError(null);
@@ -250,6 +281,7 @@ export function PromotionForm({
       <FormSection title="ماذا يعطي">
         <TextField
           label="اسم العرض كما يُطبع على الإيصال"
+          hint="يظهر هذا الاسم أيضاً لزبائن المتجر الإلكتروني على القطع المخفّضة."
           value={name}
           onChange={(e) => setName(e.target.value)}
           error={fields.name}
@@ -532,19 +564,21 @@ export function PromotionForm({
         title="لمن العرض"
         description="اترك الكل فارغاً ليشمل كل الزبائن. العرض الخاص يظهر على السلة حين يكون الزبون من اختيارك."
       >
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1.5 text-sm font-semibold text-ink-muted">نوع الزبون</legend>
-          <div className="flex flex-wrap gap-2">
-            {CUSTOMER_KINDS.map((k) => (
-              <ToggleChip
-                key={k}
-                label={CUSTOMER_KIND_LABELS[k]}
-                checked={customerKinds.includes(k)}
-                onChange={() => setCustomerKinds((list) => toggle(list, k))}
-              />
-            ))}
-          </div>
-        </fieldset>
+        {showKinds ? (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1.5 text-sm font-semibold text-ink-muted">نوع الزبون</legend>
+            <div className="flex flex-wrap gap-2">
+              {CUSTOMER_KINDS.map((k) => (
+                <ToggleChip
+                  key={k}
+                  label={CUSTOMER_KIND_LABELS[k]}
+                  checked={customerKinds.includes(k)}
+                  onChange={() => setCustomerKinds((list) => toggle(list, k))}
+                />
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1.5 text-sm font-semibold text-ink-muted">قائمة السعر</legend>
           <div className="flex flex-wrap gap-2">
@@ -619,7 +653,21 @@ export function PromotionForm({
       </FormSection>
 
       {/* The sheet's foot: pinned while the fields scroll, flush with the sheet's edges. */}
-      <div className="sticky -bottom-5 z-10 -mx-6 mt-auto -mb-5 flex flex-wrap justify-end gap-3 border-t border-line bg-surface px-6 py-4">
+      <div className="sticky -bottom-5 z-10 -mx-6 mt-auto -mb-5 flex flex-wrap items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4">
+        <p className="me-auto min-w-0 basis-60 text-sm text-ink-muted">
+          {startStopped || promotion?.archived
+            ? 'يُحفظ متوقفاً: لا يعمل على الكاشير ولا يظهر في المتجر حتى تشغّله.'
+            : `يعمل فور الحفظ ${scope === 'all' ? 'على كل المنتجات' : scope === 'categories' ? 'على التصنيفات المختارة' : 'على المنتجات المختارة'}، وتراه الزبائن في المتجر الإلكتروني${
+                couponCode.trim() && (kind === 'percent' || kind === 'buy_get') ? ' بعد كتابة الكود' : ''
+              }.`}
+        </p>
+        {promotion ? null : (
+          <ToggleChip
+            label="احفظه متوقفاً"
+            checked={startStopped}
+            onChange={() => setStartStopped((v) => !v)}
+          />
+        )}
         <Button variant="secondary" onClick={onCancel}>
           إلغاء
         </Button>

@@ -74,6 +74,18 @@ describe('promotionActive', () => {
     expect(promotionActive(rule({ fromTime: '22:00' }), TUESDAY_1430, DAMASCUS)).toBe(true);
   });
 
+  it('keeps the small hours of a Friday night window to Friday, not to Saturday', () => {
+    const friday = rule({ daysOfWeek: [5], fromTime: '22:00', toTime: '02:00' });
+    // Friday 6 November 23:00 in Damascus: its first part
+    expect(promotionActive(friday, new Date('2026-11-06T20:00:00Z'), DAMASCUS)).toBe(true);
+    // Saturday 7 November 00:30: still Friday's window
+    expect(promotionActive(friday, new Date('2026-11-06T21:30:00Z'), DAMASCUS)).toBe(true);
+    // Saturday 23:00 is Saturday's own window, which the offer does not name
+    expect(promotionActive(friday, new Date('2026-11-07T20:00:00Z'), DAMASCUS)).toBe(false);
+    // Friday 00:30 belongs to Thursday's window
+    expect(promotionActive(friday, new Date('2026-11-05T21:30:00Z'), DAMASCUS)).toBe(false);
+  });
+
   it('never runs once stopped', () => {
     expect(promotionActive(rule({ archived: true }), TUESDAY_1430, DAMASCUS)).toBe(false);
   });

@@ -24,6 +24,8 @@ export interface CountDraft {
   queued: boolean;
   /** Items not counted are taken as zero (a full count of the part counted) */
   restZero: boolean;
+  /** Who started it («tenant:user»): another sign-in on the same phone does not resume or send it (round 44) */
+  owner?: string;
 }
 
 export interface ScanHit {
@@ -214,4 +216,10 @@ export function clearSaved(store: Store | null = defaultStore()): void {
   } catch {
     // nothing kept: nothing to clear
   }
+}
+
+/** The draft saved on this phone, unless another store or person started it (an older draft has no owner and is kept) */
+export function savedFor(owner: string, store: Store | null = defaultStore()): SavedCount | null {
+  const saved = loadSaved(store);
+  return saved && (!saved.draft.owner || saved.draft.owner === owner) ? saved : null;
 }

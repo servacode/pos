@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import { promotionInput, promotionUpdateInput, uuidSchema } from '@serva/core';
+import { promotionArchiveInput, promotionInput, promotionUpdateInput, uuidSchema } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { clientIp } from '../http/client-ip';
-import { createPromotion, listPromotions, updatePromotion } from '../services/promotions';
+import { archivePromotion, createPromotion, listPromotions, updatePromotion } from '../services/promotions';
 import { parseBody } from './validation';
 
 /** Promotions (packages/core › contracts/promotions.ts). */
@@ -39,6 +39,21 @@ export async function promotionRoutes(app: FastifyInstance): Promise<void> {
       request.auth,
       parsed.data,
       parseBody(promotionUpdateInput, request.body),
+      meta(request),
+      app.clock.now(),
+    );
+  });
+
+  // Stopping or restarting an offer touches nothing else of it: an old row that today's form would refuse can still be stopped
+  app.post('/v1/promotions/:id/archive', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const parsed = uuidSchema.safeParse((request.params as { id?: string }).id);
+    if (!parsed.success) throw new AppError(404, 'not_found', 'هذا العرض غير موجود.');
+    return archivePromotion(
+      app.db,
+      request.auth,
+      parsed.data,
+      parseBody(promotionArchiveInput, request.body),
       meta(request),
       app.clock.now(),
     );

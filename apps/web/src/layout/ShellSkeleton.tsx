@@ -1,4 +1,5 @@
-import { AdminShell, Logo, Skeleton, cn } from '@serva/ui';
+import { Logo, Skeleton, cn } from '@serva/ui';
+import './shell.css';
 
 /**
  * What the store admin shows while its session is restored from the server: the shell itself
@@ -7,36 +8,44 @@ import { AdminShell, Logo, Skeleton, cn } from '@serva/ui';
  */
 export function ShellSkeleton() {
   return (
-    <AdminShell
-      sidebar={
-        <div role="status" aria-busy="true" className="flex flex-1 flex-col">
-          <span className="sr-only">جارٍ التحميل…</span>
-          <div className="flex h-8 shrink-0 items-center px-1.5">
-            <Logo />
+    <div className="sh-app">
+      <div className="sh-sbwrap">
+        <aside className="sh-aside" aria-label="الشريط الجانبي">
+          <div className="sh-panel" role="status" aria-busy="true">
+            <span className="sr-only">جارٍ التحميل…</span>
+            <div className="sh-head">
+              <div className="sh-wm">
+                <Logo tone="sidebar" />
+              </div>
+              <Skeleton className="h-14 w-full bg-sidebar-hover" />
+            </div>
+            <div aria-hidden="true" className="sh-nav flex flex-col gap-2">
+              {Array.from({ length: 8 }, (_, index) => (
+                <Skeleton
+                  key={index}
+                  className={cn('h-9 bg-sidebar-hover', index % 3 === 2 ? 'w-4/5' : 'w-full')}
+                />
+              ))}
+            </div>
           </div>
-          <div aria-hidden="true" className="mt-6 flex flex-col gap-2">
-            {Array.from({ length: 8 }, (_, index) => (
-              <Skeleton
-                key={index}
-                className={cn('h-10 bg-sidebar-hover', index % 3 === 2 ? 'w-4/5' : 'w-full')}
-              />
-            ))}
-          </div>
-        </div>
-      }
-      topBar={
-        <>
-          <Skeleton className="h-6 w-40 max-w-full" />
-          <span className="flex-1" />
-          <Skeleton className="size-10 rounded-full" />
-        </>
-      }
-    >
-      <div aria-hidden="true" className="flex flex-col gap-4">
-        <Skeleton className="h-8 w-48 max-w-full" />
-        <Skeleton className="h-24 w-full max-w-full" />
-        <Skeleton className="h-64 w-full max-w-full" />
+        </aside>
       </div>
-    </AdminShell>
+      <div className="sh-main">
+        <header className="sh-header">
+          <div className="sh-top">
+            <Skeleton className="h-6 w-40 max-w-full" />
+            <span className="flex-1" />
+            <Skeleton className="size-10 rounded-control" />
+          </div>
+        </header>
+        <main className="sh-page">
+          <div aria-hidden="true" className="flex flex-col gap-4">
+            <Skeleton className="h-8 w-48 max-w-full" />
+            <Skeleton className="h-24 w-full max-w-full" />
+            <Skeleton className="h-64 w-full max-w-full" />
+          </div>
+        </main>
+      </div>
+    </div>
   );
 }

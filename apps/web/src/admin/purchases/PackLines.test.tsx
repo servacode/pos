@@ -43,7 +43,7 @@ function drugs() {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
     'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
-    'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+    'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
     'GET /v1/transfers': () => ({ status: 200, body: { items: [] } }),
     'GET /v1/supplier-returns': () => ({ status: 200, body: { items: [] } }),
     [`GET ${productsPath({ q: 'أموكسيل' })}`]: () => ({

@@ -149,11 +149,17 @@ export function CouponBox({
   applied,
   onApplied,
   onClear,
+  refused,
+  note,
 }: {
   slug: string;
   applied: { code: string; coupon: ShopCoupon } | null;
   onApplied: (value: { code: string; coupon: ShopCoupon }) => void;
   onClear: () => void;
+  /** Why the server took the applied code off the order (it ran out, or was never open) */
+  refused?: string | null;
+  /** A line under the applied code: what it gives or why it gives nothing here */
+  note?: string | null;
 }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -179,17 +185,20 @@ export function CouponBox({
 
   if (applied) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-brand-soft px-3 py-2 text-sm text-brand-ink">
-        <span>
-          كود الخصم{' '}
-          <bdi dir="ltr" className="num font-bold">
-            {applied.code.toUpperCase()}
-          </bdi>
-          : {applied.coupon.name}
-        </span>
-        <Button size="sm" variant="ghost" onClick={onClear}>
-          أزل الكود
-        </Button>
+      <div className="flex flex-col gap-1 rounded-control bg-brand-soft px-3 py-2 text-sm text-brand-ink">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span>
+            كود الخصم{' '}
+            <bdi dir="ltr" className="num font-bold">
+              {applied.code.toUpperCase()}
+            </bdi>
+            : {applied.coupon.name}
+          </span>
+          <Button size="sm" variant="ghost" onClick={onClear}>
+            أزل الكود
+          </Button>
+        </div>
+        {note ? <p className="text-xs">{note}</p> : null}
       </div>
     );
   }
@@ -209,7 +218,7 @@ export function CouponBox({
             dir="ltr"
             value={code}
             onChange={(e) => setCode(e.target.value.slice(0, 20))}
-            error={error ?? undefined}
+            error={error ?? refused ?? undefined}
           />
         </div>
         <Button type="submit" variant="secondary" loading={busy} disabled={!code.trim()}>

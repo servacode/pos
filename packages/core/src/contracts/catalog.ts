@@ -395,6 +395,10 @@ export const productListQuery = z.object({
   branchId: uuidSchema.optional(),
   /** «ينتهي قريباً» (within 30 days, not yet expired) or «منتهية» (a batch past its date) */
   expiry: z.enum(['soon', 'expired']).optional(),
+  /** «نفد»: only stocked products whose net quantity is zero or below */
+  stock: z.enum(['out']).optional(),
+  /** The order: by name (default) or the least stock first */
+  sort: z.enum(['name', 'stock']).default('name'),
   ...listPageQuery,
 });
 export type ProductListQuery = z.input<typeof productListQuery>;
@@ -1061,4 +1065,35 @@ export interface BulkPriceResult {
     /** The price printed struck through after the change; null: none */
     wasMinor: number | null;
   }[];
+}
+
+// ─── Opening stock and cost from the product card (round 44) ──────────────────
+
+/**
+ * POST /v1/products/{id}/opening-stock   catalog.manage + inventory.adjust (in that branch)
+ * The first quantity of a piece that never moved in the branch, with what one unit cost: the same
+ * posting as an imported opening balance (Dr 1300 المخزون / Cr 3900 الأرصدة الافتتاحية).
+ * GET /v1/products/{id}/costs            cost.view → { items: [{ variantId, qty, unitCostMinor|null }] }
+ */
+export const productOpeningInput = z.object({
+  /** The business day of the opening document */
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  branchId: uuidSchema,
+  lines: z
+    .array(
+      z.object({
+        variantId: uuidSchema,
+        /** Thousandths of the base unit, above zero */
+        qty: z.int().min(1).max(1_000_000_000),
+        /** What one whole unit cost, in the base currency's minor units */
+        unitCostMinor: z.int().min(0).max(1_000_000_000_000),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+export type ProductOpeningInput = z.input<typeof productOpeningInput>;
+
+export interface ProductCostsResponse {
+  items: { variantId: string; qty: number; unitCostMinor: number | null }[];
 }

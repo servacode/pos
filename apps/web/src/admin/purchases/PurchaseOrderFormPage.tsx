@@ -15,10 +15,8 @@ import {
   Card,
   CardHeader,
   formatQuantity,
-  ListIcon,
   Money,
   NumberField,
-  PageHeader,
   SkeletonText,
   Select,
   Switch,
@@ -28,9 +26,11 @@ import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';
 import { ApiError, errorMessage } from '../../lib/api';
 import { DateField } from '../../lib/DateField';
-import { getInventory, moneyOf, qtyOf, listSuppliers, today } from './api';
+import { getInventory, moneyOf, newDocumentId, qtyOf, listSuppliers, storeToday } from './api';
 import { getProduct } from '../catalog/api';
 import { moneyText } from './packLines';
+import { PageTop, SalesPage } from '../sales/ui';
+import './purchases.css';
 import { createOrder, getOrder, suggestOrder, updateOrder } from './orderApi';
 import { Caption, LinesHead, LinesTable, RemoveLine } from './parts';
 import {
@@ -83,7 +83,9 @@ export function PurchaseOrderFormPage() {
   const base = me.settings.baseCurrency;
   const [loading, setLoading] = useState(Boolean(id));
   const [saved, setSaved] = useState<PurchaseOrderDetail | null>(null);
-  const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
+  const [supplierList, setSupplierList] = useState<SupplierRow[]>([]);
+  // The order's own id, made when the form opens and kept until it is saved: a retry answers the order already made
+  const [docId] = useState(newDocumentId);
   const [suppliersLoaded, setSuppliersLoaded] = useState(false);
   // «اطلب من المورد» in «النواقص» opens a new order for that supplier with the suggestion already asked for (round 38)
   const [params] = useSearchParams();
@@ -115,7 +117,7 @@ export function PurchaseOrderFormPage() {
     listSuppliers()
       .then((r) => {
         const active = r.items.filter((s) => !s.archived);
-        setSuppliers(active);
+        setSupplierList(r.items);
         // With one supplier there is nothing to choose; with several the owner picks (the first is not assumed)
         setSupplierId((current) => current || (id || active.length !== 1 ? '' : active[0]!.id));
         setSuppliersLoaded(true);
@@ -160,8 +162,10 @@ export function PurchaseOrderFormPage() {
 
   useEffect(() => {
     if (!id) return;
+    let alive = true;
     getOrder(id)
       .then((o) => {
+        if (!alive) return;
         setSaved(o);
         setSupplierId(o.supplierId);
         setExpected(o.expectedDate ?? '');
@@ -182,17 +186,22 @@ export function PurchaseOrderFormPage() {
               for (const v of d.variants) {
                 learn(v.id, {
                   min: v.minStockQty,
-                  price: v.price.currency === 'SYP' && v.price.priceMinor > 0 ? v.price.priceMinor : null,
+                  price: v.price.currency === base && v.price.priceMinor > 0 ? v.price.priceMinor : null,
                 });
               }
             })
             .catch(() => undefined);
         }
       })
-      .catch((e: unknown) => setError(errorMessage(e)))
-      .finally(() => setLoading(false));
+      .catch((e: unknown) => alive && setError(errorMessage(e)))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
   }, [id]);
 
+  // An archived supplier stays in the list only while it is the one the order already has
+  const suppliers = supplierList.filter((s) => !s.archived || s.id === supplierId);
   const parsed = lines.map((l) => {
     const qty = qtyOf(l.qty);
     const unit = l.unit.trim() ? moneyOf(l.unit) : 0;
@@ -347,7 +356,7 @@ export function PurchaseOrderFormPage() {
     try {
       const done = saved
         ? await updateOrder(saved.id, { ...body, version: saved.version })
-        : await createOrder(body);
+        : await createOrder({ id: docId, ...body });
       void navigate(`/purchase-orders/${done.id}`);
     } catch (e) {
       const named = e instanceof ApiError ? (e.fields ?? {}) : {};
@@ -394,11 +403,10 @@ export function PurchaseOrderFormPage() {
   const title = saved ? `تعديل الطلبية ${saved.number}` : 'طلبية شراء جديدة';
   return (
     <ReportScreen me={me} access={['purchases.manage']} title={title}>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
+      <SalesPage className="flex w-full flex-col gap-6">
+        <PageTop
           title={title}
-          description="اختر المورد وأضف الأصناف بكمياتها وسعر الوحدة المتوقع. تُحفظ مسودة، ثم ترسلها للمورد."
-          icon={<ListIcon />}
+          subtitle="اختر المورد وأضف الأصناف بكمياتها وسعر الوحدة المتوقع. تُحفظ مسودة، ثم ترسلها للمورد."
         />
         {loading ? (
           <SkeletonText lines={4} />
@@ -441,7 +449,7 @@ export function PurchaseOrderFormPage() {
                 <DateField
                   label="موعد التسليم المطلوب"
                   value={expected}
-                  min={today()}
+                  min={storeToday(me.tenant.timezone)}
                   onChange={setExpected}
                   hint="اختياري"
                   error={fields.expectedDate}
@@ -633,7 +641,7 @@ export function PurchaseOrderFormPage() {
             </div>
           </form>
         )}
-      </div>
+      </SalesPage>
     </ReportScreen>
   );
 }

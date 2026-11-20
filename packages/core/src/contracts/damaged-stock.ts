@@ -30,4 +30,6 @@ export interface DamagedStockLocation {
 export interface DamagedStock {
   baseCurrency: string;
   locations: DamagedStockLocation[];
+  /** The database clock when the list was read: a write-off from it counts what moved since (round 44) */
+  asOf?: string;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   CUSTOMER_KIND_LABELS,
@@ -11,41 +11,35 @@ import {
   AddIcon,
   Alert,
   ArchiveIcon,
-  Avatar,
-  BackIcon,
-  Badge,
   BookIcon,
   Button,
-  Card,
-  CardHeader,
-  DataTable,
+  CashIcon,
+  Dialog,
   EditIcon,
-  EmptyState,
   formatQuantity,
-  Money,
-  ProgressBar,
   SalesIcon,
-  ProductsIcon,
-  ShirtIcon,
   Skeleton,
-  SkeletonText,
   UndoIcon,
-  cn,
   useDigits,
-  type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { dayText, isoDay } from '../../lib/dates';
 import { storeSells } from '../../lib/sectors';
-import { archiveDuplicate, getCustomer, getPurchases, listCustomers, updateCustomer } from './api';
-import { CustomerForm } from './CustomerForm';
-import { CustomerMoneyDialog } from './CustomerMoneyDialog';
+import { useIsPhone } from '../../lib/useIsPhone';
+import { pieces } from '../../lib/plural';
+import { Paged } from '../pager';
+import { Amt, ChevRight, PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { WarrantyDevices } from '../warranty/WarrantyDevices';
 import { statementWhat } from '../ledger/csv';
 import { CustomerPlans } from '../installments/CustomerPlans';
-import { pieces } from '../../lib/plural';
+import { archiveDuplicate, getCustomer, getPurchases, listCustomers, updateCustomer } from './api';
+import { CustomerForm } from './CustomerForm';
+import { CustomerMoneyDialog } from './CustomerMoneyDialog';
+import { debtReminderLink } from './debtReminder';
+import { Empty } from './parts';
+import './customers.css';
 
 const SOURCE_TEXT: Record<string, string> = {
   sale: 'فاتورة آجل',
@@ -54,15 +48,14 @@ const SOURCE_TEXT: Record<string, string> = {
   manual: 'قيد تصحيح',
 };
 
-/** A title over a table, with a line of what it holds. */
-function SectionTitle({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <h2 className="text-lg font-semibold text-ink">{title}</h2>
-      <p className="text-sm text-ink-muted">{description}</p>
-    </div>
-  );
-}
+type StatementRow = StatementLine & { k: number };
+
+const statementTitle = (l: StatementLine) =>
+  l.sourceType === 'manual'
+    ? l.memo
+    : l.sourceType === 'cheque'
+      ? statementWhat(l)
+      : (SOURCE_TEXT[l.sourceType] ?? l.memo);
 
 /**
  * A document number («INV-001-002-0000419») that may break only before its last part, so a narrow
@@ -71,7 +64,7 @@ function SectionTitle({ title, description }: { title: string; description: stri
 function DocNumber({ value }: { value: string }) {
   const cut = value.lastIndexOf('-') + 1;
   return (
-    <bdi dir="ltr" className="num">
+    <bdi dir="ltr" className="sx-n">
       <span className="whitespace-nowrap">{value.slice(0, cut)}</span>
       <wbr />
       <span className="whitespace-nowrap">{value.slice(cut)}</span>
@@ -82,15 +75,15 @@ function DocNumber({ value }: { value: string }) {
 /** The pieces of an invoice: each line with its quantity, and what came back of it. */
 function InvoiceLines({ lines }: { lines: CustomerPurchases['invoices'][number]['lines'] }) {
   return (
-    <ul className="flex flex-col gap-1">
+    <ul className="cx-inv">
       {lines.map((l, index) => (
-        <li key={index} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <li key={index}>
           <span>{l.name}</span>
-          <span className="num text-ink-muted">×{l.qty / 1000}</span>
+          <span className="sx-n sx-mute">×{l.qty / 1000}</span>
           {l.returnedQty > 0 ? (
-            <Badge tone="warning">
-              رجع <bdi className="num">{l.returnedQty / 1000}</bdi>
-            </Badge>
+            <StatusPill kind="warn">
+              رجع <bdi className="sx-n">{l.returnedQty / 1000}</bdi>
+            </StatusPill>
           ) : null}
         </li>
       ))}
@@ -98,79 +91,67 @@ function InvoiceLines({ lines }: { lines: CustomerPurchases['invoices'][number][
   );
 }
 
-/** One fact of the profile: a small label over its value. */
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <dt className="text-xs font-semibold text-ink-muted">{label}</dt>
-      <dd className="truncate text-sm text-ink">{children}</dd>
-    </div>
-  );
-}
-
-/** A label and its value on one line of a summary card. */
-function SummaryRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 text-sm">
-      <dt className="text-ink-muted">{label}</dt>
-      <dd className="font-semibold text-ink">{children}</dd>
-    </div>
-  );
-}
-
 /**
- * The side summary: what the customer owes (or is owed), and how much of the credit limit that is,
- * from the balance and limit the page already has.
+ * What the customer owes (or is owed) as the figure of the page, with how much of the credit limit
+ * that is and the loyalty points they hold.
  */
-function BalanceCard({ customer, currency }: { customer: CustomerDetail; currency: CurrencyCode }) {
+function BalanceHero({ customer, currency }: { customer: CustomerDetail; currency: CurrencyCode }) {
   const balance = customer.balanceMinor;
   const limit = customer.creditLimitMinor;
   const owed = Math.max(0, balance);
   const over = limit !== null && balance > limit;
+  // What is still open under the limit counts a credit the customer holds too
+  const room = limit === null ? null : limit - balance;
+  const share = limit !== null && limit > 0 ? Math.min(100, Math.round((owed / limit) * 100)) : 0;
   return (
-    <Card className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm text-ink-muted">{balance >= 0 ? 'عليه' : 'له عند المتجر'}</p>
-          {over ? <Badge tone="danger">فوق حد الدين</Badge> : null}
+    <section className="sx-card cx-hero" aria-label="رصيد الزبون">
+      <div className="lbl">
+        <span>{balance >= 0 ? 'عليه' : 'له عند المتجر'}</span>
+        {over ? <StatusPill kind="danger">فوق حد الدين</StatusPill> : null}
+      </div>
+      <p className={`big m-0 sx-n ${balance < 0 ? 'cred' : over ? 'over' : balance > 0 ? 'owe' : ''}`}>
+        <Amt minor={Math.abs(balance)} currency={currency} />
+      </p>
+      <dl className="m-0">
+        <div className="cx-line">
+          <dt>حد الدين</dt>
+          <dd>{limit === null ? 'بلا حد' : <Amt minor={limit} currency={currency} />}</dd>
         </div>
-        <p className="num text-kpi font-bold tracking-tight text-ink">
-          <Money
-            minor={Math.abs(balance)}
-            currency={currency}
-            unitClassName="text-base font-semibold text-ink-subtle"
-          />
-        </p>
-      </div>
-      <div className="flex flex-col gap-2.5 border-t border-line pt-4">
-        <dl>
-          <SummaryRow label="حد الدين">
-            {limit === null ? 'بلا حد' : <Money minor={limit} currency={currency} />}
-          </SummaryRow>
-        </dl>
-        {limit !== null && limit > 0 ? (
-          <>
-            <ProgressBar
-              label="ما استُخدم من حد الدين"
-              value={owed}
-              max={limit}
-              tone={over ? 'danger' : owed >= limit * 0.8 ? 'warning' : 'brand'}
-            />
-            <p className="text-xs text-ink-muted">
-              {over ? (
-                <>
-                  تجاوز الحد بـ <Money minor={balance - limit} currency={currency} />
-                </>
-              ) : (
-                <>
-                  يبقى <Money minor={limit - owed} currency={currency} /> قبل الحد
-                </>
-              )}
-            </p>
-          </>
+        {customer.loyaltyPoints ? (
+          <div className="cx-line">
+            <dt>نقاط الولاء</dt>
+            <dd>
+              <bdi className="sx-n">{customer.loyaltyPoints}</bdi> نقطة
+            </dd>
+          </div>
         ) : null}
-      </div>
-    </Card>
+      </dl>
+      {limit !== null && limit > 0 ? (
+        <>
+          <div
+            className={`cx-meter ${over ? 'bad' : owed >= limit * 0.8 ? 'warn' : ''}`}
+            role="progressbar"
+            aria-label="ما استُخدم من حد الدين"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={share}
+          >
+            <i style={{ width: `${share}%` }} />
+          </div>
+          <p className="sx-wait m-0">
+            {over ? (
+              <>
+                تجاوز الحد بـ <Amt minor={balance - limit} currency={currency} />
+              </>
+            ) : (
+              <>
+                يبقى <Amt minor={room ?? 0} currency={currency} /> قبل الحد
+              </>
+            )}
+          </p>
+        </>
+      ) : null}
+    </section>
   );
 }
 
@@ -178,60 +159,52 @@ function BalanceCard({ customer, currency }: { customer: CustomerDetail; currenc
  * «مشترياته»: what the customer bought in all, the sizes they buy most (the most first, so the
  * till can advise «ريم تلبس M») and the day of their latest purchase.
  */
-function SizesCard({ purchases, currency }: { purchases: CustomerPurchases; currency: CurrencyCode }) {
+function SizesPanel({ purchases, currency }: { purchases: CustomerPurchases; currency: CurrencyCode }) {
   const digits = useDigits();
   const me = useMe();
   const latest = purchases.invoices[0];
+  const clothing = storeSells(me.tenant.sectors, ['clothing']);
   return (
-    <section aria-label="مشترياته">
-      <Card>
-        <CardHeader
-          icon={storeSells(me.tenant.sectors, ['clothing']) ? <ShirtIcon /> : <ProductsIcon />}
-          title="مشترياته"
-          description={
-            <>
-              اشترى <bdi className="num">{formatQuantity(purchases.pieces, digits)}</bdi>{' '}
-              {pieces(purchases.pieces / 1000)} بقيمة{' '}
-              <Money minor={purchases.spentMinor} currency={currency} /> بعد المرتجعات.
-            </>
-          }
-        />
-        {purchases.sizes.length === 0 ? (
-          storeSells(me.tenant.sectors, ['clothing']) ? (
-            <p className="text-sm text-ink-muted">لا مقاسات في مشترياته بعد.</p>
-          ) : null
-        ) : (
-          <div className="flex flex-col gap-4">
-            {purchases.sizes.map((s) => (
-              <div key={s.name} className="flex flex-col gap-2">
-                <p className="text-xs font-semibold text-ink-muted">{s.name}</p>
-                <ul className="flex flex-wrap gap-1.5">
-                  {s.values.map((v, index) => (
-                    <li
-                      key={v.value}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-small px-2.5 py-1 text-sm',
-                        index === 0 ? 'bg-brand-soft text-brand-ink' : 'bg-surface-muted text-ink',
-                      )}
-                    >
-                      <bdi className="font-semibold">{v.value}</bdi>
-                      <span className={cn('num text-xs', index === 0 ? 'text-brand-ink' : 'text-ink-muted')}>
-                        ×{v.qty / 1000}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-        <dl className="mt-5 border-t border-line pt-4">
-          <SummaryRow label="آخر شراء">
-            {latest ? <bdi className="num">{dayText(latest.date, digits)}</bdi> : '—'}
-          </SummaryRow>
-        </dl>
-      </Card>
-    </section>
+    <Panel
+      title="مشترياته"
+      aside={
+        <>
+          اشترى <bdi className="sx-n">{formatQuantity(purchases.pieces, digits)}</bdi>{' '}
+          {pieces(purchases.pieces / 1000)} بعد المرتجعات
+        </>
+      }
+    >
+      <p className="m-0 mb-3 font-semibold">
+        <Amt minor={purchases.spentMinor} currency={currency} />
+      </p>
+      {purchases.sizes.length === 0 ? (
+        clothing ? (
+          <p className="sx-wait">لا مقاسات في مشترياته بعد.</p>
+        ) : null
+      ) : (
+        <div className="flex flex-col gap-3">
+          {purchases.sizes.map((s) => (
+            <div key={s.name} className="flex flex-col gap-2">
+              <p className="sx-eyebrow m-0">{s.name}</p>
+              <ul className="cx-sizes">
+                {s.values.map((v, index) => (
+                  <li key={v.value} className={index === 0 ? 'top' : undefined}>
+                    <bdi className="font-semibold">{v.value}</bdi>
+                    <span className="sx-n text-xs">×{v.qty / 1000}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+      <dl className="m-0 mt-3 border-t border-line pt-2">
+        <div className="cx-line">
+          <dt>آخر شراء</dt>
+          <dd>{latest ? <bdi className="sx-n">{dayText(latest.date, digits)}</bdi> : '—'}</dd>
+        </div>
+      </dl>
+    </Panel>
   );
 }
 
@@ -239,20 +212,10 @@ function SizesCard({ purchases, currency }: { purchases: CustomerPurchases; curr
 function LoadingCustomer() {
   return (
     <div aria-busy="true" className="flex flex-col gap-6">
-      <Card className="flex items-center gap-4">
-        <Skeleton className="size-10" />
-        <span className="flex flex-1 flex-col gap-2">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-4 w-32" />
-        </span>
-      </Card>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <Card>
-          <SkeletonText lines={5} />
-        </Card>
-        <Card>
-          <SkeletonText lines={3} />
-        </Card>
+      <Skeleton className="h-12 w-64" />
+      <div className="cx-head">
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-48 w-full" />
       </div>
     </div>
   );
@@ -263,34 +226,49 @@ export function CustomerPage() {
   const { id = '' } = useParams();
   const me = useMe();
   const digits = useDigits();
+  const phone = useIsPhone();
   const canManage = me.user.permissions.includes('customers.manage');
   const seesInvoices = me.user.permissions.includes('report.view');
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [money, setMoney] = useState<'payment' | 'opening' | null>(null);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [allInvoices, setAllInvoices] = useState(false);
   const canReceive = me.user.permissions.includes('receipt.create');
   const canOpen = me.user.permissions.includes('accounting.post');
 
   const [purchases, setPurchases] = useState<CustomerPurchases | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const load = useCallback(() => setAttempt((n) => n + 1), []);
 
-  const load = useCallback(() => {
+  // Going from one customer to another never shows the answer of the earlier one
+  useEffect(() => {
+    let alive = true;
     setError(null);
+    setCustomer((was) => (was && was.id === id ? was : null));
+    setPurchases((was) => (was && was.customerId === id ? was : null));
     getCustomer(id)
-      .then(setCustomer)
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .then((c) => alive && setCustomer(c))
+      .catch((e: unknown) => alive && setError(errorMessage(e)));
     getPurchases(id)
-      .then(setPurchases)
-      .catch(() => setPurchases(null));
-  }, [id]);
-  useEffect(load, [load]);
+      .then((p) => alive && setPurchases(p))
+      .catch(() => alive && setPurchases(null));
+    return () => {
+      alive = false;
+    };
+  }, [id, attempt]);
 
+  /** «أرشفه» and «أرجعه»: the server refuses to archive a customer with an open balance, cheque or points */
   async function archive(archived: boolean) {
     if (!customer) return;
+    setArchiveError(null);
     try {
       setCustomer(await updateCustomer(customer.id, { name: customer.name, archived }));
+      setConfirmArchive(false);
     } catch (e) {
-      setError(errorMessage(e));
+      setArchiveError(errorMessage(e));
     }
   }
 
@@ -301,7 +279,7 @@ export function CustomerPage() {
     if (!customer) return;
     let alive = true;
     const name = customer.name.trim();
-    const phone = customer.phone;
+    const phoneNumber = customer.phone;
     void listCustomers(name)
       .then((res) => {
         if (!alive) return;
@@ -310,7 +288,7 @@ export function CustomerPage() {
             (c) =>
               c.id !== customer.id &&
               !c.archived &&
-              (c.name.trim() === name || (phone !== null && c.phone === phone)),
+              (c.name.trim() === name || (phoneNumber !== null && c.phone === phoneNumber)),
           ),
         );
       })
@@ -333,170 +311,144 @@ export function CustomerPage() {
   }
 
   const base = customer?.baseCurrency ?? 'SYP';
-  // On a phone «عليه» and «له» share one column, and the date moves under the entry.
-  const columns: DataColumn<StatementLine>[] = [
+  const reminder =
+    customer && !customer.noMessages
+      ? debtReminderLink(customer.phone, {
+          name: customer.name,
+          balanceMinor: customer.balanceMinor,
+          currency: base,
+          store: me.tenant.name,
+        })
+      : null;
+
+  const columns: SxColumn<StatementRow>[] = [
     {
       key: 'date',
       header: 'التاريخ',
-      className: 'hidden sm:table-cell',
-      cell: (l) => <bdi className="num whitespace-nowrap text-ink-muted">{dayText(l.date, digits)}</bdi>,
+      cell: (l) => <span className="sx-n sx-mute">{dayText(l.date, digits)}</span>,
     },
     {
       key: 'what',
       header: 'البيان',
+      lead: true,
       cell: (l) => (
-        <div className="flex flex-col gap-0.5 py-2">
-          <span className="font-semibold">
-            {l.sourceType === 'manual'
-              ? l.memo
-              : l.sourceType === 'cheque'
-                ? statementWhat(l)
-                : (SOURCE_TEXT[l.sourceType] ?? l.memo)}
-          </span>
+        <>
+          <span>{statementTitle(l)}</span>
           {l.number ? (
-            <span className="text-xs text-ink-muted">
+            <span className="sx-subline">
               <DocNumber value={l.number} />
             </span>
           ) : null}
-          <span className="text-xs text-ink-muted sm:hidden">
-            <bdi className="num">{dayText(l.date, digits)}</bdi>
-          </span>
-        </div>
+        </>
       ),
     },
     {
       key: 'debit',
       header: 'عليه',
       numeric: true,
-      className: 'hidden sm:table-cell',
-      cell: (l) => (l.debitMinor ? <Money minor={l.debitMinor} currency={base} /> : ''),
+      cell: (l) => (l.debitMinor ? <Amt minor={l.debitMinor} currency={base} /> : ''),
     },
     {
       key: 'credit',
       header: 'له',
       numeric: true,
-      className: 'hidden sm:table-cell',
-      cell: (l) => (l.creditMinor ? <Money minor={l.creditMinor} currency={base} /> : ''),
-    },
-    {
-      key: 'move',
-      header: 'الحركة',
-      numeric: true,
-      className: 'sm:hidden',
-      cell: (l) => (
-        <div className="flex flex-col items-end">
-          <span className="text-xs text-ink-muted">{l.debitMinor ? 'عليه' : 'له'}</span>
-          <Money minor={l.debitMinor || l.creditMinor} currency={base} />
-        </div>
-      ),
+      cell: (l) => (l.creditMinor ? <Amt minor={l.creditMinor} currency={base} /> : ''),
     },
     {
       key: 'balance',
       header: 'الرصيد',
       numeric: true,
-      cell: (l) => <Money minor={l.balanceMinor} currency={base} className="font-semibold" />,
+      strong: true,
+      cell: (l) => <Amt minor={l.balanceMinor} currency={base} />,
     },
   ];
+
+  const statementEmpty = (
+    <Empty icon={<BookIcon size={24} />} title="لا حركة على حساب هذا الزبون بعد.">
+      <p>يظهر هنا كل بيع بالآجل له، وكل دفعة يدفعها.</p>
+    </Empty>
+  );
+  // The newest line first: the running balance is after each line, and the latest page is the one wanted
+  const statement: StatementRow[] = (customer?.statement ?? []).map((l, k) => ({ ...l, k })).reverse();
+
+  const invoices = purchases?.invoices ?? [];
+  const shownInvoices = allInvoices ? invoices : invoices.slice(0, 5);
 
   return (
     <AppShell>
       <title>{`${customer?.name ?? 'زبون'} · SERVA`}</title>
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <Link
-          to="/customers"
-          className="inline-flex items-center gap-1.5 self-start rounded-small text-sm font-semibold text-ink-muted transition-colors duration-120 ease-standard hover:text-ink"
-        >
-          <BackIcon size={16} /> الزبائن
+      <SalesPage>
+        <Link to="/customers" className="sx-back print:hidden">
+          <ChevRight /> الزبائن
         </Link>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {!customer && !error ? <LoadingCustomer /> : null}
         {customer ? (
           <>
-            <Card>
-              <div className="flex flex-wrap items-start gap-4">
-                <Avatar name={customer.name} />
-                <div className="flex min-w-0 flex-1 basis-60 flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <h1 className="text-2xl font-bold text-ink">{customer.name}</h1>
-                    {customer.priceTier === 'wholesale' ? <Badge tone="brand">زبون جملة</Badge> : null}
-                    {customer.archived ? <Badge>مؤرشف</Badge> : null}
-                    {customer.noMessages ? <Badge>لا يريد رسائل</Badge> : null}
-                    {customer.kind ? <Badge tone="info">{CUSTOMER_KIND_LABELS[customer.kind]}</Badge> : null}
-                  </div>
-                  {customer.contactName || customer.contactPhone ? (
-                    <p className="text-sm text-ink-muted">
-                      المسؤول: {customer.contactName ?? '—'}
-                      {customer.contactPhone ? (
-                        <>
-                          {' · '}
-                          <bdi dir="ltr" className="num">
-                            {customer.contactPhone}
-                          </bdi>
-                        </>
-                      ) : null}
-                    </p>
-                  ) : null}
-                  <p className="text-sm text-ink-muted">
-                    زبون منذ{' '}
-                    <bdi className="num">
-                      {dayText(isoDay(Date.parse(customer.createdAt), me.tenant.timezone), digits)}
-                    </bdi>
-                  </p>
-                </div>
-                {seesInvoices ? (
-                  <Link
-                    to={`/sales/invoices?customerId=${encodeURIComponent(customer.id)}`}
-                    className="inline-flex min-h-11 items-center gap-1.5 rounded-small px-2 text-sm font-semibold text-brand-ink underline-offset-4 hover:underline"
-                  >
-                    <SalesIcon size={16} /> فواتير الزبون
-                  </Link>
-                ) : null}
-                {canManage && !editing ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button variant="secondary" icon={<EditIcon />} onClick={() => setEditing(true)}>
-                      عدّل
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      icon={customer.archived ? <UndoIcon /> : <ArchiveIcon />}
-                      onClick={() => void archive(!customer.archived)}
+            <PageTop
+              title={customer.name}
+              subtitle={
+                <>
+                  زبون منذ{' '}
+                  <bdi className="sx-n">
+                    {dayText(isoDay(Date.parse(customer.createdAt), me.tenant.timezone), digits)}
+                  </bdi>
+                </>
+              }
+              actions={
+                <>
+                  {seesInvoices ? (
+                    <Link
+                      to={`/sales/invoices?customerId=${encodeURIComponent(customer.id)}`}
+                      className="sx-fbtn"
                     >
-                      {customer.archived ? 'أرجعه' : 'أرشفه'}
-                    </Button>
-                    {customer.archived || !hasTwin ? null : (
+                      <SalesIcon size={16} /> فواتير الزبون
+                    </Link>
+                  ) : null}
+                  {reminder ? (
+                    <a href={reminder} target="_blank" rel="noreferrer" className="sx-fbtn">
+                      <CashIcon size={16} /> ذكّره بالدين
+                    </a>
+                  ) : null}
+                  {canManage && !editing ? (
+                    <>
+                      <Button variant="secondary" icon={<EditIcon />} onClick={() => setEditing(true)}>
+                        عدّل
+                      </Button>
                       <Button
                         variant="ghost"
-                        icon={<ArchiveIcon />}
-                        onClick={() => void archiveAsDuplicate()}
+                        icon={customer.archived ? <UndoIcon /> : <ArchiveIcon />}
+                        onClick={() => {
+                          setArchiveError(null);
+                          if (customer.archived) void archive(false);
+                          else setConfirmArchive(true);
+                        }}
                       >
-                        أرشف هذا الزبون المكرر
+                        {customer.archived ? 'أرجعه' : 'أرشفه'}
                       </Button>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-              <dl className="mt-5 grid gap-x-6 gap-y-4 border-t border-line pt-5 sm:grid-cols-3">
-                <Fact label="الجوال">
-                  {customer.phone ? (
-                    <bdi dir="ltr" className="num">
-                      {customer.phone}
-                    </bdi>
-                  ) : (
-                    '—'
-                  )}
-                </Fact>
-                <Fact label="العنوان">{customer.address ?? '—'}</Fact>
-                <Fact label="الرقم الضريبي">
-                  {customer.taxNumber ? <bdi className="num">{customer.taxNumber}</bdi> : '—'}
-                </Fact>
-              </dl>
-              {customer.notes ? (
-                <p className="mt-4 rounded-control bg-surface-muted px-4 py-3 text-sm text-ink-muted">
-                  <span className="font-semibold text-ink">ملاحظات: </span>
-                  {customer.notes}
-                </p>
+                      {customer.archived || !hasTwin ? null : (
+                        <Button
+                          variant="ghost"
+                          icon={<ArchiveIcon />}
+                          onClick={() => void archiveAsDuplicate()}
+                        >
+                          أرشف هذا الزبون المكرر
+                        </Button>
+                      )}
+                    </>
+                  ) : null}
+                </>
+              }
+            />
+            <div className="cx-badges">
+              {customer.priceTier === 'wholesale' ? <StatusPill kind="ok">زبون جملة</StatusPill> : null}
+              {customer.archived ? <StatusPill kind="open">مؤرشف</StatusPill> : null}
+              {customer.noMessages ? <StatusPill kind="open">لا يريد رسائل</StatusPill> : null}
+              {customer.kind ? (
+                <StatusPill kind="ok">{CUSTOMER_KIND_LABELS[customer.kind]}</StatusPill>
               ) : null}
-            </Card>
+            </div>
+            {archiveError && !confirmArchive ? <Alert tone="error">{archiveError}</Alert> : null}
             {customer.archived ? (
               <Alert tone="info">هذا الزبون مؤرشف: لا يظهر على أجهزة الكاشير.</Alert>
             ) : null}
@@ -510,105 +462,167 @@ export function CustomerPage() {
                 onCancel={() => setEditing(false)}
               />
             ) : null}
-            <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-              <aside className="flex flex-col gap-6 lg:sticky lg:top-24 lg:col-start-2 lg:row-start-1">
-                <BalanceCard customer={customer} currency={base} />
-                {purchases ? <SizesCard purchases={purchases} currency={base} /> : null}
-              </aside>
-              <div className="flex min-w-0 flex-col gap-8 lg:col-start-1 lg:row-start-1">
-                {purchases ? (
-                  <section className="flex flex-col gap-3">
-                    <SectionTitle
-                      title="آخر الفواتير"
-                      description="أحدث ما اشتراه، قطعة قطعة، وما رجع منه."
-                    />
-                    <DataTable
-                      caption="آخر الفواتير"
-                      columns={[
-                        {
-                          key: 'number',
-                          header: 'الفاتورة',
-                          cell: (r) => (
-                            <div className="flex flex-col gap-0.5 py-2.5">
-                              <span className="font-semibold">
-                                <DocNumber value={r.number} />
-                              </span>
-                              <span className="text-xs text-ink-muted">
-                                <bdi className="num">{dayText(r.date, digits)}</bdi>
-                              </span>
-                              <div className="mt-1.5 sm:hidden">
-                                <InvoiceLines lines={r.lines} />
-                              </div>
-                            </div>
-                          ),
-                        },
-                        {
-                          key: 'lines',
-                          header: 'القطع',
-                          className: 'hidden sm:table-cell',
-                          cell: (r) => (
-                            <div className="py-2.5">
-                              <InvoiceLines lines={r.lines} />
-                            </div>
-                          ),
-                        },
-                        {
-                          key: 'total',
-                          header: 'المبلغ',
-                          numeric: true,
-                          cell: (r) => (
-                            <Money minor={r.totalMinor} currency={r.currency} className="font-semibold" />
-                          ),
-                        },
-                      ]}
-                      rows={purchases.invoices}
-                      rowKey={(r) => r.id}
-                      empty={<EmptyState icon={SalesIcon} title="لم يشترِ شيئاً بعد." />}
-                    />
-                  </section>
-                ) : null}
-                <section className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-end justify-between gap-3">
-                    <SectionTitle
-                      title="كشف الحساب"
-                      description="كل بيع بالآجل وكل دفعة ومرتجع، والرصيد بعد كل حركة."
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
+            <div className="cx-head">
+              <div className="cx-main">
+                <Panel title="بيانات الزبون">
+                  <dl className="cx-facts">
+                    <div>
+                      <dt>الجوال</dt>
+                      <dd>
+                        {customer.phone ? (
+                          <bdi dir="ltr" className="sx-n">
+                            {customer.phone}
+                          </bdi>
+                        ) : (
+                          '—'
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>العنوان</dt>
+                      <dd>{customer.address ?? '—'}</dd>
+                    </div>
+                    <div>
+                      <dt>الرقم الضريبي</dt>
+                      <dd>{customer.taxNumber ? <bdi className="sx-n">{customer.taxNumber}</bdi> : '—'}</dd>
+                    </div>
+                    {customer.contactName || customer.contactPhone ? (
+                      <div>
+                        <dt>المسؤول</dt>
+                        <dd>
+                          {customer.contactName ?? '—'}
+                          {customer.contactPhone ? (
+                            <>
+                              {' · '}
+                              <bdi dir="ltr" className="sx-n">
+                                {customer.contactPhone}
+                              </bdi>
+                            </>
+                          ) : null}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                  {customer.notes ? (
+                    <p className="cx-notes">
+                      <span className="font-semibold text-ink">ملاحظات: </span>
+                      {customer.notes}
+                    </p>
+                  ) : null}
+                </Panel>
+                <Panel
+                  title="كشف الحساب"
+                  aside={
+                    <>
                       {canReceive ? (
                         <Button icon={<AddIcon />} onClick={() => setMoney('payment')}>
                           استلم دفعة
                         </Button>
                       ) : null}
-                      {canOpen ? (
+                      {canOpen && !customer.archived ? (
                         <Button variant="secondary" onClick={() => setMoney('opening')}>
                           سجّل دين افتتاحي
                         </Button>
                       ) : null}
-                      <Link
-                        to={`/customers/${customer.id}/statement`}
-                        className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-line bg-surface px-3.5 text-sm font-semibold text-ink transition-colors duration-120 ease-standard hover:bg-surface-muted"
-                      >
+                      <Link to={`/customers/${customer.id}/statement`} className="sx-fbtn">
                         <BookIcon size={16} /> كشف حساب بفترة، للطباعة
                       </Link>
-                    </div>
-                  </div>
-                  <p className="text-xs text-ink-muted sm:hidden">
-                    إن لم يظهر عمود الرصيد كاملاً فمرّر الجدول جانباً.
-                  </p>
-                  <DataTable
-                    caption="كشف الحساب"
-                    columns={columns}
-                    rows={customer.statement}
-                    rowKey={(l) => `${l.sourceId}:${l.balanceMinor}:${l.debitMinor}:${l.creditMinor}`}
-                    empty={
-                      <EmptyState
-                        icon={BookIcon}
-                        title="لا حركة على حساب هذا الزبون بعد."
-                        description="يظهر هنا كل بيع بالآجل له، وكل دفعة يدفعها."
-                      />
-                    }
-                  />
-                </section>
+                    </>
+                  }
+                  flush
+                >
+                  {phone && statement.length > 0 ? (
+                    <Paged
+                      rows={statement}
+                      size={15}
+                      noun="الحركات"
+                      render={(page) => (
+                        <ul className="cx-stm" aria-label="كشف الحساب">
+                          {page.map((l) => (
+                            <li key={l.k}>
+                              <span className="what">{statementTitle(l)}</span>
+                              <span className="num end font-semibold">
+                                {l.debitMinor ? (
+                                  <>
+                                    <span className="sx-sub text-xs">عليه </span>
+                                    <Amt minor={l.debitMinor} currency={base} />
+                                  </>
+                                ) : (
+                                  <span className="cx-ok">
+                                    <span className="text-xs">له </span>
+                                    <Amt minor={l.creditMinor} currency={base} />
+                                  </span>
+                                )}
+                              </span>
+                              <span className="row2">
+                                <span className="num">
+                                  {l.number ? (
+                                    <>
+                                      <DocNumber value={l.number} /> ·{' '}
+                                    </>
+                                  ) : null}
+                                  {dayText(l.date, digits)}
+                                </span>
+                                <span className="num">
+                                  الرصيد <Amt minor={l.balanceMinor} currency={base} />
+                                </span>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    />
+                  ) : (
+                    <Paged
+                      rows={statement}
+                      size={25}
+                      noun="الحركات"
+                      render={(page) => (
+                        <SxTable
+                          bare
+                          caption="كشف الحساب"
+                          columns={columns}
+                          rows={page}
+                          rowKey={(l) => String(l.k)}
+                          empty={statementEmpty}
+                        />
+                      )}
+                    />
+                  )}
+                </Panel>
+                {purchases ? (
+                  <Panel title="آخر الفواتير" aside="أحدث ما اشتراه، قطعة قطعة، وما رجع منه." flush>
+                    {shownInvoices.length === 0 ? (
+                      <Empty icon={<SalesIcon size={24} />} title="لم يشترِ شيئاً بعد." />
+                    ) : (
+                      <ul className="cx-stm" aria-label="آخر الفواتير">
+                        {shownInvoices.map((r) => (
+                          <li key={r.id}>
+                            <span className="what">
+                              <DocNumber value={r.number} />
+                            </span>
+                            <span className="num end font-semibold">
+                              <Amt minor={r.totalMinor} currency={r.currency} />
+                            </span>
+                            <span className="row2">
+                              <span className="num">{dayText(r.date, digits)}</span>
+                            </span>
+                            <span style={{ gridColumn: '1 / -1' }}>
+                              <InvoiceLines lines={r.lines} />
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {invoices.length > 5 ? (
+                      <div className="cx-more">
+                        <Button variant="secondary" onClick={() => setAllInvoices((v) => !v)}>
+                          {allInvoices ? 'اعرض أحدث 5 فقط' : `اعرض الكل (${invoices.length})`}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </Panel>
+                ) : null}
                 <CustomerPlans customerId={customer.id} />
                 {storeSells(me.tenant.sectors, ['electronics', 'medical_supplies']) ? (
                   <WarrantyDevices
@@ -620,7 +634,23 @@ export function CustomerPage() {
                   />
                 ) : null}
               </div>
+              <aside className="cx-side">
+                <BalanceHero customer={customer} currency={base} />
+                {purchases ? <SizesPanel purchases={purchases} currency={base} /> : null}
+              </aside>
             </div>
+            {canReceive && phone ? (
+              <div className="cx-dock print:hidden">
+                <Button icon={<AddIcon />} onClick={() => setMoney('payment')}>
+                  استلم دفعة
+                </Button>
+                {reminder ? (
+                  <a href={reminder} target="_blank" rel="noreferrer" className="sx-fbtn">
+                    <CashIcon size={16} /> ذكّره بالدين
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
             {money ? (
               <CustomerMoneyDialog
                 kind={money}
@@ -632,9 +662,36 @@ export function CustomerPage() {
                 }}
               />
             ) : null}
+            {confirmArchive ? (
+              <Dialog
+                open
+                onOpenChange={(open) => {
+                  if (!open) setConfirmArchive(false);
+                }}
+                title={`أرشفة ${customer.name}؟`}
+                description="لا يظهر بعدها على أجهزة الكاشير ولا في القوائم، وتبقى فواتيره وحسابه في الدفاتر. تقدر تعيده متى شئت."
+              >
+                <div className="flex flex-col gap-4">
+                  {customer.balanceMinor !== 0 ? (
+                    <Alert tone="warning">
+                      {customer.balanceMinor > 0 ? 'عليه دين: ' : 'له رصيد عندنا: '}
+                      <Amt minor={Math.abs(customer.balanceMinor)} currency={base} />. لا يُؤرشف زبون حسابه
+                      مفتوح؛ سدّد حسابه أولاً.
+                    </Alert>
+                  ) : null}
+                  {archiveError ? <Alert tone="error">{archiveError}</Alert> : null}
+                  <div className="flex flex-wrap items-center justify-end gap-3">
+                    <Button variant="secondary" onClick={() => setConfirmArchive(false)}>
+                      تراجع
+                    </Button>
+                    <Button onClick={() => void archive(true)}>نعم، أرشفه</Button>
+                  </div>
+                </div>
+              </Dialog>
+            ) : null}
           </>
         ) : null}
-      </div>
+      </SalesPage>
     </AppShell>
   );
 }

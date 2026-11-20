@@ -228,6 +228,10 @@ describe('the coupon in the cart', () => {
   it('checks the code with the server, shows its offer and sends it with the order', async () => {
     const { user, requestsTo } = await toCart({
       'GET /v1/shop/nour/coupon?code=summer10': { status: 200, body: { name: 'خصم الصيف', percentBp: 1000 } },
+      'POST /v1/shop/nour/quote': {
+        status: 200,
+        body: { subtotalMinor: 500_000, discountMinor: 50_000, totalMinor: 450_000, showPrices: true },
+      },
       'POST /v1/shop/nour/orders': (r: MockRequest) => {
         expect((r.body as { coupon?: string }).coupon).toBe('summer10');
         return { status: 201, body: placed };
@@ -237,9 +241,9 @@ describe('the coupon in the cart', () => {
     await user.type(within(box).getByLabelText('كود الخصم (اختياري)'), 'summer10');
     await user.click(within(box).getByRole('button', { name: 'طبّق' }));
     expect(await screen.findByText(/خصم الصيف/)).toBeInTheDocument();
-    // 10% off 5,000 as the cart can tell it
+    // 10% off 5,000, as the server quotes it
     const cart = screen.getByRole('region', { name: 'السلة' });
-    expect(cart).toHaveTextContent('خصم الكود');
+    await within(cart).findByText('خصم الكود');
     expect(cart).toHaveTextContent('4,500');
 
     await user.type(screen.getByLabelText('الاسم'), 'ريم');
@@ -280,6 +284,80 @@ describe('the coupon in the cart', () => {
     await user.click(screen.getByRole('button', { name: 'اطلب عبر واتساب' }));
     expect(await screen.findByRole('region', { name: 'وصل طلبك' })).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/shop/nour/orders')).toHaveLength(1);
+  });
+
+  it('says so when a better offer is already on the pieces and the code adds nothing', async () => {
+    const { user } = await toCart({
+      'GET /v1/shop/nour/coupon?code=ten': { status: 200, body: { name: 'عشرة', percentBp: 1000 } },
+      'POST /v1/shop/nour/quote': {
+        status: 200,
+        body: { subtotalMinor: 500_000, discountMinor: 0, totalMinor: 500_000, showPrices: true },
+      },
+    });
+    const box = screen.getByRole('form', { name: 'كود الخصم' });
+    await user.type(within(box).getByLabelText('كود الخصم (اختياري)'), 'ten');
+    await user.click(within(box).getByRole('button', { name: 'طبّق' }));
+    expect(await screen.findByText('الكود لم يزد الخصم: عرض أفضل مطبّق على هذه القطع.')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'السلة' })).not.toHaveTextContent('خصم الكود');
+  });
+
+  it('tells a buy-and-get code is applied when the order is collected', async () => {
+    const { user } = await toCart({
+      'GET /v1/shop/nour/coupon?code=bg': {
+        status: 200,
+        body: { name: 'اثنان وواحد', percentBp: null, kind: 'buy_get' },
+      },
+    });
+    const box = screen.getByRole('form', { name: 'كود الخصم' });
+    await user.type(within(box).getByLabelText('كود الخصم (اختياري)'), 'bg');
+    await user.click(within(box).getByRole('button', { name: 'طبّق' }));
+    expect(await screen.findByText('هذا الكود يُطبّق عند استلام الطلب.')).toBeInTheDocument();
+  });
+
+  it('shows what the server refused: the piece that ran out under its line, a lapsed code beside its box', async () => {
+    const refusal = (field: string, text: string) =>
+      apiError(400, 'validation_failed', text, { [field]: text });
+    const { user } = await toCart({
+      'POST /v1/shop/nour/orders': refusal(
+        'lines.0',
+        'المتوفر من «قميص كتان (M)» 0 فقط. خفّض الكمية وأكمل الطلب.',
+      ),
+    });
+    await user.type(screen.getByLabelText('الاسم'), 'ريم');
+    await user.type(screen.getByLabelText('رقم الجوال'), '0944555666');
+    await user.type(screen.getByLabelText('العنوان'), 'المزة');
+    await user.click(screen.getByRole('button', { name: 'اطلب عبر واتساب' }));
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.some((a) => a.textContent?.includes('المتوفر من «قميص كتان (M)»'))).toBe(true);
+    // Under the line itself
+    expect(within(screen.getByRole('region', { name: 'السلة' })).getByRole('alert')).toHaveTextContent(
+      'خفّض الكمية',
+    );
+  });
+
+  it('takes the code off when the server says it ran out, and says why beside the box', async () => {
+    const { user } = await toCart({
+      'GET /v1/shop/nour/coupon?code=late': { status: 200, body: { name: 'عرض', percentBp: 1000 } },
+      'POST /v1/shop/nour/quote': {
+        status: 200,
+        body: { subtotalMinor: 500_000, discountMinor: 50_000, totalMinor: 450_000, showPrices: true },
+      },
+      'POST /v1/shop/nour/orders': apiError(400, 'validation_failed', 'هذا الكود غير صحيح أو انتهت مدته.', {
+        coupon: 'هذا الكود غير صحيح أو انتهت مدته.',
+      }),
+    });
+    const box = screen.getByRole('form', { name: 'كود الخصم' });
+    await user.type(within(box).getByLabelText('كود الخصم (اختياري)'), 'late');
+    await user.click(within(box).getByRole('button', { name: 'طبّق' }));
+    await screen.findByRole('button', { name: 'أزل الكود' });
+    await user.type(screen.getByLabelText('الاسم'), 'ريم');
+    await user.type(screen.getByLabelText('رقم الجوال'), '0944555666');
+    await user.type(screen.getByLabelText('العنوان'), 'المزة');
+    await user.click(screen.getByRole('button', { name: 'اطلب عبر واتساب' }));
+    expect(await screen.findByRole('form', { name: 'كود الخصم' })).toHaveTextContent(
+      'هذا الكود غير صحيح أو انتهت مدته.',
+    );
+    expect(screen.queryByRole('button', { name: 'أزل الكود' })).toBeNull();
   });
 
   it('shows no discount figure when the store hides its prices', async () => {

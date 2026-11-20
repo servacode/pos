@@ -12,7 +12,7 @@ import {
 } from '@serva/core';
 import { batchBlocks, batchMovements, withTenant, type Database, type Transaction } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
-import { inScope, permissionScope, requirePermission } from '../auth/permissions';
+import { forbidden, inScope, permissionScope, requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
@@ -490,7 +490,8 @@ export function expiryReport(
   } = {},
 ): Promise<ExpiryResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    // A role given for one branch sees the batches of that branch only (round 44)
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const [tenant] = await tx.execute<{ timezone: string }>(
       sql`select timezone from tenants where id = ${auth.tenantId}`,
     );
@@ -544,6 +545,7 @@ export function expiryReport(
             : sql`(bl.id is not null or b.expiry_date <= ${today}::date + ${days}::int)`
       }
         ${only.branchId ? sql`and b.branch_id = ${only.branchId}` : sql``}
+        ${scope.all ? sql`` : sql`and b.branch_id = any(${uuidArray([...scope.branchIds])})`}
       order by b.expiry_date nulls last, name, br.name`);
     const day = Date.parse(`${today}T00:00:00Z`);
     return {
@@ -580,7 +582,9 @@ export function setBatchBlocked(
   meta: RequestMeta,
 ): Promise<BatchBlockResult> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    // Blocking stops the batch at every till of the store: it is not a branch role's to do
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
+    if (!scope.all) throw forbidden();
     const known = await tx.execute<{ variant_id: string }>(sql`
       select distinct variant_id from batch_movements where batch_no = ${input.batchNo}
       ${input.variantId ? sql`and variant_id = ${input.variantId}` : sql``}
@@ -641,7 +645,9 @@ export function setBatchBlocked(
 /** «سحب دفعة»: where a batch came from, what is left, and every invoice and customer that got it. */
 export function recall(db: Database, auth: AccessClaims, batchNo: string): Promise<RecallResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    // A recall follows a batch through every branch and shows who bought it: not for a role of one branch
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
+    if (!scope.all) throw forbidden();
     const found = await tx.execute<{
       variant_id: string;
       name: string;

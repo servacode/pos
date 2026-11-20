@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import type { PartyStatement, PartyStatementLine } from '@serva/core';
 import {
@@ -37,7 +37,7 @@ const COPY = {
   },
   supplier: {
     title: 'كشف حساب مورد',
-    backLabel: 'المشتريات',
+    backLabel: 'الموردون',
     access: ['purchases.manage'],
     // A supplier's balance is what the store owes it: «له».
     signed: (minor: number) => -minor,
@@ -45,6 +45,15 @@ const COPY = {
 } as const;
 
 type Copy = (typeof COPY)[keyof typeof COPY];
+
+/**
+ * The two sides of the account in the words of its owner (round 44): a customer's are «عليه / له»; a
+ * supplier's are what the store paid it and what it bought from it, so a shop owner need not flip sides.
+ */
+const SIDES = {
+  customer: { debit: 'عليه', credit: 'له' },
+  supplier: { debit: 'دفعنا له', credit: 'اشترينا منه' },
+} as const;
 
 function DocNumber({ value }: { value: string }) {
   return (
@@ -86,8 +95,8 @@ function StatementSheet({ s, store, copy }: { s: PartyStatement; store: string; 
           <tr className="border-b border-ink">
             <th className="py-1 text-start">التاريخ</th>
             <th className="py-1 text-start">البيان</th>
-            <th className="py-1 text-end">عليه</th>
-            <th className="py-1 text-end">له</th>
+            <th className="py-1 text-end">{SIDES[s.type].debit}</th>
+            <th className="py-1 text-end">{SIDES[s.type].credit}</th>
             <th className="py-1 text-end">الرصيد</th>
             {s.usd ? <th className="py-1 text-end">بالدولار</th> : null}
           </tr>
@@ -210,7 +219,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
     },
     {
       key: 'debit',
-      header: 'عليه',
+      header: SIDES[type].debit,
       numeric: true,
       className: 'hidden sm:table-cell',
       cell: (l) => (l.debitMinor ? <Money minor={l.debitMinor} currency={base} /> : ''),
@@ -218,7 +227,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
     },
     {
       key: 'credit',
-      header: 'له',
+      header: SIDES[type].credit,
       numeric: true,
       className: 'hidden sm:table-cell',
       cell: (l) => (l.creditMinor ? <Money minor={l.creditMinor} currency={base} /> : ''),
@@ -231,7 +240,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
       className: 'sm:hidden',
       cell: (l) => (
         <div className="flex flex-col items-end">
-          <span className="text-xs text-ink-muted">{l.debitMinor ? 'عليه' : 'له'}</span>
+          <span className="text-xs text-ink-muted">{l.debitMinor ? SIDES[type].debit : SIDES[type].credit}</span>
           <Money minor={l.debitMinor || l.creditMinor} currency={base} />
         </div>
       ),
@@ -255,7 +264,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
                 <div className="flex flex-col items-end">
                   {l.usdDebitMinor || l.usdCreditMinor ? (
                     <span className="text-xs text-ink-muted">
-                      {l.usdDebitMinor ? 'عليه' : 'له'}{' '}
+                      {l.usdDebitMinor ? SIDES[type].debit : SIDES[type].credit}{' '}
                       <Money minor={l.usdDebitMinor || l.usdCreditMinor || 0} currency="USD" />
                     </span>
                   ) : null}
@@ -271,7 +280,19 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
   const tile = (value: (s: PartyStatement) => ReactNode) =>
     data ? value(data) : error ? '—' : <Skeleton className="h-9 w-40" />;
 
-  const backTo = type === 'customer' ? `/customers/${id}` : '/purchases';
+  const backTo = type === 'customer' ? `/customers/${id}` : '/suppliers';
+  // Two identical lines of one document must not share a key
+  const lineKeys = useMemo(() => {
+    const seen = new Map<string, number>();
+    const keys = new WeakMap<object, string>();
+    for (const l of data?.lines ?? []) {
+      const base = `${l.sourceId}:${l.balanceMinor}:${l.debitMinor}:${l.creditMinor}`;
+      const n = (seen.get(base) ?? 0) + 1;
+      seen.set(base, n);
+      keys.set(l, n > 1 ? `${base}:${n}` : base);
+    }
+    return keys;
+  }, [data]);
 
   return (
     <ReportScreen me={me} access={copy.access} title={copy.title}>
@@ -331,7 +352,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
           label="حركة الفترة"
           value={tile((s) => (
             <span className="text-base">
-              عليه <Money minor={s.totalDebitMinor} currency={base} /> · له{' '}
+              {SIDES[type].debit} <Money minor={s.totalDebitMinor} currency={base} /> · {SIDES[type].credit}{' '}
               <Money minor={s.totalCreditMinor} currency={base} />
             </span>
           ))}
@@ -355,7 +376,7 @@ export function StatementPage({ type }: { type: 'customer' | 'supplier' }) {
           caption={copy.title}
           columns={columns}
           rows={data?.lines ?? []}
-          rowKey={(l) => `${l.sourceId}:${l.balanceMinor}:${l.debitMinor}:${l.creditMinor}`}
+          rowKey={(l) => lineKeys.get(l) ?? `${l.sourceId}:${l.balanceMinor}`}
           loading={loading}
           error={error ?? undefined}
           onRetry={retry}

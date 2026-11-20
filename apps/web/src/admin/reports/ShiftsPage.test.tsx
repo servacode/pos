@@ -272,7 +272,8 @@ describe('«الورديات»', () => {
       '/shifts?open=1',
     );
     const table = await screen.findByRole('table', { name: 'الورديات المفتوحة' }, { timeout: 4000 });
-    const row = text(within(table).getAllByRole('row')[1]!);
+    const number = await within(table).findByText('SFT-001-001-0000100');
+    const row = text(number.closest('tr')!);
     expect(row).toContain('SFT-001-001-0000100');
     expect(row).toContain('هبة');
     expect(row).toContain('منذ 3 أيام');

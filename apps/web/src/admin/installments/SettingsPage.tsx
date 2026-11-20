@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { CURRENCIES, type InstalmentSettings, type MarkupBand } from '@serva/core';
-import { Alert, Button, PageHeader, Select, Skeleton, Switch, TextField } from '@serva/ui';
+import { Alert, Select, Skeleton, Switch, TextField, Button } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
+import { PageTop, SalesPage } from '../sales/ui';
 import { getInstalmentSettings, saveInstalmentSettings } from './api';
 
 const NOTES_TEXT = {
@@ -132,13 +133,13 @@ export function SettingsPage() {
   return (
     <AppShell>
       <title>إعدادات التقسيط · SERVA</title>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-        <PageHeader
+      <SalesPage className="mx-auto w-full max-w-3xl">
+        <PageTop
           title="إعدادات التقسيط"
-          description="تحدد هنا قواعد البيع بالتقسيط على الكاشير."
+          subtitle="تحدد هنا قواعد البيع بالتقسيط على الكاشير."
           actions={
-            <Link to="/installments">
-              <Button variant="secondary">كل الخطط</Button>
+            <Link to="/installments" className="sx-fbtn">
+              كل الخطط
             </Link>
           }
         />
@@ -297,7 +298,7 @@ export function SettingsPage() {
             </div>
           </form>
         )}
-      </div>
+      </SalesPage>
     </AppShell>
   );
 }

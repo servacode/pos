@@ -99,8 +99,8 @@ describe('«الصلاحية» on a phone and the recall button', () => {
       expect(cards).toHaveTextContent('25 تشرين الأول 2026');
       const urgent = within(cards).getByRole('link', { name: /استدعاء الدفعة A-01/ });
       const calm = within(cards).getByRole('link', { name: /استدعاء الدفعة B-77/ });
-      expect(urgent).toHaveClass('border-danger');
-      expect(calm).not.toHaveClass('border-danger');
+      expect(urgent).toHaveClass('ix-urgent');
+      expect(calm).not.toHaveClass('ix-urgent');
     } finally {
       window.matchMedia = original;
     }

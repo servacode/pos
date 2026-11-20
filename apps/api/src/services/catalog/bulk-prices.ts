@@ -3,6 +3,7 @@ import type { BulkPriceResult, bulkPriceInput, CurrencyCode } from '@serva/core'
 import { withTenant, type Database } from '@serva/db';
 import type { z } from 'zod';
 import { audit } from '../audit';
+import { AppError } from '../../errors';
 import { notFound, requireCatalogManager, type CatalogContext } from './common';
 
 /**
@@ -55,7 +56,19 @@ export function bulkPrices(
       join prices pr on pr.id = v.id
       where p.category_id in (select id from tree) and p.archived_at is null
       order by p.name_ar, v.sort_order, v.id
-      limit 5000`);
+      limit 5001
+      ${input.apply ? sql`for update of pr` : sql``}`);
+    // More than 5,000 pieces in one category: never apply half of it silently
+    if (rows.length > 5000) {
+      if (input.apply) {
+        throw new AppError(
+          422,
+          'validation_failed',
+          'في هذا التصنيف أكثر من 5000 قطعة. غيّر الأسعار على تصنيفاته الفرعية كلاً على حدة.',
+        );
+      }
+      rows.length = 5000;
+    }
     const items = rows.flatMap((r) => {
       const step = r.currency === base ? input.roundToMinor : 1;
       const oldMinor = Number(r.price);

@@ -1,24 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CatalogGate } from './CatalogGate';
 import type { BulkPriceResult, Category } from '@serva/core';
 import { COUNT_NOUNS, countNoun } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
 import {
   Alert,
-  Badge,
   Button,
-  Card,
-  DataTable,
+  Dialog,
   EmptyState,
-  Money,
-  PageHeader,
   PercentIcon,
   PrintIcon,
   SegmentedControl,
   Select,
   Switch,
   TextField,
-  type DataColumn,
 } from '@serva/ui';
+import { Amt, PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { useMe } from '../../auth/useAuth';
 import { storeSells } from '../../lib/sectors';
 import { AppShell } from '../../layout/AppShell';
@@ -99,7 +96,9 @@ export function BulkPricesPage() {
   // The page keeps its state below the shell, so typing never redraws the menu and the top bar.
   return (
     <AppShell>
-      <BulkPrices />
+      <CatalogGate>
+        <BulkPrices />
+      </CatalogGate>
     </AppShell>
   );
 }
@@ -116,6 +115,7 @@ function BulkPrices() {
   const [markWas, setMarkWas] = useState(true);
   const [result, setResult] = useState<BulkPriceResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -165,12 +165,13 @@ function BulkPrices() {
   }
 
   const changed = (result?.items ?? []).filter((i) => i.newMinor !== i.oldMinor);
-  const columns: DataColumn<Row>[] = [
+  const columns: SxColumn<Row>[] = [
     {
       key: 'name',
       header: 'القطعة',
+      lead: true,
       cell: (r) => (
-        <span className="font-semibold whitespace-nowrap">
+        <span className="font-semibold">
           {r.name}
           {r.pieces ? (
             <span className="font-normal text-ink-muted"> · {countNoun(r.pieces, COUNT_NOUNS.piece)}</span>
@@ -182,7 +183,7 @@ function BulkPrices() {
       key: 'old',
       header: 'السعر الآن',
       numeric: true,
-      cell: (r) => <Money minor={r.oldMinor} currency={r.currency} className="text-ink-muted" />,
+      cell: (r) => <Amt minor={r.oldMinor} currency={r.currency} className="sx-mute" />,
     },
     {
       key: 'new',
@@ -191,11 +192,11 @@ function BulkPrices() {
       cell: (r) =>
         r.newMinor === r.oldMinor ? (
           <span className="inline-flex items-center gap-2">
-            <Badge>دون تغيير</Badge>
-            <Money minor={r.newMinor} currency={r.currency} />
+            <StatusPill kind="ok">دون تغيير</StatusPill>
+            <Amt minor={r.newMinor} currency={r.currency} />
           </span>
         ) : (
-          <Money minor={r.newMinor} currency={r.currency} className="font-bold text-ink" />
+          <Amt minor={r.newMinor} currency={r.currency} className="font-bold" />
         ),
     },
     {
@@ -204,10 +205,10 @@ function BulkPrices() {
       numeric: true,
       cell: (r) =>
         r.wasMinor === null ? (
-          <span className="text-ink-subtle">—</span>
+          <span className="sx-z sx-n">—</span>
         ) : (
-          <s className="text-ink-muted">
-            <Money minor={r.wasMinor} currency={r.currency} />
+          <s className="sx-mute">
+            <Amt minor={r.wasMinor} currency={r.currency} />
           </s>
         ),
     },
@@ -224,116 +225,116 @@ function BulkPrices() {
   return (
     <>
       <title>تغيير الأسعار · SERVA</title>
-      <div className="flex flex-col gap-6">
-        <PageHeader
-          icon={<PercentIcon />}
+      <SalesPage>
+        <PageTop
           title="تغيير الأسعار"
-          description={`${storeSells(me.tenant.sectors, ['clothing']) ? 'تنزيلات آخر الموسم' : 'التنزيلات'} أو رفع الأسعار: كل قطع التصنيف وتصنيفاته الفرعية بنسبة واحدة، مقرّبة، وتُعرض قبل تطبيقها.`}
+          subtitle={`${storeSells(me.tenant.sectors, ['clothing']) ? 'تنزيلات آخر الموسم' : 'التنزيلات'} أو رفع الأسعار: كل قطع التصنيف وتصنيفاته الفرعية بنسبة واحدة، مقرّبة، وتُعرض قبل تطبيقها.`}
         />
         {error ? <Alert tone="error">{error}</Alert> : null}
 
         <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
-          <Card className="flex flex-col gap-5 xl:sticky xl:top-24">
-            <div className="flex flex-col gap-0.5">
-              <h2 className="text-lg font-semibold text-ink">ماذا يتغيّر؟</h2>
-              <p className="text-sm text-ink-muted">
-                اختر التصنيف والنسبة، ثم اعرض كل قطعة بسعرها قبل التطبيق.
-              </p>
+          <Panel title="ماذا يتغيّر؟" aside="اختر التصنيف والنسبة ثم اعرض" className="xl:sticky xl:top-24">
+            <div className="flex flex-col gap-5">
+              <SegmentedControl
+                label="العملية"
+                value={mode}
+                fullWidth
+                onValueChange={(m) => {
+                  setMode(m);
+                  setResult(null);
+                }}
+                options={[
+                  { value: 'move', label: 'تنزيل أو رفع بنسبة' },
+                  { value: 'restore', label: 'أنهِ التنزيل' },
+                ]}
+              />
+              {mode === 'restore' ? (
+                <p className="rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
+                  ترجع كل قطعة منزّلة في التصنيف إلى سعرها قبل التنزيل، ويختفي السعر المشطوب.
+                </p>
+              ) : null}
+              <Select
+                label="التصنيف"
+                value={categoryId}
+                onChange={(e) => {
+                  setCategoryId(e.target.value);
+                  setResult(null);
+                }}
+              >
+                <option value="">اختر التصنيف</option>
+                {named.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+              {mode === 'move' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <TextField
+                    label="النسبة ٪"
+                    hint={
+                      <>
+                        بالسالب للتنزيل:{' '}
+                        <bdi dir="ltr" className="num">
+                          −30
+                        </bdi>
+                      </>
+                    }
+                    dir="ltr"
+                    inputMode="decimal"
+                    value={percent}
+                    onChange={(e) => {
+                      setPercent(e.target.value.slice(0, 8));
+                      setResult(null);
+                    }}
+                    // The numbers sit in their own direction isolate (LRI … PDI), so «−90» keeps its sign in front.
+                    error={percent && bp === null ? 'من \u2066−90\u2069 إلى 200، غير الصفر' : undefined}
+                  />
+                  <Select
+                    label="التقريب"
+                    value={String(round)}
+                    onChange={(e) => {
+                      setRound(Number(e.target.value) as (typeof ROUNDING)[number]);
+                      setResult(null);
+                    }}
+                  >
+                    {ROUNDING.map((r) => (
+                      <option key={r} value={r}>
+                        {r === 1 ? 'دون تقريب' : `لأقرب ${r.toLocaleString('en')}`}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              ) : null}
+              {mode === 'move' && bp !== null && bp < 0 ? (
+                <div className="border-t border-line pt-4">
+                  <Switch
+                    label="اطبع السعر القديم مشطوباً"
+                    description="يظهر السعر قبل التنزيل مشطوباً على الملصق وفي المتجر الإلكتروني."
+                    checked={markWas}
+                    onCheckedChange={(v) => {
+                      setMarkWas(v);
+                      setResult(null);
+                    }}
+                  />
+                </div>
+              ) : null}
+              <Button
+                variant="secondary"
+                fullWidth
+                disabled={!categoryId || (mode === 'move' && bp === null)}
+                loading={busy && !result}
+                onClick={() => void run(false)}
+              >
+                اعرض الأسعار الجديدة
+              </Button>
+              {!categoryId ? (
+                <p className="text-sm text-ink-muted">اختر التصنيف أولاً ليظهر الزر.</p>
+              ) : mode === 'move' && bp === null ? (
+                <p className="text-sm text-danger-ink">اكتب نسبة صحيحة (غير الصفر) لتعرض الأسعار الجديدة.</p>
+              ) : null}
             </div>
-            <SegmentedControl
-              label="العملية"
-              value={mode}
-              fullWidth
-              onValueChange={(m) => {
-                setMode(m);
-                setResult(null);
-              }}
-              options={[
-                { value: 'move', label: 'تنزيل أو رفع بنسبة' },
-                { value: 'restore', label: 'أنهِ التنزيل' },
-              ]}
-            />
-            {mode === 'restore' ? (
-              <p className="rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
-                ترجع كل قطعة منزّلة في التصنيف إلى سعرها قبل التنزيل، ويختفي السعر المشطوب.
-              </p>
-            ) : null}
-            <Select
-              label="التصنيف"
-              value={categoryId}
-              onChange={(e) => {
-                setCategoryId(e.target.value);
-                setResult(null);
-              }}
-            >
-              <option value="">اختر التصنيف</option>
-              {named.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-            {mode === 'move' ? (
-              <div className="grid grid-cols-2 gap-3">
-                <TextField
-                  label="النسبة ٪"
-                  hint={
-                    <>
-                      بالسالب للتنزيل:{' '}
-                      <bdi dir="ltr" className="num">
-                        −30
-                      </bdi>
-                    </>
-                  }
-                  dir="ltr"
-                  inputMode="decimal"
-                  value={percent}
-                  onChange={(e) => {
-                    setPercent(e.target.value.slice(0, 8));
-                    setResult(null);
-                  }}
-                  // The numbers sit in their own direction isolate (LRI … PDI), so «−90» keeps its sign in front.
-                  error={percent && bp === null ? 'من \u2066−90\u2069 إلى 200، غير الصفر' : undefined}
-                />
-                <Select
-                  label="التقريب"
-                  value={String(round)}
-                  onChange={(e) => {
-                    setRound(Number(e.target.value) as (typeof ROUNDING)[number]);
-                    setResult(null);
-                  }}
-                >
-                  {ROUNDING.map((r) => (
-                    <option key={r} value={r}>
-                      {r === 1 ? 'دون تقريب' : `لأقرب ${r.toLocaleString('en')}`}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ) : null}
-            {mode === 'move' && bp !== null && bp < 0 ? (
-              <div className="border-t border-line pt-4">
-                <Switch
-                  label="اطبع السعر القديم مشطوباً"
-                  description="يظهر السعر قبل التنزيل مشطوباً على الملصق وفي المتجر الإلكتروني."
-                  checked={markWas}
-                  onCheckedChange={(v) => {
-                    setMarkWas(v);
-                    setResult(null);
-                  }}
-                />
-              </div>
-            ) : null}
-            <Button
-              variant="secondary"
-              fullWidth
-              disabled={!categoryId || (mode === 'move' && bp === null)}
-              loading={busy && !result}
-              onClick={() => void run(false)}
-            >
-              اعرض الأسعار الجديدة
-            </Button>
-          </Card>
+          </Panel>
 
           <div className="flex min-w-0 flex-col gap-4">
             {result?.applied ? (
@@ -350,18 +351,19 @@ function BulkPrices() {
               </Alert>
             ) : null}
             {result ? (
-              <section aria-labelledby="bulk-preview" className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                  <h2 id="bulk-preview" className="text-lg font-semibold text-ink">
-                    {result.applied ? 'الأسعار بعد التغيير' : 'ما سيتغيّر'}
-                  </h2>
-                  <p className="text-sm text-ink-muted">
+              <Panel
+                title={result.applied ? 'الأسعار بعد التغيير' : 'ما سيتغيّر'}
+                aside={
+                  <>
                     {categoryName ? <bdi>{categoryName}</bdi> : null}
                     {categoryName && rule ? ' · ' : null}
                     {rule}
-                  </p>
-                </div>
-                <DataTable
+                  </>
+                }
+                flush
+              >
+                <SxTable
+                  bare
                   caption={result.applied ? 'الأسعار بعد التغيير' : 'ما سيتغيّر'}
                   columns={columns}
                   rows={groupByModel(result.items)}
@@ -374,7 +376,7 @@ function BulkPrices() {
                     />
                   }
                 />
-              </section>
+              </Panel>
             ) : (
               <EmptyState
                 icon={PercentIcon}
@@ -392,14 +394,40 @@ function BulkPrices() {
                   </bdi>
                   {rule ? ` · ${rule}` : ''}
                 </p>
-                <Button loading={busy} onClick={() => void run(true)} className="max-sm:flex-1">
+                <Button loading={busy} onClick={() => setConfirming(true)} className="max-sm:flex-1">
                   طبّق على {countNoun(changed.length, COUNT_NOUNS.piece, String(changed.length), true)}
                 </Button>
               </div>
             ) : null}
           </div>
         </div>
-      </div>
+        {confirming && result ? (
+          <Dialog
+            open
+            onOpenChange={(open) => !open && setConfirming(false)}
+            title="تأكيد تغيير الأسعار"
+            description={`ستتغيّر أسعار ${countNoun(changed.length, COUNT_NOUNS.piece)}${rule ? ` (${rule})` : ''} وتصل إلى كل أجهزة الكاشير. لا يوجد زر تراجع تلقائي؛ للعودة استخدم «أنهِ التنزيل» أو سجل الأسعار.`}
+            actions={
+              <>
+                <Button variant="secondary" onClick={() => setConfirming(false)}>
+                  رجوع
+                </Button>
+                <Button
+                  loading={busy}
+                  onClick={() => {
+                    setConfirming(false);
+                    void run(true);
+                  }}
+                >
+                  نعم، طبّق التغيير
+                </Button>
+              </>
+            }
+          >
+            <p className="text-sm text-ink-muted">راجع جدول «ما سيتغيّر» قبل أن تؤكد.</p>
+          </Dialog>
+        ) : null}
+      </SalesPage>
     </>
   );
 }

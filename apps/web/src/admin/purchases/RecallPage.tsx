@@ -10,7 +10,6 @@ import {
 } from '@serva/core';
 import {
   Alert,
-  Badge,
   Button,
   Card,
   CardHeader,
@@ -19,7 +18,6 @@ import {
   Dialog,
   EmptyState,
   formatQuantity,
-  PageHeader,
   SearchIcon,
   SegmentedControl,
   TextField,
@@ -27,7 +25,8 @@ import {
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
-import { AppShell } from '../../layout/AppShell';
+import { ReportScreen } from '../reports/parts';
+import { PageTop, SalesPage, StatusPill } from '../sales/ui';
 import { errorMessage } from '../../lib/api';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { dayText } from '../../lib/dates';
@@ -35,6 +34,7 @@ import { registeredAdjective } from '../../lib/plural';
 import { whatsappNumber } from '../../pos/receipt/whatsapp';
 import { downloadCsv } from '../exportCsv';
 import { getRecall, listExpiry, setBatchBlocked } from './api';
+import './inventory.css';
 import { SectionHead } from './parts';
 
 /** «3 زبائن معروفين · 2 فاتورتان بلا زبون»: who to call first, and what cannot be traced */
@@ -334,11 +334,11 @@ export function RecallPage() {
       header: 'الحالة',
       cell: (b) =>
         b.blocked ? (
-          <Badge tone="danger">موقوفة</Badge>
+          <StatusPill kind="danger">موقوفة</StatusPill>
         ) : b.expiryDate && b.expiryDate < new Date().toISOString().slice(0, 10) ? (
-          <Badge tone="warning">منتهية</Badge>
+          <StatusPill kind="warn">منتهية</StatusPill>
         ) : (
-          <Badge tone="neutral">تُباع</Badge>
+          <StatusPill kind="ok">تُباع</StatusPill>
         ),
     },
   ];
@@ -376,12 +376,11 @@ export function RecallPage() {
   ];
 
   return (
-    <AppShell>
-      <title>استدعاء دفعة · SERVA</title>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
+    <ReportScreen me={me} access={['purchases.manage']} title="استدعاء دفعة">
+      <SalesPage>
+        <PageTop
           title="استدعاء دفعة (سحب من السوق)"
-          description="اكتب رقم الدفعة لترى من أين جاءت وأين بقي منها ومن اشتراها، ثم أوقف بيعها في كل الفروع."
+          subtitle="اكتب رقم الدفعة لترى من أين جاءت وأين بقي منها ومن اشتراها، ثم أوقف بيعها في كل الفروع."
         />
         <Card className="print:hidden">
           <CardHeader icon={<SearchIcon />} title="ابحث عن دفعة" />
@@ -626,7 +625,7 @@ export function RecallPage() {
             )
           ) : null}
         </div>
-      </div>
+      </SalesPage>
       <Dialog
         open={messaging}
         onOpenChange={setMessaging}
@@ -748,7 +747,7 @@ export function RecallPage() {
           ستعود كل الصناديق في كل الفروع تبيع هذه الدفعة. هل أنت متأكد؟
         </p>
       </Dialog>
-    </AppShell>
+    </ReportScreen>
   );
 }
 

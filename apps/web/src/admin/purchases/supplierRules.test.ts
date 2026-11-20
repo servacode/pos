@@ -29,6 +29,11 @@ describe('paymentProblem and isAdvance', () => {
     expect(paymentProblem('12.345', null)).toContain('منزلتين');
     expect(paymentProblem('0', 0)).toContain('أكبر من صفر');
     expect(paymentProblem('5', 500)).toBeNull();
+    expect(paymentProblem('-100', null)).toContain('ناقص');
+    expect(paymentProblem('-100', 10_000)).toContain('ناقص');
+    expect(paymentProblem('1000.555', null)).toContain('منزلتين');
+    expect(paymentProblem('١٠٠٠٫٥٥٥', null)).toContain('منزلتين');
+    expect(paymentProblem('1,000.55', 100_055)).toBeNull();
     expect(isAdvance(500, 300)).toBe(true);
     expect(isAdvance(300, 300)).toBe(false);
     expect(isAdvance(1, -50)).toBe(true);

@@ -1,43 +1,38 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   CUSTOMER_PAYMENT_LABEL,
   CUSTOMER_PAYMENT_METHODS,
   formatMoney,
   NOTE_STATUS_LABELS,
-  PLAN_STATUS_LABELS,
   stripBidiControls,
   type Permission,
   toMinor,
   type CustomerPaymentMethod,
   type PlanDetail,
   type PlanInstalment,
-  type PlanStatus,
 } from '@serva/core';
 import {
   Alert,
-  Badge,
   Button,
   CalendarIcon,
   ChatIcon,
-  DataTable,
+  CheckIcon,
   Dialog,
-  EmptyState,
-  KpiStrip,
-  Money,
-  PageHeader,
   PrintIcon,
   Select,
   Skeleton,
-  StatTile,
   TextField,
-  type BadgeTone,
-  type DataColumn,
+  useDigits,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
+import { Empty } from '../customers/parts';
+import { Amt, ChevRight, PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
+import { PlanStatePill } from './PlansPage';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
+import { useIsPhone } from '../../lib/useIsPhone';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { cancelPlan, collectOnPlan, getPlan, logReminder } from './api';
 import { defaultPaymentBranch, PaymentBranchField } from '../customers/PaymentBranch';
@@ -52,20 +47,29 @@ const STATE_TEXT: Record<PlanInstalment['state'], string> = {
   upcoming: 'قادم',
   cancelled: 'ملغى',
 };
-const STATE_TONE: Record<PlanInstalment['state'], BadgeTone> = {
-  paid: 'success',
-  partial: 'warning',
-  due_today: 'warning',
-  late: 'danger',
-  upcoming: 'neutral',
-  cancelled: 'neutral',
-};
-const PLAN_TONE: Record<PlanStatus, BadgeTone> = {
-  active: 'brand',
-  completed: 'success',
-  cancelled: 'neutral',
-  defaulted: 'danger',
-};
+
+/** An instalment's state: filled only for what needs a look, quiet for what is fine, plain for what is ahead */
+function InstalmentState({ i }: { i: PlanInstalment }) {
+  if (i.state === 'late') {
+    return (
+      <span className="flex flex-col items-start gap-0.5">
+        <StatusPill kind="danger">{STATE_TEXT.late}</StatusPill>
+        <span className="cx-late">تأخر {i.daysLate} يوماً</span>
+      </span>
+    );
+  }
+  if (i.state === 'paid') {
+    return (
+      <StatusPill kind="ok" icon={<CheckIcon size={16} />}>
+        {STATE_TEXT.paid}
+      </StatusPill>
+    );
+  }
+  if (i.state === 'partial' || i.state === 'due_today') {
+    return <StatusPill kind="warn">{STATE_TEXT[i.state]}</StatusPill>;
+  }
+  return <span className="sx-mute">{STATE_TEXT[i.state]}</span>;
+}
 
 /**
  * One plan: what the customer owes on it, every instalment with its day and state, the guarantor, the
@@ -75,7 +79,8 @@ const PLAN_TONE: Record<PlanStatus, BadgeTone> = {
 export function PlanPage() {
   const { id = '' } = useParams();
   const me = useMe();
-  const digits = me.settings.numberFormat;
+  const digits = useDigits();
+  const phone = useIsPhone();
   const base = me.settings.baseCurrency;
   const can = (p: Permission) => me.user.permissions.includes(p);
   const [plan, setPlan] = useState<PlanDetail | null>(null);
@@ -85,23 +90,22 @@ export function PlanPage() {
   const { paper, print } = usePrint();
   const [sheet, setSheet] = useState<'schedule' | 'notes'>('schedule');
 
-  const load = useCallback(() => {
+  // Going from one plan to another never shows the earlier one's answer
+  useEffect(() => {
+    let alive = true;
     setError(null);
+    setPlan((was) => (was && was.id === id ? was : null));
     getPlan(id)
-      .then(setPlan)
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .then((p) => alive && setPlan(p))
+      .catch((e: unknown) => alive && setError(errorMessage(e)));
+    return () => {
+      alive = false;
+    };
   }, [id]);
-  useEffect(load, [load]);
 
   const open = plan && (plan.status === 'active' || plan.status === 'defaulted');
   const next = plan?.instalments.find((i) => i.state !== 'paid' && i.state !== 'cancelled');
 
-  const stateCell = (i: PlanInstalment) => (
-    <span className="flex flex-col items-start gap-0.5">
-      <Badge tone={STATE_TONE[i.state]}>{STATE_TEXT[i.state]}</Badge>
-      {i.state === 'late' ? <span className="text-xs text-danger-ink">تأخر {i.daysLate} يوماً</span> : null}
-    </span>
-  );
   const waCell = (i: PlanInstalment) => {
     if (!plan || !open || !['late', 'due_today', 'upcoming', 'partial'].includes(i.state)) return null;
     const kind = i.state === 'late' ? 'late' : i.state === 'due_today' ? 'due' : 'before';
@@ -116,27 +120,29 @@ export function PlanPage() {
       store: plan.storeName,
       daysLate: i.daysLate,
     });
+    // Only the instalments that are late or due now carry the link loud; the rest keep a quiet icon
     return link ? (
       <a
         href={link}
         target="_blank"
         rel="noreferrer"
+        aria-label={`واتساب القسط ${i.no}`}
+        title="تذكير على واتساب"
         onClick={() => void logReminder(plan.id, i.no, kind).catch(() => undefined)}
-        className="inline-flex min-h-9 items-center gap-1 text-sm font-semibold text-brand-ink hover:underline"
+        className="cx-icbtn"
       >
-        <ChatIcon size={16} /> واتساب
+        <ChatIcon size={20} />
       </a>
     ) : null;
   };
 
-  // On a phone the due day's cell carries the state and the WhatsApp link, so the amount stays in view
-  const columns: DataColumn<PlanInstalment>[] = [
+  const columns: SxColumn<PlanInstalment>[] = [
     {
       key: 'no',
       header: 'القسط',
-      className: 'whitespace-nowrap',
+      lead: true,
       cell: (i) => (
-        <span className="num font-semibold">
+        <span className="sx-n">
           {i.no}
           <span className="hidden sm:inline"> من {plan?.count}</span>
         </span>
@@ -146,44 +152,54 @@ export function PlanPage() {
       key: 'due',
       header: 'الاستحقاق',
       cell: (i) => (
-        <span className="flex flex-col items-start gap-1 py-1">
-          <span className="whitespace-nowrap">{dayText(i.dueDate, digits)}</span>
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:hidden">
-            {stateCell(i)}
-            {waCell(i)}
-          </span>
-        </span>
+        <>
+          <span className="sx-n">{dayText(i.dueDate, digits)}</span>
+          {phone ? (
+            <span className="sx-subline">
+              <InstalmentState i={i} />
+            </span>
+          ) : null}
+        </>
       ),
     },
     {
       key: 'amount',
       header: 'المبلغ',
       numeric: true,
-      cell: (i) => <Money minor={i.amountMinor} currency={base} />,
+      strong: true,
+      cell: (i) => <Amt minor={i.amountMinor} currency={base} />,
     },
     {
       key: 'paid',
       header: 'المدفوع',
       numeric: true,
-      className: 'hidden sm:table-cell',
-      cell: (i) => (i.paidMinor > 0 ? <Money minor={i.paidMinor} currency={base} /> : <span>—</span>),
+      hideBelowLg: true,
+      cell: (i) => <Amt minor={i.paidMinor} currency={base} zero="dash" />,
     },
-    { key: 'state', header: 'الحالة', className: 'hidden sm:table-cell', cell: stateCell },
-    { key: 'wa', header: '', className: 'hidden sm:table-cell', cell: waCell },
+    ...(phone
+      ? []
+      : [
+          {
+            key: 'state',
+            header: 'الحالة',
+            cell: (i: PlanInstalment) => <InstalmentState i={i} />,
+          } satisfies SxColumn<PlanInstalment>,
+        ]),
+    { key: 'wa', header: <span className="sr-only">تذكير</span>, cell: waCell },
   ];
 
   return (
     <AppShell>
       <title>خطة تقسيط · SERVA</title>
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-        <PageHeader
+      <SalesPage>
+        <Link to="/installments" className="sx-back print:hidden">
+          <ChevRight /> الأقساط
+        </Link>
+        <PageTop
           title={plan ? `خطة ${plan.customerName}` : 'خطة تقسيط'}
-          description={plan ? `فاتورة ${plan.saleNumber ?? plan.number}` : undefined}
+          subtitle={plan ? `فاتورة ${plan.saleNumber ?? plan.number}` : undefined}
           actions={
             <>
-              <Link to="/installments">
-                <Button variant="secondary">كل الخطط</Button>
-              </Link>
               {plan ? (
                 <Button
                   variant="secondary"
@@ -227,99 +243,136 @@ export function PlanPage() {
           <Skeleton className="h-48 w-full" />
         ) : (
           <>
-            <KpiStrip columns={3}>
-              <StatTile
-                label="المتبقي على الخطة"
-                value={<Money minor={plan.remainingMinor} currency={base} />}
-              />
-              <StatTile label="المدفوع" value={<Money minor={plan.paidMinor} currency={base} />} />
-              <StatTile
-                label="القسط القادم"
-                value={next ? <Money minor={next.amountMinor - next.paidMinor} currency={base} /> : '—'}
-                footnote={next ? dayText(next.dueDate, digits) : undefined}
-              />
-            </KpiStrip>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={PLAN_TONE[plan.status]}>{PLAN_STATUS_LABELS[plan.status]}</Badge>
-              {plan.lateCount > 0 ? <Badge tone="danger">{plan.lateCount} متأخر</Badge> : null}
-              <span className="text-sm text-ink-muted">
-                الدفعة الأولى <Money minor={plan.downPaymentMinor} currency={base} /> · رسم التقسيط{' '}
-                <Money minor={plan.markupMinor} currency={base} /> · عدد الأقساط{' '}
-                <bdi className="num">{plan.count}</bdi>
-              </span>
-              <Link to={`/customers/${plan.customerId}`} className="text-sm font-semibold hover:underline">
-                صفحة الزبون
-              </Link>
+            <div className="sx-card sx-strip cx3">
+              <div>
+                <span className="sx-eyebrow">المتبقي على الخطة</span>
+                <span className="v">
+                  <Amt minor={plan.remainingMinor} currency={base} />
+                </span>
+              </div>
+              <div>
+                <span className="sx-eyebrow">المدفوع</span>
+                <span className="v">
+                  <Amt minor={plan.paidMinor} currency={base} zero="dash" />
+                </span>
+              </div>
+              <div>
+                <span className="sx-eyebrow">القسط القادم</span>
+                <span className="v">
+                  {next ? <Amt minor={next.amountMinor - next.paidMinor} currency={base} /> : '—'}
+                </span>
+                {next ? <span className="cx-sub">{dayText(next.dueDate, digits)}</span> : null}
+              </div>
             </div>
+            <Panel
+              title="عن الخطة"
+              aside={
+                <Link to={`/customers/${plan.customerId}`} className="sx-fbtn">
+                  صفحة الزبون
+                </Link>
+              }
+            >
+              <dl className="cx-plan">
+                <div>
+                  <dt>الحالة</dt>
+                  <dd>
+                    <PlanStatePill plan={plan} />
+                  </dd>
+                </div>
+                <div>
+                  <dt>الدفعة الأولى</dt>
+                  <dd>
+                    <Amt minor={plan.downPaymentMinor} currency={base} />
+                  </dd>
+                </div>
+                <div>
+                  <dt>رسم التقسيط</dt>
+                  <dd>
+                    <Amt minor={plan.markupMinor} currency={base} />
+                  </dd>
+                </div>
+                <div>
+                  <dt>عدد الأقساط</dt>
+                  <dd>
+                    <bdi className="sx-n">{plan.count}</bdi>
+                  </dd>
+                </div>
+              </dl>
+            </Panel>
             {plan.closeReason ? <Alert tone="info">سبب الإغلاق: {plan.closeReason}</Alert> : null}
-            <DataTable
+            <SxTable
               caption="الأقساط"
               columns={columns}
               rows={plan.instalments}
-              rowKey={(i) => i.no}
-              empty={<EmptyState icon={CalendarIcon} title="لا أقساط." />}
+              rowKey={(i) => String(i.no)}
+              empty={<Empty icon={<CalendarIcon size={24} />} title="لا أقساط." />}
             />
             {plan.guarantor || plan.borrower ? (
-              <section className="grid gap-3 rounded-card border border-line bg-surface p-4 sm:grid-cols-2">
-                <div className="flex flex-col gap-1">
-                  <h2 className="font-semibold">الزبون</h2>
-                  <span>{plan.customerName}</span>
-                  {plan.customerPhone ? (
-                    <bdi dir="ltr" className="num text-sm text-ink-muted">
-                      {plan.customerPhone}
-                    </bdi>
-                  ) : null}
-                  {plan.borrower?.nationalId ? (
-                    <span className="text-sm text-ink-muted">الرقم الوطني: {plan.borrower.nationalId}</span>
-                  ) : null}
-                  {plan.borrower?.address ? (
-                    <span className="text-sm text-ink-muted">{plan.borrower.address}</span>
-                  ) : null}
-                </div>
-                {plan.guarantor ? (
+              <Panel title="الزبون والكفيل">
+                <div className="cx-grid2">
                   <div className="flex flex-col gap-1">
-                    <h2 className="font-semibold">الكفيل</h2>
-                    <span>{plan.guarantor.name}</span>
-                    {plan.guarantor.phone ? (
-                      <bdi dir="ltr" className="num text-sm text-ink-muted">
-                        {plan.guarantor.phone}
+                    <h3 className="m-0 font-semibold">الزبون</h3>
+                    <span>{plan.customerName}</span>
+                    {plan.customerPhone ? (
+                      <bdi dir="ltr" className="sx-n sx-mute">
+                        {plan.customerPhone}
                       </bdi>
                     ) : null}
-                    {plan.guarantor.nationalId ? (
-                      <span className="text-sm text-ink-muted">
-                        الرقم الوطني: {plan.guarantor.nationalId}
-                      </span>
+                    {plan.borrower?.nationalId ? (
+                      <span className="sx-mute">الرقم الوطني: {plan.borrower.nationalId}</span>
                     ) : null}
+                    {plan.borrower?.address ? <span className="sx-mute">{plan.borrower.address}</span> : null}
                   </div>
-                ) : null}
-              </section>
+                  {plan.guarantor ? (
+                    <div className="flex flex-col gap-1">
+                      <h3 className="m-0 font-semibold">الكفيل</h3>
+                      <span>{plan.guarantor.name}</span>
+                      {plan.guarantor.phone ? (
+                        <bdi dir="ltr" className="sx-n sx-mute">
+                          {plan.guarantor.phone}
+                        </bdi>
+                      ) : null}
+                      {plan.guarantor.nationalId ? (
+                        <span className="sx-mute">الرقم الوطني: {plan.guarantor.nationalId}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </Panel>
             ) : null}
             {plan.notes.length > 0 ? (
               <NotesTable plan={plan} onChanged={setPlan} canManage={can('installments.manage')} />
             ) : null}
             {plan.payments.length > 0 ? (
-              <section className="flex flex-col gap-2">
-                <h2 className="font-semibold">ما دُفع</h2>
-                <ul className="flex flex-col divide-y divide-line rounded-card border border-line bg-surface">
+              <Panel title="ما دُفع" flush>
+                <ul className="cx-stm">
                   {plan.payments.map((p, i) => (
-                    <li key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
-                      <span className="whitespace-nowrap">{dayText(p.date, digits)}</span>
-                      <span className="text-sm text-ink-muted">للقسط {p.no}</span>
-                      {p.receiptNumber ? (
-                        <bdi dir="ltr" className="num text-xs text-ink-muted">
-                          {p.receiptNumber}
-                        </bdi>
-                      ) : null}
-                      <span className="flex-1" />
-                      <Money minor={p.amountMinor} currency={base} className="font-semibold" />
+                    <li key={i}>
+                      <span className="what">
+                        <span className="sx-n">{dayText(p.date, digits)}</span>
+                        <span className="sx-subline">
+                          للقسط {p.no}
+                          {p.receiptNumber ? (
+                            <>
+                              {' · '}
+                              <bdi dir="ltr" className="sx-n">
+                                {p.receiptNumber}
+                              </bdi>
+                            </>
+                          ) : null}
+                        </span>
+                      </span>
+                      <span className="end font-semibold">
+                        <Amt minor={p.amountMinor} currency={base} />
+                      </span>
                     </li>
                   ))}
                 </ul>
-              </section>
+              </Panel>
             ) : null}
             {open && can('installments.manage') ? (
               <div>
-                <Button variant="ghost" onClick={() => setCancelling(true)}>
+                <Button variant="ghost" className="sx-neg" onClick={() => setCancelling(true)}>
                   ألغِ الخطة
                 </Button>
               </div>
@@ -355,7 +408,7 @@ export function PlanPage() {
             ) : null}
           </>
         )}
-      </div>
+      </SalesPage>
     </AppShell>
   );
 }
@@ -390,60 +443,60 @@ function NotesTable({
     }
   }
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="font-semibold">الكمبيالات</h2>
+    <Panel title="الكمبيالات" flush>
       {error ? <Alert tone="error">{error}</Alert> : null}
-      <ul className="flex flex-col divide-y divide-line rounded-card border border-line bg-surface">
+      <ul className="cx-stm">
         {plan.notes.map((n) => (
-          <li key={n.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
-            <bdi dir="ltr" className="num text-sm font-semibold">
-              {n.number}
-            </bdi>
-            <span className="whitespace-nowrap text-sm text-ink-muted">
-              {dayText(n.dueDate, me.settings.numberFormat)}
-            </span>
-            <Badge
-              tone={
-                n.status === 'paid'
-                  ? 'success'
-                  : n.status === 'protested'
-                    ? 'danger'
-                    : n.status === 'cancelled'
-                      ? 'neutral'
-                      : 'brand'
-              }
-            >
-              {NOTE_STATUS_LABELS[n.status]}
-            </Badge>
-            {n.printedCount > 0 ? (
-              <span className="text-xs text-ink-subtle">طُبعت {n.printedCount}</span>
-            ) : null}
-            <span className="flex-1" />
-            <Money minor={n.amountMinor} currency={me.settings.baseCurrency} />
-            {canManage && n.status === 'issued' ? (
-              <span className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy === n.id}
-                  onClick={() => void act(n.id, 'paid')}
-                >
-                  أُعيدت للزبون
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy === n.id}
-                  onClick={() => void act(n.id, 'protested')}
-                >
-                  احتجاج
-                </Button>
+          <li key={n.id}>
+            <span className="what">
+              <bdi dir="ltr" className="sx-n">
+                {n.number}
+              </bdi>
+              <span className="sx-subline">
+                {dayText(n.dueDate, me.settings.numberFormat)}
+                {n.printedCount > 0 ? ` · طُبعت ${n.printedCount}` : ''}
               </span>
-            ) : null}
+            </span>
+            <span className="end font-semibold">
+              <Amt minor={n.amountMinor} currency={me.settings.baseCurrency} />
+            </span>
+            <span className="row2">
+              {n.status === 'paid' ? (
+                <StatusPill kind="ok" icon={<CheckIcon size={16} />}>
+                  {NOTE_STATUS_LABELS[n.status]}
+                </StatusPill>
+              ) : n.status === 'protested' ? (
+                <StatusPill kind="danger">{NOTE_STATUS_LABELS[n.status]}</StatusPill>
+              ) : n.status === 'cancelled' ? (
+                <span className="sx-mute">{NOTE_STATUS_LABELS[n.status]}</span>
+              ) : (
+                <StatusPill kind="ok">{NOTE_STATUS_LABELS[n.status]}</StatusPill>
+              )}
+              {canManage && n.status === 'issued' ? (
+                <span className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy === n.id}
+                    onClick={() => void act(n.id, 'paid')}
+                  >
+                    أُعيدت للزبون
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy === n.id}
+                    onClick={() => void act(n.id, 'protested')}
+                  >
+                    احتجاج
+                  </Button>
+                </span>
+              ) : null}
+            </span>
           </li>
         ))}
       </ul>
-    </section>
+    </Panel>
   );
 }
 
@@ -467,6 +520,8 @@ function CollectDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [askOver, setAskOver] = useState(false);
+  // One id per dialog: the same press sent again after a lost answer posts once
+  const [requestId] = useState(() => crypto.randomUUID());
 
   let minor: number | null = null;
   try {
@@ -487,6 +542,7 @@ function CollectDialog({
     try {
       onDone(
         await collectOnPlan(plan.id, {
+          id: requestId,
           amountMinor: minor,
           method,
           reference: reference.trim() || null,

@@ -43,3 +43,45 @@ describe('«الموردون»', () => {
     expect(screen.getByRole('navigation', { name: 'صفحات المشتريات' })).toBeInTheDocument();
   });
 });
+
+describe('«الموردون»: edit and archive (round 44)', () => {
+  it('edits a supplier, archives it, and shows the dollars owed apart', async () => {
+    const me = makeMe();
+    const supplier = {
+      id: 's-1',
+      name: 'مستودع النور',
+      phone: '0944123456',
+      notes: null,
+      balanceMinor: 500_000,
+      usdBalanceMinor: 1_200,
+      usdBookMinor: 150_000,
+      archived: false,
+      lastPurchaseOn: '2026-11-03',
+      purchasesTotalMinor: 1_200_000,
+    };
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: { ...me, user: { ...me.user, permissions: ['purchases.manage'] } } },
+      'GET /v1/suppliers': {
+        status: 200,
+        body: { baseCurrency: 'SYP', totalOwedMinor: 500_000, items: [supplier] },
+      },
+      'PUT /v1/suppliers/s-1': { status: 200, body: { ...supplier, name: 'النور للتجارة', archived: true } },
+    });
+    const { user } = renderApp('/suppliers');
+    // The dollars owed sit under the pounds
+    expect((await screen.findAllByText(/منه/)).length).toBeGreaterThan(0);
+    await user.click(await screen.findByRole('button', { name: 'عدّل مستودع النور' }));
+    const name = screen.getByLabelText('اسم المورد');
+    await user.clear(name);
+    await user.type(name, 'النور للتجارة');
+    await user.click(screen.getByRole('switch', { name: 'أرشف هذا المورد' }));
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    expect(await screen.findByText('أُرشف المورد النور للتجارة.')).toBeInTheDocument();
+    expect(requestsTo('PUT', '/v1/suppliers/s-1')[0]?.body).toMatchObject({
+      name: 'النور للتجارة',
+      phone: '0944123456',
+      archived: true,
+    });
+  });
+});

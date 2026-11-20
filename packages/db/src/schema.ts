@@ -1123,6 +1123,8 @@ export const products = pgTable(
     foreignKey({ columns: [t.tenantId, t.taxRateId], foreignColumns: [taxRates.tenantId, taxRates.id] }),
     index('products_change_xid_idx').on(t.tenantId, t.changeXid, t.id),
     index('products_category_idx').on(t.tenantId, t.categoryId),
+    // The products list pages by name then id per store
+    index('products_list_order_idx').on(t.tenantId, t.nameAr, t.id),
     tenantIsolation(),
   ],
 );
@@ -1912,6 +1914,13 @@ export const purchases = pgTable(
     foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
     unique('purchases_number_unique').on(t.tenantId, t.number),
     index('purchases_date_idx').on(t.tenantId, t.businessDate),
+    // The invoice list pages newest first; the supplier's balances read by supplier
+    index('purchases_list_order_idx').on(
+      t.tenantId,
+      t.businessDate.desc().nullsLast(),
+      t.number.desc().nullsLast(),
+    ),
+    index('purchases_supplier_idx').on(t.tenantId, t.supplierId),
     tenantIsolation(),
   ],
 );
@@ -2089,6 +2098,11 @@ export const stocktakes = pgTable(
   (t) => [
     primaryKey({ name: 'stocktakes_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
+    index('stocktakes_list_order_idx').on(
+      t.tenantId,
+      t.businessDate.desc().nullsLast(),
+      t.createdAt.desc().nullsLast(),
+    ),
     tenantIsolation(),
   ],
 );
@@ -2125,6 +2139,14 @@ export const transfers = pgTable(
     primaryKey({ name: 'transfers_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.fromBranchId], foreignColumns: [branches.tenantId, branches.id] }),
     foreignKey({ columns: [t.tenantId, t.toBranchId], foreignColumns: [branches.tenantId, branches.id] }),
+    index('transfers_list_order_idx').on(
+      t.tenantId,
+      t.businessDate.desc().nullsLast(),
+      t.createdAt.desc().nullsLast(),
+    ),
+    index('transfers_in_transit_idx')
+      .on(t.tenantId)
+      .where(sql`${t.inTransit}`),
     tenantIsolation(),
   ],
 );
@@ -2200,6 +2222,8 @@ export const supplierReturns = pgTable(
     primaryKey({ name: 'supplier_returns_pkey', columns: [t.tenantId, t.id] }),
     foreignKey({ columns: [t.tenantId, t.branchId], foreignColumns: [branches.tenantId, branches.id] }),
     foreignKey({ columns: [t.tenantId, t.supplierId], foreignColumns: [suppliers.tenantId, suppliers.id] }),
+    index('supplier_returns_purchase_idx').on(t.tenantId, t.purchaseId),
+    index('supplier_returns_supplier_idx').on(t.tenantId, t.supplierId),
     tenantIsolation(),
   ],
 );

@@ -134,18 +134,49 @@ describe('the start wizard', () => {
 
   it('ticks the first tasks the store has already done', async () => {
     openWizard(owner(3), store({ onboarding: { step: 3, done: false } }), '/', {
-      'GET /v1/products?limit=1': { status: 200, body: { items: [{ id: 'p1' }], nextCursor: null } },
+      'GET /v1/me/home-summary': {
+        status: 200,
+        body: {
+          baseCurrency: 'SYP',
+          debts: null,
+          photos: { goodsCount: 3, withoutPhoto: 3 },
+          lowStock: null,
+        },
+      },
       'GET /v1/devices': { status: 200, body: { devices: [{ id: 'd1', status: 'active' }] } },
       'GET /v1/staff': {
         status: 200,
-        body: { staff: [{ id: 'u1', isOwner: true, hasPin: true }], roles: [], branches: [] },
+        // Someone else's PIN does not tick the owner's own card
+        body: { staff: [{ id: 'someone-else', isOwner: false, hasPin: true }], roles: [], branches: [] },
       },
     });
     const products = await screen.findByRole('link', { name: /أضف أصنافك/ });
     await waitFor(() => expect(products).toHaveTextContent('تمّ'));
     expect(screen.getByRole('link', { name: /اربط جهاز الكاشير/ })).toHaveTextContent('تمّ');
     expect(screen.getByRole('link', { name: /اختر رمز الدخول للكاشير/ })).not.toHaveTextContent('تمّ');
+    expect(screen.getByRole('link', { name: /اختر رمز الدخول للكاشير/ })).toHaveTextContent('لم يتم');
     expect(screen.getByRole('link', { name: /أول عملية بيع/ })).not.toHaveTextContent('تمّ');
+  });
+
+  it('ticks the PIN card when the signed-in owner has his own PIN, and not for a service-only catalogue', async () => {
+    openWizard(owner(3), store({ onboarding: { step: 3, done: false } }), '/', {
+      'GET /v1/me/home-summary': {
+        status: 200,
+        body: {
+          baseCurrency: 'SYP',
+          debts: null,
+          photos: { goodsCount: 0, withoutPhoto: 0 },
+          lowStock: null,
+        },
+      },
+      'GET /v1/staff': {
+        status: 200,
+        body: { staff: [{ id: 'user-1', isOwner: true, hasPin: true }], roles: [], branches: [] },
+      },
+    });
+    const pin = await screen.findByRole('link', { name: /اختر رمز الدخول للكاشير/ });
+    await waitFor(() => expect(pin).toHaveTextContent('تمّ'));
+    expect(screen.getByRole('link', { name: /أضف أصنافك/ })).not.toHaveTextContent('تمّ');
   });
 
   it('resumes at the step the owner left', async () => {

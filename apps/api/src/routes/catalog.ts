@@ -15,11 +15,13 @@ import {
   productImageOrder,
   productImagePatch,
   productListQuery,
+  productOpeningInput,
   updateCategoryInput,
   updateProductInput,
   updateTaxRateInput,
   updateUnitInput,
 } from '@serva/core';
+import { postProductOpening, productCosts } from '../services/catalog/opening-cost';
 import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { createTillProduct } from '../services/till-products';
@@ -124,6 +126,17 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
     const id = idOf(request, PRODUCT);
     return updateProduct(db, id, parseCatalog(updateProductInput, request.body), ctxOf(request));
   });
+  app.post('/v1/products/:id/opening-stock', signedIn, async (request) =>
+    postProductOpening(
+      db,
+      idOf(request, PRODUCT),
+      parseCatalog(productOpeningInput, request.body),
+      ctxOf(request),
+    ),
+  );
+  app.get('/v1/products/:id/costs', signedIn, async (request) =>
+    productCosts(db, idOf(request, PRODUCT), ctxOf(request)),
+  );
   app.post('/v1/products/:id/archive', signedIn, async (request) =>
     setProductArchived(db, idOf(request, PRODUCT), true, ctxOf(request)),
   );

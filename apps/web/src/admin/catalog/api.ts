@@ -9,7 +9,9 @@ import type {
   ProductImage,
   ProductImageInput,
   ProductImagesResponse,
+  ProductCostsResponse,
   ProductListQuery,
+  ProductOpeningInput,
   TaxRateList,
   Unit,
   UpdateCategoryInput,
@@ -32,6 +34,8 @@ export function productsPath(query: ProductListQuery): string {
   if (query.status) params.set('status', query.status);
   if (query.branchId) params.set('branchId', query.branchId);
   if (query.expiry) params.set('expiry', query.expiry);
+  if (query.stock) params.set('stock', query.stock);
+  if (query.sort && query.sort !== 'name') params.set('sort', query.sort);
   if (query.cursor) params.set('cursor', query.cursor);
   if (query.limit) params.set('limit', String(query.limit));
   const search = params.toString();
@@ -135,3 +139,17 @@ export const orderProductImages = (productId: string, ids: string[]) =>
     body: { ids },
     auth: true,
   });
+
+/** The first quantity of pieces that never moved in the branch, with what a unit cost (catalog.manage + inventory.adjust) */
+export function postProductOpening(productId: string, input: ProductOpeningInput) {
+  return apiFetch<{ posted: number }>(`/v1/products/${id(productId)}/opening-stock`, {
+    method: 'POST',
+    body: input,
+    auth: true,
+  });
+}
+
+/** The average cost of each piece (cost.view) */
+export function getProductCosts(productId: string) {
+  return apiFetch<ProductCostsResponse>(`/v1/products/${id(productId)}/costs`, { auth: true });
+}

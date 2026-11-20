@@ -176,7 +176,12 @@ describe('updateProductInput', () => {
 
 describe('lists, categories, units and tax rates', () => {
   it('reads the list query: Arabic digits, default status and page size, limit ≤ 200', () => {
-    expect(productListQuery.parse({ q: '٦٩٧٠' })).toEqual({ q: '6970', status: 'active', limit: 50 });
+    expect(productListQuery.parse({ q: '٦٩٧٠' })).toEqual({
+      q: '6970',
+      status: 'active',
+      limit: 50,
+      sort: 'name',
+    });
     expect(productListQuery.parse({ q: '' }).q).toBeUndefined();
     expect(productListQuery.safeParse({ limit: '201' }).success).toBe(false);
     expect(productListQuery.parse({ limit: '20', status: 'archived' })).toMatchObject({

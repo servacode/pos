@@ -1,28 +1,11 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react';
-import type { Promotion } from '@serva/core';
-import {
-  AddIcon,
-  AlertCircleIcon,
-  Badge,
-  Button,
-  CalendarIcon,
-  CategoriesIcon,
-  ClockIcon,
-  EmptyState,
-  InfoIcon,
-  OfferIcon,
-  PageHeader,
-  ProductsIcon,
-  RetryIcon,
-  StoreIcon,
-  Sheet,
-  Skeleton,
-  cn,
-  type BadgeTone,
-} from '@serva/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { promotionActive, type Promotion } from '@serva/core';
+import { AddIcon, Badge, Button, CheckIcon, EmptyState, InfoIcon, OfferIcon, Sheet } from '@serva/ui';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
-import { listPromotions, updatePromotion } from './api';
+import { dayText } from '../../lib/dates';
+import { PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
+import { archivePromotion, listPromotions } from './api';
 import { localDate, PromotionForm, WEEKDAY_NAMES } from './PromotionForm';
 
 /** What the promotion gives, as the owner says it. */
@@ -34,7 +17,7 @@ export function promotionSummary(p: Promotion): string {
         ? `خصم حسب الكمية: ${(p.tiers ?? []).map((t) => `من ${t.minQty} ${t.percentBp / 100}%`).join('، ')}`
         : p.kind === 'free_item'
           ? `اشترِ ${p.buyQty} وخذ ${p.freeQty} من صنف آخر مجاناً`
-          : `${p.buyQty} + ${p.getQty} مجاناً: اشترِ ${p.buyQty} وتأخذ ${p.getQty} مجاناً (من كل ${(p.buyQty ?? 0) + (p.getQty ?? 0)} قطعة ${p.getQty} مجاناً)`;
+          : `اشترِ ${p.buyQty} وخذ ${p.getQty} مجاناً`;
   const who = [
     p.repOnly ? 'للمندوب فقط' : null,
     (p.customerKinds ?? []).length > 0 ? 'لأنواع محددة من الزبائن' : null,
@@ -49,245 +32,86 @@ export function promotionSummary(p: Promotion): string {
   return who.length > 0 ? `${what} ${on} · ${who.join('، ')}` : `${what} ${on}`;
 }
 
-/**
- * One part of when a promotion runs: its first day, its last day, its weekdays or its hours. `text`
- * is the whole part («من 2026-11-01»); `value` the date, days or hours in it, after `lead`.
- */
-interface WhenPart {
-  kind: 'from' | 'to' | 'days' | 'hours';
-  lead?: string;
-  value: string;
-  text: string;
-}
+/** How a date shows in a sentence: «30 تشرين الأول 2026» (never the ISO form, which reads reversed in Arabic) */
+const dayWords = (iso: string) => dayText(localDate(iso));
 
-const whenPart = (kind: WhenPart['kind'], value: string, lead?: string): WhenPart => ({
-  kind,
-  value,
-  ...(lead ? { lead } : {}),
-  text: lead ? `${lead} ${value}` : value,
-});
-
-/** When it runs, part by part, in the order promotionWhen says them. */
-function promotionWhenParts(p: Promotion): WhenPart[] {
-  const parts: WhenPart[] = [];
-  if (p.startsAt) parts.push(whenPart('from', localDate(p.startsAt), 'من'));
+/** When it runs, in words: dates, weekdays and hours in the order a person says them. */
+export function promotionWhen(p: Promotion): string {
+  const parts: string[] = [];
+  if (p.startsAt) parts.push(`من ${dayWords(p.startsAt)}`);
   if (p.endsAt) {
     const last = new Date(p.endsAt);
     last.setUTCDate(last.getUTCDate() - 1);
-    parts.push(whenPart('to', localDate(last.toISOString()), 'حتى'));
+    parts.push(`حتى ${dayWords(last.toISOString())}`);
   }
-  if (p.daysOfWeek.length > 0)
-    parts.push(whenPart('days', p.daysOfWeek.map((d) => WEEKDAY_NAMES[d]).join('، ')));
-  if (p.fromTime && p.toTime) parts.push(whenPart('hours', `${p.fromTime}–${p.toTime}`));
-  return parts;
+  if (p.daysOfWeek.length > 0) parts.push(p.daysOfWeek.map((d) => WEEKDAY_NAMES[d]).join('، '));
+  if (p.fromTime && p.toTime) parts.push(`${p.fromTime}–${p.toTime}`);
+  return parts.length > 0 ? parts.join(' · ') : 'دائماً';
 }
 
-/** When it runs, in words. */
-export function promotionWhen(p: Promotion): string {
-  const parts = promotionWhenParts(p);
-  return parts.length > 0 ? parts.map((each) => each.text).join(' · ') : 'دائماً';
-}
+/** `idle`: inside its dates but not on its days or hours right now */
+type PromotionState = 'active' | 'idle' | 'scheduled' | 'ended' | 'stopped';
 
-type PromotionState = 'active' | 'scheduled' | 'ended' | 'stopped';
+const DAY = 86_400_000;
 
 /** Where the promotion stands today: stopped by the owner, not started yet, past its last day, or on. */
-function promotionState(p: Promotion, now: number): PromotionState {
+function promotionState(p: Promotion, now: number, timeZone = 'Asia/Damascus'): PromotionState {
   if (p.archived) return 'stopped';
   if (p.startsAt && Date.parse(p.startsAt) > now) return 'scheduled';
   if (p.endsAt && Date.parse(p.endsAt) <= now) return 'ended';
-  return 'active';
+  const timed = p.daysOfWeek.length > 0 || Boolean(p.fromTime && p.toTime);
+  return timed && !promotionActive(p, new Date(now), timeZone) ? 'idle' : 'active';
 }
 
-const STATES: Record<PromotionState, { tone: BadgeTone; label: string }> = {
-  active: { tone: 'success', label: 'يعمل' },
-  scheduled: { tone: 'info', label: 'مجدول' },
-  ended: { tone: 'neutral', label: 'انتهى' },
-  stopped: { tone: 'neutral', label: 'متوقف' },
+const isOff = (p: Promotion, now: number) => {
+  const state = promotionState(p, now);
+  return state === 'stopped' || state === 'ended';
 };
 
-/** What the promotion applies to, as a picture beside its summary. */
-const SCOPE_ICONS = { all: StoreIcon, categories: CategoriesIcon, products: ProductsIcon } as const;
+/** «ينتهي بعد 3 أيام» in the last week of an offer, so an owner does not leave a sale on by mistake */
+function endsSoon(p: Promotion, now: number): string | null {
+  if (!p.endsAt) return null;
+  const left = Math.ceil((Date.parse(p.endsAt) - now) / DAY);
+  if (left < 1 || left > 7) return null;
+  return left === 1 ? 'ينتهي اليوم' : left === 2 ? 'ينتهي غداً' : `ينتهي بعد ${left} أيام`;
+}
 
-/** A part of the schedule in a small chip; the dots between chips are read, not drawn. */
-function WhenChip({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
+/** Two running offers that can both hit the same piece: the customer gets the better one, the owner should know */
+function overlapsWith(p: Promotion, all: readonly Promotion[], now: number): Promotion | null {
+  if (promotionState(p, now) !== 'active' || p.couponCode) return null;
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-small bg-surface-muted px-2 py-1 text-xs font-semibold text-ink-muted">
-      {icon}
-      {children}
-    </span>
+    all.find((q) => {
+      if (q.id === p.id || q.couponCode || promotionState(q, now) !== 'active') return false;
+      if (q.repOnly !== p.repOnly) return false;
+      if (p.scope === 'all' || q.scope === 'all') return true;
+      if (p.scope !== q.scope) return false;
+      const mine = new Set(p.scope === 'categories' ? p.categoryIds : p.productIds);
+      return (q.scope === 'categories' ? q.categoryIds : q.productIds).some((id) => mine.has(id));
+    }) ?? null
   );
 }
 
-const Dot = () => <span className="sr-only"> · </span>;
-
-/** A date or the hours, left to right inside the Arabic sentence («من 2026-11-01»). */
-function WhenText({ part: { lead, value } }: { part: WhenPart }) {
-  return (
-    <span>
-      {lead ? `${lead} ` : null}
-      <bdi dir="ltr" className="num">
-        {value}
-      </bdi>
-    </span>
-  );
-}
-
-/** The schedule as chips: the dates, the weekdays and the hours, or «دائماً». */
-function Schedule({ promotion }: { promotion: Promotion }) {
-  const parts = promotionWhenParts(promotion);
-  if (parts.length === 0) return <WhenChip>دائماً</WhenChip>;
-  const from = parts.find((each) => each.kind === 'from');
-  const to = parts.find((each) => each.kind === 'to');
-  const days = parts.find((each) => each.kind === 'days');
-  const hours = parts.find((each) => each.kind === 'hours');
-  const chips: ReactNode[] = [];
-  if (from || to) {
-    chips.push(
-      <WhenChip key="dates" icon={<CalendarIcon size={16} />}>
-        {from ? <WhenText part={from} /> : null}
-        {from && to ? <Dot /> : null}
-        {to ? <WhenText part={to} /> : null}
-      </WhenChip>,
+function StateBadge({ state }: { state: PromotionState }) {
+  if (state === 'active') {
+    return (
+      <StatusPill kind="ok" icon={<CheckIcon size={16} />}>
+        يعمل
+      </StatusPill>
     );
   }
-  if (days) chips.push(<WhenChip key="days">{days.text}</WhenChip>);
-  if (hours) {
-    chips.push(
-      <WhenChip key="hours" icon={<ClockIcon size={16} />}>
-        <WhenText part={hours} />
-      </WhenChip>,
-    );
-  }
-  return chips.map((chip, index) => (
-    <Fragment key={index}>
-      {index > 0 ? <Dot /> : null}
-      {chip}
-    </Fragment>
-  ));
+  if (state === 'scheduled') return <StatusPill kind="open">مجدول</StatusPill>;
+  if (state === 'idle') return <StatusPill kind="ok">في غير وقته</StatusPill>;
+  return <StatusPill kind="ok">{state === 'ended' ? 'انتهى' : 'متوقف'}</StatusPill>;
 }
 
-/** The ticket stub at the start of a card: what the promotion gives, big. */
-function Stub({ promotion, state }: { promotion: Promotion; state: PromotionState }) {
-  const off = state === 'stopped' || state === 'ended';
-  const percent = promotion.kind === 'percent' || promotion.kind === 'tiered';
-  const tiered = promotion.kind === 'tiered';
-  return (
-    <div
-      aria-hidden="true"
-      className={cn(
-        'flex w-24 shrink-0 flex-col items-center justify-center gap-0.5 rounded-s-card px-2 py-4 text-center',
-        off
-          ? 'bg-surface-muted text-ink-subtle'
-          : percent
-            ? 'bg-brand-soft text-brand-ink'
-            : 'bg-accent-soft text-accent-ink',
-      )}
-    >
-      <bdi dir="ltr" className="num text-2xl leading-none font-bold tracking-tight">
-        {tiered
-          ? `${Math.max(0, ...(promotion.tiers ?? []).map((t) => t.percentBp)) / 100}%`
-          : percent
-            ? `${(promotion.percentBp ?? 0) / 100}%`
-            : `${promotion.buyQty}+${promotion.kind === 'free_item' ? (promotion.freeQty ?? 0) : promotion.getQty}`}
-      </bdi>
-      <span className="text-xs font-semibold">{tiered ? 'حتى' : percent ? 'خصم' : 'مجاناً'}</span>
-    </div>
-  );
+/** The big figure of an offer: what it gives, in two or three characters */
+function stampOf(p: Promotion): string {
+  if (p.kind === 'percent') return `${(p.percentBp ?? 0) / 100}%`;
+  if (p.kind === 'tiered') return `حتى ${Math.max(0, ...(p.tiers ?? []).map((t) => t.percentBp)) / 100}%`;
+  return `${p.buyQty}+${p.kind === 'free_item' ? (p.freeQty ?? 0) : p.getQty}`;
 }
 
-function PromotionCard({
-  promotion,
-  now,
-  onEdit,
-  onToggle,
-}: {
-  promotion: Promotion;
-  now: number;
-  onEdit: () => void;
-  onToggle: () => void;
-}) {
-  const state = promotionState(promotion, now);
-  const ScopeIcon = SCOPE_ICONS[promotion.scope];
-  const { tone, label } = STATES[state];
-  return (
-    <li
-      className={cn(
-        'relative flex rounded-card border border-line bg-surface shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard',
-        'hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5',
-      )}
-    >
-      <Stub promotion={promotion} state={state} />
-      {/* The perforation between the stub and the ticket, with a notch cut at each end. */}
-      <span aria-hidden="true" className="relative w-0 border-s border-dashed border-line-control/50">
-        <span className="absolute -top-px -start-2 h-2 w-4 rounded-b-small border-x border-b border-line bg-canvas" />
-        <span className="absolute -start-2 -bottom-px h-2 w-4 rounded-t-small border-x border-t border-line bg-canvas" />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex flex-col gap-3 p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3">
-            <h3 className="min-w-0 text-base font-semibold text-ink">
-              {/* The whole card opens the promotion: the name's button stretches over it. */}
-              <button
-                type="button"
-                onClick={onEdit}
-                className="rounded-small text-start transition-colors duration-120 ease-standard after:absolute after:inset-0 after:rounded-card hover:text-brand-ink"
-              >
-                {promotion.name}
-              </button>
-            </h3>
-            <Badge tone={tone}>{label}</Badge>
-          </div>
-          <p className="flex items-center gap-1.5 text-sm text-ink-muted">
-            <ScopeIcon size={16} className="text-ink-subtle" />
-            {promotionSummary(promotion)}
-            {promotion.couponCode ? (
-              <Badge tone="brand">
-                كود <bdi dir="ltr">{promotion.couponCode}</bdi>
-              </Badge>
-            ) : null}
-          </p>
-          <p className="flex flex-wrap items-center gap-1.5">
-            <span className="sr-only">متى: </span>
-            <Schedule promotion={promotion} />
-          </p>
-        </div>
-        <div className="mt-auto flex items-center justify-between gap-3 border-t border-line px-4 py-2.5 sm:px-5">
-          <span className="text-xs text-ink-subtle">
-            آخر تعديل <bdi className="num">{localDate(promotion.updatedAt)}</bdi>
-          </span>
-          <Button size="sm" variant="secondary" onClick={onToggle} className="relative">
-            {promotion.archived ? 'شغّل' : 'أوقف'}
-          </Button>
-        </div>
-      </div>
-    </li>
-  );
-}
-
-/** Cards in the shape of the real ones while the list loads. */
-function CardsSkeleton() {
-  return (
-    <div aria-busy="true" className="grid gap-4 lg:grid-cols-2">
-      <span className="sr-only">نحمّل العروض…</span>
-      {[0, 1, 2, 3].map((index) => (
-        <div
-          key={index}
-          aria-hidden="true"
-          className="flex h-44 overflow-hidden rounded-card border border-line bg-surface shadow-e1"
-        >
-          <span className="flex w-24 p-3">
-            <Skeleton className="h-full w-full" />
-          </span>
-          <div className="flex flex-1 flex-col gap-3 p-5">
-            <Skeleton className="h-4 w-1/2" />
-            <Skeleton className="h-3.5 w-3/4" />
-            <Skeleton className="h-6 w-1/3" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+const GROUPS = { running: 'تعمل الآن أو مجدولة', off: 'متوقفة أو منتهية' } as const;
 
 /**
  * «العروض» (03 › عروض متقدمة): promotions the tills apply by themselves, online or not. The owner
@@ -296,36 +120,135 @@ function CardsSkeleton() {
 export function PromotionsPage() {
   const [items, setItems] = useState<Promotion[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Promotion | 'new' | null>(null);
+  // The offers being stopped or started: their button is off until the answer, so a double click is one request
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const newest = useRef(0);
+  const inflight = useRef(new Set<string>());
 
   const load = useCallback(() => {
     setError(null);
+    const mine = ++newest.current;
     listPromotions()
-      .then((r) => setItems(r.items))
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .then((r) => mine === newest.current && setItems(r.items))
+      .catch((e: unknown) => mine === newest.current && setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
 
   async function toggle(p: Promotion) {
+    // The ref answers a second click that lands before the page has drawn the disabled button
+    if (inflight.current.has(p.id)) return;
+    inflight.current.add(p.id);
+    setBusy((b) => new Set(b).add(p.id));
+    setActionError(null);
     try {
-      const { id, version, updatedAt: _u, ...rest } = p;
-      await updatePromotion(id, { ...rest, version, archived: !p.archived });
-      load();
+      await archivePromotion(p.id, { version: p.version, archived: !p.archived });
     } catch (e) {
-      setError(errorMessage(e));
+      setActionError(errorMessage(e));
+    } finally {
+      inflight.current.delete(p.id);
+      setBusy((b) => {
+        const rest = new Set(b);
+        rest.delete(p.id);
+        return rest;
+      });
     }
+    load();
   }
 
   const now = Date.now();
-  const running = items?.filter((p) => promotionState(p, now) === 'active').length ?? 0;
+  const rows = (items ?? []).slice().sort((a, b) => Number(isOff(a, now)) - Number(isOff(b, now)));
+  const running = items?.filter((p) => !isOff(p, now) && promotionState(p, now) !== 'scheduled').length ?? 0;
+
+  const columns: SxColumn<Promotion>[] = [
+    {
+      key: 'stamp',
+      header: 'العرض',
+      cell: (p) => (
+        <bdi dir="ltr" className="num" style={{ fontWeight: 700, fontSize: 18 }}>
+          {stampOf(p)}
+        </bdi>
+      ),
+    },
+    {
+      key: 'name',
+      header: 'الاسم',
+      lead: true,
+      cell: (p) => {
+        const other = overlapsWith(p, items ?? [], now);
+        return (
+          <span
+            style={{ display: 'flex', flexDirection: 'column', gap: 2, whiteSpace: 'normal', minWidth: 0 }}
+          >
+            <span>
+              <button
+                type="button"
+                onClick={() => setEditing(p)}
+                style={{ font: 'inherit', fontWeight: 600, textAlign: 'start' }}
+              >
+                {p.name}
+              </button>{' '}
+              {p.couponCode ? (
+                <Badge tone="brand">
+                  كود <bdi dir="ltr">{p.couponCode}</bdi>
+                </Badge>
+              ) : null}
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{promotionSummary(p)}</span>
+            {other ? (
+              <span style={{ fontSize: 12, color: 'var(--warning-ink)' }}>
+                يتقاطع مع «{other.name}»: يُطبَّق الأفضل للزبون.
+              </span>
+            ) : null}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'when',
+      header: 'متى',
+      hideBelowLg: true,
+      cell: (p) => {
+        const soon = endsSoon(p, now);
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, whiteSpace: 'normal' }}>
+            <span>
+              <span className="sr-only">متى: </span>
+              {promotionWhen(p)}
+            </span>
+            {soon && promotionState(p, now) === 'active' ? (
+              <span style={{ fontSize: 12, color: 'var(--warning-ink)', fontWeight: 600 }}>{soon}</span>
+            ) : null}
+          </span>
+        );
+      },
+    },
+    { key: 'state', header: 'الحالة', cell: (p) => <StateBadge state={promotionState(p, now)} /> },
+    {
+      key: 'act',
+      header: <span className="sr-only">إجراء</span>,
+      numeric: true,
+      cell: (p) => (
+        <Button
+          variant="secondary"
+          loading={busy.has(p.id)}
+          disabled={busy.has(p.id)}
+          onClick={() => void toggle(p)}
+        >
+          {p.archived ? 'شغّل' : 'أوقف'}
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <AppShell>
       <title>العروض · SERVA</title>
-      <div className="flex flex-col gap-6">
-        <PageHeader
+      <SalesPage>
+        <PageTop
           title="العروض"
-          description={
+          subtitle={
             items && items.length > 0 ? (
               <>
                 يطبّقها الكاشير بنفسه، مع الإنترنت أو دونه. الفعّالة: <bdi className="num">{running}</bdi> من{' '}
@@ -341,57 +264,48 @@ export function PromotionsPage() {
             </Button>
           }
         />
-
-        {error ? (
-          <div
-            role="alert"
-            className="flex flex-col items-center gap-3 rounded-card border border-line bg-surface px-6 py-10 text-center shadow-e1"
-          >
-            <span className="grid size-12 place-items-center rounded-card bg-danger-soft text-danger-ink">
-              <AlertCircleIcon size={24} />
-            </span>
-            <p className="max-w-md text-ink">{error}</p>
-            <Button variant="secondary" size="sm" icon={<RetryIcon />} onClick={load}>
-              حاول مرة أخرى
-            </Button>
-          </div>
+        {actionError ? (
+          <p role="alert" style={{ color: 'var(--danger-ink)', fontWeight: 600 }}>
+            {actionError}
+          </p>
         ) : null}
-
-        {!items && !error ? <CardsSkeleton /> : null}
-
-        {items && items.length === 0 ? (
-          <EmptyState
-            icon={OfferIcon}
-            title="لا عروض بعد."
-            description="أضف أول عرض: خصم على تصنيف، أو «اشترِ 2 والثالث مجاناً»."
-            action={
-              <Button variant="secondary" icon={<AddIcon />} onClick={() => setEditing('new')}>
-                أضف عرضاً
-              </Button>
+        <Panel title="كل العروض" flush>
+          <SxTable
+            bare
+            caption="العروض"
+            columns={columns}
+            rows={rows}
+            rowKey={(p) => p.id}
+            loading={items === null && !error}
+            {...(error ? { error } : {})}
+            onRetry={load}
+            groupOf={(p) => (isOff(p, now) ? 'off' : 'running')}
+            groupLabel={(key, count) => (
+              <>
+                {GROUPS[key as keyof typeof GROUPS]} · <span className="num">{count}</span>
+              </>
+            )}
+            empty={
+              <EmptyState
+                icon={OfferIcon}
+                title="لا عروض بعد."
+                description="أضف أول عرض: خصم على تصنيف، أو «اشترِ 2 والثالث مجاناً»."
+                action={
+                  <Button variant="secondary" icon={<AddIcon />} onClick={() => setEditing('new')}>
+                    أضف عرضاً
+                  </Button>
+                }
+              />
             }
           />
-        ) : null}
-
-        {items && items.length > 0 ? (
-          <ul aria-label="العروض" className="grid gap-4 lg:grid-cols-2">
-            {items.map((p) => (
-              <PromotionCard
-                key={p.id}
-                promotion={p}
-                now={now}
-                onEdit={() => setEditing(p)}
-                onToggle={() => void toggle(p)}
-              />
-            ))}
-          </ul>
-        ) : null}
-
-        <p className="flex items-start gap-2 text-sm text-ink-muted">
-          <InfoIcon size={16} className="mt-1 text-ink-subtle" />
+        </Panel>
+        <p style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: 'var(--ink-muted)' }}>
+          <InfoIcon size={16} />
           الكاشير يطبّق العرض بنفسه على كل سطر ينطبق عليه، ويختار الأفضل للزبون إن انطبق أكثر من عرض. الخصم
-          الذي يكتبه الكاشير يحلّ محل العرض على ذلك السطر.
+          الذي يكتبه الكاشير يحلّ محل العرض على ذلك السطر. العرض الذي تحفظه يظهر في المتجر الإلكتروني فوراً إن
+          لم تحفظه متوقفاً.
         </p>
-      </div>
+      </SalesPage>
 
       <Sheet
         open={editing !== null}

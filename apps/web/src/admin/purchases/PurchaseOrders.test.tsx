@@ -167,7 +167,7 @@ describe('«طلبيات الشراء»', () => {
       'GET /v1/purchase-orders/o-1': { status: 200, body: ORDER },
       'GET /v1/store': { status: 200, body: { name: 'متجري', taxNumber: null, address: null, phone: null } },
       'GET /v1/suppliers': SUPPLIERS,
-      'GET /v1/purchases': { status: 200, body: { items: [] } },
+      'GET /v1/purchases?limit=50': { status: 200, body: { items: [] } },
       'GET /v1/inventory': { status: 200, body: { items: [], totals: [] } },
       'GET /v1/products/p-1': {
         status: 200,
@@ -264,6 +264,67 @@ describe('«طلبيات الشراء»', () => {
     expect(await screen.findByText('أُغلقت الطلبية ناقصة بما وصل.')).toBeInTheDocument();
   });
 
+  it('asks before cancelling an order, and says a closed-short order was closed short', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/purchase-orders/o-1': { status: 200, body: ORDER },
+      'GET /v1/store': { status: 200, body: { name: 'متجري', taxNumber: null, address: null, phone: null } },
+      'POST /v1/purchase-orders/o-1/status': {
+        status: 200,
+        body: { ...ORDER, status: 'cancelled', version: 3 },
+      },
+    });
+    const { user } = renderApp('/purchase-orders/o-1');
+    await user.click(await screen.findByRole('button', { name: 'ألغِ الطلبية' }));
+    // One click cancels nothing: the owner is asked first
+    expect(requestsTo('POST', '/v1/purchase-orders/o-1/status')).toHaveLength(0);
+    await user.click(await screen.findByRole('button', { name: 'لا، أبقها' }));
+    expect(requestsTo('POST', '/v1/purchase-orders/o-1/status')).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'ألغِ الطلبية' }));
+    await user.click(await screen.findByRole('button', { name: 'نعم، ألغِها' }));
+    await waitFor(() => expect(requestsTo('POST', '/v1/purchase-orders/o-1/status')).toHaveLength(1));
+    expect(await screen.findByText('أُلغيت الطلبية.')).toBeInTheDocument();
+  });
+
+  it('counts the orders on each state and shows a short close as «أُغلقت ناقصة»', async () => {
+    const row = (id: string, number: string, status: string, received: number) => ({
+      id,
+      number,
+      status,
+      date: '2026-11-10',
+      supplierName: 'معمل الأمل',
+      expectedDate: null,
+      totalMinor: 140_000,
+      orderedQty: 9_000,
+      receivedQty: received,
+    });
+    mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: buyer() },
+      'GET /v1/purchase-orders': {
+        status: 200,
+        body: {
+          items: [
+            row('o-1', 'PO-2026-000001', 'sent', 0),
+            row('o-2', 'PO-2026-000002', 'received', 1_000),
+            row('o-3', 'PO-2026-000003', 'received', 9_000),
+          ],
+        },
+      },
+    });
+    const { user } = renderApp('/purchase-orders');
+    const table = await screen.findByRole('table', { name: 'طلبيات الشراء' });
+    expect(await within(table).findByText('أُغلقت ناقصة')).toBeInTheDocument();
+    // «الكل 3 · مُرسلة 1 · مستلمة 2», and a state with no order is not offered
+    expect(screen.getByRole('radio', { name: /^الكل\s*3$/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^مستلمة\s*2$/ })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /ملغاة/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /^مُرسلة\s*1$/ }));
+    expect(within(table).queryByText('PO-2026-000002')).not.toBeInTheDocument();
+    expect(within(table).getByText('PO-2026-000001')).toBeInTheDocument();
+  });
+
   it('tells which waiting order already owes the short items', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
@@ -296,7 +357,7 @@ describe('«طلبيات الشراء»', () => {
       'GET /v1/purchase-orders/o-1': { status: 200, body: ORDER },
       'GET /v1/store': { status: 200, body: { name: 'متجري', taxNumber: null, address: null, phone: null } },
       'GET /v1/suppliers': SUPPLIERS,
-      'GET /v1/purchases': { status: 200, body: { items: [] } },
+      'GET /v1/purchases?limit=50': { status: 200, body: { items: [] } },
       'GET /v1/inventory': { status: 200, body: { items: [], totals: [] } },
       'POST /v1/purchases': (r: MockRequest) => {
         expect(r.body).toMatchObject({ lines: [{ variantId: 'v-1', qty: 2500, costMinor: 25_000 }] });

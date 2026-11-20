@@ -77,14 +77,25 @@ function open(
     // The same person typed twice: «أرشف هذا الزبون المكرر» shows only then
     items: twin ? [current, { ...current, id: 'c-2', balanceMinor: 0 }] : [current],
     totalOwedMinor: Math.max(0, current.balanceMinor),
+    totalCount: twin ? 2 : 1,
+    allCount: twin ? 2 : 1,
+    owingCount: current.balanceMinor > 0 ? 1 : 0,
+    pendingCount: 0,
+    nextCursor: null,
     baseCurrency: 'SYP',
   });
   const mock = mockFetch({
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner(branches) }),
-    'GET /v1/customers': () => ({ status: 200, body: list() }),
+    'GET /v1/customers?limit=50': () => ({ status: 200, body: list() }),
     // The customer page asks whether another customer has the same name
     [`GET /v1/customers?${new URLSearchParams({ q: start.name })}`]: () => ({ status: 200, body: list() }),
+    // The new-customer form looks the typed name and phone up once the typing pauses
+    [`GET /v1/customers?${new URLSearchParams({ q: 'ابو خالد' })}`]: () => ({ status: 200, body: list() }),
+    [`GET /v1/customers?${new URLSearchParams({ q: '٠٩٣٣-١١١-٢٢٢' })}`]: () => ({
+      status: 200,
+      body: list(),
+    }),
     'GET /v1/customers/c-1': () => ({ status: 200, body: current }),
     'POST /v1/customers': (r: MockRequest) => {
       const body = r.body as { name: string };
@@ -282,6 +293,12 @@ describe('«الزبائن»', () => {
   });
 });
 
+/** The day 90 days back, as the page asks for it (the store's day in Damascus) */
+const cutoffDay = () => {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Damascus' }).format(new Date());
+  return new Date(Date.parse(`${today}T00:00:00Z`) - 90 * 86_400_000).toISOString().slice(0, 10);
+};
+
 describe('«الزبائن» by kind of store', () => {
   const withSectors = (sectors: MeResponse['tenant']['sectors']): MeResponse => {
     const me = owner();
@@ -297,7 +314,7 @@ describe('«الزبائن» by kind of store', () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
-      'GET /v1/customers': () => ({ status: 200, body: list() }),
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: list() }),
     });
     const { user } = renderApp('/customers');
     await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
@@ -309,7 +326,7 @@ describe('«الزبائن» by kind of store', () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: withSectors(['medical_supplies']) }),
-      'GET /v1/customers': () => ({ status: 200, body: list() }),
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: list() }),
     });
     const { user } = renderApp('/customers');
     await user.click(await screen.findByRole('button', { name: 'زبون جديد' }));
@@ -317,14 +334,7 @@ describe('«الزبائن» by kind of store', () => {
     expect(await screen.findAllByLabelText('نوع الزبون')).toHaveLength(2);
   });
 
-  it('makes the debt tile follow the 90-day filter like the others, and says so', async () => {
-    const away = {
-      ...detail(),
-      id: 'c-9',
-      name: 'غائب',
-      balanceMinor: 100_000,
-      lastPurchaseDate: '2025-01-01',
-    };
+  it('asks the server for those away 90 days, and says the figures are theirs', async () => {
     const near = {
       ...detail(),
       id: 'c-8',
@@ -332,28 +342,50 @@ describe('«الزبائن» by kind of store', () => {
       balanceMinor: 900_000,
       lastPurchaseDate: '2026-11-10',
     };
-    mockFetch({
+    const away = {
+      ...detail(),
+      id: 'c-9',
+      name: 'غائب',
+      balanceMinor: 100_000,
+      lastPurchaseDate: '2025-01-01',
+    };
+    const page = (items: unknown[], totalOwedMinor: number) => ({
+      items,
+      totalOwedMinor,
+      totalCount: items.length,
+      allCount: 2,
+      owingCount: items.length,
+      pendingCount: 0,
+      nextCursor: null,
+      baseCurrency: 'SYP',
+    });
+    const { requests } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
-      'GET /v1/customers': () => ({
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: page([away, near], 1_000_000) }),
+      [`GET /v1/customers?${new URLSearchParams({ lastBefore: cutoffDay(), limit: '50' })}`]: () => ({
         status: 200,
-        body: { items: [away, near], totalOwedMinor: 1_000_000, baseCurrency: 'SYP' },
+        body: page([away], 100_000),
       }),
     });
     const { user } = renderApp('/customers');
-    const tile = async () => (await screen.findByText('الديون على الزبائن')).closest('div')?.parentElement;
     await screen.findByText('حاضر');
-    const before = (await tile())?.textContent;
     await user.click(await screen.findByRole('checkbox', { name: 'لم يزر منذ 90 يوماً' }));
     expect(await screen.findByText('الأرقام أدناه لمن لم يزر منذ 90 يوماً فقط.')).toBeInTheDocument();
-    expect((await tile())?.textContent).not.toBe(before);
+    await waitFor(() => expect(screen.queryByText('حاضر')).not.toBeInTheDocument());
+    expect(screen.getByText('غائب')).toBeInTheDocument();
+    expect(requests.some((r) => r.path.includes('lastBefore='))).toBe(true);
   });
 
   it('says so, not «لا زبائن بعد», when nobody has been away for 90 days', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: withSectors(['clothing']) }),
-      'GET /v1/customers': () => ({ status: 200, body: { ...list(), items: [] } }),
+      'GET /v1/customers?limit=50': () => ({ status: 200, body: { ...list(), items: [] } }),
+      [`GET /v1/customers?${new URLSearchParams({ lastBefore: cutoffDay(), limit: '50' })}`]: () => ({
+        status: 200,
+        body: { ...list(), items: [] },
+      }),
     });
     const { user } = renderApp('/customers');
     await user.click(await screen.findByRole('checkbox', { name: 'لم يزر منذ 90 يوماً' }));

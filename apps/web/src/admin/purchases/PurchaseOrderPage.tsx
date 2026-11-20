@@ -5,7 +5,6 @@ import {
   orderLineCost,
   orderLineRemaining,
   PURCHASE_ORDER_NEXT,
-  PURCHASE_ORDER_STATUS_LABELS,
   purchaseOrderOpen,
   purchaseOrderText,
   type PurchaseOrderDetail,
@@ -23,9 +22,7 @@ import {
   DataTable,
   Dialog,
   formatQuantity,
-  ListIcon,
   Money,
-  PageHeader,
   PrintIcon,
   ProgressBar,
   SkeletonText,
@@ -35,13 +32,15 @@ import {
 import { useMe } from '../../auth/useAuth';
 import { PurchaseOrderA4 } from '../../lib/a4/documents';
 import { ReportScreen } from '../reports/parts';
-import { errorMessage } from '../../lib/api';
+import { ApiError, errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { getStore } from '../store/api';
-import { today } from './api';
+import { storeToday } from './api';
 import { getOrder, moveOrder } from './orderApi';
-import { ORDER_TONES } from './PurchaseOrdersPage';
+import { OrderPill } from './pui';
+import { PageTop, SalesPage } from '../sales/ui';
+import './purchases.css';
 
 /** The wa.me address to chat with a supplier, or the plain one that lets the owner pick a contact */
 export function orderWhatsappLink(phone: string | null, text: string): string {
@@ -67,13 +66,22 @@ export function PurchaseOrderPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   // Asked after WhatsApp opens («هل أُرسلت؟») and before an order is closed short
-  const [asking, setAsking] = useState<'sent' | 'close' | null>(null);
+  const [asking, setAsking] = useState<'sent' | 'close' | 'cancel' | null>(null);
 
   useEffect(() => {
-    getOrder(id)
-      .then(setOrder)
-      .catch((e: unknown) => setError(errorMessage(e)));
-    void getStore().then(setStore, () => undefined);
+    let alive = true;
+    setOrder(null);
+    getOrder(id).then(
+      (o) => alive && setOrder(o),
+      (e: unknown) => alive && setError(errorMessage(e)),
+    );
+    void getStore().then(
+      (s) => alive && setStore(s),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
   }, [id]);
 
   async function step(to: 'sent' | 'received' | 'cancelled', message: string) {
@@ -84,6 +92,14 @@ export function PurchaseOrderPage() {
       setOrder(await moveOrder(order.id, to, order.version));
       setNotice(message);
     } catch (e) {
+      // Another tab (or another person) moved the order first: read it again so the next press works
+      if (e instanceof ApiError && (e.code === 'stale_version' || e.status === 409)) {
+        try {
+          setOrder(await getOrder(order.id));
+        } catch {
+          /* the message below still says what happened */
+        }
+      }
       setError(errorMessage(e));
     } finally {
       setBusy(false);
@@ -110,7 +126,9 @@ export function PurchaseOrderPage() {
   const percent =
     order && order.orderedQty > 0 ? Math.round((order.receivedQty / order.orderedQty) * 100) : 0;
   const doneLines = order ? order.lines.filter((l) => orderLineRemaining(l) === 0).length : 0;
-  const late = Boolean(order && open && order.expectedDate && order.expectedDate < today());
+  const late = Boolean(
+    order && open && order.expectedDate && order.expectedDate < storeToday(me.tenant.timezone),
+  );
 
   const columns: DataColumn<PurchaseOrderLine>[] = [
     { key: 'name', header: 'الصنف', cell: (l) => <span className="font-semibold">{l.name}</span> },
@@ -174,22 +192,20 @@ export function PurchaseOrderPage() {
       access={['purchases.manage']}
       title={order ? `طلبية ${order.number}` : 'طلبية شراء'}
     >
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
-          title={
+      <SalesPage className="flex w-full flex-col gap-6">
+        <PageTop
+          title={order ? `طلبية ${order.number}` : 'طلبية شراء'}
+          subtitle={
             order ? (
-              <span className="flex flex-wrap items-center gap-3">
-                <bdi dir="ltr" className="num">
-                  {order.number}
-                </bdi>
-                <Badge tone={ORDER_TONES[order.status]}>{PURCHASE_ORDER_STATUS_LABELS[order.status]}</Badge>
+              <span className="flex flex-wrap items-center gap-2">
+                <span>إلى {order.supplierName}</span>
+                <OrderPill
+                  status={order.status}
+                  short={order.status === 'received' && order.receivedQty < order.orderedQty}
+                />
               </span>
-            ) : (
-              'طلبية شراء'
-            )
+            ) : undefined
           }
-          description={order ? `إلى ${order.supplierName}` : undefined}
-          icon={<ListIcon />}
           actions={
             <Link
               to="/purchase-orders"
@@ -276,11 +292,7 @@ export function PurchaseOrderPage() {
                     </Button>
                   ) : null}
                   {next.includes('cancelled') ? (
-                    <Button
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => void step('cancelled', 'أُلغيت الطلبية.')}
-                    >
+                    <Button variant="ghost" disabled={busy} onClick={() => setAsking('cancel')}>
                       ألغِ الطلبية
                     </Button>
                   ) : null}
@@ -307,6 +319,30 @@ export function PurchaseOrderPage() {
                   </Button>
                   <Button variant="secondary" onClick={() => setAsking(null)}>
                     لا
+                  </Button>
+                </div>
+              </Dialog>
+            ) : null}
+            {asking === 'cancel' ? (
+              <Dialog
+                open
+                onOpenChange={(o) => {
+                  if (!o) setAsking(null);
+                }}
+                title="إلغاء الطلبية؟"
+                description="الطلبية الملغاة لا ترجع. إن كان فيها ما وصل فاغلقها بما وصل بدل أن تلغيها."
+              >
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => {
+                      setAsking(null);
+                      void step('cancelled', 'أُلغيت الطلبية.');
+                    }}
+                  >
+                    نعم، ألغِها
+                  </Button>
+                  <Button variant="secondary" onClick={() => setAsking(null)}>
+                    لا، أبقها
                   </Button>
                 </div>
               </Dialog>
@@ -387,7 +423,7 @@ export function PurchaseOrderPage() {
             />
           </PrintSheet>
         ) : null}
-      </div>
+      </SalesPage>
     </ReportScreen>
   );
 }

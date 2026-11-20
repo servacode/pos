@@ -1,20 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CatalogGate } from './CatalogGate';
 import type { PriceChange, PriceChangeSource } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  DataTable,
-  EmptyState,
-  Money,
-  PageHeader,
-  PercentIcon,
-  Select,
-  TextField,
-  type DataColumn,
-} from '@serva/ui';
+import { Alert, Button, EmptyState, PercentIcon, Select, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
@@ -22,6 +10,17 @@ import { zonedDateTime } from '../../lib/dates';
 import { DateField } from '../../lib/DateField';
 import { downloadCsv } from '../exportCsv';
 import { listProducts } from '../catalog/api';
+import { useIsPhone } from '../../lib/useIsPhone';
+import {
+  Amt,
+  DownloadGlyph,
+  PageTop,
+  Panel,
+  SalesPage,
+  StatusPill,
+  SxTable,
+  type SxColumn,
+} from '../sales/ui';
 
 /**
  * «سجل تغيير الأسعار»: who changed a price, when, from what to what and from where. It reads the
@@ -87,13 +86,43 @@ const getHistory = (query: { productId: string; from: string; to: string }) => {
 export function PriceHistoryPage() {
   return (
     <AppShell>
-      <PriceHistory />
+      <CatalogGate>
+        <PriceHistory />
+      </CatalogGate>
     </AppShell>
   );
 }
 
+/** «▲ 100» or «▼ 300» between the old and the new price, with its direction in words for a screen reader */
+function Delta({ row }: { row: PriceChange }) {
+  if (row.oldMinor === null || row.newMinor === null || !row.currency) return null;
+  const d = row.newMinor - row.oldMinor;
+  if (d === 0) return null;
+  return (
+    <StatusPill kind={d > 0 ? 'warn' : 'ok'}>
+      <span className="sr-only">{d > 0 ? 'ارتفع' : 'انخفض'}</span>
+      <span aria-hidden="true">{d > 0 ? '▲' : '▼'}</span>
+      <Amt minor={Math.abs(d)} currency={row.currency} />
+    </StatusPill>
+  );
+}
+
+function PriceCell({
+  minor,
+  currency,
+  strong,
+}: {
+  minor: number | null;
+  currency: PriceChange['currency'];
+  strong?: boolean;
+}) {
+  if (minor === null || !currency) return <span className="sx-z sx-n">—</span>;
+  return <Amt minor={minor} currency={currency} className={strong ? 'font-bold' : 'sx-mute'} />;
+}
+
 function PriceHistory() {
   const me = useMe();
+  const phone = useIsPhone();
   const digits = me.settings.numberFormat;
   const [items, setItems] = useState<PriceChange[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -102,12 +131,19 @@ function PriceHistory() {
   const [search, setSearch] = useState('');
   const [products, setProducts] = useState<{ id: string; nameAr: string }[]>([]);
   const [productId, setProductId] = useState('');
+  // A slower answer to an older filter never replaces the answer to the latest one
+  const latest = useRef(0);
 
   const load = useCallback(() => {
+    const mine = ++latest.current;
     setError(null);
     getHistory({ productId, from, to })
-      .then((r) => setItems(r.items))
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .then((r) => {
+        if (mine === latest.current) setItems(r.items);
+      })
+      .catch((e: unknown) => {
+        if (mine === latest.current) setError(errorMessage(e));
+      });
   }, [productId, from, to]);
   useEffect(load, [load]);
 
@@ -117,112 +153,65 @@ function PriceHistory() {
       setProducts([]);
       return;
     }
+    let live = true;
     const timer = setTimeout(() => {
       listProducts({ q: search.trim(), limit: 8 })
-        .then((r) => setProducts(r.items.map((p) => ({ id: p.id, nameAr: p.nameAr }))))
-        .catch(() => setProducts([]));
+        .then((r) => {
+          if (live) setProducts(r.items.map((p) => ({ id: p.id, nameAr: p.nameAr })));
+        })
+        .catch(() => {
+          if (live) setProducts([]);
+        });
     }, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
   }, [search]);
 
-  const columns = useMemo<DataColumn<PriceChange>[]>(
+  const tz = me.tenant.timezone;
+  const when = useCallback((r: PriceChange) => zonedDateTime(r.at, tz, digits), [tz, digits]);
+
+  const columns = useMemo<SxColumn<PriceChange>[]>(
     () => [
-      {
-        key: 'at',
-        header: 'التاريخ',
-        cell: (r) => (
-          <span className="whitespace-nowrap">{zonedDateTime(r.at, me.tenant.timezone, digits)}</span>
-        ),
-      },
+      { key: 'at', header: 'التاريخ', cell: (r) => <span className="whitespace-nowrap">{when(r)}</span> },
       { key: 'who', header: 'من غيّر', cell: (r) => r.userName ?? '—' },
-      {
-        key: 'piece',
-        header: 'القطعة',
-        cell: (r) =>
-          r.productName ? (
-            <span className="font-semibold whitespace-nowrap">
-              {r.productName}
-              {r.variantLabel ? <span className="text-ink-muted"> · {r.variantLabel}</span> : null}
-            </span>
-          ) : (
-            // An old summary row (before each piece was logged on its own): its details were never kept
-            <details className="text-sm">
-              <summary className="cursor-pointer rounded-small text-ink-muted hover:text-ink">
-                {properSigns(r.note)}
-              </summary>
-              <p className="pt-1 text-xs text-ink-subtle">
-                تغيير قديم: التفاصيل غير محفوظة. التغييرات الجديدة تُسجَّل لكل صنف على حدة.
-              </p>
-            </details>
-          ),
-      },
+      { key: 'piece', header: 'القطعة', lead: true, cell: (r) => <Piece row={r} /> },
       {
         key: 'old',
         header: 'قبل',
         numeric: true,
-        cell: (r) =>
-          r.oldMinor === null || !r.currency ? (
-            <span className="text-ink-subtle">—</span>
-          ) : (
-            <Money minor={r.oldMinor} currency={r.currency} className="text-ink-muted" />
-          ),
+        cell: (r) => <PriceCell minor={r.oldMinor} currency={r.currency} />,
       },
       {
         key: 'new',
         header: 'بعد',
         numeric: true,
-        cell: (r) =>
-          r.newMinor === null || !r.currency ? (
-            <span className="text-ink-subtle">—</span>
-          ) : (
-            <Money minor={r.newMinor} currency={r.currency} className="font-bold text-ink" />
-          ),
+        cell: (r) => <PriceCell minor={r.newMinor} currency={r.currency} strong />,
       },
+      { key: 'delta', header: 'الفرق', numeric: true, cell: (r) => <Delta row={r} /> },
       {
         key: 'source',
         header: 'المصدر',
-        cell: (r) => <Badge tone={r.oldMinor === null ? 'neutral' : 'brand'}>{SOURCE_TEXT[r.source]}</Badge>,
+        cell: (r) => <span className="sx-mute">{SOURCE_TEXT[r.source]}</span>,
       },
     ],
-    [me.tenant.timezone, digits],
+    [when],
   );
+
+  const filtered = Boolean(from || to || productId);
 
   return (
     <>
       <title>سجل تغيير الأسعار · SERVA</title>
-      <div className="flex flex-col gap-6">
-        <PageHeader
-          icon={<PercentIcon />}
+      <SalesPage>
+        <PageTop
           title="سجل تغيير الأسعار"
-          description="من غيّر سعراً ومتى ومن كم إلى كم ومن أين، من تعديل المنتج أو ملف الأسعار أو التغيير الجماعي."
-        />
-        {error ? <Alert tone="error">{error}</Alert> : null}
-        <Card className="flex flex-col gap-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <DateField label="من تاريخ" value={from} onChange={setFrom} />
-            <DateField label="حتى تاريخ" value={to} onChange={setTo} />
-            <TextField
-              label="منتج معيّن (ابحث بالاسم)"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                if (!e.target.value) setProductId('');
-              }}
-            />
-            {products.length > 0 ? (
-              <Select label="اختر المنتج" value={productId} onChange={(e) => setProductId(e.target.value)}>
-                <option value="">كل المنتجات</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nameAr}
-                  </option>
-                ))}
-              </Select>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+          subtitle="من غيّر سعراً ومتى ومن كم إلى كم ومن أين، من تعديل المنتج أو ملف الأسعار أو التغيير الجماعي."
+          actions={
             <Button
               variant="secondary"
+              icon={<DownloadGlyph />}
               disabled={!items || items.length === 0}
               onClick={() => {
                 if (items) downloadCsv('سجل-الأسعار', HISTORY_HEADERS, historyRows(items));
@@ -230,37 +219,113 @@ function PriceHistory() {
             >
               صدّر إلى إكسل
             </Button>
-            {from || to || productId ? (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setFrom('');
-                  setTo('');
-                  setProductId('');
-                  setSearch('');
-                }}
-              >
-                امسح الفلاتر
-              </Button>
-            ) : null}
-          </div>
-        </Card>
-        {items && items.length === 0 ? (
-          <EmptyState
-            icon={PercentIcon}
-            title="لا تغييرات في الأسعار هنا."
-            description="كل تغيير تُجريه من صفحة المنتج أو من ملف الأسعار أو بالتغيير الجماعي يظهر في هذا السجل."
+          }
+        />
+        {error ? <Alert tone="error">{error}</Alert> : null}
+        <div className="sx-toolbar">
+          <DateField label="من تاريخ" value={from} onChange={setFrom} />
+          <DateField label="حتى تاريخ" value={to} onChange={setTo} />
+          <TextField
+            label="منتج معيّن (ابحث بالاسم)"
+            placeholder="اكتب حرفين من الاسم"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              if (!e.target.value) setProductId('');
+            }}
           />
+          {products.length > 0 ? (
+            <Select label="اختر المنتج" value={productId} onChange={(e) => setProductId(e.target.value)}>
+              <option value="">كل المنتجات</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nameAr}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          {filtered ? (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setFrom('');
+                setTo('');
+                setProductId('');
+                setSearch('');
+              }}
+            >
+              امسح الفلاتر
+            </Button>
+          ) : null}
+        </div>
+        {phone && items && items.length > 0 ? (
+          <ul aria-label="تغييرات الأسعار" className="sx-cards">
+            {items.map((r) => (
+              <li key={r.id} className="sx-icard" style={{ cursor: 'default' }}>
+                <span style={{ gridColumn: 1, gridRow: 1, minWidth: 0 }}>
+                  <Piece row={r} />
+                </span>
+                <span className="st">
+                  <Delta row={r} />
+                </span>
+                <span className="d">{when(r)}</span>
+                <span className="t">
+                  {r.oldMinor !== null && r.newMinor !== null && r.currency ? (
+                    <>
+                      <Amt minor={r.oldMinor} currency={r.currency} className="sx-mute" />
+                      {' ← '}
+                      <Amt minor={r.newMinor} currency={r.currency} />
+                    </>
+                  ) : null}
+                </span>
+                <span className="x">
+                  {r.userName ?? '—'} · {SOURCE_TEXT[r.source]}
+                </span>
+              </li>
+            ))}
+          </ul>
         ) : (
-          <DataTable
-            caption="تغييرات الأسعار"
-            columns={columns}
-            rows={items ?? []}
-            rowKey={(r) => r.id}
-            loading={items === null && !error}
-          />
+          <Panel title="التغييرات" aside={items ? `${String(items.length)} تغيير` : undefined} flush>
+            <SxTable
+              bare
+              caption="تغييرات الأسعار"
+              columns={columns}
+              rows={items ?? []}
+              rowKey={(r) => r.id}
+              loading={items === null && !error}
+              empty={
+                <EmptyState
+                  icon={PercentIcon}
+                  title="لا تغييرات في الأسعار هنا."
+                  description="كل تغيير تُجريه من صفحة المنتج أو من ملف الأسعار أو بالتغيير الجماعي يظهر في هذا السجل."
+                />
+              }
+            />
+          </Panel>
         )}
-      </div>
+      </SalesPage>
     </>
+  );
+}
+
+function Piece({ row }: { row: PriceChange }) {
+  if (row.productName) {
+    return (
+      <span className="font-semibold">
+        {row.productName}
+        {row.variantLabel ? <span className="sx-mute"> · {row.variantLabel}</span> : null}
+      </span>
+    );
+  }
+  // An old summary row (before each piece was logged on its own): its details were never kept
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer rounded-small text-ink-muted hover:text-ink">
+        {properSigns(row.note)}
+      </summary>
+      <p className="pt-1 text-xs text-ink-subtle">
+        تغيير قديم: التفاصيل غير محفوظة. التغييرات الجديدة تُسجَّل لكل صنف على حدة.
+      </p>
+    </details>
   );
 }

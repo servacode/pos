@@ -21,7 +21,10 @@ function owner(): MeResponse {
   const base = makeMe();
   return {
     ...base,
-    user: { ...base.user, permissions: [...base.user.permissions, 'settings.manage', 'customers.view'] },
+    user: {
+      ...base.user,
+      permissions: [...base.user.permissions, 'settings.manage', 'customers.view', 'customers.manage'],
+    },
   };
 }
 

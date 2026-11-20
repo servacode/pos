@@ -10,6 +10,8 @@ import {
   type OnlineStoreSettings,
   type ProductTexts,
   type ShopCoupon,
+  type ShopQuote,
+  type shopQuoteInput,
   type StockAlert,
   type onlineOrderDeliveryInput,
   type productImageInput,
@@ -37,6 +39,8 @@ import {
   couponRule,
   fieldError,
   getOnlineStore,
+  priceLines,
+  refusal,
   notFound,
   orderChanged,
   orderOf,
@@ -64,7 +68,38 @@ export function shopCoupon(db: Database, slug: string, code: string): Promise<Sh
         name: rule.name,
         // A price-ish number only where the shop shows prices
         percentBp: store.show_prices && rule.kind === 'percent' ? rule.percentBp : null,
+        kind: rule.kind === 'buy_get' ? 'buy_get' : 'percent',
       };
+    }),
+  );
+}
+
+/**
+ * What the cart costs as the order will be priced: the shop's offers taken off, then the code. The
+ * code takes the better of its own percent and the offer already on a line (never both), so the
+ * figure shown in the cart is the one the order carries.
+ */
+export function shopQuote(
+  db: Database,
+  slug: string,
+  input: z.output<typeof shopQuoteInput>,
+): Promise<ShopQuote> {
+  return tenantOf(db, slug).then((tenantId) =>
+    withTenant(db, tenantId, async (tx) => {
+      const store = await storeOf(tx, tenantId);
+      if (!store.show_prices) return { subtotalMinor: 0, discountMinor: 0, totalMinor: 0, showPrices: false };
+      const base = store.base as CurrencyCode;
+      let coupon: string | null = null;
+      if (input.coupon) {
+        const rule = await couponRule(tx, input.coupon);
+        if (!rule?.couponCode) throw refusal('coupon', COUPON_BAD);
+        coupon = rule.couponCode;
+      }
+      const plain = await priceLines(tx, base, input.lines, false);
+      const subtotalMinor = plain.reduce((n, l) => n + l.totalMinor, 0);
+      const withCode = coupon ? await priceLines(tx, base, input.lines, false, coupon) : plain;
+      const totalMinor = withCode.reduce((n, l) => n + l.totalMinor, 0);
+      return { subtotalMinor, discountMinor: subtotalMinor - totalMinor, totalMinor, showPrices: true };
     }),
   );
 }
@@ -181,7 +216,7 @@ export function setOrderDelivery(
   meta: RequestMeta,
 ): Promise<OnlineOrder> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'customers.view');
+    await requirePermission(tx, auth.userId, 'customers.manage');
     const [row] = await tx
       .select()
       .from(onlineOrders)
@@ -243,7 +278,7 @@ export function setOrderDelivery(
 /** The orders out for delivery, by courier: the cash each is expected to bring back. */
 export function codSummary(db: Database, auth: AccessClaims): Promise<CodSummary> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'customers.view');
+    await requirePermission(tx, auth.userId, 'customers.manage');
     const rows = await tx
       .select()
       .from(onlineOrders)

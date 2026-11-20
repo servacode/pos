@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   addDays,
   businessDateOf,
@@ -18,12 +18,12 @@ import {
   type PurchaseOrderUpdateInput,
 } from '@serva/core';
 import { branches, purchaseOrders, suppliers, withTenant, type Database, type Transaction } from '@serva/db';
-import { requirePermission } from '../auth/permissions';
+import { inScope, requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
-import { nextNumber } from './purchases';
+import { documentLock, nextNumber } from './purchases';
 import { OPEN_REQUEST, UNSELLABLE_CTE } from './shortages';
 
 /**
@@ -168,15 +168,23 @@ export function createPurchaseOrder(
 ): Promise<PurchaseOrderDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'purchases.manage');
+    // Round 44: an id the form made posts once; the same id again answers the order already made
+    if (input.id) {
+      await documentLock(tx, 'purchase_order', input.id);
+      const [again] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, input.id));
+      if (again) return detailOf(tx, again);
+    }
     const day = await today(tx);
     if (input.expectedDate && input.expectedDate < day) {
       throw invalid({ expectedDate: 'موعد التسليم قبل اليوم' });
     }
     const { branchId, lines, totalMinor } = await checked(tx, input);
+    await requirePermission(tx, auth.userId, 'purchases.manage', branchId);
     const number = await nextNumber(tx, auth.tenantId, 'PO', day);
     const [made] = await tx
       .insert(purchaseOrders)
       .values({
+        ...(input.id ? { id: input.id } : {}),
         tenantId: auth.tenantId,
         number,
         supplierId: input.supplierId,
@@ -212,9 +220,9 @@ export function updatePurchaseOrder(
   meta: RequestMeta,
 ): Promise<PurchaseOrderDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const [current] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
-    if (!current) throw notFound();
+    if (!current || !inScope(scope, current.branchId)) throw notFound();
     if (current.version !== input.version) throw stale();
     if (current.status !== 'draft' && current.status !== 'sent') {
       throw new AppError(409, 'conflict', 'لا تُعدَّل طلبية استُلم منها شيء أو أُغلقت.');
@@ -262,9 +270,9 @@ export function movePurchaseOrder(
   meta: RequestMeta,
 ): Promise<PurchaseOrderDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const [current] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for('update');
-    if (!current) throw notFound();
+    if (!current || !inScope(scope, current.branchId)) throw notFound();
     if (current.version !== version) throw stale();
     const from = current.status as PurchaseOrderStatus;
     if (!PURCHASE_ORDER_NEXT[from].includes(to)) {
@@ -297,9 +305,9 @@ export function readPurchaseOrder(
   id: string,
 ): Promise<PurchaseOrderDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const [row] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
-    if (!row) throw notFound();
+    if (!row || !inScope(scope, row.branchId)) throw notFound();
     return detailOf(tx, row);
   });
 }
@@ -310,8 +318,9 @@ export function listPurchaseOrders(
   query: { status?: PurchaseOrderStatus | undefined; supplierId?: string | undefined },
 ): Promise<PurchaseOrderListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const conditions = [sql`true`];
+    if (!scope.all) conditions.push(inArray(purchaseOrders.branchId, [...scope.branchIds]));
     if (query.status) conditions.push(eq(purchaseOrders.status, query.status));
     if (query.supplierId) conditions.push(eq(purchaseOrders.supplierId, query.supplierId));
     const zone = await zoneOf(tx);
@@ -389,6 +398,7 @@ export function suggestPurchaseOrder(
       lastbuy as (
         select distinct on (pl.variant_id) pl.variant_id, p.supplier_id, pl.cost_minor, pl.qty
         from purchase_lines pl join purchases p on p.tenant_id = pl.tenant_id and p.id = pl.purchase_id
+        where not exists (select 1 from purchase_reversals rv where rv.tenant_id = p.tenant_id and rv.purchase_id = p.id)
         order by pl.variant_id, p.business_date desc, p.created_at desc, pl.line_no desc
       ),
       asked as (
@@ -415,6 +425,7 @@ export function suggestPurchaseOrder(
                 select pl.cost_minor * 1000.0 / pl.qty as c from purchase_lines pl
                 join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
                 where pl.variant_id = v.id and pl.qty > 0 and pl.cost_minor > 0
+                and not exists (select 1 from purchase_reversals rv where rv.tenant_id = pu.tenant_id and rv.purchase_id = pu.id)
                 order by pu.business_date desc, pu.created_at desc, pl.line_no desc limit 5) t) as typical_unit,
              pr.price_minor::text as price
       from variants v

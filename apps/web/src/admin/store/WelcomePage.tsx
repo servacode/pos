@@ -17,10 +17,10 @@ import {
   SkeletonText,
   type Icon,
 } from '@serva/ui';
-import { useAuth } from '../../auth/useAuth';
+import { useAuth, useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
-import { listProducts } from '../catalog/api';
+import { getHomeSummary } from '../../pages/homeSummary';
 import { listDevices } from '../devices/api';
 import { listStaff } from '../staff/api';
 import { getStore, saveOnboarding, saveProfile } from './api';
@@ -97,14 +97,17 @@ type DoneKey = 'products' | 'staff' | 'device' | 'sale';
  * till code, an approved device, a first invoice). A task that cannot be read (no permission, offline)
  * stays unticked. Display only.
  */
-function useDone(active: boolean): ReadonlySet<DoneKey> {
+function useDone(active: boolean, myId: string): { done: ReadonlySet<DoneKey>; ready: boolean } {
   const [done, setDone] = useState<ReadonlySet<DoneKey>>(new Set());
+  const [settled, setSettled] = useState(0);
   useEffect(() => {
     if (!active) return;
     let alive = true;
     const checks: [DoneKey, () => Promise<boolean>][] = [
-      ['products', async () => (await listProducts({ limit: 1 })).items.length > 0],
-      ['staff', async () => (await listStaff()).staff.some((m) => m.hasPin && !m.isOwner)],
+      // Goods only: the service the clothing pack adds on its own (تقصير) is not «أضف أصنافك»
+      ['products', async () => ((await getHomeSummary()).photos?.goodsCount ?? 0) > 0],
+      // The card opens the signed-in person's own PIN page: it is ticked when that person has one
+      ['staff', async () => (await listStaff()).staff.some((m) => m.id === myId && m.hasPin)],
       ['device', async () => (await listDevices()).devices.some((d) => d.status === 'active')],
       [
         'sale',
@@ -116,13 +119,14 @@ function useDone(active: boolean): ReadonlySet<DoneKey> {
         .then((yes) => {
           if (alive && yes) setDone((all) => new Set(all).add(key));
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => alive && setSettled((n) => n + 1));
     }
     return () => {
       alive = false;
     };
-  }, [active]);
-  return done;
+  }, [active, myId]);
+  return { done, ready: settled >= 4 };
 }
 
 /** The wizard's frame while the store loads: the step list and a card of grey lines. */
@@ -155,7 +159,9 @@ export function WelcomePage() {
   const [error, setError] = useState<string | null>(null);
   const [sectors, setSectors] = useState<SectorKey[]>([]);
   const [busy, setBusy] = useState(false);
-  const done = useDone(step === 3);
+  const me = useMe();
+  const { done, ready } = useDone(step === 3, me.user.id);
+  const allDone = ready && done.size === 4;
 
   useEffect(() => {
     let alive = true;
@@ -239,10 +245,12 @@ export function WelcomePage() {
         <div className="flex flex-col gap-8">
           <WizardSteps current={step} />
           <div className="flex flex-col gap-2">
-            <p className="text-sm font-semibold text-brand-ink">
-              الخطوة <span className="num">{step + 1}</span> من{' '}
-              <span className="num">{ONBOARDING_STEPS}</span>
-            </p>
+            {step < 3 ? (
+              <p className="text-sm font-semibold text-brand-ink">
+                الخطوة <span className="num">{step + 1}</span> من{' '}
+                <span className="num">{ONBOARDING_STEPS}</span>
+              </p>
+            ) : null}
             <h1 className="text-3xl font-bold text-ink">{TITLES[step]}</h1>
             <p className="text-ink-muted">{STEPS[step]?.description}</p>
           </div>
@@ -304,6 +312,8 @@ export function WelcomePage() {
                 title="أضف أصنافك"
                 text="بالاسم والسعر والباركود"
                 done={done.has('products')}
+                pending={ready && !done.has('products')}
+                compact={allDone}
               />
               <NextStep
                 icon={KeyIcon}
@@ -311,6 +321,8 @@ export function WelcomePage() {
                 title="اختر رمز الدخول للكاشير"
                 text="4 أو 6 أرقام"
                 done={done.has('staff')}
+                pending={ready && !done.has('staff')}
+                compact={allDone}
               />
               <NextStep
                 icon={DeviceIcon}
@@ -318,6 +330,8 @@ export function WelcomePage() {
                 title="اربط جهاز الكاشير"
                 text="جوال أو تابلت أو كمبيوتر متصل بالإنترنت"
                 done={done.has('device')}
+                pending={ready && !done.has('device')}
+                compact={allDone}
               />
               <NextStep
                 icon={CashIcon}
@@ -325,6 +339,8 @@ export function WelcomePage() {
                 title="أول عملية بيع"
                 text="بعها من الكاشير وتراها هنا في الفواتير"
                 done={done.has('sale')}
+                pending={ready && !done.has('sale')}
+                compact={allDone}
               />
             </ul>
             <Card className="flex flex-wrap items-center justify-between gap-4">
@@ -332,7 +348,11 @@ export function WelcomePage() {
                 <IconChip tone="success">
                   <CheckIcon />
                 </IconChip>
-                <p className="text-ink">تقدر تبدأ البيع الآن، وترجع لهذه الخطوات متى شئت.</p>
+                <p className="text-ink">
+                  {allDone
+                    ? 'كل شيء جاهز. افتح الكاشير وابدأ البيع.'
+                    : 'تقدر تبدأ البيع الآن، وترجع لهذه الخطوات متى شئت.'}
+                </p>
               </div>
               <Button size="lg" onClick={() => void finish()} loading={busy} className="max-sm:w-full">
                 ابدأ العمل
@@ -358,7 +378,13 @@ function NextStep({
   title,
   text,
   done = false,
+  pending = false,
+  compact = false,
 }: {
+  /** The check ran and the task is not done: an amber «لم يتم» says so */
+  pending?: boolean;
+  /** Everything is done: the tiles shrink to a quiet row */
+  compact?: boolean;
   icon: Icon;
   to: string;
   title: string;
@@ -370,7 +396,10 @@ function NextStep({
     <li className="flex">
       <Link
         to={to}
-        className="group/next flex w-full flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5 sm:p-6"
+        className={cn(
+          'group/next flex w-full flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5 sm:p-6',
+          compact && 'gap-2 p-3 sm:p-4',
+        )}
       >
         <span className="flex items-center justify-between gap-3">
           <IconChip size="lg" tone={done ? 'success' : undefined}>
@@ -383,8 +412,13 @@ function NextStep({
           <span className="font-semibold text-ink">
             {title}
             {done ? <span className="ms-2 text-sm font-semibold text-success-ink">تمّ</span> : null}
+            {pending ? (
+              <span className="ms-2 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-ink">
+                لم يتم
+              </span>
+            ) : null}
           </span>
-          <span className="text-sm text-ink-muted">{text}</span>
+          {compact ? null : <span className="text-sm text-ink-muted">{text}</span>}
         </span>
       </Link>
     </li>

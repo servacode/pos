@@ -88,7 +88,8 @@ export function CustomerMoneyDialog({
   onCancel,
 }: {
   kind: 'payment' | 'opening';
-  customer: { id: string; name: string };
+  /** `balanceMinor`: what they owe now, to ask before a payment that is more than that */
+  customer: { id: string; name: string; balanceMinor?: number };
   /** Called once the posted result is shown and closed */
   onDone: (result: CustomerMoneyResult) => void;
   onCancel: () => void;
@@ -104,6 +105,7 @@ export function CustomerMoneyDialog({
   const [date, setDate] = useState(today);
   const [branchId, setBranchId] = useState(() => defaultPaymentBranch(me));
   const [saving, setSaving] = useState(false);
+  const [askOver, setAskOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [result, setResult] = useState<CustomerMoneyResult | null>(null);
@@ -122,6 +124,12 @@ export function CustomerMoneyDialog({
 
   async function submit() {
     if (!ready || amountMinor === null) return;
+    // A typo (an extra zero) is a real risk: more than they owe is asked about once, and says what follows
+    const owed = Math.max(0, customer.balanceMinor ?? 0);
+    if (payment && customer.balanceMinor !== undefined && amountMinor > owed && !askOver) {
+      setAskOver(true);
+      return;
+    }
     setSaving(true);
     setError(null);
     setFields({});
@@ -159,7 +167,16 @@ export function CustomerMoneyDialog({
       >
         <div className="flex flex-col gap-4">
           <p className="text-ink">
-            صار على الزبون <Money minor={result.balanceAfterMinor} currency={result.baseCurrency} />.
+            {result.balanceAfterMinor < 0 ? (
+              <>
+                صار له عند المتجر{' '}
+                <Money minor={Math.abs(result.balanceAfterMinor)} currency={result.baseCurrency} />.
+              </>
+            ) : (
+              <>
+                صار على الزبون <Money minor={result.balanceAfterMinor} currency={result.baseCurrency} />.
+              </>
+            )}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <Button variant="secondary" icon={<PrintIcon />} onClick={() => print('A4')}>
@@ -205,9 +222,19 @@ export function CustomerMoneyDialog({
           dir="ltr"
           autoFocus
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setAskOver(false);
+          }}
           error={fields.amountMinor ?? (amount.trim() && amountMinor === null ? 'مبلغ غير صالح' : undefined)}
         />
+        {askOver ? (
+          <Alert tone="warning">
+            المبلغ أكبر من المستحق على الزبون (
+            <Money minor={Math.max(0, customer.balanceMinor ?? 0)} currency={base} />
+            ). الباقي يصير رصيداً له عند المتجر. هل هذا هو المقصود؟
+          </Alert>
+        ) : null}
         {payment ? (
           <>
             <Select
@@ -260,7 +287,7 @@ export function CustomerMoneyDialog({
             إلغاء
           </Button>
           <Button type="submit" loading={saving} disabled={!ready}>
-            {payment ? 'سجّل الدفعة' : 'سجّل الدين'}
+            {askOver ? 'نعم، سجّل والباقي رصيد له' : payment ? 'سجّل الدفعة' : 'سجّل الدين'}
           </Button>
         </div>
       </form>

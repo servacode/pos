@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { CatalogGate } from './CatalogGate';
+import { PageTop } from '../sales/ui';
+import { useUnsavedGuard } from './unsaved';
+import { CostStockSection, qtyThousandths } from './CostStockSection';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { catalogOptionsOf } from '@serva/core';
 import type { CatalogOptions, Category, CurrencyCode, ProductDetail, TaxRate, Unit } from '@serva/core';
@@ -15,7 +19,8 @@ import {
   CheckIcon,
   Dialog,
   GiftIcon,
-  PageHeader,
+  MoneyField,
+  NumberField,
   PrintIcon,
   RetryIcon,
   Select,
@@ -40,6 +45,7 @@ import {
   addProductImage,
   createProduct,
   getProduct,
+  postProductOpening,
   listCategories,
   listTaxRates,
   listUnits,
@@ -217,7 +223,9 @@ export function ProductPage() {
   // The card keeps its state below the shell, so typing in it never redraws the menu and the top bar.
   return (
     <AppShell>
-      <ProductCard />
+      <CatalogGate>
+        <ProductCard />
+      </CatalogGate>
     </AppShell>
   );
 }
@@ -255,13 +263,18 @@ function ProductCard() {
   };
   const [notice, setNotice] = useState<string | null>(
     (location.state as { saved?: boolean } | null)?.saved
-      ? (location.state as { imagesLost?: number }).imagesLost
-        ? 'حُفظ المنتج، لكن لم تُرفع بعض الصور: أضفها من قسم «الصور».'
-        : 'حُفظ المنتج، ويصل إلى أجهزة الكاشير مع أول اتصال.'
+      ? (location.state as { openingLost?: boolean }).openingLost
+        ? 'حُفظ المنتج، لكن لم تُسجَّل الكمية الافتتاحية: سجّلها من قسم «التكلفة والكمية الافتتاحية».'
+        : (location.state as { imagesLost?: number }).imagesLost
+          ? 'حُفظ المنتج، لكن لم تُرفع بعض الصور: أضفها من قسم «الصور».'
+          : 'حُفظ المنتج، ويصل إلى أجهزة الكاشير مع أول اتصال.'
       : null,
   );
   // Pictures picked before the first save: sent as soon as the product has an id
   const [pendingImages, setPendingImages] = useState<ResizedImage[]>([]);
+  // The opening quantity and unit cost typed on a new card
+  const [openQty, setOpenQty] = useState('');
+  const [openCost, setOpenCost] = useState<number | null>(null);
   // The variants grid shows name and price; the rest opens on request (see `advanced` below)
   const [moreFields, setMoreFields] = useState(false);
   // A model with sizes and colours shows its prices as a grid first; the detailed list opens on request
@@ -379,6 +392,10 @@ function ProductCard() {
   }
   const draftJson = useMemo(() => (draft && product ? JSON.stringify(draft) : null), [draft, product]);
   const edited = !product || draftJson !== clean.current.json || pendingImages.length > 0;
+  // A new product counts as edited only once something was typed in it
+  const firstJson = useRef<string | null>(null);
+  if (firstJson.current === null && draftJson !== null) firstJson.current = draftJson;
+  useUnsavedGuard(product ? edited : draftJson !== firstJson.current || pendingImages.length > 0);
 
   function showErrors(next: FieldErrors) {
     setErrors(next);
@@ -439,6 +456,21 @@ function ProductCard() {
         setNotice('حُفظ المنتج، ويصل إلى أجهزة الكاشير مع أول اتصال.');
       } else if (!('version' in built.body)) {
         const saved = await createProduct(built.body);
+        // The opening quantity typed on the new card: the same posting as an imported opening balance
+        const openMilli = qtyThousandths(openQty);
+        let openingLost = false;
+        const first = saved.variants.find((v) => !v.archivedAt);
+        if (openMilli !== null && first) {
+          try {
+            await postProductOpening(saved.id, {
+              date: isoDay(Date.now(), me.tenant.timezone),
+              branchId: me.branches[0]?.id ?? '',
+              lines: [{ variantId: first.id, qty: openMilli, unitCostMinor: openCost ?? 0 }],
+            });
+          } catch {
+            openingLost = true;
+          }
+        }
         let imagesLost = 0;
         for (const picture of pendingImages) {
           try {
@@ -449,7 +481,7 @@ function ProductCard() {
         }
         void navigate(`/products/${saved.id}`, {
           replace: true,
-          state: { saved: true, imagesLost },
+          state: { saved: true, imagesLost, openingLost },
         });
       }
     } catch (error) {
@@ -617,577 +649,656 @@ function ProductCard() {
   return (
     <>
       <title>{`${title} · SERVA`}</title>
-      <form
-        ref={formRef}
-        noValidate
-        onSubmit={save}
-        // A field reached with Tab scrolls clear of the sticky top bar and the save bar.
-        className="flex flex-col gap-6 [&_:is(input,select,textarea,button)]:scroll-my-28"
+      <div
+        role="presentation"
+        className="contents"
+        onKeyDown={(event) => {
+          // A price is never negative: the field would drop the sign and save a positive one
+          const target = event.target as HTMLElement;
+          if ((event.key === '-' || event.key === '−') && target.getAttribute('inputmode') === 'decimal') {
+            event.preventDefault();
+            setFormError('الأسعار والكميات لا تقبل رقماً سالباً. اكتب الرقم بلا إشارة ناقص.');
+          }
+        }}
+        onPaste={(event) => {
+          const target = event.target as HTMLElement;
+          if (
+            target.getAttribute('inputmode') === 'decimal' &&
+            /[-−]/.test(event.clipboardData.getData('text'))
+          ) {
+            event.preventDefault();
+            setFormError('الأسعار والكميات لا تقبل رقماً سالباً. اكتب الرقم بلا إشارة ناقص.');
+          }
+        }}
       >
-        <div className="flex flex-col gap-2">
-          <BackToProducts />
-          <PageHeader
-            title={title}
-            description={
-              product ? (
-                <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-                  {product.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
-                  {archived ? <Badge>مؤرشف</Badge> : null}
-                  {!archived && product.status !== 'temporary' ? <StatusChip status="active" /> : null}
-                  {!product.sellOnPos ? <Badge>لا يظهر على الكاشير</Badge> : null}
-                </span>
-              ) : (
-                'الاسم والسعر والباركود تكفي ليُباع على الكاشير، والباقي حين تحتاجه.'
-              )
-            }
-            actions={
-              canManage && product ? (
-                <>
-                  {!archived && product.status === 'temporary' ? (
-                    <Button
-                      variant="secondary"
-                      icon={<CheckIcon />}
-                      loading={archiving === 'busy'}
-                      onClick={() => void approve()}
-                    >
-                      اعتمد الصنف
-                    </Button>
-                  ) : null}
-                  {!archived ? (
-                    <ButtonLink to={`/labels?product=${product.id}`} icon={<PrintIcon />}>
-                      اطبع الملصقات
-                    </ButtonLink>
-                  ) : null}
-                  {archived ? (
-                    <Button
-                      variant="secondary"
-                      icon={<UndoIcon />}
-                      loading={archiving === 'busy'}
-                      onClick={() => void toggleArchive(false)}
-                    >
-                      أعد المنتج إلى البيع
-                    </Button>
-                  ) : (
-                    <Button variant="ghost" icon={<ArchiveIcon />} onClick={() => setArchiving('ask')}>
-                      أرشف
-                    </Button>
-                  )}
-                </>
-              ) : undefined
-            }
-          />
-        </div>
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={save}
+          // A field reached with Tab scrolls clear of the sticky top bar and the save bar.
+          className="sx flex flex-col gap-6 [&_:is(input,select,textarea,button)]:scroll-my-28"
+        >
+          <div className="flex flex-col gap-2">
+            <BackToProducts />
+            <PageTop
+              title={title}
+              subtitle={
+                product ? (
+                  <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                    {product.status === 'temporary' ? <Badge tone="warning">بانتظار المراجعة</Badge> : null}
+                    {archived ? <Badge>مؤرشف</Badge> : null}
+                    {!archived && product.status !== 'temporary' ? <StatusChip status="active" /> : null}
+                    {!product.sellOnPos ? <Badge>لا يظهر على الكاشير</Badge> : null}
+                  </span>
+                ) : (
+                  'الاسم والسعر والباركود تكفي ليُباع على الكاشير، والباقي حين تحتاجه.'
+                )
+              }
+              actions={
+                canManage && product ? (
+                  <>
+                    {!archived && product.status === 'temporary' ? (
+                      <Button
+                        variant="secondary"
+                        icon={<CheckIcon />}
+                        loading={archiving === 'busy'}
+                        onClick={() => void approve()}
+                      >
+                        اعتمد الصنف
+                      </Button>
+                    ) : null}
+                    {!archived ? (
+                      <ButtonLink to={`/labels?product=${product.id}`} icon={<PrintIcon />}>
+                        اطبع الملصقات
+                      </ButtonLink>
+                    ) : null}
+                    {archived ? (
+                      <Button
+                        variant="secondary"
+                        icon={<UndoIcon />}
+                        loading={archiving === 'busy'}
+                        onClick={() => void toggleArchive(false)}
+                      >
+                        أعد المنتج إلى البيع
+                      </Button>
+                    ) : (
+                      <Button variant="ghost" icon={<ArchiveIcon />} onClick={() => setArchiving('ask')}>
+                        أرشف
+                      </Button>
+                    )}
+                  </>
+                ) : undefined
+              }
+            />
+          </div>
 
-        <div className={COLUMNS}>
-          <div className="flex min-w-0 flex-col gap-6">
-            <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
-              <SectionCard
-                title="البيانات الأساسية"
-                icon={<Kind />}
-                description="الاسم كما يظهر على الكاشير والإيصال والملصق."
+          <nav aria-label="أقسام البطاقة" className="-mt-2 flex gap-2 overflow-x-auto pb-1 xl:hidden">
+            {[
+              ['#basic', 'الأساسية'],
+              ['#prices', 'الأسعار'],
+              ['#images', 'الصور'],
+              ['#organise', 'التنظيم'],
+              ...(product ? [['#branches', 'المخزون']] : []),
+            ].map(([href, label]) => (
+              <a
+                key={href}
+                href={href}
+                className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-line bg-surface px-4 text-sm font-semibold text-ink-muted hover:bg-surface-muted hover:text-ink"
               >
-                <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
-                  <TextField
-                    name="nameAr"
-                    label="اسم المنتج"
-                    value={draft.nameAr}
-                    onChange={(event) => update({ nameAr: event.target.value })}
-                    error={errors.nameAr}
-                    className="sm:col-span-2"
-                  />
-                  <TextField
-                    name="nameEn"
-                    label="الاسم بالإنجليزية (اختياري)"
-                    dir="ltr"
-                    value={draft.nameEn}
-                    onChange={(event) => update({ nameEn: event.target.value })}
-                    error={errors.nameEn}
-                  />
-                  <TextField
-                    name="brand"
-                    label="الماركة (اختياري)"
-                    value={draft.brand}
-                    onChange={(event) => update({ brand: event.target.value })}
-                    error={errors.brand}
-                  />
-                  {fits(['clothing']) || draft.season ? (
+                {label}
+              </a>
+            ))}
+          </nav>
+
+          <div className={COLUMNS}>
+            <div className="flex min-w-0 flex-col gap-6">
+              <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
+                <SectionCard
+                  anchor="basic"
+                  title="البيانات الأساسية"
+                  icon={<Kind />}
+                  description="الاسم كما يظهر على الكاشير والإيصال والملصق."
+                >
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2">
                     <TextField
-                      name="season"
-                      label="الموسم/التشكيلة (اختياري)"
-                      hint="مثل صيف 2026: تفلتر به القائمة والتقارير"
-                      value={draft.season ?? ''}
-                      onChange={(event) => update({ season: event.target.value })}
-                      error={errors.season}
+                      name="nameAr"
+                      label="اسم المنتج"
+                      value={draft.nameAr}
+                      onChange={(event) => update({ nameAr: event.target.value })}
+                      error={errors.nameAr}
+                      className="sm:col-span-2"
                     />
-                  ) : null}
-                  {fits(['pharmacy']) || draft.genericName ? (
                     <TextField
-                      name="genericName"
-                      label="الاسم العلمي (للأدوية، اختياري)"
-                      hint="الكاشير يجد الدواء به أيضاً"
-                      value={draft.genericName ?? ''}
-                      onChange={(event) => update({ genericName: event.target.value })}
-                      error={errors.genericName}
+                      name="nameEn"
+                      label="الاسم بالإنجليزية (اختياري)"
+                      dir="ltr"
+                      value={draft.nameEn}
+                      onChange={(event) => update({ nameEn: event.target.value })}
+                      error={errors.nameEn}
                     />
-                  ) : null}
-                  {fits(['pharmacy']) || draft.genericName ? (
-                    <>
+                    <TextField
+                      name="brand"
+                      label="الماركة (اختياري)"
+                      value={draft.brand}
+                      onChange={(event) => update({ brand: event.target.value })}
+                      error={errors.brand}
+                    />
+                    {fits(['clothing']) || draft.season ? (
                       <TextField
-                        name="strength"
-                        label="التركيز (اختياري)"
-                        hint="مثل 500 ملغ: به تُعرف البدائل"
-                        value={draft.strength ?? ''}
-                        onChange={(event) => update({ strength: event.target.value })}
-                        error={errors.strength}
+                        name="season"
+                        label="الموسم/التشكيلة (اختياري)"
+                        hint="مثل صيف 2026: تفلتر به القائمة والتقارير"
+                        value={draft.season ?? ''}
+                        onChange={(event) => update({ season: event.target.value })}
+                        error={errors.season}
                       />
+                    ) : null}
+                    {fits(['pharmacy']) || draft.genericName ? (
                       <TextField
-                        name="dosageForm"
-                        label="الشكل الدوائي (اختياري)"
-                        hint="مثل أقراص أو شراب أو حقن"
-                        value={draft.dosageForm ?? ''}
-                        onChange={(event) => update({ dosageForm: event.target.value })}
-                        error={errors.dosageForm}
+                        name="genericName"
+                        label="الاسم العلمي (للأدوية، اختياري)"
+                        hint="الكاشير يجد الدواء به أيضاً"
+                        value={draft.genericName ?? ''}
+                        onChange={(event) => update({ genericName: event.target.value })}
+                        error={errors.genericName}
                       />
-                    </>
-                  ) : null}
-                  {fits(['pharmacy']) || draft.requiresPrescription || draft.controlled ? (
-                    <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
-                      <Switch
-                        label="يحتاج وصفة"
-                        description="الكاشير يطلب رقم الوصفة واسم الطبيب قبل الدفع."
-                        checked={draft.requiresPrescription ?? false}
-                        disabled={!canManage}
-                        onCheckedChange={(requiresPrescription) => update({ requiresPrescription })}
-                      />
-                      <Switch
-                        label="مراقَب"
-                        description="لا يبيعه إلا الصيدلاني، ويدخل سجل الأدوية المراقبة."
-                        checked={draft.controlled ?? false}
-                        disabled={!canManage}
-                        onCheckedChange={(controlled) => update({ controlled })}
-                      />
-                    </div>
-                  ) : null}
-                  {fits(['pharmacy', 'medical_supplies']) || draft.requiresExpiry ? (
-                    <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
-                      <Switch
-                        label="يتطلب صلاحية"
-                        description="فاتورة الشراء لا تقبل هذا الصنف بلا تاريخ انتهاء، ويحكم الكاشير على دفعاته."
-                        checked={draft.requiresExpiry ?? false}
-                        disabled={!canManage}
-                        onCheckedChange={(requiresExpiry) => update({ requiresExpiry })}
-                      />
-                    </div>
-                  ) : null}
-                  {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
-                    <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
-                      <Switch
-                        label={serialSwitchLabel(me.tenant.sectors)}
-                        description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
-                        checked={draft.tracksSerial ?? false}
-                        disabled={!canManage}
-                        onCheckedChange={(tracksSerial) => update({ tracksSerial })}
-                        className="sm:col-span-2"
-                      />
-                      {fits(RENTAL_SECTORS) || draft.rentable ? (
+                    ) : null}
+                    {fits(['pharmacy']) || draft.genericName ? (
+                      <>
+                        <TextField
+                          name="strength"
+                          label="التركيز (اختياري)"
+                          hint="مثل 500 ملغ: به تُعرف البدائل"
+                          value={draft.strength ?? ''}
+                          onChange={(event) => update({ strength: event.target.value })}
+                          error={errors.strength}
+                        />
+                        <TextField
+                          name="dosageForm"
+                          label="الشكل الدوائي (اختياري)"
+                          hint="مثل أقراص أو شراب أو حقن"
+                          value={draft.dosageForm ?? ''}
+                          onChange={(event) => update({ dosageForm: event.target.value })}
+                          error={errors.dosageForm}
+                        />
+                      </>
+                    ) : null}
+                    {fits(['pharmacy']) || draft.requiresPrescription || draft.controlled ? (
+                      <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
                         <Switch
-                          label="قابل للتأجير"
-                          description="تُؤجَّر قطعه من شاشة التأجير على الصندوق، وتُمنع من البيع وهي عند الزبون."
-                          checked={draft.rentable ?? false}
-                          disabled={!canManage || !draft.tracksSerial}
-                          onCheckedChange={(rentable) => update({ rentable })}
+                          label="يحتاج وصفة"
+                          description="الكاشير يطلب رقم الوصفة واسم الطبيب قبل الدفع."
+                          checked={draft.requiresPrescription ?? false}
+                          disabled={!canManage}
+                          onCheckedChange={(requiresPrescription) => update({ requiresPrescription })}
+                        />
+                        <Switch
+                          label="مراقَب"
+                          description="لا يبيعه إلا الصيدلاني، ويدخل سجل الأدوية المراقبة."
+                          checked={draft.controlled ?? false}
+                          disabled={!canManage}
+                          onCheckedChange={(controlled) => update({ controlled })}
+                        />
+                      </div>
+                    ) : null}
+                    {fits(['pharmacy', 'medical_supplies']) || draft.requiresExpiry ? (
+                      <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
+                        <Switch
+                          label="يتطلب صلاحية"
+                          description="فاتورة الشراء لا تقبل هذا الصنف بلا تاريخ انتهاء، ويحكم الكاشير على دفعاته."
+                          checked={draft.requiresExpiry ?? false}
+                          disabled={!canManage}
+                          onCheckedChange={(requiresExpiry) => update({ requiresExpiry })}
+                        />
+                      </div>
+                    ) : null}
+                    {fits(SERIAL_SECTORS) || draft.tracksSerial || draft.warranty ? (
+                      <div className="grid grid-cols-1 gap-x-4 gap-y-5 border-t border-line pt-5 sm:col-span-2 sm:grid-cols-2">
+                        <Switch
+                          label={serialSwitchLabel(me.tenant.sectors)}
+                          description="يُستلم ويُباع كل جهاز برقمه، ويُطبع الرقم على الإيصال."
+                          checked={draft.tracksSerial ?? false}
+                          disabled={!canManage}
+                          onCheckedChange={(tracksSerial) => update({ tracksSerial })}
                           className="sm:col-span-2"
                         />
-                      ) : null}
-                      <TextField
-                        name="warrantyMonths"
-                        label="الكفالة بالأشهر (اختياري)"
-                        inputMode="numeric"
-                        dir="ltr"
-                        value={draft.warranty ?? ''}
-                        disabled={!canManage}
-                        onChange={(event) => update({ warranty: event.target.value })}
-                        error={errors.warrantyMonths}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              </SectionCard>
-
-              <div id="images" className="scroll-mt-24 min-w-0">
-                <SectionCard
-                  title="الصور"
-                  icon={<CameraIcon />}
-                  description="تظهر على شاشة البيع وفي المتجر الإلكتروني؛ الأولى هي الرئيسية."
-                >
-                  <ImagesEditor
-                    productId={product?.id ?? null}
-                    optionValues={optionValues}
-                    disabled={!canManage}
-                    pending={pendingImages}
-                    onPendingChange={setPendingImages}
-                  />
-                </SectionCard>
-              </div>
-
-              <SectionCard
-                title={fits(['clothing']) ? 'المقاسات والألوان' : 'الأنواع والخيارات'}
-                icon={<ShirtIcon />}
-              >
-                <OptionsEditor
-                  axes={draft.axes}
-                  variantCount={liveVariants.length}
-                  onChange={setAxes}
-                  fashion={fits(['clothing'])}
-                />
-                {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
-              </SectionCard>
-            </fieldset>
-
-            {/* What is on the shelf, sizes down and colours across, comes before the price rows */}
-            {product && draft.type === 'stock' && titled ? (
-              <StockGrid product={product} numberFormat={me.settings.numberFormat} />
-            ) : null}
-
-            <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
-              <SectionCard
-                title={titled ? 'الأسعار والباركودات' : 'السعر والباركود'}
-                icon={<BarcodeIcon />}
-                description={
-                  titled
-                    ? fits(['clothing'])
-                      ? 'لكل مقاس ولون سعره وباركوده. القطعة الجديدة تبدأ بسعر الأولى.'
-                      : 'لكل نوع سعره وباركوده. النوع الجديد يبدأ بسعر الأول.'
-                    : 'سعر البيع على الكاشير، والباركودات التي تُمسح له.'
-                }
-              >
-                {titled ? (
-                  <>
-                    {showMatrix ? (
-                      <>
-                        {canManage ? (
-                          <PriceMatrix
-                            axes={draft.axes}
-                            variants={draft.variants}
-                            currency={liveVariants[0]?.currency ?? 'SYP'}
-                            autoBarcode={autoBarcode}
-                            onAutoBarcode={setAutoBarcode}
-                            onChange={(variants) => update({ variants })}
+                        {fits(RENTAL_SECTORS) || draft.rentable ? (
+                          <Switch
+                            label="قابل للتأجير"
+                            description="تُؤجَّر قطعه من شاشة التأجير على الصندوق، وتُمنع من البيع وهي عند الزبون."
+                            checked={draft.rentable ?? false}
+                            disabled={!canManage || !draft.tracksSerial}
+                            onCheckedChange={(rentable) => update({ rentable })}
+                            className="sm:col-span-2"
                           />
                         ) : null}
-                        {errorsInList ? null : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-auto! self-start py-2! text-start whitespace-normal!"
-                            aria-expanded={detailList}
-                            onClick={() => setDetailList((open) => !open)}
-                          >
-                            {detailList
-                              ? 'أخفِ التفاصيل المتقدمة'
-                              : 'تفاصيل متقدمة: الباركودات، الأدنى للمفاصلة، الجملة، الحد الأدنى'}
-                          </Button>
-                        )}
-                      </>
+                        <TextField
+                          name="warrantyMonths"
+                          label="الكفالة بالأشهر (اختياري)"
+                          inputMode="numeric"
+                          dir="ltr"
+                          value={draft.warranty ?? ''}
+                          disabled={!canManage}
+                          onChange={(event) => update({ warranty: event.target.value })}
+                          error={errors.warrantyMonths}
+                        />
+                      </div>
                     ) : null}
-                    {listShown ? (
-                      <>
-                        {canManage ? (
-                          <BulkApply
-                            axes={draft.axes}
-                            variants={draft.variants}
-                            currency={liveVariants[0]?.currency ?? 'SYP'}
-                            autoBarcode={autoBarcode}
-                            onAutoBarcode={setAutoBarcode}
-                            onChange={(variants) => update({ variants })}
-                          />
-                        ) : null}
-                        <VariantGrid currencies={currencies} advanced={advanced}>
-                          {liveVariants.map(variantBlock)}
-                        </VariantGrid>
-                        {moreNeeded || showMatrix ? null : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-auto! self-start py-2! text-start whitespace-normal!"
-                            aria-expanded={moreFields}
-                            onClick={() => setMoreFields((open) => !open)}
-                          >
-                            {moreFields
-                              ? 'أخفِ الحقول الإضافية'
-                              : 'حقول إضافية: الأدنى للمفاصلة، الجملة، الحد الأدنى، الباركودات'}
-                          </Button>
-                        )}
-                        <ul
-                          className={cn('flex flex-col gap-1 text-sm text-ink-subtle', !advanced && 'hidden')}
-                        >
-                          <li>الأدنى للمفاصلة: الكاشير ينزل حتى هذا السعر دون رمز المدير.</li>
-                          <li>سعر الجملة: يُباع به عند اختيار «سعر الجملة» على الكاشير أو لزبون جملة.</li>
-                          <li>الحد الأدنى في الفرع: تحته يصلك تنبيه النقص.</li>
-                          {liveVariants.some((v) => v.currency !== 'SYP') ? (
-                            <li>
-                              السعر بالدولار يبقى بالدولار، ويحوّله الكاشير إلى الليرة بسعر الصرف عند البيع.
-                            </li>
-                          ) : null}
-                        </ul>
-                      </>
-                    ) : null}
-                  </>
-                ) : (
-                  liveVariants.map(variantBlock)
-                )}
-                {archivedVariants.length > 0 ? (
-                  <p className="flex items-start gap-2 rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
-                    <ArchiveIcon size={16} className="mt-0.5 text-ink-subtle" />
-                    <span>
-                      متغيّرات مؤرشفة تبقى في الفواتير السابقة:{' '}
-                      {archivedVariants
-                        .map((v) => v.attributes.map((a) => a.value).join(' · ') || '—')
-                        .join('، ')}
-                    </span>
-                  </p>
-                ) : null}
-              </SectionCard>
-
-              <ShopTextSection
-                productId={product?.id ?? null}
-                productName={product?.nameAr ?? ''}
-                disabled={!canManage}
-              />
-
-              {fits(MODIFIER_SECTORS) || (draft.modifiers?.length ?? 0) > 0 ? (
-                <SectionCard
-                  title="الإضافات والخيارات (للمطاعم والمقاهي)"
-                  icon={<GiftIcon />}
-                  description="ما يختاره الزبون مع الطلب، كالحجم والإضافات، وما يزيده على السعر."
-                >
-                  <ModifiersEditor
-                    groups={draft.modifiers ?? NO_MODIFIERS}
-                    currency={liveVariants[0]?.currency ?? 'SYP'}
-                    disabled={!canManage}
-                    onChange={setModifiers}
-                  />
-                  {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
-                </SectionCard>
-              ) : null}
-
-              {product && fits(MODIFIER_SECTORS) ? (
-                <RecipeSection productId={product.id} disabled={!canManage} />
-              ) : null}
-            </fieldset>
-
-            {product && draft.type === 'stock' && !titled ? (
-              <StockGrid product={product} numberFormat={me.settings.numberFormat} />
-            ) : null}
-          </div>
-
-          <div className="flex min-w-0 flex-col gap-6">
-            <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
-              <SectionCard title="الحالة" icon={<StoreIcon />}>
-                <Switch
-                  label="يُباع على الكاشير"
-                  description="أطفئه ليختفي من شاشة البيع ويبقى في المخزون."
-                  checked={draft.sellOnPos}
-                  disabled={!canManage}
-                  onCheckedChange={(sellOnPos) => update({ sellOnPos })}
-                />
-                {archived ? (
-                  <p className="rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
-                    في الأرشيف: لا يظهر على الكاشير حتى تعيده إلى البيع.
-                  </p>
-                ) : null}
-                {product ? (
-                  <dl className="-my-2.5 flex flex-col divide-y divide-line border-t border-line">
-                    {titled ? (
-                      <Fact label="المتغيّرات">
-                        <bdi className="num">{liveVariants.length}</bdi>
-                      </Fact>
-                    ) : null}
-                    <Fact label="الباركودات">
-                      <bdi className="num">{barcodeCount}</bdi>
-                    </Fact>
-                    <Fact label="أُضيف في">
-                      <bdi className="num">
-                        {dayText(isoDay(Date.parse(product.createdAt), me.tenant.timezone), digits)}
-                      </bdi>
-                    </Fact>
-                  </dl>
-                ) : null}
-              </SectionCard>
-
-              <SectionCard title="التنظيم" icon={<CategoriesIcon />}>
-                <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-1">
-                  <div className="flex flex-col gap-2">
-                    {tree.length > 6 ? (
-                      <TextField
-                        label="ابحث في التصنيفات"
-                        placeholder="اكتب جزءاً من اسم التصنيف"
-                        value={categoryQuery}
-                        onChange={(event) => setCategoryQuery(event.target.value)}
-                      />
-                    ) : null}
-                    <Select
-                      name="categoryId"
-                      label="التصنيف"
-                      value={draft.categoryId}
-                      onChange={(event) => update({ categoryId: event.target.value })}
-                      error={errors.categoryId}
-                    >
-                      <option value="">بلا تصنيف</option>
-                      {shownTree.map((node) => (
-                        <option key={node.category.id} value={node.category.id}>
-                          {categoryOptionLabel(node)}
-                        </option>
-                      ))}
-                    </Select>
                   </div>
-                  <Select
-                    name="type"
-                    label="نوع المنتج"
-                    value={draft.type}
-                    onChange={(event) => update({ type: event.target.value as ProductDraft['type'] })}
-                    error={errors.type}
+                </SectionCard>
+
+                <div id="images" className="scroll-mt-24 min-w-0">
+                  <SectionCard
+                    title="الصور"
+                    icon={<CameraIcon />}
+                    description="تظهر على شاشة البيع وفي المتجر الإلكتروني؛ الأولى هي الرئيسية."
                   >
-                    <option value="stock">بضاعة لها مخزون</option>
-                    <option value="service">خدمة بلا مخزون</option>
-                  </Select>
-                  {draft.type === 'service' ? (
-                    <p className="-mt-2 text-sm text-ink-muted">
-                      الخدمة بلا مخزون. اترك السعر صفراً إن كانت أجرتها تتغيّر، فيسأل الكاشير عن الأجرة عند
-                      البيع.
-                    </p>
-                  ) : null}
-                  <Select
-                    name="unitId"
-                    label="الوحدة"
-                    value={draft.unitId}
-                    onChange={(event) => update({ unitId: event.target.value })}
-                    error={errors.unitId}
-                    hint={
-                      canManage ? (
-                        <button
-                          type="button"
-                          onClick={() => setUnitsOpen(true)}
-                          className="rounded-small font-semibold text-brand-ink underline-offset-4 hover:underline"
-                        >
-                          أضف وحدة (علبة، كرتونة، متر…)
-                        </button>
-                      ) : undefined
-                    }
-                  >
-                    {lookups.units
-                      .filter((u) => !u.archivedAt || u.id === draft.unitId)
-                      .map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.allowsFraction ? `${u.name} (بالوزن)` : u.name}
-                        </option>
-                      ))}
-                  </Select>
-                  <Select
-                    name="taxRateId"
-                    label="الضريبة"
-                    value={draft.taxRateId}
-                    onChange={(event) => update({ taxRateId: event.target.value })}
-                    error={errors.taxRateId}
-                    hint={
-                      lookups.taxRates.length === 0 ? (
-                        <Link to="/tax-rates" className="font-semibold underline underline-offset-4">
-                          لا ضرائب بعد: أضفها من «الضرائب»
-                        </Link>
-                      ) : undefined
-                    }
-                  >
-                    <option value="">بلا ضريبة</option>
-                    {lookups.taxRates
-                      .filter((t) => !t.archivedAt || t.id === draft.taxRateId)
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {`${t.name} ${t.rateBp / 100}%`}
-                        </option>
-                      ))}
-                  </Select>
-                  {fits(WEIGHED_SECTORS) || unit?.allowsFraction ? (
-                    <Switch
-                      label="يُباع بالوزن"
-                      description="الكمية على الكاشير بالكيلو، مثل 0.250"
-                      checked={unit?.allowsFraction ?? false}
-                      disabled={!canManage || !fractionUnit(!(unit?.allowsFraction ?? false))}
-                      onCheckedChange={(checked) => {
-                        const next = fractionUnit(checked);
-                        if (next) update({ unitId: next.id });
-                      }}
-                      className="sm:col-span-2 xl:col-span-1"
+                    <ImagesEditor
+                      productId={product?.id ?? null}
+                      optionValues={optionValues}
+                      disabled={!canManage}
+                      pending={pendingImages}
+                      onPendingChange={setPendingImages}
                     />
-                  ) : null}
+                  </SectionCard>
                 </div>
-              </SectionCard>
-            </fieldset>
 
-            {product && draft.type === 'stock' ? (
-              <SectionCard title="في كل الفروع" icon={<StockIcon />}>
-                <StockByBranch product={product} numberFormat={me.settings.numberFormat} />
-              </SectionCard>
-            ) : null}
-          </div>
-        </div>
+                <SectionCard
+                  title={fits(['clothing']) ? 'المقاسات والألوان' : 'الأنواع والخيارات'}
+                  icon={<ShirtIcon />}
+                >
+                  <OptionsEditor
+                    axes={draft.axes}
+                    variantCount={liveVariants.length}
+                    onChange={setAxes}
+                    fashion={fits(['clothing'])}
+                  />
+                  {errors.variants ? <p className="text-sm text-danger-ink">{errors.variants}</p> : null}
+                </SectionCard>
+              </fieldset>
 
-        {(canManage && edited) || notice || conflict || formError ? (
-          // Saving happens here, so what it answers shows here too, whatever the scroll.
-          <div className="sticky bottom-3 z-10 flex flex-col gap-2">
-            {notice ? (
-              <Alert tone="success" className="shadow-e2">
-                {notice}
-              </Alert>
-            ) : null}
-            {conflict ? (
-              <Alert tone="error" className="shadow-e2">
-                {conflict}
-              </Alert>
-            ) : null}
-            {formError ? (
-              <Alert tone="error" className="shadow-e2">
-                {formError}
-                {askFree ? (
-                  <Button
-                    variant="secondary"
-                    className="mt-2"
-                    onClick={() => {
-                      freeOk.current = true;
-                      formRef.current?.requestSubmit();
-                    }}
-                  >
-                    نعم، مجاني: احفظ
-                  </Button>
-                ) : null}
-              </Alert>
-            ) : null}
-            {canManage && edited ? (
-              <div className="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 shadow-e3">
-                <p className="ps-2 text-sm text-ink-muted max-sm:hidden">
-                  {product ? (
+              {/* What is on the shelf, sizes down and colours across, comes before the price rows */}
+              {product && draft.type === 'stock' && titled ? (
+                <StockGrid product={product} numberFormat={me.settings.numberFormat} />
+              ) : null}
+
+              <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
+                <SectionCard
+                  anchor="prices"
+                  title={titled ? 'الأسعار والباركودات' : 'السعر والباركود'}
+                  icon={<BarcodeIcon />}
+                  description={
+                    titled
+                      ? fits(['clothing'])
+                        ? 'لكل مقاس ولون سعره وباركوده. القطعة الجديدة تبدأ بسعر الأولى.'
+                        : 'لكل نوع سعره وباركوده. النوع الجديد يبدأ بسعر الأول.'
+                      : 'سعر البيع على الكاشير، والباركودات التي تُمسح له.'
+                  }
+                >
+                  {titled ? (
                     <>
-                      آخر حفظ:{' '}
-                      <bdi className="num">
-                        {zonedDateTime(product.updatedAt, me.tenant.timezone, digits)}
-                      </bdi>
+                      {showMatrix ? (
+                        <>
+                          {canManage ? (
+                            <PriceMatrix
+                              axes={draft.axes}
+                              variants={draft.variants}
+                              currency={liveVariants[0]?.currency ?? 'SYP'}
+                              autoBarcode={autoBarcode}
+                              onAutoBarcode={setAutoBarcode}
+                              onChange={(variants) => update({ variants })}
+                            />
+                          ) : null}
+                          {errorsInList ? null : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-auto! self-start py-2! text-start whitespace-normal!"
+                              aria-expanded={detailList}
+                              onClick={() => setDetailList((open) => !open)}
+                            >
+                              {detailList
+                                ? 'أخفِ التفاصيل المتقدمة'
+                                : 'تفاصيل متقدمة: الباركودات، الأدنى للمفاصلة، الجملة، الحد الأدنى'}
+                            </Button>
+                          )}
+                        </>
+                      ) : null}
+                      {listShown ? (
+                        <>
+                          {canManage ? (
+                            <BulkApply
+                              axes={draft.axes}
+                              variants={draft.variants}
+                              currency={liveVariants[0]?.currency ?? 'SYP'}
+                              autoBarcode={autoBarcode}
+                              onAutoBarcode={setAutoBarcode}
+                              onChange={(variants) => update({ variants })}
+                            />
+                          ) : null}
+                          <VariantGrid currencies={currencies} advanced={advanced}>
+                            {liveVariants.map(variantBlock)}
+                          </VariantGrid>
+                          {moreNeeded || showMatrix ? null : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-auto! self-start py-2! text-start whitespace-normal!"
+                              aria-expanded={moreFields}
+                              onClick={() => setMoreFields((open) => !open)}
+                            >
+                              {moreFields
+                                ? 'أخفِ الحقول الإضافية'
+                                : 'حقول إضافية: الأدنى للمفاصلة، الجملة، الحد الأدنى، الباركودات'}
+                            </Button>
+                          )}
+                          <ul
+                            className={cn(
+                              'flex flex-col gap-1 text-sm text-ink-subtle',
+                              !advanced && 'hidden',
+                            )}
+                          >
+                            <li>الأدنى للمفاصلة: الكاشير ينزل حتى هذا السعر دون رمز المدير.</li>
+                            <li>سعر الجملة: يُباع به عند اختيار «سعر الجملة» على الكاشير أو لزبون جملة.</li>
+                            <li>الحد الأدنى في الفرع: تحته يصلك تنبيه النقص.</li>
+                            {liveVariants.some((v) => v.currency !== 'SYP') ? (
+                              <li>
+                                السعر بالدولار يبقى بالدولار، ويحوّله الكاشير إلى الليرة بسعر الصرف عند البيع.
+                              </li>
+                            ) : null}
+                          </ul>
+                        </>
+                      ) : null}
                     </>
                   ) : (
-                    'منتج جديد: يصل إلى أجهزة الكاشير بعد الحفظ.'
+                    liveVariants.map(variantBlock)
                   )}
-                </p>
-                <div className="flex flex-1 items-center justify-end gap-2 sm:flex-none">
-                  <ButtonLink to="/products" variant="ghost">
-                    إلغاء
-                  </ButtonLink>
-                  <Button type="submit" loading={saving} icon={<CheckIcon />} className="max-sm:flex-1">
-                    احفظ
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+                  {archivedVariants.length > 0 ? (
+                    <p className="flex items-start gap-2 rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
+                      <ArchiveIcon size={16} className="mt-0.5 text-ink-subtle" />
+                      <span>
+                        متغيّرات مؤرشفة تبقى في الفواتير السابقة:{' '}
+                        {archivedVariants
+                          .map((v) => v.attributes.map((a) => a.value).join(' · ') || '—')
+                          .join('، ')}
+                      </span>
+                    </p>
+                  ) : null}
+                </SectionCard>
+
+                <ShopTextSection
+                  productId={product?.id ?? null}
+                  productName={product?.nameAr ?? ''}
+                  disabled={!canManage}
+                />
+
+                {fits(MODIFIER_SECTORS) || (draft.modifiers?.length ?? 0) > 0 ? (
+                  <SectionCard
+                    title="الإضافات والخيارات (للمطاعم والمقاهي)"
+                    icon={<GiftIcon />}
+                    description="ما يختاره الزبون مع الطلب، كالحجم والإضافات، وما يزيده على السعر."
+                  >
+                    <ModifiersEditor
+                      groups={draft.modifiers ?? NO_MODIFIERS}
+                      currency={liveVariants[0]?.currency ?? 'SYP'}
+                      disabled={!canManage}
+                      onChange={setModifiers}
+                    />
+                    {errors.modifiers ? <p className="text-sm text-danger-ink">{errors.modifiers}</p> : null}
+                  </SectionCard>
+                ) : null}
+
+                {product && fits(MODIFIER_SECTORS) ? (
+                  <RecipeSection productId={product.id} disabled={!canManage} />
+                ) : null}
+              </fieldset>
+
+              {product && draft.type === 'stock' && !titled ? (
+                <StockGrid product={product} numberFormat={me.settings.numberFormat} />
+              ) : null}
+              {product && draft.type === 'stock' && canManage ? (
+                <CostStockSection
+                  product={product}
+                  onPosted={() => void getProduct(product.id).then(setProduct)}
+                />
+              ) : null}
+              {!product && draft.type === 'stock' && canManage && liveVariants.length === 1 ? (
+                <SectionCard
+                  title="الكمية الافتتاحية والتكلفة"
+                  icon={<StockIcon />}
+                  description="اختياري: كم عندك الآن من هذا المنتج وبكم اشتريته. تُسجَّل مع الحفظ كرصيد افتتاحي."
+                >
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <NumberField
+                      label="الكمية الآن"
+                      decimals={3}
+                      value={openQty}
+                      onValueChange={setOpenQty}
+                    />
+                    <MoneyField
+                      label="تكلفة الوحدة"
+                      currency={me.settings.baseCurrency}
+                      valueMinor={openCost}
+                      onValueChange={setOpenCost}
+                    />
+                  </div>
+                  {qtyThousandths(openQty) !== null && !openCost ? (
+                    <Alert tone="warning">
+                      بلا تكلفة يدخل المخزون بقيمة صفر، ويظهر هامش الربح 100٪ حتى أول فاتورة شراء.
+                    </Alert>
+                  ) : null}
+                </SectionCard>
+              ) : null}
+            </div>
+
+            <div className="flex min-w-0 flex-col gap-6">
+              <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6">
+                <SectionCard title="الحالة" icon={<StoreIcon />}>
+                  <Switch
+                    label="يُباع على الكاشير"
+                    description="أطفئه ليختفي من شاشة البيع ويبقى في المخزون."
+                    checked={draft.sellOnPos}
+                    disabled={!canManage}
+                    onCheckedChange={(sellOnPos) => update({ sellOnPos })}
+                  />
+                  {archived ? (
+                    <p className="rounded-control bg-surface-muted px-3 py-2.5 text-sm text-ink-muted">
+                      في الأرشيف: لا يظهر على الكاشير حتى تعيده إلى البيع.
+                    </p>
+                  ) : null}
+                  {product ? (
+                    <dl className="-my-2.5 flex flex-col divide-y divide-line border-t border-line">
+                      {titled ? (
+                        <Fact label="المتغيّرات">
+                          <bdi className="num">{liveVariants.length}</bdi>
+                        </Fact>
+                      ) : null}
+                      <Fact label="الباركودات">
+                        <bdi className="num">{barcodeCount}</bdi>
+                      </Fact>
+                      <Fact label="أُضيف في">
+                        <bdi className="num">
+                          {dayText(isoDay(Date.parse(product.createdAt), me.tenant.timezone), digits)}
+                        </bdi>
+                      </Fact>
+                    </dl>
+                  ) : null}
+                </SectionCard>
+
+                <SectionCard anchor="organise" title="التنظيم" icon={<CategoriesIcon />}>
+                  <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 xl:grid-cols-1">
+                    <div className="flex flex-col gap-2">
+                      {tree.length > 6 ? (
+                        <TextField
+                          label="ابحث في التصنيفات"
+                          placeholder="اكتب جزءاً من اسم التصنيف"
+                          value={categoryQuery}
+                          onChange={(event) => setCategoryQuery(event.target.value)}
+                        />
+                      ) : null}
+                      <Select
+                        name="categoryId"
+                        label="التصنيف"
+                        value={draft.categoryId}
+                        onChange={(event) => update({ categoryId: event.target.value })}
+                        error={errors.categoryId}
+                      >
+                        <option value="">بلا تصنيف</option>
+                        {shownTree.map((node) => (
+                          <option key={node.category.id} value={node.category.id}>
+                            {categoryOptionLabel(node)}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Select
+                      name="type"
+                      label="نوع المنتج"
+                      value={draft.type}
+                      onChange={(event) => update({ type: event.target.value as ProductDraft['type'] })}
+                      error={errors.type}
+                    >
+                      <option value="stock">بضاعة لها مخزون</option>
+                      <option value="service">خدمة بلا مخزون</option>
+                    </Select>
+                    {draft.type === 'service' ? (
+                      <p className="-mt-2 text-sm text-ink-muted">
+                        الخدمة بلا مخزون. اترك السعر صفراً إن كانت أجرتها تتغيّر، فيسأل الكاشير عن الأجرة عند
+                        البيع.
+                      </p>
+                    ) : null}
+                    <Select
+                      name="unitId"
+                      label="الوحدة"
+                      value={draft.unitId}
+                      onChange={(event) => update({ unitId: event.target.value })}
+                      error={errors.unitId}
+                      hint={
+                        canManage ? (
+                          <button
+                            type="button"
+                            onClick={() => setUnitsOpen(true)}
+                            className="rounded-small font-semibold text-brand-ink underline-offset-4 hover:underline"
+                          >
+                            أضف وحدة (علبة، كرتونة، متر…)
+                          </button>
+                        ) : undefined
+                      }
+                    >
+                      {lookups.units
+                        .filter((u) => !u.archivedAt || u.id === draft.unitId)
+                        .map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.allowsFraction ? `${u.name} (بالوزن)` : u.name}
+                          </option>
+                        ))}
+                    </Select>
+                    <Select
+                      name="taxRateId"
+                      label="الضريبة"
+                      value={draft.taxRateId}
+                      onChange={(event) => update({ taxRateId: event.target.value })}
+                      error={errors.taxRateId}
+                      hint={
+                        lookups.taxRates.length === 0 ? (
+                          <Link to="/tax-rates" className="font-semibold underline underline-offset-4">
+                            لا ضرائب بعد: أضفها من «الضرائب»
+                          </Link>
+                        ) : undefined
+                      }
+                    >
+                      <option value="">بلا ضريبة</option>
+                      {lookups.taxRates
+                        .filter((t) => !t.archivedAt || t.id === draft.taxRateId)
+                        .map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {`${t.name} ${t.rateBp / 100}%`}
+                          </option>
+                        ))}
+                    </Select>
+                    {fits(WEIGHED_SECTORS) || unit?.allowsFraction ? (
+                      <Switch
+                        label="يُباع بالوزن"
+                        description="الكمية على الكاشير بالكيلو، مثل 0.250"
+                        checked={unit?.allowsFraction ?? false}
+                        disabled={!canManage || !fractionUnit(!(unit?.allowsFraction ?? false))}
+                        onCheckedChange={(checked) => {
+                          const next = fractionUnit(checked);
+                          if (next) update({ unitId: next.id });
+                        }}
+                        className="sm:col-span-2 xl:col-span-1"
+                      />
+                    ) : null}
+                  </div>
+                </SectionCard>
+              </fieldset>
+
+              {product && draft.type === 'stock' ? (
+                <SectionCard anchor="branches" title="في كل الفروع" icon={<StockIcon />}>
+                  <StockByBranch product={product} numberFormat={me.settings.numberFormat} />
+                </SectionCard>
+              ) : null}
+            </div>
           </div>
-        ) : null}
-      </form>
+
+          {(canManage && edited) || notice || conflict || formError ? (
+            // Saving happens here, so what it answers shows here too, whatever the scroll.
+            <div className="sticky bottom-3 z-10 flex flex-col gap-2">
+              {notice ? (
+                <Alert tone="success" className="shadow-e2">
+                  {notice}
+                </Alert>
+              ) : null}
+              {conflict ? (
+                <Alert tone="error" className="shadow-e2">
+                  {conflict}
+                </Alert>
+              ) : null}
+              {formError ? (
+                <Alert tone="error" className="shadow-e2">
+                  {formError}
+                  {askFree ? (
+                    <Button
+                      variant="secondary"
+                      className="mt-2"
+                      onClick={() => {
+                        freeOk.current = true;
+                        formRef.current?.requestSubmit();
+                      }}
+                    >
+                      نعم، مجاني: احفظ
+                    </Button>
+                  ) : null}
+                </Alert>
+              ) : null}
+              {canManage && edited ? (
+                <div className="flex items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 shadow-e3">
+                  <p className="ps-2 text-sm text-ink-muted max-sm:hidden">
+                    {product ? (
+                      <>
+                        آخر حفظ:{' '}
+                        <bdi className="num">
+                          {zonedDateTime(product.updatedAt, me.tenant.timezone, digits)}
+                        </bdi>
+                      </>
+                    ) : (
+                      'منتج جديد: يصل إلى أجهزة الكاشير بعد الحفظ.'
+                    )}
+                  </p>
+                  <div className="flex flex-1 items-center justify-end gap-2 sm:flex-none">
+                    <ButtonLink to="/products" variant="ghost">
+                      إلغاء
+                    </ButtonLink>
+                    <Button type="submit" loading={saving} icon={<CheckIcon />} className="max-sm:flex-1">
+                      احفظ
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </form>
+      </div>
 
       {unitsOpen ? (
         <UnitsDialog

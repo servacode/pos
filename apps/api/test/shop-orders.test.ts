@@ -388,3 +388,45 @@ describe('what the shop shows to filter and warn', () => {
     expect(page.json<{ variants: { left: number | null }[] }>().variants[0]!.left).toBe(1);
   });
 });
+
+describe('round 44: the code is used up by an order that is written, and a number gets a few codes', () => {
+  it('keeps the code when the form is wrong, so the customer fixes the field and sends again', async () => {
+    const store = await openStore(app);
+    await openShop(store, 'shop');
+    const { variantId } = await dress(store);
+    const sent = (await askCode()).json<ShopCodeSent>();
+    const code = codes.sent.at(-1)!.code;
+    // A delivery with no address: refused before the code is touched
+    const noAddress = await order([{ variantId, qty: 1 }], {
+      fulfilment: 'delivery',
+      challengeId: sent.challengeId,
+      code,
+    });
+    expect(noAddress.statusCode).toBe(400);
+    expect(noAddress.json<{ error: { fields: Record<string, string> } }>().error.fields.address).toBeTruthy();
+    // More than the shelf holds: the same
+    const tooMany = await order([{ variantId, qty: 9 }], { challengeId: sent.challengeId, code });
+    expect(tooMany.statusCode).toBe(400);
+    // The same code still places the corrected order
+    const placed = await order([{ variantId, qty: 1 }], {
+      fulfilment: 'delivery',
+      address: 'المزة',
+      challengeId: sent.challengeId,
+      code,
+    });
+    expect(placed.statusCode, placed.body).toBe(201);
+    // ...and only once
+    const again = await order([{ variantId, qty: 1 }], { challengeId: sent.challengeId, code });
+    expect(again.statusCode).toBe(400);
+  });
+
+  it('sends a number only a few codes in ten minutes', async () => {
+    const store = await openStore(app);
+    await openShop(store, 'shop');
+    await dress(store);
+    const answers: number[] = [];
+    for (let n = 0; n < 5; n += 1) answers.push((await askCode()).statusCode);
+    expect(answers.slice(0, 4)).toEqual([200, 200, 200, 200]);
+    expect(answers[4]).toBe(429);
+  });
+});

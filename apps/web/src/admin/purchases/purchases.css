@@ -1,0 +1,109 @@
+/*
+ * The Purchases pages (round 44): the few rules the Sales styles (sales.css) do not have. Imported only by the
+ * lazy pages of this section, after sales.css, and scoped under .sx like it.
+ */
+.sx .px-strip {
+  grid-template-columns: 1.4fr 1fr 1fr;
+}
+.sx .px-strip .v.big {
+  font-size: 28px;
+  line-height: 36px;
+}
+.sx .px-strip .note {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ink-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sx .px-dual {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.sx .px-dual .usd {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-subtle);
+}
+.sx .px-bar {
+  display: block;
+  width: 100%;
+  min-width: 64px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+.sx .px-bar i {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  border-radius: 999px;
+}
+.sx .px-bar.done i {
+  background: var(--success);
+}
+.sx .px-prog {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 96px;
+  align-items: flex-start;
+}
+.sx .px-prog .t {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ink-muted);
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.sx .px-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sx .px-chips .sx-chip .c {
+  margin-inline-start: 6px;
+  color: var(--ink-subtle);
+  font-weight: 400;
+}
+.sx .px-draftbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.sx .px-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+@media (max-width: 639px) {
+  .sx .px-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sx .px-strip .v.big {
+    font-size: 24px;
+    line-height: 32px;
+  }
+  .sx .px-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+}
+.sx .px-owe-name {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 22px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sx a.sx-icard {
+  text-decoration: none;
+}

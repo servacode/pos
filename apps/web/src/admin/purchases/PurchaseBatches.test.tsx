@@ -27,7 +27,7 @@ function open() {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
     'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
-    'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+    'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
     [`GET ${productsPath({ q: 'قفازات' })}`]: () => ({
       status: 200,
       body: { items: [{ id: 'p-1', nameAr: 'قفازات طبية', type: 'stock' }], nextCursor: null },
@@ -127,7 +127,7 @@ describe('serial numbers on a receipt', () => {
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: owner() }),
       'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
-      'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+      'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
       [`GET ${productsPath({ q: 'جهاز' })}`]: () => ({
         status: 200,
         body: { items: [{ id: 'p-9', nameAr: 'جهاز ضغط', type: 'stock' }], nextCursor: null },

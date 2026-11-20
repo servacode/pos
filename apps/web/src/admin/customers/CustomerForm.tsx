@@ -1,22 +1,26 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import {
   CUSTOMER_KIND_LABELS,
   CUSTOMER_KINDS,
   normalizeArabic,
   normalizeContactPhone,
+  toLatinDigits,
+  toMinor,
   type CustomerDetail,
+  type CurrencyCode,
   type CustomerKind,
   type CustomerListItem,
   type RegionRow,
   type SectorKey,
 } from '@serva/core';
-import { Alert, Button, Card, CardHeader, Select, Switch, TextField, UserIcon } from '@serva/ui';
+import { Alert, Button, Select, Switch, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
 import { storeSells } from '../../lib/sectors';
 import { approveCustomer, listRegions } from '../distribution/api';
-import { createCustomer, updateCustomer } from './api';
+import { createCustomer, listCustomers, updateCustomer } from './api';
+import './customers.css';
 
 /** The shops that sell to clinics, hospitals and offices: only they type a customer by kind */
 export const KIND_SECTORS: readonly SectorKey[] = [
@@ -27,12 +31,22 @@ export const KIND_SECTORS: readonly SectorKey[] = [
   'general',
 ];
 
-/** Pounds typed («50000» or «50,000») to minor units; '' is no limit */
-function limitOf(text: string): number | null | 'bad' {
-  const clean = text.replace(/[,\s]/g, '').replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+/** An amount typed in the base currency («50000», «50,000», «٥٠٠٠٠», «0.5») to minor units; '' is no limit */
+export function limitOf(text: string, base: CurrencyCode): number | null | 'bad' {
+  if (!text.trim()) return null;
+  try {
+    const minor = toMinor(text, base);
+    return minor >= 0 ? minor : 'bad';
+  } catch {
+    return 'bad';
+  }
+}
+
+/** A coordinate typed in any digits: NaN when it is not a number */
+export function coordinate(text: string): number | null {
+  const clean = toLatinDigits(text).trim().replace('٫', '.').replace(',', '.');
   if (!clean) return null;
-  if (!/^\d{1,12}$/.test(clean)) return 'bad';
-  return Number(clean) * 100;
+  return /^-?\d{1,3}(\.\d{1,10})?$/.test(clean) ? Number(clean) : Number.NaN;
 }
 
 /** A part of the form: its title and a line of help at the start, its fields beside them. */
@@ -46,14 +60,51 @@ function FormSection({
   children: ReactNode;
 }) {
   return (
-    <div className="grid gap-x-8 gap-y-4 border-t border-line pt-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
-      <div className="flex flex-col gap-1">
-        <h4 className="text-[0.9375rem] font-semibold text-ink">{title}</h4>
-        <p className="text-sm text-ink-muted">{description}</p>
+    <div className="cx-sec">
+      <div>
+        <h3>{title}</h3>
+        <p>{description}</p>
       </div>
       <div className="min-w-0">{children}</div>
     </div>
   );
+}
+
+/**
+ * The customers that share the typed name or phone, asked of the server once the typing pauses (the
+ * list is paged, so no page holds everyone). `existing` is what the caller already knows.
+ */
+function useTwins(
+  existing: readonly CustomerListItem[],
+  name: string,
+  phone: string,
+  selfId?: string,
+): CustomerListItem[] {
+  const [found, setFound] = useState<CustomerListItem[]>([]);
+  const wanted = useRef('');
+  useEffect(() => {
+    const byName = normalizeArabic(name).length >= 2 ? name.trim() : '';
+    const byPhone = phone.trim() && normalizeContactPhone(phone) ? phone.trim() : '';
+    wanted.current = `${byName}|${byPhone}`;
+    if (!byName && !byPhone) {
+      setFound([]);
+      return;
+    }
+    const mine = wanted.current;
+    const timer = setTimeout(() => {
+      void Promise.all([
+        byName ? listCustomers(byName).catch(() => null) : null,
+        byPhone ? listCustomers(byPhone).catch(() => null) : null,
+      ]).then(([a, b]) => {
+        if (wanted.current !== mine) return;
+        const seen = new Map<string, CustomerListItem>();
+        for (const c of [...(a?.items ?? []), ...(b?.items ?? [])]) seen.set(c.id, c);
+        setFound([...seen.values()]);
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [name, phone]);
+  return sameCustomers([...existing, ...found], name, phone, selfId);
 }
 
 /**
@@ -68,9 +119,12 @@ export function sameCustomers(
 ): CustomerListItem[] {
   const wantedPhone = phone.trim() ? normalizeContactPhone(phone) : null;
   const wantedName = normalizeArabic(name);
+  const seen = new Set<string>();
   return existing.filter(
     (c) =>
       c.id !== selfId &&
+      !seen.has(c.id) &&
+      (seen.add(c.id), true) &&
       ((wantedPhone !== null && c.phone === wantedPhone) ||
         (wantedName.length >= 2 && normalizeArabic(c.name) === wantedName)),
   );
@@ -123,28 +177,27 @@ export function CustomerForm({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const same = sameCustomers(existing, name, phone, customer?.id);
+  const same = useTwins(existing, name, phone, customer?.id);
+  const base = me.settings.baseCurrency;
+  const unit = base === 'SYP' ? 'بالليرة' : `(${base})`;
 
   async function save() {
-    const creditLimitMinor = limitOf(limit);
+    // Everything that can be wrong with what was typed is said before anything is sent
+    const creditLimitMinor = limitOf(limit, base);
     if (creditLimitMinor === 'bad') {
-      setFields({ creditLimitMinor: 'اكتب الحد أرقاماً بالليرة، أو اتركه فارغاً بلا حد' });
+      setFields({ creditLimitMinor: 'اكتب الحد أرقاماً، أو اتركه فارغاً بلا حد' });
       return;
     }
-    setSaving(true);
-    setError(null);
-    setFields({});
     const place = distribution
-      ? {
-          regionId: regionId || null,
-          lat: lat.trim() ? Number(lat.trim()) : null,
-          lng: lng.trim() ? Number(lng.trim()) : null,
-        }
+      ? { regionId: regionId || null, lat: coordinate(lat), lng: coordinate(lng) }
       : {};
     if (distribution && (Number.isNaN(place.lat) || Number.isNaN(place.lng))) {
       setFields({ lat: 'اكتب الموقع أرقاماً، مثل 33.51 و 36.29' });
       return;
     }
+    setSaving(true);
+    setError(null);
+    setFields({});
     const input = {
       ...place,
       name,
@@ -176,15 +229,14 @@ export function CustomerForm({
         void save();
       }}
     >
-      <Card>
-        <CardHeader
-          icon={<UserIcon />}
-          title={customer ? 'بيانات الزبون' : 'زبون جديد'}
-          description={
-            customer ? 'عدّل ما تغيّر، ثم احفظ.' : 'الاسم وحده يكفي للبدء، والباقي تضيفه حين تحتاجه.'
-          }
-        />
-        <div className="flex flex-col gap-6">
+      <section className="sx-card">
+        <div className="sx-card-h">
+          <h2>{customer ? 'بيانات الزبون' : 'زبون جديد'}</h2>
+          <span className="sx-aside">
+            {customer ? 'عدّل ما تغيّر، ثم احفظ.' : 'الاسم وحده يكفي للبدء، والباقي تضيفه حين تحتاجه.'}
+          </span>
+        </div>
+        <div className="cx-form">
           {error ? <Alert tone="error">{error}</Alert> : null}
           {distribution && customer?.approvalStatus === 'pending' ? (
             <Alert tone="warning" title="زبون أضافه مندوب وينتظر موافقتك">
@@ -207,30 +259,8 @@ export function CustomerForm({
               </div>
             </Alert>
           ) : null}
-          {same.length > 0 ? (
-            <Alert tone="warning" title="يوجد زبون بالاسم أو الرقم نفسه">
-              <ul className="flex flex-col gap-1">
-                {same.slice(0, 3).map((c) => (
-                  <li key={c.id}>
-                    <Link to={`/customers/${c.id}`} className="font-semibold underline underline-offset-4">
-                      افتح {c.name}
-                    </Link>
-                    {c.phone ? (
-                      <>
-                        {' · '}
-                        <bdi dir="ltr" className="num">
-                          {c.phone}
-                        </bdi>
-                      </>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-1">يمكنك الحفظ رغم ذلك إن كان زبوناً آخر فعلاً.</p>
-            </Alert>
-          ) : null}
           <FormSection title="البيانات" description="كيف تعرفه وتصل إليه.">
-            <div className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+            <div className="cx-grid2">
               <TextField
                 label="اسم الزبون"
                 value={name}
@@ -297,7 +327,7 @@ export function CustomerForm({
           </FormSection>
           {distribution ? (
             <FormSection title="التوزيع" description="منطقة الزبون وموقع محله لخط سير المندوب.">
-              <div className="grid gap-x-4 gap-y-5 sm:grid-cols-3">
+              <div className="cx-grid3">
                 <Select
                   label="المنطقة"
                   value={regionId}
@@ -335,9 +365,9 @@ export function CustomerForm({
           <FormSection title="البيع بالآجل" description="حدّ دينه، والسعر الذي يشتري به.">
             <div className="flex flex-col gap-4">
               <TextField
-                label="حد الدين بالليرة"
+                label={`حد الدين ${unit}`}
                 hint="فارغ: بلا حد. البيع فوق الحد يُقبل ويظهر تنبيه."
-                inputMode="numeric"
+                inputMode="decimal"
                 dir="ltr"
                 value={limit}
                 onChange={(e) => setLimit(e.target.value)}
@@ -362,7 +392,29 @@ export function CustomerForm({
               </div>
             </div>
           </FormSection>
-          <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-5">
+          {same.length > 0 ? (
+            <Alert tone="warning" title="يوجد زبون بالاسم أو الرقم نفسه">
+              <ul className="flex flex-col gap-1">
+                {same.slice(0, 3).map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/customers/${c.id}`} className="font-semibold underline underline-offset-4">
+                      افتح {c.name}
+                    </Link>
+                    {c.phone ? (
+                      <>
+                        {' · '}
+                        <bdi dir="ltr" className="num">
+                          {c.phone}
+                        </bdi>
+                      </>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1">يمكنك الحفظ رغم ذلك إن كان زبوناً آخر فعلاً.</p>
+            </Alert>
+          ) : null}
+          <div className="cx-actions">
             <Button variant="secondary" onClick={onCancel}>
               إلغاء
             </Button>
@@ -371,7 +423,7 @@ export function CustomerForm({
             </Button>
           </div>
         </div>
-      </Card>
+      </section>
     </form>
   );
 }

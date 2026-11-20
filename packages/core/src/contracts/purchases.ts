@@ -110,6 +110,8 @@ export const purchaseLineInput = z.object({
 
 export const purchaseInput = z
   .object({
+    /** Round 44: the document's own id, made by the form when it opens. The same id again answers the document already made and posts nothing twice (a retry after a dropped connection) */
+    id: uuidSchema.optional(),
     supplierId: uuidSchema,
     branchId: uuidSchema.optional(),
     date: isoDateSchema,
@@ -212,18 +214,30 @@ export interface PurchaseCorrection {
 export interface PurchaseListResponse {
   items: PurchaseRow[];
   baseCurrency: CurrencyCode;
+  /** Round 44: the cursor of the next page when the request asked for pages (`limit`); null on the last page. Absent from older servers */
+  nextCursor?: string | null;
+  /** Round 44: what the filters match in all (corrected invoices left out): how many and their total. Absent from older servers */
+  summary?: { count: number; totalMinor: number };
 }
 
 export const purchaseListQuery = z.object({
   from: isoDateSchema.optional(),
   to: isoDateSchema.optional(),
   supplierId: uuidSchema.optional(),
+  /** Round 44: pages. Without `limit` the list is the newest 500, as before */
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().max(80).optional(),
+  /** Round 44: a number, a supplier's name or the supplier's own invoice number */
+  q: z.string().trim().max(80).optional(),
+  payment: z.enum(PURCHASE_PAYMENTS).optional(),
 });
 
 /** The largest single payment to a supplier, minor units (100 billion pounds): above it is a typing slip */
 export const MAX_PAYMENT_MINOR = 10_000_000_000_000;
 
 export const supplierPaymentInput = z.object({
+  /** Round 44: the document's own id, made by the form when it opens. The same id again answers the document already made and posts nothing twice (a retry after a dropped connection) */
+  id: uuidSchema.optional(),
   supplierId: uuidSchema,
   date: isoDateSchema,
   amountMinor: positiveMinorSchema.max(MAX_PAYMENT_MINOR, 'المبلغ كبير جداً. تحقّق من الأصفار'),
@@ -270,6 +284,9 @@ export interface InventoryRow {
   /** The unit takes fractions (a weighed item); false for pieces. Absent from older servers */
   allowsFraction?: boolean;
   branchId: string;
+  /** The branch's name and kind (store, van), so a van's stock is told apart from a store's; absent from older servers */
+  branchName?: string;
+  branchKind?: string;
   /** Base units, thousandths */
   qty: number;
   valueMinor: number;
@@ -292,6 +309,8 @@ export interface InventoryResponse {
   baseCurrency: CurrencyCode;
   /** The reasons «سجّل هدراً» offers: the store's own, or the built-in ones; absent from older servers */
   wasteReasons?: string[];
+  /** The database clock when the list was read: a write-off made from it counts what moved since (round 44) */
+  asOf?: string;
 }
 
 export const stocktakeInput = z.object({
@@ -367,6 +386,33 @@ export interface StocktakeDetail {
   /** Sum of the differences' value */
   diffValueMinor: number;
   baseCurrency: CurrencyCode;
+}
+
+/**
+ *   GET /v1/stocktakes?limit&cursor   inventory.adjust   → StocktakeListResponse
+ * The counts already made, newest first (round 44): who counted, in which branch, and what the difference cost.
+ */
+export const stocktakeListQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  cursor: z.string().max(40).optional(),
+});
+export interface StocktakeListRow {
+  id: string;
+  number: string;
+  date: string;
+  branchId: string;
+  branchName: string;
+  /** Who made the count (the person's name); empty when unknown */
+  by: string;
+  /** What kind of document it was: a shelf count, a waste, a shortage on a transfer */
+  kind: 'count' | 'waste' | 'shortage';
+  items: number;
+  diffValueMinor: number;
+  note: string | null;
+}
+export interface StocktakeListResponse {
+  items: StocktakeListRow[];
+  nextCursor: string | null;
 }
 
 /** Batches still on the shelf that end within `days` (90 by default), or already have. */
@@ -609,6 +655,8 @@ export const transferInput = z
     note: optionalText(200, 'الملاحظة طويلة'),
     /** Round 37: send it in one step or «بالطريق»; left out, the store's setting decides (TransferMode) */
     mode: z.enum(['instant', 'transit']).optional(),
+    /** Round 44: refuse more than the sending branch holds (the screen sets it; left out, stock may go below nothing as at the till) */
+    strictStock: z.boolean().optional(),
     lines: z
       .array(
         z.object({
@@ -631,8 +679,9 @@ export type TransferInput = z.input<typeof transferInput>;
  * Round 37, decision 16: a transfer is «بالطريق» (in transit) or instant.
  *   in_transit  the goods left the sender; the receiving branch has not confirmed them yet
  *   received    the goods are in the receiver (every older transfer, and an instant one, is this)
+ *   cancelled   round 44: the sender cancelled it on the way and the goods came back to it
  */
-export type TransferStatus = 'in_transit' | 'received';
+export type TransferStatus = 'in_transit' | 'received' | 'cancelled';
 
 /** How a store sends goods between its branches. auto: in transit when the store has more than one branch. */
 export const TRANSFER_MODES = ['auto', 'instant', 'transit'] as const;
@@ -677,7 +726,35 @@ export interface TransferRow {
   toBranchId?: string;
   /** Pieces that did not arrive (thousandths), when the receiver confirmed less than was sent */
   shortPieces?: number;
+  /** Round 44: this user may confirm / cancel it (the right is per branch); absent from older servers */
+  canReceive?: boolean;
+  canCancel?: boolean;
 }
+
+/**
+ *   GET /v1/transfers?limit&cursor   inventory.adjust   → { items, nextCursor?, inTransit? }
+ * Every transfer still on the way is always in the list (on the first page); the rest are paged newest first.
+ */
+export const transferListQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().max(80).optional(),
+});
+export interface TransferListResponse {
+  items: TransferRow[];
+  nextCursor?: string | null;
+  /** How many are on the way now (all of them, not only this page) */
+  inTransit?: number;
+}
+
+/**
+ *   POST /v1/transfers/:id/cancel   inventory.adjust (at the sending branch)   transferCancelInput → TransferFull
+ * A transfer still on the way is cancelled by the sender: the goods come back to it at the value they left with.
+ */
+export const transferCancelInput = z.object({
+  date: isoDateSchema.optional(),
+  reason: optionalText(200, 'السبب طويل'),
+});
+export type TransferCancelInput = z.input<typeof transferCancelInput>;
 
 /**
  *   POST /v1/transfers/:id/receive   inventory.adjust (at the receiving branch)   transferReceiveInput → TransferFull
@@ -751,6 +828,8 @@ export interface TransferFull {
  */
 export const supplierReturnInput = z
   .object({
+    /** Round 44: the document's own id, made by the form when it opens. The same id again answers the document already made and posts nothing twice (a retry after a dropped connection) */
+    id: uuidSchema.optional(),
     supplierId: uuidSchema,
     branchId: uuidSchema.optional(),
     date: isoDateSchema,
@@ -894,4 +973,6 @@ export interface WasteReport {
   byProduct: { variantId: string; name: string; qty: number; costMinor: number; count: number }[];
   totalCostMinor: number;
   baseCurrency: CurrencyCode;
+  /** More lines matched than the 5000 returned: the totals cover those only (round 44) */
+  truncated?: boolean;
 }

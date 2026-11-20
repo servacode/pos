@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { dayText } from '../../lib/dates';
 import { Link } from 'react-router';
-import type { PurchaseCorrection, PurchaseDetail, PurchaseRow } from '@serva/core';
+import type { PurchaseCorrection, PurchaseDetail, PurchaseDraft, PurchaseRow } from '@serva/core';
 import { Alert, Button, Dialog, formatQuantity, Money, SkeletonText, TextLink, useDigits } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { correctPurchase, getPurchase } from './api';
+import { draftOfDetail } from './correctionDraft';
+import { PAYMENT_TEXT } from './pui';
 
 /**
  * One purchase invoice (from the same record the labels page reads): each line with its quantity,
@@ -16,11 +18,14 @@ export function PurchaseDetailDialog({
   purchase,
   onClose,
   onCorrected,
+  onRewrite,
 }: {
   purchase: PurchaseRow;
   onClose: () => void;
   /** The invoice was turned back: the page opens its draft */
   onCorrected?: (correction: PurchaseCorrection) => void;
+  /** A corrected invoice written again: the page opens a new invoice with its lines (round 44) */
+  onRewrite?: (draft: PurchaseDraft, reversalNumber: string) => void;
 }) {
   const digits = useDigits();
   const [detail, setDetail] = useState<PurchaseDetail | null>(null);
@@ -69,6 +74,13 @@ export function PurchaseDetailDialog({
       description={`${purchase.supplierName} · ${dayText(purchase.date)}`}
       actions={
         <>
+          {detail?.correctedBy && onRewrite ? (
+            <Button
+              onClick={() => onRewrite(draftOfDetail(detail), detail.correctedBy!.number)}
+            >
+              أعد كتابتها
+            </Button>
+          ) : null}
           {correctable && !asking ? (
             <Button variant="secondary" onClick={() => setAsking(true)}>
               صحّح الفاتورة
@@ -92,13 +104,25 @@ export function PurchaseDetailDialog({
       {!detail && !error ? <SkeletonText lines={4} /> : null}
       {detail ? (
         <div className="flex flex-col gap-4">
+          <p className="text-sm text-ink-muted">
+            {PAYMENT_TEXT[detail.payment]}
+            {detail.reference ? (
+              <>
+                {' · '}رقمها عند المورد{' '}
+                <bdi dir="ltr" className="num">
+                  {detail.reference}
+                </bdi>
+              </>
+            ) : null}
+          </p>
           {detail.correctedBy ? (
             <Alert tone="info">
               صُحّحت هذه الفاتورة بالمستند{' '}
               <bdi dir="ltr" className="num font-semibold">
                 {detail.correctedBy.number}
               </bdi>{' '}
-              بتاريخ {dayText(detail.correctedBy.date)}. أثرها على المخزون وعلى حساب المورد انتهى.
+              بتاريخ {dayText(detail.correctedBy.date)}. أثرها على المخزون وعلى حساب المورد انتهى. إن أردت فاكتبها من جديد
+              بالقيم الصحيحة.
             </Alert>
           ) : null}
           {asking ? (
@@ -135,6 +159,15 @@ export function PurchaseDetailDialog({
                 </div>
                 <p className="text-sm text-ink-muted">
                   الكمية <span className="num">{formatQuantity(l.qty, digits)}</span>
+                  {l.qty > 0 ? (
+                    <>
+                      {' · '}كلفة الوحدة{' '}
+                      <Money
+                        minor={Math.round(((dollars && typeof l.foreignCostMinor === 'number' ? l.foreignCostMinor : l.costMinor) * 1000) / l.qty)}
+                        currency={dollars ? 'USD' : detail.baseCurrency}
+                      />
+                    </>
+                  ) : null}
                   {l.batchNo ? (
                     <>
                       {' · '}دفعة{' '}

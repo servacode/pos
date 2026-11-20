@@ -122,7 +122,10 @@ export function promotionActive(rule: PromotionRule, at: Date, timeZone: string)
   if (rule.startsAt && ms < Date.parse(rule.startsAt)) return false;
   if (rule.endsAt && ms >= Date.parse(rule.endsAt)) return false;
   const { weekday, time } = localClock(at, timeZone);
-  if (rule.daysOfWeek.length > 0 && !rule.daysOfWeek.includes(weekday)) return false;
+  // A window past midnight (22:00-02:00) belongs to the day it began: its small hours count for the day before
+  const overnight = Boolean(rule.fromTime && rule.toTime && rule.fromTime > rule.toTime);
+  const day = overnight && rule.toTime && time < rule.toTime ? (weekday + 6) % 7 : weekday;
+  if (rule.daysOfWeek.length > 0 && !rule.daysOfWeek.includes(day)) return false;
   if (rule.fromTime && rule.toTime) {
     const inside =
       rule.fromTime <= rule.toTime

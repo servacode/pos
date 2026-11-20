@@ -86,8 +86,8 @@ export function PinPage() {
 
         <Card className="flex flex-col gap-6">
           <Alert tone="info" title={sixDigits ? 'رمزك 6 أرقام.' : 'رمزك 4 أرقام أو 6.'}>
-            الكاشير يكفيه 4 أرقام. المالك والمدير ومن يوافق على خصم أو إرجاع أو سحب نقد يحتاج 6 أرقام، لأن
-            رمزه يفتح عمليات غيره.
+            <strong>الكاشير يكفيه 4 أرقام، والمالك والمدير 6 أرقام.</strong> وكذلك من يوافق على خصم أو إرجاع
+            أو سحب نقد، لأن رمزه يفتح عمليات غيره.
           </Alert>
 
           {saved ? (
@@ -122,7 +122,7 @@ export function PinPage() {
             <PasswordField
               name="password"
               label="كلمة السر"
-              hint="للتأكد أنك صاحب الحساب."
+              hint="كلمة سر دخولك إلى لوحة التحكم، للتأكد أنك صاحب الحساب."
               autoComplete="current-password"
               value={values.password}
               onChange={(event) => setValue('password', event.target.value)}

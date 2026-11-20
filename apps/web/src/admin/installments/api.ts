@@ -22,7 +22,7 @@ export const listPlans = (
   if (query.customerId) params.set('customerId', query.customerId);
   if (query.overdue) params.set('overdue', '1');
   const qs = params.toString();
-  return apiFetch<{ items: PlanListItem[]; baseCurrency: CurrencyCode; today: string }>(
+  return apiFetch<{ items: PlanListItem[]; baseCurrency: CurrencyCode; today: string; hasMore?: boolean }>(
     `/v1/installment-plans${qs ? `?${qs}` : ''}`,
     { auth: true },
   );
@@ -45,7 +45,7 @@ export const cancelPlan = (id: string, reason: string) =>
 
 /** `GET /v1/installments/worklist?bucket=` */
 export const getWorklist = (bucket: WorklistBucket) =>
-  apiFetch<{ items: WorklistRow[]; today: string; baseCurrency: CurrencyCode }>(
+  apiFetch<{ items: WorklistRow[]; today: string; baseCurrency: CurrencyCode; hasMore?: boolean }>(
     `/v1/installments/worklist?bucket=${bucket}`,
     { auth: true },
   );

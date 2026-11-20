@@ -25,6 +25,7 @@ import {
   type WorklistBucket,
   type WorklistRow,
 } from '@serva/core';
+import { toLatinDigits } from '@serva/core/text';
 import { withTenant, type Database, type Transaction } from '@serva/db';
 import type { SyncFlag } from '@serva/sync';
 import { createUuidV7 } from '@serva/sync';
@@ -346,29 +347,37 @@ async function instalmentRows(tx: Transaction, planIds: string[]): Promise<Map<s
   return map;
 }
 
+export const PLAN_LIST_LIMIT = 300;
+
 export function listPlans(
   db: Database,
   auth: AccessClaims,
   query: { status?: PlanStatus; q?: string; customerId?: string; overdue?: boolean },
   now: Date,
-): Promise<{ items: PlanListItem[]; baseCurrency: CurrencyCode; today: string }> {
+): Promise<{ items: PlanListItem[]; baseCurrency: CurrencyCode; today: string; hasMore: boolean }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'installments.view');
     const day = await dayOf(tx, now);
-    const q = query.q ? `%${query.q.replace(/[%_]/g, '')}%` : null;
+    const q = query.q ? `%${toLatinDigits(query.q).replace(/[%_\\]/g, '')}%` : null;
+    // «متأخرة» is decided in the query, before the cap: a late plan from months ago is never cut off
     const plans = await tx.execute<PlanRow>(sql`
       ${planSelect}
       where (${query.status ?? null}::text is null or p.status = ${query.status ?? null})
         and (${q}::text is null or p.number ilike ${q} or c.name ilike ${q})
         and (${query.customerId ?? null}::uuid is null or p.customer_id = ${query.customerId ?? null}::uuid)
-      order by p.created_at desc limit 300`);
+        and (${query.overdue ? true : false} = false or exists (
+          select 1 from installments i where i.plan_id = p.id and i.status = 'open'
+            and i.due_date < ${day.today}::date and i.paid_minor < i.amount_minor))
+      order by p.created_at desc limit ${PLAN_LIST_LIMIT + 1}`);
+    const hasMore = plans.length > PLAN_LIST_LIMIT;
+    const page = plans.slice(0, PLAN_LIST_LIMIT);
     const rows = await instalmentRows(
       tx,
-      plans.map((p) => p.id),
+      page.map((p) => p.id),
     );
-    let items = plans.map((p) => listItem(p, rows.get(p.id) ?? [], day.today));
+    let items = page.map((p) => listItem(p, rows.get(p.id) ?? [], day.today));
     if (query.overdue) items = items.filter((i) => i.lateCount > 0);
-    return { items, baseCurrency: day.base, today: day.today };
+    return { items, baseCurrency: day.base, today: day.today, hasMore };
   });
 }
 
@@ -455,7 +464,7 @@ export function worklist(
   auth: AccessClaims,
   bucket: WorklistBucket,
   now: Date,
-): Promise<{ items: WorklistRow[]; today: string; baseCurrency: CurrencyCode }> {
+): Promise<{ items: WorklistRow[]; today: string; baseCurrency: CurrencyCode; hasMore: boolean }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'installments.view');
     const day = await dayOf(tx, now);
@@ -486,9 +495,10 @@ export function worklist(
       join installment_plans p on p.tenant_id = i.tenant_id and p.id = i.plan_id
       join customers c on c.tenant_id = p.tenant_id and c.id = p.customer_id
       where i.status = 'open' and p.status in ('active', 'defaulted') and ${range}
-      order by i.due_date, p.number, i.no limit 500`);
+      order by i.due_date, p.number, i.no limit 501`);
     return {
-      items: rows.map((r) => ({
+      hasMore: rows.length > 500,
+      items: rows.slice(0, 500).map((r) => ({
         planId: r.plan_id,
         planNumber: r.number,
         customerId: r.customer_id,
@@ -605,7 +615,8 @@ export async function collectOnPlan(
   meta: RequestMeta,
   now: Date,
 ): Promise<PlanDetail> {
-  const paymentId = newId();
+  // A dialog sends its own id: the same call sent again (a lost answer) posts once
+  const paymentId = input.id ?? newId();
   const customerId = await withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'installments.view');
     const [row] = await tx.execute<{ customer_id: string; status: string }>(
@@ -613,7 +624,12 @@ export async function collectOnPlan(
     );
     if (!row) throw notFound();
     if (row.status !== 'active' && row.status !== 'defaulted') {
-      throw new AppError(409, 'conflict', 'هذه الخطة مغلقة، لا يُقبض عليها.');
+      const [done] = input.id
+        ? await tx.execute<{ n: number }>(
+            sql`select 1 as n from installment_payments where plan_id = ${planId} and receipt_id = ${input.id} limit 1`,
+          )
+        : [];
+      if (!done) throw new AppError(409, 'conflict', 'هذه الخطة مغلقة، لا يُقبض عليها.');
     }
     return row.customer_id;
   });

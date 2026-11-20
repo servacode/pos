@@ -5,6 +5,7 @@ import {
   customerOpeningDebtInput,
   customerPaymentInput,
   uuidSchema,
+  voucherListQuery,
 } from '@serva/core';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
@@ -20,6 +21,7 @@ import {
   readCustomer,
   updateCustomer,
 } from '../services/customers';
+import { listVouchers } from '../services/vouchers-admin';
 import { parseBody } from './validation';
 
 /** Customers and their balances (packages/core › contracts/customers.ts). */
@@ -37,6 +39,11 @@ export async function customerRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/customers', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
     return listCustomers(app.db, request.auth, parseBody(customerListQuery, request.query));
+  });
+
+  app.get('/v1/vouchers', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listVouchers(app.db, request.auth, parseBody(voucherListQuery, request.query));
   });
 
   app.post('/v1/customers', { preHandler: requireAuth }, async (request, reply) => {

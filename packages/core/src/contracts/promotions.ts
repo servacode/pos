@@ -89,6 +89,15 @@ export const promotionInput = z
     if ((p.kind === 'tiered' || p.kind === 'free_item') && p.couponCode) {
       ctx.addIssue({ code: 'custom', path: ['couponCode'], message: 'الكود لعروض الخصم والعبوات فقط' });
     }
+    // The shop never offers a code to an audience-limited offer, so the owner is told instead of a code that never works
+    // (a stopped offer is let through: an old row must still be stoppable)
+    if (p.couponCode && !p.archived && (p.repOnly || p.customerKinds.length > 0 || p.priceTiers.length > 0)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['couponCode'],
+        message: 'الكود لا يعمل مع عرض مخصص لفئة من الزبائن أو للمندوب. أزل أحدهما',
+      });
+    }
     if (p.scope === 'categories' && p.categoryIds.length === 0) {
       ctx.addIssue({ code: 'custom', path: ['categoryIds'], message: 'اختر تصنيفاً واحداً على الأقل' });
     }
@@ -107,6 +116,10 @@ export type PromotionData = z.output<typeof promotionInput>;
 
 export const promotionUpdateInput = z.object({ version: versionSchema }).and(promotionInput);
 export type PromotionUpdateInput = z.input<typeof promotionUpdateInput>;
+
+/** `POST /v1/promotions/{id}/archive`: stop (`archived: true`) or restart an offer, whatever else is in the row */
+export const promotionArchiveInput = z.object({ version: versionSchema, archived: z.boolean() });
+export type PromotionArchiveInput = z.input<typeof promotionArchiveInput>;
 
 /** A promotion as the dashboard reads it and as the `promotions` pull set carries it. */
 export interface PromotionRow extends PromotionRule {

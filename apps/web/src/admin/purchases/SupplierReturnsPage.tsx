@@ -10,7 +10,6 @@ import type {
 import {
   AddIcon,
   Alert,
-  Badge,
   BookIcon,
   Button,
   Card,
@@ -18,27 +17,34 @@ import {
   CashIcon,
   ChequeIcon,
   ChoiceCard,
-  DataTable,
   EmptyState,
   formatQuantity,
   Money,
   NumberField,
-  PageHeader,
   RadioGroup,
   Select,
   TextField,
   UndoIcon,
   useDigits,
-  type BadgeTone,
-  type DataColumn,
   type Icon,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { dayText } from '../../lib/dates';
-import { AppShell } from '../../layout/AppShell';
+import { DateField } from '../../lib/DateField';
+import { ReportScreen } from '../reports/parts';
+import { PageTop, SalesPage, StatusPill, SxTable, type SxColumn, Amt } from '../sales/ui';
+import './purchases.css';
 import { apiFetch, ApiError, errorMessage } from '../../lib/api';
-import { getPurchase, listPurchases, listSuppliers, moneyOf, qtyOf, today } from './api';
-import { Caption, LinesHead, LinesTable, RemoveLine, SectionHead, WayArrow } from './parts';
+import {
+  getPurchase,
+  listPurchasePage,
+  listSuppliers,
+  moneyOf,
+  newDocumentId,
+  qtyOf,
+  storeToday,
+} from './api';
+import { Caption, LinesHead, LinesTable, RemoveLine, WayArrow } from './parts';
 import { PackQty } from './PackQty';
 import { baseQtyOf, packSummary, withPackChange } from './packLines';
 import { BatchSelect, type BatchChoice, type BatchSuggestion } from './BatchSelect';
@@ -49,20 +55,11 @@ const listReturns = () => apiFetch<{ items: SupplierReturnRow[] }>('/v1/supplier
 const createReturn = (input: SupplierReturnInput) =>
   apiFetch<SupplierReturnDetail>('/v1/supplier-returns', { method: 'POST', body: input, auth: true });
 
-const REFUND_TEXT: Record<SupplierReturnRow['refund'], string> = {
-  credit: 'من رصيده',
-  cash: 'نقداً',
-  bank: 'تحويل بنكي',
-};
-
 /** Each way the supplier pays back, as a choice and as a state in the list. */
-const REFUND_CHOICE: Record<
-  SupplierReturnRow['refund'],
-  { title: string; hint: string; icon: Icon; tone: BadgeTone }
-> = {
-  credit: { title: 'من رصيده عندي', hint: 'ينزل مما تدين له', icon: BookIcon, tone: 'neutral' },
-  cash: { title: 'نقداً', hint: 'تعود النقود إلى الخزنة', icon: CashIcon, tone: 'success' },
-  bank: { title: 'تحويل بنكي', hint: 'تدخل حساب البنك', icon: ChequeIcon, tone: 'info' },
+const REFUND_CHOICE: Record<SupplierReturnRow['refund'], { title: string; hint: string; icon: Icon }> = {
+  credit: { title: 'من رصيده عندي', hint: 'ينزل مما تدين له', icon: BookIcon },
+  cash: { title: 'نقداً', hint: 'تعود النقود إلى الخزنة', icon: CashIcon },
+  bank: { title: 'تحويل بنكي', hint: 'تدخل حساب البنك', icon: ChequeIcon },
 };
 
 interface Line extends PickedVariant {
@@ -92,6 +89,10 @@ export function SupplierReturnsPage() {
   const digits = useDigits();
   const branches = me.branches;
   const base = me.settings.baseCurrency;
+  const todayDay = storeToday(me.tenant.timezone);
+  const [date, setDate] = useState(todayDay);
+  // Each return the form sends has its own id, kept until that return is saved: a retry never sends the same pieces twice
+  const ids = useRef(new Map<string, string>());
   // «رجّعو للمورد» from the expiring-soon report opens the form already filled (round 38)
   const prefill = prefillOf(useLocation().state);
   const [suppliers, setSuppliers] = useState<SupplierListResponse | null>(null);
@@ -154,17 +155,19 @@ export function SupplierReturnsPage() {
   useEffect(() => {
     if (!supplierId) return;
     let alive = true;
-    listPurchases()
+    // This supplier's newest invoices only (the server filters), the latest five read at once for their batches
+    listPurchasePage({ supplierId }, null, 100)
       .then(async (all) => {
-        const mine = all.items
-          .filter((p) => p.supplierId === supplierId)
+        const mine = [...all.items]
           // Newest first; two on the same day: the later number
-          .sort((a, b) => (a.date === b.date ? (a.number < b.number ? 1 : -1) : a.date < b.date ? 1 : -1));
-        if (alive) setInvoices(mine.filter((p) => !p.correctedBy));
+          .sort((a, b) => (a.date === b.date ? (a.number < b.number ? 1 : -1) : a.date < b.date ? 1 : -1))
+          .filter((p) => !p.correctedBy);
+        if (alive) setInvoices(mine);
         const recent = mine.slice(0, 5);
         const found = new Map<string, BatchSuggestion[]>();
-        for (const p of recent) {
-          const detail = await getPurchase(p.id);
+        const details = await Promise.all(recent.map((p) => getPurchase(p.id)));
+        for (const [n, detail] of details.entries()) {
+          const p = recent[n]!;
           for (const l of detail.lines) {
             if (l.batchNo || l.expiryDate) {
               found.set(l.variantId, [
@@ -234,10 +237,13 @@ export function SupplierReturnsPage() {
     try {
       for (const part of batches) {
         const mine = part.rows.map((i) => lines[i]!);
+        const key = part.purchaseId || '-';
+        if (!ids.current.has(key)) ids.current.set(key, newDocumentId());
         const created = await createReturn({
+          id: ids.current.get(key)!,
           supplierId,
           branchId: branchId || undefined,
-          date: today(),
+          date,
           refund,
           ...(part.purchaseId ? { purchaseId: part.purchaseId } : {}),
           reference: reference.trim() || null,
@@ -261,6 +267,7 @@ export function SupplierReturnsPage() {
           }),
         });
         made.push(created);
+        ids.current.delete(key);
         // What is saved leaves the form, so a retry after a later failure never sends it twice
         setLines((list) => list.filter((l) => !mine.includes(l)));
       }
@@ -296,51 +303,62 @@ export function SupplierReturnsPage() {
     }
   }
 
-  const columns: DataColumn<SupplierReturnRow>[] = [
+  const columns: SxColumn<SupplierReturnRow>[] = [
     {
       key: 'number',
-      className: 'whitespace-nowrap',
       header: 'الرقم',
+      lead: true,
       cell: (r) => (
-        <bdi dir="ltr" className="num font-semibold">
+        <bdi dir="ltr" className="sx-n sx-no">
           {r.number}
         </bdi>
       ),
     },
     {
       key: 'date',
-      className: 'whitespace-nowrap',
       header: 'التاريخ',
-      cell: (r) => <span className="whitespace-nowrap text-ink-muted">{dayText(r.date, digits)}</span>,
+      cell: (r) => <span className="sx-mute">{dayText(r.date, digits)}</span>,
     },
-    { key: 'supplier', className: 'whitespace-nowrap', header: 'المورد', cell: (r) => r.supplierName },
+    { key: 'supplier', header: 'المورد', cell: (r) => r.supplierName },
     {
       key: 'refund',
       header: 'الاسترداد',
-      cell: (r) => <Badge tone={REFUND_CHOICE[r.refund].tone}>{REFUND_TEXT[r.refund]}</Badge>,
+      cell: (r) =>
+        r.refund === 'credit' ? (
+          <StatusPill kind="open" icon={<BookIcon size={16} />}>
+            تنقص من دينك له
+          </StatusPill>
+        ) : (
+          <StatusPill
+            kind="ok"
+            icon={r.refund === 'cash' ? <CashIcon size={16} /> : <ChequeIcon size={16} />}
+          >
+            {r.refund === 'cash' ? 'مبلغ نقدي مُستردّ' : 'تحويل بنكي مُستردّ'}
+          </StatusPill>
+        ),
     },
     {
       key: 'pieces',
       header: 'القطع',
       numeric: true,
-      cell: (r) => <span className="num">{formatQuantity(r.pieces, digits)}</span>,
+      cell: (r) => <span className="sx-n">{formatQuantity(r.pieces, digits)}</span>,
     },
     {
       key: 'amount',
       header: 'المبلغ',
       numeric: true,
-      cell: (r) => <Money minor={r.amountMinor} currency={base} className="font-semibold" />,
+      strong: true,
+      cell: (r) => <Amt minor={r.amountMinor} currency={base} />,
     },
   ];
 
   const active = (suppliers?.items ?? []).filter((s) => !s.archived);
   return (
-    <AppShell>
-      <title>مرتجع إلى المورد · SERVA</title>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
+    <ReportScreen me={me} access={['purchases.manage']} title="مرتجع إلى المورد">
+      <SalesPage>
+        <PageTop
           title="مرتجع إلى المورد"
-          description="قطع ترجع لمورّدها: تخرج من المخزون بكلفتها، وتنزل من رصيده أو تستردّ ثمنها."
+          subtitle="قطع ترجع لمورّدها: تخرج من المخزون بكلفتها، وتنزل من رصيده أو تستردّ ثمنها."
           actions={
             formOpen ? null : (
               <Button icon={<AddIcon />} onClick={() => setFormOpen(true)}>
@@ -485,7 +503,8 @@ export function SupplierReturnsPage() {
                     })}
                   </div>
                 </RadioGroup>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <DateField label="التاريخ" value={date} onChange={setDate} required />
                   <TextField
                     label="رقم إشعار المورد (اختياري)"
                     dir="ltr"
@@ -658,8 +677,7 @@ export function SupplierReturnsPage() {
           </section>
         ) : null}
         <section aria-label="المرتجعات السابقة" className="flex flex-col gap-3">
-          <SectionHead title="المرتجعات إلى الموردين" description="الأحدث أولاً." />
-          <DataTable
+          <SxTable
             caption="المرتجعات إلى الموردين"
             columns={columns}
             rows={items ?? []}
@@ -670,11 +688,18 @@ export function SupplierReturnsPage() {
                 icon={UndoIcon}
                 title="لا مرتجعات بعد."
                 description="كل مرتجع تسجّله يظهر هنا بمبلغه وطريقة استرداده."
+                action={
+                  formOpen ? undefined : (
+                    <Button icon={<AddIcon />} onClick={() => setFormOpen(true)}>
+                      مرتجع جديد
+                    </Button>
+                  )
+                }
               />
             }
           />
         </section>
-      </div>
-    </AppShell>
+      </SalesPage>
+    </ReportScreen>
   );
 }

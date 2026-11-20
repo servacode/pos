@@ -624,6 +624,27 @@
       "when": 1795165963887,
       "tag": "0089_invoices_list_order_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1795165964887,
+      "tag": "0090_products_list_order_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1795165965887,
+      "tag": "0091_purchases_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1795165966887,
+      "tag": "0092_inventory_indexes",
+      "breakpoints": true
     }
   ]
 }

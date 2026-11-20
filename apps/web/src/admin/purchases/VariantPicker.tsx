@@ -38,9 +38,12 @@ export function VariantPicker({
   onPick,
   onPickGrid,
   unitFor,
+  noCost = false,
 }: {
   onPick: (v: PickedVariant) => void;
   onPickGrid?: (lines: GridLine[]) => void;
+  /** The grid asks no cost (a transfer or a count: the books hold the cost) */
+  noCost?: boolean;
   /** The last known cost of one piece of these variants, as typed, to start the grid's cost box with */
   unitFor?: (variantIds: string[]) => string;
 }) {
@@ -97,6 +100,7 @@ export function VariantPicker({
       {grid && onPickGrid ? (
         <SizeGrid
           product={grid}
+          noCost={noCost}
           initialUnit={unitFor?.(grid.variants.filter((v) => !v.archivedAt).map((v) => v.id)) ?? ''}
           onAdd={(lines) => {
             onPickGrid(lines);

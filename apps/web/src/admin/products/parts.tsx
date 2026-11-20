@@ -14,8 +14,11 @@ export function SectionCard({
   icon,
   action,
   className,
+  anchor,
   children,
 }: {
+  /** The id a jump link points at */
+  anchor?: string;
   title: string;
   description?: ReactNode;
   icon?: ReactNode;
@@ -26,7 +29,7 @@ export function SectionCard({
   const id = useId();
   return (
     <Card className={cn('min-w-0', className)}>
-      <section aria-labelledby={id} className="flex flex-col gap-5">
+      <section id={anchor} aria-labelledby={id} className="flex scroll-mt-24 flex-col gap-5">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
           <div className={cn('flex min-w-0 flex-1 gap-3', description ? 'items-start' : 'items-center')}>
             {icon ? <IconChip>{icon}</IconChip> : null}

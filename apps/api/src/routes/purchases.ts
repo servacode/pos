@@ -3,6 +3,9 @@ import {
   batchBlockInput,
   expiryQuery,
   inventoryQuery,
+  stocktakeListQuery,
+  transferCancelInput,
+  transferListQuery,
   profitQuery,
   purchaseInput,
   purchaseCorrectionInput,
@@ -29,6 +32,7 @@ import { clientIp } from '../http/client-ip';
 import {
   createPurchase,
   createStocktake,
+  listStocktakes,
   createSupplierReturn,
   createTransfer,
   inventory,
@@ -51,7 +55,13 @@ import {
 } from '../services/purchase-orders';
 import { correctPurchase } from '../services/purchase-correction';
 import { assertDatesOpen } from '../services/period-close';
-import { readTransfer, receiveTransfer, saveTransferSettings, transferSettings } from '../services/transfers';
+import {
+  cancelTransfer,
+  readTransfer,
+  receiveTransfer,
+  saveTransferSettings,
+  transferSettings,
+} from '../services/transfers';
 import { expiryReport } from '../services/expiry';
 import { listDamagedStock } from '../services/damaged-stock';
 import { recall, setBatchBlocked } from '../services/batches';
@@ -239,6 +249,10 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
       meta(request),
     );
   });
+  app.get('/v1/stocktakes', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    return listStocktakes(app.db, request.auth, parseBody(stocktakeListQuery, request.query));
+  });
   app.post('/v1/stocktakes', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
     await dateOpen(request.auth, request.body);
@@ -253,7 +267,7 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/v1/transfers', opts, async (request) => {
     if (!request.auth) throw unauthorized();
-    return listTransfers(app.db, request.auth);
+    return listTransfers(app.db, request.auth, parseBody(transferListQuery, request.query));
   });
   app.post('/v1/transfers', opts, async (request, reply) => {
     if (!request.auth) throw unauthorized();
@@ -282,6 +296,18 @@ export async function purchaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/transfers/:id', opts, async (request) => {
     if (!request.auth) throw unauthorized();
     return readTransfer(app.db, request.auth, idOf(request.params, 'هذا التحويل'));
+  });
+  app.post('/v1/transfers/:id/cancel', opts, async (request) => {
+    if (!request.auth) throw unauthorized();
+    await dateOpen(request.auth, request.body);
+    return cancelTransfer(
+      app.db,
+      request.auth,
+      idOf(request.params, 'هذا التحويل'),
+      parseBody(transferCancelInput, request.body ?? {}),
+      meta(request),
+      app.clock.now(),
+    );
   });
   app.post('/v1/transfers/:id/receive', opts, async (request) => {
     if (!request.auth) throw unauthorized();

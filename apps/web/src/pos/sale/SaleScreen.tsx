@@ -277,7 +277,6 @@ export function SaleScreen(props: SaleScreenProps) {
     return cart.onlineOrder?.couponRule
       ? [...running, couponPromotion(cart.onlineOrder.couponRule)]
       : running;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the cart is the clock's tick
   }, [catalog.promotions, settings.timezone, cart]);
   // 03 › الصيدليات: what the cart takes from which batch (first expiry first), and from the shelf.
   // What this till sold and has not sent yet comes off what it last pulled, as it works offline.

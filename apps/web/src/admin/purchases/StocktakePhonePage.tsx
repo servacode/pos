@@ -4,26 +4,23 @@ import type { Category, CountSheet, StocktakeDetail } from '@serva/core';
 import { uuidv7 } from '@serva/sync';
 import {
   Alert,
-  Badge,
   BarcodeIcon,
   Button,
-  Card,
   CheckCircleIcon,
   formatQuantity,
-  ListIcon,
-  Money,
-  PageHeader,
   Select,
   Switch,
   TextField,
   useDigits,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
-import { AppShell } from '../../layout/AppShell';
 import { ApiError, errorMessage } from '../../lib/api';
 import { BarcodeCamera, canScanBarcodes } from '../../lib/BarcodeCamera';
 import { listCategories } from '../catalog/api';
-import { createStocktake, getCountSheet, today } from './api';
+import { ReportScreen } from '../reports/parts';
+import { Amt, PageTop, SalesPage, StatusPill } from '../sales/ui';
+import { createStocktake, getCountSheet, storeToday } from './api';
+import './inventory.css';
 import {
   addCount,
   clearSaved,
@@ -32,9 +29,9 @@ import {
   editRowsOf,
   findInSheet,
   linesOf,
-  loadSaved,
   newDraft,
   save,
+  savedFor,
   saveDraftOnly,
   setCount,
   stocktakeOf,
@@ -68,12 +65,17 @@ export function StocktakePhonePage() {
   const me = useMe();
   const digits = useDigits();
   const online = useOnline();
-  const [saved] = useState(() => loadSaved());
+  // Only this person's own unfinished count is resumed (another sign-in on the same phone starts clean)
+  const owner = `${me.tenant.id}:${me.user.id}`;
+  const [saved] = useState(() => savedFor(owner));
   const [sheet, setSheet] = useState<CountSheet | null>(saved?.sheet ?? null);
   const [draft, setDraft] = useState<CountDraft | null>(saved?.draft ?? null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryId, setCategoryId] = useState('');
-  const [branchId, setBranchId] = useState('');
+  // The main branch (the first code) is the default: the list names it once, no empty duplicate option
+  const mainBranch =
+    [...me.branches].sort((a, b) => a.code.localeCompare(b.code, 'en', { numeric: true }))[0]?.id ?? '';
+  const [branchId, setBranchId] = useState(mainBranch);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -103,8 +105,8 @@ export function StocktakePhonePage() {
     setLoading(true);
     setError(null);
     try {
-      const got = await getCountSheet(branchId || undefined, categoryId || undefined);
-      const fresh = newDraft(got, uuidv7(), me.tenant.timezone);
+      const got = await getCountSheet(me.branches.length > 1 ? branchId : undefined, categoryId || undefined);
+      const fresh = { ...newDraft(got, uuidv7(), me.tenant.timezone), owner };
       setRoomWarning(!save(fresh, got));
       setSheet(got);
       setDraft(fresh);
@@ -147,7 +149,7 @@ export function StocktakePhonePage() {
     setSending(true);
     setError(null);
     try {
-      const result = await createStocktake(stocktakeOf(draft, sheet, today()));
+      const result = await createStocktake(stocktakeOf(draft, sheet, storeToday(me.tenant.timezone)));
       clearSaved();
       setDone(result);
       setSheet(null);
@@ -166,7 +168,7 @@ export function StocktakePhonePage() {
     } finally {
       setSending(false);
     }
-  }, [sheet, draft, sending, keep]);
+  }, [sheet, draft, sending, keep, me.tenant.timezone]);
 
   // A count waiting for the connection goes by itself when it returns
   const sendRef = useRef(send);
@@ -182,12 +184,12 @@ export function StocktakePhonePage() {
 
   if (done) {
     return (
-      <AppShell>
-        <title>الجرد بالهاتف · SERVA</title>
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-5">
-          <PageHeader icon={<ListIcon />} title="الجرد بالهاتف" />
+      <ReportScreen me={me} access={['inventory.adjust']} title="الجرد بالهاتف">
+        <SalesPage className="ix-narrow">
+          <PageTop title="الجرد بالهاتف" />
           <Alert tone="success" title={`سُجّل الجرد ${done.number}`}>
-            الفرق في القيمة <Money minor={done.diffValueMinor} currency={done.baseCurrency} negativeTone />.
+            الفرق في القيمة{' '}
+            <Amt minor={done.diffValueMinor} currency={done.baseCurrency} neg={done.diffValueMinor < 0} />.
           </Alert>
           <div className="flex flex-wrap gap-3">
             <Button onClick={() => setDone(null)}>جرد جديد</Button>
@@ -197,19 +199,17 @@ export function StocktakePhonePage() {
               </Button>
             </Link>
           </div>
-        </div>
-      </AppShell>
+        </SalesPage>
+      </ReportScreen>
     );
   }
 
   return (
-    <AppShell>
-      <title>الجرد بالهاتف · SERVA</title>
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-5">
-        <PageHeader
-          icon={<ListIcon />}
+    <ReportScreen me={me} access={['inventory.adjust']} title="الجرد بالهاتف">
+      <SalesPage className="ix-narrow">
+        <PageTop
           title="الجرد بالهاتف"
-          description="امسح القطع بكاميرا الهاتف وعدّها على الرف. يعمل بلا اتصال ويُرسل لاحقاً."
+          subtitle="امسح القطع بكاميرا الهاتف وعدّها على الرف. يعمل بلا اتصال ويُرسل لاحقاً."
         />
         {!online ? (
           <Alert tone="warning" title="لا اتصال بالإنترنت">
@@ -221,14 +221,13 @@ export function StocktakePhonePage() {
         {error ? <Alert tone="error">{error}</Alert> : null}
 
         {!sheet || !draft ? (
-          <Card className="flex flex-col gap-4 p-5">
+          <section className="sx-card ix-pad">
             <p className="text-ink-muted">
               اختر تصنيفاً لتعدّ جزءاً من المخزون (رفّاً أو قسماً)، أو اتركه لتعدّ كل شيء. ما لا تعدّه لا
               يتغيّر.
             </p>
             {me.branches.length > 1 ? (
               <Select label="الفرع" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-                <option value="">الفرع الرئيسي</option>
                 {me.branches.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
@@ -247,15 +246,15 @@ export function StocktakePhonePage() {
             <Button size="lg" loading={loading} disabled={!online} onClick={() => void download()}>
               حمّل قائمة الجرد
             </Button>
-          </Card>
+          </section>
         ) : (
           <>
-            <Card className="flex flex-col gap-3 p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="brand">
-                  <bdi className="num">{`${counted} من ${total}`}</bdi> صنفاً معدوداً
-                </Badge>
-                {draft.queued ? <Badge tone="warning">بانتظار الاتصال</Badge> : null}
+            <section className="sx-card ix-pad">
+              <div className="ix-countbar" role="status" aria-label="تقدّم الجرد">
+                <span className="p">
+                  عُدّ <bdi className="num">{counted}</bdi> من <bdi className="num">{total}</bdi> صنفاً
+                </span>
+                {draft.queued ? <StatusPill kind="warn">بانتظار الاتصال</StatusPill> : null}
               </div>
               {roomWarning ? (
                 <Alert tone="warning">
@@ -284,9 +283,23 @@ export function StocktakePhonePage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && needle) {
                     e.preventDefault();
-                    if (isCode) scan(needle);
-                    else if (matches[0]) scan(matches[0].barcodes[0]?.code ?? '');
-                    setTyped('');
+                    if (isCode) {
+                      scan(needle);
+                      setTyped('');
+                    } else if (matches.length === 1) {
+                      // One item matches: it is counted by itself, barcode or not
+                      const only = matches[0]!;
+                      const next = addCount(draft, only.variantId, 1000);
+                      keep(next);
+                      setLast({ name: only.name, counted: next.counts[only.variantId]! });
+                      setNotice(null);
+                      setTyped('');
+                    } else if (matches.length > 1) {
+                      // Several match: nothing is counted, the person picks from the list below
+                      setNotice('أكثر من صنف يطابق هذا الاسم. اختر الصنف من القائمة تحته.');
+                    } else {
+                      setNotice(`لا صنف باسم «${needle}» في قائمة الجرد هذه.`);
+                    }
                   }
                 }}
               />
@@ -316,11 +329,11 @@ export function StocktakePhonePage() {
                   <bdi className="num text-lg font-bold">{formatQuantity(last.counted, digits)}</bdi>
                 </p>
               ) : null}
-            </Card>
+            </section>
 
             {!reviewing ? (
               <>
-                <Card className="flex flex-col gap-2 p-4">
+                <section className="sx-card ix-pad">
                   <h2 className="text-base font-semibold text-ink">ما عددته</h2>
                   {editRows.length === 0 ? (
                     <p className="text-ink-muted">لم تعدّ شيئاً بعد. امسح أول قطعة.</p>
@@ -351,7 +364,7 @@ export function StocktakePhonePage() {
                       ))}
                     </ul>
                   )}
-                </Card>
+                </section>
                 <div className="flex flex-wrap gap-3">
                   <Button size="lg" disabled={counted === 0} onClick={() => setReviewing(true)}>
                     راجع وأرسل
@@ -371,7 +384,7 @@ export function StocktakePhonePage() {
                 </div>
               </>
             ) : (
-              <Card className="flex flex-col gap-4 p-4">
+              <section className="sx-card ix-pad">
                 <h2 className="text-base font-semibold text-ink">مراجعة قبل الإرسال</h2>
                 <Switch
                   label="ما لم أعدّه في هذه القائمة صفر"
@@ -389,9 +402,9 @@ export function StocktakePhonePage() {
                       <span className="num shrink-0 text-ink-muted">
                         {`الدفتر ${formatQuantity(l.item.qty, digits)} · المعدود ${formatQuantity(l.counted, digits)}`}
                       </span>
-                      <Badge tone={l.diff === 0 ? 'neutral' : l.diff < 0 ? 'danger' : 'success'}>
+                      <StatusPill kind={l.diff === 0 ? 'ok' : l.diff < 0 ? 'danger' : 'warn'}>
                         <bdi className="num">{l.diff === 0 ? 'مطابق' : formatQuantity(l.diff, digits)}</bdi>
-                      </Badge>
+                      </StatusPill>
                     </li>
                   ))}
                 </ul>
@@ -423,11 +436,11 @@ export function StocktakePhonePage() {
                     ارجع للعدّ
                   </Button>
                 </div>
-              </Card>
+              </section>
             )}
           </>
         )}
-      </div>
-    </AppShell>
+      </SalesPage>
+    </ReportScreen>
   );
 }

@@ -35,8 +35,8 @@ export function statementCsv(s: PartyStatement): string {
     'البيان',
     'الرقم',
     'ملاحظات',
-    s.type === 'customer' ? 'عليه' : 'عليه',
-    'له',
+    s.type === 'customer' ? 'عليه' : 'دفعنا له',
+    s.type === 'customer' ? 'له' : 'اشترينا منه',
     'الرصيد',
     ...(s.usd ? ['عليه بالدولار', 'له بالدولار', 'الرصيد بالدولار'] : []),
   ];

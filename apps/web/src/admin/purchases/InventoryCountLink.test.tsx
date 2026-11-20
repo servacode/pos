@@ -7,7 +7,10 @@ import { renderApp } from '../../test/renderApp';
 
 const me = () => {
   const base = makeMe();
-  return { ...base, user: { ...base.user, permissions: [...base.user.permissions, 'inventory.adjust'] } };
+  return {
+    ...base,
+    user: { ...base.user, permissions: [...base.user.permissions, 'cost.view', 'inventory.adjust'] },
+  };
 };
 
 const piece = (variantId: string, name: string, qty: number) => ({

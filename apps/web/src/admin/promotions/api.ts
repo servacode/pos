@@ -11,3 +11,7 @@ export const createPromotion = (input: PromotionInput) =>
 /** `PUT /v1/promotions/{id}` (catalog.manage) */
 export const updatePromotion = (id: string, input: PromotionInput & { version: number }) =>
   apiFetch<Promotion>(`/v1/promotions/${id}`, { method: 'PUT', body: input, auth: true });
+
+/** `POST /v1/promotions/{id}/archive` (catalog.manage): stop or restart one offer, whatever else is in its row */
+export const archivePromotion = (id: string, input: { version: number; archived: boolean }) =>
+  apiFetch<Promotion>(`/v1/promotions/${id}/archive`, { method: 'POST', body: input, auth: true });

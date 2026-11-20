@@ -113,6 +113,11 @@ export function listDamagedStock(db: Database, auth: AccessClaims): Promise<Dama
     const [settings] = await tx.execute<{ base: string }>(
       sql`select base_currency as base from tenant_settings`,
     );
-    return { baseCurrency: settings?.base ?? 'SYP', locations: [...locations.values()] };
+    const [clock] = await tx.execute<{ at: Date | string }>(sql`select now() as at`);
+    return {
+      baseCurrency: settings?.base ?? 'SYP',
+      locations: [...locations.values()],
+      asOf: new Date(clock?.at ?? Date.now()).toISOString(),
+    };
   });
 }

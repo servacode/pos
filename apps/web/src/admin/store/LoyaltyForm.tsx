@@ -1,17 +1,20 @@
 import { useState } from 'react';
-import type { StoreResponse } from '@serva/core';
+import { parseDecimal, type StoreResponse } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
 import { Button, Switch, TextField } from '@serva/ui';
 import { ApiError, errorMessage } from '../../lib/api';
 import { saveLoyalty } from './api';
 import { FailedNote, SavedNote, SETTINGS_SECTIONS, SettingsCard } from './parts';
 
-/** Whole amounts in the store's currency to minor units («1000» → 100,000); null while unusable. */
+/** An amount in the store's currency to minor units («1000» → 100,000, «0.5» → 50), Arabic digits too; null while unusable. */
 function minorOf(text: string, decimals: number): number | null {
-  const clean = text.replace(/[,\s]/g, '').replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
-  if (!clean || [...clean].some((c) => c < '0' || c > '9')) return null;
-  const n = Number(clean) * 10 ** decimals;
-  return Number.isSafeInteger(n) && n > 0 ? n : null;
+  if (!text.trim()) return null;
+  try {
+    const n = Number(parseDecimal(text, decimals));
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

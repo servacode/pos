@@ -11,7 +11,7 @@ import {
 } from '@serva/db';
 import { requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
-import { AppError } from '../errors';
+import { AppError, isUniqueViolation } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
 import { fieldError, staleVersion } from './catalog/common';
@@ -21,6 +21,7 @@ import { fieldError, staleVersion } from './catalog/common';
  * pull them (sync-pull › promotions) and apply them themselves; nothing here touches a sale.
  */
 
+const codeTaken = () => fieldError('couponCode', 'هذا الكود لعرض آخر، اختر غيره');
 const notFound = () => new AppError(404, 'not_found', 'هذا العرض غير موجود.');
 
 type Row = typeof promotions.$inferSelect;
@@ -115,11 +116,18 @@ async function checkCoupon(tx: Transaction, input: PromotionData, ownId: string 
       ),
     )
     .limit(1);
-  if (same) throw fieldError('couponCode', 'هذا الكود لعرض آخر، اختر غيره');
+  if (same) throw codeTaken();
+}
+
+/** The offer, locked for the rest of the transaction so two edits cannot both pass the version check */
+/** Two saves with the same code at once: the unique index says so, the owner reads the field message */
+function rethrowCode(error: unknown): never {
+  if (isUniqueViolation(error, 'promotions_coupon_unique')) throw codeTaken();
+  throw error;
 }
 
 async function one(tx: Transaction, id: string): Promise<Row> {
-  const [row] = await tx.select().from(promotions).where(eq(promotions.id, id)).limit(1);
+  const [row] = await tx.select().from(promotions).where(eq(promotions.id, id)).limit(1).for('update');
   if (!row) throw notFound();
   return row;
 }
@@ -149,7 +157,8 @@ export function createPromotion(
     const [row] = await tx
       .insert(promotions)
       .values({ tenantId: auth.tenantId, ...columns(input, now, null) })
-      .returning();
+      .returning()
+      .catch(rethrowCode);
     const created = view(row!);
     await audit(
       tx,
@@ -186,9 +195,11 @@ export function updatePromotion(
     const [row] = await tx
       .update(promotions)
       .set(columns(input, now, before.archivedAt))
-      .where(eq(promotions.id, id))
-      .returning();
-    const after = view(row!);
+      .where(and(eq(promotions.id, id), eq(promotions.version, input.version)))
+      .returning()
+      .catch(rethrowCode);
+    if (!row) throw staleVersion();
+    const after = view(row);
     const old = view(before);
     const changes: Record<string, [unknown, unknown]> = {};
     for (const key of Object.keys(after) as (keyof Promotion)[]) {
@@ -208,5 +219,42 @@ export function updatePromotion(
       meta,
     );
     return after;
+  });
+}
+
+/** Stops or restarts an offer; nothing else of it is read again, so an old row can always be stopped */
+export function archivePromotion(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  input: { version: number; archived: boolean },
+  meta: RequestMeta,
+  now: Date,
+): Promise<Promotion> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const before = await one(tx, id);
+    if (before.version !== input.version) throw staleVersion();
+    // Already in the state asked for (a double click): the answer is the offer as it is
+    if ((before.archivedAt !== null) === input.archived) return view(before);
+    const [row] = await tx
+      .update(promotions)
+      .set({ archivedAt: input.archived ? now : null })
+      .where(and(eq(promotions.id, id), eq(promotions.version, input.version)))
+      .returning();
+    if (!row) throw staleVersion();
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'promotion.update',
+        entity: 'promotion',
+        entityId: id,
+        changes: { archived: [before.archivedAt !== null, input.archived] },
+      },
+      meta,
+    );
+    return view(row);
   });
 }

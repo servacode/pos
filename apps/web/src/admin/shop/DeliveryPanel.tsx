@@ -2,10 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CodSummary, OnlineOrder } from '@serva/core';
 import {
   Alert,
-  Badge,
   Button,
-  Card,
-  CardHeader,
   CheckIcon,
   EmptyState,
   Money,
@@ -18,6 +15,7 @@ import { useMe } from '../../auth/useAuth';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { zonedDateTime } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
+import { Amt, Panel, StatusPill } from '../sales/ui';
 
 /**
  * «التوصيل» (26 › حياة الطلب): a delivery order goes out with a courier's name, then is delivered;
@@ -174,7 +172,7 @@ export function DeliveryActions({
         ) : stage === 'out' ? (
           <>
             <p className="min-w-0 flex-1 text-sm text-ink">
-              <Badge tone="info">خرج للتوصيل</Badge> مع{' '}
+              <StatusPill kind="open">خرج للتوصيل</StatusPill> مع{' '}
               <span className="font-semibold">{order.courierName}</span>
               <span className="num text-ink-muted"> · {stamp(order.outAt, tz, digits)}</span>
             </p>
@@ -189,7 +187,9 @@ export function DeliveryActions({
           </>
         ) : (
           <p className="min-w-0 flex-1 text-sm text-ink">
-            <Badge tone="success">سُلّم</Badge>
+            <StatusPill kind="ok" icon={<CheckIcon size={16} />}>
+              سُلّم
+            </StatusPill>
             {order.courierName ? ` بيد ${order.courierName}` : ''}
             <span className="num text-ink-muted"> · {stamp(order.deliveredAt, tz, digits)}</span>
           </p>
@@ -221,12 +221,10 @@ export function CodCard({ refreshKey }: { refreshKey: number }) {
   useEffect(load, [load, refreshKey]);
 
   return (
-    <Card>
-      <CardHeader
-        icon={<TruckIcon />}
-        title="النقد مع المندوبين"
-        description="الطلبات التي خرجت للتوصيل ولم تُسلَّم بعد، والمبلغ المنتظَر من كل مندوب."
-      />
+    <Panel
+      title="النقد مع المندوبين"
+      aside="الطلبات التي خرجت للتوصيل ولم تُسلَّم بعد، والمبلغ المنتظَر من كل مندوب."
+    >
       {error ? <Alert tone="error">{error}</Alert> : null}
       {!cod && !error ? <SkeletonText lines={3} /> : null}
       {cod && cod.couriers.length === 0 ? (
@@ -248,7 +246,7 @@ export function CodCard({ refreshKey }: { refreshKey: number }) {
                 <h3 className="font-bold text-ink">{c.courier}</h3>
                 <p className="text-sm text-ink-muted">
                   المنتظَر منه{' '}
-                  <Money minor={c.expectedMinor} currency={cod.currency} className="font-bold text-ink" />
+                  <Amt minor={c.expectedMinor} currency={cod.currency} className="font-bold text-ink" />
                 </p>
               </div>
               <ul className="flex flex-col divide-y divide-line text-sm">
@@ -261,7 +259,7 @@ export function CodCard({ refreshKey }: { refreshKey: number }) {
                       · {o.customerName}
                       {o.deliveryArea ? ` · ${o.deliveryArea}` : ''}
                     </span>
-                    <Money minor={o.collectMinor} currency={cod.currency} />
+                    <Amt minor={o.collectMinor} currency={cod.currency} />
                   </li>
                 ))}
               </ul>
@@ -269,6 +267,6 @@ export function CodCard({ refreshKey }: { refreshKey: number }) {
           ))}
         </ul>
       ) : null}
-    </Card>
+    </Panel>
   );
 }

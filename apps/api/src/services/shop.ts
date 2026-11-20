@@ -63,6 +63,10 @@ export const notFound = (message: string) => new AppError(404, 'not_found', mess
 export const fieldError = (field: string, message: string) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', { [field]: message });
 
+/** A refusal the customer reads as is: the alert carries the very sentence of its field */
+export const refusal = (field: string, message: string) =>
+  new AppError(400, 'validation_failed', message, { [field]: message });
+
 const money = (minor: number, currency: CurrencyCode) => stripBidiControls(formatMoney(minor, currency));
 
 /** The store behind a shop link, or 404 (also when its shop is off). */
@@ -286,6 +290,9 @@ const leftOf = (units: string | null): number | null => {
   return n > 0 && n <= LOW_STOCK * 1000 ? Math.ceil(n / 1000) : null;
 };
 
+/** The most pieces (sizes and colours count each) the public page carries; the owner is told when he passes it */
+const SHOP_VARIANT_CAP = 5000;
+
 export function shopHome(db: Database, slug: string): Promise<ShopHome> {
   return tenantOf(db, slug).then((tenantId) =>
     withTenant(db, tenantId, async (tx) => {
@@ -315,7 +322,7 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
         join prices pr on pr.id = v.id
         where ${sellable}
         order by p.name_ar, p.id
-        limit 5000`);
+        limit ${SHOP_VARIANT_CAP}`);
       const byProduct = new Map<string, ShopHome['products'][number]>();
       for (const r of rows) {
         const priced = priceOf({ productId: r.id, categoryId: r.category_id, ...r });
@@ -489,7 +496,7 @@ export function shopProduct(db: Database, slug: string, productId: string): Prom
  * line. A shop order needs each piece on the shelf (less what other orders hold); a hold at the
  * counter has the piece in hand.
  */
-async function priceLines(
+export async function priceLines(
   tx: Transaction,
   base: CurrencyCode,
   input: { variantId: string; qty: number }[],
@@ -529,14 +536,14 @@ async function priceLines(
       ? (priceOf({ productId: row.product_id, categoryId: row.category_id, ...row })?.priceMinor ?? null)
       : null;
     if (!row || price === null || (needOnShelf && !row.available)) {
-      throw fieldError(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
+      throw refusal(`lines.${index}`, 'قطعة في السلة لم تعد متوفرة. احذفها وأكمل الطلب.');
     }
     // More than the shelf holds is refused with the number that is there (the shop's cart already stops at it)
     if (needOnShelf && row.units !== null) {
       const wanted = input.filter((l) => l.variantId === line.variantId).reduce((n, l) => n + l.qty, 0);
       const left = Math.max(0, Math.floor(Number(row.units) / 1000));
       if (wanted > left) {
-        throw fieldError(
+        throw refusal(
           `lines.${index}`,
           `المتوفر من «${row.name}${row.label ? ` (${row.label})` : ''}» ${left} فقط. خفّض الكمية وأكمل الطلب.`,
         );
@@ -692,6 +699,57 @@ async function checkShopCode(
   }
 }
 
+/** What an order is worth before it is written: the fee, the code's offer and the lines at the server's prices */
+async function draftShopOrder(tx: Transaction, tenantId: string, input: z.output<typeof shopOrderInput>) {
+  const store = await storeOf(tx, tenantId);
+  const base = store.base as CurrencyCode;
+  if (input.fulfilment === 'delivery' && !store.delivery)
+    throw refusal('fulfilment', 'هذا المحل لا يوصّل، الاستلام من المحل.');
+  if (input.fulfilment === 'pickup' && !store.pickup) throw refusal('fulfilment', 'هذا المحل يوصّل فقط.');
+  if (input.fulfilment === 'delivery' && !input.address) throw fieldError('address', 'اكتب عنوان التوصيل');
+  // The courier's fee: the area's when the store charges by area, else the flat one
+  let deliveryFeeMinor = 0;
+  let deliveryArea: string | null = null;
+  if (input.fulfilment === 'delivery') {
+    if (store.delivery_areas.length > 0) {
+      const area = store.delivery_areas.find((a) => a.name === input.area);
+      if (!area) throw fieldError('area', 'اختر منطقة التوصيل');
+      deliveryFeeMinor = area.feeMinor;
+      deliveryArea = area.name;
+    } else {
+      deliveryFeeMinor = Number(store.delivery_fee_minor);
+    }
+  }
+  // «كود الخصم»: a code of an offer running now, or the customer is told it is not
+  let coupon: string | null = null;
+  let couponSnapshot: OnlineOrderCouponRule | null = null;
+  if (input.coupon) {
+    const rule = await couponRule(tx, input.coupon);
+    if (!rule?.couponCode || (rule.kind !== 'percent' && rule.kind !== 'buy_get')) {
+      throw refusal('coupon', COUPON_BAD);
+    }
+    coupon = rule.couponCode;
+    couponSnapshot = {
+      id: rule.id,
+      name: rule.name,
+      kind: rule.kind,
+      percentBp: rule.percentBp,
+      buyQty: rule.buyQty,
+      getQty: rule.getQty,
+      scope: rule.scope,
+      categoryIds: rule.categoryIds,
+      productIds: rule.productIds,
+      couponCode: rule.couponCode,
+    };
+  }
+  const lines = await priceLines(tx, base, input.lines, true, coupon);
+  const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
+  return { store, base, coupon, couponSnapshot, lines, totalMinor, deliveryFeeMinor, deliveryArea };
+}
+
+/** An identical order from the same phone this recent is the same tap sent twice (a timeout, a retry) */
+const DUPLICATE_WINDOW_SECONDS = 90;
+
 export function placeShopOrder(
   app: FastifyInstance,
   slug: string,
@@ -700,56 +758,15 @@ export function placeShopOrder(
   const { db } = app;
   return tenantOf(db, slug).then(async (tenantId) => {
     const mode = (await withTenant(db, tenantId, (tx) => storeOf(tx, tenantId))).order_mode;
-    if (mode === 'shop') await checkShopCode(app, tenantId, input);
+    if (mode === 'shop') {
+      // Everything the form could get wrong is checked first: the code is used up only for an order that will be written
+      await withTenant(db, tenantId, (tx) => draftShopOrder(tx, tenantId, input));
+      await checkShopCode(app, tenantId, input);
+    }
     return withTenant(db, tenantId, async (tx) => {
-      const store = await storeOf(tx, tenantId);
-      const base = store.base as CurrencyCode;
-      if (input.fulfilment === 'delivery' && !store.delivery)
-        throw fieldError('fulfilment', 'هذا المحل لا يوصّل، الاستلام من المحل.');
-      if (input.fulfilment === 'pickup' && !store.pickup)
-        throw fieldError('fulfilment', 'هذا المحل يوصّل فقط.');
-      if (input.fulfilment === 'delivery' && !input.address)
-        throw fieldError('address', 'اكتب عنوان التوصيل');
-      // The courier's fee: the area's when the store charges by area, else the flat one
-      let deliveryFeeMinor = 0;
-      let deliveryArea: string | null = null;
-      if (input.fulfilment === 'delivery') {
-        if (store.delivery_areas.length > 0) {
-          const area = store.delivery_areas.find((a) => a.name === input.area);
-          if (!area) throw fieldError('area', 'اختر منطقة التوصيل');
-          deliveryFeeMinor = area.feeMinor;
-          deliveryArea = area.name;
-        } else {
-          deliveryFeeMinor = Number(store.delivery_fee_minor);
-        }
-      }
-      // «كود الخصم»: a code of an offer running now, or the customer is told it is not
-      let coupon: string | null = null;
-      let couponSnapshot: OnlineOrderCouponRule | null = null;
-      if (input.coupon) {
-        const rule = await couponRule(tx, input.coupon);
-        if (!rule?.couponCode || (rule.kind !== 'percent' && rule.kind !== 'buy_get')) {
-          throw fieldError('coupon', COUPON_BAD);
-        }
-        coupon = rule.couponCode;
-        couponSnapshot = {
-          id: rule.id,
-          name: rule.name,
-          kind: rule.kind,
-          percentBp: rule.percentBp,
-          buyQty: rule.buyQty,
-          getQty: rule.getQty,
-          scope: rule.scope,
-          categoryIds: rule.categoryIds,
-          productIds: rule.productIds,
-          couponCode: rule.couponCode,
-        };
-      }
-      const lines = await priceLines(tx, base, input.lines, true, coupon);
-      const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
-      const { seq, number } = await nextOrderNumber(tx, tenantId);
+      const { store, base, coupon, couponSnapshot, lines, totalMinor, deliveryFeeMinor, deliveryArea } =
+        await draftShopOrder(tx, tenantId, input);
       const order = {
-        number,
         customerName: input.name,
         phone: input.phone,
         fulfilment: input.fulfilment,
@@ -761,25 +778,65 @@ export function placeShopOrder(
         deliveryArea,
         lines,
       };
+      const reply = (made: { token: string; number: string }) => {
+        const message = orderMessage({
+          ...order,
+          number: made.number,
+          showPrices: store.show_prices,
+          coupon,
+        });
+        return {
+          trackPath: `/shop/${store.slug}/o/${made.token}`,
+          number: made.number,
+          currency: base,
+          showPrices: store.show_prices,
+          // The order keeps its server-side prices for the store; the customer is told none of them
+          totalMinor: store.show_prices ? totalMinor : null,
+          deliveryFeeMinor: store.show_prices ? deliveryFeeMinor : null,
+          message,
+          whatsappUrl:
+            mode === 'whatsapp' && store.whatsapp
+              ? `https://wa.me/${store.whatsapp.replace('+', '')}?text=${encodeURIComponent(message)}`
+              : null,
+        };
+      };
+      // The same order twice (a dropped answer, then a second tap): the first one is the answer, no second order
+      if (mode === 'whatsapp') {
+        const [twin] = await tx
+          .select({ token: onlineOrders.trackToken, number: onlineOrders.number })
+          .from(onlineOrders)
+          .where(
+            and(
+              eq(onlineOrders.tenantId, tenantId),
+              eq(onlineOrders.phone, input.phone),
+              eq(onlineOrders.totalMinor, totalMinor),
+              eq(onlineOrders.status, 'pending'),
+              eq(onlineOrders.fulfilment, input.fulfilment),
+              eq(onlineOrders.deliveryFeeMinor, deliveryFeeMinor),
+              sql`${onlineOrders.deliveryArea} is not distinct from ${deliveryArea}`,
+              sql`${onlineOrders.address} is not distinct from ${order.address}`,
+              sql`${onlineOrders.note} is not distinct from ${order.note}`,
+              sql`${onlineOrders.lines} = ${JSON.stringify(lines)}::jsonb`,
+              sql`${onlineOrders.createdAt} > now() - make_interval(secs => ${DUPLICATE_WINDOW_SECONDS})`,
+            ),
+          )
+          .limit(1);
+        if (twin) return reply(twin);
+      }
+      const { seq, number } = await nextOrderNumber(tx, tenantId);
       const [made] = await tx
         .insert(onlineOrders)
-        .values({ tenantId, seq, source: mode, couponCode: coupon, couponRule: couponSnapshot, ...order })
+        .values({
+          tenantId,
+          seq,
+          source: mode,
+          couponCode: coupon,
+          couponRule: couponSnapshot,
+          number,
+          ...order,
+        })
         .returning({ token: onlineOrders.trackToken });
-      const message = orderMessage({ ...order, showPrices: store.show_prices, coupon });
-      return {
-        trackPath: `/shop/${store.slug}/o/${made!.token}`,
-        number,
-        currency: base,
-        showPrices: store.show_prices,
-        // The order keeps its server-side prices for the store; the customer is told none of them
-        totalMinor: store.show_prices ? totalMinor : null,
-        deliveryFeeMinor: store.show_prices ? deliveryFeeMinor : null,
-        message,
-        whatsappUrl:
-          mode === 'whatsapp' && store.whatsapp
-            ? `https://wa.me/${store.whatsapp.replace('+', '')}?text=${encodeURIComponent(message)}`
-            : null,
-      };
+      return reply({ token: made!.token, number });
     });
   });
 }
@@ -1001,8 +1058,20 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       accent: row.accent as OnlineStoreSettings['accent'],
       logoUrl: row.logoUploadId ? imageUrl(auth.tenantId, row.logoUploadId, true) : null,
       coverUrl: row.coverUploadId ? imageUrl(auth.tenantId, row.coverUploadId) : null,
+      catalogueCut: await catalogueIsCut(tx),
     };
   });
+}
+
+/** True when the shop has more pieces for sale than its page carries: the rest never show to customers */
+async function catalogueIsCut(tx: Transaction): Promise<boolean> {
+  const [row] = await tx.execute<{ n: string }>(sql`
+    select count(*)::text as n from (
+      select 1 from variants v
+      join products p on p.id = v.product_id
+      join prices pr on pr.id = v.id
+      where ${liveVariant} and ${sellable} limit ${SHOP_VARIANT_CAP + 1}) x`);
+  return Number(row?.n ?? 0) > SHOP_VARIANT_CAP;
 }
 
 export async function saveOnlineStore(
@@ -1096,8 +1165,15 @@ export const orderOf = (r: typeof onlineOrders.$inferSelect): OnlineOrder => ({
 export function listOnlineOrders(
   db: Database,
   auth: AccessClaims,
-  status: OnlineOrder['status'] | undefined,
-): Promise<{ items: OnlineOrder[] }> {
+  query: {
+    status?: OnlineOrder['status'] | undefined;
+    cursor?: string | undefined;
+    limit?: number | undefined;
+  },
+): Promise<{ items: OnlineOrder[]; nextCursor: string | null }> {
+  const status = query.status;
+  const limit = query.limit ?? 200;
+  const offset = query.cursor ? Number(query.cursor) : 0;
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
     const rows = await tx
@@ -1115,9 +1191,28 @@ export function listOnlineOrders(
         ),
       )
       .orderBy(desc(onlineOrders.createdAt), desc(onlineOrders.seq))
-      .limit(200);
-    return { items: rows.map(orderOf) };
+      .limit(limit + 1)
+      .offset(offset);
+    const more = rows.length > limit;
+    return { items: rows.slice(0, limit).map(orderOf), nextCursor: more ? String(offset + limit) : null };
   });
+}
+
+/** The lines of an order the shelf cannot cover now (on hand in any branch, less what accepted orders hold) */
+async function uncoveredLines(tx: Transaction, lines: OnlineOrderLine[]): Promise<string[]> {
+  const wanted = new Map<string, number>();
+  for (const l of lines) wanted.set(l.variantId, (wanted.get(l.variantId) ?? 0) + l.qty);
+  if (wanted.size === 0) return [];
+  const rows = await tx.execute<{ id: string; name: string; label: string | null; units: string | null }>(sql`
+    select v.id, p.name_ar as name, v.label, ${unitsLeftSql}::text as units
+    from variants v join products p on p.id = v.product_id
+    where v.id in (${sql.join(
+      [...wanted.keys()].map((id) => sql`${id}::uuid`),
+      sql`, `,
+    )})`);
+  return rows
+    .filter((r) => r.units !== null && Number(r.units) < (wanted.get(r.id) ?? 0) * 1000)
+    .map((r) => `«${r.name}${r.label ? ` (${r.label})` : ''}»`);
 }
 
 const NEXT: Record<OnlineOrder['status'], readonly OnlineOrder['status'][]> = {
@@ -1137,11 +1232,13 @@ export function setOnlineOrderStatus(
   meta: RequestMeta,
 ): Promise<OnlineOrder> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'customers.view');
+    // Deciding an order reserves stock and hands out the customer's data: a manager's act, not any viewer's
+    await requirePermission(tx, auth.userId, 'customers.manage');
     const [row] = await tx
       .select()
       .from(onlineOrders)
-      .where(and(eq(onlineOrders.tenantId, auth.tenantId), eq(onlineOrders.id, id)));
+      .where(and(eq(onlineOrders.tenantId, auth.tenantId), eq(onlineOrders.id, id)))
+      .for('update');
     if (!row) throw notFound('هذا الطلب غير موجود.');
     if (row.version !== input.version) {
       // The same order decided twice (a double click, or two people at the till and the desk): say so
@@ -1150,6 +1247,14 @@ export function setOnlineOrderStatus(
     }
     if (!NEXT[row.status as OnlineOrder['status']].includes(input.status)) {
       throw fieldError('status', 'لا يمكن نقل الطلب إلى هذه الحالة.');
+    }
+    // Accepting holds the pieces: refused when the shelf, less what other accepted orders hold, cannot cover them
+    if (input.status === 'accepted' && !input.force) {
+      const lacking = await uncoveredLines(tx, row.lines as OnlineOrderLine[]);
+      if (lacking.length > 0) {
+        const text = `لا يكفي المخزون لـ ${lacking.join('، ')}. اقبل الطلب مع ذلك إن كانت القطع ستصل.`;
+        throw new AppError(409, 'conflict', text, { stock: lacking.join('، ') });
+      }
     }
     const [done] = await tx
       .update(onlineOrders)

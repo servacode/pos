@@ -1,25 +1,23 @@
-import { useCallback, useEffect, useId, useState } from 'react';
-import { BROADCAST_FOOTER, type Broadcast, type BroadcastAudience, type Category } from '@serva/core';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  BROADCAST_FOOTER,
+  MAX_BROADCAST_RECIPIENTS,
+  type Broadcast,
+  type BroadcastAudience,
+  type Category,
+} from '@serva/core';
 import {
   Alert,
-  Badge,
   Button,
-  Card,
-  CardHeader,
   CategoriesIcon,
+  CheckIcon,
   ChoiceCard,
   ClockIcon,
   CustomersIcon,
-  EmptyState,
-  EyeIcon,
   FieldGroup,
-  IconChip,
   MegaphoneIcon,
-  PageHeader,
-  ProgressBar,
   Select,
   SendIcon,
-  SkeletonText,
   useDigits,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
@@ -27,10 +25,16 @@ import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
 import { zonedDateTime } from '../../lib/dates';
 import { listCategories } from '../catalog/api';
+import { PageTop, Panel, SalesPage, StatusPill } from '../sales/ui';
+import { Empty } from './parts';
 
 const listBroadcasts = () => apiFetch<{ items: Broadcast[] }>('/v1/broadcasts', { auth: true });
 const preview = (audience: BroadcastAudience) =>
-  apiFetch<{ count: number }>('/v1/broadcasts/preview', { method: 'POST', body: { audience }, auth: true });
+  apiFetch<{ count: number; max?: number }>('/v1/broadcasts/preview', {
+    method: 'POST',
+    body: { audience },
+    auth: true,
+  });
 const send = (text: string, audience: BroadcastAudience) =>
   apiFetch<Broadcast>('/v1/broadcasts', { method: 'POST', body: { text, audience }, auth: true });
 
@@ -72,20 +76,14 @@ const PLACEHOLDER = 'وصلت التشكيلة الشتوية! مرّوا علي
 function MessagePreview({ store, text }: { store: string; text: string }) {
   const typed = text.trim();
   return (
-    <Card className="flex flex-col gap-4">
-      <CardHeader icon={<EyeIcon />} title="كيف تصل" description="معاينة الرسالة على جوال الزبون." />
-      <div aria-hidden="true" className="rounded-card bg-surface-muted p-4">
-        <div className="me-8 flex flex-col gap-2 rounded-card rounded-ss-small bg-surface px-3.5 py-3 text-sm text-ink shadow-e1 ring-1 ring-line">
-          <p className="font-semibold">{store}</p>
-          <p className={typed ? 'break-words whitespace-pre-line' : 'text-ink-subtle'}>
-            {typed || PLACEHOLDER}
-          </p>
-          <p className="text-ink-muted">{BROADCAST_FOOTER}</p>
-          <span className="self-end text-xs text-ink-muted">الآن</span>
-        </div>
+    <Panel title="كيف تصل" aside="معاينة الرسالة على جوال الزبون">
+      <div aria-hidden="true" className="cx-bubble">
+        <p className="m-0 font-semibold">{store}</p>
+        <p className={typed ? 'm-0' : 'sx-sub m-0'}>{typed || PLACEHOLDER}</p>
+        <p className="sx-mute m-0">{BROADCAST_FOOTER}</p>
       </div>
-      <p className="text-xs text-ink-muted">يُضاف اسم المحل في أولها، وسطر الإيقاف في آخرها.</p>
-    </Card>
+      <p className="sx-wait mt-3">يُضاف اسم المحل في أولها، وسطر الإيقاف في آخرها.</p>
+    </Panel>
   );
 }
 
@@ -105,13 +103,21 @@ export function BroadcastsPage() {
   const [categoryId, setCategoryId] = useState('');
   const [days, setDays] = useState(90);
   const [count, setCount] = useState<number | null>(null);
+  const [max, setMax] = useState(MAX_BROADCAST_RECIPIENTS);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const load = useCallback(() => {
     listBroadcasts()
-      .then((r) => setItems(r.items))
-      .catch((e: unknown) => setError(errorMessage(e)));
+      .then((r) => mounted.current && setItems(r.items))
+      .catch((e: unknown) => mounted.current && setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
   useEffect(() => {
@@ -126,7 +132,11 @@ export function BroadcastsPage() {
     if (!audience) return;
     let alive = true;
     preview(audience)
-      .then((r) => alive && setCount(r.count))
+      .then((r) => {
+        if (!alive) return;
+        setCount(r.count);
+        if (r.max) setMax(r.max);
+      })
       .catch(() => alive && setCount(null));
     return () => {
       alive = false;
@@ -159,25 +169,35 @@ export function BroadcastsPage() {
   }
 
   const names = new Map(categories.map((c) => [c.id, c.name]));
+  const tooMany = count !== null && count > max;
+  const typedOk = text.trim().length >= 5;
+  // Why the button is off, said beside it
+  const why = !audience
+    ? 'اختر القسم أولاً'
+    : !typedOk
+      ? 'اكتب الرسالة أولاً'
+      : tooMany
+        ? `أكثر من ${max} زبون: اختر قسماً أو مدة أقصر.`
+        : busy
+          ? 'رسالة سابقة ما زالت تُرسل.'
+          : null;
   return (
     <AppShell>
       <title>رسائل للزبائن · SERVA</title>
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
-        <PageHeader
+      <SalesPage>
+        <PageTop
           title="رسائل للزبائن"
-          description="رسالة على واتساب لزبائنك: «وصلت التشكيلة الشتوية» أو «تنزيلات 30٪»."
+          subtitle="رسالة على واتساب لزبائنك: «وصلت التشكيلة الشتوية» أو «تنزيلات 30٪»."
         />
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
-          <Card>
-            <CardHeader
-              icon={<MegaphoneIcon />}
-              title="رسالة جديدة"
-              description="تُرسل واحدة كل ثانيتين حتى لا يُعدّ رقمك مزعجاً، ومعها سطر يقول كيف يوقفها الزبون."
-            />
+        <div className="cx-compose">
+          <Panel
+            title="رسالة جديدة"
+            aside="تُرسل واحدة كل ثانيتين حتى لا يُعدّ رقمك مزعجاً، ومعها سطر يقول كيف يوقفها الزبون."
+          >
             <div className="flex flex-col gap-6">
               {error ? <Alert tone="error">{error}</Alert> : null}
               <div className="flex flex-col gap-1.5">
-                <label htmlFor={textId} className="text-sm font-semibold text-ink-muted">
+                <label htmlFor={textId} className="sx-eyebrow">
                   الرسالة
                 </label>
                 <textarea
@@ -189,8 +209,10 @@ export function BroadcastsPage() {
                   placeholder={PLACEHOLDER}
                   className="w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base"
                 />
-                <p className="text-end text-sm text-ink-subtle">
-                  <span className="num">{text.length}</span> / 700
+                <p className="sx-wait m-0 text-end">
+                  <bdi dir="ltr" className="sx-n">
+                    {text.length} / 700
+                  </bdi>
                 </p>
               </div>
               <FieldGroup legend="لمن">
@@ -241,89 +263,74 @@ export function BroadcastsPage() {
                   ))}
                 </Select>
               ) : null}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-line pt-5">
-                <div className="flex min-w-0 flex-1 basis-56 items-center gap-3">
-                  <IconChip tone={count ? 'brand' : 'neutral'}>
-                    <CustomersIcon />
-                  </IconChip>
-                  <div className="flex min-w-0 flex-col">
-                    <p role="status" className="font-semibold text-ink">
-                      {count === null
-                        ? '…'
-                        : count === 0
-                          ? 'لا زبائن بأرقام جوال في هذا الاختيار.'
+              <div className="cx-actions" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="flex min-w-0 flex-col">
+                  <p role="status" className="m-0 font-semibold">
+                    {count === null
+                      ? '…'
+                      : count === 0
+                        ? 'لا زبائن بأرقام جوال في هذا الاختيار.'
+                        : tooMany
+                          ? `يصل إلى ${count} زبون، والحد ${max}.`
                           : `تصل إلى ${count} زبون.`}
-                    </p>
-                    {busy ? (
-                      <span className="text-sm text-warning-ink">رسالة سابقة ما زالت تُرسل.</span>
-                    ) : (
-                      <span className="text-sm text-ink-muted">من علّمته «لا يريد رسائل» لا تصله.</span>
-                    )}
-                  </div>
+                  </p>
+                  <span className="sx-wait">{why ?? 'من علّمته «لا يريد رسائل» لا تصله.'}</span>
                 </div>
                 <Button
                   icon={<SendIcon />}
                   loading={sending}
-                  disabled={!audience || text.trim().length < 5 || !count || busy}
+                  disabled={!audience || !typedOk || !count || tooMany || busy}
                   onClick={() => void go()}
                 >
                   أرسل
                 </Button>
               </div>
             </div>
-          </Card>
+          </Panel>
           <aside className="lg:sticky lg:top-24">
             <MessagePreview store={me.tenant.name} text={text} />
           </aside>
         </div>
-        <section aria-label="الرسائل السابقة" className="flex flex-col gap-3">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="text-lg font-semibold text-ink">الرسائل السابقة</h2>
-            <p className="text-sm text-ink-muted">لمن ذهبت كل رسالة، وكم منها وصل.</p>
-          </div>
-          {items === null && !error ? (
-            <Card aria-busy="true">
-              <SkeletonText lines={3} />
-            </Card>
-          ) : null}
+        <Panel title="الرسائل السابقة" aside="لمن ذهبت كل رسالة، وكم منها وصل." flush>
+          {items === null && !error ? <p className="sx-wait p-4">نحمّل الرسائل…</p> : null}
           {items && items.length === 0 ? (
-            <EmptyState
-              icon={MegaphoneIcon}
-              title="لم تُرسل رسائل بعد."
-              description="كل رسالة ترسلها تظهر هنا مع عدد من وصلته."
-            />
+            <Empty icon={<MegaphoneIcon size={24} />} title="لم تُرسل رسائل بعد.">
+              <p>كل رسالة ترسلها تظهر هنا مع عدد من وصلته.</p>
+            </Empty>
           ) : null}
           {items && items.length > 0 ? (
-            <ul className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface shadow-e1">
+            <ul className="cx-stm" aria-label="الرسائل السابقة">
               {items.map((b) => (
-                <li key={b.id} className="flex flex-col gap-3 px-5 py-4 sm:px-6">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <Badge tone={b.status === 'done' ? 'success' : 'warning'}>
-                      {b.status === 'done' ? 'أُرسلت' : 'تُرسل الآن'}
-                    </Badge>
-                    <span className="text-sm font-semibold text-ink">{AUDIENCE_TEXT(b.audience, names)}</span>
-                    <span className="text-sm text-ink-subtle">
-                      {zonedDateTime(b.createdAt, me.tenant.timezone, digits)}
-                    </span>
-                    <span className="num ms-auto text-sm font-semibold text-ink">
+                <li key={b.id}>
+                  <span className="what">
+                    {b.status === 'done' ? (
+                      <StatusPill kind="ok" icon={<CheckIcon size={16} />}>
+                        أُرسلت
+                      </StatusPill>
+                    ) : (
+                      <StatusPill kind="warn">تُرسل الآن</StatusPill>
+                    )}{' '}
+                    {AUDIENCE_TEXT(b.audience, names)}
+                  </span>
+                  <span className="end font-semibold">
+                    <span className="sx-n">
                       {b.sent} / {b.total}
                       {b.failed > 0 ? ` · لم تصل ${b.failed}` : ''}
                     </span>
-                  </div>
-                  <p className="line-clamp-2 text-sm whitespace-pre-line text-ink-muted">{b.text}</p>
-                  <ProgressBar
-                    label="ما وصل إلى الزبائن"
-                    value={b.sent}
-                    max={b.total}
-                    valueText={`${b.sent} من ${b.total}`}
-                    tone={b.status === 'done' ? 'success' : 'brand'}
-                  />
+                  </span>
+                  <span className="row2">
+                    <span className="line-clamp-2 whitespace-pre-line">{b.text}</span>
+                    <span className="sx-n">{zonedDateTime(b.createdAt, me.tenant.timezone, digits)}</span>
+                  </span>
+                  <span className="cx-bar" style={{ gridColumn: '1 / -1' }} aria-hidden="true">
+                    <i style={{ width: `${b.total ? Math.round((b.sent / b.total) * 100) : 0}%` }} />
+                  </span>
                 </li>
               ))}
             </ul>
           ) : null}
-        </section>
-      </div>
+        </Panel>
+      </SalesPage>
     </AppShell>
   );
 }

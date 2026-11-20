@@ -6,6 +6,16 @@ import { mockFetch } from '../../test/fetchMock';
 import { makeMe, signedInRefresh } from '../../test/fixtures';
 import { renderApp } from '../../test/renderApp';
 
+/** An electronics store's owner of the screen: the numbers page asks for catalog.manage */
+const electronicsMe = () => {
+  const me = makeMe();
+  return {
+    ...me,
+    user: { ...me.user, permissions: [...me.user.permissions, 'catalog.manage'] },
+    tenant: { ...me.tenant, sectors: ['electronics'] },
+  };
+};
+
 const row = (serial: string, status: SerialRow['status']): SerialRow => ({
   serial,
   variantId: 'v-1',
@@ -42,7 +52,7 @@ describe('«الأرقام التسلسلية»: numbers ahead of the stock', ()
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({
         status: 200,
-        body: { ...makeMe(), tenant: { ...makeMe().tenant, sectors: ['electronics'] } },
+        body: electronicsMe(),
       }),
       'GET /v1/serials?': () => ({
         status: 200,
@@ -62,7 +72,7 @@ describe('«الأرقام التسلسلية»: numbers ahead of the stock', ()
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({
         status: 200,
-        body: { ...makeMe(), tenant: { ...makeMe().tenant, sectors: ['electronics'] } },
+        body: electronicsMe(),
       }),
       'GET /v1/serials?': () => ({
         status: 200,
@@ -99,7 +109,7 @@ describe('«الأرقام التسلسلية»: numbers ahead of the stock', ()
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({
         status: 200,
-        body: { ...makeMe(), tenant: { ...makeMe().tenant, sectors: ['electronics'] } },
+        body: electronicsMe(),
       }),
       'GET /v1/serials?': () => ({ status: 200, body: { items: [twice] } }),
       'GET /v1/inventory': () => ({

@@ -214,10 +214,10 @@ interface ListRow extends Record<string, unknown> {
   nearest_expiry: string | null;
 }
 
-const encodeCursor = (name: string, id: string) =>
-  Buffer.from(JSON.stringify([name, id]), 'utf8').toString('base64url');
+const encodeCursor = (name: string, id: string, stock?: string) =>
+  Buffer.from(JSON.stringify(stock === undefined ? [name, id] : [name, id, stock]), 'utf8').toString('base64url');
 
-function decodeCursor(cursor: string): [string, string] {
+function decodeCursor(cursor: string): [string, string, string?] {
   try {
     const value: unknown = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
     if (
@@ -228,6 +228,17 @@ function decodeCursor(cursor: string): [string, string] {
       /^[0-9a-f-]{36}$/.test(value[1])
     ) {
       return [value[0], value[1]];
+    }
+    if (
+      Array.isArray(value) &&
+      value.length === 3 &&
+      typeof value[0] === 'string' &&
+      typeof value[1] === 'string' &&
+      typeof value[2] === 'string' &&
+      /^[0-9a-f-]{36}$/.test(value[1]) &&
+      /^-?\d{1,18}$/.test(value[2])
+    ) {
+      return [value[0], value[1], value[2]];
     }
   } catch {
     // Falls through to the error below.
@@ -297,6 +308,11 @@ export async function listProducts(
   const limit = Math.min(query.limit, LIST_MAX_LIMIT);
   return withTenant(db, ctx.auth.tenantId, async (tx) => {
     await requireCatalogReader(tx, ctx.auth.userId);
+    // The store's own day, not the database server's (a Damascus night is still «yesterday» in UTC)
+    const [dayRow] = await tx.execute<{ today: string }>(
+      sql`select (now() at time zone coalesce((select timezone from tenants limit 1), 'UTC'))::date::text as today`,
+    );
+    const today = dayRow?.today ?? new Date().toISOString().slice(0, 10);
     const filters: SQL[] = [sql`p.tenant_id = ${ctx.auth.tenantId}`];
     if (query.status === 'archived') filters.push(sql`p.archived_at is not null`);
     else filters.push(sql`p.archived_at is null and p.status = ${query.status}`);
@@ -307,26 +323,43 @@ export async function listProducts(
       const code = query.q.replace(/\s+/g, '');
       const byBarcode = sql`exists (
         select 1 from barcodes b join variants bv on bv.tenant_id = b.tenant_id and bv.id = b.variant_id
-        where b.tenant_id = p.tenant_id and b.code = ${code} and bv.product_id = p.id)`;
+        where b.tenant_id = p.tenant_id and lower(b.code) = ${code.toLowerCase()} and bv.product_id = p.id)`;
+      const raw = `%${escapeLike(query.q.trim().toLowerCase())}%`;
       filters.push(
-        name ? sql`(p.search_name like ${`%${escapeLike(name)}%`} escape '\\' or ${byBarcode})` : byBarcode,
+        name
+          ? sql`(p.search_name like ${`%${escapeLike(name)}%`} escape '\\' or ${byBarcode}
+              or lower(coalesce(p.brand, '')) like ${raw} escape '\\'
+              or lower(coalesce(p.generic_name, '')) like ${raw} escape '\\'
+              or exists (select 1 from variants sv where sv.tenant_id = p.tenant_id and sv.product_id = p.id
+                         and lower(coalesce(sv.sku, '')) = ${code.toLowerCase()}))`
+          : byBarcode,
       );
     }
     if (query.expiry) {
       // A piece's nearest expiry is the earliest date among the batches still holding stock
       const window =
         query.expiry === 'expired'
-          ? sql`v.nearest_expiry < current_date`
-          : sql`v.nearest_expiry >= current_date and v.nearest_expiry <= current_date + 30`;
+          ? sql`v.nearest_expiry < ${today}::date`
+          : sql`v.nearest_expiry >= ${today}::date and v.nearest_expiry <= ${today}::date + 30`;
       filters.push(sql`exists (
         select 1 from variants v
         where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and ${window})`);
     }
-    if (query.cursor) {
-      const [name, id] = decodeCursor(query.cursor);
-      filters.push(sql`(p.name_ar, p.id) > (${name}, ${id}::uuid)`);
-    }
     const branchFilter = query.branchId ? sql`and s.branch_id = ${query.branchId}` : sql``;
+    // The net quantity of a product over its live variants, all branches (a minus counts as a minus)
+    const netStock = sql`(select coalesce(sum(s.qty), 0) from variants nv
+      join stock_levels s on s.tenant_id = nv.tenant_id and s.variant_id = nv.id ${branchFilter}
+      where nv.tenant_id = p.tenant_id and nv.product_id = p.id and nv.archived_at is null)`;
+    if (query.stock === 'out') filters.push(sql`p.type <> 'service' and ${netStock} <= 0`);
+    const byStock = query.sort === 'stock';
+    if (query.cursor) {
+      const [name, id, stock] = decodeCursor(query.cursor);
+      if (byStock && stock !== undefined) {
+        filters.push(sql`(${netStock}, p.name_ar, p.id) > (${stock}::numeric, ${name}, ${id}::uuid)`);
+      } else {
+        filters.push(sql`(p.name_ar, p.id) > (${name}, ${id}::uuid)`);
+      }
+    }
     const movementBranch = query.branchId ? sql`and m.branch_id = ${query.branchId}` : sql``;
     const rows = await tx.execute<ListRow>(sql`
       select p.id, p.name_ar, p.name_en, p.category_id, c.name as category_name, p.season, p.type, p.status,
@@ -345,7 +378,7 @@ export async function listProducts(
                           select m.batch_no, m.expiry_date, sum(m.qty) as q from batch_movements m
                           where m.tenant_id = v.tenant_id and m.variant_id = v.id ${movementBranch}
                           group by m.branch_id, m.batch_no, m.expiry_date having sum(m.qty) > 0) bm
-                        where bm.expiry_date < current_date
+                        where bm.expiry_date < ${today}::date
                            or exists (select 1 from batch_blocks bl
                                       where bl.tenant_id = v.tenant_id and bl.variant_id = v.id
                                         and bl.batch_no = bm.batch_no and bl.released_at is null)) as dead
@@ -374,7 +407,7 @@ export async function listProducts(
         where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
       ) pr
       where ${sql.join(filters, sql` and `)}
-      order by p.name_ar, p.id
+      order by ${byStock ? sql`${netStock}, ` : sql``}p.name_ar, p.id
       limit ${limit + 1}`);
     const page = rows.slice(0, limit);
     const items: ProductListItem[] = page.map((r) => ({
@@ -405,7 +438,9 @@ export async function listProducts(
     // What needs doing across the whole store (asked once, with the first page)
     let attention:
       { zeroPrice: number; noPhoto: number; expiringSoon: number; uncategorised: number } | undefined;
-    if (!query.cursor && query.status === 'active') {
+    // The whole-store figures do not depend on the search: asked only for the unfiltered first page
+    const unfiltered = !query.q && !query.categoryId && !query.season && !query.expiry && !query.stock;
+    if (!query.cursor && query.status === 'active' && unfiltered) {
       const [counts] = await tx.execute<{
         zero_price: number;
         no_photo: number;
@@ -422,7 +457,7 @@ export async function listProducts(
                count(*) filter (where exists (
                  select 1 from variants v
                  where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null
-                   and v.nearest_expiry >= current_date and v.nearest_expiry <= current_date + 30))::int as expiring_soon,
+                   and v.nearest_expiry >= ${today}::date and v.nearest_expiry <= ${today}::date + 30))::int as expiring_soon,
                count(*) filter (where p.category_id is null and p.type <> 'service')::int as uncategorised
         from products p
         where p.tenant_id = ${ctx.auth.tenantId} and p.archived_at is null and p.status = 'active'`);
@@ -435,10 +470,13 @@ export async function listProducts(
     }
     // The tiles over the list count the whole store, whatever the search or the page shows (first page only)
     let totals: ProductListTotals | undefined;
-    if (!query.cursor && query.status === 'active') totals = await storeTotals(tx, ctx.auth.tenantId);
+    if (!query.cursor && query.status === 'active' && unfiltered) totals = await storeTotals(tx, ctx.auth.tenantId);
     return {
       items,
-      nextCursor: rows.length > limit && last ? encodeCursor(last.name_ar, last.id) : null,
+      nextCursor:
+        rows.length > limit && last
+          ? encodeCursor(last.name_ar, last.id, byStock ? String(Math.trunc(Number(last.stock_qty))) : undefined)
+          : null,
       ...(attention ? { attention } : {}),
       ...(totals ? { totals } : {}),
     };
@@ -461,6 +499,31 @@ async function checkReferences(
   if (input.taxRateId && !(await liveReference(tx, taxRates, input.taxRateId))) {
     throw fieldError('taxRateId', 'الضريبة غير موجودة أو مؤرشفة');
   }
+}
+
+/** «السعر الأدنى للمفاصلة» above the shelf price would ask a manager code for every sale at the shelf price */
+function checkFloor(path: string, priceMinor: number, floorMinor: number | null | undefined): void {
+  if (floorMinor !== null && floorMinor !== undefined && Number(floorMinor) > priceMinor) {
+    throw fieldError(path, 'السعر الأدنى للمفاصلة أعلى من سعر البيع. اجعله أقل أو يساويه.');
+  }
+}
+
+/** Serial tracking, the kind or the unit of a product that holds stock cannot change under that stock */
+async function checkKindChange(
+  tx: Transaction,
+  current: { id: string; tracksSerial: boolean; type: string; unitId: string },
+  input: { tracksSerial?: boolean; type?: string; unitId?: string },
+): Promise<void> {
+  const serial = input.tracksSerial !== undefined && input.tracksSerial !== current.tracksSerial;
+  const kind = input.type !== undefined && input.type !== current.type;
+  const unit = input.unitId !== undefined && input.unitId !== current.unitId;
+  if (!serial && !kind && !unit) return;
+  const [held] = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n from stock_levels s join variants v on v.tenant_id = s.tenant_id and v.id = s.variant_id
+    where v.product_id = ${current.id} and s.qty <> 0`);
+  if ((held?.n ?? 0) === 0) return;
+  const path = serial ? 'tracksSerial' : kind ? 'type' : 'unitId';
+  throw fieldError(path, 'لا يمكن تغيير هذا الخيار والمنتج فيه مخزون. صفّر المخزون أولاً أو أنشئ منتجاً جديداً.');
 }
 
 async function pieceUnit(tx: Transaction): Promise<string> {
@@ -627,6 +690,7 @@ export async function createProductTx(
 ): Promise<ProductDetail> {
   const { tenantId } = ctx.auth;
   await checkReferences(tx, input);
+  input.variants.forEach((v, i) => checkFloor(`variants.${i}.minPriceMinor`, v.price.priceMinor, v.minPriceMinor));
   const writes: BarcodeWrite[] = input.variants.flatMap((v, i) =>
     v.barcodes.map((data, b) => ({ path: `variants.${i}.barcodes.${b}.code`, variantIndex: i, data })),
   );
@@ -749,7 +813,13 @@ export async function updateProductTx(
     if (v.id && !existing.some((e) => e.variant.id === v.id)) {
       throw fieldError(`variants.${i}.id`, 'هذا المتغير ليس من هذا المنتج');
     }
+    // The floor is checked against the price the variant will have after this save
+    const stored = existing.find((e) => e.variant.id === v.id)?.price;
+    const price = v.price?.priceMinor ?? stored?.priceMinor;
+    const floor = v.minPriceMinor === undefined ? (stored?.minPriceMinor ?? null) : v.minPriceMinor;
+    if (price !== undefined) checkFloor(`variants.${i}.minPriceMinor`, Number(price), floor);
   });
+  await checkKindChange(tx, current, input);
   const writes: BarcodeWrite[] = variantInput.flatMap((v, i) =>
     (v.barcodes ?? []).map((data, b) => ({
       path: `variants.${i}.barcodes.${b}.code`,

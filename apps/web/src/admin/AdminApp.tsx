@@ -6,7 +6,6 @@ import { useAuth } from '../auth/useAuth';
 import { ShellSkeleton } from '../layout/ShellSkeleton';
 import { PageLoading } from '../layout/PageLoading';
 import { NotFoundPage } from '../pages/NotFoundPage';
-import { HomePage } from '../pages/HomePage';
 // Rarely opened: its own chunk keeps the admin shell small
 const ForgotPasswordPage = lazy(() =>
   import('../pages/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })),
@@ -139,6 +138,8 @@ const CategoriesPage = lazy(() =>
   import('./categories/CategoriesPage').then((m) => ({ default: m.CategoriesPage })),
 );
 // The start wizard and «إعدادات المتجر» (04)
+// The home page is its own chunk: it keeps the admin chunk under its size budget
+const HomePage = lazy(() => import('../pages/HomePage').then((m) => ({ default: m.HomePage })));
 const WelcomePage = lazy(() => import('./store/WelcomePage').then((m) => ({ default: m.WelcomePage })));
 const SettingsPage = lazy(() => import('./store/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const BroadcastsPage = lazy(() =>
@@ -188,7 +189,9 @@ function Front() {
   const { state } = useAuth();
   if (state.status === 'loading') return <ShellSkeleton />;
   return state.status === 'signedIn' ? (
-    <HomePage />
+    <Suspense fallback={<ShellSkeleton />}>
+      <HomePage />
+    </Suspense>
   ) : (
     <Suspense fallback={<ShellSkeleton />}>
       <LandingPage />

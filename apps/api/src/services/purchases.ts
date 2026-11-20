@@ -14,9 +14,12 @@ import {
   type PurchaseListResponse,
   type PurchaseRow,
   type StocktakeDetail,
+  type StocktakeListResponse,
+  LEGACY_WASTE_NOTE,
   type StocktakeInput,
   type TransferDetail,
   type TransferInput,
+  type TransferListResponse,
   type TransferRow,
   type StocktakeLineRow,
   type StockValue,
@@ -50,7 +53,7 @@ import {
 } from '@serva/db';
 import { createUuidV7 } from '@serva/sync';
 import type { z } from 'zod';
-import { requirePermission } from '../auth/permissions';
+import { forbidden, inScope, requirePermission } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
 import { AppError } from '../errors';
 import type { RequestMeta } from '../types';
@@ -93,6 +96,11 @@ const newId = createUuidV7();
 const notFound = (what: string) => new AppError(404, 'not_found', `${what} غير موجود.`);
 export const invalid = (fields: Record<string, string>) =>
   new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', fields);
+
+/** Round 44: one writer at a time per client-made document id (the retry of a dropped request waits for the first) */
+export async function documentLock(tx: Transaction, kind: string, id: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${kind}:${id}`}, 0))`);
+}
 
 export async function baseCurrency(tx: Transaction): Promise<CurrencyCode> {
   const [row] = await tx.execute<{ base: string }>(sql`select base_currency as base from tenant_settings`);
@@ -171,8 +179,10 @@ async function supplierRows(tx: Transaction, id?: string): Promise<SupplierRow[]
            pu.last_purchase::text as last_purchase, coalesce(pu.total, 0)::text as purchases_total
     from suppliers s left join (${supplierBalances}) b on b.supplier_id = s.id
     left join (
-      select supplier_id, max(business_date) as last_purchase, sum(total_minor) as total
-      from purchases group by supplier_id
+      select p.supplier_id, max(p.business_date) as last_purchase, sum(p.total_minor) as total
+      from purchases p
+      where not exists (select 1 from purchase_reversals r where r.tenant_id = p.tenant_id and r.purchase_id = p.id)
+      group by p.supplier_id
     ) pu on pu.supplier_id = s.id
     ${id ? sql`where s.id = ${id}` : sql``}
     order by s.name, s.id`);
@@ -394,9 +404,17 @@ export async function createPurchase(
 ): Promise<PurchaseDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'purchases.manage');
+    // Round 44: an id the form made posts once; the same id again answers the invoice already made
+    if (input.id) {
+      await documentLock(tx, 'purchase', input.id);
+      const [made] = await tx.select({ id: purchases.id }).from(purchases).where(eq(purchases.id, input.id));
+      if (made) return purchaseDetail(tx, made.id);
+    }
     const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
     if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
     const branchId = await branchOf(tx, input.branchId);
+    // Round 44: the invoice goes into one branch, and the role must hold there
+    await requirePermission(tx, auth.userId, 'purchases.manage', branchId);
     const names = await stockedVariants(
       tx,
       input.lines.map((l) => l.variantId),
@@ -422,7 +440,7 @@ export async function createPurchase(
 
     // What was sold until now is costed at the old average first
     await costPending(tx, auth.tenantId);
-    const id = newId();
+    const id = input.id ?? newId();
     const number = await nextNumber(tx, auth.tenantId, 'PUR', input.date);
     const total = baseCosts.reduce((sum, c) => sum + c, 0);
     await tx.insert(purchases).values({
@@ -570,22 +588,52 @@ export async function createPurchase(
 
 export async function readPurchase(db: Database, auth: AccessClaims, id: string): Promise<PurchaseDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
-    return purchaseDetail(tx, id);
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
+    const detail = await purchaseDetail(tx, id);
+    if (!inScope(scope, detail.branchId)) throw notFound('هذه الفاتورة');
+    return detail;
   });
 }
 
 export async function listPurchases(
   db: Database,
   auth: AccessClaims,
-  query: { from?: string; to?: string; supplierId?: string },
+  query: {
+    from?: string | undefined;
+    to?: string | undefined;
+    supplierId?: string | undefined;
+    limit?: number | undefined;
+    cursor?: string | undefined;
+    q?: string | undefined;
+    payment?: PurchaseRow['payment'] | undefined;
+  },
 ): Promise<PurchaseListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const conditions = [sql`true`];
+    if (!scope.all) conditions.push(sql`p.branch_id = any(${uuidArray([...scope.branchIds])})`);
     if (query.from) conditions.push(sql`p.business_date >= ${query.from}`);
     if (query.to) conditions.push(sql`p.business_date <= ${query.to}`);
     if (query.supplierId) conditions.push(sql`p.supplier_id = ${query.supplierId}`);
+    if (query.payment) conditions.push(sql`p.payment = ${query.payment}`);
+    if (query.q) {
+      // Escaped for like: «%» and «_» typed by the owner mean themselves
+      const like = `%${query.q.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      conditions.push(
+        sql`(lower(p.number) like ${like} or lower(s.name) like ${like} or lower(coalesce(p.reference, '')) like ${like})`,
+      );
+    }
+    // What the filters match in all, before the page: the corrected invoices are cancelled, so they are left out
+    const [sum] = await tx.execute<{ count: string; total: string }>(sql`
+      select count(*)::text as count, coalesce(sum(p.total_minor), 0)::text as total
+      from purchases p join suppliers s on s.tenant_id = p.tenant_id and s.id = p.supplier_id
+      where ${sql.join(conditions, sql` and `)}
+        and not exists (select 1 from purchase_reversals rv where rv.tenant_id = p.tenant_id and rv.purchase_id = p.id)`);
+    // A page continues after the last row of the one before (newest first: date, then number)
+    const after = /^(\d{4}-\d{2}-\d{2})~([A-Za-z0-9-]{1,40})$/.exec(query.cursor ?? '');
+    if (query.cursor && !after) throw invalid({ cursor: 'صفحة غير صالحة' });
+    if (after) conditions.push(sql`(p.business_date, p.number) < (${after[1]}::date, ${after[2]})`);
+    const pageSize = query.limit ?? 500;
     const rows = await tx.execute<{
       id: string;
       number: string;
@@ -609,8 +657,13 @@ export async function listPurchases(
       left join purchase_reversals r on r.tenant_id = p.tenant_id and r.purchase_id = p.id
       where ${sql.join(conditions, sql` and `)}
       order by p.business_date desc, p.number desc
-      limit 500`);
+      limit ${pageSize + 1}`);
+    const more = rows.length > pageSize;
+    if (more) rows.length = pageSize;
+    const lastRow = rows[rows.length - 1];
     return {
+      nextCursor: query.limit && more && lastRow ? `${lastRow.business_date}~${lastRow.number}` : null,
+      summary: { count: Number(sum?.count ?? 0), totalMinor: Number(sum?.total ?? 0) },
       items: rows.map((r) => ({
         id: r.id,
         number: r.number,
@@ -646,7 +699,36 @@ export async function paySupplier(
 ): Promise<SupplierPaymentRow> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'purchases.manage');
-    const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
+    // Round 44: an id the form made posts once; the same id again answers the payment already made
+    if (input.id) {
+      await documentLock(tx, 'supplier_payment', input.id);
+      const [made] = await tx.select().from(supplierPayments).where(eq(supplierPayments.id, input.id));
+      if (made) {
+        return {
+          id: made.id,
+          number: made.number,
+          supplierId: made.supplierId,
+          date: made.businessDate,
+          amountMinor: made.currency ? (made.foreignMinor ?? made.amountMinor) : made.amountMinor,
+          method: made.method as 'cash' | 'bank',
+          ...(made.currency
+            ? {
+                currency: 'USD' as const,
+                rate: made.rate,
+                baseMinor: made.amountMinor,
+                fxMinor: made.fxMinor ?? 0,
+              }
+            : {}),
+        };
+      }
+    }
+    // Round 44: the supplier row is locked, so two payments at once cannot both pass the «more than owed» check
+    // nor price the dollar book value from the same stale balance
+    const [supplier] = await tx
+      .select()
+      .from(suppliers)
+      .where(eq(suppliers.id, input.supplierId))
+      .for('update');
     if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
     const currency = await baseCurrency(tx);
     // A payment in dollars (round 36, decision 11) pays the supplier's dollar debt, from the dollar safe or the bank
@@ -667,7 +749,7 @@ export async function paySupplier(
             : 'لا شيء مستحق لهذا المورد الآن. إن كانت دفعة مقدّمة فأكّد ذلك';
       throw new AppError(409, 'conflict', message, { amountMinor: message });
     }
-    const id = newId();
+    const id = input.id ?? newId();
     const number = await nextNumber(tx, auth.tenantId, 'PAY', input.date);
     const method = input.cheque ? 'bank' : input.method;
     // Dollars paid cost what they cost at today's rate; the books held that debt at its own rates, and
@@ -768,11 +850,15 @@ export async function inventory(
   query: { branchId?: string },
 ): Promise<InventoryResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'cost.view');
+    const scope = await requirePermission(tx, auth.userId, 'cost.view');
+    // A role given for one branch reads that branch's stock only
+    if (query.branchId && !inScope(scope, query.branchId)) throw forbidden();
     await costPending(tx, auth.tenantId);
     const rows = await tx.execute<{
       variant_id: string;
       branch_id: string;
+      branch_name: string;
+      branch_kind: string;
       name: string;
       qty: string;
       value_minor: string;
@@ -786,7 +872,8 @@ export async function inventory(
       product_name: string;
       allows_fraction: boolean | null;
     }>(sql`
-      select l.variant_id, l.branch_id, trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
+      select l.variant_id, l.branch_id, br.name as branch_name, br.kind as branch_kind,
+             trim(p.name_ar || ' ' || coalesce(v.label, '')) as name,
              v.attributes, p.id as product_id, p.name_ar as product_name, un.allows_fraction,
              l.qty::text, coalesce(sv.value_minor, 0)::text as value_minor,
              coalesce(sv.ref_qty, 0)::text as ref_qty, coalesce(sv.ref_value_minor, 0)::text as ref_value_minor,
@@ -801,15 +888,18 @@ export async function inventory(
              (select (pl.cost_minor * 1000.0 / pl.qty)::text from purchase_lines pl
               join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
               where pl.tenant_id = l.tenant_id and pl.variant_id = l.variant_id and pl.qty > 0 and pl.cost_minor > 0
+              and not exists (select 1 from purchase_reversals rv where rv.tenant_id = pu.tenant_id and rv.purchase_id = pu.id)
               order by pu.business_date desc, pu.created_at desc, pl.line_no desc limit 1) as last_cost,
              (select (percentile_cont(0.5) within group (order by t.c))::text from (
                 select pl.cost_minor * 1000.0 / pl.qty as c from purchase_lines pl
                 join purchases pu on pu.tenant_id = pl.tenant_id and pu.id = pl.purchase_id
                 where pl.tenant_id = l.tenant_id and pl.variant_id = l.variant_id and pl.qty > 0 and pl.cost_minor > 0
+              and not exists (select 1 from purchase_reversals rv where rv.tenant_id = pu.tenant_id and rv.purchase_id = pu.id)
                 order by pu.business_date desc, pu.created_at desc, pl.line_no desc limit 5) t) as typical_cost
       from stock_levels l
       join variants v on v.tenant_id = l.tenant_id and v.id = l.variant_id
       join products p on p.tenant_id = v.tenant_id and p.id = v.product_id
+      join branches br on br.tenant_id = l.tenant_id and br.id = l.branch_id
       left join units un on un.tenant_id = p.tenant_id and un.id = p.unit_id
       left join stock_values sv on sv.tenant_id = l.tenant_id and sv.branch_id = l.branch_id and sv.variant_id = l.variant_id
       ${
@@ -818,6 +908,7 @@ export async function inventory(
           : // The damaged goods have their own page (round 35, D7): this one is the stock a shop can sell
             sql`where l.branch_id not in (select id from branches where kind = 'damaged')`
       }
+      ${scope.all ? sql`` : sql`and l.branch_id = any(${uuidArray([...scope.branchIds])})`}
       order by name, l.variant_id`);
     const items = rows.map((r) => {
       const qty = Number(r.qty);
@@ -825,6 +916,8 @@ export async function inventory(
       return {
         variantId: r.variant_id,
         branchId: r.branch_id,
+        branchName: r.branch_name,
+        branchKind: r.branch_kind,
         name: r.name,
         attributes: r.attributes ?? [],
         productId: r.product_id,
@@ -844,11 +937,14 @@ export async function inventory(
     const [till] = await tx.execute<{ reasons: string[] | null }>(
       sql`select (till->'wasteReasons') as reasons from tenant_settings`,
     );
+    // The database's clock: a write-off made from this list counts what moved after it (see createStocktakeIn)
+    const [clock] = await tx.execute<{ at: Date | string }>(sql`select now() as at`);
     return {
       items,
       totalValueMinor: items.reduce((sum, i) => sum + i.valueMinor, 0),
       baseCurrency: await baseCurrency(tx),
       wasteReasons: wasteReasonsOf(till?.reasons),
+      asOf: new Date(clock?.at ?? Date.now()).toISOString(),
     };
   });
 }
@@ -866,6 +962,60 @@ export async function stocktakeById(tx: Transaction, id: string): Promise<Stockt
     diffValueMinor: row.diffValueMinor,
     baseCurrency: await baseCurrency(tx),
   };
+}
+
+/** The counts already made, newest first, with who made them (round 44), inside the branches the role is held in */
+export function listStocktakes(
+  db: Database,
+  auth: AccessClaims,
+  query: { limit?: number | undefined; cursor?: string | undefined } = {},
+): Promise<StocktakeListResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const scope = await requirePermission(tx, auth.userId, 'inventory.adjust');
+    const limit = query.limit ?? 20;
+    const offset = /^o:\d{1,6}$/.test(query.cursor ?? '') ? Number(query.cursor!.slice(2)) : 0;
+    const rows = await tx.execute<{
+      id: string;
+      number: string;
+      date: string;
+      branch_id: string;
+      branch_name: string;
+      by: string | null;
+      items: string;
+      diff: string;
+      note: string | null;
+      waste: boolean;
+    }>(sql`
+      select s.id, s.number, s.business_date::text as date, s.branch_id, b.name as branch_name, u.full_name as by,
+             jsonb_array_length(s.lines)::text as items, s.diff_value_minor::text as diff, s.note,
+             exists (select 1 from jsonb_array_elements(s.lines) l where nullif(l->>'reason', '') is not null) as waste
+      from stocktakes s
+      join branches b on b.tenant_id = s.tenant_id and b.id = s.branch_id
+      left join users u on u.tenant_id = s.tenant_id and u.id = s.created_by
+      ${scope.all ? sql`` : sql`where s.branch_id = any(${uuidArray([...scope.branchIds])})`}
+      order by s.business_date desc, s.created_at desc
+      limit ${limit + 1} offset ${offset}`);
+    return {
+      items: rows.slice(0, limit).map((r) => ({
+        id: r.id,
+        number: r.number,
+        date: r.date,
+        branchId: r.branch_id,
+        branchName: r.branch_name,
+        by: r.by ?? '',
+        kind:
+          r.waste || r.note === LEGACY_WASTE_NOTE
+            ? ('waste' as const)
+            : r.note?.startsWith('نقص في التحويل')
+              ? ('shortage' as const)
+              : ('count' as const),
+        items: Number(r.items),
+        diffValueMinor: Number(r.diff),
+        note: r.note,
+      })),
+      nextCursor: rows.length > limit ? `o:${offset + limit}` : null,
+    };
+  });
 }
 
 export function createStocktake(
@@ -909,6 +1059,14 @@ export async function createStocktakeIn(
   // batch's difference. A line without one counts the whole item. An item is counted one way.
   const isBatchLine = (l: (typeof input.lines)[number]) => Boolean(l.batchNo || l.expiryDate);
   const wholeCounted = new Set(input.lines.filter((l) => !isBatchLine(l)).map((l) => l.variantId));
+  // An item is counted once: two whole counts of it would each be compared with the same book figure and both applied
+  const seenWhole = new Set<string>();
+  for (const [i, l] of input.lines.entries()) {
+    if (isBatchLine(l)) continue;
+    if (seenWhole.has(l.variantId))
+      throw invalid({ [`lines.${i}.variantId`]: 'هذا الصنف مكرر في الجرد: اجمع عدّاته في سطر واحد' });
+    seenWhole.add(l.variantId);
+  }
   const mixed = input.lines.findIndex((l) => isBatchLine(l) && wholeCounted.has(l.variantId));
   if (mixed >= 0) {
     throw invalid({ [`lines.${mixed}.batchNo`]: 'عُدّ الصنف كاملاً أو دفعةً دفعة، لا الاثنين معاً' });
@@ -1136,10 +1294,20 @@ export async function createTransfer(
   meta: RequestMeta,
 ): Promise<TransferDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'inventory.adjust');
+    // The goods leave the sending branch: the right must hold THERE, not only somewhere
     const from = await branchOf(tx, input.fromBranchId);
+    await requirePermission(tx, auth.userId, 'inventory.adjust', from);
     const to = await branchOf(tx, input.toBranchId);
     const inTransit = await sendsInTransit(tx, input.mode, from, to);
+    if (inTransit) {
+      // A transfer on the way keeps one line per item: the receipt confirms what arrived item by item
+      const seen = new Set<string>();
+      for (const [i, l] of input.lines.entries()) {
+        if (seen.has(l.variantId))
+          throw invalid({ [`lines.${i}.variantId`]: 'هذا الصنف مكرر في التحويل: اجمع كمياته في سطر واحد' });
+        seen.add(l.variantId);
+      }
+    }
     const names = await stockedVariants(
       tx,
       input.lines.map((l) => l.variantId),
@@ -1158,6 +1326,19 @@ export async function createTransfer(
     const empty: StockValue = { qty: 0, valueMinor: 0, refQty: 0, refValueMinor: 0 };
     const lines: TransferDetail['lines'] = [];
     let costDiff = 0;
+    if (input.strictStock) {
+      // The screen asks for this: more than the sender holds is a typing slip, not a sale below nothing
+      const asked = new Map<string, number>();
+      for (const l of input.lines) asked.set(l.variantId, (asked.get(l.variantId) ?? 0) + l.qty);
+      for (const [i, l] of input.lines.entries()) {
+        const held = values.get(stockKey(from, l.variantId))?.qty ?? 0;
+        if ((asked.get(l.variantId) ?? 0) > Math.max(0, held)) {
+          throw invalid({
+            [`lines.${i}.qty`]: `عند المرسِل ${Math.max(0, held) / 1000} فقط من هذا الصنف. اكتب كمية أقل`,
+          });
+        }
+      }
+    }
     for (const l of input.lines) {
       const outKey = stockKey(from, l.variantId);
       const inKey = stockKey(to, l.variantId);
@@ -1307,10 +1488,34 @@ async function withSerialNumbers(
   });
 }
 
-export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items: TransferRow[] }> {
+export function listTransfers(
+  db: Database,
+  auth: AccessClaims,
+  query: { limit?: number | undefined; cursor?: string | undefined } = {},
+): Promise<TransferListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'inventory.adjust');
-    const rows = await tx.execute<{
+    const scope = await requirePermission(tx, auth.userId, 'inventory.adjust');
+    // The page is the newest ones; every transfer still on the way is on the first page whatever its age, so one that
+    // is old can still be received (round 44). The cursor is how many of the rest came before.
+    const limit = query.limit ?? 50;
+    const offset = /^o:\d{1,7}$/.test(query.cursor ?? '') ? Number(query.cursor!.slice(2)) : 0;
+    const mine = scope.all
+      ? sql``
+      : sql`and (t.from_branch_id = any(${uuidArray([...scope.branchIds])}) or t.to_branch_id = any(${uuidArray([...scope.branchIds])}))`;
+    const pending = sql`(t.in_transit and r.id is null)`;
+    const pick = (where: ReturnType<typeof sql>, tail: ReturnType<typeof sql>) => sql`
+      select t.id, t.number, t.business_date::text as date, f.name as from_name, d.name as to_name,
+             coalesce((select sum((l ->> 'qty')::bigint) from jsonb_array_elements(t.lines) l), 0)::text as pieces,
+             t.value_minor::text as value, t.from_branch_id as from_id, t.to_branch_id as to_id, t.in_transit,
+             (r.id is not null) as received, (r.id is not null and r.branch_id = t.from_branch_id) as cancelled,
+             coalesce(r.short_pieces, 0)::text as short
+      from transfers t
+      join branches f on f.id = t.from_branch_id
+      join branches d on d.id = t.to_branch_id
+      left join transfer_receipts r on r.tenant_id = t.tenant_id and r.transfer_id = t.id
+      where ${where} ${mine}
+      order by t.business_date desc, t.created_at desc ${tail}`;
+    type Found = {
       id: string;
       number: string;
       date: string;
@@ -1322,20 +1527,19 @@ export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items
       to_id: string;
       in_transit: boolean;
       received: boolean;
+      cancelled: boolean;
       short: string;
-    }>(sql`
-      select t.id, t.number, t.business_date::text as date, f.name as from_name, d.name as to_name,
-             coalesce((select sum((l ->> 'qty')::bigint) from jsonb_array_elements(t.lines) l), 0)::text as pieces,
-             t.value_minor::text as value, t.from_branch_id as from_id, t.to_branch_id as to_id, t.in_transit,
-             (r.id is not null) as received, coalesce(r.short_pieces, 0)::text as short
-      from transfers t
-      join branches f on f.id = t.from_branch_id
-      join branches d on d.id = t.to_branch_id
+    };
+    const waiting = offset === 0 ? await tx.execute<Found>(pick(pending, sql``)) : [];
+    const rest = await tx.execute<Found>(pick(sql`not ${pending}`, sql`limit ${limit + 1} offset ${offset}`));
+    const [count] = await tx.execute<{ n: string }>(sql`
+      select count(*)::text as n from transfers t
       left join transfer_receipts r on r.tenant_id = t.tenant_id and r.transfer_id = t.id
-      order by t.business_date desc, t.created_at desc
-      limit 200`);
-    return {
-      items: rows.map((r) => ({
+      where ${pending} ${mine}`);
+    const more = rest.length > limit;
+    const row = (r: Found): TransferRow => {
+      const onWay = r.in_transit && !r.received;
+      return {
         id: r.id,
         number: r.number,
         date: r.date,
@@ -1343,11 +1547,18 @@ export function listTransfers(db: Database, auth: AccessClaims): Promise<{ items
         toBranch: r.to_name,
         pieces: Number(r.pieces),
         valueMinor: Number(r.value),
-        status: r.in_transit && !r.received ? ('in_transit' as const) : ('received' as const),
+        status: onWay ? 'in_transit' : r.cancelled ? 'cancelled' : 'received',
         fromBranchId: r.from_id,
         toBranchId: r.to_id,
         ...(Number(r.short) > 0 ? { shortPieces: Number(r.short) } : {}),
-      })),
+        canReceive: onWay && inScope(scope, r.to_id),
+        canCancel: onWay && inScope(scope, r.from_id),
+      };
+    };
+    return {
+      items: [...waiting, ...rest.slice(0, limit)].map(row),
+      nextCursor: more ? `o:${offset + limit}` : null,
+      inTransit: Number(count?.n ?? 0),
     };
   });
 }
@@ -1374,9 +1585,16 @@ export async function createSupplierReturn(
 ): Promise<SupplierReturnDetail> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'purchases.manage');
+    // Round 44: an id the form made posts once; the same id again answers the return already made
+    if (input.id) {
+      await documentLock(tx, 'supplier_return', input.id);
+      const made = await supplierReturnById(tx, input.id);
+      if (made) return made;
+    }
     const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
     if (!supplier) throw invalid({ supplierId: 'اختر المورد' });
     const branchId = await branchOf(tx, input.branchId);
+    await requirePermission(tx, auth.userId, 'purchases.manage', branchId);
     const names = await stockedVariants(
       tx,
       input.lines.map((l) => l.variantId),
@@ -1435,7 +1653,7 @@ export async function createSupplierReturn(
     const outgoing = await outgoingSerials(tx, branchId, input.lines);
     await saveValues(tx, auth.tenantId, values);
 
-    const id = newId();
+    const id = input.id ?? newId();
     const number = await nextNumber(tx, auth.tenantId, 'PRT', input.date);
     const amountMinor = lines.reduce((sum, l) => sum + l.amountMinor, 0);
     const costMinor = lines.reduce((sum, l) => sum + l.costMinor, 0);
@@ -1558,6 +1776,42 @@ export async function createSupplierReturn(
   });
 }
 
+/** A supplier return made earlier, as the answer of the POST that made it (a retry with the same id) */
+async function supplierReturnById(tx: Transaction, id: string): Promise<SupplierReturnDetail | null> {
+  const [r] = await tx.select().from(supplierReturns).where(eq(supplierReturns.id, id));
+  if (!r) return null;
+  const [supplier] = await tx
+    .select({ name: suppliers.name })
+    .from(suppliers)
+    .where(eq(suppliers.id, r.supplierId));
+  const [invoice] = r.purchaseId
+    ? await tx.select({ number: purchases.number }).from(purchases).where(eq(purchases.id, r.purchaseId))
+    : [];
+  return {
+    id: r.id,
+    number: r.number,
+    date: r.businessDate,
+    supplierId: r.supplierId,
+    supplierName: supplier?.name ?? '',
+    branchId: r.branchId,
+    refund: r.refund as SupplierReturnDetail['refund'],
+    reference: r.reference,
+    lines: r.lines as SupplierReturnDetail['lines'],
+    amountMinor: r.amountMinor,
+    costMinor: r.costMinor,
+    ...(r.purchaseId
+      ? {
+          purchaseId: r.purchaseId,
+          purchaseNumber: invoice?.number ?? null,
+          ...(r.currency
+            ? { currency: 'USD' as const, rate: r.rate, foreignAmountMinor: r.foreignAmountMinor }
+            : {}),
+        }
+      : {}),
+    baseCurrency: await baseCurrency(tx),
+  };
+}
+
 /**
  * The invoice a supplier return is against (round 36, decision 13): it must be this supplier's, every line
  * must be an item of it, and no line may send back more than was bought less what earlier returns against
@@ -1574,6 +1828,13 @@ async function invoiceForReturn(
   const [purchase] = await tx.select().from(purchases).where(eq(purchases.id, purchaseId));
   if (!purchase || purchase.supplierId !== supplierId) {
     throw invalid({ purchaseId: 'هذه الفاتورة ليست من هذا المورد' });
+  }
+  // Round 44: a corrected invoice was already turned back whole (the debt too): nothing more is returned against it
+  const [reversed] = await tx.execute<{ number: string }>(
+    sql`select number from purchase_reversals where purchase_id = ${purchaseId}`,
+  );
+  if (reversed) {
+    throw invalid({ purchaseId: `هذه الفاتورة صُحّحت بالمستند ${reversed.number}. لا يُرجَع منها شيء` });
   }
   const bought = await tx.select().from(purchaseLines).where(eq(purchaseLines.purchaseId, purchaseId));
   // The invoice's own rate: the credit is at the rate the debt was booked at
@@ -1665,7 +1926,7 @@ export function listSupplierReturns(
   auth: AccessClaims,
 ): Promise<{ items: SupplierReturnRow[] }> {
   return withTenant(db, auth.tenantId, async (tx) => {
-    await requirePermission(tx, auth.userId, 'purchases.manage');
+    const scope = await requirePermission(tx, auth.userId, 'purchases.manage');
     const rows = await tx.execute<{
       id: string;
       number: string;
@@ -1680,6 +1941,7 @@ export function listSupplierReturns(
              r.amount_minor::text as amount
       from supplier_returns r
       join suppliers s on s.tenant_id = r.tenant_id and s.id = r.supplier_id
+      ${scope.all ? sql`` : sql`where r.branch_id = any(${uuidArray([...scope.branchIds])})`}
       order by r.business_date desc, r.created_at desc
       limit 200`);
     return {

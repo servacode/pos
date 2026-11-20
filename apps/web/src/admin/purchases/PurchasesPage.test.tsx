@@ -26,7 +26,7 @@ function open() {
     'POST /v1/auth/refresh': signedInRefresh,
     'GET /v1/me': () => ({ status: 200, body: owner() }),
     'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
-    'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+    'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
     'POST /v1/suppliers': (r: MockRequest) => {
       const s = {
         id: 's-1',
@@ -157,7 +157,7 @@ describe('«تفاصيل» of a purchase invoice', () => {
         status: 200,
         body: { items: [], totalOwedMinor: 0, baseCurrency: 'SYP' } satisfies SupplierListResponse,
       },
-      'GET /v1/purchases': { status: 200, body: { items: [row], baseCurrency: 'SYP' } },
+      'GET /v1/purchases?limit=50': { status: 200, body: { items: [row], baseCurrency: 'SYP' } },
       'GET /v1/purchases/pu-7': {
         status: 200,
         body: {
@@ -313,7 +313,7 @@ describe('payments and duplicate suppliers', () => {
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': () => ({ status: 200, body: owner() }),
       'GET /v1/suppliers': () => ({ status: 200, body: suppliers }),
-      'GET /v1/purchases': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+      'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
       'POST /v1/supplier-payments': () => ({
         status: 201,
         body: {
@@ -404,5 +404,82 @@ describe('size runs that do not match the grid', () => {
     expect(runMismatchNote('طقم', 4, 4)).toBeNull();
     expect(runMismatchNote('طقم 3', 3, 5)).toBe('«طقم 3» له 3 من 5 مقاسات: الباقي بلا كمية.');
     expect(runMismatchNote('طقم 6', 6, 4)).toBe('«طقم 6» له 6 أعداد والجدول 4 مقاسات فقط: الزائد يُهمَل.');
+  });
+});
+
+describe('round 44: money typed by the owner and retries', () => {
+  const supplier = {
+    id: 's-1',
+    name: 'شركة النور',
+    phone: '0933123456',
+    notes: null,
+    balanceMinor: 500_000,
+    archived: false,
+  };
+  function openWith(post: () => { status: number; body: unknown }) {
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: owner() }),
+      'GET /v1/suppliers': () => ({
+        status: 200,
+        body: { items: [supplier], totalOwedMinor: 500_000, baseCurrency: 'SYP' },
+      }),
+      'GET /v1/purchases?limit=50': () => ({ status: 200, body: { items: [], baseCurrency: 'SYP' } }),
+      'POST /v1/supplier-payments': post,
+    });
+    return { ...mock, ...renderApp('/purchases') };
+  }
+
+  it('says why a minus sign or a third decimal is refused, and sends nothing', async () => {
+    const { user, requestsTo } = openWith(() => ({ status: 201, body: {} }));
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    const amount = screen.getByLabelText('المبلغ بالليرة');
+    await user.type(amount, '-100');
+    expect(await screen.findByText(/لا تكتب إشارة ناقص/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    await user.clear(amount);
+    await user.type(amount, '1000.555');
+    expect(await screen.findByText(/بمنزلتين عشريتين/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'سجّل الدفعة' })).toBeDisabled();
+    expect(requestsTo('POST', '/v1/supplier-payments')).toHaveLength(0);
+  });
+
+  it('keeps the same document id when the first try fails, so a retry cannot pay twice', async () => {
+    let calls = 0;
+    const { user, requestsTo } = openWith(() => {
+      calls += 1;
+      return calls === 1
+        ? { status: 500, body: { error: { code: 'internal', message: 'تعذّر الاتصال.' } } }
+        : {
+            status: 201,
+            body: {
+              id: 'sp-1',
+              number: 'PAY-1',
+              supplierId: 's-1',
+              date: '2026-10-30',
+              amountMinor: 1,
+              method: 'cash',
+            },
+          };
+    });
+    await user.click(await screen.findByRole('button', { name: 'دفعة لمورد' }));
+    await user.type(screen.getByLabelText('المبلغ بالليرة'), '1,000.55');
+    await user.click(screen.getByRole('button', { name: 'سجّل الدفعة' }));
+    expect(await screen.findByText('تعذّر الاتصال.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'سجّل الدفعة' }));
+    expect(await screen.findByText('سُجّل سند الدفع PAY-1.')).toBeInTheDocument();
+    const [first, second] = requestsTo('POST', '/v1/supplier-payments').map(
+      (r) => r.body as { id?: string; amountMinor: number },
+    );
+    expect(first?.amountMinor).toBe(100_055);
+    expect(first?.id).toBeTruthy();
+    expect(second?.id).toBe(first?.id);
+  });
+
+  it('reads an amount with Arabic digits and Arabic separators', () => {
+    expect(moneyOf('١٬٢٠٠٫٥٠')).toBe(120_050);
+    expect(moneyOf('1،200')).toBe(120_000);
+    expect(moneyOf('-5')).toBeNull();
+    expect(moneyOf('1.234')).toBeNull();
   });
 });
