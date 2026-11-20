@@ -19,18 +19,14 @@ describe('routing', () => {
     await waitFor(() => expect(requestsTo('POST', '/v1/auth/refresh')).toHaveLength(1));
     expect(screen.getByRole('status')).toHaveTextContent('جارٍ التحميل…');
     finishRefresh(signedOutRefresh);
-    expect(
-      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /الكاشير يبيع/ })).toBeInTheDocument();
   });
 
   it('shows signed-out visitors the landing page, with the way to sign in', async () => {
     mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
     renderApp('/');
 
-    expect(
-      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /الكاشير يبيع/ })).toBeInTheDocument();
   });
 
   it('sends signed-in users away from the register page', async () => {
@@ -96,9 +92,7 @@ describe('routing', () => {
     mockFetch({ 'POST /v1/auth/refresh': signedOutRefresh });
     renderApp('/');
 
-    expect(
-      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /الكاشير يبيع/ })).toBeInTheDocument();
     expect(sessionStorage.getItem('serva.me')).toBeNull();
   });
 });

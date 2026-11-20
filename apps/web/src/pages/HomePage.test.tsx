@@ -72,9 +72,7 @@ describe('HomePage', () => {
     await user.click(await screen.findByRole('button', { name: /^حسابي/ }));
     await user.click(await screen.findByRole('button', { name: /خروج/ }));
 
-    expect(
-      await screen.findByRole('heading', { level: 1, name: /كاشير ومخزون ومبيعات/ }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /الكاشير يبيع/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'تسجيل الدخول' })).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/auth/logout')).toHaveLength(1);
   });

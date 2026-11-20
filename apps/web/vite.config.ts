@@ -27,7 +27,10 @@ function serviceWorker(): Plugin {
     generateBundle(_options, bundle) {
       const files = [
         ...Object.keys(bundle).filter((f) => !f.endsWith('.map') && f !== 'vite-manifest.json'),
-        ...readdirSync(publicDir),
+        // Files only: the landing's screenshots (public/landing/) are for visitors, not the offline app
+        ...readdirSync(publicDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => entry.name),
       ]
         .filter((f) => f !== 'index.html' && f !== 'sw.js')
         .sort();
