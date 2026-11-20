@@ -362,7 +362,7 @@ export function WarrantyPage() {
 
   return (
     <AppShell>
-      <title>طلبات الكفالة · SERFA</title>
+      <title>طلبات الكفالة · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="طلبات الكفالة"

@@ -131,7 +131,7 @@ export function SettingsPage() {
 
   return (
     <AppShell>
-      <title>إعدادات التقسيط · SERFA</title>
+      <title>إعدادات التقسيط · SERVA</title>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <PageHeader
           title="إعدادات التقسيط"

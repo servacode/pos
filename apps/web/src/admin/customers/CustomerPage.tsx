@@ -400,7 +400,7 @@ export function CustomerPage() {
 
   return (
     <AppShell>
-      <title>{`${customer?.name ?? 'زبون'} · SERFA`}</title>
+      <title>{`${customer?.name ?? 'زبون'} · SERVA`}</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <Link
           to="/customers"

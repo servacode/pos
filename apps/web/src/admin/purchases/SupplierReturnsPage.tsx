@@ -336,7 +336,7 @@ export function SupplierReturnsPage() {
   const active = (suppliers?.items ?? []).filter((s) => !s.archived);
   return (
     <AppShell>
-      <title>مرتجع إلى المورد · SERFA</title>
+      <title>مرتجع إلى المورد · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="مرتجع إلى المورد"

@@ -387,7 +387,7 @@ type ShiftRow = {
   } | null;
 };
 
-async function shiftRows(tx: Transaction, where: SQL): Promise<ShiftRow[]> {
+async function shiftRows(tx: Transaction, where: SQL, limit?: number): Promise<ShiftRow[]> {
   return tx.execute<ShiftRow>(sql`
     select s.id, s.number, s.branch_id, d.code as device_code, s.opened_by, u.full_name as opened_by_name,
            s.opened_at, s.closed_at, s.status, s.opening, s.closing,
@@ -399,7 +399,7 @@ async function shiftRows(tx: Transaction, where: SQL): Promise<ShiftRow[]> {
     join devices d on d.id = s.device_id
     left join users u on u.id = s.opened_by
     where ${where}
-    order by coalesce(s.opened_at, s.closed_at), s.id`);
+    order by coalesce(s.opened_at, s.closed_at), s.id${limit ? sql` limit ${limit}` : sql``}`);
 }
 
 const summaryOf = (r: ShiftRow): ShiftSummary => ({
@@ -417,83 +417,48 @@ const summaryOf = (r: ShiftRow): ShiftSummary => ({
   returnsTotalMinor: num(r.returns_total),
 });
 
-export async function listShifts(
-  db: Database,
-  auth: AccessClaims,
-  query: z.output<typeof shiftListQuery>,
-): Promise<ShiftListResponse> {
-  return withTenant(db, auth.tenantId, async (tx) => {
-    const filter = await branchFilter(tx, auth, 'report.view', query.branchId);
-    // A shift's day is its opening's business day; a close that came alone, its closing day.
-    const day =
-      query.status === 'open'
-        ? sql`s.status = 'open'`
-        : query.date
-          ? sql`coalesce(s.business_date,
-          (select (s.closed_at at time zone t.timezone)::date from tenants t where t.id = s.tenant_id)) = ${query.date}`
-          : sql`true`;
-    const rows = await shiftRows(tx, sql`${inBranches(sql`s.branch_id`, filter)} and ${day}`);
-    return { items: rows.map(summaryOf) };
-  });
-}
-
 /**
- * GET /v1/shifts/{id}: the drawer of each currency by the formula of 10 › مطابقة الصندوق, from the
- * documents the server holds (an open shift's X report too). The expected amount and the
- * difference are only for those who may see them (shift.view_difference).
+ * The drawer of each currency of the shifts given, by the formula of 10 › مطابقة الصندوق, in one
+ * pass for all of them (the list and the report share it). The expected amount and the difference
+ * are null where `seesDifference(branchId)` is false.
  */
-export async function shiftReport(db: Database, auth: AccessClaims, id: string): Promise<ShiftReport> {
-  return withTenant(db, auth.tenantId, async (tx) => {
-    const [row] = await shiftRows(tx, sql`s.id = ${id}`);
-    if (!row) throw notFound('هذه الوردية غير موجودة.');
-    const scope = await permissionScope(tx, auth.userId, 'report.view');
-    if (!inScope(scope, row.branch_id)) throw forbidden();
-    const seesDifference = inScope(
-      await permissionScope(tx, auth.userId, 'shift.view_difference'),
-      row.branch_id,
-    );
-
-    const ofShift = sql`i.shift_id = ${id}`;
-    const byMethod = await paymentsByMethod(tx, ofShift);
-    const flows = await tx.execute<{ currency: CurrencyCode; kind: string; amount: string }>(sql`
-      select p.currency, 'cash_in' as kind, sum(p.amount_minor)::text as amount
+async function drawersOf(
+  tx: Transaction,
+  rows: readonly ShiftRow[],
+  seesDifference: (branchId: string) => boolean,
+): Promise<Map<string, ShiftCurrencyReport[]>> {
+  const result = new Map<string, ShiftCurrencyReport[]>();
+  if (rows.length === 0) return result;
+  const ids = sql.join(
+    rows.map((r) => sql`${r.id}::uuid`),
+    sql`, `,
+  );
+  const flows = await tx.execute<{
+    shift_id: string;
+    currency: CurrencyCode;
+    kind: string;
+    amount: string;
+  }>(sql`
+      select i.shift_id, p.currency, 'cash_in' as kind, sum(p.amount_minor)::text as amount
       from invoice_payments p join invoices i on i.id = p.invoice_id
-      where ${ofShift} and p.method = 'cash' group by p.currency
+      where i.shift_id in (${ids}) and p.method = 'cash' group by i.shift_id, p.currency
       union all
-      select i.payload -> 'change' ->> 'currency', 'change', sum((i.payload -> 'change' ->> 'amountMinor')::bigint)::text
-      from invoices i where ${ofShift} and jsonb_typeof(i.payload -> 'change') = 'object'
-      group by i.payload -> 'change' ->> 'currency'
+      select i.shift_id, i.payload -> 'change' ->> 'currency', 'change', sum((i.payload -> 'change' ->> 'amountMinor')::bigint)::text
+      from invoices i where i.shift_id in (${ids}) and jsonb_typeof(i.payload -> 'change') = 'object'
+      group by i.shift_id, i.payload -> 'change' ->> 'currency'
       union all
-      select r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
-      where r.shift_id = ${id} and r.method = 'cash' group by r.currency
+      select r.shift_id, r.currency, 'receipt', sum(r.amount_minor)::text from receipts r
+      where r.shift_id in (${ids}) and r.method = 'cash' group by r.shift_id, r.currency
       union all
-      select x.currency, 'refund', sum(x.amount)::text
-      from (${cashRefundDrawers(sql`r.shift_id = ${id}`)}) x group by x.currency
+      select x.shift_id, x.currency, 'refund', sum(x.amount)::text
+      from (${cashRefundDrawers(sql`r.shift_id in (${ids})`)}) x group by x.shift_id, x.currency
       union all
-      select v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
-      where v.shift_id = ${id} and v.kind in ('gift', 'deposit') and v.method = 'cash' group by v.currency
+      select v.shift_id, v.currency, 'receipt', sum(v.amount_minor)::text from vouchers v
+      where v.shift_id in (${ids}) and v.kind in ('gift', 'deposit') and v.method = 'cash' group by v.shift_id, v.currency
       union all
-      select m.currency, m.kind, sum(m.amount_minor)::text from cash_movements m
-      where m.shift_id = ${id} group by m.currency, m.kind`);
-    const movements = await tx.execute<{
-      id: string;
-      kind: ShiftReport['movements'][number]['kind'];
-      currency: CurrencyCode;
-      amount: string;
-      reason: string;
-      approver: string | null;
-      approver_name: string | null;
-      at: string | null;
-    }>(sql`
-      select m.id, m.kind, m.currency, m.amount_minor::text as amount, m.reason,
-             u.id as approver, u.full_name as approver_name,
-             coalesce(x.device_time, m.created_at) as at
-      from cash_movements m
-      left join users u on u.id = (m.approval ->> 'userId')::uuid
-      left join sync_inbox x on x.doc_id = m.id
-      where m.shift_id = ${id}
-      order by coalesce(x.device_time, m.created_at), m.id`);
-
+      select m.shift_id, m.currency, m.kind, sum(m.amount_minor)::text from cash_movements m
+      where m.shift_id in (${ids}) group by m.shift_id, m.currency, m.kind`);
+  for (const row of rows) {
     const currencies = new Map<CurrencyCode, ShiftCurrencyReport>();
     const drawer = (currency: CurrencyCode) => {
       let d = currencies.get(currency);
@@ -521,6 +486,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       row.opening ?? row.closing?.cash.map((c) => ({ currency: c.currency, amountMinor: c.openingMinor }));
     for (const o of opening ?? []) drawer(o.currency).openingMinor = o.amountMinor;
     for (const f of flows) {
+      if (f.shift_id !== row.id) continue;
       const d = drawer(f.currency);
       const amount = num(f.amount);
       if (f.kind === 'cash_in') d.cashSalesMinor += amount;
@@ -532,6 +498,7 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
       else if (f.kind === 'safe_drop') d.dropsMinor += amount;
     }
     for (const c of row.closing?.cash ?? []) drawer(c.currency).countedMinor = c.countedMinor;
+    const sees = seesDifference(row.branch_id);
     for (const d of currencies.values()) {
       const expected =
         d.openingMinor +
@@ -542,13 +509,107 @@ export async function shiftReport(db: Database, auth: AccessClaims, id: string):
         d.payInMinor -
         d.payOutMinor -
         d.dropsMinor;
-      d.expectedMinor = seesDifference ? expected : null;
-      d.differenceMinor = seesDifference && d.countedMinor !== null ? d.countedMinor - expected : null;
+      d.expectedMinor = sees ? expected : null;
+      d.differenceMinor = sees && d.countedMinor !== null ? d.countedMinor - expected : null;
     }
+    result.set(
+      row.id,
+      [...currencies.values()].sort((x, y) => x.currency.localeCompare(y.currency)),
+    );
+  }
+  return result;
+}
+
+/** The most shifts one list answers with; more is said in `truncated` */
+const SHIFT_LIST_MAX = 500;
+/** With no day, range or status asked, the list covers this many days back from the store's today */
+const SHIFT_DEFAULT_DAYS = 31;
+
+export async function listShifts(
+  db: Database,
+  auth: AccessClaims,
+  query: z.output<typeof shiftListQuery>,
+): Promise<ShiftListResponse> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const filter = await branchFilter(tx, auth, 'report.view', query.branchId);
+    // A shift's day is its opening's business day; a close that came alone, its closing day.
+    const shiftDay = sql`coalesce(s.business_date,
+          (select (s.closed_at at time zone t.timezone)::date from tenants t where t.id = s.tenant_id))`;
+    const day =
+      query.status === 'open'
+        ? sql`s.status = 'open'`
+        : query.date
+          ? sql`${shiftDay} = ${query.date}`
+          : query.from && query.to
+            ? sql`${shiftDay} between ${query.from} and ${query.to}`
+            : sql`${shiftDay} >= (select (now() at time zone t.timezone)::date from tenants t where t.id = s.tenant_id) - ${SHIFT_DEFAULT_DAYS}::int`;
+    const found = await shiftRows(
+      tx,
+      sql`${inBranches(sql`s.branch_id`, filter)} and ${day}`,
+      SHIFT_LIST_MAX + 1,
+    );
+    const truncated = found.length > SHIFT_LIST_MAX;
+    const rows = truncated ? found.slice(0, SHIFT_LIST_MAX) : found;
+    // Expected, counted and the difference of every shift, in one pass (not one report per shift)
+    const scope = await permissionScope(tx, auth.userId, 'shift.view_difference');
+    const drawers = await drawersOf(tx, rows, (branchId) => inScope(scope, branchId));
+    return {
+      items: rows.map((row) => ({
+        ...summaryOf(row),
+        cash: (drawers.get(row.id) ?? []).map((d) => ({
+          currency: d.currency,
+          expectedMinor: d.expectedMinor,
+          countedMinor: d.countedMinor,
+          differenceMinor: d.differenceMinor,
+        })),
+      })),
+      ...(truncated ? { truncated } : {}),
+    };
+  });
+}
+
+/**
+ * GET /v1/shifts/{id}: the drawer of each currency by the formula of 10 › مطابقة الصندوق, from the
+ * documents the server holds (an open shift's X report too). The expected amount and the
+ * difference are only for those who may see them (shift.view_difference).
+ */
+export async function shiftReport(db: Database, auth: AccessClaims, id: string): Promise<ShiftReport> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const [row] = await shiftRows(tx, sql`s.id = ${id}`);
+    if (!row) throw notFound('هذه الوردية غير موجودة.');
+    const scope = await permissionScope(tx, auth.userId, 'report.view');
+    if (!inScope(scope, row.branch_id)) throw forbidden();
+    const seesDifference = inScope(
+      await permissionScope(tx, auth.userId, 'shift.view_difference'),
+      row.branch_id,
+    );
+
+    const ofShift = sql`i.shift_id = ${id}`;
+    const byMethod = await paymentsByMethod(tx, ofShift);
+    const movements = await tx.execute<{
+      id: string;
+      kind: ShiftReport['movements'][number]['kind'];
+      currency: CurrencyCode;
+      amount: string;
+      reason: string;
+      approver: string | null;
+      approver_name: string | null;
+      at: string | null;
+    }>(sql`
+      select m.id, m.kind, m.currency, m.amount_minor::text as amount, m.reason,
+             u.id as approver, u.full_name as approver_name,
+             coalesce(x.device_time, m.created_at) as at
+      from cash_movements m
+      left join users u on u.id = (m.approval ->> 'userId')::uuid
+      left join sync_inbox x on x.doc_id = m.id
+      where m.shift_id = ${id}
+      order by coalesce(x.device_time, m.created_at), m.id`);
+
+    const byCurrency = (await drawersOf(tx, [row], () => seesDifference)).get(id) ?? [];
 
     return {
       ...summaryOf(row),
-      byCurrency: [...currencies.values()].sort((a, b) => a.currency.localeCompare(b.currency)),
+      byCurrency,
       byMethod: byMethod.map(({ baseAmountMinor: _base, ...m }) => m),
       movements: movements.map((m) => ({
         id: m.id,

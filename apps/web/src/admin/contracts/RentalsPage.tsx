@@ -64,7 +64,7 @@ export function RentalsPage() {
 
   return (
     <AppShell>
-      <title>التأجير · SERFA</title>
+      <title>التأجير · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           icon={<KeyIcon />}

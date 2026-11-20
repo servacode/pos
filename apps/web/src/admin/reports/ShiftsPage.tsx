@@ -1,35 +1,53 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
-import { Link } from 'react-router';
-import type { CurrencyCode } from '@serva/core';
+import { useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import type { CurrencyCode, ShiftCashSummary } from '@serva/core';
 import {
-  Badge,
+  Alert,
   Button,
+  CheckIcon,
   ClockIcon,
   cn,
-  DataTable,
   EmptyState,
-  exactDecimals,
-  Money,
+  LockIcon,
+  WarningIcon,
   useDigits,
   type Digits,
-  type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { useIsPhone } from '../../lib/useIsPhone';
 import { dayText, isoDay, zonedClock, zonedDateTime } from '../../lib/dates';
+import {
+  Amt,
+  DayStepper,
+  PageTop,
+  Panel,
+  PeriodChips,
+  SalesPage,
+  StatusPill,
+  SxTable,
+  type SxColumn,
+} from '../sales/ui';
 import { seesDifference, SHIFTS_ACCESS } from './access';
-import { getShift, listShifts } from './api';
-import type { ShiftCurrencyRow, ShiftReport, ShiftSummary } from './contracts';
-import { BranchSelect, DayField, defaultBranch, PageHead, ReportFilters, ReportScreen } from './parts';
+import { listShifts } from './api';
+import type { ShiftSummary } from './contracts';
+import type { DayRange } from './periods';
+import { BranchSelect, DayField, defaultBranch, ReportScreen } from './parts';
 import { useReport } from './useReport';
 
+/** A shift's status: open is the one exception worth a fill, closed is quiet with its lock */
 export function ShiftStatus({ status }: { status: ShiftSummary['status'] }) {
-  return status === 'open' ? <Badge tone="success">مفتوحة</Badge> : <Badge>مغلقة</Badge>;
+  return status === 'open' ? (
+    <StatusPill kind="open">● مفتوحة</StatusPill>
+  ) : (
+    <StatusPill kind="ok" icon={<LockIcon size={16} />}>
+      مغلقة
+    </StatusPill>
+  );
 }
 
 /** An amount with its half shown («28,372.50»), a whole one without a fraction: the same figure as the close report */
 function Amount({ minor, currency }: { minor: number; currency: CurrencyCode }) {
-  return <Money minor={minor} currency={currency} decimals={exactDecimals(minor, currency)} />;
+  return <Amt minor={minor} currency={currency} exact />;
 }
 
 /** «عجز 1,500 ل.س», «زيادة 500 ل.س», «لا فرق» (print/ShiftReport › الفرق). */
@@ -37,27 +55,37 @@ export function Difference({ minor, currency }: { minor: number; currency: Curre
   if (minor === 0) return <span className="text-ink-muted">لا فرق</span>;
   return (
     <span className={cn('font-semibold', minor < 0 ? 'text-danger-ink' : 'text-ink')}>
-      {minor < 0 ? 'عجز' : 'زيادة'}{' '}
-      <Money
-        minor={minor}
-        currency={currency}
-        signDisplay="never"
-        decimals={exactDecimals(minor, currency)}
-      />
+      {minor < 0 ? 'عجز' : 'زيادة'} <Amt minor={minor} currency={currency} signDisplay="never" exact />
     </span>
   );
 }
 
-/** One line per currency of a shift's drawer, or a dash while the figure does not exist yet */
-function cashCell(report: ShiftReport | undefined, pick: (row: ShiftCurrencyRow) => ReactNode) {
-  const lines = (report?.byCurrency ?? []).map((row) => ({ currency: row.currency, node: pick(row) }));
-  const shown = lines.filter((line) => line.node !== null);
-  if (shown.length === 0) return '—';
+/**
+ * The difference of a shift's drawer as one badge per currency: «مطابق» quietly when every counted
+ * currency is exact, a filled «عجز» or «زيادة» for each one that is not; «—» while nothing is counted.
+ */
+function DiffBadges({ cash }: { cash: ShiftCashSummary[] | undefined }) {
+  const counted = (cash ?? []).filter((row) => row.differenceMinor !== null);
+  if (counted.length === 0) return <span className="sx-z">—</span>;
+  const off = counted.filter((row) => row.differenceMinor !== 0);
+  if (off.length === 0) {
+    return (
+      <StatusPill kind="ok" icon={<CheckIcon size={16} />}>
+        مطابق
+      </StatusPill>
+    );
+  }
   return (
-    <span className="flex flex-col">
-      {shown.map((line) => (
-        <span key={line.currency}>{line.node}</span>
-      ))}
+    <span className="sx-diff">
+      {off.map((row) => {
+        const diff = row.differenceMinor ?? 0;
+        return (
+          <StatusPill key={row.currency} kind={diff < 0 ? 'danger' : 'warn'} icon={<WarningIcon size={16} />}>
+            {diff < 0 ? 'عجز' : 'زيادة'}{' '}
+            <Amt minor={diff} currency={row.currency} signDisplay="never" exact />
+          </StatusPill>
+        );
+      })}
     </span>
   );
 }
@@ -67,294 +95,436 @@ const DAY_MS = 86_400_000;
 /** «منذ 3 أيام» / «منذ 30 ساعة»: how long a shift has been open */
 function ageText(openedAt: string, now: number): string {
   const hours = Math.max(1, Math.floor((now - Date.parse(openedAt)) / 3_600_000));
-  return hours >= 48 ? `منذ ${Math.floor(hours / 24)} يوماً` : `منذ ${hours} ساعة`;
+  const days = Math.floor(hours / 24);
+  if (hours < 48) return `منذ ${hours} ساعة`;
+  // 3 to 10 take the plural «أيام», 11 and more the singular «يوماً»
+  return days <= 10 ? `منذ ${days} أيام` : `منذ ${days} يوماً`;
 }
 
 /**
- * Shifts still open more than 24 hours after they opened, of any day, above the day's list: who opened
- * each one and on which device. Display only; a shift is closed from its own till or by a manager there.
+ * One quiet line above the list when shifts have stayed open for more than a day, with a link to the
+ * list filtered to them. Nothing here closes a shift: the server takes a close only from the till that
+ * opened the shift (the close arrives as that till's document), so it is said once, in the filtered list.
  */
-function StaleOpenShifts({ branchId, tz, digits }: { branchId: string | null; tz: string; digits: Digits }) {
+function StaleOpenLine({ branchId }: { branchId: string | null }) {
   const { data } = useReport(`open|${branchId ?? ''}`, () => listShifts({ branchId, status: 'open' }));
   const now = Date.now();
   const stale = (data?.items ?? []).filter((s) => s.openedAt && now - Date.parse(s.openedAt) > DAY_MS);
-  const [all, setAll] = useState(false);
   if (stale.length === 0) return null;
-  const shown = all ? stale : stale.slice(0, 5);
   return (
-    <section
-      aria-labelledby="stale-shifts"
-      className="flex flex-col gap-2 rounded-card border border-line bg-warning-soft p-3"
-    >
-      <h2 id="stale-shifts" className="text-base font-semibold text-warning-ink">
-        ورديات مفتوحة منذ أكثر من 24 ساعة (<span className="num">{stale.length}</span>)
-      </h2>
-      <p className="text-sm text-ink-muted">يقفلها الكاشير أو المدير من جهازها.</p>
-      <ul className="flex flex-col">
-        {shown.map((row) => (
-          <li key={row.id} className="flex flex-col border-b border-line py-1 text-sm last:border-0">
-            <span className="flex items-center justify-between gap-3">
-              <Link
-                to={`/shifts/${encodeURIComponent(row.id)}`}
-                className="inline-flex min-h-11 items-center font-semibold text-brand-ink underline-offset-4 hover:underline"
-              >
-                <bdi className="num" dir="ltr">
-                  {row.number}
-                </bdi>
-              </Link>
-              <span className="font-semibold text-warning-ink">
-                {row.openedAt ? ageText(row.openedAt, now) : ''}
-              </span>
-            </span>
-            <span className="pb-1 text-ink-muted">
-              الجهاز <bdi className="num">{row.deviceCode}</bdi> · فتحها{' '}
-              {row.openedBy?.fullName ?? 'غير معروف'}
-              {row.openedAt ? ` · ${zonedDateTime(row.openedAt, tz, digits)}` : ''}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {stale.length > 5 ? (
-        <Button variant="ghost" size="sm" className="self-start" onClick={() => setAll((v) => !v)}>
-          {all ? 'أخفِ الباقي' : `اعرض الكل (${stale.length})`}
-        </Button>
-      ) : null}
-    </section>
+    <p className="sx-quiet print:hidden">
+      <ClockIcon size={16} />
+      <span>
+        فيه <span className="num">{stale.length}</span> ورديات مفتوحة من أكثر من يوم.
+      </span>{' '}
+      <Link to="/shifts?open=1">اعرضها</Link>
+    </p>
   );
 }
 
-/** One shift as a card on a phone: number and status, device and opener, times, sales, then the drawer figures */
+/** What one cashier's closed shifts came to in a currency: the shortages, the surpluses and what is left */
+interface CashierFigures {
+  shortMinor: number;
+  overMinor: number;
+}
+
+interface CashierRow {
+  key: string;
+  name: string;
+  /** Closed shifts that have a counted drawer */
+  shifts: number;
+  /** Per currency, in the currency's own units */
+  byCurrency: Map<CurrencyCode, CashierFigures>;
+}
+
+/**
+ * The shortage of each cashier over the shifts on the list: for every closed shift with a counted
+ * drawer, the difference added to the cashier's shortage (below zero) or surplus (above), per
+ * currency, since a Syrian pound and a dollar do not add up.
+ */
+export function cashierShortages(rows: readonly ShiftSummary[]): CashierRow[] {
+  const byCashier = new Map<string, CashierRow>();
+  for (const row of rows) {
+    const diffs = (row.cash ?? []).filter((c) => c.differenceMinor !== null);
+    if (diffs.length === 0) continue;
+    const key = row.openedBy?.id ?? '—';
+    let entry = byCashier.get(key);
+    if (!entry) {
+      entry = { key, name: row.openedBy?.fullName ?? 'غير معروف', shifts: 0, byCurrency: new Map() };
+      byCashier.set(key, entry);
+    }
+    entry.shifts += 1;
+    for (const c of diffs) {
+      const figures = entry.byCurrency.get(c.currency) ?? { shortMinor: 0, overMinor: 0 };
+      const diff = c.differenceMinor ?? 0;
+      if (diff < 0) figures.shortMinor += -diff;
+      else figures.overMinor += diff;
+      entry.byCurrency.set(c.currency, figures);
+    }
+  }
+  return [...byCashier.values()];
+}
+
+/** «وردية واحدة / ورديتان / 5 ورديات / 12 وردية» */
+function shiftsNoun(n: number): string {
+  if (n === 1) return 'وردية واحدة';
+  if (n === 2) return 'ورديتان';
+  return n >= 3 && n <= 10 ? `${n} ورديات` : `${n} وردية`;
+}
+
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0])
+    .join('');
+
+/** «فروق الصندوق لكل كاشير»: the owner's view of who is short, most short first */
+function CashierShortagePanel({ rows, base }: { rows: readonly ShiftSummary[]; base: CurrencyCode }) {
+  const cashiers = cashierShortages(rows).sort((a, b) => {
+    const short = (r: CashierRow) =>
+      (r.byCurrency.get(base)?.shortMinor ?? 0) - (r.byCurrency.get(base)?.overMinor ?? 0);
+    return short(b) - short(a) || a.name.localeCompare(b.name, 'ar');
+  });
+  if (cashiers.length === 0) return null;
+  return (
+    <Panel title="فروق الصندوق لكل كاشير" aside="من الورديات المغلقة في القائمة أدناه" flush>
+      <div className="sx-cslab">
+        {cashiers.map((row) => {
+          const nets = [...row.byCurrency.entries()].filter(([, f]) => f.overMinor - f.shortMinor !== 0);
+          const bad = nets.some(([, f]) => f.overMinor - f.shortMinor < 0);
+          const shorts = [...row.byCurrency.entries()].filter(([, f]) => f.shortMinor !== 0);
+          const overs = [...row.byCurrency.entries()].filter(([, f]) => f.overMinor !== 0);
+          return (
+            <div key={row.key} className="sx-cs">
+              <div className="who">
+                <span className="sx-av" aria-hidden="true">
+                  {initials(row.name)}
+                </span>
+                {row.name}
+              </div>
+              {nets.length === 0 ? (
+                <span className="res">
+                  <span className="sx-mute">لا فرق</span>
+                </span>
+              ) : (
+                <span className={cn('res', bad && 'bad')}>
+                  {nets.map(([currency, f]) => (
+                    <Difference key={currency} minor={f.overMinor - f.shortMinor} currency={currency} />
+                  ))}
+                </span>
+              )}
+              <span className="sx-sub">
+                {shiftsNoun(row.shifts)} مغلقة
+                {shorts.length > 0 ? (
+                  <>
+                    {' · العجز '}
+                    {shorts.map(([currency, f], i) => (
+                      <span key={currency}>
+                        {i > 0 ? ' + ' : ''}
+                        <Amount minor={f.shortMinor} currency={currency} />
+                      </span>
+                    ))}
+                  </>
+                ) : null}
+                {overs.length > 0 ? (
+                  <>
+                    {' · الزيادة '}
+                    {overs.map(([currency, f], i) => (
+                      <span key={currency}>
+                        {i > 0 ? ' + ' : ''}
+                        <Amount minor={f.overMinor} currency={currency} />
+                      </span>
+                    ))}
+                  </>
+                ) : null}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+/** One shift as a card on a phone: cashier and number, sales and difference, times and invoices */
 function ShiftCard({
   row,
   base,
   tz,
   digits,
-  cash,
   showsCash,
+  long,
 }: {
   row: ShiftSummary;
   base: CurrencyCode;
   tz: string;
   digits: Digits;
-  cash: ShiftReport | undefined;
   showsCash: boolean;
+  /** The list spans days: the date shows with the time */
+  long: boolean;
 }) {
-  const line = (label: string, value: ReactNode) => (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-ink-muted">{label}</dt>
-      <dd className="text-end font-semibold">{value}</dd>
-    </div>
-  );
+  const when = (iso: string | null) =>
+    iso ? (long ? zonedDateTime(iso, tz, digits) : zonedClock(iso, tz, digits)) : null;
+  const opened = when(row.openedAt);
+  const closed = when(row.closedAt);
   return (
-    <li className="flex flex-col gap-2 border-b border-line p-3 text-sm last:border-0">
-      <div className="flex items-center justify-between gap-2">
-        <Link
-          to={`/shifts/${encodeURIComponent(row.id)}`}
-          className="inline-flex min-h-11 items-center font-semibold text-brand-ink underline-offset-4 hover:underline"
-        >
-          <bdi className="num" dir="ltr">
-            {row.number}
-          </bdi>
-        </Link>
-        <ShiftStatus status={row.status} />
-      </div>
-      <dl className="flex flex-col gap-1">
-        {line('الجهاز', <bdi className="num">{row.deviceCode}</bdi>)}
-        {line('فتحها', row.openedBy?.fullName ?? 'غير معروف')}
-        {line('الفتح', row.openedAt ? zonedClock(row.openedAt, tz, digits) : '—')}
-        {line('الإغلاق', row.closedAt ? zonedClock(row.closedAt, tz, digits) : '—')}
-        {line('الفواتير', <span className="num">{row.salesCount}</span>)}
-        {line('إجمالي المبيعات', <Amount minor={row.salesTotalMinor} currency={base} />)}
-        {showsCash
-          ? [
-              line(
-                'المتوقع بالدرج',
-                cashCell(cash, (c) =>
-                  c.expectedMinor === null ? null : <Amount minor={c.expectedMinor} currency={c.currency} />,
-                ),
-              ),
-              line(
-                'المعدود',
-                cashCell(cash, (c) =>
-                  c.countedMinor === null ? null : <Amount minor={c.countedMinor} currency={c.currency} />,
-                ),
-              ),
-              line(
-                'الفرق',
-                cashCell(cash, (c) =>
-                  c.differenceMinor === null ? null : (
-                    <Difference minor={c.differenceMinor} currency={c.currency} />
-                  ),
-                ),
-              ),
-            ].map((node, i) => <Fragment key={i}>{node}</Fragment>)
-          : null}
-      </dl>
+    <li>
+      <Link to={`/shifts/${encodeURIComponent(row.id)}`} className="sx-scard">
+        <span className="font-semibold">{row.openedBy?.fullName ?? 'غير معروف'}</span>
+        <span className="n sx-n">{row.number}</span>
+        <span className="sx-n font-bold">
+          <Amount minor={row.salesTotalMinor} currency={base} />
+        </span>
+        <span className="justify-self-end">
+          {showsCash && row.status === 'closed' ? (
+            <DiffBadges cash={row.cash} />
+          ) : (
+            <ShiftStatus status={row.status} />
+          )}
+        </span>
+        <span className="x">
+          <span className="sx-n">
+            {opened ?? '—'}
+            {closed ? ` – ${closed}` : ''}
+          </span>
+          <span>
+            <span className="sx-n">{row.salesCount}</span> فاتورة · جهاز{' '}
+            <bdi className="sx-n">{row.deviceCode}</bdi>
+          </span>
+        </span>
+      </Link>
     </li>
   );
 }
 
 /**
- * «الورديات» (11 › الورديات; admin/ReturnsShifts › الورديات): the day's shifts in a branch, each
- * with its device, who opened it, when it opened and closed, and its sales; each opens its close
- * report.
+ * «الورديات» (11 › الورديات; admin/ReturnsShifts › الورديات): the shifts of a day or a range in a
+ * branch, each with its device, who opened it, when it opened and closed, its sales and its drawer's
+ * difference (from the list itself, not one report per shift); each opens its close report.
+ * «?open=1» lists the shifts still open, of any day.
  */
 export function ShiftsPage() {
   const me = useMe();
   const phone = useIsPhone();
   const digits = useDigits();
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const openOnly = params.get('open') === '1';
   const today = isoDay(Date.now(), me.tenant.timezone);
   const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me));
-  const [date, setDate] = useState(today);
-  const { data, error, loading, retry } = useReport(`${branchId ?? ''}|${date}`, () =>
-    listShifts({ branchId, date }),
-  );
+  const [range, setRange] = useState<DayRange>({ from: today, to: today });
+  const single = range.from === range.to;
+  const date = range.from;
+  const query = openOnly
+    ? { branchId, status: 'open' as const }
+    : single
+      ? { branchId, date }
+      : { branchId, from: range.from, to: range.to };
+  const key = openOnly
+    ? `open|${branchId ?? ''}|all`
+    : `${branchId ?? ''}|${single ? date : `${range.from}|${range.to}`}`;
+  const { data, error, loading, retry } = useReport(key, () => listShifts(query));
   const base: CurrencyCode = me.settings.baseCurrency;
   const tz = me.tenant.timezone;
   const rows = data?.items ?? [];
   const salesTotal = rows.reduce((sum, row) => sum + row.salesTotalMinor, 0);
   const salesCount = rows.reduce((sum, row) => sum + row.salesCount, 0);
-
-  // Expected, counted and the difference of every shift on the list: each one's close report, which
-  // the server only fills for those who may see the difference.
   const showsCash = seesDifference(me);
-  const [cash, setCash] = useState<Record<string, ShiftReport>>({});
-  useEffect(() => {
-    if (!showsCash || !data) return;
-    let live = true;
-    for (const row of data.items) {
-      getShift(row.id)
-        .then((report) => {
-          if (live) setCash((all) => ({ ...all, [row.id]: report }));
-        })
-        .catch(() => undefined);
-    }
-    return () => {
-      live = false;
-    };
-  }, [data, showsCash]);
+  const long = openOnly || !single;
+  const label = openOnly
+    ? 'الورديات المفتوحة'
+    : single
+      ? `ورديات ${dayText(date, digits)}`
+      : `ورديات من ${dayText(range.from, digits)} إلى ${dayText(range.to, digits)}`;
+  const now = Date.now();
+  const pick = (next: DayRange) => setRange(next);
 
-  const columns: DataColumn<ShiftSummary>[] = [
+  const columns: SxColumn<ShiftSummary>[] = [
     {
       key: 'number',
       header: 'الوردية',
-      cell: (row) => (
-        <Link
-          to={`/shifts/${encodeURIComponent(row.id)}`}
-          className="inline-flex min-h-11 items-center font-semibold text-brand-ink underline-offset-4 hover:underline"
-        >
-          <bdi className="num" dir="ltr">
-            {row.number}
-          </bdi>
-        </Link>
-      ),
+      lead: true,
       total: 'المجموع',
+      cell: (row) => (
+        <>
+          <Link
+            to={`/shifts/${encodeURIComponent(row.id)}`}
+            className="sx-rowbtn inline-flex items-center hover:underline"
+          >
+            <bdi className="sx-n sx-no" dir="ltr">
+              {row.number}
+            </bdi>
+          </Link>
+          <span className="sx-subline">
+            جهاز <bdi className="sx-n">{row.deviceCode}</bdi>
+          </span>
+        </>
+      ),
     },
-    { key: 'device', header: 'الجهاز', cell: (row) => <bdi className="num">{row.deviceCode}</bdi> },
-    { key: 'openedBy', header: 'فتحها', cell: (row) => row.openedBy?.fullName ?? 'غير معروف' },
+    { key: 'openedBy', header: 'الكاشير', cell: (row) => row.openedBy?.fullName ?? 'غير معروف' },
     {
       key: 'openedAt',
       header: 'الفتح',
-      cell: (row) => (row.openedAt ? zonedClock(row.openedAt, tz, digits) : '—'),
+      cell: (row) =>
+        row.openedAt ? (
+          <>
+            <span className="sx-n sx-mute">
+              {long ? zonedDateTime(row.openedAt, tz, digits) : zonedClock(row.openedAt, tz, digits)}
+            </span>
+            {openOnly && row.status === 'open' ? (
+              <span className="sx-subline text-warning-ink">{ageText(row.openedAt, now)}</span>
+            ) : null}
+          </>
+        ) : (
+          <span className="sx-z">—</span>
+        ),
     },
     {
       key: 'closedAt',
       header: 'الإغلاق',
       cell: (row) =>
-        row.closedAt ? zonedClock(row.closedAt, tz, digits) : <ShiftStatus status={row.status} />,
+        row.closedAt ? (
+          <span className="sx-n sx-mute">
+            {long ? zonedDateTime(row.closedAt, tz, digits) : zonedClock(row.closedAt, tz, digits)}
+          </span>
+        ) : (
+          <span className="sx-z">—</span>
+        ),
     },
-    { key: 'count', header: 'الفواتير', numeric: true, cell: (row) => row.salesCount, total: salesCount },
+    {
+      key: 'count',
+      header: 'الفواتير',
+      numeric: true,
+      cell: (row) => <span className="sx-n">{row.salesCount}</span>,
+      total: <span className="sx-n">{salesCount}</span>,
+    },
     {
       key: 'total',
       header: 'إجمالي المبيعات',
       numeric: true,
+      strong: true,
       cell: (row) => <Amount minor={row.salesTotalMinor} currency={base} />,
       total: <Amount minor={salesTotal} currency={base} />,
     },
-    ...(showsCash
-      ? ([
-          {
-            key: 'expected',
-            header: 'المتوقع بالدرج',
-            numeric: true,
-            cell: (row) =>
-              cashCell(cash[row.id], (c) =>
-                c.expectedMinor === null ? null : <Amount minor={c.expectedMinor} currency={c.currency} />,
-              ),
-          },
-          {
-            key: 'counted',
-            header: 'المعدود',
-            numeric: true,
-            cell: (row) =>
-              cashCell(cash[row.id], (c) =>
-                c.countedMinor === null ? null : <Amount minor={c.countedMinor} currency={c.currency} />,
-              ),
-          },
-          {
-            key: 'difference',
-            header: 'الفرق',
-            numeric: true,
-            cell: (row) =>
-              cashCell(cash[row.id], (c) =>
-                c.differenceMinor === null ? null : (
-                  <Difference minor={c.differenceMinor} currency={c.currency} />
-                ),
-              ),
-          },
-        ] satisfies DataColumn<ShiftSummary>[])
-      : []),
+    {
+      key: 'difference',
+      header: showsCash ? 'الفرق' : 'الحالة',
+      cell: (row) =>
+        showsCash && row.status === 'closed' ? (
+          <DiffBadges cash={row.cash} />
+        ) : (
+          <ShiftStatus status={row.status} />
+        ),
+    },
   ];
 
   return (
     <ReportScreen me={me} access={SHIFTS_ACCESS} title="الورديات">
-      <PageHead icon={<ClockIcon />} title="الورديات" subtitle="سجل الورديات وتقارير إغلاقها" />
-      <ReportFilters>
-        <BranchSelect me={me} value={branchId} onChange={setBranchId} />
-        <DayField label="اليوم" value={date} max={today} onChange={setDate} />
-      </ReportFilters>
-      <StaleOpenShifts branchId={branchId} tz={tz} digits={digits} />
-      {phone && rows.length > 0 && !loading ? (
-        <ul
-          aria-label={`ورديات ${dayText(date, digits)}`}
-          className="overflow-hidden rounded-card border border-line bg-surface shadow-e1"
-        >
-          {rows.map((row) => (
-            <ShiftCard
-              key={row.id}
-              row={row}
-              base={base}
-              tz={tz}
-              digits={digits}
-              cash={cash[row.id]}
-              showsCash={showsCash}
-            />
-          ))}
-          <li className="flex items-baseline justify-between gap-3 bg-surface-total p-3 text-sm font-bold">
-            <span>المجموع</span>
+      <SalesPage>
+        <PageTop title="الورديات" subtitle="سجل الورديات وتقارير إغلاقها" />
+        <div className="sx-toolbar print:hidden">
+          {openOnly ? (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const next = new URLSearchParams(params);
+                next.delete('open');
+                setParams(next);
+              }}
+            >
+              ورديات اليوم
+            </Button>
+          ) : (
+            <>
+              {single ? (
+                <DayStepper date={date} today={today} onPick={(day) => pick({ from: day, to: day })} />
+              ) : (
+                <>
+                  <DayField
+                    label="من"
+                    value={range.from}
+                    max={range.to}
+                    onChange={(day) => setRange({ from: day, to: range.to })}
+                  />
+                  <DayField
+                    label="إلى"
+                    value={range.to}
+                    max={today}
+                    onChange={(day) => setRange({ from: range.from <= day ? range.from : day, to: day })}
+                  />
+                </>
+              )}
+              <PeriodChips name="shifts-period" range={range} today={today} scroll onPick={pick} />
+            </>
+          )}
+          <div className="sx-push">
+            <BranchSelect me={me} value={branchId} onChange={setBranchId} hideLabel className="min-w-44" />
+          </div>
+        </div>
+        {openOnly ? (
+          <p className="sx-quiet">
+            <ClockIcon size={16} />
             <span>
-              <span className="num">{salesCount}</span> فاتورة · <Amount minor={salesTotal} currency={base} />
+              يقفل الكاشير وردية جهازه من الكاشير نفسه، ولا يوجد إغلاق من لوحة الإدارة. ادخل على الوردية لترى
+              نقدها ومبيعاتها.
             </span>
-          </li>
-        </ul>
-      ) : (
-        <DataTable
-          caption={`ورديات ${dayText(date, digits)}`}
-          columns={columns}
-          rows={rows}
-          rowKey={(row) => row.id}
-          loading={loading}
-          error={error ?? undefined}
-          onRetry={retry}
-          empty={
-            <EmptyState
-              icon={ClockIcon}
-              title="لا ورديات في هذا اليوم."
-              description="تظهر الوردية هنا حين يفتحها الكاشير على جهازه وتصل."
-            />
-          }
-        />
-      )}
+          </p>
+        ) : (
+          <StaleOpenLine branchId={branchId} />
+        )}
+        {data?.truncated ? (
+          <Alert tone="info">القائمة طويلة، وهذه أول 500 وردية فقط. اختر مدة أقصر لترى الباقي.</Alert>
+        ) : null}
+        {showsCash && !loading && !error ? <CashierShortagePanel rows={rows} base={base} /> : null}
+        {phone && rows.length > 0 && !loading && !error ? (
+          <ul aria-label={label} className="sx-cards">
+            {rows.map((row) => (
+              <ShiftCard
+                key={row.id}
+                row={row}
+                base={base}
+                tz={tz}
+                digits={digits}
+                showsCash={showsCash}
+                long={long}
+              />
+            ))}
+            <li className="sx-sumcard">
+              <span>المجموع</span>
+              <span>
+                <span className="sx-n">{salesCount}</span> فاتورة ·{' '}
+                <Amount minor={salesTotal} currency={base} />
+              </span>
+            </li>
+          </ul>
+        ) : (
+          <SxTable
+            caption={label}
+            columns={columns}
+            rows={rows}
+            rowKey={(row) => row.id}
+            loading={loading}
+            error={error ?? undefined}
+            onRetry={retry}
+            onRowClick={(row) => void navigate(`/shifts/${encodeURIComponent(row.id)}`)}
+            empty={
+              <EmptyState
+                icon={ClockIcon}
+                title={
+                  openOnly
+                    ? 'لا ورديات مفتوحة.'
+                    : single
+                      ? 'لا ورديات في هذا اليوم.'
+                      : 'لا ورديات في هذه المدة.'
+                }
+                description="تظهر الوردية هنا حين يفتحها الكاشير على جهازه وتصل."
+              />
+            }
+          />
+        )}
+      </SalesPage>
     </ReportScreen>
   );
 }

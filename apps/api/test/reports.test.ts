@@ -300,8 +300,9 @@ describe('GET /v1/reports/day', () => {
 describe('GET /v1/shifts and /v1/shifts/{id}', () => {
   it('lists the day’s shifts with their sales', async () => {
     const store = await openStore(app);
-    const { open } = await aDay(store);
+    const { open, change } = await aDay(store);
     const res = await get(store.accessToken, '/v1/shifts?date=2026-10-30');
+    const expectedSyp = 100_000 + 170_000 - 8_000 - change + 50_000 - 15_000 - 100_000;
     expect(res.statusCode, res.body).toBe(200);
     expect(res.json<ShiftListResponse>().items).toEqual([
       {
@@ -317,6 +318,16 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
         salesTotalMinor: 363_750,
         returnsCount: 0,
         returnsTotalMinor: 0,
+        // The drawer of each currency on the list itself, the same figures as the close report
+        cash: [
+          {
+            currency: 'SYP',
+            expectedMinor: expectedSyp,
+            countedMinor: expectedSyp - 1_000,
+            differenceMinor: -1_000,
+          },
+          { currency: 'USD', expectedMinor: 2_900, countedMinor: 2_900, differenceMinor: 0 },
+        ],
       },
     ]);
     expect(
@@ -327,6 +338,40 @@ describe('GET /v1/shifts and /v1/shifts/{id}', () => {
     expect(stillOpen.statusCode, stillOpen.body).toBe(200);
     expect(stillOpen.json<ShiftListResponse>().items).toEqual([]);
     expect((await get(store.accessToken, '/v1/shifts?status=closed')).statusCode).toBe(400);
+  });
+
+  it('lists a range of days, refuses a wrong one, and bounds a list asked with nothing', async () => {
+    const store = await openStore(app);
+    const { open } = await aDay(store);
+    const inRange = await get(store.accessToken, '/v1/shifts?from=2026-10-01&to=2026-10-31');
+    expect(inRange.statusCode, inRange.body).toBe(200);
+    expect(inRange.json<ShiftListResponse>().items.map((x) => x.id)).toEqual([open.id]);
+    const before = await get(store.accessToken, '/v1/shifts?from=2026-10-01&to=2026-10-29');
+    expect(before.json<ShiftListResponse>().items).toEqual([]);
+    expect((await get(store.accessToken, '/v1/shifts?from=2026-10-31&to=2026-10-01')).statusCode).toBe(400);
+    expect((await get(store.accessToken, '/v1/shifts?from=2026-10-01')).statusCode).toBe(400);
+    expect((await get(store.accessToken, '/v1/shifts?from=2026-01-01&to=2026-12-31')).statusCode).toBe(400);
+    // Asked with nothing, the list is the last 31 days of the store, not all of history
+    const bare = await get(store.accessToken, '/v1/shifts');
+    expect(bare.statusCode, bare.body).toBe(200);
+    const today = Date.now();
+    const old = Date.parse('2026-10-30') < today - 40 * 86_400_000;
+    if (old) expect(bare.json<ShiftListResponse>().items).toEqual([]);
+  });
+
+  it('keeps the list’s expected cash and difference for those who may see them only', async () => {
+    const store = await openStore(app);
+    await aDay(store);
+    const viewer = await personWith(store, ['report.view'], '0955555556');
+    const items = (await get(viewer.accessToken, '/v1/shifts?date=2026-10-30')).json<ShiftListResponse>()
+      .items;
+    expect(items).toHaveLength(1);
+    expect(items[0]!.cash!.map((c) => [c.expectedMinor, c.countedMinor !== null, c.differenceMinor])).toEqual(
+      [
+        [null, true, null],
+        [null, true, null],
+      ],
+    );
   });
 
   it('reports each drawer by the formula of tab 10, the methods and the movements with their approver', async () => {

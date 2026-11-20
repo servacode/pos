@@ -183,7 +183,7 @@ export function BranchesPage() {
 
   return (
     <AppShell>
-      <title>الفروع · SERFA</title>
+      <title>الفروع · SERVA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           title="الفروع"

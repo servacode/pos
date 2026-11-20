@@ -377,7 +377,7 @@ export function RecallPage() {
 
   return (
     <AppShell>
-      <title>استدعاء دفعة · SERFA</title>
+      <title>استدعاء دفعة · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="استدعاء دفعة (سحب من السوق)"

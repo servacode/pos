@@ -1,5 +1,5 @@
 /*
- * The SERFA theme for Tailwind v4 (هوية 4 «الزمرّدي»; tab 14 › مصدر واحد): every colour, type size,
+ * The SERVA theme for Tailwind v4 (هوية 4 «الزمرّدي»; tab 14 › مصدر واحد): every colour, type size,
  * radius, shadow and motion token of the apps lives here, once. An app's stylesheet is only:
  *
  *   @import 'tailwindcss';
@@ -122,7 +122,7 @@
  * addon-dark.css (dark), written in oklch; each converts back to the kit's hex exactly, and
  * src/theme.test.ts checks that and the contrast of every allowed pair.
  * Screens use these names only (bg-surface, text-ink-muted, border-line-control…), never a palette
- * shade or a raw colour. The sidebar has its own deep-emerald set in both modes: SERFA's signature.
+ * shade or a raw colour. The sidebar has its own deep-emerald set in both modes: SERVA's signature.
  */
 @theme static {
   --color-*: initial;
@@ -169,7 +169,7 @@
   --color-sidebar-brand: oklch(0.7151 0.1343 164.44);
 
   /*
-   * The same in both modes, as the specimen draws them on any background: the SERFA mark (its
+   * The same in both modes, as the specimen draws them on any background: the SERVA mark (its
    * emerald → teal square and white «S») and the light along the top edge of a raised button. The
    * primary button's small shadow takes the mark's emerald too.
    */

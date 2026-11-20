@@ -268,7 +268,7 @@ export function LandingPage() {
           <Link className="logo" to="/" aria-label="سيرفا">
             <img src="/favicon.svg" alt="" width={36} height={36} />
             <span className="logo-t" aria-hidden="true">
-              <b>SERFA</b>
+              <b>SERVA</b>
               <i>سيرفا</i>
             </span>
           </Link>
@@ -803,7 +803,7 @@ export function LandingPage() {
               <Link className="logo" to="/" aria-label="سيرفا">
                 <img src="/favicon.svg" alt="" width={36} height={36} loading="lazy" />
                 <span className="logo-t" aria-hidden="true">
-                  <b>SERFA</b>
+                  <b>SERVA</b>
                   <i>سيرفا</i>
                 </span>
               </Link>

@@ -7,6 +7,7 @@ import { PAYMENT_METHODS, type PaymentMethod, type SalePayload } from './documen
  * The store-wide invoice list (الفواتير), read-only, from the sales the tills synced:
  *
  * - GET /v1/sales        report.view (in the branches the role holds it)  → SaleListPage
+ * - GET /v1/sales/summary report.view (the list's filters)               → SaleSummary
  * - GET /v1/sales/{id}   report.view                                       → SaleDetail
  *
  * A sale is never edited nor voided once it is stored: the only way back is a return (RET), so the
@@ -67,6 +68,19 @@ export interface SaleListItem {
 export interface SaleListPage {
   items: SaleListItem[];
   nextCursor: string | null;
+}
+
+/** The totals strip over the invoice list for the same filters: one row per currency (GET /v1/sales/summary). */
+export interface SaleSummary {
+  totals: {
+    currency: CurrencyCode;
+    count: number;
+    /** What the invoices total, in the currency */
+    grossMinor: number;
+    /** What returns gave back of them */
+    returnsMinor: number;
+    netMinor: number;
+  }[];
 }
 
 export interface SaleReturnRef {

@@ -161,7 +161,7 @@ export function ContractPricesPage() {
 
   return (
     <AppShell>
-      <title>أسعار العقود · SERFA</title>
+      <title>أسعار العقود · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="أسعار العقود"

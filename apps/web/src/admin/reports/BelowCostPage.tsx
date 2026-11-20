@@ -47,7 +47,7 @@ export function BelowCostPage() {
   ];
   return (
     <AppShell>
-      <title>بيع تحت الكلفة · SERFA</title>
+      <title>بيع تحت الكلفة · SERVA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           icon={<ReportsIcon />}

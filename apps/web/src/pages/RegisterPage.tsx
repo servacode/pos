@@ -119,7 +119,7 @@ function DetailsStep({ onCodeSent }: { onCodeSent: (pending: PendingCode) => voi
         </>
       }
     >
-      <title>افتح متجرك · SERFA</title>
+      <title>افتح متجرك · SERVA</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
 
@@ -251,7 +251,7 @@ function CodeStep({ pending, onChangeNumber }: { pending: PendingCode; onChangeN
         </>
       }
     >
-      <title>رمز التحقق · SERFA</title>
+      <title>رمز التحقق · SERVA</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         {pending.testCode ? (

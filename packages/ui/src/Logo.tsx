@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { cn } from './cn';
 
-// The SERFA mark (هوية 4 «الزمرّدي»), drawn as docs/design/kit/logo.md: viewBox 64, a square with
+// The SERVA mark (هوية 4 «الزمرّدي»), drawn as docs/design/kit/logo.md: viewBox 64, a square with
 // corner 16, the «S» of two arcs (stroke 7, round caps) and the small dot. The square is filled with
 // the emerald → teal gradient; under it lies the same square in solid emerald, so the mark stays whole
 // where a gradient cannot draw. The mark keeps its colours in both modes, as the specimen draws it
@@ -68,22 +68,22 @@ export function AppIcon({ className, label, small = false }: MarkProps & { small
   );
 }
 
-// «SERFA» in Latin capitals, bold and letter-spaced 0.12em. The text is the word «Serfa» and the
+// «SERVA» in Latin capitals, bold and letter-spaced 0.12em. The text is the word «Serva» and the
 // capitals are drawn (uppercase), so a screen reader says a name instead of spelling five letters.
 // The space after the last letter is taken back (-me-[0.12em]) so the word sits optically centred
 // and close to the mark.
 const LATIN = '-me-[0.12em] font-bold tracking-[0.12em] uppercase';
-const WORDMARK = 'Serfa';
+const WORDMARK = 'Serva';
 
 const HORIZONTAL = {
-  // Headers (sidebar, cashier bar, phone top): mark 32, «SERFA» 18/20, «سيرفا» 12/16, gap 10.
+  // Headers (sidebar, cashier bar, phone top): mark 32, «SERVA» 18/20, «سيرفا» 12/16, gap 10.
   sm: {
     gap: 'gap-2.5',
     mark: 'size-8',
     latin: 'text-lg/5',
     arabic: 'text-xs/4',
   },
-  // The large sheet: mark 92, «SERFA» 48/56, «سيرفا» 24/36, gap 20.
+  // The large sheet: mark 92, «SERVA» 48/56, «سيرفا» 24/36, gap 20.
   lg: {
     gap: 'gap-5',
     mark: 'size-23',
@@ -98,7 +98,7 @@ const WORDS = {
   sidebar: { latin: 'text-sidebar-strong', arabic: 'text-sidebar-muted' },
 } as const;
 
-/** The horizontal lockup: the mark, «SERFA» and «سيرفا» under it. */
+/** The horizontal lockup: the mark, «SERVA» and «سيرفا» under it. */
 export function Logo({
   className,
   markClassName,
@@ -108,7 +108,7 @@ export function Logo({
   className?: string;
   markClassName?: string;
   size?: keyof typeof HORIZONTAL;
-  /** 'sidebar' on the deep-emerald sidebar: «SERFA» in white and «سيرفا» in sidebar-muted. */
+  /** 'sidebar' on the deep-emerald sidebar: «SERVA» in white and «سيرفا» in sidebar-muted. */
   tone?: keyof typeof WORDS;
 }) {
   const s = HORIZONTAL[size];
@@ -126,7 +126,7 @@ export function Logo({
   );
 }
 
-/** The stacked lockup for the splash, sign-in and error pages: mark 96, «SERFA» 44/48, «سيرفا» 20/30. */
+/** The stacked lockup for the splash, sign-in and error pages: mark 96, «SERVA» 44/48, «سيرفا» 20/30. */
 export function LogoStacked({ className }: { className?: string }) {
   return (
     <span className={cn('inline-flex flex-col items-center gap-4', className)}>

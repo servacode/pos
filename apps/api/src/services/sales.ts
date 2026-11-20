@@ -7,6 +7,7 @@ import type {
   SaleListPage,
   SalePayload,
   SaleStatus,
+  SaleSummary,
   saleListQuery,
 } from '@serva/core';
 import { withTenant, type Database, type Transaction } from '@serva/db';
@@ -158,6 +159,37 @@ function itemOf(row: Row): SaleListItem {
   };
 }
 
+/** The conditions of the list and of its totals strip: the same filters, so both count the same invoices. */
+function filtersOf(scope: Scope, query: z.output<typeof saleListQuery>): { where: SQL[]; status: SQL } {
+  const where: SQL[] = [inScopeSql(sql`i.branch_id`, scope)];
+  if (query.from) where.push(sql`i.business_date >= ${query.from}`);
+  if (query.to) where.push(sql`i.business_date <= ${query.to}`);
+  if (query.deviceId) where.push(sql`i.device_id = ${query.deviceId}`);
+  if (query.cashierId) where.push(sql`i.cashier_id = ${query.cashierId}`);
+  if (query.customerId) where.push(sql`i.customer_id = ${query.customerId}`);
+  if (query.minTotal !== undefined) where.push(sql`i.total_minor >= ${query.minTotal}`);
+  if (query.maxTotal !== undefined) where.push(sql`i.total_minor <= ${query.maxTotal}`);
+  if (query.method)
+    where.push(sql`exists (select 1 from invoice_payments p where p.tenant_id = i.tenant_id
+        and p.invoice_id = i.id and p.method = ${query.method})`);
+  if (query.q) {
+    const pattern = likeOf(query.q);
+    // An invoice is also found by the serial number of a piece it sold (03 › الإلكترونيات)
+    where.push(
+      sql`(i.number ilike ${pattern} or i.customer_name ilike ${pattern} or exists (select 1 from serial_sales ss where ss.tenant_id = i.tenant_id and ss.sale_id = i.id and ss.serial = ${query.q.replace(/s+/g, '').toUpperCase()}) or exists (select 1 from batch_movements bm where bm.tenant_id = i.tenant_id and bm.kind = 'sale' and bm.doc_id = i.id and bm.batch_no = ${query.q.trim()}))`,
+    );
+  }
+  const status =
+    query.status === 'paid'
+      ? sql`where back_qty::bigint = 0`
+      : query.status === 'returned'
+        ? sql`where back_qty::bigint > 0 and back_qty::bigint >= sold_qty::bigint`
+        : query.status === 'partly_returned'
+          ? sql`where back_qty::bigint > 0 and back_qty::bigint < sold_qty::bigint`
+          : sql``;
+  return { where, status };
+}
+
 export function listSales(
   db: Database,
   auth: AccessClaims,
@@ -166,36 +198,11 @@ export function listSales(
   return withTenant(db, auth.tenantId, async (tx) => {
     const scope = await scopeOf(tx, auth, query.branchId);
     const after = decodeCursor(query.cursor);
-    const where: SQL[] = [inScopeSql(sql`i.branch_id`, scope)];
-    if (query.from) where.push(sql`i.business_date >= ${query.from}`);
-    if (query.to) where.push(sql`i.business_date <= ${query.to}`);
-    if (query.deviceId) where.push(sql`i.device_id = ${query.deviceId}`);
-    if (query.cashierId) where.push(sql`i.cashier_id = ${query.cashierId}`);
-    if (query.customerId) where.push(sql`i.customer_id = ${query.customerId}`);
-    if (query.minTotal !== undefined) where.push(sql`i.total_minor >= ${query.minTotal}`);
-    if (query.maxTotal !== undefined) where.push(sql`i.total_minor <= ${query.maxTotal}`);
-    if (query.method)
-      where.push(sql`exists (select 1 from invoice_payments p where p.tenant_id = i.tenant_id
-        and p.invoice_id = i.id and p.method = ${query.method})`);
-    if (query.q) {
-      const pattern = likeOf(query.q);
-      // An invoice is also found by the serial number of a piece it sold (03 › الإلكترونيات)
-      where.push(
-        sql`(i.number ilike ${pattern} or i.customer_name ilike ${pattern} or exists (select 1 from serial_sales ss where ss.tenant_id = i.tenant_id and ss.sale_id = i.id and ss.serial = ${query.q.replace(/\s+/g, '').toUpperCase()}) or exists (select 1 from batch_movements bm where bm.tenant_id = i.tenant_id and bm.kind = 'sale' and bm.doc_id = i.id and bm.batch_no = ${query.q.trim()}))`,
-      );
-    }
+    const { where, status } = filtersOf(scope, query);
     if (after)
       where.push(
         sql`(i.business_date, i.device_time, i.id) < (${after.date}::date, ${after.time}::timestamptz, ${after.id}::uuid)`,
       );
-    const status =
-      query.status === 'paid'
-        ? sql`where back_qty::bigint = 0`
-        : query.status === 'returned'
-          ? sql`where back_qty::bigint > 0 and back_qty::bigint >= sold_qty::bigint`
-          : query.status === 'partly_returned'
-            ? sql`where back_qty::bigint > 0 and back_qty::bigint < sold_qty::bigint`
-            : sql``;
     const rows = await tx.execute<Row>(sql`
       select * from (${SELECT} where ${sql.join(where, sql` and `)}) s
       ${status}
@@ -292,6 +299,38 @@ export function getSale(db: Database, auth: AccessClaims, id: string): Promise<S
         deviceName: row.device_name ?? row.device_code ?? '',
         cashierName: row.cashier_name ?? '',
       },
+    };
+  });
+}
+
+/**
+ * The totals strip over the invoice list: for the same filters (the cursor and the page size do
+ * not count), how many invoices, what they total and what came back of them, one row per
+ * currency because an invoice's amounts are in its own currency.
+ */
+export function salesSummary(
+  db: Database,
+  auth: AccessClaims,
+  query: z.output<typeof saleListQuery>,
+): Promise<SaleSummary> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    const scope = await scopeOf(tx, auth, query.branchId);
+    const { where, status } = filtersOf(scope, query);
+    const rows = await tx.execute<{ currency: string; count: string; gross: string; returned: string }>(sql`
+      select currency, count(*)::text as count, coalesce(sum(total::bigint), 0)::text as gross,
+             coalesce(sum(returned::bigint), 0)::text as returned
+      from (${SELECT} where ${sql.join(where, sql` and `)}) s
+      ${status}
+      group by currency
+      order by currency`);
+    return {
+      totals: rows.map((r) => ({
+        currency: r.currency as CurrencyCode,
+        count: num(r.count),
+        grossMinor: num(r.gross),
+        returnsMinor: num(r.returned),
+        netMinor: num(r.gross) - num(r.returned),
+      })),
     };
   });
 }

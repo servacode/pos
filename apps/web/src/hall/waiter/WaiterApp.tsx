@@ -8,7 +8,7 @@ import { WaiterScreen } from './WaiterScreen';
 export function WaiterApp() {
   return (
     <>
-      <title>النادل · SERFA</title>
+      <title>النادل · SERVA</title>
       <DeviceGate kind="waiter">
         {(device) => <WaiterOnDevice token={device.token} name={device.deviceName} />}
       </DeviceGate>

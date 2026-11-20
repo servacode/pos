@@ -1,6 +1,6 @@
-# SERFA — هوية 4 «الزمرّدي» (the design language)
+# SERVA — هوية 4 «الزمرّدي» (the design language)
 
-The visual identity every screen of SERFA follows: the store admin, the cashier, the platform panel
+The visual identity every screen of SERVA follows: the store admin, the cashier, the platform panel
 and the online shop. Tokens live once in `packages/ui/src/theme.css` (values from
 `docs/design/kit/serva-ui.css` and `addon-dark.css`; `theme.test.ts` checks every value and the
 contrast of every allowed pair). Components live in `packages/ui/src`. Screens compose components;
@@ -26,7 +26,7 @@ a copy of them, never a generic admin template. Beauty never costs the cashier s
 | Brand    | `brand`, `brand-hover`, `on-brand`, `brand-soft`, `brand-ink`, `ring`                                                           | primary actions, selection, focus. `brand-ink` is brand-coloured _text_; `brand-soft` a tinted fill                                                            |
 | Accent   | `accent`, `on-accent`, `accent-soft`, `accent-ink`                                                                              | teal, sparingly: the second series in a chart, a highlight chip, the gradient end of the logo                                                                  |
 | Status   | `success                                                                                                                        | warning                                                                                                                                                        | danger | info`+`-soft`+`-ink`, `on-danger` | state only, always with an icon or a word |
-| Sidebar  | `sidebar`, `sidebar-hover`, `sidebar-active`, `sidebar-line`, `sidebar-ink`, `sidebar-muted`, `sidebar-strong`, `sidebar-brand` | the deep-emerald sidebar, the same in both modes: SERFA's signature                                                                                            |
+| Sidebar  | `sidebar`, `sidebar-hover`, `sidebar-active`, `sidebar-line`, `sidebar-ink`, `sidebar-muted`, `sidebar-strong`, `sidebar-brand` | the deep-emerald sidebar, the same in both modes: SERVA's signature                                                                                            |
 | Fixed    | `mark-from`, `mark-to`, `on-mark`, `highlight`                                                                                  | the same in both modes: the logo mark (emerald → teal, white «S»), the primary button's shadow (`mark-from/30`) and the light along a raised button's top edge |
 | Overlay  | `overlay`                                                                                                                       | behind dialogs and sheets                                                                                                                                      |
 
@@ -152,7 +152,7 @@ border-line`, hover `bg-surface-muted/60`, selected `bg-brand-soft`; numbers `te
   type-ahead not required.
 - **Avatar**: `rounded-full`, initials `font-bold` on `brand-soft/brand-ink`.
 - **Logo**: the emerald mark (gradient `mark-from → mark-to`, the «S» in `on-mark`, white; the same
-  in both modes) + the wordmark «SERFA» (Latin, bold, letter-spaced) + «سيرفا» small under it.
+  in both modes) + the wordmark «SERVA» (Latin, bold, letter-spaced) + «سيرفا» small under it.
 
 ## Motion
 

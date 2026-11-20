@@ -8,11 +8,18 @@ import type {
 } from '@serva/core';
 import { apiFetch } from '../../lib/api';
 
-/** `GET /v1/quotations?status=&q=` (sale.create): the latest 200 */
-export const listQuotations = (status: string, q: string) => {
+/** One page of the list: the newest first, with where the next page starts (null on the last) */
+export interface QuotationPage {
+  items: QuotationListItem[];
+  nextCursor: string | null;
+}
+
+/** `GET /v1/quotations?status=&q=&cursor=` (customers.manage): 50 a page, the cursor from the page before */
+export const listQuotations = (status: string, q: string, cursor: string | null = null) => {
   const params = new URLSearchParams({ status });
   if (q.trim()) params.set('q', q.trim());
-  return apiFetch<{ items: QuotationListItem[] }>(`/v1/quotations?${params}`, { auth: true });
+  if (cursor) params.set('cursor', cursor);
+  return apiFetch<QuotationPage>(`/v1/quotations?${params}`, { auth: true });
 };
 
 export const getQuotation = (id: string) => apiFetch<Quotation>(`/v1/quotations/${id}`, { auth: true });

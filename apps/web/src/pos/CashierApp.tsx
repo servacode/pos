@@ -295,6 +295,18 @@ function CashierScreens({
   const [startExchange, setStartExchange] = useState(false);
   // From a customer's page the rep opens the return and the receipt already on him
   const [repReturnFor, setRepReturnFor] = useState('');
+  // «استبدال / مرتجع» from an invoice in the admin: `/pos?return=<invoice number>` opens the return screen on it
+  const [linkReturn, setLinkReturn] = useState(() =>
+    (new URLSearchParams(window.location.search).get('return') ?? '').trim().slice(0, 60),
+  );
+  const linkOpened = useRef(false);
+  useEffect(() => {
+    if (!linkReturn || !shift || linkOpened.current) return;
+    linkOpened.current = true;
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    setStartExchange(false);
+    setView('return');
+  }, [linkReturn, shift, setView]);
   const [repCollectFor, setRepCollectFor] = useState<{ id: string; name: string } | null>(null);
   const [cart, setCartState] = useState<Cart>(EMPTY_CART);
   const cartRef = useRef(cart);
@@ -1470,13 +1482,20 @@ function CashierScreens({
             ) : view === 'return' ? (
               <ReturnScreen
                 startExchange={startExchange}
-                {...(rep && repReturnFor ? { initialSearch: repReturnFor } : {})}
+                {...(rep && repReturnFor
+                  ? { initialSearch: repReturnFor }
+                  : linkReturn
+                    ? { initialSearch: linkReturn }
+                    : {})}
                 {...(rep?.sheet ? { extraInvoices: rep.sheet.returnable as InvoiceLookup[] } : {})}
                 session={session}
                 catalog={catalog}
                 staff={staff}
                 shift={shift}
-                onBack={() => setView('sale')}
+                onBack={() => {
+                  setLinkReturn('');
+                  setView('sale');
+                }}
                 onPrint={(doc) =>
                   setPrintJob({
                     data: { ...receiptData(doc, session.fullName), kind: 'return' },
@@ -1485,6 +1504,7 @@ function CashierScreens({
                 }
                 onExchange={(code, handedBack) => {
                   // A cash exchange has no voucher: the return went out in cash, the other piece is paid in cash
+                  setLinkReturn('');
                   if (code) setCart((c) => ({ ...c, voucher: code }));
                   else if (handedBack) setCart((c) => ({ ...c, exchangeCashBackMinor: handedBack }));
                   setDone(null);

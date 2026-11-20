@@ -61,7 +61,7 @@ export function ExpiringSoonPage() {
 
   return (
     <AppShell>
-      <title>بينتهي قريباً · SERFA</title>
+      <title>بينتهي قريباً · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="بينتهي قريباً"

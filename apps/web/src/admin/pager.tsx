@@ -16,11 +16,35 @@ export interface PagerState {
   onPrev: () => void;
   onNext: () => void;
   onRetry: () => void;
+  /** True while the list loads from nothing (new filters, retry): the controls show but stay off */
+  loading?: boolean;
+  /** With `loading`: whether the list had page controls before, so a single page does not flash them */
+  wasPaged?: boolean;
 }
 
 /** «‹ السابق · صفحة N · الفواتير من A إلى B · التالي ›». The list is one page; nothing shows when it is the only one. */
 export function Pager({ noun, pager }: { noun: string; pager: PagerState }) {
-  const { page, from, to, hasNext, moving, error } = pager;
+  const { page, from, to, hasNext, moving, error, loading, wasPaged } = pager;
+  if (loading) {
+    if (!wasPaged) return null;
+    return (
+      <nav
+        aria-label="الصفحات"
+        aria-busy="true"
+        className="flex flex-wrap items-center justify-center gap-3 print:hidden"
+      >
+        <Button variant="secondary" aria-label="الصفحة السابقة" disabled>
+          <span aria-hidden="true">›</span> السابق
+        </Button>
+        <span aria-current="page" className="text-sm text-ink-muted">
+          نحمّل {noun}…
+        </span>
+        <Button variant="secondary" aria-label="الصفحة التالية" disabled>
+          التالي <span aria-hidden="true">‹</span>
+        </Button>
+      </nav>
+    );
+  }
   if (page === 1 && !hasNext && !error) return null;
   return (
     <div className="flex flex-col items-center gap-3 print:hidden">
@@ -77,6 +101,14 @@ const FIRST: Step = { cursor: null, offset: 0 };
 export function useCursorPages<P extends { items: readonly unknown[]; nextCursor: string | null }>(
   key: string,
   fetchPage: (cursor: string | null) => Promise<P>,
+  options: {
+    /** The cursors of the pages passed (page 2 on), to open the list on the page they lead to */
+    initial?: readonly string[];
+    /** How many rows a page holds, to number the rows of a page opened from `initial` */
+    pageSize?: number;
+    /** Told the cursors of the pages passed whenever the page on screen changes, to keep them in the address */
+    onCursors?: (cursors: string[]) => void;
+  } = {},
 ) {
   const [state, setState] = useState<{
     key: string | null;
@@ -99,19 +131,49 @@ export function useCursorPages<P extends { items: readonly unknown[]; nextCursor
   const lastMove = useRef<1 | -1>(1);
   const scrollNext = useRef(false);
   const topRef = useRef<HTMLDivElement>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  // The first load opens on the page the address names; one that no longer exists falls back to page 1
+  const started = useRef(false);
+  const seeded = useRef(false);
 
   useEffect(() => {
     let current = true;
-    if (live.current.key !== key) live.current = { key: null, steps: [FIRST] };
+    if (!started.current) {
+      started.current = true;
+      const { initial = [], pageSize = 50 } = optionsRef.current;
+      if (initial.length > 0) {
+        seeded.current = true;
+        live.current = {
+          key,
+          steps: [FIRST, ...initial.map((cursor, i) => ({ cursor, offset: (i + 1) * pageSize }))],
+        };
+      }
+    }
+    if (live.current.key !== key) {
+      live.current = { key: null, steps: [FIRST] };
+      seeded.current = false;
+    }
     const steps = live.current.steps;
     setMoveError(null);
     fetchRef.current(steps[steps.length - 1]!.cursor).then(
       (data) => {
         if (!current) return;
+        seeded.current = false;
         live.current = { key, steps };
         setState({ key, steps, data, error: null });
+        optionsRef.current.onCursors?.(steps.slice(1).map((step) => step.cursor ?? ''));
       },
-      (error: unknown) => current && setState({ key, steps, data: null, error: errorMessage(error) }),
+      (error: unknown) => {
+        if (!current) return;
+        if (seeded.current && steps.length > 1) {
+          seeded.current = false;
+          live.current = { key: null, steps: [FIRST] };
+          setAttempt((n) => n + 1);
+          return;
+        }
+        setState({ key, steps, data: null, error: errorMessage(error) });
+      },
     );
     return () => {
       current = false;
@@ -153,6 +215,7 @@ export function useCursorPages<P extends { items: readonly unknown[]; nextCursor
         live.current = { key, steps: target };
         scrollNext.current = true;
         setState({ key, steps: target, data: next, error: null });
+        optionsRef.current.onCursors?.(target.slice(1).map((step) => step.cursor ?? ''));
       } catch (error) {
         setMoveError(errorMessage(error));
       } finally {
@@ -177,15 +240,18 @@ export function useCursorPages<P extends { items: readonly unknown[]; nextCursor
     /** Put on the element above the list: a move scrolls it into view */
     topRef,
     pager: {
-      page: state.steps.length,
-      from: last.offset + 1,
-      to: last.offset + (data?.items.length ?? 0),
-      hasNext: Boolean(data?.nextCursor),
+      // New filters or a retry: the old page's numbers mean nothing, the controls wait for the answer
+      page: fresh ? state.steps.length : 1,
+      from: fresh ? last.offset + 1 : 1,
+      to: fresh ? last.offset + (data?.items.length ?? 0) : 0,
+      hasNext: fresh && Boolean(data?.nextCursor),
       moving,
       error: moveError,
       onPrev: () => void go(-1),
       onNext: () => void go(1),
       onRetry: () => void go(lastMove.current),
+      loading: !fresh,
+      wasPaged: state.steps.length > 1 || Boolean(state.data?.nextCursor),
     } satisfies PagerState,
   };
 }

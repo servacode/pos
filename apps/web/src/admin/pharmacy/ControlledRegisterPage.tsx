@@ -141,7 +141,7 @@ export function ControlledRegisterPage() {
 
   return (
     <AppShell>
-      <title>سجل الأدوية المراقبة · SERFA</title>
+      <title>سجل الأدوية المراقبة · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="سجل الأدوية المراقبة"

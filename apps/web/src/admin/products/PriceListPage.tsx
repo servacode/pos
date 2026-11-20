@@ -314,7 +314,7 @@ function PriceList() {
 
   return (
     <>
-      <title>تحديث الأسعار من ملف · SERFA</title>
+      <title>تحديث الأسعار من ملف · SERVA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           icon={<PercentIcon />}

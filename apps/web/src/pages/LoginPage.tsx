@@ -32,7 +32,7 @@ export function LoginPage() {
         </>
       }
     >
-      <title>تسجيل الدخول · SERFA</title>
+      <title>تسجيل الدخول · SERVA</title>
       <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
         {formError ? <Alert tone="error">{formError}</Alert> : null}
         {sessionExpired && !formError ? <Alert tone="info">انتهى دخولك. سجّل الدخول مرة أخرى.</Alert> : null}

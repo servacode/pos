@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MeResponse, Permission, SectorKey } from '@serva/core';
 import { THEME_STORAGE_KEY } from '@serva/ui';
@@ -119,15 +119,17 @@ describe('AppShell', () => {
     expect(within(nav).getByRole('link', { name: 'المبيعات' })).toHaveAttribute('href', '/sales/today');
   });
 
-  it('shows the shifts to a manager who may close any shift, without the books', async () => {
+  it('does not show the shifts to a key that only closes shifts at the till: the list needs report.view', async () => {
     signedIn(['shift.close_any']);
-    const nav = await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
-    expect(
-      within(nav)
-        .getAllByRole('link')
-        .map((link) => link.textContent),
-    ).toEqual(['الرئيسية', 'المبيعات']);
-    expect(within(nav).getByRole('link', { name: 'المبيعات' })).toHaveAttribute('href', '/shifts');
+    await screen.findByRole('navigation', { name: 'القائمة الرئيسية' });
+    await waitFor(() => {
+      const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
+      expect(
+        within(nav)
+          .getAllByRole('link')
+          .map((link) => link.textContent),
+      ).toEqual(['الرئيسية']);
+    });
   });
 
   it('gives a cashier only the home page, and their own sign-in code', async () => {

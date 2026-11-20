@@ -65,7 +65,7 @@ export function WasteReportPage() {
 
   return (
     <AppShell>
-      <title>التالف والهدر · SERFA</title>
+      <title>التالف والهدر · SERVA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           icon={<DeleteIcon />}

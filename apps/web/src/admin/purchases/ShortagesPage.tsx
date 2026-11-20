@@ -86,7 +86,7 @@ export function ShortagesPage() {
 
   return (
     <AppShell>
-      <title>النواقص · SERFA</title>
+      <title>النواقص · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="النواقص"

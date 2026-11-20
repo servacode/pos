@@ -113,7 +113,7 @@ import {
 } from '@serva/ui';
 
 // The component gallery of tab 14 › معرض المكوّنات, at /dev/ui in dev builds only: every @serva/ui
-// component in its states, on the SERFA identity (docs/design/IDENTITY.md, هوية 4 «الزمرّدي»), with
+// component in its states, on the SERVA identity (docs/design/IDENTITY.md, هوية 4 «الزمرّدي»), with
 // a toolbar for the theme, the direction, the digits and the density. The sample data is a day at
 // «بوتيك الأناقة», a clothing boutique in Damascus, in new Syrian pounds (ل.س).
 
@@ -131,7 +131,7 @@ const SECTIONS = {
     id: 'g-logo',
     title: 'الشعار',
     description:
-      'العلامة الزمرّدية، و«SERFA» بالحروف اللاتينية، و«سيرفا» تحتها: أفقي للرؤوس، وعمودي لصفحات الدخول، وأيقونة للتطبيق.',
+      'العلامة الزمرّدية، و«SERVA» بالحروف اللاتينية، و«سيرفا» تحتها: أفقي للرؤوس، وعمودي لصفحات الدخول، وأيقونة للتطبيق.',
   },
   colors: {
     id: 'g-colors',
@@ -293,7 +293,7 @@ function LogoSection() {
         <Card className="flex min-h-64 flex-col items-center justify-center gap-6">
           <Logo size="lg" />
           <p className="text-sm text-ink-muted">
-            الأفقي الكبير: العلامة <bdi className="num">92</bdi>، و«<bdi>SERFA</bdi>»{' '}
+            الأفقي الكبير: العلامة <bdi className="num">92</bdi>، و«<bdi>SERVA</bdi>»{' '}
             <bdi className="num">48</bdi>، و«سيرفا» <bdi className="num">24</bdi>
           </p>
         </Card>
@@ -301,7 +301,7 @@ function LogoSection() {
           <Logo tone="sidebar" />
           <div className="flex flex-col gap-1">
             <p className="font-semibold text-sidebar-strong">على القائمة الجانبية</p>
-            <p className="text-sm text-sidebar-muted">الأخضر الغامق نفسه في الوضعين: توقيع SERFA.</p>
+            <p className="text-sm text-sidebar-muted">الأخضر الغامق نفسه في الوضعين: توقيع SERVA.</p>
           </div>
         </div>
       </div>
@@ -2424,7 +2424,7 @@ export function UiGallery() {
       <DigitsProvider digits={digits}>
         <ToastProvider>
           <div dir={dir} className="min-h-dvh bg-canvas text-ink">
-            <title>معرض المكوّنات · SERFA</title>
+            <title>معرض المكوّنات · SERVA</title>
             <Toolbar {...{ theme, setTheme, dir, setDir, digits, setDigits, density, setDensity }} />
             <DensityProvider density={density}>
               <GallerySections />

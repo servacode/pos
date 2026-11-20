@@ -189,7 +189,7 @@ function PriceHistory() {
 
   return (
     <>
-      <title>سجل تغيير الأسعار · SERFA</title>
+      <title>سجل تغيير الأسعار · SERVA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           icon={<PercentIcon />}

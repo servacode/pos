@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import {
   quotationConvertInput,
   quotationInput,
@@ -26,6 +27,12 @@ import {
 } from '../services/quotations';
 import { parseBody } from './validation';
 
+/** The list takes a page: the cursor the last page gave and a size (50 by default, 100 at most) */
+const listQuery = quotationListQuery.extend({
+  cursor: z.string().max(80).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 /** «عروض الأسعار»: the admin's list and editor, and the tills' save and open (packages/core › contracts/quotations.ts). */
 export async function quotationRoutes(app: FastifyInstance): Promise<void> {
   const idOf = (params: unknown): string => {
@@ -36,7 +43,7 @@ export async function quotationRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/v1/quotations', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
-    return listQuotations(app.db, request.auth, parseBody(quotationListQuery, request.query));
+    return listQuotations(app.db, request.auth, parseBody(listQuery, request.query));
   });
   app.get('/v1/quotations/customer-pricing', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();

@@ -93,7 +93,7 @@ export function OnlineStorePage() {
   const [tab, setTab] = useState<'orders' | 'settings'>('orders');
   return (
     <AppShell>
-      <title>المتجر الإلكتروني · SERFA</title>
+      <title>المتجر الإلكتروني · SERVA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <PageHeader
           title="المتجر الإلكتروني"

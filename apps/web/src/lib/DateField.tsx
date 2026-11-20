@@ -4,6 +4,8 @@ import { parseDayInput, slashDay } from './dates';
 
 export interface DateFieldProps {
   label: string;
+  /** The label for screen readers only, when the field's place already says what it is */
+  hideLabel?: boolean;
   /** An ISO day «2026-10-31», or '' for no date */
   value: string;
   /** The ISO day, or '' when the field was emptied (never with `required`) */
@@ -28,6 +30,7 @@ export interface DateFieldProps {
  */
 export function DateField({
   label,
+  hideLabel,
   value,
   onChange,
   min,
@@ -81,6 +84,7 @@ export function DateField({
     <div className={cn('relative', className)}>
       <TextField
         label={label}
+        hideLabel={hideLabel}
         name={name}
         value={text}
         disabled={disabled}

@@ -25,7 +25,7 @@ export function DistributionFrame() {
   const tabs = TABS.filter((t) => me.user.permissions.includes(t.permission));
   return (
     <AppShell>
-      <title>التوزيع · SERFA</title>
+      <title>التوزيع · SERVA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <nav aria-label="صفحات التوزيع" className="-mb-2 border-b border-line">
           <ScrollStrip>

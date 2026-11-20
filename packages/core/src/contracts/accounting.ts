@@ -113,12 +113,40 @@ export interface DayReport {
 
 // ─── Shifts ──────────────────────────────────────────────────────────────────
 
-export const shiftListQuery = z.object({
-  branchId: uuidSchema.optional(),
-  date: isoDateSchema.optional(),
-  /** 'open': the shifts still open, of any day (the list's «ورديات قديمة مفتوحة») */
-  status: z.enum(['open']).optional(),
-});
+export const shiftListQuery = z
+  .object({
+    branchId: uuidSchema.optional(),
+    date: isoDateSchema.optional(),
+    /** A range of days (at most 93), the shifts of those days: the shortage per cashier of a week or a month */
+    from: isoDateSchema.optional(),
+    to: isoDateSchema.optional(),
+    /** 'open': the shifts still open, of any day (the list's «ورديات قديمة مفتوحة») */
+    status: z.enum(['open']).optional(),
+  })
+  .refine((q) => (q.from === undefined) === (q.to === undefined), {
+    message: 'حدّد بداية المدة ونهايتها معاً.',
+    path: ['from'],
+  })
+  .refine((q) => q.from === undefined || q.to === undefined || q.from <= q.to, {
+    message: 'بداية المدة بعد نهايتها.',
+    path: ['from'],
+  })
+  .refine(
+    (q) =>
+      q.from === undefined || q.to === undefined || Date.parse(q.to) - Date.parse(q.from) <= 92 * 86_400_000,
+    { message: 'المدة أطول من ثلاثة أشهر.', path: ['to'] },
+  );
+
+/** One drawer currency of a shift on the list: the same figures as the close report's rows */
+export interface ShiftCashSummary {
+  currency: CurrencyCode;
+  /** null without shift.view_difference */
+  expectedMinor: number | null;
+  /** null while the shift is open */
+  countedMinor: number | null;
+  /** counted − expected; null without shift.view_difference or while open */
+  differenceMinor: number | null;
+}
 
 export interface ShiftSummary {
   id: string;
@@ -135,10 +163,14 @@ export interface ShiftSummary {
   salesTotalMinor: number;
   returnsCount: number;
   returnsTotalMinor: number;
+  /** The drawer per currency, on the list (the close report has the full rows in byCurrency) */
+  cash?: ShiftCashSummary[];
 }
 
 export interface ShiftListResponse {
   items: ShiftSummary[];
+  /** true when more shifts matched than the list holds (500): narrow the days */
+  truncated?: boolean;
 }
 
 /** Every term of the drawer formula of 10 › مطابقة الصندوق, per currency, in that currency. */

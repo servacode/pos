@@ -1,4 +1,4 @@
-import type { QuotationLine, QuotationLineInput } from '@serva/core';
+import type { Quotation, QuotationData, QuotationLine, QuotationLineInput } from '@serva/core';
 
 /** One line of the editor, with its numbers as the person typed them */
 export interface EditorLine {
@@ -169,4 +169,70 @@ export function editorLineOf(l: QuotationLine): EditorLine {
     taxRateId: l.taxRateId ?? null,
     taxRateBp: l.taxRateBp,
   };
+}
+
+/** What a form holds, reduced to what the server keeps, so «is there anything unsaved?» is one comparison */
+export interface FormParts {
+  customerId: string | null;
+  customerName: string;
+  customerPhone: string;
+  customerTaxNumber: string;
+  customerAddress: string;
+  validUntil: string;
+  notes: string;
+  terms: string;
+  invoiceDiscount: QuotationData['invoiceDiscount'];
+  /** Null while a line has a number that cannot be read: then the form certainly differs */
+  lines: QuotationData['lines'] | null;
+}
+
+type LineKept = Pick<
+  QuotationLine,
+  'productId' | 'variantId' | 'name' | 'packQty' | 'qty' | 'unitPriceMinor' | 'discount' | 'taxRateId'
+>;
+
+const text = (v: string | null | undefined) => (v ?? '').trim();
+
+function signatureOf(f: Omit<FormParts, 'lines'> & { lines: readonly LineKept[] | null }): string {
+  if (f.lines === null) return 'unreadable';
+  return JSON.stringify([
+    f.customerId ?? null,
+    text(f.customerName),
+    text(f.customerPhone),
+    text(f.customerTaxNumber),
+    text(f.customerAddress),
+    f.validUntil,
+    text(f.notes),
+    text(f.terms),
+    f.invoiceDiscount ?? null,
+    f.lines.map((l) => [
+      l.productId ?? null,
+      l.variantId ?? null,
+      l.name,
+      l.packQty,
+      l.qty,
+      l.unitPriceMinor,
+      l.discount ?? null,
+      l.taxRateId ?? null,
+    ]),
+  ]);
+}
+
+/** The signature of the form as it stands */
+export const formSignature = (f: FormParts): string => signatureOf(f);
+
+/** The signature of the quotation as it was saved: equal to the form's while nothing was changed */
+export function savedSignature(q: Quotation): string {
+  return signatureOf({
+    customerId: q.customerId,
+    customerName: q.customerName ?? '',
+    customerPhone: q.customerPhone ?? '',
+    customerTaxNumber: q.customerTaxNumber ?? '',
+    customerAddress: q.customerAddress ?? '',
+    validUntil: q.validUntil,
+    notes: q.notes ?? '',
+    terms: q.terms ?? '',
+    invoiceDiscount: q.invoiceDiscount,
+    lines: q.lines,
+  });
 }

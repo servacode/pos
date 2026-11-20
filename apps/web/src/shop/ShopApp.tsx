@@ -70,7 +70,7 @@ import {
  * its page for the customer to follow. No sign-in, no app to install; made for a phone first.
  *
  * هوية 4, led by the store: its name and monogram in the header, its note in the strip above it,
- * and SERFA only in the footer's small «يعمل بنظام سيرفا».
+ * and SERVA only in the footer's small «يعمل بنظام سيرفا».
  */
 export function ShopApp() {
   const { slug = '' } = useParams();

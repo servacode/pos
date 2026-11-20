@@ -222,7 +222,7 @@ export function SettingsPage() {
 
   return (
     <AppShell>
-      <title>إعدادات المتجر · SERFA</title>
+      <title>إعدادات المتجر · SERVA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="إعدادات المتجر"

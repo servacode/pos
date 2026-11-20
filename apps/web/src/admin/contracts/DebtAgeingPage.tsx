@@ -100,7 +100,7 @@ export function DebtAgeingPage() {
 
   return (
     <AppShell>
-      <title>أعمار الديون · SERFA</title>
+      <title>أعمار الديون · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="أعمار الديون"

@@ -1522,6 +1522,8 @@ export const invoices = pgTable(
     foreignKey({ columns: [t.tenantId, t.deviceId], foreignColumns: [devices.tenantId, devices.id] }),
     index('invoices_shift_idx').on(t.tenantId, t.shiftId),
     index('invoices_business_date_idx').on(t.tenantId, t.branchId, t.businessDate),
+    // The invoice list's order, newest first: the all-branches list reads its page off the index
+    index('invoices_list_order_idx').on(t.tenantId, t.businessDate.desc(), t.deviceTime.desc(), t.id.desc()),
     tenantIsolation(),
   ],
 );

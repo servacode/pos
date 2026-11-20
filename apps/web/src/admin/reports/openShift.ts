@@ -45,19 +45,21 @@ export function openFromYesterday(
 /**
  * A shift opened before midnight and not closed yet keeps selling into the new day: the figures it
  * holds are yesterday's invoices. Asked only while the day is young (before noon) and only by those
- * who see sales.
+ * who see sales. `branchId` is the branch the page shows: its note counts that branch's shifts only
+ * (null: every branch the person may see).
  */
 export function useOpenShiftFromYesterday(
   enabled: boolean,
   today: string,
   timeZone: string,
   cache?: 'home',
+  branchId: string | null = null,
 ): { note: OpenFromYesterday | null; state: ReportState<{ items: ShiftSummary[] }> } {
   const young = enabled && hourIn(timeZone) < 12;
   const yesterday = dayBefore(today);
   const state = useReport(
-    young ? `shifts:${yesterday}` : null,
-    () => listShifts({ branchId: null, date: yesterday }),
+    young ? `shifts:${branchId ?? ''}|${yesterday}` : null,
+    () => listShifts({ branchId, date: yesterday }),
     cache ? { cache } : undefined,
   );
   return { note: young ? openFromYesterday(state.data?.items) : null, state };

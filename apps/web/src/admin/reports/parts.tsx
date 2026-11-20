@@ -52,7 +52,7 @@ export function ReportScreen({
   const allowed = typeof access === 'function' ? access(me) : holdsAny(me, access);
   return (
     <AppShell>
-      <title>{`${title} · SERFA`}</title>
+      <title>{`${title} · SERVA`}</title>
       {allowed ? (
         <div className="flex flex-col gap-6">{children}</div>
       ) : (
@@ -111,19 +111,25 @@ export function BranchSelect({
   value,
   onChange,
   alwaysAll = false,
+  hideLabel = false,
+  className,
 }: {
   me: MeResponse;
   value: string | null;
   onChange: (branchId: string | null) => void;
   alwaysAll?: boolean;
+  /** The label for screen readers only (a bar whose place already says «الفرع») */
+  hideLabel?: boolean;
+  className?: string;
 }) {
   const { all, branches } = branchChoices(me, alwaysAll);
   return (
     <Select
       label="الفرع"
+      hideLabel={hideLabel}
       value={value ?? ''}
       onChange={(event) => onChange(event.target.value || null)}
-      className="min-w-48"
+      className={className ?? 'min-w-48'}
     >
       {all ? <option value="">كل الفروع</option> : null}
       {branches.map((branch) => (

@@ -6,12 +6,13 @@ import {
   saleListQuery,
   type SaleDetail,
   type SaleListPage,
+  type SaleSummary,
 } from '@serva/core';
 import { requireDevice } from '../auth/device-guard';
 import { requireAuth } from '../auth/guard';
 import { AppError, unauthorized } from '../errors';
 import { lookupInvoice, searchInvoices } from '../services/invoice-lookup';
-import { getSale, listSales } from '../services/sales';
+import { getSale, listSales, salesSummary } from '../services/sales';
 import { parseBody } from './validation';
 
 const uuid = z.uuid();
@@ -24,6 +25,12 @@ export async function saleRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/sales', signedIn, async (request): Promise<SaleListPage> => {
     if (!request.auth) throw unauthorized();
     return listSales(db, request.auth, parseBody(saleListQuery, request.query));
+  });
+
+  // Count, total and returns of the list's filters, for the strip above it
+  app.get('/v1/sales/summary', signedIn, async (request): Promise<SaleSummary> => {
+    if (!request.auth) throw unauthorized();
+    return salesSummary(db, request.auth, parseBody(saleListQuery, request.query));
   });
 
   // The till finds an invoice of any till of the store to return from (contracts/till.ts)

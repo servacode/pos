@@ -239,7 +239,7 @@ export function LabelsPage() {
 
   return (
     <AppShell>
-      <title>طباعة الملصقات · SERFA</title>
+      <title>طباعة الملصقات · SERVA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           title="طباعة الملصقات"

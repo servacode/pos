@@ -1,9 +1,42 @@
 import { useEffect, useState } from 'react';
-import { packOptionsOf, type ProductListItem, type TaxRate, type Unit } from '@serva/core';
-import { AddIcon, cn, CONTROL_HEIGHT, IconChip, ProductsIcon, SearchField, useDensity } from '@serva/ui';
+import { packOptionsOf, type CurrencyCode, type ProductListItem, type TaxRate, type Unit } from '@serva/core';
+import {
+  AddIcon,
+  cn,
+  CONTROL_HEIGHT,
+  IconChip,
+  Money,
+  ProductsIcon,
+  SearchField,
+  useDensity,
+} from '@serva/ui';
 import { errorMessage } from '../../lib/api';
 import { getProduct, listProducts } from '../catalog/api';
 import { moneyText, nextKey, packPriceOf, type EditorLine } from './lines';
+
+/** One variant to pick: its line, its own label («30 · أزرق») and the price shown on its chip */
+interface Choice {
+  line: EditorLine;
+  label: string;
+  priceMinor: number | null;
+}
+
+/**
+ * The variants of one product as chips: grouped by the first part of the label (a row for size 30 with
+ * its colours) when every label is «size · colour», else one row of chips.
+ */
+export function groupChoices(choices: readonly Choice[]): { head: string | null; items: Choice[] }[] {
+  const parts = choices.map((c) => c.label.split(' · '));
+  if (choices.length > 1 && parts.every((p) => p.length === 2 && p[0] !== '' && p[1] !== '')) {
+    const groups = new Map<string, Choice[]>();
+    for (const [i, c] of choices.entries()) {
+      const head = parts[i]![0]!;
+      groups.set(head, [...(groups.get(head) ?? []), { ...c, label: parts[i]![1]! }]);
+    }
+    return [...groups].map(([head, items]) => ({ head, items }));
+  }
+  return [{ head: null, items: [...choices] }];
+}
 
 /**
  * Finds a product by name or barcode and gives back a line for it: its name and variant, the price in
@@ -26,7 +59,7 @@ export function ItemPicker({
   const density = useDensity();
   const [q, setQ] = useState('');
   const [items, setItems] = useState<ProductListItem[]>([]);
-  const [choices, setChoices] = useState<EditorLine[] | null>(null);
+  const [choices, setChoices] = useState<{ title: string; items: Choice[] } | null>(null);
 
   useEffect(() => {
     if (q.trim().length < 2) {
@@ -59,7 +92,7 @@ export function ItemPicker({
       const unit = units.find((u) => u.id === detail.unitId);
       const lines = detail.variants
         .filter((v) => !v.archivedAt)
-        .map((v): EditorLine => {
+        .map((v): Choice => {
           const inCurrency = v.price.currency === currency;
           const packPrices: Record<number, number> = {};
           for (const b of v.barcodes) {
@@ -96,10 +129,14 @@ export function ItemPicker({
             taxRateBp: rate?.rateBp ?? 0,
           };
           const first = packPriceOf(line, 1000);
-          return { ...line, price: first === null ? '' : moneyText(first) };
+          return {
+            line: { ...line, price: first === null ? '' : moneyText(first) },
+            label: v.label || detail.nameAr,
+            priceMinor: first,
+          };
         });
-      if (lines.length === 1) done(lines[0]!);
-      else setChoices(lines);
+      if (lines.length === 1) done(lines[0]!.line);
+      else setChoices({ title: detail.nameAr, items: lines });
     } catch (e) {
       onError(errorMessage(e));
     }
@@ -112,17 +149,33 @@ export function ItemPicker({
         <div
           role="group"
           aria-label="اختر النوع"
-          className="flex flex-wrap gap-2 rounded-card border border-line bg-surface-muted/40 p-4"
+          className="flex flex-col gap-3 rounded-card border border-line bg-surface-muted/40 p-4"
         >
-          {choices.map((line) => (
-            <button
-              key={line.key}
-              type="button"
-              onClick={() => done(line)}
-              className="rounded-control border border-line-control bg-surface px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface-muted"
-            >
-              {line.name}
-            </button>
+          <p className="font-semibold text-ink">{choices.title}</p>
+          {groupChoices(choices.items).map((group) => (
+            <div key={group.head ?? ''} className="flex flex-wrap items-center gap-2">
+              {group.head ? (
+                <span className="min-w-14 text-sm font-semibold text-ink-muted">{group.head}</span>
+              ) : null}
+              {group.items.map((c) => (
+                <button
+                  key={c.line.key}
+                  type="button"
+                  aria-label={c.line.name}
+                  onClick={() => done(c.line)}
+                  className="flex items-center gap-2 rounded-control border border-line-control bg-surface px-3 py-1.5 text-sm font-semibold text-ink hover:bg-surface-muted"
+                >
+                  <span>{c.label}</span>
+                  {c.priceMinor === null ? null : (
+                    <Money
+                      minor={c.priceMinor}
+                      currency={currency as CurrencyCode}
+                      className="text-xs font-normal text-ink-muted"
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       ) : items.length > 0 ? (
@@ -144,6 +197,12 @@ export function ItemPicker({
                   <ProductsIcon size={16} />
                 </IconChip>
                 <span className="min-w-0 flex-1 truncate font-semibold">{p.nameAr}</span>
+                {p.price ? (
+                  <span className="flex shrink-0 items-center gap-1 text-sm text-ink-muted">
+                    {p.price.minMinor !== p.price.maxMinor ? <span>من</span> : null}
+                    <Money minor={p.price.minMinor} currency={p.price.currency} />
+                  </span>
+                ) : null}
                 <AddIcon size={16} className="text-ink-subtle group-hover/item:text-brand-ink" />
               </button>
             </li>

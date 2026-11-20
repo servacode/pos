@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import {
+  addDays,
   packOptionsOf,
   priceQuotation,
+  QUOTATION_DEFAULT_DAYS,
   QUOTATION_NEXT,
   QUOTATION_STATUS_LABELS,
   type Quotation,
@@ -25,14 +27,16 @@ import {
   PageHeader,
   PrintIcon,
   SearchField,
+  SendIcon,
   SkeletonText,
   TextField,
+  useDigits,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { QuotationA4 } from '../../lib/a4/documents';
 import { ReportScreen } from '../reports/parts';
 import { ApiError, errorMessage } from '../../lib/api';
-import { isoDay } from '../../lib/dates';
+import { dayText, isoDay } from '../../lib/dates';
 import { PrintSheet, usePrint } from '../../lib/print';
 import { getProduct, listTaxRates, listUnits } from '../catalog/api';
 import { getCustomer, listCustomers } from '../customers/api';
@@ -40,13 +44,16 @@ import { PackQty } from '../purchases/PackQty';
 import { getStore } from '../store/api';
 import { createQuotation, getCustomerPricing, getQuotation, moveQuotation, updateQuotation } from './api';
 import { ItemPicker } from './ItemPicker';
+import { quotationMessage, quotationWhatsappLink } from './share';
 import {
   customerPackPrice,
   editorLineOf,
+  formSignature,
   lineInput,
   moneyText,
   percentOf,
   priceForCustomer,
+  savedSignature,
   type CustomerPricing,
   type EditorLine,
 } from './lines';
@@ -64,9 +71,17 @@ const STEP_LABEL: Partial<Record<QuotationStatus, string>> = {
 const NOTES_CLASS =
   'w-full resize-y rounded-control border border-line-control bg-surface px-3 py-2.5 text-[0.9375rem] leading-relaxed text-ink caret-brand transition-[border-color,box-shadow] duration-120 ease-standard placeholder:text-ink-subtle hover:border-ink-subtle focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-hidden pointer-coarse:text-base';
 
-function inDays(days: number): string {
-  return isoDay(Date.now() + days * 86_400_000, Intl.DateTimeFormat().resolvedOptions().timeZone);
-}
+/** The fields this page marks itself; any other message the server gives is shown in the alert on top */
+const MARKED = new Set([
+  'validUntil',
+  'customerName',
+  'customerPhone',
+  'customerTaxNumber',
+  'customerAddress',
+  'notes',
+  'terms',
+  'lines',
+]);
 
 /**
  * One quotation (03 › الجملة: عرض السعر): customer, lines with their pack, price and discount, the
@@ -79,6 +94,7 @@ export function QuotationPage() {
   const me = useMe();
   const navigate = useNavigate();
   const { paper, print } = usePrint();
+  const digits = useDigits();
   const currency = me.settings.baseCurrency;
 
   const [saved, setSaved] = useState<Quotation | null>(null);
@@ -101,7 +117,10 @@ export function QuotationPage() {
   useEffect(() => {
     if (anyFree) setFreeOpen(true);
   }, [anyFree]);
-  const [validUntil, setValidUntil] = useState(() => inDays(15));
+  // The store's own day, not the browser's: the server counts the days from the same one
+  const today = isoDay(Date.now(), me.tenant.timezone);
+  const [validUntil, setValidUntil] = useState(() => addDays(today, QUOTATION_DEFAULT_DAYS));
+  const [invoiceDiscount, setInvoiceDiscount] = useState<QuotationData['invoiceDiscount']>(null);
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('');
   const [lines, setLines] = useState<EditorLine[]>([]);
@@ -140,6 +159,7 @@ export function QuotationPage() {
     setCustomerTaxNumber(q.customerTaxNumber ?? '');
     setCustomerAddress(q.customerAddress ?? '');
     setValidUntil(q.validUntil);
+    setInvoiceDiscount(q.invoiceDiscount ?? null);
     setNotes(q.notes ?? '');
     setTerms(q.terms ?? '');
     setLines(q.lines.map(editorLineOf));
@@ -262,11 +282,11 @@ export function QuotationPage() {
   const preview = useMemo(() => {
     if (!built.lines || built.lines.length === 0) return null;
     try {
-      return priceQuotation(built.lines, null, me.settings.taxInclusive);
+      return priceQuotation(built.lines, invoiceDiscount, me.settings.taxInclusive);
     } catch {
       return null;
     }
-  }, [built, me.settings.taxInclusive]);
+  }, [built, invoiceDiscount, me.settings.taxInclusive]);
 
   const body = () => ({
     customerId,
@@ -277,44 +297,130 @@ export function QuotationPage() {
     validUntil,
     notes: notes.trim() || null,
     terms: terms.trim() || null,
+    // Kept as the till or the last save left it: leaving it out would wipe it
+    invoiceDiscount,
     lines: built.lines ?? [],
   });
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
+  /** Anything typed since the last save (or since it was opened) */
+  const dirty = useMemo(
+    () =>
+      saved !== null &&
+      saved.status !== 'converted' &&
+      formSignature({
+        customerId,
+        customerName,
+        customerPhone,
+        customerTaxNumber,
+        customerAddress,
+        validUntil,
+        notes,
+        terms,
+        invoiceDiscount,
+        lines: built.lines,
+      }) !== savedSignature(saved),
+    [
+      saved,
+      customerId,
+      customerName,
+      customerPhone,
+      customerTaxNumber,
+      customerAddress,
+      validUntil,
+      notes,
+      terms,
+      invoiceDiscount,
+      built,
+    ],
+  );
+
+  /** What is wrong with the form before it is sent, each on its own field; false when something is */
+  function check(): boolean {
     setError(null);
-    setFieldErrors({});
+    const marks: Record<string, string> = {};
+    if (!validUntil) marks.validUntil = 'اكتب آخر يوم تسري فيه الأسعار';
+    else if (validUntil < today) marks.validUntil = 'آخر يوم للعرض قبل اليوم. اختر تاريخاً من اليوم أو بعده';
+    setFieldErrors(marks);
+    if (Object.keys(marks).length > 0) {
+      setError('تحقّق من الحقول المظلّلة.');
+      return false;
+    }
     if (built.error) {
       const what = { qty: 'الكمية', price: 'السعر', discount: 'الخصم' }[built.error.field];
       setError(`تحقّق من ${what} في السطر ${built.error.index + 1}.`);
-      return;
+      return false;
     }
     if (lines.length === 0) {
       setError('أضف صنفاً واحداً على الأقل.');
-      return;
+      return false;
     }
+    return true;
+  }
+
+  /** What the server said, put where it belongs: on its field when the page has one, else in the alert on top */
+  function showServerError(e: unknown) {
+    if (e instanceof ApiError && e.fields) {
+      setFieldErrors(e.fields);
+      const loose = Object.entries(e.fields)
+        .filter(([key]) => !MARKED.has(key))
+        .map(([, message]) => message);
+      setError(loose.length > 0 ? loose.join('. ') : errorMessage(e));
+    } else setError(errorMessage(e));
+  }
+
+  // The first field that is marked comes into view: the alert is on top, the field may be far below
+  useEffect(() => {
+    if (Object.keys(fieldErrors).length === 0) return;
+    const field = document.querySelector<HTMLElement>('[aria-invalid="true"]');
+    field?.scrollIntoView?.({ block: 'center' });
+    field?.focus?.({ preventScroll: true });
+  }, [fieldErrors]);
+
+  /** Saves the form over the saved offer; null (with the reason on screen) when it could not be */
+  async function writeBack(): Promise<Quotation | null> {
+    if (!saved || !check()) return null;
+    try {
+      const made = await updateQuotation(saved.id, { ...body(), version: saved.version });
+      fill(made);
+      return made;
+    } catch (e) {
+      showServerError(e);
+      return null;
+    }
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setFieldErrors({});
+    if (!check()) return;
     setBusy(true);
     try {
       if (isNew) {
         const made = await createQuotation(body());
         void navigate(`/quotations/${made.id}`, { replace: true });
       } else {
-        fill(await updateQuotation(saved!.id, { ...body(), version: saved!.version }));
+        await writeBack();
       }
     } catch (e) {
-      if (e instanceof ApiError && e.fields) setFieldErrors(e.fields);
-      setError(errorMessage(e));
+      showServerError(e);
     } finally {
       setBusy(false);
     }
   }
 
+  /** A status button: what was typed and not saved is saved first, so the move never wipes it */
   async function move(status: QuotationStatus) {
     if (!saved) return;
     setError(null);
     setBusy(true);
     try {
-      fill(await moveQuotation(saved.id, status, saved.version));
+      let version = saved.version;
+      if (dirty) {
+        const made = await writeBack();
+        if (!made) return;
+        version = made.version;
+      }
+      fill(await moveQuotation(saved.id, status, version));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -325,6 +431,12 @@ export function QuotationPage() {
   /** The till takes a quotation only in a browser that is paired as one: ask first, never land on the pairing screen blind */
   async function toTill(quotationId: string) {
     setNoTill(false);
+    if (dirty) {
+      setBusy(true);
+      const made = await writeBack();
+      setBusy(false);
+      if (!made) return;
+    }
     try {
       const [{ deviceStore }, { loadDevice }] = await Promise.all([
         import('../../offline/database'),
@@ -341,6 +453,7 @@ export function QuotationPage() {
   }
 
   const next = saved ? QUOTATION_NEXT[saved.status] : [];
+  const stillStands = saved ? saved.validUntil >= today : false;
   const totals = saved && !preview ? saved.totals : preview?.totals;
   const quotationForPrint: Quotation | null = saved
     ? preview
@@ -349,18 +462,30 @@ export function QuotationPage() {
           lines: preview.lines,
           totals: preview.totals,
           validUntil,
+          invoiceDiscount,
           notes: notes || null,
           terms: terms || null,
         }
       : saved
     : null;
 
+  /** The offer as it is on screen, in a WhatsApp message to the customer's phone (or to a chat chosen there) */
+  function sendWhatsapp() {
+    if (!quotationForPrint) return;
+    const link = quotationWhatsappLink(
+      customerPhone,
+      quotationMessage(quotationForPrint, store?.name ?? null),
+    );
+    window.open(link, '_blank', 'noopener');
+  }
+  const phoneOk = !quotationWhatsappLink(customerPhone, '').startsWith('https://wa.me/?');
+
   return (
     <ReportScreen me={me} access={['customers.manage']} title={saved ? saved.number : 'عرض سعر جديد'}>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title={saved ? `عرض السعر ${saved.number}` : 'عرض سعر جديد'}
-          description="لا يسجّل العرض بيعاً ولا يحرّك المخزون. يتحول إلى فاتورة من شاشة الكاشير."
+          description="لا يسجّل العرض بيعاً ولا يحرّك المخزون. «حوّل إلى فاتورة» يفتحه في شاشة الكاشير ليُباع من هناك."
           icon={<ListIcon />}
           actions={
             <Button variant="secondary" icon={<BackIcon />} onClick={() => void navigate('/quotations')}>
@@ -371,15 +496,24 @@ export function QuotationPage() {
         {loading ? <SkeletonText lines={6} /> : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
         {saved?.status === 'expired' ? (
-          <Alert tone="warning">
-            انتهت صلاحية هذا العرض في {saved.validUntil}. غيّر «صالح حتى» واحفظ ليعود مفتوحاً.
-          </Alert>
+          stillStands ? (
+            <Alert tone="warning">
+              أُنهي هذا العرض قبل موعده (أسعاره كانت صالحة حتى {dayText(saved.validUntil, digits)}). اضغط
+              «أُرسل للزبون» ليعود مفتوحاً.
+            </Alert>
+          ) : (
+            <Alert tone="warning">
+              انتهت صلاحية هذا العرض في {dayText(saved.validUntil, digits)}. غيّر «صالح حتى» واحفظ ليعود
+              مفتوحاً.
+            </Alert>
+          )
         ) : null}
         {noTill && saved ? (
           <Alert tone="info" title="هذا المتصفح غير مربوط بكاشير">
             <span className="flex flex-col gap-2">
               <span>
-                افتح عرض السعر من جهاز الكاشير ليتحول إلى فاتورة، أو اربط هذا المتصفح بالكاشير أولاً.
+                لتحويل العرض إلى فاتورة: افتح شاشة الكاشير على جهازه، واختر «عروض الأسعار» ثم هذا العرض. أو
+                اربط هذا المتصفح بالكاشير أولاً.
               </span>
               <Link
                 to={`/pos?quotation=${saved.id}`}
@@ -423,8 +557,26 @@ export function QuotationPage() {
                   icon={<PrintIcon />}
                   onClick={() => print('A4')}
                 >
-                  اطبع A4
+                  PDF / اطبع A4
                 </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  icon={<SendIcon />}
+                  disabled={!quotationForPrint}
+                  onClick={sendWhatsapp}
+                >
+                  أرسل واتساب
+                </Button>
+                {phoneOk ? null : (
+                  <span className="text-xs text-ink-muted">لا رقم للزبون: واتساب يسألك لمن ترسل.</span>
+                )}
+                {dirty ? (
+                  <span className="text-xs text-warning-ink">
+                    فيه تعديلات غير محفوظة: تُحفظ عند تغيير الحالة.
+                  </span>
+                ) : null}
               </div>
             ) : null}
 
@@ -486,6 +638,7 @@ export function QuotationPage() {
                     inputClassName="num"
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
+                    error={fieldErrors.customerPhone}
                     disabled={locked}
                   />
                   <TextField
@@ -494,12 +647,14 @@ export function QuotationPage() {
                     inputClassName="num"
                     value={customerTaxNumber}
                     onChange={(e) => setCustomerTaxNumber(e.target.value)}
+                    error={fieldErrors.customerTaxNumber}
                     disabled={locked}
                   />
                   <TextField
                     label="عنوان الزبون"
                     value={customerAddress}
                     onChange={(e) => setCustomerAddress(e.target.value)}
+                    error={fieldErrors.customerAddress}
                     disabled={locked}
                   />
                 </div>
@@ -583,7 +738,31 @@ export function QuotationPage() {
               )}
               {totals ? (
                 <dl className="ms-auto flex w-fit min-w-40 max-w-full flex-col gap-1 text-sm">
-                  {totals.discountMinor > 0 ? (
+                  {totals.invoiceDiscountMinor > 0 ? (
+                    <>
+                      {totals.lineDiscountMinor > 0 ? (
+                        <div className="flex justify-between gap-6">
+                          <dt>خصم الأسطر</dt>
+                          <dd>
+                            <Money minor={totals.lineDiscountMinor} currency={currency} />
+                          </dd>
+                        </div>
+                      ) : null}
+                      <div className="flex items-center justify-between gap-6">
+                        <dt className="flex items-center gap-2">
+                          خصم الفاتورة
+                          {locked ? null : (
+                            <Button variant="ghost" size="xs" onClick={() => setInvoiceDiscount(null)}>
+                              ألغِه
+                            </Button>
+                          )}
+                        </dt>
+                        <dd>
+                          <Money minor={totals.invoiceDiscountMinor} currency={currency} />
+                        </dd>
+                      </div>
+                    </>
+                  ) : totals.discountMinor > 0 ? (
                     <div className="flex justify-between gap-6">
                       <dt>الخصم</dt>
                       <dd>
@@ -626,8 +805,12 @@ export function QuotationPage() {
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className={NOTES_CLASS}
+                  aria-invalid={fieldErrors.notes ? true : undefined}
                   disabled={locked}
                 />
+                {fieldErrors.notes ? (
+                  <span className="text-sm text-danger-ink">{fieldErrors.notes}</span>
+                ) : null}
               </label>
               <label className="flex flex-col gap-1.5 text-sm font-semibold text-ink-muted">
                 الشروط (الدفع، التسليم، الضمان)
@@ -636,8 +819,12 @@ export function QuotationPage() {
                   value={terms}
                   onChange={(e) => setTerms(e.target.value)}
                   className={NOTES_CLASS}
+                  aria-invalid={fieldErrors.terms ? true : undefined}
                   disabled={locked}
                 />
+                {fieldErrors.terms ? (
+                  <span className="text-sm text-danger-ink">{fieldErrors.terms}</span>
+                ) : null}
               </label>
             </Card>
 

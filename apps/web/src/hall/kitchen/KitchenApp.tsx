@@ -7,7 +7,7 @@ import { KitchenScreen } from './KitchenScreen';
 export function KitchenApp() {
   return (
     <>
-      <title>المطبخ · SERFA</title>
+      <title>المطبخ · SERVA</title>
       <DeviceGate kind="kitchen_screen">
         {(device) => <KitchenOnDevice token={device.token} name={device.deviceName} />}
       </DeviceGate>

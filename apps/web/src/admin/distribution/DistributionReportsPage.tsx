@@ -128,7 +128,7 @@ export function DistributionReportsPage() {
   const cell = { border: '1px solid #000', padding: '4pt', textAlign: 'start' } as const;
   return (
     <AppShell>
-      <title>تقارير التوزيع · SERFA</title>
+      <title>تقارير التوزيع · SERVA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="تقارير التوزيع"

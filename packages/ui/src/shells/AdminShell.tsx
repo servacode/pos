@@ -108,7 +108,7 @@ export function AdminShell({
           collapsed ? 'w-18' : 'w-66',
         )}
       >
-        {/* هوية 4: SERFA's signature, a deep-emerald panel in both modes, floating on the page. */}
+        {/* هوية 4: SERVA's signature, a deep-emerald panel in both modes, floating on the page. */}
         <div className="flex min-h-0 w-full flex-col overflow-x-hidden overflow-y-auto rounded-panel bg-sidebar p-3 text-sidebar-ink shadow-e2 ring-1 ring-sidebar-line scheme-dark [scrollbar-width:thin]">
           <SidebarContext value={{ collapsed }}>{draw({ collapsed })}</SidebarContext>
         </div>

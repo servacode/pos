@@ -69,7 +69,7 @@ export function DamagedStockPage() {
   const total = (data?.locations ?? []).reduce((sum, l) => sum + l.totalValueMinor, 0);
   return (
     <AppShell>
-      <title>البضاعة التالفة · SERFA</title>
+      <title>البضاعة التالفة · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="البضاعة التالفة"

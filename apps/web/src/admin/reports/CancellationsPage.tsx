@@ -53,7 +53,7 @@ export function CancellationsPage() {
   const report = useReport(`${from}:${to}`, () => getCancellations(from, to));
   return (
     <AppShell>
-      <title>الإلغاءات بعد المطبخ · SERFA</title>
+      <title>الإلغاءات بعد المطبخ · SERVA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           icon={<ReportsIcon />}

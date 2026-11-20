@@ -41,7 +41,7 @@ export function RepApp() {
 
   return (
     <>
-      <title>وضع المندوب · SERFA</title>
+      <title>وضع المندوب · SERVA</title>
       {loading ? (
         <FullScreenLoader />
       ) : services?.device.token ? (

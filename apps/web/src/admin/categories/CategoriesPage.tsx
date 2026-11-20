@@ -379,7 +379,7 @@ export function CategoriesPage() {
 
   return (
     <AppShell>
-      <title>التصنيفات · SERFA</title>
+      <title>التصنيفات · SERVA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           title="التصنيفات"

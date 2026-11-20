@@ -10,10 +10,16 @@ export type AccessKey = Permission | 'report.view' | 'accounting.view';
 
 export type AccessRule = readonly AccessKey[];
 
-/** «مبيعات اليوم»: report.view, or the owner's and manager's financial reports key. */
-export const DAY_REPORT_ACCESS: AccessRule = ['report.view', 'reports.financial'];
-/** «الورديات»: as the day report, or whoever may close any shift (the branch manager). */
-export const SHIFTS_ACCESS: AccessRule = ['report.view', 'reports.financial', 'shift.close_any'];
+/**
+ * «مبيعات اليوم»: report.view alone, the key the server checks (services/reports.ts › branchFilter).
+ * reports.financial is the profit key, a different one: holding it opens nothing here.
+ */
+export const DAY_REPORT_ACCESS: AccessRule = ['report.view'];
+/**
+ * «الورديات»: report.view alone, as the server's list and close report ask. shift.close_any is for
+ * closing a shift at the till; it does not open the list.
+ */
+export const SHIFTS_ACCESS: AccessRule = ['report.view'];
 /** Accounting (12 › المحاسبة): the books are for accounting.view alone, in accounting mode. */
 export const ACCOUNTING_ACCESS: AccessRule = ['accounting.view'];
 /** «شاشة الدليل»: the owner and the manager, who see the devices. */

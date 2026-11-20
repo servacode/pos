@@ -701,14 +701,14 @@ describe('Logo (docs/design/kit/logo.md)', () => {
     expect(screen.getByRole('img', { name: 'أيقونة التطبيق' })).toBe(large);
   });
 
-  it('writes «SERFA» in Latin, bold and letter-spaced, and «سيرفا» under it in brand-ink', () => {
+  it('writes «SERVA» in Latin, bold and letter-spaced, and «سيرفا» under it in brand-ink', () => {
     renderUi(
       <>
         <Logo />
         <LogoStacked />
       </>,
     );
-    const latins = screen.getAllByText('Serfa');
+    const latins = screen.getAllByText('Serva');
     expect(latins).toHaveLength(2);
     for (const latin of latins) {
       expect(latin).toHaveAttribute('lang', 'en');
@@ -745,7 +745,7 @@ describe('Logo (docs/design/kit/logo.md)', () => {
 
   it('turns the words light on the deep-emerald sidebar', () => {
     renderUi(<Logo tone="sidebar" />);
-    expect(screen.getByText('Serfa')).toHaveClass('text-sidebar-strong');
+    expect(screen.getByText('Serva')).toHaveClass('text-sidebar-strong');
     expect(screen.getByText('سيرفا')).toHaveClass('text-sidebar-muted');
   });
 });

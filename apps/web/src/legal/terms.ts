@@ -11,7 +11,7 @@ export const TERMS: LegalDocument = {
     {
       id: 'parties',
       title: 'الأطراف',
-      text: '«المنصة» هي SERFA (سيرفا) المملوكة لـ{companyName}{registerClause}{ownerClause}. «المتجر» هو صاحب الحساب ومن يمثّله. «المستخدمون» هم موظفو المتجر الذين يضيفهم. «الوكيل» شخص معتمد من المنصة يساعد المتاجر.',
+      text: '«المنصة» هي SERVA (سيرفا) المملوكة لـ{companyName}{registerClause}{ownerClause}. «المتجر» هو صاحب الحساب ومن يمثّله. «المستخدمون» هم موظفو المتجر الذين يضيفهم. «الوكيل» شخص معتمد من المنصة يساعد المتاجر.',
     },
     {
       id: 'account',

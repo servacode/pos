@@ -249,7 +249,7 @@ export function MerchandisePage() {
 
   return (
     <AppShell>
-      <title>حركة الأصناف · SERFA</title>
+      <title>حركة الأصناف · SERVA</title>
       <div className="flex flex-col gap-6">
         <PageHeader
           className="print:hidden"

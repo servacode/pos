@@ -174,7 +174,7 @@ export function PlanPage() {
 
   return (
     <AppShell>
-      <title>خطة تقسيط · SERFA</title>
+      <title>خطة تقسيط · SERVA</title>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
         <PageHeader
           title={plan ? `خطة ${plan.customerName}` : 'خطة تقسيط'}

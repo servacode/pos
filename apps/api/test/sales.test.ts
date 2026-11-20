@@ -300,6 +300,78 @@ describe('GET /v1/sales', () => {
   });
 });
 
+describe('GET /v1/sales/summary', () => {
+  const summary = async (token: string, query = '') => {
+    const res = await get(token, `/v1/sales/summary${query ? `?${query}` : ''}`);
+    expect(res.statusCode, res.body).toBe(200);
+    return res.json<{
+      totals: {
+        currency: string;
+        count: number;
+        grossMinor: number;
+        returnsMinor: number;
+        netMinor: number;
+      }[];
+    }>();
+  };
+
+  it('counts, totals and nets the same invoices the list shows, with their returns', async () => {
+    const store = await openStore(app);
+    const day = await aDay(store);
+    const all = await list(store.accessToken);
+    const gross = all.items.reduce((sum, i) => sum + i.totalMinor, 0);
+    expect(await summary(store.accessToken)).toEqual({
+      totals: [{ currency: 'SYP', count: 3, grossMinor: gross, returnsMinor: 0, netMinor: gross }],
+    });
+
+    await push(app, store.device, [returnOf(store, day, 1000)]);
+    const [row] = (await summary(store.accessToken)).totals;
+    expect(row).toMatchObject({
+      count: 3,
+      grossMinor: gross,
+      returnsMinor: 200_000,
+      netMinor: gross - 200_000,
+    });
+  });
+
+  it('follows the list filters: method, amount, status, search and dates', async () => {
+    const store = await openStore(app);
+    const day = await aDay(store);
+    await push(app, store.device, [returnOf(store, day, 1000)]);
+    const count = async (query: string) => (await summary(store.accessToken, query)).totals[0]?.count ?? 0;
+    expect(await count('method=card')).toBe(1);
+    expect(await count('method=cash')).toBe(2);
+    expect(await count('minTotal=300000')).toBe(1);
+    expect(await count('status=partly_returned')).toBe(1);
+    expect(await count('status=paid')).toBe(2);
+    expect(await count(`q=${encodeURIComponent('ريم')}`)).toBe(1);
+    expect(await count('from=2030-01-01&to=2030-01-31')).toBe(0);
+    expect((await summary(store.accessToken, 'method=voucher')).totals).toEqual([]);
+    expect((await get(store.accessToken, '/v1/sales/summary?minTotal=10&maxTotal=5')).statusCode).toBe(400);
+  });
+
+  it('keeps to the store and the branch the person holds report.view in', async () => {
+    const store = await openStore(app, '0911111111');
+    const other = await openStore(app, '0922222222');
+    await aDay(store);
+    expect((await summary(other.accessToken)).totals).toEqual([]);
+    expect(
+      (await get(other.accessToken, `/v1/sales/summary?branchId=${store.device.branchId}`)).statusCode,
+    ).toBe(404);
+    const cashier = await staffUser(app, asTestStore(store), 'cashier', '0933333333');
+    expect((await get(cashier.accessToken, '/v1/sales/summary')).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/v1/sales/summary' })).statusCode).toBe(401);
+  });
+});
+
+describe('the invoice list index', () => {
+  it('has the index that serves the newest-first order', async () => {
+    const rows = await ownerDb()<{ indexname: string }[]>`
+      select indexname from pg_indexes where tablename = 'invoices' and indexname = 'invoices_list_order_idx'`;
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe('GET /v1/sales/{id}', () => {
   it('returns the sale with its payload, payments, linked returns and what a reprint needs', async () => {
     const store = await openStore(app);

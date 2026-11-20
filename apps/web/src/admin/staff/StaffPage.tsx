@@ -269,7 +269,7 @@ export function StaffPage() {
 
   return (
     <AppShell>
-      <title>الموظفون · SERFA</title>
+      <title>الموظفون · SERVA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="الموظفون"

@@ -183,7 +183,7 @@ export function StocktakePhonePage() {
   if (done) {
     return (
       <AppShell>
-        <title>الجرد بالهاتف · SERFA</title>
+        <title>الجرد بالهاتف · SERVA</title>
         <div className="mx-auto flex w-full max-w-xl flex-col gap-5">
           <PageHeader icon={<ListIcon />} title="الجرد بالهاتف" />
           <Alert tone="success" title={`سُجّل الجرد ${done.number}`}>
@@ -204,7 +204,7 @@ export function StocktakePhonePage() {
 
   return (
     <AppShell>
-      <title>الجرد بالهاتف · SERFA</title>
+      <title>الجرد بالهاتف · SERVA</title>
       <div className="mx-auto flex w-full max-w-xl flex-col gap-5">
         <PageHeader
           icon={<ListIcon />}

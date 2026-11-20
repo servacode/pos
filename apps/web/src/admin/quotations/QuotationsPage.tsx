@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { QUOTATION_STATUS_LABELS, type QuotationListItem, type QuotationStatus } from '@serva/core';
 import {
@@ -18,8 +18,7 @@ import {
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { ReportScreen } from '../reports/parts';
-import { recallAnswer, rememberAnswer } from '../reports/useReport';
-import { errorMessage } from '../../lib/api';
+import { Pager, useCursorPages } from '../pager';
 import { dayText } from '../../lib/dates';
 import { listQuotations } from './api';
 
@@ -50,24 +49,18 @@ export function QuotationsPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<(typeof FILTERS)[number]['value']>('all');
   const [q, setQ] = useState('');
-  const [rows, setRows] = useState<QuotationListItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setError(null);
-    const key = `quotations|${status}|${q}`;
-    setRows(recallAnswer<QuotationListItem[]>(key));
-    listQuotations(status, q)
-      .then((r) => {
-        rememberAnswer(key, r.items);
-        setRows(r.items);
-      })
-      .catch((e: unknown) => setError(errorMessage(e)));
-  }, [status, q]);
+  // The search waits for the typing to pause; the pages restart on a new status or search, and an
+  // answer that comes late for an older one is dropped by useCursorPages
+  const [asked, setAsked] = useState('');
   useEffect(() => {
-    const timer = setTimeout(load, q ? 250 : 0);
+    const timer = setTimeout(() => setAsked(q.trim()), q.trim() ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [load, q]);
+  }, [q]);
+  const { data, error, loading, retry, pager, topRef } = useCursorPages(`${status}|${asked}`, (cursor) =>
+    listQuotations(status, asked, cursor),
+  );
+  const rows = data?.items ?? [];
+  const filtered = status !== 'all' || asked !== '';
 
   const columns: DataColumn<QuotationListItem>[] = [
     {
@@ -152,21 +145,31 @@ export function QuotationsPage() {
             className="w-full sm:w-80"
           />
         </div>
+        <div ref={topRef} />
         <DataTable
           caption="عروض الأسعار"
           columns={columns}
-          rows={rows ?? []}
+          rows={rows}
           rowKey={(r) => r.id}
-          loading={rows === null && !error}
-          {...(error ? { error, onRetry: load } : {})}
+          loading={loading && !error}
+          {...(error ? { error, onRetry: retry } : {})}
           empty={
-            <EmptyState
-              icon={ListIcon}
-              title="لا عروض أسعار هنا"
-              description="اضغط «عرض سعر جديد»، أو احفظ سلة الكاشير كعرض سعر من زر «عرض سعر»."
-            />
+            filtered ? (
+              <EmptyState
+                icon={ListIcon}
+                title="لا عروض تطابق هذه التصفية"
+                description="جرّب حالة ثانية أو غيّر كلمة البحث."
+              />
+            ) : (
+              <EmptyState
+                icon={ListIcon}
+                title="لا عروض أسعار هنا"
+                description="اضغط «عرض سعر جديد»، أو احفظ سلة الكاشير كعرض سعر من زر «عرض سعر»."
+              />
+            )
           }
         />
+        <Pager noun="العروض" pager={pager} />
       </div>
     </ReportScreen>
   );

@@ -128,6 +128,61 @@ describe('quotations in the admin', () => {
     expect(again.statusCode).toBe(409);
   });
 
+  it('keeps the invoice discount when an edit leaves it out, and drops it only when told to', async () => {
+    const s = await openStore(app);
+    const q = (await make(s, { invoiceDiscount: { type: 'amount', minor: 5_000 } })).json<Quotation>();
+    expect(q.totalMinor).toBe(15_000);
+    const put = (extra: Record<string, unknown>, version: number) =>
+      app.inject({
+        method: 'PUT',
+        url: `/v1/quotations/${q.id}`,
+        headers: owner(s),
+        payload: body({ version, notes: 'تعديل', ...extra }),
+      });
+    const kept = (await put({}, q.version)).json<Quotation>();
+    expect(kept.invoiceDiscount).toEqual({ type: 'amount', minor: 5_000 });
+    expect(kept.totalMinor).toBe(15_000);
+    const sent = (
+      await put({ invoiceDiscount: { type: 'amount', minor: 5_000 } }, kept.version)
+    ).json<Quotation>();
+    expect(sent.totalMinor).toBe(15_000);
+    const dropped = (await put({ invoiceDiscount: null }, sent.version)).json<Quotation>();
+    expect(dropped.invoiceDiscount).toBeNull();
+    expect(dropped.totalMinor).toBe(20_000);
+  });
+
+  it('lists in pages with a cursor, newest first, and refuses a made-up cursor', async () => {
+    const s = await openStore(app);
+    const numbers: string[] = [];
+    for (let i = 0; i < 5; i++) numbers.push((await make(s)).json<Quotation>().number);
+    const get = async (query: string) => {
+      const res = await app.inject({ method: 'GET', url: `/v1/quotations?${query}`, headers: owner(s) });
+      return res;
+    };
+    const first = await get('limit=2');
+    expect(first.statusCode, first.body).toBe(200);
+    const one = first.json<{ items: QuotationListItem[]; nextCursor: string | null }>();
+    expect(one.items.map((i) => i.number)).toEqual([numbers[4], numbers[3]]);
+    expect(one.nextCursor).toEqual(expect.any(String));
+    const second = (await get(`limit=2&cursor=${encodeURIComponent(one.nextCursor!)}`)).json<{
+      items: QuotationListItem[];
+      nextCursor: string | null;
+    }>();
+    expect(second.items.map((i) => i.number)).toEqual([numbers[2], numbers[1]]);
+    const third = (await get(`limit=2&cursor=${encodeURIComponent(second.nextCursor!)}`)).json<{
+      items: QuotationListItem[];
+      nextCursor: string | null;
+    }>();
+    expect(third.items.map((i) => i.number)).toEqual([numbers[0]]);
+    expect(third.nextCursor).toBeNull();
+    // Without a size the page is 50: all five, no next page
+    const all = (await get('status=all')).json<{ items: unknown[]; nextCursor: string | null }>();
+    expect(all.items).toHaveLength(5);
+    expect(all.nextCursor).toBeNull();
+    expect((await get('cursor=nonsense')).statusCode).toBe(400);
+    expect((await get('limit=0')).statusCode).toBe(400);
+  });
+
   it('follows draft to sent to accepted to converted, and a converted one is not edited', async () => {
     const s = await openStore(app);
     let q = (await make(s)).json<Quotation>();

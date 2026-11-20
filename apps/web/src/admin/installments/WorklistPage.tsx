@@ -161,7 +161,7 @@ export function WorklistPage() {
 
   return (
     <AppShell>
-      <title>متابعة الأقساط · SERFA</title>
+      <title>متابعة الأقساط · SERVA</title>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
         <PageHeader
           title="متابعة الأقساط"

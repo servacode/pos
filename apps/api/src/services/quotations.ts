@@ -233,7 +233,12 @@ export function updateQuotation(
     const day = await today(tx, auth.tenantId);
     const validUntil = input.validUntil ?? current.validUntil;
     checkDates(validUntil, day);
-    const result = await priced(tx, input, current.taxInclusive);
+    // Left out, the discount the offer has stays; sent (even null), it is what is kept
+    const invoiceDiscount =
+      input.invoiceDiscount === undefined
+        ? ((current.invoiceDiscount ?? null) as QuotationData['invoiceDiscount'])
+        : input.invoiceDiscount;
+    const result = await priced(tx, { ...input, invoiceDiscount }, current.taxInclusive);
     const customer = await customerFields(tx, input);
     const [row] = await tx
       .update(quotations)
@@ -245,7 +250,7 @@ export function updateQuotation(
         notes: input.notes || null,
         terms: input.terms || null,
         lines: result.lines,
-        invoiceDiscount: input.invoiceDiscount ?? null,
+        invoiceDiscount,
         totals: result.totals,
         totalMinor: result.totals.totalMinor,
         updatedAt: new Date(),
@@ -323,21 +328,55 @@ function filterOf(query: z.output<typeof quotationListQuery>, day: string): SQL 
   return and(...parts);
 }
 
+/** The page of the list: the newest first, 50 by default; `cursor` is what the last page gave */
+export interface QuotationListPaging {
+  cursor?: string | undefined;
+  limit?: number | undefined;
+}
+
+const DEFAULT_PAGE = 50;
+const CURSOR_TIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?([+-]\d{2}(:\d{2})?)?$/;
+const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** «created_at|id»: the exact (microsecond) time as the database writes it, and the row's id as the tiebreaker */
+function readCursor(text: string): { at: string; id: string } {
+  const bar = text.indexOf('|');
+  const at = bar < 0 ? '' : text.slice(0, bar);
+  const id = bar < 0 ? '' : text.slice(bar + 1);
+  if (!CURSOR_TIME.test(at) || !CURSOR_ID.test(id)) {
+    throw invalid({ cursor: 'صفحة غير صالحة. ارجع إلى أول القائمة' });
+  }
+  return { at, id };
+}
+
 export function listQuotations(
   db: Database,
   auth: AccessClaims,
-  query: z.output<typeof quotationListQuery>,
-): Promise<{ items: QuotationListItem[] }> {
+  query: z.output<typeof quotationListQuery> & QuotationListPaging,
+): Promise<{ items: QuotationListItem[]; nextCursor: string | null }> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.manage');
     const day = await today(tx, auth.tenantId);
+    const limit = query.limit ?? DEFAULT_PAGE;
+    const after = query.cursor ? readCursor(query.cursor) : null;
+    const where = and(
+      filterOf(query, day),
+      after
+        ? sql`(${quotations.createdAt}, ${quotations.id}) < (${after.at}::timestamptz, ${after.id}::uuid)`
+        : undefined,
+    );
     const rows = await tx
-      .select()
+      .select({ row: quotations, at: sql<string>`${quotations.createdAt}::text` })
       .from(quotations)
-      .where(filterOf(query, day))
+      .where(where)
       .orderBy(desc(quotations.createdAt), desc(quotations.id))
-      .limit(200);
-    return { items: rows.map((r) => itemOf(r, day)) };
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      items: page.map((r) => itemOf(r.row, day)),
+      nextCursor: rows.length > limit && last ? `${last.at}|${last.row.id}` : null,
+    };
   });
 }
 

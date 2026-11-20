@@ -16,7 +16,7 @@ export function SectorGate({ sectors, children }: { sectors: readonly SectorKey[
   if (storeSells(me.tenant.sectors, sectors)) return children;
   return (
     <AppShell>
-      <title>غير متاحة · SERFA</title>
+      <title>غير متاحة · SERVA</title>
       <div className="mx-auto w-full max-w-3xl">
         <Card>
           <EmptyState

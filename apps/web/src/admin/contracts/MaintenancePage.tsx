@@ -245,7 +245,7 @@ export function MaintenancePage() {
 
   return (
     <AppShell>
-      <title>عقود الصيانة · SERFA</title>
+      <title>عقود الصيانة · SERVA</title>
       <div className="flex w-full flex-col gap-6">
         <PageHeader
           title="عقود الصيانة"

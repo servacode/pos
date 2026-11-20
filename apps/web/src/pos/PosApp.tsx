@@ -215,7 +215,7 @@ export function PosApp() {
 
   return (
     <>
-      <title>الكاشير · SERFA</title>
+      <title>الكاشير · SERVA</title>
       <Routes>
         <Route
           index

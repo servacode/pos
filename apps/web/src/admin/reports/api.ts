@@ -35,11 +35,17 @@ export interface DayTotal {
 }
 
 /** The totals of every day from `from` to `to` in one request (the home page's chart). */
-export function getDayTotals(query: { from: string; to: string }) {
+export function getDayTotals(query: { from: string; to: string; branchId?: string | null }) {
   return apiFetch<{ items: DayTotal[] }>(withQuery('/v1/reports/days', query), { auth: true });
 }
 
-export function listShifts(query: { branchId: string | null; date?: string; status?: 'open' }) {
+export function listShifts(query: {
+  branchId: string | null;
+  date?: string;
+  from?: string;
+  to?: string;
+  status?: 'open';
+}) {
   return apiFetch<ShiftListResponse>(withQuery('/v1/shifts', query), { auth: true });
 }
 
