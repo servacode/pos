@@ -165,18 +165,78 @@ describe('«الفواتير»', () => {
     });
   });
 
-  it('loads the next page with «اعرض المزيد» using the cursor', async () => {
+  const NEXT = LIST.replace('limit=50', 'cursor=next-1&limit=50');
+  const label = () => screen.getByRole('navigation', { name: 'الصفحات' }).querySelector('[aria-current]');
+
+  it('pages with the cursor: next and back show one page at a time, with the label and range', async () => {
     signIn(OWNER_KEYS, {
-      [`GET ${LIST}`]: page([item()], 'next-1'),
-      [`GET ${LIST.replace('limit=50', 'cursor=next-1&limit=50')}`]: page([
-        item({ id: 'sale-2', number: 'INV-001-002-0000418' }),
-      ]),
+      [`GET ${LIST}`]: page([item(), item({ id: 'sale-3', number: 'INV-001-002-0000417' })], 'next-1'),
+      [`GET ${NEXT}`]: page([item({ id: 'sale-2', number: 'INV-001-002-0000418' })]),
     });
     await screen.findByText('INV-001-002-0000419');
-    fireEvent.click(screen.getByRole('button', { name: 'اعرض المزيد' }));
+    expect(label()).toHaveTextContent('صفحة 1 · الفواتير من 1 إلى 2');
+    expect(screen.getByRole('button', { name: 'الصفحة السابقة' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
     expect(await screen.findByText('INV-001-002-0000418')).toBeInTheDocument();
+    expect(screen.queryByText('INV-001-002-0000419')).not.toBeInTheDocument();
+    expect(label()).toHaveTextContent('صفحة 2 · الفواتير من 3 إلى 3');
+    expect(screen.getByRole('button', { name: 'الصفحة التالية' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'الصفحة السابقة' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة السابقة' }));
+    expect(await screen.findByText('INV-001-002-0000419')).toBeInTheDocument();
+    expect(screen.queryByText('INV-001-002-0000418')).not.toBeInTheDocument();
+    expect(label()).toHaveTextContent('صفحة 1 · الفواتير من 1 إلى 2');
+  });
+
+  it('shows no page controls when everything fits one page', async () => {
+    signIn(OWNER_KEYS, { [`GET ${LIST}`]: page([item()]) });
+    await screen.findByText('INV-001-002-0000419');
+    expect(screen.queryByRole('navigation', { name: 'الصفحات' })).not.toBeInTheDocument();
+  });
+
+  it('a failed next page shows the error with a retry and stays on the current page', async () => {
+    let calls = 0;
+    signIn(OWNER_KEYS, {
+      [`GET ${LIST}`]: page([item()], 'next-1'),
+      [`GET ${NEXT}`]: () => {
+        calls += 1;
+        return calls === 1
+          ? apiError(503, 'unavailable', 'الخادم مشغول حالياً. حاول بعد قليل.')
+          : page([item({ id: 'sale-2', number: 'INV-001-002-0000418' })]);
+      },
+    });
+    await screen.findByText('INV-001-002-0000419');
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
+    expect(await screen.findByText('الخادم مشغول حالياً. حاول بعد قليل.')).toBeInTheDocument();
     expect(screen.getByText('INV-001-002-0000419')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'اعرض المزيد' })).not.toBeInTheDocument();
+    expect(label()).toHaveTextContent('صفحة 1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'أعد المحاولة' }));
+    expect(await screen.findByText('INV-001-002-0000418')).toBeInTheDocument();
+    expect(label()).toHaveTextContent('صفحة 2');
+    expect(screen.queryByText('الخادم مشغول حالياً. حاول بعد قليل.')).not.toBeInTheDocument();
+  });
+
+  it('a changed filter goes back to page 1', async () => {
+    const q = encodeURIComponent('0419');
+    signIn(OWNER_KEYS, {
+      [`GET ${LIST}`]: page([item()], 'next-1'),
+      [`GET ${NEXT}`]: page([item({ id: 'sale-2', number: 'INV-001-002-0000418' })], 'next-2'),
+      [`GET /v1/sales?from=2026-10-01&to=2026-10-31&q=${q}&limit=50`]: page([item()], 'next-1'),
+    });
+    await screen.findByText('INV-001-002-0000419');
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
+    await screen.findByText('INV-001-002-0000418');
+    expect(label()).toHaveTextContent('صفحة 2');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /ابحث/ }), { target: { value: '0419' } });
+    await waitFor(() => {
+      expect(screen.getByText('INV-001-002-0000419')).toBeInTheDocument();
+      expect(label()).toHaveTextContent('صفحة 1 · الفواتير من 1 إلى 1');
+    });
+    expect(screen.getByRole('button', { name: 'الصفحة السابقة' })).toBeDisabled();
   });
 
   it('shows an error with a retry', async () => {

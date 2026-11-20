@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import type {
   Category,
@@ -44,6 +44,7 @@ import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
 import { ApiError, apiFetch, errorMessage } from '../../lib/api';
+import { Pager, useCursorPages } from '../pager';
 import { listCategories, listProducts, lookupBarcode, updateProduct } from '../catalog/api';
 import { LiraCaption } from '../../lib/LiraCaption';
 import {
@@ -406,8 +407,6 @@ function ProductsList() {
     categoryId: params.get('category') ?? '',
   }));
   const q = useDebounced(filters.q, SEARCH_DEBOUNCE_MS);
-  const [items, setItems] = useState<ProductListItem[] | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   // Counts over the whole store, from the server (the first page carries them)
   const [attention, setAttention] = useState<{
     zeroPrice: number;
@@ -417,14 +416,11 @@ function ProductsList() {
   } | null>(null);
   // The whole store's stock numbers for the tiles: they stay while a search narrows the list
   const [totals, setTotals] = useState<ProductListTotals | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   // The seasons the store's products carry (a clothing store's filter)
   const [seasons, setSeasons] = useState<string[]>([]);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [unknownCode, setUnknownCode] = useState<string | null>(null);
-  const request = useRef(0);
 
   const queryKey = JSON.stringify({
     q: searchTerm(q) || undefined,
@@ -434,28 +430,26 @@ function ProductsList() {
     expiry: filters.expiry || undefined,
   } satisfies ProductListQuery);
 
-  const load = useCallback(async () => {
-    const id = ++request.current;
-    setItems(null);
-    setLoadError(null);
-    try {
-      const page = await listProducts({
-        ...(JSON.parse(queryKey) as ProductListQuery),
-        limit: PRODUCTS_PAGE_SIZE,
-      });
-      if (id !== request.current) return;
-      setItems(page.items);
-      setNextCursor(page.nextCursor);
-      if (page.attention) setAttention(page.attention);
-      if (page.totals) setTotals(page.totals);
-    } catch (error) {
-      if (id === request.current) setLoadError(errorMessage(error));
-    }
-  }, [queryKey]);
-
+  const {
+    data: pageData,
+    error: loadError,
+    retry: load,
+    patch,
+    topRef,
+    pager,
+  } = useCursorPages(queryKey, (cursor) =>
+    listProducts({
+      ...(JSON.parse(queryKey) as ProductListQuery),
+      ...(cursor ? { cursor } : {}),
+      limit: PRODUCTS_PAGE_SIZE,
+    }),
+  );
+  const items = pageData ? pageData.items : null;
+  // The first page carries the whole store's counts; they stay while another page shows
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (pageData?.attention) setAttention(pageData.attention);
+    if (pageData?.totals) setTotals(pageData.totals);
+  }, [pageData]);
 
   useEffect(() => {
     listCategories()
@@ -502,26 +496,6 @@ function ProductsList() {
       setNotice({ tone: 'error', text: errorMessage(error) });
     } finally {
       setExporting(false);
-    }
-  }
-
-  async function loadMore() {
-    if (!nextCursor) return;
-    const id = request.current;
-    setLoadingMore(true);
-    try {
-      const page = await listProducts({
-        ...(JSON.parse(queryKey) as ProductListQuery),
-        cursor: nextCursor,
-        limit: PRODUCTS_PAGE_SIZE,
-      });
-      if (id !== request.current) return;
-      setItems((current) => [...(current ?? []), ...page.items]);
-      setNextCursor(page.nextCursor);
-    } catch (error) {
-      setNotice({ tone: 'error', text: errorMessage(error) });
-    } finally {
-      setLoadingMore(false);
     }
   }
 
@@ -632,8 +606,8 @@ function ProductsList() {
     }
   }
   const summary = totals ?? (items ? summaryOf(items) : null);
-  // More pages wait behind «اعرض المزيد»: the tiles count what is on screen, «+» says there is more.
-  const more = !totals && nextCursor ? '+' : '';
+  // More pages wait behind the page buttons: the tiles count what is on this page, «+» says there is more.
+  const more = !totals && (pager.hasNext || pager.page > 1) ? '+' : '';
   const showSummary = !loadError && (items === null || items.length > 0);
 
   const today = isoDay(Date.now(), me.tenant.timezone);
@@ -749,12 +723,12 @@ function ProductsList() {
             key={`${item.id}-${item.version}`}
             item={item}
             onSaved={(updated, text) => {
-              setItems((current) => current?.map((row) => (row.id === updated.id ? updated : row)) ?? null);
+              patch((p) => ({ ...p, items: p.items.map((row) => (row.id === updated.id ? updated : row)) }));
               setNotice({ tone: 'success', text });
             }}
             onConflict={(text) => {
               setNotice({ tone: 'error', text });
-              void load();
+              load();
             }}
           />
         ) : (
@@ -1228,92 +1202,100 @@ function ProductsList() {
             </Alert>
           ) : null}
 
-          {phone && items && items.length > 0 ? (
-            <ul
-              aria-label="المنتجات"
-              className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface shadow-e1"
-            >
-              {items.map((item) => {
-                const cell = (key: string) => columns.find((c) => c.key === key)?.cell?.(item);
-                return (
-                  <li key={item.id} className="flex items-center gap-2 ps-3 pe-1">
-                    {canManage ? pickBox(item) : null}
-                    <div className="flex min-w-0 flex-1 items-center gap-3 py-2.5">
-                      <Thumb item={item} canAdd={canManage && !item.archivedAt} sectors={me.tenant.sectors} />
-                      <div className="flex min-w-0 flex-col gap-0.5">
-                        <Link
-                          to={`/products/${item.id}`}
-                          className="line-clamp-2 rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
-                        >
-                          {item.nameAr}
-                        </Link>
-                        <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
-                          {item.type === 'service' ? (
-                            <span>خدمة</span>
-                          ) : (
-                            <>
-                              <span
-                                className={cn(
-                                  'shrink-0 font-semibold',
-                                  availableOf(item) === 0 && 'text-warning-ink',
-                                )}
-                              >
-                                {availableOf(item) === 0
-                                  ? 'نفد'
-                                  : `${formatQuantity(availableOf(item), digits)} ${countWord(availableOf(item), { one: 'قطعة', few: 'قطع' })}`}
-                              </span>
-                              {negativeWords(item, digits) ? (
-                                <span className="shrink-0 text-danger-ink">
-                                  · {negativeWords(item, digits)}
+          <div ref={topRef}>
+            {phone && items && items.length > 0 ? (
+              <ul
+                aria-label="المنتجات"
+                className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface shadow-e1"
+              >
+                {items.map((item) => {
+                  const cell = (key: string) => columns.find((c) => c.key === key)?.cell?.(item);
+                  return (
+                    <li key={item.id} className="flex items-center gap-2 ps-3 pe-1">
+                      {canManage ? pickBox(item) : null}
+                      <div className="flex min-w-0 flex-1 items-center gap-3 py-2.5">
+                        <Thumb
+                          item={item}
+                          canAdd={canManage && !item.archivedAt}
+                          sectors={me.tenant.sectors}
+                        />
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <Link
+                            to={`/products/${item.id}`}
+                            className="line-clamp-2 rounded-small font-semibold text-ink transition-colors duration-120 ease-standard hover:text-brand-ink"
+                          >
+                            {item.nameAr}
+                          </Link>
+                          <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-muted">
+                            {item.type === 'service' ? (
+                              <span>خدمة</span>
+                            ) : (
+                              <>
+                                <span
+                                  className={cn(
+                                    'shrink-0 font-semibold',
+                                    availableOf(item) === 0 && 'text-warning-ink',
+                                  )}
+                                >
+                                  {availableOf(item) === 0
+                                    ? 'نفد'
+                                    : `${formatQuantity(availableOf(item), digits)} ${countWord(availableOf(item), { one: 'قطعة', few: 'قطع' })}`}
                                 </span>
-                              ) : null}
-                            </>
-                          )}
-                          {item.categoryName && item.type !== 'service' ? (
-                            <span className="min-w-0 truncate text-ink-subtle">{item.categoryName}</span>
-                          ) : null}
-                          {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
-                        </span>
+                                {negativeWords(item, digits) ? (
+                                  <span className="shrink-0 text-danger-ink">
+                                    · {negativeWords(item, digits)}
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
+                            {item.categoryName && item.type !== 'service' ? (
+                              <span className="min-w-0 truncate text-ink-subtle">{item.categoryName}</span>
+                            ) : null}
+                            {item.archivedAt || item.status === 'temporary' ? cell('status') : null}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                    <span className="shrink-0 text-sm font-semibold whitespace-nowrap">{cell('price')}</span>
-                    {canManage ? rowMenu(item) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <DataTable
-              caption="المنتجات"
-              columns={columns}
-              rows={items ?? []}
-              rowKey={(item) => item.id}
-              loading={items === null && !loadError}
-              error={loadError ?? undefined}
-              onRetry={() => void load()}
-              empty={
-                filtered ? (
-                  <EmptyState
-                    icon={ProductsIcon}
-                    title="لا منتجات تطابق بحثك."
-                    description="جرّب كلمة أخرى أو تصنيفاً آخر."
-                    action={
-                      <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
-                        امسح البحث والتصفية
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <EmptyState
-                    icon={ProductsIcon}
-                    title="لا منتجات بعد."
-                    description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
-                    action={canManage ? addProduct : null}
-                  />
-                )
-              }
-            />
-          )}
+                      <span className="shrink-0 text-sm font-semibold whitespace-nowrap">
+                        {cell('price')}
+                      </span>
+                      {canManage ? rowMenu(item) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <DataTable
+                caption="المنتجات"
+                columns={columns}
+                rows={items ?? []}
+                rowKey={(item) => item.id}
+                loading={items === null && !loadError}
+                error={loadError ?? undefined}
+                onRetry={load}
+                empty={
+                  filtered ? (
+                    <EmptyState
+                      icon={ProductsIcon}
+                      title="لا منتجات تطابق بحثك."
+                      description="جرّب كلمة أخرى أو تصنيفاً آخر."
+                      action={
+                        <Button variant="secondary" onClick={() => setFilters(NO_FILTERS)}>
+                          امسح البحث والتصفية
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <EmptyState
+                      icon={ProductsIcon}
+                      title="لا منتجات بعد."
+                      description="أضف منتجك الأول باسمه وسعره وباركوده، فيصل إلى أجهزة الكاشير."
+                      action={canManage ? addProduct : null}
+                    />
+                  )
+                }
+              />
+            )}
+          </div>
 
           {canManage && selected.size > 0 ? (
             <div
@@ -1333,17 +1315,11 @@ function ProductsList() {
             </div>
           ) : null}
 
-          {nextCursor && items ? (
-            <div className="flex justify-center">
-              <Button variant="secondary" loading={loadingMore} onClick={() => void loadMore()}>
-                اعرض المزيد
-              </Button>
-            </div>
-          ) : null}
+          {items ? <Pager noun="المنتجات" pager={pager} /> : null}
         </div>
       </div>
       {canManage ? (
-        <BulkPhotos open={photosOpen} onClose={() => setPhotosOpen(false)} onDone={() => void load()} />
+        <BulkPhotos open={photosOpen} onClose={() => setPhotosOpen(false)} onDone={() => load()} />
       ) : null}
       {canManage ? (
         <CategorizeDialog
@@ -1364,7 +1340,7 @@ function ProductsList() {
             listCategories()
               .then((answer) => setCategories(answer.items))
               .catch(() => undefined);
-            void load();
+            load();
           }}
         />
       ) : null}

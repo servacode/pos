@@ -26,7 +26,11 @@ import { defaultBranch } from '../reports/parts';
 import { useReport } from '../reports/useReport';
 import { getAccountLedger } from './api';
 import { accountLedgerTable } from './csv';
+import { Paged } from '../pager';
 import { PrintHead, period } from './parts';
+
+/** Lines of the ledger on one page */
+const LEDGER_PAGE = 50;
 
 const isDay = (value: string | null): value is string => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
 
@@ -34,13 +38,13 @@ function Lines({
   ledger,
   loading,
   error,
-  limit,
+  rows,
 }: {
   ledger: AccountLedger | null;
   loading: boolean;
   error?: string;
-  /** How many lines the screen draws (the sheet draws all) */
-  limit?: number;
+  /** The lines of the page on screen (the sheet draws all) */
+  rows: AccountLedgerLine[];
 }) {
   const base = ledger?.baseCurrency ?? 'SYP';
   const columns: DataColumn<AccountLedgerLine>[] = [
@@ -100,7 +104,7 @@ function Lines({
     <DataTable
       caption="حركة الحساب"
       columns={columns}
-      rows={limit ? (ledger?.lines.slice(0, limit) ?? []) : (ledger?.lines ?? [])}
+      rows={rows}
       rowKey={(l) => `${l.entryId}|${l.accountCode}|${l.debitMinor}|${l.creditMinor}|${l.balanceMinor}`}
       loading={loading}
       error={error}
@@ -137,7 +141,6 @@ export function AccountLedgerPage() {
     getAccountLedger({ code, from, to, branchId }),
   );
   const { paper, print } = usePrint();
-  const [shown, setShown] = useState(50);
 
   const choose = (next: { code?: string; from?: string; to?: string }) => {
     if (next.code !== undefined) setCode(next.code);
@@ -237,15 +240,14 @@ export function AccountLedgerPage() {
         </Alert>
       ) : null}
       <div className="print:hidden">
-        <Lines ledger={data} loading={loading} error={error ?? undefined} limit={shown} />
+        <Paged
+          key={`${code}|${from}|${to}|${branchId ?? ''}`}
+          rows={data?.lines ?? []}
+          size={LEDGER_PAGE}
+          noun="الحركات"
+          render={(rows) => <Lines ledger={data} rows={rows} loading={loading} error={error ?? undefined} />}
+        />
       </div>
-      {data && data.lines.length > shown ? (
-        <div className="print:hidden">
-          <Button variant="secondary" onClick={() => setShown((n) => n + 100)}>
-            اعرض المزيد ({data.lines.length - shown} حركة باقية)
-          </Button>
-        </div>
-      ) : null}
       {data && paper ? (
         <PrintSheet paper={paper}>
           <div dir="rtl" className="flex flex-col gap-4 p-2 text-sm text-ink">
@@ -255,7 +257,7 @@ export function AccountLedgerPage() {
               title={`دفتر الأستاذ · ${data.account.code} ${data.account.name}`}
               period={period(data.from, data.to, digits)}
             />
-            <Lines ledger={data} loading={false} />
+            <Lines ledger={data} rows={data.lines} loading={false} />
           </div>
         </PrintSheet>
       ) : null}

@@ -29,6 +29,7 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { errorMessage } from '../../lib/api';
 import { FileProblem, readSpreadsheet, type FileCell, type Sheet } from '../import/file';
+import { Paged } from '../pager';
 import {
   columnsReady,
   detectHeaderRow,
@@ -55,7 +56,7 @@ function oneRowPerModel(items: readonly PriceListItem[]): boolean {
   return rows.length > 0 && new Set(rows.map((i) => i.productId)).size === rows.length;
 }
 
-/** Rows of a table shown at once; «اعرض المزيد» adds the next ones, so 3,000 rows stay light. */
+/** Rows of a table shown on one page, so 3,000 rows stay light. */
 const PAGE = 200;
 
 type Step = 'file' | 'columns' | 'preview' | 'done';
@@ -93,7 +94,6 @@ function PriceList() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [applied, setApplied] = useState<PriceListApplied | null>(null);
   const [tab, setTab] = useState<Tab>('change');
-  const [shown, setShown] = useState(PAGE);
   // «طبّق على كل قياسات وألوان هذا الموديل»
   const [wholeModel, setWholeModel] = useState(false);
 
@@ -133,7 +133,6 @@ function PriceList() {
     setApplied(null);
     setError(null);
     setTab('change');
-    setShown(PAGE);
   }
 
   /** Sends the rows in requests of at most PRICE_LIST_CHUNK_MAX and gathers the matches. */
@@ -165,7 +164,6 @@ function PriceList() {
       setPicked(new Set(checked.filter((i) => i.status === 'change').map((i) => i.variantId!)));
       setWholeModel(oneRowPerModel(checked));
       setTab('change');
-      setShown(PAGE);
       setStep('preview');
     } catch (e) {
       setError(errorMessage(e));
@@ -292,20 +290,21 @@ function PriceList() {
 
   function list(rows: PriceListItem[], cols: DataColumn<PriceListItem>[], caption: string, empty: string) {
     return (
-      <div className="flex flex-col gap-3">
-        <DataTable
-          caption={caption}
-          columns={cols}
-          rows={rows.slice(0, shown)}
-          rowKey={(r) => r.row}
-          empty={<EmptyState icon={PercentIcon} title={empty} />}
-        />
-        {rows.length > shown ? (
-          <Button variant="secondary" className="self-center" onClick={() => setShown((n) => n + PAGE)}>
-            اعرض المزيد ({rows.length - shown})
-          </Button>
-        ) : null}
-      </div>
+      <Paged
+        key={tab}
+        rows={rows}
+        size={PAGE}
+        noun="الصفوف"
+        render={(page) => (
+          <DataTable
+            caption={caption}
+            columns={cols}
+            rows={page}
+            rowKey={(r) => r.row}
+            empty={<EmptyState icon={PercentIcon} title={empty} />}
+          />
+        )}
+      />
     );
   }
 
@@ -440,7 +439,6 @@ function PriceList() {
               value={tab}
               onValueChange={(t) => {
                 setTab(t);
-                setShown(PAGE);
               }}
               items={[
                 {

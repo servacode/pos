@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import {
   getCurrency,
@@ -10,7 +10,6 @@ import {
 import {
   Alert,
   Button,
-  Card,
   DataTable,
   EmptyState,
   Money,
@@ -32,6 +31,7 @@ import {
   ReportFilters,
   ReportScreen,
 } from '../reports/parts';
+import { Pager, useCursorPages } from '../pager';
 import { listSales, type SaleFilters } from './api';
 import { salesCsv } from './csv';
 import { downloadText } from '../accounting/csv';
@@ -52,64 +52,6 @@ export function toMinor(text: string, currency: CurrencyCode): string | null {
   const [whole, fraction = ''] = clean.split('.');
   if (fraction.length > decimals) return null;
   return String(Number(`${whole}${fraction.padEnd(decimals, '0')}`));
-}
-
-function useInvoices(filters: SaleFilters) {
-  const key = JSON.stringify(filters);
-  const [state, setState] = useState<{
-    key: string | null;
-    items: SaleListItem[];
-    cursor: string | null;
-    error: string | null;
-  }>({ key: null, items: [], cursor: null, error: null });
-  const [moreError, setMoreError] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const filtersRef = useRef(filters);
-  filtersRef.current = filters;
-
-  useEffect(() => {
-    let current = true;
-    setMoreError(null);
-    listSales(filtersRef.current, null).then(
-      (page) => current && setState({ key, items: page.items, cursor: page.nextCursor, error: null }),
-      (error: unknown) => current && setState({ key, items: [], cursor: null, error: errorMessage(error) }),
-    );
-    return () => {
-      current = false;
-    };
-  }, [key, attempt]);
-
-  const fresh = state.key === key;
-  const loadMore = useCallback(async () => {
-    if (!state.cursor) return;
-    setLoadingMore(true);
-    setMoreError(null);
-    try {
-      const page = await listSales(filtersRef.current, state.cursor);
-      setState((s) =>
-        s.key === key ? { ...s, items: [...s.items, ...page.items], cursor: page.nextCursor } : s,
-      );
-    } catch (error) {
-      setMoreError(errorMessage(error));
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [state.cursor, key]);
-
-  return {
-    items: fresh ? state.items : [],
-    cursor: fresh ? state.cursor : null,
-    error: fresh ? state.error : null,
-    loading: !fresh,
-    loadingMore,
-    moreError,
-    loadMore,
-    retry: () => {
-      setState((s) => ({ ...s, key: null }));
-      setAttempt((n) => n + 1);
-    },
-  };
 }
 
 /**
@@ -162,7 +104,15 @@ export function InvoicesPage() {
     }),
     [from, to, branchId, deviceId, cashierId, customerId, method, status, q, minMinor, maxMinor],
   );
-  const { items, cursor, error, loading, loadingMore, moreError, loadMore, retry } = useInvoices(filters);
+  const {
+    data: page,
+    error,
+    loading,
+    retry,
+    topRef,
+    pager,
+  } = useCursorPages(JSON.stringify(filters), (cursor) => listSales(filters, cursor));
+  const items = useMemo(() => page?.items ?? [], [page]);
 
   // The cashiers and devices to pick from are the ones seen in the rows loaded so far
   const [seen, setSeen] = useState<{ cashiers: Map<string, string>; devices: Map<string, string> }>({
@@ -350,35 +300,25 @@ export function InvoicesPage() {
         </Alert>
       ) : null}
       {exportError ? <Alert tone="error">{exportError}</Alert> : null}
-      <DataTable
-        caption="فواتير المتجر"
-        columns={columns}
-        rows={items}
-        rowKey={(row) => row.id}
-        loading={loading}
-        error={error ?? undefined}
-        onRetry={retry}
-        empty={
-          <EmptyState
-            icon={SalesIcon}
-            title="لا فواتير بهذه الشروط."
-            description="غيّر المدة أو الفرع أو البحث. تظهر الفاتورة هنا حين يرسلها جهاز الكاشير."
-          />
-        }
-      />
-      {moreError ? <Alert tone="error">{moreError}</Alert> : null}
-      {cursor && !loading ? (
-        <Card className="!border-0 !bg-transparent !p-0 !shadow-none">
-          <Button
-            variant="secondary"
-            className="mx-auto"
-            loading={loadingMore}
-            onClick={() => void loadMore()}
-          >
-            اعرض المزيد
-          </Button>
-        </Card>
-      ) : null}
+      <div ref={topRef}>
+        <DataTable
+          caption="فواتير المتجر"
+          columns={columns}
+          rows={items}
+          rowKey={(row) => row.id}
+          loading={loading}
+          error={error ?? undefined}
+          onRetry={retry}
+          empty={
+            <EmptyState
+              icon={SalesIcon}
+              title="لا فواتير بهذه الشروط."
+              description="غيّر المدة أو الفرع أو البحث. تظهر الفاتورة هنا حين يرسلها جهاز الكاشير."
+            />
+          }
+        />
+      </div>
+      <Pager noun="الفواتير" pager={pager} />
       <InvoiceSheet id={openId} onClose={() => setOpenId(null)} />
     </ReportScreen>
   );

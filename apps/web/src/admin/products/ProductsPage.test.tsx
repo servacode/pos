@@ -317,11 +317,17 @@ describe('/products list', () => {
     });
     await screen.findByText('حليب المراعي 1 لتر');
 
-    await user.click(screen.getByRole('button', { name: 'اعرض المزيد' }));
+    expect(screen.getByRole('button', { name: 'الصفحة السابقة' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
 
     expect(await screen.findByText('شاي ربيع 400 غ')).toBeInTheDocument();
-    expect(screen.getByText('حليب المراعي 1 لتر')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'اعرض المزيد' })).not.toBeInTheDocument();
+    expect(screen.queryByText('حليب المراعي 1 لتر')).not.toBeInTheDocument();
+    expect(screen.getByText(/صفحة/)).toHaveTextContent('صفحة 2 · المنتجات من 2 إلى 2');
+    expect(screen.getByRole('button', { name: 'الصفحة التالية' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'الصفحة السابقة' }));
+    expect(await screen.findByText('حليب المراعي 1 لتر')).toBeInTheDocument();
+    expect(screen.queryByText('شاي ربيع 400 غ')).not.toBeInTheDocument();
   });
 
   it('says there is no product yet and offers the first one', async () => {

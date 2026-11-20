@@ -21,13 +21,12 @@ import {
   type DataColumn,
 } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
-import { errorMessage } from '../../lib/api';
 import { dayText, isoDay, monthStart } from '../../lib/dates';
 import { getJournal } from '../reports/api';
 import type { JournalEntry, JournalLine } from '../reports/contracts';
 import { sourceLabel } from '../reports/labels';
 import { defaultBranch } from '../reports/parts';
-import { useReport } from '../reports/useReport';
+import { Pager, useCursorPages } from '../pager';
 import { ManualEntryDialog, ReverseDialog } from '../ledger/ManualEntryDialog';
 import { AccountingLayout } from './AccountingLayout';
 import { AccountName, PeriodBar } from './parts';
@@ -340,14 +339,9 @@ export function JournalPage() {
   const [to, setTo] = useState(today);
   const [branchId, setBranchId] = useState<string | null>(() => defaultBranch(me, true));
   const key = `${from}|${to}|${branchId ?? ''}`;
-  const first = useReport(key, () => getJournal({ from, to, branchId }));
-  const [more, setMore] = useState<{
-    key: string;
-    items: JournalEntry[];
-    cursor: string | null;
-    error: string | null;
-  } | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const { data, error, loading, retry, topRef, pager } = useCursorPages(key, (cursor) =>
+    getJournal({ from, to, branchId, cursor }),
+  );
   const [open, setOpen] = useState<JournalEntry | null>(null);
   const [writing, setWriting] = useState(false);
   const [reversing, setReversing] = useState<JournalEntry | null>(null);
@@ -355,22 +349,7 @@ export function JournalPage() {
   const canPost = me.user.permissions.includes('accounting.post');
   const base = me.settings.baseCurrency;
 
-  const extra = more?.key === key ? more : null;
-  const entries = [...(first.data?.items ?? []), ...(extra?.items ?? [])];
-  const cursor = extra ? extra.cursor : (first.data?.nextCursor ?? null);
-
-  async function loadMore() {
-    if (!cursor) return;
-    setLoadingMore(true);
-    try {
-      const page = await getJournal({ from, to, branchId, cursor });
-      setMore({ key, items: [...(extra?.items ?? []), ...page.items], cursor: page.nextCursor, error: null });
-    } catch (error) {
-      setMore({ key, items: extra?.items ?? [], cursor, error: errorMessage(error) });
-    } finally {
-      setLoadingMore(false);
-    }
-  }
+  const entries = data?.items ?? [];
 
   return (
     <AccountingLayout
@@ -394,33 +373,25 @@ export function JournalPage() {
         onTo={setTo}
         onBranch={setBranchId}
       />
-      <JournalTable
-        caption={`القيود من ${dayText(from, digits)} إلى ${dayText(to, digits)}`}
-        entries={entries}
-        base={base}
-        loading={first.loading}
-        error={first.error}
-        onRetry={first.retry}
-        onOpen={setOpen}
-        empty={
-          <EmptyState
-            icon={ReportsIcon}
-            title="لا قيود في هذه الفترة."
-            description="كل فاتورة وحركة درج وإغلاق وردية يصنع قيده وحده حين يصل."
-          />
-        }
-      />
-      {extra?.error ? <Alert tone="error">{extra.error}</Alert> : null}
-      {cursor && !first.loading ? (
-        <Button
-          variant="secondary"
-          className="self-center"
-          loading={loadingMore}
-          onClick={() => void loadMore()}
-        >
-          اعرض المزيد
-        </Button>
-      ) : null}
+      <div ref={topRef}>
+        <JournalTable
+          caption={`القيود من ${dayText(from, digits)} إلى ${dayText(to, digits)}`}
+          entries={entries}
+          base={base}
+          loading={loading}
+          error={error}
+          onRetry={retry}
+          onOpen={setOpen}
+          empty={
+            <EmptyState
+              icon={ReportsIcon}
+              title="لا قيود في هذه الفترة."
+              description="كل فاتورة وحركة درج وإغلاق وردية يصنع قيده وحده حين يصل."
+            />
+          }
+        />
+      </div>
+      <Pager noun="القيود" pager={pager} />
       <EntrySheet
         entry={open}
         onClose={() => setOpen(null)}
@@ -432,8 +403,7 @@ export function JournalPage() {
           onSaved={(number) => {
             setWriting(false);
             setNotice(`رُحّل القيد ${number}.`);
-            setMore(null);
-            first.retry();
+            retry();
           }}
         />
       ) : null}
@@ -446,8 +416,7 @@ export function JournalPage() {
             setReversing(null);
             setOpen(null);
             setNotice(`رُحّل القيد العكسي ${number}.`);
-            setMore(null);
-            first.retry();
+            retry();
           }}
         />
       ) : null}

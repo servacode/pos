@@ -207,15 +207,18 @@ describe('«القيود»', () => {
       'rowgroup',
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'اعرض المزيد' }));
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة التالية' }));
     expect(await within(table).findByText('JRN-2026-0000002')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'اعرض المزيد' })).not.toBeInTheDocument();
+    // One page at a time: the first page's entry is gone, and there is no page after this one
+    expect(within(table).queryByText('JRN-2026-0000001')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'الصفحة التالية' })).toBeDisabled();
     expect(within(table).getByRole('link', { name: 'إغلاق وردية SFT-001-002-0000231' })).toHaveAttribute(
       'href',
       '/shifts/shift-1',
     );
 
-    fireEvent.click(within(table).getByRole('button', { name: 'JRN-2026-0000001' }));
+    fireEvent.click(screen.getByRole('button', { name: 'الصفحة السابقة' }));
+    fireEvent.click(await within(table).findByRole('button', { name: 'JRN-2026-0000001' }));
     const drawer = await screen.findByRole('dialog', { name: 'القيد JRN-2026-0000001' });
     const lines = within(drawer).getAllByRole('row').map(text);
     expect(lines).toEqual([
@@ -274,10 +277,13 @@ describe('«القيود»', () => {
       ),
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'اعرض المزيد' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'الصفحة التالية' }));
     expect(await screen.findByText('الخادم مشغول حالياً. حاول بعد قليل.')).toBeInTheDocument();
+    // Still on page 1, with its entry, and the next page can be tried again
     expect(screen.getByText('JRN-2026-0000001')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'اعرض المزيد' })).toBeInTheDocument();
+    expect(screen.getByText(/صفحة/)).toHaveTextContent('صفحة 1');
+    expect(screen.getByRole('button', { name: 'أعد المحاولة' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'الصفحة التالية' })).toBeEnabled();
   });
 });
 
