@@ -9,12 +9,13 @@ import { listPlans } from './api';
 
 /**
  * «الأقساط» on a customer's page: each plan with what is left, the next day due and whether it is
- * late, each a link to the plan. Nothing shows for a customer with no plan, or for a person who may
+ * late, each a link to the plan. A customer with no plan gets one sentence; nothing shows for a person who may
  * not see plans.
  */
 export function CustomerPlans({ customerId }: { customerId: string }) {
   const me = useMe();
   const [plans, setPlans] = useState<PlanListItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [base, setBase] = useState<CurrencyCode>('SYP');
   const allowed = me.user.permissions.includes('installments.view');
   useEffect(() => {
@@ -25,13 +26,21 @@ export function CustomerPlans({ customerId }: { customerId: string }) {
         if (!alive) return;
         setPlans(r.items);
         setBase(r.baseCurrency);
+        setLoaded(true);
       })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
   }, [allowed, customerId]);
-  if (!allowed || plans.length === 0) return null;
+  if (!allowed) return null;
+  if (plans.length === 0) {
+    return loaded ? (
+      <Panel title="الأقساط">
+        <p className="sx-wait m-0">لا أقساط على هذا الزبون.</p>
+      </Panel>
+    ) : null;
+  }
   return (
     <Panel title="الأقساط" flush>
       <ul className="cx-stm" aria-label="أقساطه">

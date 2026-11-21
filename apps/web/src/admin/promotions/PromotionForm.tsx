@@ -53,7 +53,8 @@ export function dateBound(date: string, end: boolean): string | null {
   return start.toISOString();
 }
 
-function endDate(iso: string): string {
+/** The last day an offer runs, as a local date: the stored end is the first moment after it */
+export function endDate(iso: string): string {
   const d = new Date(iso);
   d.setUTCDate(d.getUTCDate() - 1);
   return localDate(d.toISOString());

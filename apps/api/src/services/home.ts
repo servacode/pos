@@ -26,11 +26,13 @@ export interface HomeSummary {
   } | null;
   /** catalog.manage: goods (not services) still without a photo, and how many goods there are */
   photos: { goodsCount: number; withoutPhoto: number } | null;
-  /** report.view: the pieces that sold in the last 30 days and are down to their minimum (the report's rule), best sellers first */
-  /** reports.financial: what the cash drawers hold now (account 1110, base currency) */
+  /** reports.financial: what the cash drawers hold now, in the base currency (the child accounts of 1110 in that currency) */
   cashMinor: number | null;
+  /** reports.financial: the dollars in the drawers (in cents), only when the store uses dollars */
+  cashUsdMinor: number | null;
   /** The latest dollar rate in liras, when the store uses dollars (a decimal text) */
   usdRate: string | null;
+  /** report.view: the pieces that sold in the last 30 days and are down to their minimum (the report's rule), best sellers first */
   lowStock: {
     /** How many pieces are low in all; `items` is the first 100 */
     total: number;
@@ -161,27 +163,37 @@ export async function loadHomeSummary(db: Database, auth: AccessClaims, now: Dat
       };
     }
 
-    // Whether the store has ever sold: a week without sales is a closed week, not a new store
-    // The cash in the drawers (account 1110) for who sees the money, and the dollar rate for the morning's look
+    // The cash in the drawers for who sees the money: cash lives in the per-currency children of 1110
+    // (111001 pounds, 111002 dollars), each line carries its own currency amount (amount_minor, signed), so the two are never added together
     let cashMinor: number | null = null;
+    let cashUsdMinor: number | null = null;
     const seesMoney = await permissionScope(tx, auth.userId, 'reports.financial');
     if (seesMoney.all) {
-      const [cash] = await tx.execute<{ balance: string }>(sql`
-        select coalesce(sum(l.debit_minor - l.credit_minor), 0)::text as balance
+      const cash = await tx.execute<{ currency: string; balance: string }>(sql`
+        select l.currency, sum(l.amount_minor)::text as balance
         from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
-        where a.code = '1110'`);
-      cashMinor = Number(cash?.balance ?? 0);
+        where a.parent_code = '1110'
+        group by l.currency`);
+      const of = (code: string) => Number(cash.find((r) => r.currency === code)?.balance ?? 0);
+      const baseCode = base?.base ?? 'SYP';
+      cashMinor = of(baseCode);
+      const [usd] = await tx.execute<{ on: boolean }>(
+        sql`select 'USD' = any (enabled_currencies) as on from tenant_settings`,
+      );
+      if (usd?.on === true && baseCode !== 'USD') cashUsdMinor = of('USD');
     }
     const [rate] = await tx.execute<{ rate: string }>(sql`
       select r.rate::text as rate from exchange_rates r
       where r.unit = 'USD' and r.quote = 'SYP' and exists (select 1 from tenant_settings t where 'USD' = any (t.enabled_currencies))
       order by r.effective_at desc, r.id desc limit 1`);
+    // Whether the store has ever sold: a week without sales is a closed week, not a new store
     const [sold] = await tx.execute<{ ever: boolean }>(sql`select exists (select 1 from invoices) as ever`);
 
     return {
       baseCurrency: (base?.base ?? 'SYP') as CurrencyCode,
       hasEverSold: sold?.ever === true,
       cashMinor,
+      cashUsdMinor,
       usdRate: rate?.rate ?? null,
       debts,
       photos,

@@ -76,6 +76,8 @@ export const priceListApplyInput = z.object({
         newMinor: z.int().min(1).max(Number.MAX_SAFE_INTEGER),
         /** «طبّق على كل قياسات وألوان هذا الموديل»: every live variant of the product gets the price */
         wholeModel: z.boolean().default(false),
+        /** The price the preview showed: a piece whose price moved since (another edit) is left, not overwritten */
+        expectedOldMinor: z.int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       }),
     )
     .min(1)
@@ -88,6 +90,8 @@ export interface PriceListApplied {
   changed: number;
   /** Pieces left as they were: the price was already that, or the piece is gone or in another currency */
   skipped: number;
+  /** Of the skipped: pieces whose price changed after the preview, so the file's price was not applied */
+  stale?: number;
   items: {
     productId: string;
     variantId: string;

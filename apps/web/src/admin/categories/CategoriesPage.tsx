@@ -268,18 +268,18 @@ function CategoryRow({
           {category.name}
         </Link>
         {archived ? <Badge>مؤرشف</Badge> : null}
+        {category.productCount > 0 ? (
+          // The share bar sits under the name it belongs to, not far across the row
+          <span aria-hidden="true" className="hidden basis-full sm:block">
+            <span className="block h-1.5 w-28 overflow-hidden rounded-full bg-surface-muted">
+              <span
+                className="block h-full rounded-full bg-brand"
+                style={{ width: `${Math.max(6, Math.round((category.productCount / maxCount) * 100))}%` }}
+              />
+            </span>
+          </span>
+        ) : null}
       </span>
-      {category.productCount > 0 ? (
-        <span
-          aria-hidden="true"
-          className="hidden h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-surface-muted sm:block"
-        >
-          <span
-            className="block h-full rounded-full bg-brand"
-            style={{ width: `${Math.max(6, Math.round((category.productCount / maxCount) * 100))}%` }}
-          />
-        </span>
-      ) : null}
       <Badge dot={false}>
         {category.productCount === 0 ? (
           'لا منتجات'

@@ -17,7 +17,7 @@ import {
   Skeleton,
   TruckIcon,
 } from '@serva/ui';
-import { listCustomers } from '../customers/api';
+import { listCustomerPage } from '../customers/api';
 import { errorMessage } from '../../lib/api';
 import { getRoute, listRegions, listReps, setRouteCustomers } from './api';
 import { useLoad } from './parts';
@@ -44,7 +44,11 @@ export function RoutePage() {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [q, setQ] = useState('');
-  const [everyone, setEveryone] = useState<CustomerListItem[] | null>(null);
+  /** The search answers, from the server (30 at a time): the store may have thousands of customers */
+  const [found, setFound] = useState<CustomerListItem[] | null>(null);
+  /** How many customers the route's region has (the server counts; they are fetched only when «أضف كل» is pressed) */
+  const [regionCount, setRegionCount] = useState(0);
+  const [addingRegion, setAddingRegion] = useState(false);
   const regions = useLoad(listRegions);
   const reps = useLoad(listReps);
 
@@ -57,10 +61,40 @@ export function RoutePage() {
     getRoute(id)
       .then(show)
       .catch((e: unknown) => setError(errorMessage(e)));
-    listCustomers()
-      .then((r) => setEveryone(r.items.filter((c) => !c.archived && c.approvalStatus !== 'rejected')))
-      .catch((e: unknown) => setError(errorMessage(e)));
   }, [id]);
+
+  const regionId = route?.regionId ?? null;
+  useEffect(() => {
+    if (!regionId) {
+      setRegionCount(0);
+      return;
+    }
+    let alive = true;
+    listCustomerPage({ regionId, limit: 1, sort: 'name', dir: 'asc' })
+      .then((r) => alive && setRegionCount(r.totalCount ?? r.items.length))
+      .catch(() => alive && setRegionCount(0));
+    return () => {
+      alive = false;
+    };
+  }, [regionId]);
+
+  useEffect(() => {
+    let alive = true;
+    const timer = setTimeout(
+      () => {
+        listCustomerPage({ q: q.trim(), limit: 50, sort: 'name', dir: 'asc' })
+          .then(
+            (r) => alive && setFound(r.items.filter((c) => !c.archived && c.approvalStatus !== 'rejected')),
+          )
+          .catch((e: unknown) => alive && setError(errorMessage(e)));
+      },
+      q.trim() ? 250 : 0,
+    );
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [q]);
 
   const inRoute = useMemo(() => new Set(entries.map((e) => e.customerId)), [entries]);
   const changed =
@@ -68,19 +102,31 @@ export function RoutePage() {
     (entries.length !== route.customers.length ||
       entries.some((e, i) => e.customerId !== route.customers[i]?.customerId));
 
-  const results = useMemo(() => {
-    const word = q.trim();
-    return (everyone ?? [])
-      .filter((c) => !inRoute.has(c.id))
-      .filter((c) => !word || c.name.includes(word) || (c.phone ?? '').includes(word))
-      .slice(0, 30);
-  }, [everyone, inRoute, q]);
-
-  const ofRegion = useMemo(
-    () =>
-      (everyone ?? []).filter((c) => route?.regionId && c.regionId === route.regionId && !inRoute.has(c.id)),
-    [everyone, inRoute, route?.regionId],
+  const results = useMemo(
+    () => (found ?? []).filter((c) => !inRoute.has(c.id)).slice(0, 30),
+    [found, inRoute],
   );
+
+  /** Every customer of the route's region, page by page (200 at most per request) */
+  async function addRegion() {
+    if (!regionId) return;
+    setAddingRegion(true);
+    setError(null);
+    try {
+      const all: CustomerListItem[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await listCustomerPage({ regionId, limit: 200, sort: 'name', dir: 'asc', cursor });
+        all.push(...page.items);
+        cursor = page.nextCursor ?? null;
+      } while (cursor);
+      add(all.filter((c) => !c.archived && c.approvalStatus !== 'rejected' && !inRoute.has(c.id)));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setAddingRegion(false);
+    }
+  }
 
   const add = (list: readonly CustomerListItem[]) =>
     setEntries((current) => [
@@ -203,12 +249,17 @@ export function RoutePage() {
               value={q}
               onValueChange={setQ}
             />
-            {route.regionName && ofRegion.length > 0 ? (
-              <Button variant="secondary" icon={<AddIcon />} onClick={() => add(ofRegion)}>
-                أضف كل زبائن {route.regionName} ({ofRegion.length})
+            {route.regionName && regionCount > 0 ? (
+              <Button
+                variant="secondary"
+                icon={<AddIcon />}
+                loading={addingRegion}
+                onClick={() => void addRegion()}
+              >
+                أضف كل زبائن {route.regionName} ({regionCount})
               </Button>
             ) : null}
-            {!everyone ? (
+            {!found ? (
               <Skeleton className="h-24 w-full" />
             ) : results.length === 0 ? (
               <p className="py-4 text-center text-sm text-ink-muted">لا زبائن يطابقون البحث.</p>

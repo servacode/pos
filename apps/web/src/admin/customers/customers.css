@@ -539,3 +539,11 @@
   color: var(--sx-mute, inherit);
   font-size: 0.95rem;
 }
+
+/* On a phone the filter chips scroll sideways on one row, so the first customer is not pushed down */
+@media (max-width: 640px) {
+  .cx-chips {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}

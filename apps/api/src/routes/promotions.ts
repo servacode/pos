@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   promotionArchiveInput,
   promotionInput,
+  promotionEndDateInput,
   promotionPreviewInput,
   promotionReportQuery,
   promotionUpdateInput,
@@ -16,6 +17,7 @@ import {
   listPromotions,
   promotionPreview,
   promotionReport,
+  setPromotionEndDate,
   updatePromotion,
 } from '../services/promotions';
 import { parseBody } from './validation';
@@ -80,6 +82,20 @@ export async function promotionRoutes(app: FastifyInstance): Promise<void> {
       parseBody(promotionArchiveInput, request.body),
       meta(request),
       app.clock.now(),
+    );
+  });
+
+  // Moving the end of an offer from the list touches nothing else of it
+  app.post('/v1/promotions/:id/end-date', { preHandler: requireAuth }, async (request) => {
+    if (!request.auth) throw unauthorized();
+    const parsed = uuidSchema.safeParse((request.params as { id?: string }).id);
+    if (!parsed.success) throw new AppError(404, 'not_found', 'هذا العرض غير موجود.');
+    return setPromotionEndDate(
+      app.db,
+      request.auth,
+      parsed.data,
+      parseBody(promotionEndDateInput, request.body),
+      meta(request),
     );
   });
 }

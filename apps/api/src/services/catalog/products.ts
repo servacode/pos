@@ -219,6 +219,7 @@ interface ListRow extends Record<string, unknown> {
   wh_max?: string | null;
   cost_qty?: string | null;
   cost_value?: string | null;
+  cost_price_value?: string | null;
 }
 
 const encodeCursor = (name: string, id: string, stock?: string) =>
@@ -389,7 +390,9 @@ export async function listProducts(
              (select coalesce(sum(sv.qty), 0)::text from variants v join stock_values sv on sv.tenant_id = v.tenant_id and sv.variant_id = v.id
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_qty,
              (select coalesce(sum(sv.value_minor), 0)::text from variants v join stock_values sv on sv.tenant_id = v.tenant_id and sv.variant_id = v.id
-              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_value`
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_value,
+             (select coalesce(sum(sv.qty * x.price_minor), 0)::text from variants v join stock_values sv on sv.tenant_id = v.tenant_id and sv.variant_id = v.id join prices x on x.tenant_id = v.tenant_id and x.id = v.id
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_price_value`
         : sql``
     }`;
     const movementBranch = query.branchId ? sql`and m.branch_id = ${query.branchId}` : sql``;
@@ -479,6 +482,11 @@ export async function listProducts(
             costMinor:
               r.cost_qty !== undefined && r.cost_qty !== null && Number(r.cost_qty) > 0
                 ? Math.round((Number(r.cost_value) * 1000) / Number(r.cost_qty))
+                : null,
+            // The shelf price averaged over the same stocked units: the margin compares like with like
+            costPriceMinor:
+              r.cost_qty !== undefined && r.cost_qty !== null && Number(r.cost_qty) > 0
+                ? Math.round(Number(r.cost_price_value ?? 0) / Number(r.cost_qty))
                 : null,
           }
         : {}),

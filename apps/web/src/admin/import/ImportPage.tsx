@@ -463,7 +463,7 @@ function Import() {
                 >
                   نزّل القالب الجاهز
                 </Button>
-                <p className="max-w-[70ch] basis-full text-sm text-ink-muted">
+                <p className="max-w-[100ch] basis-full text-sm text-ink-muted">
                   الأمين، الميزان، الرشيد أو أي برنامج يصدّر إلى إكسل. أعمدة {IMPORT_TYPE_LABELS[type]}:{' '}
                   {chosen.map((f) => f.label).join('، ')}.
                 </p>

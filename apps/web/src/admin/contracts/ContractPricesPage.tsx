@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   CUSTOMER_KIND_LABELS,
-  CUSTOMER_KINDS,
   getCurrency,
   toMinor,
   type ContractPrice,
   type CustomerKind,
-  type CustomerListItem,
 } from '@serva/core';
 import {
   AddIcon,
@@ -20,7 +18,6 @@ import {
   Money,
   OfferIcon,
   PageHeader,
-  Select,
   TextField,
   useDigits,
 } from '@serva/ui';
@@ -28,7 +25,7 @@ import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { dayText } from '../../lib/dates';
 import { ApiError, errorMessage } from '../../lib/api';
-import { listCustomers } from '../customers/api';
+import { WhoSelect } from '../customers/WhoSelect';
 import { VariantPicker, type PickedVariant } from '../purchases/VariantPicker';
 import { SectionHead } from '../purchases/parts';
 import { deleteContractPrice, listContractPrices, saveContractPrice } from './api';
@@ -58,7 +55,6 @@ export function ContractPricesPage() {
   const me = useMe();
   const digits = useDigits();
   const base = me.settings.baseCurrency;
-  const [customers, setCustomers] = useState<CustomerListItem[]>([]);
   const [filter, setFilter] = useState<Target>('');
   const [items, setItems] = useState<ContractPrice[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,12 +70,6 @@ export function ContractPricesPage() {
   const [validTo, setValidTo] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    listCustomers()
-      .then((r) => setCustomers(r.items.filter((c) => !c.archived)))
-      .catch(() => setCustomers([]));
-  }, []);
 
   const load = useCallback(() => {
     setError(null);
@@ -180,23 +170,12 @@ export function ContractPricesPage() {
             <Card>
               <form noValidate onSubmit={(e) => void submit(e)} className="flex flex-col gap-4">
                 {formError ? <Alert tone="error">{formError}</Alert> : null}
-                <Select label="لمن" value={target} onChange={(e) => setTarget(e.target.value)}>
-                  <option value="">اختر</option>
-                  <optgroup label="نوع زبائن">
-                    {CUSTOMER_KINDS.map((k) => (
-                      <option key={k} value={`k:${k}`}>
-                        كل زبائن النوع: {CUSTOMER_KIND_LABELS[k]}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="زبون">
-                    {customers.map((c) => (
-                      <option key={c.id} value={`c:${c.id}`}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                </Select>
+                <WhoSelect
+                  label="لمن"
+                  value={target}
+                  onChange={setTarget}
+                  customerName={editing?.customerName}
+                />
                 {variant ? (
                   <div className="flex items-center gap-3">
                     <span className="font-semibold text-ink">{variant.name}</span>
@@ -251,19 +230,7 @@ export function ContractPricesPage() {
 
         <section aria-label="الأسعار" className="flex flex-col gap-3">
           <SectionHead title="الأسعار">
-            <Select label="عرض" hideLabel value={filter} onChange={(e) => setFilter(e.target.value)}>
-              <option value="">الكل</option>
-              {CUSTOMER_KINDS.map((k) => (
-                <option key={k} value={`k:${k}`}>
-                  {CUSTOMER_KIND_LABELS[k]}
-                </option>
-              ))}
-              {customers.map((c) => (
-                <option key={c.id} value={`c:${c.id}`}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
+            <WhoSelect label="عرض" hideLabel emptyLabel="الكل" value={filter} onChange={setFilter} />
           </SectionHead>
           {error ? <Alert tone="error">{error}</Alert> : null}
           {items && items.length === 0 ? (
@@ -300,7 +267,7 @@ export function ContractPricesPage() {
             ))}
           </ul>
         </section>
-        <PriceListSection customers={customers} />
+        <PriceListSection />
       </div>
       <Dialog
         open={removing !== null}

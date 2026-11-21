@@ -394,4 +394,38 @@ describe('a delivery fee as typed', () => {
     expect(feeOf('-3', 0)).toBeNull();
     expect(feeOf('1..5', 2)).toBeNull();
   });
+
+  it('saves «توصيل مجاني فوق مبلغ» in minor units, refuses a typo, and clears it when emptied', async () => {
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: owner() },
+      'GET /v1/online-store': { status: 200, body: { ...settings, version: 1 } },
+      'PUT /v1/online-store': (r: MockRequest) => ({
+        status: 200,
+        body: { ...(r.body as OnlineStoreSettings), version: 2 },
+      }),
+      'GET /v1/online-orders?status=pending': { status: 200, body: { items: [] } },
+      'GET /v1/online-orders/cod': { status: 200, body: { currency: 'SYP', couriers: [] } },
+    });
+    const { user } = renderApp('/online-store');
+    await user.click(await screen.findByRole('radio', { name: 'إعدادات المتجر' }));
+    const field = await screen.findByLabelText('توصيل مجاني فوق مبلغ');
+    // Arabic-Indic digits and the thousands comma are read
+    await user.type(field, '٥٠٠٠٠');
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await screen.findByText(/حُفظ/);
+    expect(requestsTo('PUT', '/v1/online-store')[0]!.body).toMatchObject({
+      freeDeliveryOverMinor: 5_000_000,
+    });
+    // A typo is told on the field and nothing is sent with it
+    await user.clear(field);
+    await user.type(field, '12ab');
+    expect(await screen.findByText(/اكتب رقماً صحيحاً، مثل 500000/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'احفظ' })).toBeDisabled();
+    // Emptied: no offer
+    await user.clear(field);
+    await user.click(screen.getByRole('button', { name: 'احفظ' }));
+    await screen.findByText(/حُفظ/);
+    expect(requestsTo('PUT', '/v1/online-store')[1]!.body).toMatchObject({ freeDeliveryOverMinor: null });
+  });
 });

@@ -382,7 +382,7 @@ describe('«التحويل بين الفروع»: a slip and a cancel', () => {
     });
     const { user } = renderApp('/transfers');
     const table = await screen.findByRole('table', { name: 'التحويلات' });
-    await user.click(within(table).getByRole('button', { name: 'ألغِ التحويل' }));
+    await user.click(await within(table).findByRole('button', { name: 'ألغِ التحويل' }));
     const dialog = await screen.findByRole('dialog');
     expect(requestsTo('POST', '/v1/transfers/t-9/cancel')).toHaveLength(0);
     await user.type(within(dialog).getByLabelText('السبب (اختياري)'), 'كمية خاطئة');

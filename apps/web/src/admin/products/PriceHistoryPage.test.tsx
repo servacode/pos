@@ -133,7 +133,7 @@ describe('«سجل تغيير الأسعار»', () => {
   });
 
   it('undoes a bulk change from the history, once, and offers nothing on a change already taken back', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const nativeConfirm = vi.spyOn(window, 'confirm');
     const bulk = (n: number, extra: Partial<PriceChange> = {}) =>
       row(n, { source: 'bulk', note: 'تعديل جماعي -30٪', batchId: 'b-1', undone: false, ...extra });
     const { requestsTo } = mockFetch({
@@ -158,6 +158,11 @@ describe('«سجل تغيير الأسعار»', () => {
     expect(screen.getAllByRole('button', { name: 'تراجع عن هذا التغيير' })).toHaveLength(1);
     expect(table).toHaveTextContent('تم التراجع عنه');
     await user.click(screen.getByRole('button', { name: 'تراجع عن هذا التغيير' }));
+    // The app's own dialog asks, not the browser's; nothing is sent until the owner says yes
+    const dialog = await screen.findByRole('dialog');
+    expect(requestsTo('POST', '/v1/prices/bulk/b-1/undo')).toHaveLength(0);
+    await user.click(within(dialog).getByRole('button', { name: 'نعم، رجّع الأسعار' }));
+    expect(nativeConfirm).not.toHaveBeenCalled();
     expect(await screen.findByText(/رجعت قطعتان إلى سعرها قبل التغيير/)).toBeInTheDocument();
     expect(requestsTo('POST', '/v1/prices/bulk/b-1/undo')).toHaveLength(1);
   });

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 import { bearer, staffUser, testStore } from './staff';
+import { documents, goldenFirstSale, openStore, push, shiftOpen } from './accounting-fixtures';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -94,6 +95,41 @@ describe('GET /v1/me/home-summary', () => {
     expect((await summary(owner.accessToken)).json().usdRate).toBeNull();
     await db`update tenant_settings set enabled_currencies = array['SYP', 'USD']::text[] where tenant_id = ${owner.tenantId}`;
     expect((await summary(owner.accessToken)).json().usdRate).toBe('13000');
+  });
+
+  it('counts the cash the till took, in pounds, and the dollars apart (the drawers are child accounts of 1110)', async () => {
+    const store = await openStore(app);
+    const db = ownerDb();
+    await db`update tenant_settings set enabled_currencies = array['SYP', 'USD']::text[] where tenant_id = ${store.tenantId}`;
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const first = doc('sale', goldenFirstSale(store, open.id));
+    const pushed = await push(app, store.device, [open, first]);
+    expect(pushed.results.map((r) => r.status)).toEqual(['accepted', 'accepted']);
+    // The parent 1110 holds no line at all: the figure must come from the two children
+    const [parent] = await db<{ n: string }[]>`
+      select count(*)::text as n from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+      where l.tenant_id = ${store.tenantId} and a.code = '1110'`;
+    expect(parent!.n).toBe('0');
+    const ledger = async (code: string) =>
+      Number(
+        (
+          await db<{ n: string }[]>`
+            select coalesce(sum(l.amount_minor), 0)::text as n
+            from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+            where l.tenant_id = ${store.tenantId} and a.code = ${code}`
+        )[0]!.n,
+      );
+    const body = (await summary(store.accessToken)).json();
+    expect(body.cashMinor).toBe(await ledger('111001'));
+    expect(body.cashMinor).toBeGreaterThan(0);
+    expect(body.cashUsdMinor).toBe(await ledger('111002'));
+    expect(body.cashUsdMinor).toBe(900);
+    // Dollars switched off: the dollar figure goes away, the pounds stay
+    await db`update tenant_settings set enabled_currencies = array['SYP']::text[] where tenant_id = ${store.tenantId}`;
+    const off = (await summary(store.accessToken)).json();
+    expect(off.cashUsdMinor).toBeNull();
+    expect(off.cashMinor).toBe(await ledger('111001'));
   });
 
   it('needs a signed-in user', async () => {

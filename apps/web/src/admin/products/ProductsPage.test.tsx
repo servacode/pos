@@ -649,6 +649,16 @@ describe('round 50: the margin column, the status counts and the accountant', ()
     expect(rows[2]).not.toHaveTextContent('٪');
   });
 
+  it('works the margin on the price averaged over the stocked sizes, not the cheapest size', async () => {
+    openProducts({ [list({ cost: '1' })]: page([listItem({ costMinor: 6_000, costPriceMinor: 12_000 })]) }, [
+      'catalog.manage',
+      'cost.view',
+    ]);
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    await within(table).findByText('٪');
+    expect(within(table).getAllByRole('row')[1]).toHaveTextContent('50٪');
+  });
+
   it('has no margin column for who does not see costs', async () => {
     openProducts();
     const table = await screen.findByRole('table', { name: 'المنتجات' });

@@ -250,6 +250,8 @@ function ProductCard() {
   const [search] = useSearchParams();
   const canManage = canManageCatalog(me);
   const formRef = useRef<HTMLFormElement>(null);
+  // The field that just refused a typed minus: the digits typed next are ignored with it
+  const signRefused = useRef<HTMLElement | null>(null);
 
   const [lookups, setLookups] = useState<Lookups | null>(null);
   const [product, setProduct] = useState<ProductDetail | null>(null);
@@ -345,7 +347,10 @@ function ProductCard() {
         // A new product starts with the store's default tax rate (الضرائب), when it chose one
         const defaultBp = taxRates.defaultRateBp ?? 0;
         const defaultTax =
-          defaultBp > 0 ? taxRates.items.find((t) => !t.archivedAt && t.rateBp === defaultBp) : undefined;
+          defaultBp > 0
+            ? (taxRates.items.find((t) => !t.archivedAt && t.id === taxRates.defaultRateId) ??
+              taxRates.items.find((t) => !t.archivedAt && t.rateBp === defaultBp))
+            : undefined;
         // Whatever is already typed stays: a late answer (or a reload of the same lookups) never wipes the form
         setDraft(
           (typed) =>
@@ -703,10 +708,21 @@ function ProductCard() {
         onKeyDown={(event) => {
           // A price is never negative: the field would drop the sign and save a positive one
           const target = event.target as HTMLElement;
-          if ((event.key === '-' || event.key === '−') && target.getAttribute('inputmode') === 'decimal') {
+          if (target.getAttribute('inputmode') !== 'decimal') return;
+          if (event.key === '-' || event.key === '−') {
             event.preventDefault();
+            signRefused.current = target;
             setFormError('الأسعار والكميات لا تقبل رقماً سالباً. اكتب الرقم بلا إشارة ناقص.');
+            return;
           }
+          // The digits typed right after a refused sign are ignored too: «-5» must not become 5
+          if (signRefused.current === target) {
+            if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) event.preventDefault();
+            else if (event.key === 'Backspace' || event.key === 'Delete') signRefused.current = null;
+          }
+        }}
+        onBlur={() => {
+          signRefused.current = null;
         }}
         onPaste={(event) => {
           const target = event.target as HTMLElement;

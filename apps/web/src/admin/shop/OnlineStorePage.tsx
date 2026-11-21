@@ -101,6 +101,49 @@ function StateWord({ on }: { on: boolean }) {
   return <strong className="font-semibold text-ink">{on ? 'مفعّل' : 'متوقف'} · </strong>;
 }
 
+/** «توصيل مجاني فوق مبلغ»: a delivered order whose goods reach it pays no courier fee; blank: no such offer */
+function FreeDeliveryOver({
+  value,
+  onChange,
+  onInvalid,
+  error,
+}: {
+  value: number | null;
+  onChange: (minor: number | null) => void;
+  onInvalid: (invalid: boolean) => void;
+  error?: string | undefined;
+}) {
+  const me = useMe();
+  const base = me.settings.baseCurrency;
+  const decimals = CURRENCIES[base].decimals;
+  const [text, setText] = useState(value === null ? '' : String(value / 10 ** decimals));
+  const [bad, setBad] = useState(false);
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <TextField
+        label="توصيل مجاني فوق مبلغ"
+        hint="فارغ: لا يوجد. الطلب الذي تبلغ بضاعته هذا المبلغ فأكثر يوصَّل بلا أجرة، ويقرأ الزبون ذلك في المتجر والسلة."
+        dir="ltr"
+        inputMode="decimal"
+        value={text}
+        onChange={(e) => {
+          const typed = e.target.value.slice(0, 14);
+          setText(typed);
+          const minor = feeOf(typed, decimals);
+          const wrong = minor === null;
+          setBad(wrong);
+          onInvalid(wrong);
+          if (!wrong) onChange(minor === 0 ? null : minor);
+        }}
+        endAdornment={<Unit>{CURRENCIES[base].symbolAr}</Unit>}
+        inputClassName="num"
+        className="sm:max-w-60"
+        error={bad ? 'اكتب رقماً صحيحاً، مثل 500000 (الفاصلة للآلاف فقط)' : error}
+      />
+    </div>
+  );
+}
+
 export function OnlineStorePage() {
   const me = useMe();
   const permissions = new Set<string>(me.user.permissions);
@@ -457,7 +500,16 @@ function ShopPreview({
                 key={good ? good.name : tile}
                 className="flex flex-col gap-2 rounded-small border border-line bg-surface p-2"
               >
-                <span className="aspect-[4/3] rounded-small bg-surface-muted" />
+                {good ? (
+                  <span
+                    aria-hidden="true"
+                    className="grid aspect-[4/3] place-items-center rounded-small bg-linear-to-br from-brand-soft to-surface-muted text-lg font-bold text-brand-ink/70 select-none"
+                  >
+                    {[...good.name][0]}
+                  </span>
+                ) : (
+                  <span className="aspect-[4/3] rounded-small bg-surface-muted" />
+                )}
                 {good ? (
                   <>
                     <span className="line-clamp-2 text-xs font-semibold text-ink">{good.name}</span>
@@ -489,6 +541,7 @@ function SettingsCard() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [feeBad, setFeeBad] = useState(false);
+  const [freeBad, setFreeBad] = useState(false);
   // What the server holds, to tell an unsaved change from none
   const [kept, setKept] = useState('');
 
@@ -536,7 +589,7 @@ function SettingsCard() {
   };
 
   async function save() {
-    if (!form || whatsappError || feeBad) return;
+    if (!form || whatsappError || feeBad || freeBad) return;
     setSaving(true);
     setError(null);
     setFields({});
@@ -660,6 +713,12 @@ function SettingsCard() {
                   onInvalid={setFeeBad}
                   error={fields.deliveryAreas ?? fields.deliveryFeeMinor}
                 />
+                <FreeDeliveryOver
+                  value={form.freeDeliveryOverMinor ?? null}
+                  onChange={(freeDeliveryOverMinor) => set({ freeDeliveryOverMinor })}
+                  onInvalid={setFreeBad}
+                  error={fields.freeDeliveryOverMinor}
+                />
               </div>
             ) : null}
             <div className="border-t border-line pt-4">
@@ -711,7 +770,9 @@ function SettingsCard() {
                 description={
                   <>
                     <StateWord on={form.showOutOfStock} />
-                    تظهر بكلمة «نفد» ولا تُطلب. مطفأ: تختفي حتى تصل من جديد.
+                    {form.showOutOfStock
+                      ? 'القطع التي نفد مخزونها تظهر بكلمة «نفد» ولا تُطلب.'
+                      : 'القطع التي نفد مخزونها تختفي حتى تصل من جديد.'}
                   </>
                 }
                 checked={form.showOutOfStock}
@@ -724,7 +785,9 @@ function SettingsCard() {
                 description={
                   <>
                     <StateWord on={form.showPrices} />
-                    مطفأ: يرى الزبون القطع والصور دون سعر، ويصلك الطلب استفساراً تؤكد له سعره.
+                    {form.showPrices
+                      ? 'يرى الزبون الأسعار ويطلب بها.'
+                      : 'يرى الزبون القطع والصور دون سعر، ويصلك الطلب استفساراً تؤكد له سعره.'}
                   </>
                 }
                 checked={form.showPrices}
@@ -756,7 +819,7 @@ function SettingsCard() {
             {dirty ? (
               <Button
                 loading={saving}
-                disabled={Boolean(whatsappError) || feeBad}
+                disabled={Boolean(whatsappError) || feeBad || freeBad}
                 onClick={() => void save()}
               >
                 احفظ

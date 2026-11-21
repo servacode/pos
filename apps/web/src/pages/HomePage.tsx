@@ -1582,18 +1582,23 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 function MorningLine({
   yesterday,
   cash,
+  cashUsd,
+  owed,
   rate,
   base,
   digits,
 }: {
   yesterday: number | null;
   cash: number | null;
+  cashUsd: number | null;
+  /** What the store owes its suppliers (for who may open them) */
+  owed: { minor: number; currency: CurrencyCode } | null;
   rate: string | null;
   base: CurrencyCode;
   digits: NumberFormat;
 }) {
   const dollar = rate !== null && Number(rate) > 0 ? Number(rate) : null;
-  if (yesterday === null && cash === null && dollar === null) return null;
+  if (yesterday === null && cash === null && dollar === null && owed === null) return null;
   const chip =
     'inline-flex min-h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-sm whitespace-nowrap text-ink-muted';
   return (
@@ -1606,6 +1611,20 @@ function MorningLine({
       {cash !== null ? (
         <li className={chip}>
           الصندوق الآن <Money minor={cash} currency={base} className="font-semibold text-ink" />
+          {cashUsd !== null ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <Money minor={cashUsd} currency="USD" className="font-semibold text-ink" />
+            </>
+          ) : null}
+        </li>
+      ) : null}
+      {owed !== null ? (
+        <li className={chip}>
+          <Link to="/suppliers" className="inline-flex items-center gap-1.5">
+            علينا للموردين{' '}
+            <Money minor={owed.minor} currency={owed.currency} className="font-semibold text-ink" />
+          </Link>
         </li>
       ) : null}
       {dollar !== null ? (
@@ -1638,11 +1657,11 @@ function TillCard() {
   );
 }
 
-function StoreCard({ me, className }: { me: MeResponse; className?: string }) {
+function StoreCard({ me, className, wide }: { me: MeResponse; className?: string; wide?: boolean }) {
   const base = CURRENCIES[me.settings.baseCurrency];
   return (
     <Panel title="متجرك" className={className}>
-      <dl className="flex flex-col gap-5">
+      <dl className={wide ? 'flex flex-wrap gap-x-6 gap-y-3' : 'flex flex-col gap-5'}>
         <InfoRow label="نشاط المتجر">
           <ul className="flex flex-wrap gap-2" aria-label="نشاط المتجر">
             {me.tenant.sectors.map((sector) => (
@@ -1850,6 +1869,12 @@ export function HomePage() {
               <MorningLine
                 yesterday={weekPoints[5]?.total ?? null}
                 cash={summary.data?.cashMinor ?? null}
+                cashUsd={summary.data?.cashUsdMinor ?? null}
+                owed={
+                  money.seesSuppliers && (suppliers.data?.totalOwedMinor ?? 0) > 0
+                    ? { minor: suppliers.data!.totalOwedMinor, currency: suppliers.data!.baseCurrency }
+                    : null
+                }
                 rate={summary.data?.usdRate ?? null}
                 base={base}
                 digits={me.settings.numberFormat}
@@ -1969,10 +1994,10 @@ export function HomePage() {
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
             </div>
-            {/* The shop's card is for the first days: on a phone it is left to the settings page */}
-            {seesSales ? <StoreCard me={me} className="max-md:hidden" /> : null}
           </div>
         </div>
+        {/* The shop's card is for the first days: a full-width strip under the columns (so none ends ragged); on a phone it is left to the settings page */}
+        {seesSales ? <StoreCard me={me} className="max-md:hidden" wide /> : null}
       </SalesPage>
     </AppShell>
   );

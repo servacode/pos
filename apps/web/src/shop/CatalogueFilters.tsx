@@ -140,7 +140,7 @@ export function CatalogueFilters({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
-        {search ? <div className="min-w-0 basis-40 flex-1 sm:basis-64">{search}</div> : null}
+        {search ? <div className="min-w-0 basis-full sm:basis-64 sm:flex-1">{search}</div> : null}
         {hasAnything ? (
           <button
             type="button"
@@ -149,7 +149,7 @@ export function CatalogueFilters({
             onClick={() => setOpen((o) => !o)}
             className={cn(
               CONTROL_HEIGHT[density],
-              'inline-flex shrink-0 items-center gap-2 rounded-small border px-4 text-sm font-semibold transition-colors duration-120 ease-standard select-none',
+              'inline-flex flex-1 items-center justify-center gap-2 rounded-small border px-4 sm:flex-none sm:shrink-0 text-sm font-semibold transition-colors duration-120 ease-standard select-none',
               open || count > 0
                 ? 'border-brand bg-brand-soft text-brand-ink'
                 : 'border-line-control/50 bg-surface text-ink shadow-e1 hover:bg-surface-muted',
@@ -168,7 +168,7 @@ export function CatalogueFilters({
           hideLabel
           value={sort}
           onChange={(e) => onSort(e.target.value as ShopSort)}
-          className="w-28 flex-none sm:w-44"
+          className="min-w-0 flex-1 sm:w-44 sm:flex-none"
         >
           <option value="newest">الأحدث</option>
           {showPrices ? <option value="price-asc">السعر: الأقل أولاً</option> : null}

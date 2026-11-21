@@ -7,7 +7,7 @@ export const previewPriceList = (rows: PriceListFileRow[]) =>
 
 export const applyPriceList = (
   fileName: string,
-  changes: { variantId: string; newMinor: number; wholeModel?: boolean }[],
+  changes: { variantId: string; newMinor: number; wholeModel?: boolean; expectedOldMinor?: number }[],
 ) =>
   apiFetch<PriceListApplied>('/v1/prices/list/apply', {
     method: 'POST',

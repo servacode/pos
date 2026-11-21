@@ -556,27 +556,36 @@ export function CustomerPage() {
                           {invoices[0] ? dayText(invoices[0].date, digits) : purchases ? 'لم يشترِ بعد' : '—'}
                         </dd>
                       </div>
-                      <div>
-                        <dt>الأسعار والرسائل</dt>
-                        <dd>
-                          {customer.priceTier === 'wholesale' ? 'سعر الجملة' : 'سعر المفرد'}
-                          {customer.noMessages ? ' · لا يريد رسائل' : ''}
-                        </dd>
-                      </div>
+                      {customer.priceTier === 'wholesale' || customer.noMessages ? (
+                        <div>
+                          <dt>الأسعار والرسائل</dt>
+                          <dd>
+                            {customer.priceTier === 'wholesale' ? 'سعر الجملة' : ''}
+                            {customer.priceTier === 'wholesale' && customer.noMessages ? ' · ' : ''}
+                            {customer.noMessages ? 'لا يريد رسائل' : ''}
+                          </dd>
+                        </div>
+                      ) : null}
                       {customer.birthDate ? (
                         <div>
                           <dt>تاريخ الميلاد</dt>
                           <dd>{dayText(customer.birthDate, digits)}</dd>
                         </div>
                       ) : null}
-                      <div>
-                        <dt>العنوان</dt>
-                        <dd>{customer.address ?? '—'}</dd>
-                      </div>
-                      <div>
-                        <dt>الرقم الضريبي</dt>
-                        <dd>{customer.taxNumber ? <bdi className="sx-n">{customer.taxNumber}</bdi> : '—'}</dd>
-                      </div>
+                      {customer.address ? (
+                        <div>
+                          <dt>العنوان</dt>
+                          <dd>{customer.address}</dd>
+                        </div>
+                      ) : null}
+                      {customer.taxNumber ? (
+                        <div>
+                          <dt>الرقم الضريبي</dt>
+                          <dd>
+                            <bdi className="sx-n">{customer.taxNumber}</bdi>
+                          </dd>
+                        </div>
+                      ) : null}
                       {customer.contactName || customer.contactPhone ? (
                         <div>
                           <dt>المسؤول</dt>

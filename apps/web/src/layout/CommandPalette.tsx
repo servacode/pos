@@ -352,7 +352,7 @@ export function CommandPalette({
           ))}
         </div>
         <p role="status" aria-live="polite" className="sh-sr">
-          {q.length < 2 ? '' : searching ? 'جارٍ البحث…' : total === 0 ? '' : `${String(total)} نتيجة`}
+          {q.length < 2 || searching ? '' : total === 0 ? '' : `${String(total)} نتيجة`}
         </p>
         <div className="sh-pbody">
           {shownActions.length > 0 ? (

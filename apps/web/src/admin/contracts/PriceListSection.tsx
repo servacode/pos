@@ -1,15 +1,9 @@
 import { useState } from 'react';
-import {
-  CUSTOMER_KIND_LABELS,
-  CUSTOMER_KINDS,
-  getCurrency,
-  type CustomerKind,
-  type CustomerListItem,
-  type PriceListSheet,
-} from '@serva/core';
+import { getCurrency, type CustomerKind, type PriceListSheet } from '@serva/core';
 import { Alert, Button, Card, DataTable, Money, PrintIcon, Select, type DataColumn } from '@serva/ui';
 import { dayText } from '../../lib/dates';
 import { errorMessage } from '../../lib/api';
+import { WhoSelect } from '../customers/WhoSelect';
 import { downloadCsv } from '../exportCsv';
 import { SectionHead } from '../purchases/parts';
 import { getPriceListSheet } from './api';
@@ -25,7 +19,7 @@ const SOURCE_TEXT: Record<PriceListSheet['rows'][number]['source'], string> = {
  * today (the contract price in force, else the wholesale price for a wholesale customer, else the
  * shelf price). Printed from the browser or saved as CSV.
  */
-export function PriceListSection({ customers }: { customers: CustomerListItem[] }) {
+export function PriceListSection() {
   const [who, setWho] = useState('');
   const [tier, setTier] = useState<'retail' | 'wholesale'>('retail');
   const [sheet, setSheet] = useState<PriceListSheet | null>(null);
@@ -97,23 +91,7 @@ export function PriceListSection({ customers }: { customers: CustomerListItem[] 
       />
       <Card className="flex flex-col gap-4 print:hidden">
         <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] sm:items-end">
-          <Select label="لمن القائمة" value={who} onChange={(e) => setWho(e.target.value)}>
-            <option value="">اختر</option>
-            <optgroup label="نوع زبائن">
-              {CUSTOMER_KINDS.map((k) => (
-                <option key={k} value={`k:${k}`}>
-                  كل زبائن النوع: {CUSTOMER_KIND_LABELS[k]}
-                </option>
-              ))}
-            </optgroup>
-            <optgroup label="زبون">
-              {customers.map((c) => (
-                <option key={c.id} value={`c:${c.id}`}>
-                  {c.name}
-                </option>
-              ))}
-            </optgroup>
-          </Select>
+          <WhoSelect label="لمن القائمة" value={who} onChange={setWho} />
           {isKind ? (
             <Select
               label="السعر الأساسي"

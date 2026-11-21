@@ -89,6 +89,7 @@ export async function storeOf(tx: Transaction, tenantId: string) {
     order_mode: 'whatsapp' | 'shop';
     show_prices: boolean;
     delivery_fee_minor: string;
+    free_delivery_over_minor: string | null;
     delivery_areas: { name: string; feeMinor: number }[];
     tagline: string | null;
     accent: 'emerald' | 'teal' | 'blue';
@@ -98,7 +99,7 @@ export async function storeOf(tx: Transaction, tenantId: string) {
   }>(sql`
     select t.name, t.sectors, s.base_currency as base, o.slug, o.whatsapp, o.delivery, o.pickup, o.note,
            o.show_out_of_stock, o.order_mode, o.show_prices, o.delivery_fee_minor::text as delivery_fee_minor,
-           o.delivery_areas, o.tagline, o.accent, o.logo_upload_id, o.cover_upload_id
+           o.free_delivery_over_minor::text as free_delivery_over_minor, o.delivery_areas, o.tagline, o.accent, o.logo_upload_id, o.cover_upload_id
     from online_stores o
     join tenants t on t.id = o.tenant_id
     join tenant_settings s on s.tenant_id = o.tenant_id
@@ -406,6 +407,8 @@ export function shopHome(db: Database, slug: string): Promise<ShopHome> {
           orderMode: store.order_mode,
           showPrices: show,
           deliveryFeeMinor: show ? Number(store.delivery_fee_minor) : 0,
+          freeDeliveryOverMinor:
+            show && store.free_delivery_over_minor !== null ? Number(store.free_delivery_over_minor) : null,
           deliveryAreas: show
             ? store.delivery_areas
             : store.delivery_areas.map((a) => ({ name: a.name, feeMinor: 0 })),
@@ -759,6 +762,14 @@ async function draftShopOrder(tx: Transaction, tenantId: string, input: z.output
   }
   const lines = await priceLines(tx, base, input.lines, true, coupon);
   const totalMinor = lines.reduce((n, l) => n + l.totalMinor, 0);
+  // «توصيل مجاني فوق مبلغ»: the goods, after the code's offer, reach the store's line: no courier fee
+  if (
+    deliveryFeeMinor > 0 &&
+    store.free_delivery_over_minor !== null &&
+    totalMinor >= Number(store.free_delivery_over_minor)
+  ) {
+    deliveryFeeMinor = 0;
+  }
   return { store, base, coupon, couponSnapshot, lines, totalMinor, deliveryFeeMinor, deliveryArea };
 }
 
@@ -1050,6 +1061,7 @@ const DEFAULTS = (slug: string): OnlineStoreSettings => ({
   orderMode: 'whatsapp',
   showPrices: true,
   deliveryFeeMinor: 0,
+  freeDeliveryOverMinor: null,
   deliveryAreas: [],
   tagline: null,
   accent: 'emerald',
@@ -1079,6 +1091,7 @@ export function getOnlineStore(db: Database, auth: AccessClaims): Promise<Online
       orderMode: row.orderMode as OnlineStoreSettings['orderMode'],
       showPrices: row.showPrices,
       deliveryFeeMinor: row.deliveryFeeMinor,
+      freeDeliveryOverMinor: row.freeDeliveryOverMinor,
       deliveryAreas: row.deliveryAreas,
       tagline: row.tagline,
       accent: row.accent as OnlineStoreSettings['accent'],
@@ -1124,6 +1137,7 @@ export async function saveOnlineStore(
         orderMode: input.orderMode,
         showPrices: input.showPrices,
         deliveryFeeMinor: input.deliveryFeeMinor,
+        freeDeliveryOverMinor: input.freeDeliveryOverMinor,
         deliveryAreas: input.deliveryAreas,
         tagline: input.tagline || null,
         accent: input.accent,

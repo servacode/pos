@@ -188,6 +188,29 @@ describe('a new product', () => {
     expect(await screen.findByText(/تُعرض بلا كسور/)).toBeInTheDocument();
   });
 
+  it('picks the default tax by its id when two rates share one percentage', async () => {
+    const twin = { ...taxRates[0]!, id: '00000000-0000-4000-8000-0000000000f9', name: 'رسم ثانٍ' };
+    openCard('/products/new', {
+      'GET /v1/tax-rates': {
+        status: 200,
+        body: { items: [...taxRates, twin], defaultRateBp: 500, defaultRateId: twin.id },
+      },
+    });
+    await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
+    expect(screen.getByLabelText('الضريبة')).toHaveValue(twin.id);
+  });
+
+  it('drops the digits typed after a refused minus: «-5» does not become 5', async () => {
+    const { user } = openCard('/products/new');
+    await screen.findByLabelText('اسم المنتج');
+    await user.type(screen.getByLabelText('سعر البيع'), '-5');
+    expect(screen.getByLabelText('سعر البيع')).toHaveValue('');
+    expect(await screen.findByText(/لا تقبل رقماً سالباً/)).toBeInTheDocument();
+    // a deletion lifts the freeze: the next number goes in
+    await user.type(screen.getByLabelText('سعر البيع'), '{Backspace}7');
+    expect(screen.getByLabelText('سعر البيع')).toHaveValue('7');
+  });
+
   it('starts with the barcode scanned on the list', async () => {
     openCard('/products/new?barcode=6290360100125');
     expect(await screen.findByText('6290360100125')).toBeInTheDocument();

@@ -219,6 +219,13 @@ export function applyPriceList(
     const base = await baseCurrency(tx);
     // The last price asked for a piece wins
     const wanted = new Map(input.changes.map((c) => [c.variantId, c.newMinor]));
+    // What the preview showed for a piece the file named: a price that moved since is not overwritten
+    const expected = new Map(
+      input.changes.flatMap((c) =>
+        c.expectedOldMinor === undefined ? [] : [[c.variantId, c.expectedOldMinor] as const],
+      ),
+    );
+    let stale = 0;
     // A row for the whole model reaches the model's other live variants too, unless the file named them
     const modelWide = input.changes.filter((c) => c.wholeModel);
     if (modelWide.length > 0) {
@@ -248,6 +255,11 @@ export function applyPriceList(
       const piece = pieceOf(r);
       const newMinor = wanted.get(piece.variantId)!;
       if (piece.currency !== base || piece.price === newMinor) return [];
+      const shown = expected.get(piece.variantId);
+      if (shown !== undefined && shown !== piece.price) {
+        stale += 1;
+        return [];
+      }
       return [{ ...piece, currency: piece.currency as CurrencyCode, oldMinor: piece.price, newMinor }];
     });
     if (items.length > 0) {
@@ -302,6 +314,7 @@ export function applyPriceList(
     return {
       changed: items.length,
       skipped: ids.length - items.length,
+      stale,
       items: items.map((i) => ({
         productId: i.productId,
         variantId: i.variantId,

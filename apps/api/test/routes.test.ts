@@ -300,6 +300,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/suppliers/:id/opening-balance': 'signed-in',
   'POST /v1/products/:id/opening-stock': 'signed-in',
   'POST /v1/promotions/:id/archive': 'signed-in',
+  'POST /v1/promotions/:id/end-date': 'signed-in',
   'POST /v1/shop/:slug/quote': 'public',
   'POST /v1/transfers/:id/cancel': 'signed-in',
   'GET /v1/period-close': 'signed-in',
@@ -1450,6 +1451,27 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
       { archived_at: Date | null }[]
     >`select archived_at from promotions where id = ${id}`;
     expect(row!.archived_at).toBeNull();
+  },
+  // Another store's offer does not get a new end date
+  'POST /v1/promotions/:id/end-date': async (app, { a, b }) => {
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/promotions',
+      headers: owner(a),
+      payload: { name: 'عرض أ', kind: 'percent', percentBp: 500, scope: 'all' },
+    });
+    const { id } = made.json<{ id: string }>();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/promotions/${id}/end-date`,
+      headers: owner(b),
+      payload: { version: 1, endsAt: '2030-01-01T00:00:00.000Z' },
+    });
+    expect(res.statusCode).toBe(404);
+    const [row] = await ownerDb()<
+      { ends_at: Date | null }[]
+    >`select ends_at from promotions where id = ${id}`;
+    expect(row!.ends_at).toBeNull();
   },
   // A product of one shop is not priced through another shop's address
   'POST /v1/shop/:slug/quote': async (app, stores) => {

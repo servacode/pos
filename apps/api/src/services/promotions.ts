@@ -291,9 +291,50 @@ export function archivePromotion(
 }
 
 /**
+ * Moves or clears the end of an offer (a stopped or an ended one too, to bring it back to a new date).
+ * Only `endsAt` changes; the end must come after the offer's start.
+ */
+export function setPromotionEndDate(
+  db: Database,
+  auth: AccessClaims,
+  id: string,
+  input: { version: number; endsAt: string | null },
+  meta: RequestMeta,
+): Promise<Promotion> {
+  return withTenant(db, auth.tenantId, async (tx) => {
+    await requirePermission(tx, auth.userId, 'catalog.manage');
+    const before = await one(tx, id);
+    if (before.version !== input.version) throw staleVersion();
+    const endsAt = input.endsAt ? new Date(input.endsAt) : null;
+    if (endsAt && before.startsAt && endsAt.getTime() <= before.startsAt.getTime()) {
+      throw fieldError('endsAt', 'النهاية بعد البداية');
+    }
+    const [row] = await tx
+      .update(promotions)
+      .set({ endsAt })
+      .where(and(eq(promotions.id, id), eq(promotions.version, input.version)))
+      .returning();
+    if (!row) throw staleVersion();
+    await audit(
+      tx,
+      {
+        tenantId: auth.tenantId,
+        userId: auth.userId,
+        action: 'promotion.update',
+        entity: 'promotion',
+        entityId: id,
+        changes: { endsAt: [before.endsAt?.toISOString() ?? null, endsAt?.toISOString() ?? null] },
+      },
+      meta,
+    );
+    return view(row);
+  });
+}
+
+/**
  * What each offer did at the tills between two dates. A sale line keeps its offer's id (newer tills) and
  * its name as the reason of the `promotion` discount: rows group by the id when there is one, else by the
- * name, and show the latest name. The returns of those lines in the same period are taken off pro rata.
+ * name, and show the name on the latest invoice. The returns of those lines in the same period are taken off pro rata.
  * The period is capped by the contract (366 days).
  */
 export function promotionReport(
@@ -315,8 +356,8 @@ export function promotionReport(
     };
     const sold = await tx.execute<Row>(sql`
       select coalesce(l -> 'discount' ->> 'promotionId', l -> 'discount' ->> 'reason') as key,
-             max(l -> 'discount' ->> 'reason') as name, i.currency,
-             count(distinct i.id)::int as invoices,
+             (array_agg(l -> 'discount' ->> 'reason' order by i.business_date desc, i.created_at desc, i.id desc))[1] as name,
+             i.currency, count(distinct i.id)::int as invoices,
              coalesce(sum((l ->> 'qty')::bigint), 0)::text as pieces,
              coalesce(sum((l -> 'priced' ->> 'lineDiscountMinor')::bigint), 0)::text as discount,
              coalesce(sum((l -> 'priced' ->> 'netMinor')::bigint), 0)::text as net,

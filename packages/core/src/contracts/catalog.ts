@@ -516,6 +516,8 @@ export interface ProductListItem {
   wholesale?: { minMinor: number; maxMinor: number } | null;
   /** The average cost of one unit in the base currency; null: none, or the user lacks cost.view (`detail=1`) */
   costMinor?: number | null;
+  /** The shelf price averaged over the same stocked units the cost is averaged over (the margin's price) */
+  costPriceMinor?: number | null;
   version: number;
 }
 
@@ -669,6 +671,8 @@ export type DefaultTaxRateInput = z.input<typeof defaultTaxRateInput>;
 export interface TaxRateList {
   items: TaxRate[];
   defaultRateBp: number;
+  /** The rate picked as the default (told apart from another rate with the same percentage); null when not known */
+  defaultRateId?: string | null;
 }
 
 // ─── Pull sets: the rows a cashier device stores ──────────────────────────────

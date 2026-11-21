@@ -673,6 +673,20 @@
       "when": 1795165970887,
       "tag": "0096_customers_round50",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1795165971887,
+      "tag": "0097_products_round52",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1795165972887,
+      "tag": "0098_shop_free_delivery",
+      "breakpoints": true
     }
   ]
 }

@@ -160,6 +160,7 @@ export function TaxRatesPage() {
   const canEdit = me.user.permissions.includes('settings.manage');
   const [rates, setRates] = useState<TaxRate[] | null>(null);
   const [defaultBp, setDefaultBp] = useState(0);
+  const [defaultId, setDefaultId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ rate: TaxRate | null } | null>(null);
 
@@ -169,14 +170,18 @@ export function TaxRatesPage() {
       .then((r) => {
         setRates(r.items);
         setDefaultBp(r.defaultRateBp ?? 0);
+        setDefaultId(r.defaultRateId ?? null);
       })
       .catch((e: unknown) => setError(errorMessage(e)));
   }, []);
   useEffect(load, [load]);
 
   const live = (rates ?? []).filter((r) => !r.archivedAt);
-  // The default is a percentage: the first live rate with it stands for it
-  const defaultRate = defaultBp > 0 ? live.find((r) => r.rateBp === defaultBp) : undefined;
+  // The picked rate when known; else the first live rate with the stored percentage stands for it
+  const defaultRate =
+    defaultBp > 0
+      ? (live.find((r) => r.id === defaultId) ?? live.find((r) => r.rateBp === defaultBp))
+      : undefined;
 
   async function chooseDefault(taxRateId: string) {
     setError(null);
@@ -184,6 +189,7 @@ export function TaxRatesPage() {
       const r = await setDefaultRate({ taxRateId: taxRateId || null });
       setRates(r.items);
       setDefaultBp(r.defaultRateBp);
+      setDefaultId(r.defaultRateId ?? null);
     } catch (e) {
       setError(errorMessage(e));
     }

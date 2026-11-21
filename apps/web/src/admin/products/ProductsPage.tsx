@@ -193,7 +193,8 @@ function MarginCell({ item, base }: { item: ProductListItem; base: string }) {
   if (!item.price || cost === null || cost === undefined || item.price.currency !== base) {
     return <span className="text-ink-subtle">—</span>;
   }
-  const margin = marginPercent(item.price.minMinor, cost);
+  // Both sides averaged over the same stocked units; a model with no priced stock falls back to its lowest price
+  const margin = marginPercent(item.costPriceMinor ?? item.price.minMinor, cost);
   if (margin === null) return <span className="text-ink-subtle">—</span>;
   if (margin < 0) {
     return (

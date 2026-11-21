@@ -205,3 +205,25 @@ describe('the contract prices page', () => {
     await vi.waitFor(() => expect(deleted).toBe(true));
   });
 });
+
+describe('the contract price asks the server for its customer', () => {
+  it('lists no customers up front; one is found by a search and filters the prices', async () => {
+    const mock = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': () => ({ status: 200, body: manager() }),
+      'GET /v1/customers?q=%D9%85%D8%B4': () => ({ status: 200, body: customers }),
+      'GET /v1/contract-prices': () => ({ status: 200, body: { items: [] } }),
+      'GET /v1/contract-prices?customerId=c-1': () => ({ status: 200, body: { items: [] } }),
+    });
+    const { user } = renderApp('/contract-prices');
+    await screen.findByText('لا أسعار عقود.');
+    // no bare call that would stop at the 500th customer
+    expect(mock.requests.some((r) => r.path === '/v1/customers')).toBe(false);
+    await user.selectOptions(screen.getByLabelText('عرض'), '__one__');
+    await user.type(screen.getByLabelText(/ابحث بالاسم أو الجوال/), 'مش');
+    await user.click(await screen.findByRole('button', { name: /مشفى الأمل/ }));
+    await vi.waitFor(() =>
+      expect(mock.requests.some((r) => r.path === '/v1/contract-prices?customerId=c-1')).toBe(true),
+    );
+  });
+});

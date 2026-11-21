@@ -138,7 +138,8 @@ describe('«تحديث الأسعار من ملف»', () => {
     expect(applied).toHaveLength(1);
     expect(applied[0]!.body).toEqual({
       fileName: 'نشرة.csv',
-      changes: [{ variantId: 'v-1', newMinor: 1_250_000 }],
+      // the price the preview showed travels with it, so a piece edited meanwhile is left alone
+      changes: [{ variantId: 'v-1', newMinor: 1_250_000, expectedOldMinor: 1_000_000 }],
     });
     await screen.findByText(/تغيّر سعر 1 صنفاً/);
     await screen.findByRole('heading', { name: 'تغيّر سعرها: اطبع ملصقاتها' });

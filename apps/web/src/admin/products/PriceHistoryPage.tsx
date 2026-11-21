@@ -4,7 +4,7 @@ import { CatalogGate } from './CatalogGate';
 import type { PriceChange, PriceChangeSource } from '@serva/core';
 import { COUNT_NOUNS, countNoun } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
-import { Alert, Button, EmptyState, PercentIcon, Select, TextField } from '@serva/ui';
+import { Alert, Button, Dialog, EmptyState, PercentIcon, Select, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
 import { apiFetch, errorMessage } from '../../lib/api';
@@ -135,6 +135,8 @@ function PriceHistory() {
   const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [undoing, setUndoing] = useState<string | null>(null);
+  // The change waiting for the owner's yes
+  const [asking, setAsking] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -213,8 +215,7 @@ function PriceHistory() {
 
   function undoBatch(batchId: string) {
     if (undoing) return;
-    if (!window.confirm('نرجّع كل قطعة في هذا التغيير إلى سعرها قبله. ما تعدّل بعده يُترك كما هو. نتابع؟'))
-      return;
+    setAsking(null);
     setUndoing(batchId);
     setError(null);
     setNotice(null);
@@ -268,7 +269,7 @@ function PriceHistory() {
                 variant="ghost"
                 size="xs"
                 disabled={undoing !== null}
-                onClick={() => undoBatch(r.batchId ?? '')}
+                onClick={() => setAsking(r.batchId ?? '')}
               >
                 تراجع عن هذا التغيير
               </Button>
@@ -306,6 +307,23 @@ function PriceHistory() {
         <PriceModes current="/price-history" />
         {error ? <Alert tone="error">{error}</Alert> : null}
         {notice ? <Alert tone="success">{notice}</Alert> : null}
+        <Dialog
+          open={asking !== null}
+          onOpenChange={(open) => !open && setAsking(null)}
+          size="sm"
+          title="نرجّع هذا التغيير؟"
+          description="نرجّع كل قطعة في هذا التغيير إلى سعرها قبله. ما تعدّل بعده يُترك كما هو."
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setAsking(null)}>
+                تراجع
+              </Button>
+              <Button variant="danger" onClick={() => undoBatch(asking ?? '')}>
+                نعم، رجّع الأسعار
+              </Button>
+            </>
+          }
+        ></Dialog>
         <div className="sx-toolbar">
           <DateField label="من تاريخ" value={from} onChange={setFrom} />
           <DateField label="حتى تاريخ" value={to} onChange={setTo} />

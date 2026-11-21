@@ -187,18 +187,20 @@ function PriceList() {
     ].map((i) => ({
       variantId: i.variantId!,
       newMinor: i.newMinor,
+      ...(i.oldMinor !== null ? { expectedOldMinor: i.oldMinor } : {}),
       ...(wholeModel && multiVariantByBarcode(i) ? { wholeModel: true } : {}),
     }));
     if (changes.length === 0) return;
     setError(null);
     setBusy(true);
     setProgress({ done: 0, total: changes.length });
-    const total: PriceListApplied = { changed: 0, skipped: 0, items: [] };
+    const total: PriceListApplied = { changed: 0, skipped: 0, stale: 0, items: [] };
     try {
       for (let at = 0; at < changes.length; at += PRICE_LIST_CHUNK_MAX) {
         const answer = await applyPriceList(fileName, changes.slice(at, at + PRICE_LIST_CHUNK_MAX));
         total.changed += answer.changed;
         total.skipped += answer.skipped;
+        total.stale = (total.stale ?? 0) + (answer.stale ?? 0);
         total.items.push(...answer.items);
         setProgress({ done: Math.min(at + PRICE_LIST_CHUNK_MAX, changes.length), total: changes.length });
       }
@@ -505,8 +507,16 @@ function PriceList() {
             <Alert tone="success">
               تغيّر سعر {applied.changed} صنفاً، وتصل الأسعار الجديدة إلى أجهزة الكاشير مع أول اتصال، وسُجّل
               كل تغيير في سجل التدقيق.
-              {applied.skipped > 0 ? ` ${String(applied.skipped)} بقيت كما هي لأن سعرها لم يعد يختلف.` : ''}
+              {applied.skipped - (applied.stale ?? 0) > 0
+                ? ` ${String(applied.skipped - (applied.stale ?? 0))} بقيت كما هي لأن سعرها لم يعد يختلف.`
+                : ''}
             </Alert>
+            {(applied.stale ?? 0) > 0 ? (
+              <Alert tone="warning">
+                {String(applied.stale)} صنفاً تغيّر سعره بعد أن فحصت الملف، فتركناه كما هو ولم نكتب فوقه. افحص
+                الملف من جديد لترى الأسعار الحالية.
+              </Alert>
+            ) : null}
             <section aria-labelledby="price-list-labels" className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 id="price-list-labels" className="text-lg font-semibold text-ink">

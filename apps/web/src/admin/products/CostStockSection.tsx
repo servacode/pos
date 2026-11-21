@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CurrencyCode, ProductCostsResponse, ProductDetail } from '@serva/core';
-import { Alert, Button, MoneyField, NumberField, Select, StockIcon, Switch } from '@serva/ui';
+import {
+  Alert,
+  Button,
+  isolateNegative,
+  MoneyField,
+  NumberField,
+  Select,
+  StockIcon,
+  Switch,
+} from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
 import { isoDay } from '../../lib/dates';
@@ -139,7 +148,10 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
                       {margin !== null ? (
                         <StatusPill kind={margin < 0 ? 'danger' : margin < 10 ? 'warn' : 'ok'}>
                           {margin < 0 ? 'السعر أقل من التكلفة ' : 'هامش '}
-                          <bdi className="num">{margin}</bdi>٪
+                          <bdi className="num">
+                            {margin < 0 ? isolateNegative(`-${String(-margin)}`) : margin}
+                          </bdi>
+                          ٪
                         </StatusPill>
                       ) : (
                         <span className="text-ink-subtle">—</span>

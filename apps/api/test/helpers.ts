@@ -195,14 +195,25 @@ export function salePayload(totalMinor = 1500, extra: Record<string, unknown> = 
  * the same server can hold back what this test just wrote. Tests that pull right after writing
  * call this first.
  */
-export async function settled(timeoutMs = 20_000): Promise<void> {
+export async function settled(timeoutMs = 60_000): Promise<void> {
   const [mark] = await ownerDb()<{ xid: string }[]>`select pg_current_xact_id()::text as xid`;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const [now] = await ownerDb()<{ done: boolean }[]>`
       select pg_snapshot_xmin(pg_current_snapshot()) > ${mark!.xid}::xid8 as done`;
     if (now!.done) return;
-    if (Date.now() > deadline) throw new Error('another transaction on the server stayed open');
+    if (Date.now() > deadline) {
+      // xmin is cluster-wide: name the database holding it back, so a real leak in this
+      // database is told apart from another database's slow truncate on a shared server.
+      const holders = await ownerDb()<{ datname: string; secs: string }[]>`
+        select datname, extract(epoch from now() - xact_start)::int::text as secs
+        from pg_stat_activity
+        where xact_start is not null and pid <> pg_backend_pid() and backend_xid is not null
+        order by xact_start limit 3`;
+      throw new Error(
+        `another transaction on the server stayed open (${holders.map((h) => `${h.datname} ${h.secs}s`).join(', ') || 'none visible'})`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }

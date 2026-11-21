@@ -69,6 +69,8 @@ export interface CustomerPageQuery {
   sort?: 'balance' | 'name' | 'last' | 'spent';
   dir?: 'asc' | 'desc';
   groupId?: string;
+  /** Only customers of one region (the route page adds a whole region) */
+  regionId?: string;
   birthMonth?: number;
   limit: number;
   cursor?: string | null;
@@ -85,6 +87,7 @@ export const listCustomerPage = (query: CustomerPageQuery) => {
   if (query.sort) params.set('sort', query.sort);
   if (query.dir) params.set('dir', query.dir);
   if (query.groupId) params.set('groupId', query.groupId);
+  if (query.regionId) params.set('regionId', query.regionId);
   if (query.birthMonth) params.set('birthMonth', String(query.birthMonth));
   params.set('limit', String(query.limit));
   if (query.cursor) params.set('cursor', query.cursor);

@@ -1,17 +1,61 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { promotionActive, type Promotion } from '@serva/core';
+import { Link } from 'react-router';
+import { promotionActive, type OnlineStoreSettings, type Promotion } from '@serva/core';
 import { AddIcon, Badge, Button, CheckIcon, EmptyState, InfoIcon, OfferIcon, Sheet } from '@serva/ui';
+import { useMe } from '../../auth/useAuth';
 import { AppShell } from '../../layout/AppShell';
-import { errorMessage } from '../../lib/api';
+import { apiFetch, errorMessage } from '../../lib/api';
 import { dayText } from '../../lib/dates';
 import { useIsPhone } from '../../lib/useIsPhone';
-import { PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
+import { Amt, PageTop, Panel, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
 import { archivePromotion, listPromotions } from './api';
+import { EndDateDialog } from './PromotionDialogs';
 import { localDate, PromotionForm, WEEKDAY_NAMES } from './PromotionForm';
 
 const PromotionReportPanel = lazy(() =>
   import('./PromotionReportPanel').then((m) => ({ default: m.PromotionReportPanel })),
 );
+
+/**
+ * «توصيل مجاني فوق مبلغ»: the offer owners ask for most. It is the store's own line (set with the delivery fees in
+ * the online store), shown here with the other offers so it is found. Hidden for someone who cannot read the store.
+ */
+function FreeDeliveryOffer() {
+  const me = useMe();
+  const [store, setStore] = useState<OnlineStoreSettings | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiFetch<OnlineStoreSettings>('/v1/online-store', { auth: true })
+      .then((s) => alive && setStore(s))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!store || !store.delivery) return null;
+  const over = store.freeDeliveryOverMinor ?? null;
+  return (
+    <Panel title="توصيل مجاني فوق مبلغ">
+      <p style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'baseline', margin: 0 }}>
+        {over ? (
+          <>
+            <span>
+              الطلب الذي تبلغ بضاعته <Amt minor={over} currency={me.settings.baseCurrency} /> فأكثر يوصَّل بلا
+              أجرة في المتجر الإلكتروني.
+            </span>
+          </>
+        ) : (
+          <span style={{ color: 'var(--ink-muted)' }}>
+            غير مفعّل: الزبون يدفع أجرة التوصيل دائماً. حدد مبلغاً فيشجّعه على إكمال سلته.
+          </span>
+        )}{' '}
+        <Link to="/online-store" style={{ fontWeight: 600, textDecoration: 'underline' }}>
+          {over ? 'غيّر المبلغ' : 'فعّله'}
+        </Link>
+      </p>
+    </Panel>
+  );
+}
 
 /** What the promotion gives, as the owner says it. */
 export function promotionSummary(p: Promotion): string {
@@ -132,6 +176,8 @@ export function PromotionsPage() {
   // Stopped and ended offers stay out of sight until asked for: a list of old tests would bury the live ones
   const [showOff, setShowOff] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // The offer whose end date is being moved
+  const [endFor, setEndFor] = useState<Promotion | null>(null);
   const phone = useIsPhone();
   const newest = useRef(0);
   const inflight = useRef(new Set<string>());
@@ -245,14 +291,12 @@ export function PromotionsPage() {
       header: <span className="sr-only">إجراء</span>,
       numeric: true,
       cell: (p) => (
-        <Button
-          variant="secondary"
-          loading={busy.has(p.id)}
-          disabled={busy.has(p.id)}
-          onClick={() => void toggle(p)}
-        >
-          {p.archived ? 'شغّل' : 'أوقف'}
-        </Button>
+        <PromotionActions
+          p={p}
+          busy={busy.has(p.id)}
+          onToggle={() => void toggle(p)}
+          onEnd={() => setEndFor(p)}
+        />
       ),
     },
   ];
@@ -298,6 +342,7 @@ export function PromotionsPage() {
               busy={busy}
               onEdit={setEditing}
               onToggle={(p) => void toggle(p)}
+              onEnd={setEndFor}
             />
           ) : (
             <SxTable
@@ -337,6 +382,7 @@ export function PromotionsPage() {
             </div>
           ) : null}
         </Panel>
+        <FreeDeliveryOffer />
         <Suspense fallback={null}>
           <PromotionReportPanel />
         </Suspense>
@@ -348,6 +394,19 @@ export function PromotionsPage() {
           لم تحفظه متوقفاً.
         </p>
       </SalesPage>
+
+      {endFor ? (
+        <EndDateDialog
+          key={endFor.id}
+          promotion={endFor}
+          onCancel={() => setEndFor(null)}
+          onSaved={(message) => {
+            setEndFor(null);
+            setNotice(message);
+            load();
+          }}
+        />
+      ) : null}
 
       <Sheet
         open={editing !== null}
@@ -374,6 +433,33 @@ export function PromotionsPage() {
 }
 
 /**
+ * What can be done to an offer from the list: stop (archive) or start it, and move its end date. A stopped offer
+ * leaves the list until «show stopped» is asked for; nothing is ever deleted.
+ */
+function PromotionActions({
+  p,
+  busy,
+  onToggle,
+  onEnd,
+}: {
+  p: Promotion;
+  busy: boolean;
+  onToggle: () => void;
+  onEnd: () => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+      <Button variant="secondary" size="sm" loading={busy} disabled={busy} onClick={onToggle}>
+        {p.archived ? 'شغّل' : 'أوقف'}
+      </Button>
+      <Button variant="secondary" size="sm" aria-label={`تاريخ انتهاء ${p.name}`} onClick={onEnd}>
+        تاريخ الانتهاء
+      </Button>
+    </div>
+  );
+}
+
+/**
  * The same offers as cards, for a phone: the figure on the leading edge, the name with its words, the
  * state and the stop or start button under them (a table's five columns leave the name three letters wide).
  */
@@ -384,6 +470,7 @@ function PromotionCards({
   busy,
   onEdit,
   onToggle,
+  onEnd,
 }: {
   rows: readonly Promotion[];
   all: readonly Promotion[];
@@ -391,6 +478,7 @@ function PromotionCards({
   busy: ReadonlySet<string>;
   onEdit: (p: Promotion) => void;
   onToggle: (p: Promotion) => void;
+  onEnd: (p: Promotion) => void;
 }) {
   return (
     <ul
@@ -446,14 +534,14 @@ function PromotionCards({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
               <StateBadge state={promotionState(p, now)} />
-              <Button
-                variant="secondary"
-                loading={busy.has(p.id)}
-                disabled={busy.has(p.id)}
-                onClick={() => onToggle(p)}
-              >
-                {p.archived ? 'شغّل' : 'أوقف'}
-              </Button>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <PromotionActions
+                p={p}
+                busy={busy.has(p.id)}
+                onToggle={() => onToggle(p)}
+                onEnd={() => onEnd(p)}
+              />
             </div>
           </li>
         );

@@ -142,15 +142,18 @@ export async function listCustomers(
     groupId?: string;
     birthMonth?: number;
   },
+  meta?: RequestMeta,
 ): Promise<CustomerListResponse> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'customers.view');
+    // The Excel file carries every customer with phone, balance and spend: it needs the reports permission too
+    if (query.export === true) await requirePermission(tx, auth.userId, 'report.view');
     const offset = decodeOffset(query.cursor);
-    const filter = sql`${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
+    // The figures above the list (debts, who owes, all) ignore the group and the birthday month: an empty
+    // birthday month must not read as «no debts at all»; the count of the list itself takes every filter
+    const stripFilter = sql`${query.kind ? sql`c.kind = ${query.kind}` : sql`true`}
         and ${query.regionId ? sql`c.region_id = ${query.regionId}` : sql`true`}
         and ${query.approval ? sql`c.approval_status = ${query.approval}` : sql`true`}
-        and ${query.groupId ? sql`c.group_id = ${query.groupId}` : sql`true`}
-        and ${query.birthMonth ? sql`extract(month from c.birth_date) = ${query.birthMonth}` : sql`true`}
         and ${
           query.lastBefore
             ? sql`exists (select 1 from invoices i where i.customer_id = c.id)
@@ -158,6 +161,9 @@ export async function listCustomers(
                   and i.business_date >= ${query.lastBefore}::date)`
             : sql`true`
         }`;
+    const listOnly = sql`${query.groupId ? sql`c.group_id = ${query.groupId}` : sql`true`}
+        and ${query.birthMonth ? sql`extract(month from c.birth_date) = ${query.birthMonth}` : sql`true`}`;
+    const filter = sql`${stripFilter} and ${listOnly}`;
     const q = query.q ? normalizeArabic(query.q) : '';
     // Arabic-Indic digits are digits too: «٠٩٤٤…» finds the same phone as «0944…»
     const digits = query.q ? toLatinDigits(query.q).replace(/\D/g, '') : '';
@@ -211,6 +217,17 @@ export async function listCustomers(
     const page = (cap ? rows.slice(0, cap) : rows).map(item);
     const nextCursor = hasMore && cap ? encodeOffset(offset + cap) : null;
     if (exporting) {
+      await audit(
+        tx,
+        {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          action: 'customer.export',
+          entity: 'customer',
+          data: { rows: Math.min(rows.length, cap) },
+        },
+        meta ?? { ip: '', userAgent: null },
+      );
       return {
         items: (rows.slice(0, cap) as Row[]).map((r) => ({
           ...item(r),
@@ -234,9 +251,9 @@ export async function listCustomers(
              count(*) filter (where ${balance} > 0)::text as owing_n,
              coalesce(sum(${balance}) filter (where ${balance} > 0), 0)::text as owed,
              coalesce(sum(${balance}) filter (where ${balance} > 0 and c.archived_at is not null), 0)::text as owed_archived,
-             count(*) filter (where ${search} and ${owingWhere})::text as matched
+             count(*) filter (where ${search} and ${owingWhere} and ${listOnly})::text as matched
       from customers c left join (${balances}) b on b.customer_id = c.id
-      where ${filter}`);
+      where ${stripFilter}`);
     const [pending] = await tx.execute<{ n: string }>(
       sql`select count(*)::text as n from customers where approval_status = 'pending'`,
     );

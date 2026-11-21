@@ -209,7 +209,8 @@ describe('«خط السير»', () => {
       'GET /v1/routes/rt-1': () => ({ status: 200, body: route() }),
       'GET /v1/regions': () => ({ status: 200, body: [region({})] }),
       'GET /v1/reps': () => ({ status: 200, body: [] }),
-      'GET /v1/customers': () => ({
+      // the search is the server's (50 at a time, by name), never every customer in one call
+      'GET /v1/customers?sort=name&dir=asc&limit=50': () => ({
         status: 200,
         body: {
           items: [
@@ -223,6 +224,22 @@ describe('«خط السير»', () => {
             },
             { id: 'c-2', name: 'ميني ماركت النور', phone: null, archived: false, regionId: 'r-1' },
             { id: 'c-3', name: 'مطعم الشام', phone: null, archived: false, regionId: 'r-1' },
+          ],
+          totalOwedMinor: 0,
+          baseCurrency: 'SYP',
+        },
+      }),
+      'GET /v1/customers?sort=name&dir=asc&regionId=r-1&limit=1': () => ({
+        status: 200,
+        body: { items: [], totalCount: 3, totalOwedMinor: 0, baseCurrency: 'SYP' },
+      }),
+      'GET /v1/customers?sort=name&dir=asc&regionId=r-1&limit=200': () => ({
+        status: 200,
+        body: {
+          items: [
+            { id: 'c-1', name: 'بقالية الأمل', phone: null, archived: false, regionId: 'r-1' },
+            { id: 'c-3', name: 'مطعم الشام', phone: null, archived: false, regionId: 'r-1' },
+            { id: 'c-4', name: 'قديم', phone: null, archived: true, regionId: 'r-1' },
           ],
           totalOwedMinor: 0,
           baseCurrency: 'SYP',
@@ -273,6 +290,18 @@ describe('«خط السير»', () => {
     await screen.findByText('حُفظ ترتيب الزبائن.');
     expect(requestsTo('PUT', '/v1/routes/rt-1/customers')[0]?.body).toEqual({
       customerIds: ['c-1', 'c-3'],
+      version: 3,
+    });
+  });
+
+  it('fetches the region page by page, leaves out archived ones and those already on the route', async () => {
+    const { user, requestsTo } = open();
+    await user.click(await screen.findByRole('button', { name: /أضف كل زبائن دمشق \(3\)/ }));
+    expect(await screen.findByText('زبائن الخط (3)')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'احفظ الترتيب' }));
+    await screen.findByText('حُفظ ترتيب الزبائن.');
+    expect(requestsTo('PUT', '/v1/routes/rt-1/customers')[0]?.body).toEqual({
+      customerIds: ['c-1', 'c-2', 'c-3'],
       version: 3,
     });
   });

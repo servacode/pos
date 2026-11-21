@@ -33,6 +33,18 @@ export function SetupStrip({ me, summary }: { me: MeResponse; summary: HomeSumma
   ];
   const doneCount = tasks.filter((task) => task.done).length;
   const digits = me.settings.numberFormat;
+  // «بقيت 4 خطوات», not «0 من 4»: a store that just finished the wizard is not at zero
+  const remaining = tasks.length - doneCount;
+  const left =
+    remaining === 1 ? (
+      'بقيت خطوة واحدة'
+    ) : remaining === 2 ? (
+      'بقيت خطوتان'
+    ) : (
+      <>
+        بقيت <span className="num">{formatNumber(remaining, digits)}</span> خطوات
+      </>
+    );
 
   return (
     <section
@@ -44,16 +56,10 @@ export function SetupStrip({ me, summary }: { me: MeResponse; summary: HomeSumma
         to="/welcome"
         className="flex min-h-9 flex-1 items-center justify-between gap-2 font-semibold sm:hidden"
       >
-        <span>
-          أكمل الإعداد: <span className="num">{formatNumber(doneCount, digits)}</span> من{' '}
-          <span className="num">{formatNumber(tasks.length, digits)}</span>
-        </span>
+        <span>أكمل الإعداد: {left}</span>
         <NextIcon size={16} />
       </Link>
-      <p className="font-semibold max-sm:hidden">
-        أكمل الإعداد: <span className="num">{formatNumber(doneCount, digits)}</span> من{' '}
-        <span className="num">{formatNumber(tasks.length, digits)}</span>
-      </p>
+      <p className="font-semibold max-sm:hidden">أكمل الإعداد: {left}</p>
       <ul className="flex flex-1 flex-wrap gap-2 max-sm:hidden">
         {tasks.map((task) => (
           <li key={task.to}>

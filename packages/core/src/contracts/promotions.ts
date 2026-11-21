@@ -121,6 +121,13 @@ export type PromotionUpdateInput = z.input<typeof promotionUpdateInput>;
 export const promotionArchiveInput = z.object({ version: versionSchema, archived: z.boolean() });
 export type PromotionArchiveInput = z.input<typeof promotionArchiveInput>;
 
+/**
+ * `POST /v1/promotions/{id}/end-date`: move (or clear) the end of an offer from the list, whatever else is in the row.
+ * `endsAt: null` runs it with no end. The end must come after the start the offer already has.
+ */
+export const promotionEndDateInput = z.object({ version: versionSchema, endsAt: isoTimeSchema.nullable() });
+export type PromotionEndDateInput = z.input<typeof promotionEndDateInput>;
+
 /** A promotion as the dashboard reads it and as the `promotions` pull set carries it. */
 export interface PromotionRow extends PromotionRule {
   version: number;

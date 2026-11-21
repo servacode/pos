@@ -323,7 +323,18 @@ export async function listTaxRates(db: Database, ctx: CatalogContext): Promise<T
 async function readTaxRates(tx: Transaction): Promise<TaxRateList> {
   const rows = await tx.select().from(taxRates).orderBy(asc(taxRates.createdAt), asc(taxRates.id));
   const [settings] = await tx.select({ bp: tenantSettings.defaultTaxRateBp }).from(tenantSettings);
-  return { items: rows.map(taxRateView), defaultRateBp: settings?.bp ?? 0 };
+  const defaultRateBp = settings?.bp ?? 0;
+  // Which rate was picked as the default: the last pick in the audit trail, while it still stands for
+  // the stored percentage (two rates with one percentage are told apart by it)
+  let defaultRateId: string | null = null;
+  if (defaultRateBp > 0) {
+    const [pick] = await tx.execute<{ id: string | null }>(sql`
+      select data->>'taxRateId' as id from audit_logs
+      where action = 'tax_rate.default_set' order by created_at desc, id desc limit 1`);
+    const picked = rows.find((r) => r.id === pick?.id);
+    if (picked && !picked.archivedAt && picked.rateBp === defaultRateBp) defaultRateId = picked.id;
+  }
+  return { items: rows.map(taxRateView), defaultRateBp, defaultRateId };
 }
 
 /** «الضريبة الافتراضية»: stores the chosen rate's percentage as the store's default (null: no tax) */

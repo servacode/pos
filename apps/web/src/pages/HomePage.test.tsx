@@ -21,6 +21,7 @@ const summaryOf = (parts: {
   debts?: { totalOwedMinor: number; overLimitCount: number; overLimitOne: unknown } | null;
   photos?: { goodsCount: number; withoutPhoto: number } | null;
   cashMinor?: number | null;
+  cashUsdMinor?: number | null;
   usdRate?: string | null;
 }) => ({
   status: 200,
@@ -28,6 +29,7 @@ const summaryOf = (parts: {
     baseCurrency: 'SYP',
     hasEverSold: parts.hasEverSold ?? true,
     cashMinor: parts.cashMinor ?? null,
+    cashUsdMinor: parts.cashUsdMinor ?? null,
     usdRate: parts.usdRate ?? null,
     debts: parts.debts ?? null,
     photos: parts.photos ?? null,
@@ -180,12 +182,17 @@ describe('HomePage', () => {
         'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'catalog.manage']) },
         ['GET /v1/reports/day?date=' + TODAY]: { status: 200, body: dayReport({}) },
         [WEEK]: weekOf({ [dayBack(1)]: 800_000 }),
-        'GET /v1/me/home-summary': summaryOf({ cashMinor: 2_500_000, usdRate: '13000' }),
+        'GET /v1/me/home-summary': summaryOf({
+          cashMinor: 2_500_000,
+          cashUsdMinor: 31_250,
+          usdRate: '13000',
+        }),
       });
       renderApp('/');
       const morning = await screen.findByRole('list', { name: 'نظرة الصباح' });
       expect(await within(morning).findByText(/أمس/)).toBeInTheDocument();
-      expect(within(morning).getByText(/الصندوق الآن/)).toBeInTheDocument();
+      // The pounds in the drawer and, beside them, the dollars (never added together)
+      expect(within(morning).getByText(/الصندوق الآن/)).toHaveTextContent(/25,000.*312\.50/);
       expect(within(morning).getByText(/سعر الدولار/)).toHaveTextContent('13,000');
     });
 
@@ -477,6 +484,12 @@ describe('HomePage', () => {
       expect(await screen.findByText(/a: فوق الحدّ/)).toBeInTheDocument();
       expect(screen.getByText(/ديون الزبائن عندنا/)).toBeInTheDocument();
       expect(screen.getByText(/ما علينا للموردين/)).toBeInTheDocument();
+      // And the morning line says it too, with a way to the suppliers
+      const morning = screen.getByRole('list', { name: 'نظرة الصباح' });
+      expect(within(morning).getByRole('link', { name: /علينا للموردين/ })).toHaveAttribute(
+        'href',
+        '/suppliers',
+      );
     });
 
     it('puts the cheques due within a week under «المال», and the tab badge equals «عرض الكل»', async () => {
@@ -831,7 +844,7 @@ describe('HomePage', () => {
       expect(screen.queryByRole('region', { name: 'مبيعات اليوم' })).not.toBeInTheDocument();
       // and the set-up checklist stays on the page until the four tasks are done
       const setup = await screen.findByRole('region', { name: 'أكمل الإعداد' });
-      expect(setup).toHaveTextContent('0 من 4');
+      expect(setup).toHaveTextContent('بقيت 4 خطوات');
       expect(within(setup).getByRole('link', { name: 'اختر رمز الكاشير' })).toHaveAttribute(
         'href',
         '/me/pin',

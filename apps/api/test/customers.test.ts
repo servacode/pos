@@ -242,13 +242,20 @@ describe('a customer added on the till', () => {
       { id: twin.id, name: 'أبو خالد' },
       { id: fresh.id, name: 'أم سامر' },
     ]);
-    const pulled = await app.inject({
-      method: 'GET',
-      url: '/v1/sync/pull',
-      headers: { authorization: store.device.authorization },
-    });
-    expect(pulled.statusCode, pulled.body).toBe(200);
-    expect(JSON.stringify(pulled.json())).toContain('أم سامر');
+    // The pull only returns rows below pg_snapshot_xmin, and that bound is cluster-wide: a transaction still open in
+    // any database of a shared Postgres (another test run) holds it back for a moment. Ask again until it moves.
+    let pulledText = '';
+    for (let attempt = 0; attempt < 40 && !pulledText.includes('أم سامر'); attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1000));
+      const pulled = await app.inject({
+        method: 'GET',
+        url: '/v1/sync/pull',
+        headers: { authorization: store.device.authorization },
+      });
+      expect(pulled.statusCode, pulled.body).toBe(200);
+      pulledText = JSON.stringify(pulled.json());
+    }
+    expect(pulledText).toContain('أم سامر');
   });
 });
 

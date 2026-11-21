@@ -41,7 +41,7 @@ export async function customerRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/v1/customers', { preHandler: requireAuth }, async (request) => {
     if (!request.auth) throw unauthorized();
-    return listCustomers(app.db, request.auth, parseBody(customerListQuery, request.query));
+    return listCustomers(app.db, request.auth, parseBody(customerListQuery, request.query), meta(request));
   });
 
   app.get('/v1/vouchers', { preHandler: requireAuth }, async (request) => {

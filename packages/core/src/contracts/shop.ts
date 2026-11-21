@@ -63,6 +63,11 @@ export const onlineStoreInput = z.object({
    * a sale of the store. With areas, the customer picks one and pays its fee; otherwise the flat fee.
    */
   deliveryFeeMinor: nonNegativeMinorSchema.default(0),
+  /** «توصيل مجاني فوق مبلغ»: a delivered order whose goods total reaches it pays no fee; null: no such offer */
+  freeDeliveryOverMinor: nonNegativeMinorSchema
+    .refine((n) => n > 0, 'اكتب مبلغاً أكبر من صفر')
+    .nullable()
+    .default(null),
   deliveryAreas: z
     .array(
       z.object({
@@ -93,6 +98,8 @@ export interface OnlineStoreSettings {
   orderMode: 'whatsapp' | 'shop';
   showPrices: boolean;
   deliveryFeeMinor: number;
+  /** Null: no «توصيل مجاني فوق مبلغ» */
+  freeDeliveryOverMinor?: number | null;
   deliveryAreas: DeliveryArea[];
   tagline?: string | null;
   accent?: ShopAccent;
@@ -121,6 +128,8 @@ export interface ShopStore {
   /** False: no price is sent anywhere in the public shop; the fees below are 0 then, not to be shown */
   showPrices: boolean;
   deliveryFeeMinor: number;
+  /** A delivered order whose goods reach this pays no fee; null or absent: no such offer */
+  freeDeliveryOverMinor?: number | null;
   deliveryAreas: DeliveryArea[];
   tagline?: string | null;
   accent?: ShopAccent;
@@ -501,13 +510,51 @@ export interface StockAlert {
  *
  *   GET /v1/price-history[?productId&from&to&limit]   catalog.manage → { items: PriceChange[] }
  */
+function allDigits(text: string, min: number, max: number): boolean {
+  if (text.length < min || text.length > max) return false;
+  for (const ch of text) if (ch < '0' || ch > '9') return false;
+  return true;
+}
+
+/**
+ * A history cursor is `<created_at as postgres prints it>|<uuid>`, e.g. «2026-11-20 19:07:42.330621+00|…».
+ * Checked part by part (no pattern on user input) so a bad one is a 400, never a cast error in SQL.
+ */
+export function isPriceHistoryCursor(value: string): boolean {
+  const bar = value.indexOf('|');
+  if (bar < 0 || !uuidSchema.safeParse(value.slice(bar + 1)).success) return false;
+  const [date, rest, ...extra] = value.slice(0, bar).split(' ');
+  if (!date || !rest || extra.length > 0) return false;
+  const day = date.split('-');
+  if (day.length !== 3 || !allDigits(day[0] ?? '', 4, 4)) return false;
+  if (!allDigits(day[1] ?? '', 2, 2) || !allDigits(day[2] ?? '', 2, 2)) return false;
+  const zoneAt = Math.max(rest.indexOf('+'), rest.indexOf('-'));
+  if (zoneAt < 1) return false;
+  const time = rest.slice(0, zoneAt).split(':');
+  if (time.length !== 3) return false;
+  const [seconds = '', fraction, ...more] = (time[2] ?? '').split('.');
+  if (more.length > 0) return false;
+  if (!allDigits(time[0] ?? '', 2, 2) || !allDigits(time[1] ?? '', 2, 2)) return false;
+  if (!allDigits(seconds, 2, 2) || (fraction !== undefined && !allDigits(fraction, 1, 6))) return false;
+  const zone = rest.slice(zoneAt + 1).split(':');
+  if (zone.length > 2 || !allDigits(zone[0] ?? '', 2, 2)) return false;
+  if (zone[1] !== undefined && !allDigits(zone[1], 2, 2)) return false;
+  // Real calendar day and clock: the SQL cast cannot fail
+  const year = Number(day[0]);
+  const month = Number(day[1]);
+  const dom = Number(day[2]);
+  const real = new Date(Date.UTC(year, month - 1, dom));
+  if (real.getUTCMonth() !== month - 1 || real.getUTCDate() !== dom) return false;
+  return Number(time[0]) <= 23 && Number(time[1]) <= 59 && Number(seconds) <= 59;
+}
+
 export const priceHistoryQuery = z.object({
   productId: uuidSchema.optional(),
   from: z.iso.date().optional(),
   to: z.iso.date().optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(300),
   /** The `nextCursor` of the previous page */
-  before: z.string().max(100).optional(),
+  before: z.string().max(100).refine(isPriceHistoryCursor, 'مؤشر الصفحة غير صالح').optional(),
 });
 export type PriceChangeSource = 'product_edit' | 'price_list' | 'bulk' | 'price_list_summary';
 export interface PriceChange {

@@ -9,6 +9,7 @@ import {
 } from '@serva/core';
 import { ManualClock } from '../src/clock';
 import { cartLine, documents, openStore, push, sale, shiftOpen, type Store } from './accounting-fixtures';
+import { staffUser } from './staff';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 
 /** Round 50: one export request, a held picker, archived debt apart, a payment id that is not another customer's, vouchers with their customer. */
@@ -66,6 +67,47 @@ describe('the list for Excel and the pickers', () => {
     expect(seenByB.items.map((c) => c.name)).toEqual(['زبون المتجر الثاني']);
     expect(seenByB.items.some((c) => c.id === mine.id)).toBe(false);
     expect(seenByB.totalOwedMinor).toBe(0);
+  });
+
+  it('export needs the reports permission and leaves an audit row; the list alone does not', async () => {
+    const store = await openStore(app);
+    await add(store, { name: 'زبون التصدير' });
+    const driver = await staffUser(
+      app,
+      { ...store, branchId: store.device.branchId },
+      'driver',
+      '0944000007',
+    );
+    const plain = await app.inject({ method: 'GET', url: '/v1/customers?lite=true', headers: as(driver) });
+    expect(plain.statusCode, plain.body).toBe(200);
+    const refused = await app.inject({
+      method: 'GET',
+      url: '/v1/customers?export=true',
+      headers: as(driver),
+    });
+    expect(refused.statusCode).toBe(403);
+    const none = await ownerDb()<{ n: string }[]>`
+      select count(*)::text as n from audit_logs where tenant_id = ${store.tenantId} and action = 'customer.export'`;
+    expect(none[0]!.n).toBe('0');
+
+    expect((await list(store, '?export=true')).items).toHaveLength(1);
+    const rows = await ownerDb()<{ user_id: string; data: { rows: number } }[]>`
+      select user_id, data from audit_logs where tenant_id = ${store.tenantId} and action = 'customer.export'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.data.rows).toBe(1);
+  });
+
+  it('the figures above the list do not shrink to the group or the birthday month', async () => {
+    const store = await openStore(app);
+    const debtor = await add(store, { name: 'مدين' });
+    await post(store, `/v1/customers/${debtor.id}/opening-debt`, { amountMinor: 9_000, date: '2026-10-01' });
+    await add(store, { name: 'بلا دين' });
+    const inMonth = await list(store, '?limit=50&birthMonth=2');
+    expect(inMonth.items).toHaveLength(0);
+    expect(inMonth.totalCount).toBe(0);
+    expect(inMonth.totalOwedMinor).toBe(9_000);
+    expect(inMonth.owingCount).toBe(1);
+    expect(inMonth.allCount).toBe(2);
   });
 
   it('says how much of the debt sits on archived customers', async () => {

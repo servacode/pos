@@ -3159,6 +3159,8 @@ export const onlineStores = pgTable(
       .$type<{ name: string; feeMinor: number }[]>()
       .notNull()
       .default([]),
+    /** «توصيل مجاني فوق مبلغ»: a delivered order whose total reaches it pays no fee; null: no such offer */
+    freeDeliveryOverMinor: bigint('free_delivery_over_minor', { mode: 'number' }),
     /** «شعار المتجر وصورة الغلاف وعبارة قصيرة» (26 › الشكل): the pictures are rows of `uploads` */
     tagline: text('tagline'),
     logoUploadId: uuid('logo_upload_id'),

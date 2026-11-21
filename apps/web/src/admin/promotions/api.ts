@@ -29,3 +29,7 @@ export const previewPromotion = (input: PromotionPreviewInput) =>
 /** `GET /v1/promotions/report?from&to` (catalog.manage): what each offer did at the tills */
 export const promotionReport = (from: string, to: string) =>
   apiFetch<PromotionReport>(`/v1/promotions/report?from=${from}&to=${to}`, { auth: true });
+
+/** `POST /v1/promotions/{id}/end-date` (catalog.manage): move or clear the end of one offer, whatever else is in its row */
+export const setPromotionEndDate = (id: string, input: { version: number; endsAt: string | null }) =>
+  apiFetch<Promotion>(`/v1/promotions/${id}/end-date`, { method: 'POST', body: input, auth: true });

@@ -34,6 +34,7 @@ import {
   shopProduct,
 } from '../services/shop';
 import { priceHistory } from '../services/price-history';
+import { catalogueKeepMs, keepCatalogue, keptCatalogue } from '../services/shop-cache';
 import {
   codSummary,
   getProductTexts,
@@ -64,19 +65,13 @@ export async function shopRoutes(app: FastifyInstance): Promise<void> {
   };
 
   // One catalogue per link per half minute, shared by the visits in between (a busy link is one query, not one per visit).
-  // The tests read what they just changed, so they skip the keep.
-  const keepMs = process.env['VITEST'] ? 0 : 30_000;
-  const kept = new Map<string, { at: number; home: ReturnType<typeof shopHome> }>();
+  // Any owner's save that the shop shows drops it (hook in app.ts), so an edit is live at once.
   const catalogue = (slug: string) => {
     const now = Date.now();
-    const hit = kept.get(slug);
-    if (hit && now - hit.at < keepMs) return hit.home;
+    const hit = keptCatalogue<Awaited<ReturnType<typeof shopHome>>>(slug, now);
+    if (hit) return hit;
     const home = shopHome(app.db, slug);
-    if (keepMs === 0) return home;
-    // Only an answer that came out is kept; a missing or switched-off shop asks again
-    home.catch(() => kept.delete(slug));
-    if (kept.size >= 200) kept.delete(kept.keys().next().value as string);
-    kept.set(slug, { at: now, home });
+    if (catalogueKeepMs() > 0) keepCatalogue(slug, now, home);
     return home;
   };
 

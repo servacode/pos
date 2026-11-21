@@ -129,6 +129,11 @@ export function ShopApp() {
           {store.note}
         </p>
       ) : null}
+      {store.delivery && store.showPrices && store.freeDeliveryOverMinor ? (
+        <p className="border-b border-line bg-success-soft px-4 py-2 text-center text-sm font-semibold text-success-ink">
+          توصيل مجاني للطلبات فوق <Money minor={store.freeDeliveryOverMinor} currency={store.currency} />
+        </p>
+      ) : null}
       <header className="sticky top-0 z-20 border-b border-line bg-surface/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-3 px-4 sm:px-6">
           <Link to={base} className="me-auto flex min-h-11 min-w-0 items-center gap-3 rounded-control">
@@ -314,6 +319,20 @@ function PriceOnRequest({ className }: { className?: string }) {
   return <span className={cn('font-semibold text-ink-muted', className)}>السعر عند الطلب</span>;
 }
 
+/** The tints a photo-less tile takes, one per department: the identity's soft families only (dark mode follows the tokens) */
+const TILE_TINTS = [
+  'from-brand-soft text-brand-ink',
+  'from-info-soft text-info-ink',
+  'from-accent-soft text-accent-ink',
+] as const;
+
+/** A stable pick from a name: the same department always gets the same tint */
+function tintIndex(text: string): number {
+  let h = 0;
+  for (const ch of text) h = (h * 31 + (ch.codePointAt(0) ?? 0)) % 9973;
+  return h % TILE_TINTS.length;
+}
+
 function NoPicture({
   name,
   categoryName = null,
@@ -334,11 +353,16 @@ function NoPicture({
 }) {
   // The icon of its kind on a soft tint reads as a deliberate tile, not a missing image
   const Kind = placeholderIconFor({ categoryName, name, ...(sectors ? { sectors } : {}) });
+  // Each department keeps its own tint (by its name), so a grid of tiles without photos is not one pale block
+  const tint = TILE_TINTS[tintIndex(categoryName ?? name)]!;
   if (typographic) {
     return (
       <span
         aria-hidden="true"
-        className="flex size-full flex-col items-center justify-center gap-1 bg-linear-to-br from-brand-soft to-surface-muted text-brand-ink/70 select-none"
+        className={cn(
+          'flex size-full flex-col items-center justify-center gap-1 bg-linear-to-br to-surface-muted select-none',
+          tint,
+        )}
       >
         <Kind size={small ? 20 : 24} />
         <span className="max-w-full truncate px-2 text-[0.6875rem] font-semibold sm:text-xs">
@@ -350,7 +374,7 @@ function NoPicture({
   return (
     <span
       aria-hidden="true"
-      className="grid size-full place-items-center bg-linear-to-br from-brand-soft to-surface-muted text-brand-ink/60 select-none"
+      className={cn('grid size-full place-items-center bg-linear-to-br to-surface-muted select-none', tint)}
     >
       <Kind size={large ? 48 : 32} />
     </span>
@@ -679,7 +703,7 @@ function ProductView({ home, slug, base, cart }: { home: ShopHome; slug: string;
           <div
             className={cn(
               'overflow-hidden rounded-card border border-line bg-surface',
-              main ? 'aspect-[4/5]' : 'aspect-[4/3] md:aspect-square',
+              main ? 'aspect-[4/5]' : 'aspect-[16/7] md:aspect-[4/3]',
             )}
           >
             {main ? (
@@ -929,7 +953,7 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   // The courier's fee: the picked area's when the store charges by area, else the flat one
   const byArea = store.deliveryAreas.length > 0;
   const showPrices = store.showPrices;
-  const fee =
+  const listedFee =
     !showPrices || fulfilment !== 'delivery'
       ? 0
       : byArea
@@ -1037,12 +1061,26 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
             </div>
           )}
           {placed.deliveryFeeMinor !== null && placed.deliveryFeeMinor > 0 ? (
-            <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <dt className="text-ink-muted">أجرة التوصيل (للمندوب)</dt>
-              <dd>
-                <Money minor={placed.deliveryFeeMinor} currency={placed.currency} />
-              </dd>
-            </div>
+            <>
+              <div className="flex items-center justify-between gap-3 px-4 py-3">
+                <dt className="text-ink-muted">أجرة التوصيل (للمندوب)</dt>
+                <dd>
+                  <Money minor={placed.deliveryFeeMinor} currency={placed.currency} />
+                </dd>
+              </div>
+              {placed.totalMinor !== null ? (
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <dt className="font-semibold">المجموع مع التوصيل</dt>
+                  <dd>
+                    <Money
+                      minor={placed.totalMinor + placed.deliveryFeeMinor}
+                      currency={placed.currency}
+                      className="font-bold"
+                    />
+                  </dd>
+                </div>
+              ) : null}
+            </>
           ) : null}
         </dl>
         <div className="flex w-full flex-col gap-3">
@@ -1167,6 +1205,14 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
   const failedQuote = Boolean(coupon) && !quoted && quoteFailed === quoteKey;
   // The server's total when it priced the cart, else the cart's own
   const merchandise = coupon && quoted ? quoted.totalMinor : subtotal;
+  // «توصيل مجاني فوق مبلغ»: the goods reach the store's line, so no courier fee; short of it, the customer is told by how much
+  const freeOver = store.freeDeliveryOverMinor ?? null;
+  const freeDelivery = listedFee > 0 && freeOver !== null && merchandise >= freeOver;
+  const fee = freeDelivery ? 0 : listedFee;
+  const missingForFree =
+    showPrices && fulfilment === 'delivery' && freeOver !== null && merchandise < freeOver
+      ? freeOver - merchandise
+      : 0;
   const couponNote = !coupon
     ? null
     : coupon.coupon.kind === 'buy_get'
@@ -1276,6 +1322,18 @@ function CartView({ home, slug, base, cart }: { home: ShopHome; slug: string; ba
               <PriceOnRequest />
             )}
           </div>
+          {freeDelivery ? (
+            <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">
+              <span>أجرة التوصيل</span>
+              <span className="font-semibold text-success-ink">مجاني</span>
+            </div>
+          ) : null}
+          {missingForFree > 0 ? (
+            <p className="text-sm text-ink-muted">
+              أضف بقيمة <Money minor={missingForFree} currency={store.currency} className="font-semibold" />{' '}
+              ويصبح التوصيل مجاناً.
+            </p>
+          ) : null}
           {fee > 0 ? (
             <>
               <div className="flex items-center justify-between gap-3 text-sm text-ink-muted">

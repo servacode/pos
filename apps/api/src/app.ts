@@ -57,6 +57,7 @@ import { repSettlementRoutes } from './routes/rep-settlements';
 import { distributionReportRoutes } from './routes/distribution-reports';
 import { syncRoutes } from './routes/sync';
 import { DOCUMENT_PROCESSORS } from './services/processors';
+import { changesShopCatalogue, forgetShopCatalogues } from './services/shop-cache';
 import type { SyncProcessors } from './services/sync-push';
 import './types';
 
@@ -125,6 +126,11 @@ export async function buildApp({
   app.removeContentTypeParser('text/plain');
 
   await app.register(cookie);
+  // An owner's save that the public shop shows drops the kept catalogues (services/shop-cache.ts)
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (changesShopCatalogue(request.method, request.url, reply.statusCode)) forgetShopCatalogues();
+    return payload;
+  });
   // Every route is limited per client address; routes can set stricter limits (sign-in) or opt out
   // (health). Counters live in Postgres, shared by all instances and kept across restarts.
   await app.register(rateLimit, {

@@ -350,7 +350,7 @@ export function CustomersPage() {
           <span className="sx-z">—</span>
         ),
     },
-    ...(clothing
+    ...(clothing && items.some((c) => c.favouriteSize)
       ? [
           {
             key: 'size',
@@ -548,7 +548,7 @@ export function CustomersPage() {
                   ))}
                 </Select>
               ) : null}
-              <div className="sx-chips">
+              <div className="sx-chips scroll cx-chips">
                 <CheckChip
                   label="من عليه دين فقط"
                   checked={owing}
