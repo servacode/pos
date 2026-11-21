@@ -1809,6 +1809,26 @@ export function HomePage() {
   const chartLoading =
     (day.loading && !day.data) || (week.loading && !week.data) || (range === '30' && month.loading);
   const base = day.data?.baseCurrency ?? me.settings.baseCurrency;
+  // SalesTrend hides itself under three days with sales; then the main column would hold only the
+  // figures, so the day's panels move under them (today's two stacked beside the week's list) and the
+  // columns end near the same height
+  const thinChart = !chartLoading && chartPoints.filter((p) => (p.total ?? 0) > 0).length < 3;
+  const dayPanels = thinChart ? (
+    <div className="grid items-start gap-6 md:grid-cols-2">
+      <div className="flex min-w-0 flex-col gap-6">
+        <BestSellers report={day} />
+        <PaymentMix me={me} report={day} />
+      </div>
+      {seesStock ? <BestSellersWeek report={weekTop} /> : null}
+    </div>
+  ) : (
+    // At 1280 and up they sit under «تحتاج انتباهك», so both columns end near the same height
+    <div className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-1">
+      <BestSellers report={day} />
+      <PaymentMix me={me} report={day} />
+      {seesStock ? <BestSellersWeek report={weekTop} /> : null}
+    </div>
+  );
 
   // Nothing sold yet, today or in the week behind: a brand-new store gets a way in, not empty charts.
   // Only when the week really loaded and every day of it is a day of zero: a day that failed to load is
@@ -1907,7 +1927,7 @@ export function HomePage() {
             branchOnly
               ? `أرقام ${branchOnly} فقط${seesCheques ? '، وما على الزبائن للمتجر كله' : ''}.`
               : scopeName
-                ? `أرقام ${scopeName.startsWith('فرع') ? '' : 'فرع '}${scopeName} فقط. الطلبات والشيكات والأقساط والموردون وديون الزبائن للمتجر كله.`
+                ? `أرقام ${scopeName.startsWith('فرع') || scopeName.startsWith('الفرع') ? '' : 'فرع '}${scopeName} فقط. الطلبات والشيكات والأقساط والموردون وديون الزبائن للمتجر كله.`
                 : seesSales
                   ? 'هذه صورة متجرك اليوم.'
                   : 'أهلاً بك في عملك اليوم.'
@@ -2005,6 +2025,7 @@ export function HomePage() {
                 }}
               />
             ) : null}
+            {seesSales && !brandNew && thinChart ? dayPanels : null}
             {!quietFresh ? firstWay : null}
             {!seesSales ? canSell ? <TillCard /> : <StoreCard me={me} /> : null}
           </div>
@@ -2022,14 +2043,7 @@ export function HomePage() {
               ) : null}
               {seesContractAttention(me) ? <ContractAttention me={me} today={today} /> : null}
             </div>
-            {seesSales && !brandNew ? (
-              // At 1280 and up they sit under «تحتاج انتباهك», so both columns end near the same height
-              <div className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-1">
-                <BestSellers report={day} />
-                <PaymentMix me={me} report={day} />
-                {seesStock ? <BestSellersWeek report={weekTop} /> : null}
-              </div>
-            ) : null}
+            {seesSales && !brandNew && !thinChart ? dayPanels : null}
           </div>
         </div>
         {/* The shop's card is for the first days: a full-width strip under the columns (so none ends ragged); on a phone it is left to the settings page */}
