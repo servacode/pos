@@ -70,12 +70,12 @@ function BrandSide() {
       <div className="relative isolate flex h-full flex-col overflow-hidden rounded-panel border border-sidebar-line bg-sidebar px-10 py-12 xl:px-16 [@media(max-height:50rem)]:py-8">
         {/* The «S» of the mark, drawn large and faint behind everything: the brand without a word. */}
         <svg
-          viewBox="0 0 64 64"
+          viewBox="40 40 440 440"
           aria-hidden="true"
           focusable="false"
           className="pointer-events-none absolute -end-32 -top-36 -z-10 size-[30rem] text-sidebar-hover/70"
         >
-          <path d={LOGO_S_PATH} fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round" />
+          <path d={LOGO_S_PATH} fill="none" stroke="currentColor" strokeWidth="92" strokeLinecap="round" />
         </svg>
         <div className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center-safe gap-12 [@media(max-height:50rem)]:gap-8">
           <div className="flex flex-col gap-6">

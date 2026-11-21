@@ -661,92 +661,68 @@ describe('EmptyState, Skeleton and Avatar', () => {
   });
 });
 
-describe('Logo (docs/design/kit/logo.md)', () => {
-  it('draws the exact mark: viewBox 64, corner 16, the «S» path, stroke 7 and the dot', () => {
+describe('Logo (docs/design/IDENTITY.md › الشعار)', () => {
+  it('draws the mark: the blue «S» swoosh, the green swoosh and arrow cut away around it', () => {
     const { container } = renderUi(<LogoMark />);
     const svg = container.querySelector('svg')!;
 
-    expect(svg).toHaveAttribute('viewBox', '0 0 64 64');
+    expect(svg).toHaveAttribute('viewBox', '40 40 440 440');
     expect(svg).toHaveAttribute('aria-hidden', 'true');
-    expect(svg.querySelector('rect')).toHaveAttribute('rx', '16');
-    expect(svg.querySelector('rect')).toHaveClass('fill-mark-from');
-    const path = svg.querySelector('path')!;
-    expect(path).toHaveAttribute('d', 'M42 22 A10 10 0 1 0 32 32 A10 10 0 1 1 22 42');
-    expect(path).toHaveAttribute('stroke-width', '7');
-    expect(path).toHaveAttribute('stroke-linecap', 'round');
-    expect(path).toHaveClass('stroke-on-mark');
-    const dot = svg.querySelector('circle')!;
-    expect([dot.getAttribute('cx'), dot.getAttribute('cy'), dot.getAttribute('r')]).toEqual([
-      '46',
-      '46',
-      '3.5',
-    ]);
-    // The mark keeps its colours in both modes (the specimen): no dark: classes.
-    expect(dot).toHaveClass('fill-on-mark/90');
-    expect(dot.getAttribute('class')).not.toContain('dark:');
+    const blue = [...svg.querySelectorAll('path')].find(
+      (p) => p.getAttribute('d') === LOGO_S_PATH && p.getAttribute('stroke-width') === '92',
+    )!;
+    expect(blue).toHaveClass('stroke-brand');
+    expect(blue).toHaveAttribute('stroke-linecap', 'round');
+    expect(svg.querySelectorAll('.fill-accent')).toHaveLength(2);
+    expect(svg.querySelector('mask')).not.toBeNull();
+    // Follows the theme through the tokens: no hard-coded colour in the page's own mode.
+    expect(svg.innerHTML).not.toMatch(/#[0-9a-f]{6}/i);
   });
 
-  it('draws the app icon with corner 15, and the small one with stroke 8 and no dot', () => {
-    const { container } = renderUi(
-      <>
-        <AppIcon label="أيقونة التطبيق" />
-        <AppIcon small label="أيقونة صغيرة" />
-      </>,
-    );
-    const [large, small] = [...container.querySelectorAll('svg')];
-    expect(large!.querySelector('rect')).toHaveAttribute('rx', '15');
-    expect(large!.querySelector('circle')).not.toBeNull();
-    expect(small!.querySelector('path')).toHaveAttribute('stroke-width', '8');
-    expect(small!.querySelector('circle')).toBeNull();
-    expect(screen.getByRole('img', { name: 'أيقونة التطبيق' })).toBe(large);
+  it('names the mark when it stands alone', () => {
+    renderUi(<LogoMark label="علامة سيرفا" />);
+    expect(screen.getByRole('img', { name: 'علامة سيرفا' })).toBeInTheDocument();
   });
 
-  it('writes «SERVA» in Latin, bold and letter-spaced, and «سيرفا» under it in brand-ink', () => {
+  it('draws the app icon as the mark on a rounded tile', () => {
+    renderUi(<AppIcon label="أيقونة التطبيق" />);
+    const icon = screen.getByRole('img', { name: 'أيقونة التطبيق' });
+    expect(icon.parentElement).toHaveClass('bg-surface', 'rounded-[22%]');
+  });
+
+  it('draws the lockup «SERVA» with the letters, and «سيرفا» under the stacked one', () => {
     renderUi(
       <>
         <Logo />
         <LogoStacked />
       </>,
     );
-    const latins = screen.getAllByText('Serva');
-    expect(latins).toHaveLength(2);
-    for (const latin of latins) {
-      expect(latin).toHaveAttribute('lang', 'en');
-      expect(latin).toHaveAttribute('dir', 'ltr');
-      // A word for screen readers, drawn in capitals.
-      expect(latin).toHaveClass('uppercase', 'font-bold', 'tracking-[0.12em]');
+    const lockups = screen.getAllByRole('img', { name: 'SERVA' });
+    expect(lockups).toHaveLength(2);
+    for (const lockup of lockups) {
+      expect(lockup).toHaveAttribute('viewBox', '44 44 1190 420');
+      expect(lockup.querySelectorAll('path').length).toBeGreaterThanOrEqual(4);
     }
-    for (const arabic of screen.getAllByText('سيرفا'))
-      expect(arabic).toHaveClass('text-brand-ink', 'font-semibold');
-    expect(LOGO_S_PATH).toBe('M42 22 A10 10 0 1 0 32 32 A10 10 0 1 1 22 42');
+    expect(screen.getByText('سيرفا')).toHaveClass('text-brand-ink', 'font-semibold');
   });
 
-  it('fills each mark with its own emerald → teal gradient, over the solid emerald square', () => {
+  it('gives each logo its own mask id', () => {
     const { container } = renderUi(
       <>
         <LogoMark />
+        <Logo />
         <LogoMark label="علامة سيرفا" />
-        <AppIcon small />
       </>,
     );
-    const ids = [...container.querySelectorAll('svg')].map((svg) => {
-      const gradient = svg.querySelector('linearGradient')!;
-      const [from, to] = [...gradient.querySelectorAll('stop')];
-      expect(from).toHaveClass('text-mark-from');
-      expect(to).toHaveClass('text-mark-to');
-      const [solid, painted] = [...svg.querySelectorAll('rect')];
-      expect(solid).toHaveClass('fill-mark-from');
-      expect(painted).toHaveAttribute('fill', `url(#${gradient.id})`);
-      expect(gradient.id).toMatch(/^[\w-]+$/);
-      return gradient.id;
-    });
+    const ids = [...container.querySelectorAll('mask')].map((mask) => mask.id);
     expect(new Set(ids).size).toBe(3);
+    for (const id of ids) expect(id).toMatch(/^[\w-]+$/);
   });
 
-  it('turns the words light on the deep-emerald sidebar', () => {
-    renderUi(<Logo tone="sidebar" />);
-    expect(screen.getByText('Serva')).toHaveClass('text-sidebar-strong');
-    expect(screen.getByText('سيرفا')).toHaveClass('text-sidebar-muted');
+  it('takes the green of the sidebar and the dark-surface blue on the deep sidebar', () => {
+    const { container } = renderUi(<Logo tone="sidebar" />);
+    expect(container.querySelectorAll('.fill-sidebar-brand')).toHaveLength(2);
+    expect(container.querySelector('path[stroke="#4a80ff"]')).not.toBeNull();
   });
 });
 

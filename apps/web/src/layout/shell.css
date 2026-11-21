@@ -152,7 +152,7 @@
   width: 36px;
   height: 36px;
   border-radius: var(--radius-small);
-  background: oklch(0.7151 0.1343 164.44 / 0.16);
+  background: color-mix(in oklab, var(--color-sidebar-brand) 16%, transparent);
   color: var(--color-sidebar-brand);
   font-size: 14px;
   font-weight: 700;
@@ -190,7 +190,7 @@
   height: 20px;
   padding: 0 8px;
   border-radius: 999px;
-  background: oklch(0.7151 0.1343 164.44 / 0.16);
+  background: color-mix(in oklab, var(--color-sidebar-brand) 16%, transparent);
   color: var(--color-sidebar-brand);
   font-size: 12px;
   font-weight: 600;
@@ -766,7 +766,7 @@ a.sh-trial:hover {
   background: var(--color-brand);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.18),
-    0 1px 2px oklch(0.5378 0.1134 163.27 / 0.3);
+    0 1px 2px color-mix(in oklab, var(--color-mark-from) 30%, transparent);
   color: var(--color-on-brand);
   font-size: 14px;
   font-weight: 600;
@@ -1475,7 +1475,7 @@ a.sh-trial:hover {
     padding: 0 4px var(--sh-safe-b);
     border-top: 1px solid var(--color-line);
     background: var(--color-surface);
-    box-shadow: 0 -4px 16px -8px rgb(14 26 22 / 0.12);
+    box-shadow: 0 -4px 16px -8px rgb(11 19 38 / 0.12);
   }
   .sh-tabbar a,
   .sh-tabbar button {
@@ -1519,7 +1519,7 @@ a.sh-trial:hover {
     background: var(--color-brand);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.18),
-      0 6px 14px -4px oklch(0.5378 0.1134 163.27 / 0.55),
+      0 6px 14px -4px color-mix(in oklab, var(--color-mark-from) 55%, transparent),
       0 0 0 4px var(--color-surface);
     color: var(--color-on-brand);
   }

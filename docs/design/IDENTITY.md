@@ -1,4 +1,4 @@
-# SERVA — هوية 4 «الزمرّدي» (the design language)
+# SERVA — the blue and green identity (the design language)
 
 The visual identity every screen of SERVA follows: the store admin, the cashier, the platform panel
 and the online shop. Tokens live once in `packages/ui/src/theme.css` (values from
@@ -12,23 +12,27 @@ drawn there.
 ## Character
 
 Calm, precise, premium. Generous white space, hairline borders, soft layered shadows, one strong
-colour (emerald) used with intent, numbers that line up. Quality bar: Linear, Stripe, Vercel — never
+colour (the logo blue) used with intent, numbers that line up. Quality bar: Linear, Stripe, Vercel — never
 a copy of them, never a generic admin template. Beauty never costs the cashier speed.
 
 ## Colour (token names only — never a palette shade or a hex in a screen)
 
-| Role     | Tokens                                                                                                                          | Use                                                                                                                                                            |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Page     | `canvas`                                                                                                                        | the page behind cards                                                                                                                                          |
-| Surfaces | `surface`, `surface-muted`, `surface-total`                                                                                     | cards, inputs, menus · hover fills, chips, table header, segmented track · the cashier total                                                                   |
-| Lines    | `line`, `line-control`                                                                                                          | card and row dividers (soft) · input, checkbox and select borders (3:1, WCAG 1.4.11)                                                                           |
-| Text     | `ink`, `ink-muted`, `ink-subtle`                                                                                                | primary · secondary (labels, descriptions) · tertiary (hints, column heads, placeholders)                                                                      |
-| Brand    | `brand`, `brand-hover`, `on-brand`, `brand-soft`, `brand-ink`, `ring`                                                           | primary actions, selection, focus. `brand-ink` is brand-coloured _text_; `brand-soft` a tinted fill                                                            |
-| Accent   | `accent`, `on-accent`, `accent-soft`, `accent-ink`                                                                              | teal, sparingly: the second series in a chart, a highlight chip, the gradient end of the logo                                                                  |
-| Status   | `success                                                                                                                        | warning                                                                                                                                                        | danger | info`+`-soft`+`-ink`, `on-danger` | state only, always with an icon or a word |
-| Sidebar  | `sidebar`, `sidebar-hover`, `sidebar-active`, `sidebar-line`, `sidebar-ink`, `sidebar-muted`, `sidebar-strong`, `sidebar-brand` | the deep-emerald sidebar, the same in both modes: SERVA's signature                                                                                            |
-| Fixed    | `mark-from`, `mark-to`, `on-mark`, `highlight`                                                                                  | the same in both modes: the logo mark (emerald → teal, white «S»), the primary button's shadow (`mark-from/30`) and the light along a raised button's top edge |
-| Overlay  | `overlay`                                                                                                                       | behind dialogs and sheets                                                                                                                                      |
+| Role     | Tokens                                                                                                                          | Use                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Page     | `canvas`                                                                                                                        | the page behind cards                                                                                                                                       |
+| Surfaces | `surface`, `surface-muted`, `surface-total`                                                                                     | cards, inputs, menus · hover fills, chips, table header, segmented track · the cashier total                                                                |
+| Lines    | `line`, `line-control`                                                                                                          | card and row dividers (soft) · input, checkbox and select borders (3:1, WCAG 1.4.11)                                                                        |
+| Text     | `ink`, `ink-muted`, `ink-subtle`                                                                                                | primary · secondary (labels, descriptions) · tertiary (hints, column heads, placeholders)                                                                   |
+| Brand    | `brand`, `brand-hover`, `on-brand`, `brand-soft`, `brand-ink`, `ring`                                                           | primary actions, selection, focus. `brand-ink` is brand-coloured _text_; `brand-soft` a tinted fill                                                         |
+| Accent   | `accent`, `on-accent`, `accent-soft`, `accent-ink`                                                                              | the logo green, sparingly: brand highlights, the sidebar's active marker, the second series in a chart, a highlight chip. Not a status                      |
+| Status   | `success                                                                                                                        | warning                                                                                                                                                     | danger | info`+`-soft`+`-ink`, `on-danger` | state only, always with an icon or a word |
+| Sidebar  | `sidebar`, `sidebar-hover`, `sidebar-active`, `sidebar-line`, `sidebar-ink`, `sidebar-muted`, `sidebar-strong`, `sidebar-brand` | the deep-navy sidebar, the same in both modes: SERVA's signature                                                                                            |
+| Fixed    | `mark-from`, `mark-to`, `on-mark`, `highlight`                                                                                  | the same in both modes: the logo mark colours (blue and green), the primary button's shadow (`mark-from/30`) and the light along a raised button's top edge |
+| Overlay  | `overlay`                                                                                                                       | behind dialogs and sheets                                                                                                                                   |
+
+Colours: brand `#0038b2` (dark `#5b8cff`), accent `#2a860f` (dark `#4cc82a`), success `#067a63` (a teal-green, not the logo green), info `#0a73b3`, sidebar `#0a1a3f`. The full light and dark map with contrast ratios was approved with the specimen.
+
+**Status vs brand.** Blue or green that carries meaning in a badge, a toast, an alert or a row state uses the status tokens (`success`, `info`), never `brand` or `accent`. `brand` and `accent` are for actions and identity; a «done» tick is `success`, a link or the selected tab is `brand`. A `Badge tone="brand"` is a label (the current plan, «default»), never a state.
 
 Rules: text on a tinted fill uses the matching `-ink` (`text-brand-ink` on `bg-brand-soft`). Status
 colours never decorate. Gradients only in the logo mark, the active-nav indicator
@@ -37,7 +41,7 @@ colours never decorate. Gradients only in the logo mark, the active-nav indicato
 ## Charts
 
 Series colours `chart-1` … `chart-6`, in this fixed order, never cycled, never generated:
-emerald (the brand), blue, orange, violet, magenta, amber. Validated with the data-viz checker in both
+blue (the brand), green, orange, violet, magenta, amber. Validated with the data-viz checker in both
 modes (lightness band, chroma, colour-blind separation, normal-vision floor); slots 5 and 6 sit under
 3:1 on white, so every chart labels its values or offers a table view. A single series is
 `chart-1` with no legend; two or more get a legend, and up to four are labelled directly. One axis
@@ -52,7 +56,7 @@ and trend arrows follow the same direction.
 `data-theme="light" | "dark"` on `<html>`; no attribute follows the device. Dark mode is for
 screens only: receipts, labels and reports always print in the light colours (dark ink on white). Every component reads
 tokens, so dark mode needs no `dark:` classes except where a token cannot express it. Dark surfaces
-are charcoal with a breath of green; emerald is lighter and used with restraint.
+are deep navy; the blue and green are lifted for contrast and used with restraint.
 
 ## Type
 
@@ -151,8 +155,7 @@ border-line`, hover `bg-surface-muted/60`, selected `bg-brand-soft`; numbers `te
   `text-danger-ink hover:bg-danger-soft`; separators `h-px bg-line my-1`; arrow keys, Home/End, Esc,
   type-ahead not required.
 - **Avatar**: `rounded-full`, initials `font-bold` on `brand-soft/brand-ink`.
-- **Logo**: the emerald mark (gradient `mark-from → mark-to`, the «S» in `on-mark`, white; the same
-  in both modes) + the wordmark «SERVA» (Latin, bold, letter-spaced) + «سيرفا» small under it.
+- **Logo**: the approved SERVA logo (the blue «S» with its green rising arrow, and the rounded «erva»). Files in `apps/web/public/brand/` (sources in the brand folder): `serva-lockup.svg` / `serva-lockup-dark.svg` (header, sidebar, landing), `serva-mark*.svg` (the «S» alone, 16 px and up), `serva-app-icon*.svg` (rounded tile; `/favicon.svg`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`), `serva-logo-light/dark/mono.svg` (the full mark with its orbit; `mono` for print and receipts). In the app use `Logo`, `LogoMark`, `AppIcon` of `@serva/ui` (they follow the theme: blue = `brand`, green = `accent`; `tone="sidebar"` on the always-dark sidebar). Never redraw, recolour or stretch it. Aria labels: «SERVA» / «سيرفا».
 
 ## Motion
 

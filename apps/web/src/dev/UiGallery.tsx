@@ -293,15 +293,14 @@ function LogoSection() {
         <Card className="flex min-h-64 flex-col items-center justify-center gap-6">
           <Logo size="lg" />
           <p className="text-sm text-ink-muted">
-            الأفقي الكبير: العلامة <bdi className="num">92</bdi>، و«<bdi>SERVA</bdi>»{' '}
-            <bdi className="num">48</bdi>، و«سيرفا» <bdi className="num">24</bdi>
+            الأفقي الكبير: الارتفاع <bdi className="num">92</bdi>، العلامة وكلمة «<bdi>erva</bdi>» بخط واحد
           </p>
         </Card>
         <div className="flex min-h-64 flex-col justify-between gap-8 rounded-card bg-sidebar p-6 shadow-e1">
           <Logo tone="sidebar" />
           <div className="flex flex-col gap-1">
             <p className="font-semibold text-sidebar-strong">على القائمة الجانبية</p>
-            <p className="text-sm text-sidebar-muted">الأخضر الغامق نفسه في الوضعين: توقيع SERVA.</p>
+            <p className="text-sm text-sidebar-muted">الكحلي الغامق نفسه في الوضعين: توقيع SERVA.</p>
           </div>
         </div>
       </div>
@@ -314,11 +313,11 @@ function LogoSection() {
             <LogoMark className="size-23" label="علامة سيرفا" />
           </Row>
         </Specimen>
-        <Specimen label="أيقونة التطبيق: كبيرة، متوسطة، صغيرة (دون نقطة)">
+        <Specimen label="أيقونة التطبيق: كبيرة، متوسطة، صغيرة">
           <Row className="flex-1 content-center justify-center gap-5">
             <AppIcon className="size-23" label="أيقونة التطبيق كبيرة" />
             <AppIcon className="size-16" label="أيقونة التطبيق متوسطة" />
-            <AppIcon className="size-9" small label="أيقونة التطبيق صغيرة" />
+            <AppIcon className="size-9" label="أيقونة التطبيق صغيرة" />
           </Row>
         </Specimen>
         <Specimen label="العمودي: صفحات الدخول والتحميل والأخطاء">

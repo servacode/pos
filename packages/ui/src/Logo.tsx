@@ -1,142 +1,169 @@
 import { useId } from 'react';
 import { cn } from './cn';
 
-// The SERVA mark (هوية 4 «الزمرّدي»), drawn as docs/design/kit/logo.md: viewBox 64, a square with
-// corner 16, the «S» of two arcs (stroke 7, round caps) and the small dot. The square is filled with
-// the emerald → teal gradient; under it lies the same square in solid emerald, so the mark stays whole
-// where a gradient cannot draw. The mark keeps its colours in both modes, as the specimen draws it
-// (mark-from, mark-to, on-mark): the «S» and the dot are white. Resize with the width and height only,
-// never redraw it.
+// The SERVA logo: the «S» with its rising arrow in the brand blue and green, and the rounded «erva»
+// (the approved identity, docs/design/IDENTITY.md; the files are in apps/web/public/brand). The art
+// is drawn as in those SVGs, in a 512 box: the blue swoosh, the green swoosh and arrow cut away
+// around it by a mask (so the two never touch), then the letters as strokes (no font, no licence).
+// It follows the theme (blue → brand, green → accent); on the always-dark sidebar the 'sidebar' tone
+// uses the dark-surface values of the logo files. Resize with the height or width only, never redraw.
 
-export const LOGO_S_PATH = 'M42 22 A10 10 0 1 0 32 32 A10 10 0 1 1 22 42';
+/** The blue swoosh of the «S» in the logo's 512 box (viewBox 40 40 440 440); the faint S of the sign-in side. */
+export const LOGO_S_PATH = 'M254 276 C334 296 372 318 366 358 C356 420 236 430 142 388';
+const GREEN_SWOOSH = 'M300 176 C250 132 150 136 142 202 C136 252 200 270 258 284';
+const GREEN_ARROW =
+  'M336 276 C352 236 352 196 366 152 L334 154 L414 62 L450 176 L418 166 C404 210 398 246 392 290 Z';
+const ERVA =
+  'M762 605 H910 A74 75 0 1 0 882 664 M988 682 V532 M988 604 C988 562 1016 538 1062 540 M1092 536 L1156 680 L1220 536 M1332 533 A72 72 0 1 0 1332 677 A72 72 0 1 0 1332 533 M1404 530 V682';
 
-interface MarkProps {
+export type LogoTone = 'default' | 'sidebar';
+
+/* eslint-disable no-restricted-syntax -- the logo's own artwork colours on a dark surface (serva-logo-dark.svg): the sidebar is dark in both modes, so no theme token applies */
+const ON_DARK = { blue: '#4a80ff' } as const;
+/* eslint-enable no-restricted-syntax */
+
+const PAINT = {
+  default: { blue: 'stroke-brand', green: 'fill-accent stroke-accent' },
+  sidebar: { blue: '', green: 'fill-sidebar-brand stroke-sidebar-brand' },
+} as const;
+
+interface ArtProps {
   className?: string;
-  /** Give the mark a name when it stands alone; next to the words it is decorative. */
+  /** Give the logo a name when it stands alone; next to the words it is decorative. */
   label?: string;
+  tone?: LogoTone;
 }
 
 function a11y(label: string | undefined) {
   return label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true as const };
 }
 
-/** The square of the mark: solid emerald, and the emerald → teal gradient over it. */
-function MarkSquare({ radius }: { radius: number }) {
-  // One gradient per mark: two logos on a page never share an id (nor lose it when one unmounts).
-  const gradient = `serfa-mark-${useId().replace(/[^\w-]/g, '')}`;
+function Art({
+  className,
+  label,
+  tone = 'default',
+  viewBox,
+  withWord,
+}: ArtProps & { viewBox: string; withWord: boolean }) {
+  // One mask per logo: two logos on a page never share an id (nor lose it when one unmounts).
+  const mask = `serva-cut-${useId().replace(/[^\w-]/g, '')}`;
+  const paint = PAINT[tone];
+  const blue = tone === 'sidebar' ? { stroke: ON_DARK.blue } : {};
   return (
-    <>
+    <svg viewBox={viewBox} focusable="false" {...a11y(label)} className={className}>
       <defs>
-        <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="currentColor" className="text-mark-from" />
-          <stop offset="1" stopColor="currentColor" className="text-mark-to" />
-        </linearGradient>
+        {/* eslint-disable no-restricted-syntax -- a mask works by luminance: white keeps, black cuts; not a colour of the interface */}
+        <mask id={mask} maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+          <rect width="512" height="512" fill="#fff" />
+          <path
+            d={LOGO_S_PATH}
+            fill="none"
+            stroke="#000"
+            strokeWidth="116"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </mask>
+        {/* eslint-enable no-restricted-syntax */}
       </defs>
-      <rect width="64" height="64" rx={radius} className="fill-mark-from" />
-      <rect width="64" height="64" rx={radius} fill={`url(#${gradient})`} />
-    </>
-  );
-}
-
-export function LogoMark({ className, label }: MarkProps) {
-  return (
-    <svg viewBox="0 0 64 64" focusable="false" {...a11y(label)} className={cn('size-8 shrink-0', className)}>
-      <MarkSquare radius={16} />
-      <path d={LOGO_S_PATH} fill="none" strokeWidth="7" strokeLinecap="round" className="stroke-on-mark" />
-      <circle cx="46" cy="46" r="3.5" className="fill-on-mark/90" />
-    </svg>
-  );
-}
-
-/**
- * The app icon (logo.md › أيقونة التطبيق): corner 15 of 64. Large and medium keep the dot; the small
- * one (48 and under) has a wider stroke and no dot.
- */
-export function AppIcon({ className, label, small = false }: MarkProps & { small?: boolean }) {
-  return (
-    <svg viewBox="0 0 64 64" focusable="false" {...a11y(label)} className={cn('size-16 shrink-0', className)}>
-      <MarkSquare radius={15} />
+      <g mask={`url(#${mask})`}>
+        <path
+          d={GREEN_SWOOSH}
+          fill="none"
+          strokeWidth="92"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={paint.green}
+        />
+        <path d={GREEN_ARROW} className={paint.green} strokeWidth="0" />
+      </g>
       <path
         d={LOGO_S_PATH}
         fill="none"
-        strokeWidth={small ? 8 : 7}
+        strokeWidth="92"
         strokeLinecap="round"
-        className="stroke-on-mark"
+        strokeLinejoin="round"
+        className={paint.blue}
+        {...blue}
       />
-      {small ? null : <circle cx="46" cy="46" r="3.5" className="fill-on-mark/90" />}
+      {withWord ? (
+        <path
+          d={ERVA}
+          transform="translate(-235 -270)"
+          fill="none"
+          strokeWidth="60"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={paint.blue}
+          {...blue}
+        />
+      ) : null}
     </svg>
   );
 }
 
-// «SERVA» in Latin capitals, bold and letter-spaced 0.12em. The text is the word «Serva» and the
-// capitals are drawn (uppercase), so a screen reader says a name instead of spelling five letters.
-// The space after the last letter is taken back (-me-[0.12em]) so the word sits optically centred
-// and close to the mark.
-const LATIN = '-me-[0.12em] font-bold tracking-[0.12em] uppercase';
-const WORDMARK = 'Serva';
-
-const HORIZONTAL = {
-  // Headers (sidebar, cashier bar, phone top): mark 32, «SERVA» 18/20, «سيرفا» 12/16, gap 10.
-  sm: {
-    gap: 'gap-2.5',
-    mark: 'size-8',
-    latin: 'text-lg/5',
-    arabic: 'text-xs/4',
-  },
-  // The large sheet: mark 92, «SERVA» 48/56, «سيرفا» 24/36, gap 20.
-  lg: {
-    gap: 'gap-5',
-    mark: 'size-23',
-    latin: 'text-5xl/14',
-    arabic: 'text-2xl/9',
-  },
-} as const;
-
-// On the page, or on the deep-emerald sidebar (the same in both modes), where the words turn light.
-const WORDS = {
-  default: { latin: 'text-ink', arabic: 'text-brand-ink' },
-  sidebar: { latin: 'text-sidebar-strong', arabic: 'text-sidebar-muted' },
-} as const;
-
-/** The horizontal lockup: the mark, «SERVA» and «سيرفا» under it. */
-export function Logo({
-  className,
-  markClassName,
-  size = 'sm',
-  tone = 'default',
-}: {
-  className?: string;
-  markClassName?: string;
-  size?: keyof typeof HORIZONTAL;
-  /** 'sidebar' on the deep-emerald sidebar: «SERVA» in white and «سيرفا» in sidebar-muted. */
-  tone?: keyof typeof WORDS;
-}) {
-  const s = HORIZONTAL[size];
-  const words = WORDS[tone];
+/** The «S» alone, square: legible from 16 px up. */
+export function LogoMark({ className, label, tone }: ArtProps) {
   return (
-    <span className={cn('inline-flex items-center', s.gap, className)}>
-      <LogoMark className={cn(s.mark, markClassName)} />
-      <span className="flex flex-col">
-        <span lang="en" dir="ltr" className={cn(LATIN, words.latin, s.latin)}>
-          {WORDMARK}
-        </span>
-        <span className={cn('font-semibold', words.arabic, s.arabic)}>سيرفا</span>
-      </span>
+    <Art
+      viewBox="40 40 440 440"
+      withWord={false}
+      label={label}
+      tone={tone}
+      className={cn('size-8 shrink-0', className)}
+    />
+  );
+}
+
+/** The app icon: the mark on a rounded tile (the PWA and home-screen icon is the same, in public/). */
+export function AppIcon({ className, label }: Omit<ArtProps, 'tone'>) {
+  return (
+    <span
+      className={cn(
+        'inline-grid size-16 shrink-0 place-items-center rounded-[22%] bg-surface shadow-e1',
+        className,
+      )}
+    >
+      <LogoMark label={label} className="size-[78%]" />
     </span>
   );
 }
 
-/** The stacked lockup for the splash, sign-in and error pages: mark 96, «SERVA» 44/48, «سيرفا» 20/30. */
+const SIZES = {
+  // Headers (sidebar, cashier bar, phone top): the lockup 32 tall.
+  sm: 'h-8',
+  // The large sheet: 92 tall.
+  lg: 'h-23',
+} as const;
+
+/** The horizontal lockup: the «S» with «erva» (aria-label «SERVA»). */
+export function Logo({
+  className,
+  size = 'sm',
+  tone = 'default',
+}: {
+  className?: string;
+  size?: keyof typeof SIZES;
+  /** 'sidebar' on the always-dark sidebar: the logo's colours for a dark surface. */
+  tone?: LogoTone;
+}) {
+  return (
+    <Art
+      viewBox="44 44 1190 420"
+      withWord
+      label="SERVA"
+      tone={tone}
+      className={cn('w-auto shrink-0', SIZES[size], className)}
+    />
+  );
+}
+
+/** The stacked lockup for the splash and error pages: the lockup, and «سيرفا» under it. */
 export function LogoStacked({ className }: { className?: string }) {
   return (
-    <span className={cn('inline-flex flex-col items-center gap-4', className)}>
-      <LogoMark className="size-24" />
-      <span className="flex flex-col items-center">
-        <span lang="en" dir="ltr" className={cn(LATIN, 'text-[44px]/12 text-ink')}>
-          {WORDMARK}
-        </span>
-        <span className="text-xl/[30px] font-semibold text-brand-ink">سيرفا</span>
-      </span>
+    <span className={cn('inline-flex flex-col items-center gap-3', className)}>
+      <Logo className="h-20" />
+      <span className="text-xl/[30px] font-semibold text-brand-ink">سيرفا</span>
     </span>
   );
 }

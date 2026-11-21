@@ -2,12 +2,12 @@
 #boot {
   display: flex;
   min-height: 100dvh;
-  background: var(--color-canvas, #f4f7f6);
+  background: var(--color-canvas, #f3f6fc);
 }
 #boot i {
   display: block;
   border-radius: 0.5rem;
-  background: var(--color-surface-muted, #e8eeec);
+  background: var(--color-surface-muted, #e8edf7);
 }
 #boot aside {
   display: none;
@@ -17,7 +17,7 @@
 #boot aside div {
   height: 100%;
   border-radius: 1rem;
-  background: var(--color-sidebar, #112420);
+  background: var(--color-sidebar, #0a1a3f);
   padding: 1.5rem 0.75rem;
 }
 #boot aside i {

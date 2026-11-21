@@ -158,10 +158,10 @@ function ReceiptHeader({ data, width, copy }: { data: ReceiptData; width: PaperW
 /* eslint-disable no-restricted-syntax -- paper is white with dark ink whatever the theme: these are the light theme's own values */
 export const PAPER = {
   '--color-surface': 'oklch(1 0 0)',
-  '--color-ink': 'oklch(0.2048 0.019 171.49)',
-  '--color-ink-muted': 'oklch(0.4644 0.0198 167.74)',
-  '--color-ink-subtle': 'oklch(0.5133 0.0204 169.44)',
-  '--color-line': 'oklch(0.9286 0.0076 164.93)',
+  '--color-ink': 'oklch(0.1904 0.0406 265.49)',
+  '--color-ink-muted': 'oklch(0.4041 0.0404 262.37)',
+  '--color-ink-subtle': 'oklch(0.4464 0.0491 265.16)',
+  '--color-line': 'oklch(0.9113 0.0193 263)',
 } as CSSProperties;
 /* eslint-enable no-restricted-syntax */
 

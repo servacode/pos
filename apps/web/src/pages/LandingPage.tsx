@@ -266,11 +266,8 @@ export function LandingPage() {
       <header className="nav">
         <div className="wrap navin">
           <Link className="logo" to="/" aria-label="سيرفا">
-            <img src="/favicon.svg" alt="" width={36} height={36} />
-            <span className="logo-t" aria-hidden="true">
-              <b>SERVA</b>
-              <i>سيرفا</i>
-            </span>
+            <img className="lk-l" src="/brand/serva-lockup.svg" alt="" width={102} height={36} />
+            <img className="lk-d" src="/brand/serva-lockup-dark.svg" alt="" width={102} height={36} />
           </Link>
           <nav className="nav-links" aria-label="الأقسام">
             <a href="#sectors">القطاعات</a>
@@ -801,11 +798,22 @@ export function LandingPage() {
           <div className="foot">
             <div className="fb">
               <Link className="logo" to="/" aria-label="سيرفا">
-                <img src="/favicon.svg" alt="" width={36} height={36} loading="lazy" />
-                <span className="logo-t" aria-hidden="true">
-                  <b>SERVA</b>
-                  <i>سيرفا</i>
-                </span>
+                <img
+                  className="lk-l"
+                  src="/brand/serva-lockup.svg"
+                  alt=""
+                  width={102}
+                  height={36}
+                  loading="lazy"
+                />
+                <img
+                  className="lk-d"
+                  src="/brand/serva-lockup-dark.svg"
+                  alt=""
+                  width={102}
+                  height={36}
+                  loading="lazy"
+                />
               </Link>
               <p>كاشير سحابي ومحاسبة مزدوجة آلية للمحلات في سوريا.</p>
             </div>

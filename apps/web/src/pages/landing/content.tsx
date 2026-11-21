@@ -190,7 +190,14 @@ export const SECTORS: readonly Sector[] = [
       ['تالف وهدر', 'من الكاشير بسبب واضح.'],
       ['فاتورة معلّقة', 'والقطع محجوزة لحد ما تكمّل.'],
     ],
-    visual: { kind: 'shot', name: 'cart', alt: 'شاشة الكاشير لسوبرماركت', w: 1280, h: 900, keep: true },
+    visual: {
+      kind: 'shot',
+      name: 'cart',
+      alt: 'شاشة الكاشير وفيها فاتورة مفتوحة',
+      w: 1280,
+      h: 900,
+      keep: true,
+    },
   },
   {
     id: 's-pharm',
