@@ -12,11 +12,20 @@ import type { AccessClaims } from '../auth/tokens';
  * only logged as one summary, so they show as one row with their count and no old and new price.
  */
 
-const ACTIONS = ['price.changed', 'product.updated', 'prices.list_applied', 'prices.bulk_changed'];
+const ACTIONS = [
+  'price.changed',
+  'product.updated',
+  'prices.list_applied',
+  'prices.bulk_changed',
+  'prices.bulk_undone',
+];
+/** A bulk row lists at most this many pieces; the rest is counted */
+const MOVES_SHOWN = 300;
 
 type AuditRow = {
   id: string;
   created_at: Date;
+  created_text: string;
   user_id: string | null;
   action: string;
   entity_id: string | null;
@@ -37,8 +46,19 @@ export function priceHistory(
     // A day is the store's own: from the start of `from` to the end of `to`, in the store's time zone
     const [tenant] = await tx.execute<{ tz: string | null }>(sql`select timezone as tz from tenants limit 1`);
     const tz = tenant?.tz ?? 'Asia/Damascus';
+    // A bulk row carries up to 5,000 pieces: only the first ones shown (and the product's own) leave the database
+    const pick = product
+      ? sql`and (m->>'id') in (select id::text from variants where product_id = ${product}::uuid)`
+      : sql``;
+    const dataColumn = sql`case when action in ('prices.bulk_changed', 'prices.bulk_undone')
+        and jsonb_typeof(data->'moves') = 'array' then
+          (data - 'moves') || jsonb_build_object(
+            'moves', coalesce((select jsonb_agg(m) from (
+                select m from jsonb_array_elements(data->'moves') m where true ${pick} limit ${MOVES_SHOWN}) x), '[]'::jsonb),
+            'movesTotal', (select count(*) from jsonb_array_elements(data->'moves') m where true ${pick}))
+        else data end as data`;
     const rows = await tx.execute<AuditRow>(sql`
-      select id, created_at, user_id, action, entity_id, changes, data
+      select id, created_at, created_at::text as created_text, user_id, action, entity_id, changes, ${dataColumn}
       from audit_logs
       where action in (${sql.join(
         ACTIONS.map((a) => sql`${a}`),
@@ -53,7 +73,7 @@ export function priceHistory(
           product
             ? sql`and ((action = 'price.changed' and data->>'productId' = ${product})
                     or (action = 'product.updated' and entity_id = ${product})
-                    or (action = 'prices.bulk_changed' and exists (
+                    or (action in ('prices.bulk_changed', 'prices.bulk_undone') and exists (
                           select 1 from jsonb_array_elements(coalesce(data->'moves', '[]'::jsonb)) m
                           where (m->>'id') in (select id::text from variants where product_id = ${product}::uuid))))`
             : sql``
@@ -63,7 +83,7 @@ export function priceHistory(
     const more = rows.length > query.limit;
     if (more) rows.length = query.limit;
     const last = rows[rows.length - 1];
-    const nextCursor = more && last ? `${new Date(last.created_at).toISOString()}|${last.id}` : null;
+    const nextCursor = more && last ? `${last.created_text}|${last.id}` : null;
 
     // What the rows name: the pieces' products and labels, and who did it
     const variantIds = new Set<string>();
@@ -80,7 +100,8 @@ export function priceHistory(
         if (r.entity_id) productIds.add(r.entity_id);
         for (const v of variantsOf(r)) variantIds.add(v.id);
       }
-      if (r.action === 'prices.bulk_changed') for (const m of movesOf(r)) variantIds.add(m.id);
+      if (r.action === 'prices.bulk_changed' || r.action === 'prices.bulk_undone')
+        for (const m of movesOf(r)) variantIds.add(m.id);
     }
     const names = new Map<string, string>();
     if (productIds.size > 0) {
@@ -123,6 +144,22 @@ export function priceHistory(
       for (const u of found) who.set(u.id, u.name);
     }
 
+    // Which of the listed bulk changes were taken back since
+    const batchIds = rows.flatMap((r) =>
+      r.action === 'prices.bulk_changed' && typeof r.data?.batchId === 'string' ? [r.data.batchId] : [],
+    );
+    const undone = new Set<string>();
+    if (batchIds.length > 0) {
+      const found = await tx.execute<{ of: string }>(sql`
+        select data->>'of' as of from audit_logs
+        where action = 'prices.bulk_undone'
+          and data->>'of' in (${sql.join(
+            batchIds.map((b) => sql`${b}`),
+            sql`, `,
+          )})`);
+      for (const f of found) undone.add(f.of);
+    }
+
     const items: PriceChange[] = [];
     const push = (
       r: AuditRow,
@@ -131,7 +168,7 @@ export function priceHistory(
         PriceChange,
         'productId' | 'variantLabel' | 'currency' | 'oldMinor' | 'newMinor' | 'note'
       > &
-        Partial<Pick<PriceChange, 'field'>>,
+        Partial<Pick<PriceChange, 'field' | 'batchId' | 'undone'>>,
       suffix: string,
     ) =>
       items.push({
@@ -186,11 +223,17 @@ export function priceHistory(
             );
           }
         }
-      } else if (r.action === 'prices.bulk_changed' && movesOf(r).length > 0) {
+      } else if (
+        (r.action === 'prices.bulk_changed' || r.action === 'prices.bulk_undone') &&
+        movesOf(r).length > 0
+      ) {
+        const isUndo = r.action === 'prices.bulk_undone';
+        const batchId = isUndo ? undefined : typeof r.data?.batchId === 'string' ? r.data.batchId : undefined;
         // A bulk change written with its pieces: one row for each, as a price edit shows
-        const all = movesOf(r).filter((m) => !product || labels.get(m.id)?.productId === product);
+        const all = movesOf(r);
+        const total = Math.max(Number(r.data?.movesTotal ?? all.length), all.length);
         // A change of thousands of pieces shows its first 300 and says how many more it moved
-        for (const m of all.slice(0, 300)) {
+        for (const m of all) {
           const piece = labels.get(m.id);
           push(
             r,
@@ -201,15 +244,17 @@ export function priceHistory(
               currency: piece?.currency ?? null,
               oldMinor: m.old,
               newMinor: m.new,
-              note:
-                r.data?.mode === 'restore'
+              note: isUndo
+                ? 'تراجع عن تغيير جماعي'
+                : r.data?.mode === 'restore'
                   ? 'إنهاء التخفيض'
                   : `تعديل جماعي ${Number(r.data?.percentBp ?? 0) / 100}٪`,
+              ...(batchId ? { batchId, undone: undone.has(batchId) } : {}),
             },
             `:${m.id}`,
           );
         }
-        if (all.length > 300) {
+        if (total > all.length) {
           push(
             r,
             'bulk',
@@ -219,12 +264,12 @@ export function priceHistory(
               currency: null,
               oldMinor: null,
               newMinor: null,
-              note: `و${String(all.length - 300)} قطعة أخرى في التغيير نفسه`,
+              note: `و${String(total - all.length)} قطعة أخرى في التغيير نفسه`,
             },
             ':more',
           );
         }
-      } else if (!product) {
+      } else if (!product && r.action !== 'prices.bulk_undone') {
         const count = Number(r.data?.pieces ?? 0);
         const note =
           r.action === 'prices.bulk_changed'

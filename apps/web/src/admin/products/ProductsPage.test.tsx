@@ -361,7 +361,7 @@ describe('/products list', () => {
   });
 
   it('hides adding and price editing from whoever cannot change the catalog', async () => {
-    openProducts({}, ['sale.create']);
+    openProducts({}, ['accounting.view']);
 
     await screen.findByText('حليب المراعي 1 لتر');
     expect(screen.queryByRole('link', { name: 'أضف منتجاً' })).not.toBeInTheDocument();
@@ -625,5 +625,56 @@ describe('/products list: round 48', () => {
     await vi.waitFor(() =>
       expect(requestsTo('GET', productsPath({ status: 'active', limit: 50, stock: 'out' }))).toHaveLength(1),
     );
+  });
+});
+
+describe('round 50: the margin column, the status counts and the accountant', () => {
+  it('shows the margin to who sees costs, and says when the price is under the cost', async () => {
+    openProducts(
+      {
+        [list({ cost: '1' })]: page([
+          listItem({ costMinor: 6_000 }),
+          listItem({ id: ids.other, nameAr: 'بضاعة خاسرة', costMinor: 99_999_000 }),
+          listItem({ id: 'no-cost', nameAr: 'بلا تكلفة', costMinor: null }),
+        ]),
+      },
+      ['catalog.manage', 'cost.view'],
+    );
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    await within(table).findByText('بضاعة خاسرة');
+    expect(within(table).getByRole('columnheader', { name: 'الهامش' })).toBeInTheDocument();
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows[1]).toHaveTextContent('السعر أقل من التكلفة');
+    expect(rows[0]).toHaveTextContent('60٪');
+    expect(rows[2]).not.toHaveTextContent('٪');
+  });
+
+  it('has no margin column for who does not see costs', async () => {
+    openProducts();
+    const table = await screen.findByRole('table', { name: 'المنتجات' });
+    expect(within(table).queryByRole('columnheader', { name: 'الهامش' })).not.toBeInTheDocument();
+  });
+
+  it('writes the count beside each status', async () => {
+    openProducts({
+      [list()]: {
+        status: 200,
+        body: {
+          items: [listItem()],
+          nextCursor: null,
+          statusCounts: { active: 38, temporary: 2, archived: 7 },
+        },
+      },
+    });
+    await screen.findByRole('table', { name: 'المنتجات' });
+    expect(await screen.findByRole('radio', { name: /المؤرشفة · 7/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /من الكاشير · 2/ })).toBeInTheDocument();
+  });
+
+  it('lets the accountant take the list to a sheet without any way to add or change a product', async () => {
+    openProducts({}, ['accounting.view']);
+    await screen.findByRole('table', { name: 'المنتجات' });
+    expect(screen.getByRole('button', { name: 'صدّر الجدول' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'أضف منتجاً' })).not.toBeInTheDocument();
   });
 });

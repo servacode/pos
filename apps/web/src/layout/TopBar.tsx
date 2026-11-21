@@ -18,6 +18,12 @@ import { Notifications, type Notice } from './Notifications';
 
 export type { Notice } from './Notifications';
 
+/** Pages the menu does not list (the person's own pages), named at the end of the breadcrumb */
+const UNLISTED_TITLES: Record<string, string> = {
+  '/me/pin': 'رمز الدخول',
+  '/welcome': 'معالج البداية',
+};
+
 /** A menu this short belongs to a cashier: no keyboard hint for the page search */
 const SHORTCUT_MIN_PAGES = 5;
 
@@ -64,6 +70,7 @@ export function TopBar({
   // of pages never needs it
   const showShortcut = sections.reduce((n, section) => n + section.pages.length, 0) > SHORTCUT_MIN_PAGES;
   const stacked = current !== undefined && current.key !== 'home';
+  const unlisted = current === undefined ? UNLISTED_TITLES[pathname] : undefined;
   const pageDiffers = current !== undefined && page !== undefined && page.label !== current.label;
 
   // Ctrl K opens the search, Alt N (or Ctrl N in an installed app) the list of new things, F2 the till: from anywhere in the admin.
@@ -93,7 +100,7 @@ export function TopBar({
   return (
     <div className="sh-top">
       <nav aria-label="أنت هنا" className="sh-crumb">
-        <ol className={stacked || current?.key === 'home' ? 'has-stack' : undefined}>
+        <ol className={stacked || unlisted || current?.key === 'home' ? 'has-stack' : undefined}>
           <li className="sh-menu-li">
             <button
               type="button"
@@ -118,6 +125,16 @@ export function TopBar({
               </li>
               <li className="sh-crumb-stack">
                 <span aria-current="page">الرئيسية</span>
+              </li>
+            </>
+          ) : null}
+          {unlisted ? (
+            <>
+              <li className="sh-crumb-sep" aria-hidden="true">
+                <NextIcon size={16} />
+              </li>
+              <li className="sh-crumb-stack">
+                <span aria-current="page">{unlisted}</span>
               </li>
             </>
           ) : null}

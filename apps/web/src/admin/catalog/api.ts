@@ -1,4 +1,5 @@
 import type {
+  ArchiveImpactResponse,
   BarcodeLookupResponse,
   Category,
   CreateCategoryInput,
@@ -37,6 +38,7 @@ export function productsPath(query: ProductListQuery): string {
   if (query.stock) params.set('stock', query.stock);
   if (query.sort && query.sort !== 'name') params.set('sort', query.sort);
   if (query.detail) params.set('detail', query.detail);
+  if (query.cost) params.set('cost', query.cost);
   if (query.cursor) params.set('cursor', query.cursor);
   if (query.limit) params.set('limit', String(query.limit));
   const search = params.toString();
@@ -61,6 +63,11 @@ export function updateProduct(productId: string, input: UpdateProductInput) {
     body: input,
     auth: true,
   });
+}
+
+/** What archiving leaves behind: the stock on the shelf and the dishes that use the product */
+export function getArchiveImpact(productId: string) {
+  return apiFetch<ArchiveImpactResponse>(`/v1/products/${id(productId)}/archive-impact`, { auth: true });
 }
 
 /** `POST /v1/products/{id}/archive` or `/restore`: no body, answers the product. */

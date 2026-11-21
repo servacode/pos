@@ -47,4 +47,21 @@ describe('useUnsavedGuard', () => {
     expect(push).not.toHaveBeenCalled();
     expect(confirm).not.toHaveBeenCalled();
   });
+
+  it('takes its extra history entry away again when the edits are saved, so one Back goes one page back', () => {
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+    const { rerender } = render(<Page active />);
+    expect(back).not.toHaveBeenCalled();
+    rerender(<Page active={false} />);
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not go back when a link already moved on from the extra entry', () => {
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+    const { unmount } = render(<Page active />);
+    window.history.pushState({ other: true }, '', '/categories');
+    unmount();
+    expect(back).not.toHaveBeenCalled();
+    window.history.pushState(null, '', '/');
+  });
 });

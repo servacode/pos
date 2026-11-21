@@ -184,10 +184,10 @@ describe('/categories', () => {
     expect(await within(dialog).findByText('يوجد تصنيف بهذا الاسم')).toBeInTheDocument();
   });
 
-  it('is read-only without catalog.manage', async () => {
+  it('is closed to whoever does not hold catalog.manage: a plain no-permission page, nothing asked for', async () => {
     openCategories(categories, {}, ['sale.create']);
-    await screen.findByText('منظفات');
+    expect(await screen.findByText('ليس لديك صلاحية لهذه الصفحة')).toBeInTheDocument();
+    expect(screen.queryByText('منظفات')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /أضف|عدّل|أرشف/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /إجراءات/ })).not.toBeInTheDocument();
   });
 });

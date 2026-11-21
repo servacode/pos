@@ -62,11 +62,26 @@ describe('MoneyField refusals', () => {
     await user.type(field, '-');
     expect(screen.getByText('لا يُقبل مبلغ سالب')).toBeInTheDocument();
     expect(screen.getByTestId('minor')).toHaveTextContent('null');
+    // The digits typed after the refused sign are ignored too: «-5» must not become 5
     await user.type(field, '5');
     expect(screen.getByText('لا يُقبل مبلغ سالب')).toBeInTheDocument();
-    expect(screen.getByTestId('minor')).toHaveTextContent('500');
+    expect(screen.getByTestId('minor')).toHaveTextContent('null');
     await user.tab();
     expect(screen.queryByText('لا يُقبل مبلغ سالب')).not.toBeInTheDocument();
+    await user.type(field, '5');
+    expect(screen.getByTestId('minor')).toHaveTextContent('500');
+  });
+
+  it('does not turn 2500.5 into 25005: the digits after a refused point are ignored', async () => {
+    const user = userEvent.setup();
+    render(<Harness currency="SYP" />);
+    const field = screen.getByLabelText('السعر');
+    await user.type(field, '2500.5');
+    expect(screen.getByTestId('minor')).toHaveTextContent('250000');
+    expect(screen.getByText(/تُعرض بلا كسور/)).toBeInTheDocument();
+    // Deleting a digit lifts it: typing goes on
+    await user.type(field, '{Backspace}7');
+    expect(screen.getByTestId('minor')).toHaveTextContent('250700');
   });
 
   it('refuses a fraction a currency without fractions cannot keep, instead of cutting it', async () => {

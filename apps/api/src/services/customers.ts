@@ -57,6 +57,8 @@ type Row = {
   group_discount_bps?: number | null;
   birth_date?: string | null;
   balance: string;
+  last?: string | null;
+  spent?: string | null;
 };
 
 const balances = sql`
@@ -131,6 +133,8 @@ export async function listCustomers(
     limit?: number;
     cursor?: string;
     lite?: boolean;
+    /** Everything of the filters in one answer, for the Excel file (no totals, no paging) */
+    export?: boolean;
     /** Only customers who bought before and not since this day (YYYY-MM-DD): «لم يزر منذ 90 يوماً» */
     lastBefore?: string;
     sort?: 'balance' | 'name' | 'last' | 'spent';
@@ -166,8 +170,9 @@ export async function listCustomers(
         : sql`${foldedName} like ${`%${escapeLike(q)}%`}`;
     const balance = sql`coalesce(b.balance, 0)`;
     const owingWhere = query.owing ? sql`${balance} > 0` : sql`true`;
-    // A picker's search (a `q` and no `limit`) gets the best 50 matches, not every customer with that letter
-    const cap = query.limit ?? (q ? 50 : undefined);
+    // A picker (a `q` or `lite`, no `limit`) gets the best 50, not every customer; a bare call is held at 500
+    const exporting = query.export === true;
+    const cap = exporting ? 50000 : (query.limit ?? (q || query.lite ? 50 : 500));
     const sort = query.sort ?? (query.birthMonth ? 'birth' : 'balance');
     const flip = query.dir === 'asc' ? sql`asc` : query.dir === 'desc' ? sql`desc` : null;
     const order =
@@ -180,7 +185,7 @@ export async function listCustomers(
             : sort === 'birth'
               ? sql`extract(day from c.birth_date), c.name, c.id`
               : sql`${balance} ${flip ?? sql`desc`}, c.name, c.id`;
-    const needSold = sort === 'last' || sort === 'spent';
+    const needSold = sort === 'last' || sort === 'spent' || exporting;
     const soldJoin = needSold
       ? sql`left join (
           select i.customer_id, max(i.business_date) as last,
@@ -193,7 +198,7 @@ export async function listCustomers(
              c.kind, c.contact_name, c.contact_phone, c.region_id, g.name as region_name,
              c.approval_status, c.lat, c.lng, c.group_id, cg.name as group_name,
              cg.discount_bps as group_discount_bps, c.birth_date::text as birth_date,
-             ${balance}::text as balance
+             ${balance}::text as balance${exporting ? sql`, s.last::text as last, coalesce(s.spent, 0)::text as spent` : sql``}
       from customers c
       left join regions g on g.tenant_id = c.tenant_id and g.id = c.region_id
       left join customer_groups cg on cg.tenant_id = c.tenant_id and cg.id = c.group_id
@@ -205,10 +210,30 @@ export async function listCustomers(
     const hasMore = cap !== undefined && rows.length > cap;
     const page = (cap ? rows.slice(0, cap) : rows).map(item);
     const nextCursor = hasMore && cap ? encodeOffset(offset + cap) : null;
-    const [totals] = await tx.execute<{ all_n: string; owing_n: string; owed: string; matched: string }>(sql`
+    if (exporting) {
+      return {
+        items: (rows.slice(0, cap) as Row[]).map((r) => ({
+          ...item(r),
+          lastPurchaseDate: r.last ?? null,
+          spentMinor: Number(r.spent ?? 0),
+          favouriteSize: null,
+        })),
+        totalOwedMinor: 0,
+        nextCursor: null,
+        baseCurrency: await baseCurrency(tx),
+      };
+    }
+    const [totals] = await tx.execute<{
+      all_n: string;
+      owing_n: string;
+      owed: string;
+      owed_archived: string;
+      matched: string;
+    }>(sql`
       select count(*)::text as all_n,
              count(*) filter (where ${balance} > 0)::text as owing_n,
              coalesce(sum(${balance}) filter (where ${balance} > 0), 0)::text as owed,
+             coalesce(sum(${balance}) filter (where ${balance} > 0 and c.archived_at is not null), 0)::text as owed_archived,
              count(*) filter (where ${search} and ${owingWhere})::text as matched
       from customers c left join (${balances}) b on b.customer_id = c.id
       where ${filter}`);
@@ -256,6 +281,7 @@ export async function listCustomers(
     return {
       items,
       totalOwedMinor: Number(totals?.owed ?? 0),
+      archivedOwedMinor: Number(totals?.owed_archived ?? 0),
       totalCount: Number(totals?.matched ?? 0),
       allCount: Number(totals?.all_n ?? 0),
       owingCount: Number(totals?.owing_n ?? 0),

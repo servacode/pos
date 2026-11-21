@@ -107,6 +107,8 @@ const discountMeta = {
   source: z.enum(DISCOUNT_SOURCES),
   reason: z.string().trim().min(1).max(200).nullable(),
   approval: approvalSchema.nullable(),
+  /** The offer behind a `promotion` discount, so the report groups by it and a rename does not split it. Optional: older tills send only the name as the reason. */
+  promotionId: uuidSchema.optional(),
 };
 export const documentDiscountSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('percent'), bp: bpSchema, ...discountMeta }),

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CustomerListItem } from '@serva/core';
+import { toLatinDigits } from '@serva/core/text';
 import { Alert, Button, CashIcon, Dialog } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { errorMessage } from '../../lib/api';
@@ -7,6 +8,27 @@ import { countWord } from '../../lib/plural';
 import { Amt } from '../sales/ui';
 import { listCustomerPage } from './api';
 import { debtReminderLink } from './debtReminder';
+
+/**
+ * Customers who share one phone get one message: their names are joined and their debts added
+ */
+export function mergeByPhone(list: readonly CustomerListItem[]): CustomerListItem[] {
+  const byPhone = new Map<string, CustomerListItem>();
+  const out: CustomerListItem[] = [];
+  for (const c of list) {
+    const key = c.phone ? [...toLatinDigits(c.phone)].filter((ch) => ch >= '0' && ch <= '9').join('') : '';
+    const seen = key ? byPhone.get(key) : undefined;
+    if (!seen) {
+      const copy = { ...c };
+      if (key) byPhone.set(key, copy);
+      out.push(copy);
+    } else {
+      seen.name = `${seen.name} / ${c.name}`;
+      seen.balanceMinor += c.balanceMinor;
+    }
+  }
+  return out;
+}
 
 /**
  * «تذكير جماعي للمدينين»: every customer who owes and can be written to (a phone, and not «لا يريد
@@ -44,8 +66,7 @@ export function BulkReminder({ onClose }: { onClose: () => void }) {
 
   const rows = useMemo(
     () =>
-      (debtors ?? [])
-        .filter((c) => !c.archived && !c.noMessages)
+      mergeByPhone((debtors ?? []).filter((c) => !c.archived && !c.noMessages))
         .map((c) => ({
           customer: c,
           link: debtReminderLink(c.phone, {
@@ -99,7 +120,7 @@ export function BulkReminder({ onClose }: { onClose: () => void }) {
                 >
                   {next ? `افتح التالي: ${next.customer.name}` : 'انتهيت من الجميع'}
                 </Button>
-                <ul className="cx-groups" aria-label="المدينون">
+                <ul className="cx-groups cx-rem" aria-label="المدينون">
                   {rows.map(({ customer, link }) => (
                     <li key={customer.id}>
                       <span className="nm">{customer.name}</span>

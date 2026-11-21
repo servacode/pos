@@ -71,7 +71,7 @@ import type { DayReport } from '../admin/reports/contracts';
 import { methodLabel } from '../admin/reports/labels';
 import { useReport, type ReportState } from '../admin/reports/useReport';
 import { useMe } from '../auth/useAuth';
-import { AppShell, splitPending } from '../layout/AppShell';
+import { AppShell, getPendingOrdersOnce, splitPending } from '../layout/AppShell';
 import { apiFetch } from '../lib/api';
 import { dayText, isoDay } from '../lib/dates';
 import { products } from '../lib/plural';
@@ -107,9 +107,9 @@ function TrialBanner({ me }: { me: MeResponse }) {
   return (
     <div
       // Said once: from 1024 px the sidebar's plan card carries these days, so this is for phones
-      className="flex items-center gap-4 rounded-card border border-brand/20 bg-brand-soft px-4 py-2 text-brand-ink shadow-e1 sm:px-5 sm:py-4 lg:hidden"
+      className="flex items-center gap-3 rounded-card border border-brand/20 bg-brand-soft px-4 py-0.5 text-brand-ink shadow-e1 sm:gap-4 sm:px-5 sm:py-4 lg:hidden"
     >
-      <span className="grid size-11 shrink-0 place-items-center rounded-full bg-surface/70">
+      <span className="grid size-11 shrink-0 place-items-center rounded-full bg-surface/70 max-sm:hidden">
         <GiftIcon />
       </span>
       <div className="flex min-w-0 flex-col">
@@ -342,13 +342,18 @@ function HeroTile({
                 <>
                   <span className="opacity-85">لا مبيعات بعد</span>
                   {yesterday !== null && yesterday > 0 ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold">
-                      أمس <Money minor={yesterday} currency={data.baseCurrency} />
+                    <span className="inline-flex items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold [&_[data-money-unit]]:text-on-brand! [&_[data-money-unit]]:opacity-100">
+                      أمس{' '}
+                      <Money minor={yesterday} currency={data.baseCurrency} className="whitespace-nowrap" />
                     </span>
                   ) : lastSale ? (
-                    <span className="inline-flex flex-wrap items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold">
+                    <span className="inline-flex flex-wrap items-center gap-1 rounded-full bg-on-brand/15 px-2 py-0.5 text-xs font-semibold [&_[data-money-unit]]:text-on-brand! [&_[data-money-unit]]:opacity-100">
                       آخر يوم فيه مبيعات: {weekdayOf(lastSale.date)} {dayText(lastSale.date, digits)}{' '}
-                      <Money minor={lastSale.total} currency={data.baseCurrency} />
+                      <Money
+                        minor={lastSale.total}
+                        currency={data.baseCurrency}
+                        className="whitespace-nowrap"
+                      />
                     </span>
                   ) : null}
                 </>
@@ -407,7 +412,7 @@ function HeroTile({
           </>
         )}
       </div>
-      {week && week.length > 1 ? <WeekBars values={week} /> : null}
+      {week && week.length > 1 && !(data && netOfReturns(data) <= 0) ? <WeekBars values={week} /> : null}
     </div>
   );
 }
@@ -817,8 +822,6 @@ function PaymentMix({ me, report }: { me: MeResponse; report: DayState }) {
 
 // ─── What waits ──────────────────────────────────────────────────────────────
 
-const getPendingOrders = () =>
-  apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders?status=pending', { auth: true });
 // The orders already accepted and waiting to be sold on a till: the number the till's «طلبات المتجر» chip shows
 const getAcceptedOrders = () =>
   apiFetch<{ items: OnlineOrder[] }>('/v1/online-orders?status=accepted', { auth: true });
@@ -836,12 +839,15 @@ function WaitingRow({
   count,
   tone,
   icon,
+  action,
   children,
 }: {
   to: string;
   count: number | string | null;
   tone: WaitingTone;
   icon: ReactNode;
+  /** What pressing the row lets you do, said in two words («اقبل أو ارفض») */
+  action?: string;
   children: ReactNode;
 }) {
   return (
@@ -856,6 +862,11 @@ function WaitingRow({
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface/70">{icon}</span>
         <span className="min-w-0 flex-1">{children}</span>
         {count === null ? null : <span className="num text-lg font-bold">{count}</span>}
+        {action ? (
+          <span className="shrink-0 rounded-full bg-surface/70 px-2.5 py-1 text-xs font-semibold max-sm:hidden">
+            {action}
+          </span>
+        ) : null}
         <NextIcon size={16} />
       </Link>
     </li>
@@ -1108,19 +1119,40 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
   for (const group of stock.filter((g) => g.allOut)) rows.push(rowOf(group));
   if (cancelRequests > 0)
     rows.push(
-      <WaitingRow key="cancels" to="/online-store" count={cancelRequests} tone="warning" icon={<StoreIcon />}>
+      <WaitingRow
+        key="cancels"
+        to="/online-store"
+        count={cancelRequests}
+        tone="warning"
+        icon={<StoreIcon />}
+        action="وافق أو ارفض"
+      >
         {cancelRequests === 1 ? 'زبون يطلب إلغاء طلبه' : 'زبائن يطلبون إلغاء طلباتهم'}
       </WaitingRow>,
     );
   if (online > 0)
     rows.push(
-      <WaitingRow key="online" to="/online-store" count={online} tone="brand" icon={<StoreIcon />}>
+      <WaitingRow
+        key="online"
+        to="/online-store"
+        count={online}
+        tone="brand"
+        icon={<StoreIcon />}
+        action="اقبل أو ارفض"
+      >
         {online === 1 ? 'طلب جديد من المتجر الإلكتروني' : 'طلبات جديدة من المتجر الإلكتروني'}
       </WaitingRow>,
     );
   if (accepted > 0)
     rows.push(
-      <WaitingRow key="accepted" to="/online-store" count={accepted} tone="brand" icon={<StoreIcon />}>
+      <WaitingRow
+        key="accepted"
+        to="/online-store"
+        count={accepted}
+        tone="brand"
+        icon={<StoreIcon />}
+        action="جهّزها للبيع"
+      >
         {accepted === 1 ? 'طلب مقبول ينتظر الكاشير' : 'طلبات مقبولة تنتظر الكاشير'}
       </WaitingRow>,
     );
@@ -1141,7 +1173,14 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
     );
   if (expiring > 0)
     rows.push(
-      <WaitingRow key="expiring" to="/expiry" count={expiring} tone="warning" icon={<CalendarIcon />}>
+      <WaitingRow
+        key="expiring"
+        to="/expiry"
+        count={expiring}
+        tone="warning"
+        icon={<CalendarIcon />}
+        action="راجع الدفعات"
+      >
         {batchNamed(expiringRows, expiring === 1 ? 'دفعة يقترب انتهاؤها' : 'دفعات يقترب انتهاؤها')}
       </WaitingRow>,
     );
@@ -1171,6 +1210,15 @@ function Waiting({ bare = false, ...args }: WaitingArgs & { bare?: boolean }) {
     ) : (
       <>
         <ul className="flex flex-col gap-2">{shown}</ul>
+        {stock.length > 0 && args.seesExpiry ? (
+          <Link
+            to="/purchase-orders/new"
+            className="inline-flex min-h-11 items-center gap-1.5 self-start rounded-control px-2 text-sm font-semibold text-brand-ink hover:underline"
+          >
+            اطلب النواقص من المورد
+            <NextIcon size={16} />
+          </Link>
+        ) : null}
         {rows.length > WAITING_ROWS ? (
           <button
             type="button"
@@ -1527,6 +1575,69 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/**
+ * What a shop owner looks at first in the morning: yesterday's net sales, the cash in the drawers now and
+ * the dollar rate of the day. Each figure only appears when it is known (and for who may see it).
+ */
+function MorningLine({
+  yesterday,
+  cash,
+  rate,
+  base,
+  digits,
+}: {
+  yesterday: number | null;
+  cash: number | null;
+  rate: string | null;
+  base: CurrencyCode;
+  digits: NumberFormat;
+}) {
+  const dollar = rate !== null && Number(rate) > 0 ? Number(rate) : null;
+  if (yesterday === null && cash === null && dollar === null) return null;
+  const chip =
+    'inline-flex min-h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-3 text-sm whitespace-nowrap text-ink-muted';
+  return (
+    <ul aria-label="نظرة الصباح" className="flex flex-wrap gap-2">
+      {yesterday !== null ? (
+        <li className={chip}>
+          أمس <Money minor={yesterday} currency={base} className="font-semibold text-ink" />
+        </li>
+      ) : null}
+      {cash !== null ? (
+        <li className={chip}>
+          الصندوق الآن <Money minor={cash} currency={base} className="font-semibold text-ink" />
+        </li>
+      ) : null}
+      {dollar !== null ? (
+        <li className={chip}>
+          سعر الدولار
+          <bdi className="num font-semibold text-ink">{formatNumber(dollar, digits)}</bdi> ل.س
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+/** The cashier's home: the way to his till, not the shop's card (he has no figures to look at). */
+function TillCard() {
+  return (
+    <Link
+      to="/pos"
+      reloadDocument
+      className="flex min-h-24 items-center gap-4 rounded-panel border border-brand/20 bg-brand-soft p-5 text-brand-ink shadow-e1 transition-colors duration-120 hover:border-brand/40"
+    >
+      <span className="grid size-12 shrink-0 place-items-center rounded-full bg-surface/70">
+        <CartIcon size={24} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-lg font-bold">افتح الكاشير</span>
+        <span className="text-sm opacity-85">ابدأ وردية جديدة أو أكمل وردية مفتوحة، ثم بِع.</span>
+      </span>
+      <NextIcon size={20} />
+    </Link>
+  );
+}
+
 function StoreCard({ me, className }: { me: MeResponse; className?: string }) {
   const base = CURRENCIES[me.settings.baseCurrency];
   return (
@@ -1606,7 +1717,7 @@ export function HomePage() {
       cache: 'home',
     },
   );
-  const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrders, { cache: 'home' });
+  const orders = useReport(seesOrders ? 'orders:pending' : null, getPendingOrdersOnce, { cache: 'home' });
   const toSell = useReport(seesOrders ? 'orders:accepted' : null, getAcceptedOrders, { cache: 'home' });
   // What the page needs from the heavy lists, in one light request: the low pieces, who owes, the photos
   const canCatalogView = holdsAny(me, ['catalog.manage']);
@@ -1684,6 +1795,7 @@ export function HomePage() {
     summary.data?.hasEverSold === false;
 
   const canCatalog = holdsAny(me, ['catalog.manage']);
+  const canSell = holdsAny(me, ['sale.create']);
   const showWaiting = seesOrders || seesStock || seesExpiry || seesCheques || canCatalogView;
   const money: MoneyArgs = {
     customers,
@@ -1726,10 +1838,26 @@ export function HomePage() {
           subtitle={`${weekdayOf(today)} ${dayText(today, me.settings.numberFormat)} · ${
             branchOnly
               ? `أرقام ${branchOnly} فقط${seesCheques ? '، وما على الزبائن للمتجر كله' : ''}.`
-              : 'هذه صورة متجرك اليوم.'
+              : seesSales
+                ? 'هذه صورة متجرك اليوم.'
+                : 'أهلاً بك في عملك اليوم.'
           }`}
-          actions={<QuickActions me={me} />}
         />
+        {/* The morning look and the shortcuts sit right under the greeting, not at the far end of the page */}
+        {!brandNew && (seesSales || canCatalog) ? (
+          <div className="-mt-3 flex flex-wrap items-center gap-2">
+            {seesSales ? (
+              <MorningLine
+                yesterday={weekPoints[5]?.total ?? null}
+                cash={summary.data?.cashMinor ?? null}
+                rate={summary.data?.usdRate ?? null}
+                base={base}
+                digits={me.settings.numberFormat}
+              />
+            ) : null}
+            <QuickActions me={me} />
+          </div>
+        ) : null}
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="flex min-w-0 flex-col gap-6 max-xl:contents xl:col-start-1 xl:row-start-1">
             {seesSales && !brandNew ? (
@@ -1740,7 +1868,7 @@ export function HomePage() {
                   type="button"
                   aria-expanded={kpiOpen}
                   onClick={() => setKpiOpen((v) => !v)}
-                  className="flex min-h-14 items-center gap-2 rounded-card border border-line bg-surface px-4 text-start text-sm text-ink-muted shadow-e1 md:hidden"
+                  className="flex min-h-20 items-center gap-2 rounded-card border border-line bg-surface px-4 py-2 text-start text-sm text-ink-muted shadow-e1 md:hidden"
                 >
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="text-xs">مبيعات اليوم (صافي)</span>
@@ -1748,7 +1876,7 @@ export function HomePage() {
                       <Money
                         minor={netOfReturns(day.data)}
                         currency={day.data.baseCurrency}
-                        className="text-xl font-bold text-ink"
+                        className="text-3xl font-bold text-ink"
                       />
                     ) : (
                       <Skeleton className="mt-1 h-6 w-32" />
@@ -1815,7 +1943,7 @@ export function HomePage() {
                 <PaymentMix me={me} report={day} />
               </div>
             ) : null}
-            {!seesSales ? <StoreCard me={me} /> : null}
+            {!seesSales ? canSell ? <TillCard /> : <StoreCard me={me} /> : null}
           </div>
           <div className="contents xl:col-start-2 xl:row-start-1 xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
             <div className="flex min-w-0 flex-col gap-6 empty:hidden max-xl:order-[-1] xl:order-none">

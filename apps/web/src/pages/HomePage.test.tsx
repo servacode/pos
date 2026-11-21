@@ -20,11 +20,15 @@ const summaryOf = (parts: {
   lowStock?: unknown[];
   debts?: { totalOwedMinor: number; overLimitCount: number; overLimitOne: unknown } | null;
   photos?: { goodsCount: number; withoutPhoto: number } | null;
+  cashMinor?: number | null;
+  usdRate?: string | null;
 }) => ({
   status: 200,
   body: {
     baseCurrency: 'SYP',
     hasEverSold: parts.hasEverSold ?? true,
+    cashMinor: parts.cashMinor ?? null,
+    usdRate: parts.usdRate ?? null,
     debts: parts.debts ?? null,
     photos: parts.photos ?? null,
     lowStock: parts.lowStock ? { total: parts.lowStock.length, items: parts.lowStock } : null,
@@ -61,7 +65,11 @@ describe('HomePage', () => {
           const me = makeMe({ status: 'trialing', daysLeft: 12 });
           return {
             ...me,
-            user: { ...me.user, permissions: [...me.user.permissions, 'subscription.manage'] },
+            // Not a cashier (no till right): the shop's card shows the sectors
+            user: {
+              ...me.user,
+              permissions: [...me.user.permissions.filter((p) => p !== 'sale.create'), 'subscription.manage'],
+            },
           };
         })(),
       },
@@ -164,6 +172,33 @@ describe('HomePage', () => {
       const till = screen.getAllByRole('link', { name: /افتح الكاشير/ });
       expect(till).toHaveLength(1);
       expect(till[0]).toHaveAttribute('href', '/pos');
+    });
+
+    it('opens the morning with yesterday, the cash in the drawers and the dollar rate, right under the greeting', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith([...OWNER_KEYS, 'catalog.manage']) },
+        ['GET /v1/reports/day?date=' + TODAY]: { status: 200, body: dayReport({}) },
+        [WEEK]: weekOf({ [dayBack(1)]: 800_000 }),
+        'GET /v1/me/home-summary': summaryOf({ cashMinor: 2_500_000, usdRate: '13000' }),
+      });
+      renderApp('/');
+      const morning = await screen.findByRole('list', { name: 'نظرة الصباح' });
+      expect(await within(morning).findByText(/أمس/)).toBeInTheDocument();
+      expect(within(morning).getByText(/الصندوق الآن/)).toBeInTheDocument();
+      expect(within(morning).getByText(/سعر الدولار/)).toHaveTextContent('13,000');
+    });
+
+    it('gives a cashier the way to his till, not the shop card', async () => {
+      mockFetch({
+        'POST /v1/auth/refresh': signedInRefresh,
+        'GET /v1/me': { status: 200, body: meWith(['sale.create']) },
+      });
+      renderApp('/');
+      const card = await screen.findByRole('link', { name: /ابدأ وردية جديدة/ });
+      expect(card).toHaveAttribute('href', '/pos');
+      expect(screen.queryByText('متجرك')).not.toBeInTheDocument();
+      expect(screen.queryByRole('list', { name: 'نظرة الصباح' })).not.toBeInTheDocument();
     });
 
     it('counts the accepted orders waiting for a till, the number the till shows', async () => {

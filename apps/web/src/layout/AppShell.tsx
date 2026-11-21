@@ -57,6 +57,21 @@ const getPendingOrders = () =>
 /** How long the bell trusts its last answer while the user moves from page to page. */
 const PENDING_FRESH_MS = 30_000;
 
+let pendingAsk: Promise<{ items: OnlineOrder[] }> | null = null;
+
+/**
+ * The pending list, asked once while an answer is on its way: the shell and the home page both need it
+ * at the same moment on first load, and one request serves both.
+ */
+export function getPendingOrdersOnce(fresh = false): Promise<{ items: OnlineOrder[] }> {
+  // After an order was decided the answer on its way is older than the decision: ask again
+  if (fresh) pendingAsk = null;
+  pendingAsk ??= getPendingOrders().finally(() => {
+    pendingAsk = null;
+  });
+  return pendingAsk;
+}
+
 /** The last answer per signed-in user (a new sign-in brings a new `me`, and asks again). */
 const pendingSeen = new WeakMap<MeResponse, { at: number; items: OnlineOrder[] }>();
 
@@ -101,15 +116,20 @@ function usePendingOrders(me: MeResponse, allowed: boolean, pathname: string): O
   useEffect(() => {
     if (!allowed) return;
     let current = true;
-    const ask = () =>
-      getPendingOrders().then(
+    // Only the latest question counts: a slow answer to an earlier one never overwrites a newer one
+    let asked = 0;
+    const ask = (fresh = false) => {
+      const mine = (asked += 1);
+      return getPendingOrdersOnce(fresh).then(
         ({ items: fresh }) => {
+          if (mine !== asked) return;
           pendingSeen.set(me, { at: Date.now(), items: fresh });
           if (current) setItems(fresh);
         },
         // The bell keeps what it had; the page's own requests say when the connection is down.
         () => undefined,
       );
+    };
     const seen = pendingSeen.get(me);
     if (!seen || Date.now() - seen.at >= PENDING_FRESH_MS) void ask();
     // Any page, tab in front: ask again every 45 seconds, and the moment the tab comes back or the
@@ -119,16 +139,17 @@ function usePendingOrders(me: MeResponse, allowed: boolean, pathname: string): O
     const askIfSeen = () => {
       if (visible()) void ask();
     };
+    const onChanged = () => void ask(true);
     const timer = window.setInterval(askIfSeen, deciding ? 8000 : POLL_MS);
     document.addEventListener('visibilitychange', askIfSeen);
     window.addEventListener('focus', askIfSeen);
-    window.addEventListener(ORDERS_CHANGED, ask);
+    window.addEventListener(ORDERS_CHANGED, onChanged);
     return () => {
       current = false;
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', askIfSeen);
       window.removeEventListener('focus', askIfSeen);
-      window.removeEventListener(ORDERS_CHANGED, ask);
+      window.removeEventListener(ORDERS_CHANGED, onChanged);
     };
   }, [me, allowed, deciding]);
   return allowed ? items : [];
@@ -488,7 +509,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       const typing =
         target instanceof HTMLElement &&
         (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
-      if (event.key === '[' && !typing && !event.ctrlKey && !event.metaKey && !event.altKey) toggleSidebar();
+      // Not while a dialog (the search box, the menu drawer) is open: the key belongs to it
+      const inDialog = target instanceof HTMLElement && target.closest('[role="dialog"]') !== null;
+      if (
+        event.key === '[' &&
+        !typing &&
+        !inDialog &&
+        !drawerOpen &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      )
+        toggleSidebar();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

@@ -123,8 +123,13 @@ export const customerListQuery = z.object({
   groupId: uuidSchema.optional(),
   /** Only customers whose birthday is in this month (1-12) */
   birthMonth: z.coerce.number().int().min(1).max(12).optional(),
-  /** With `limit`: name, phone and balance only; the last purchase, spend and size are left out */
+  /** With `limit`: name, phone and balance only; the last purchase, spend and size are left out. Alone: the best 50 */
   lite: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
+  /** Every customer of the filters in one answer (up to 50,000) for the Excel file: name, phone, balance, last purchase and spend; no totals */
+  export: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .optional(),
@@ -194,6 +199,8 @@ export interface CustomerListResponse {
   owingCount?: number;
   /** Customers a rep added that wait for approval, store-wide */
   pendingCount?: number;
+  /** Of `totalOwedMinor`, what archived customers owe (a reminder never goes to them) */
+  archivedOwedMinor?: number;
   /** The next page's cursor when `limit` was sent; null on the last page */
   nextCursor?: string | null;
   baseCurrency: CurrencyCode;
@@ -370,6 +377,9 @@ export interface VoucherListRow {
   redeemedMinor: number;
   remainingMinor: number;
   createdAt: string;
+  /** The customer an exchange voucher was issued to (from the sale it came back from); null for a gift voucher */
+  customerName?: string | null;
+  customerId?: string | null;
 }
 
 export interface VoucherList {

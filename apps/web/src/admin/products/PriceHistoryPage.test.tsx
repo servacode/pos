@@ -131,4 +131,34 @@ describe('«سجل تغيير الأسعار»', () => {
     expect(Object.keys(SOURCE_TEXT)).toHaveLength(4);
     expect(whenText('2026-11-03T10:30:00.000Z')).toMatch(/^2026-11-03 \d{2}:\d{2}$/);
   });
+
+  it('undoes a bulk change from the history, once, and offers nothing on a change already taken back', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const bulk = (n: number, extra: Partial<PriceChange> = {}) =>
+      row(n, { source: 'bulk', note: 'تعديل جماعي -30٪', batchId: 'b-1', undone: false, ...extra });
+    const { requestsTo } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: catalogMe() },
+      'GET /v1/price-history?limit=500': {
+        status: 200,
+        body: {
+          items: [
+            bulk(1),
+            bulk(2, { variantLabel: 'M' }),
+            bulk(3, { batchId: 'b-0', undone: true, productName: 'بنطال' }),
+          ],
+        },
+      },
+      'POST /v1/prices/bulk/b-1/undo': { status: 200, body: { restored: 2, skipped: 0 } },
+    });
+    const { user } = renderApp('/price-history');
+    const table = await screen.findByRole('table', { name: 'تغييرات الأسعار' });
+    await within(table).findAllByText('قميص كتان');
+    // One button for the whole change, none on the one already undone
+    expect(screen.getAllByRole('button', { name: 'تراجع عن هذا التغيير' })).toHaveLength(1);
+    expect(table).toHaveTextContent('تم التراجع عنه');
+    await user.click(screen.getByRole('button', { name: 'تراجع عن هذا التغيير' }));
+    expect(await screen.findByText(/رجعت قطعتان إلى سعرها قبل التغيير/)).toBeInTheDocument();
+    expect(requestsTo('POST', '/v1/prices/bulk/b-1/undo')).toHaveLength(1);
+  });
 });

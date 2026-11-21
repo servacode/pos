@@ -545,7 +545,7 @@ describe('an existing product', () => {
   });
 
   it('is read-only for whoever cannot change the catalog', async () => {
-    openCard(`/products/${ids.milk}`, {}, ['sale.create']);
+    openCard(`/products/${ids.milk}`, {}, ['accounting.view']);
 
     expect(await screen.findByLabelText('اسم المنتج')).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'احفظ' })).not.toBeInTheDocument();

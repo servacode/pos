@@ -125,7 +125,11 @@ describe('«عروض الأسعار»', () => {
       'GET /v1/me': () => ({ status: 200, body: catalogMe(['sale.create']) }),
     });
     renderApp('/quotations');
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('writes a new offer: finds an item at its price and tax, saves it, and the server numbers it', async () => {

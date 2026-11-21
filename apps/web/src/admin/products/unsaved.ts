@@ -28,7 +28,9 @@ export function useUnsavedGuard(active: boolean): void {
     // Browser Back/Forward: one extra entry for this very page sits in front, so the first Back lands
     // on it (the page stays) and asks; «stay» puts the entry back, «leave» goes one further back.
     const here = window.location.href;
-    window.history.pushState(window.history.state, '', here);
+    const mark = `unsaved-${String(Date.now())}-${String(Math.random()).slice(2)}`;
+    const sentinel = () => ({ ...(window.history.state as Record<string, unknown> | null), __unsaved: mark });
+    window.history.pushState(sentinel(), '', here);
     let leaving = false;
     const onPop = () => {
       if (leaving) return;
@@ -36,7 +38,7 @@ export function useUnsavedGuard(active: boolean): void {
         leaving = true;
         window.history.back();
       } else {
-        window.history.pushState(window.history.state, '', here);
+        window.history.pushState(sentinel(), '', here);
       }
     };
     window.addEventListener('beforeunload', beforeUnload);
@@ -46,6 +48,10 @@ export function useUnsavedGuard(active: boolean): void {
       window.removeEventListener('beforeunload', beforeUnload);
       window.removeEventListener('popstate', onPop);
       document.removeEventListener('click', onClick, true);
+      // The edits were saved or dropped: take the extra entry away again (only while it is still on
+      // top: a link that moved on has already left it behind), so one Back goes one page back.
+      const top = window.history.state as { __unsaved?: string } | null;
+      if (!leaving && top?.__unsaved === mark && window.location.href === here) window.history.back();
     };
   }, [active]);
 }

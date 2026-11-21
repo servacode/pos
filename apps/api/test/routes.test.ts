@@ -285,6 +285,7 @@ const ROUTES: Record<string, 'public' | 'signed-in' | 'device' | 'activation' | 
   'POST /v1/transfers/:id/receive': 'signed-in',
   'GET /v1/me/home-summary': 'signed-in',
   'GET /v1/products/:id/costs': 'signed-in',
+  'GET /v1/products/:id/archive-impact': 'signed-in',
   'GET /v1/sales/summary': 'signed-in',
   'GET /v1/stocktakes': 'signed-in',
   'GET /v1/vouchers': 'signed-in',
@@ -1402,6 +1403,12 @@ const IDOR_PROBES: Record<string, (app: FastifyInstance, stores: Stores) => Prom
   },
   // Another store's product: its costs are not read and no opening stock is posted to it
   'GET /v1/products/:id/costs': catalogIdor('products', productOf, 'GET', (id) => `/v1/products/${id}/costs`),
+  'GET /v1/products/:id/archive-impact': catalogIdor(
+    'products',
+    productOf,
+    'GET',
+    (id) => `/v1/products/${id}/archive-impact`,
+  ),
   'POST /v1/products/:id/opening-stock': async (app, { a, b }) => {
     const record = await productOf(app, a);
     const [branch] = await ownerDb()<

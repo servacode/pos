@@ -48,6 +48,13 @@ export async function postProductOpening(
     if (new Set(input.lines.map((l) => l.variantId)).size !== input.lines.length) {
       throw fieldError('lines', 'قطعة مكررة');
     }
+    // A piece with no cost is booked at zero (its margin shows 100%): only when the caller says so
+    if (!input.zeroCostOk) {
+      const free = input.lines.findIndex((l) => l.unitCostMinor === 0);
+      if (free !== -1) {
+        throw fieldError(`lines.${String(free)}.unitCostMinor`, 'اكتب تكلفة الوحدة، أو أكّد أنها بلا تكلفة');
+      }
+    }
     // The same per-tenant lock the import takes: two quick presses (or two tabs) queue here, and the
     // second one sees the first one's movement below and is refused, never posting twice.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`import:${tenantId}`}, 0))`);

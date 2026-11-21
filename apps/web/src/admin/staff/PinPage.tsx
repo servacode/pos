@@ -67,7 +67,7 @@ export function PinPage() {
     autoComplete: 'off',
     dir: 'ltr' as const,
     maxLength: 6,
-    inputClassName: 'num tracking-[0.3em]',
+    inputClassName: 'num w-full min-w-0 text-center text-lg font-semibold tracking-[0.35em]',
   };
 
   return (
@@ -102,7 +102,7 @@ export function PinPage() {
           {formError ? <Alert tone="error">{formError}</Alert> : null}
 
           <form ref={formRef} noValidate onSubmit={handleSubmit} className="flex flex-col gap-5">
-            <div className="grid gap-5 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
               <TextField
                 {...pinInput}
                 name="pin"

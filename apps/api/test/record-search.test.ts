@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { closeAppDb, closeOwnerDb, makeApp, ownerDb, resetDatabase } from './helpers';
 import { bearer, staffUser, testStore } from './staff';
+import { cartLine, documents, openStore, push, sale, shiftOpen } from './accounting-fixtures';
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -61,6 +62,51 @@ describe('GET /v1/me/search', () => {
     expect((await search(nobody.accessToken, 'سام')).json().items).toEqual([]);
     const all = (await search(owner.accessToken, 'سام')).json().items.map((h: { group: string }) => h.group);
     expect(all.sort()).toEqual(['الزبائن', 'الموردون']);
+  });
+
+  it('finds a cheque by its number, its reference or the customer, on the server', async () => {
+    const store = await openStore(app);
+    const made = await app.inject({
+      method: 'POST',
+      url: '/v1/customers',
+      headers: bearer(store.accessToken),
+      payload: { name: 'مؤسسة الفرات' },
+    });
+    const customer = made.json<{ id: string; name: string }>();
+    const doc = documents(store.device);
+    const open = doc('shift_open', shiftOpen(store.userId));
+    const paid = doc(
+      'sale',
+      sale(store, open.id, {
+        lines: [cartLine(1, 50_000)],
+        payments: [
+          {
+            method: 'cheque',
+            currency: 'SYP',
+            amountMinor: 50_000,
+            reference: 'بنك سورية · 000123 · 2026-12-01',
+            cheque: { bank: 'بنك سورية', number: '000123', dueDate: '2026-12-01', drawer: 'أحمد' },
+          },
+        ],
+        customerId: customer.id,
+        customerName: customer.name,
+      }),
+    );
+    const res = await push(app, store.device, [open, paid]);
+    expect(res.results.map((r) => r.status)).toEqual(['accepted', 'accepted']);
+    const byRef = (await search(store.accessToken, '000123')).json().items;
+    const cheques = byRef.filter((h: { group: string }) => h.group === 'الشيكات');
+    expect(cheques).toHaveLength(1);
+    expect(cheques[0]).toMatchObject({
+      label: 'بنك سورية · 000123 · 2026-12-01',
+      detail: 'مؤسسة الفرات',
+      to: '/cheques',
+    });
+    const byName = (await search(store.accessToken, 'الفرات'))
+      .json()
+      .items.map((h: { group: string }) => h.group);
+    expect(byName).toContain('الشيكات');
+    expect(byName).toContain('الزبائن');
   });
 
   it('needs a signed-in user', async () => {

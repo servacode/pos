@@ -75,7 +75,7 @@ describe('«الوحدات» on the product card', () => {
   });
 
   it('does not offer it to someone who cannot manage the catalog', async () => {
-    open(['devices.view']);
+    open(['accounting.view']);
     await screen.findByRole('heading', { name: 'منتج جديد', level: 1 });
     expect(screen.queryByRole('button', { name: 'أضف وحدة (علبة، كرتونة، متر…)' })).not.toBeInTheDocument();
   });

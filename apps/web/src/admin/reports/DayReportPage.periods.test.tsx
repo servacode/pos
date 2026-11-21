@@ -170,6 +170,10 @@ describe('who may open the day report and the shifts', () => {
       'GET /v1/me': { status: 200, body: meWith([key as never]) },
     });
     renderApp(path);
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
   });
 });

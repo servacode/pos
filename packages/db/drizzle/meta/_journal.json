@@ -666,6 +666,13 @@
       "when": 1795165969887,
       "tag": "0095_customers_round48",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1795165970887,
+      "tag": "0096_customers_round50",
+      "breakpoints": true
     }
   ]
 }

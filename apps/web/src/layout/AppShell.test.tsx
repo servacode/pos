@@ -1,12 +1,12 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MeResponse, Permission, SectorKey } from '@serva/core';
+import { DEFAULT_ROLES, type MeResponse, type Permission, type SectorKey } from '@serva/core';
 import { THEME_STORAGE_KEY } from '@serva/ui';
 import { mockFetch, type MockReply } from '../test/fetchMock';
 import { makeMe, signedInRefresh } from '../test/fixtures';
 import { renderApp } from '../test/renderApp';
 import { initials, SIDEBAR_STORAGE_KEY, splitPending } from './AppShell';
-import { navFor, navSectionsFor } from './nav';
+import { mayOpen, navFor, navSectionsFor } from './nav';
 
 function signedIn(
   permissions?: Permission[],
@@ -157,18 +157,9 @@ describe('AppShell', () => {
       within(tabs)
         .getAllByRole('link')
         .map((link) => link.textContent),
-    ).toEqual([
-      'المنتجات',
-      'التصنيفات',
-      'تغيير الأسعار',
-      'تحديث الأسعار',
-      'سجل الأسعار',
-      'الملصقات',
-      'الاستيراد',
-    ]);
-    // a shortened tab still carries the page's full name for a screen reader
-    expect(within(tabs).getByRole('link', { name: 'تحديث الأسعار من ملف' })).toBeInTheDocument();
-    expect(within(tabs).getByRole('link', { name: 'تغيير الأسعار' })).toHaveAttribute('aria-current', 'page');
+    ).toEqual(['المنتجات', 'التصنيفات', 'الأسعار', 'الملصقات', 'الاستيراد']);
+    // the price pages (change, from a file, history) are one tab
+    expect(within(tabs).getByRole('link', { name: 'الأسعار' })).toHaveAttribute('aria-current', 'page');
     const nav = screen.getByRole('navigation', { name: 'القائمة الرئيسية' });
     expect(within(nav).getByRole('link', { name: 'المنتجات' })).toHaveAttribute('aria-current', 'page');
   });
@@ -177,7 +168,7 @@ describe('AppShell', () => {
     signedIn(['catalog.manage'], undefined, '/prices');
     const crumbs = await screen.findByRole('navigation', { name: 'أنت هنا' });
     expect(within(crumbs).getByRole('link', { name: 'المنتجات' })).toHaveAttribute('href', '/products');
-    expect(within(crumbs).getByText('تغيير الأسعار')).toHaveAttribute('aria-current', 'page');
+    expect(within(crumbs).getByText('الأسعار')).toHaveAttribute('aria-current', 'page');
   });
 
   it('opens the till from the top bar, away from the home page that has its own button', async () => {
@@ -195,7 +186,7 @@ describe('AppShell', () => {
     await user.type(screen.getByRole('combobox', { name: 'ابحث في المتجر' }), 'الأسعار');
     await user.keyboard('{Enter}');
     expect(await screen.findByRole('navigation', { name: 'صفحات المنتجات' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'تغيير الأسعار' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'الأسعار' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('shows no tabs for a section of one page', async () => {
@@ -499,8 +490,12 @@ describe('the page search (Ctrl K)', () => {
     expect(within(list).getAllByRole('option', { name: /الأسعار/ }).length).toBeGreaterThan(0);
     // The arrow keys move the active option the screen reader hears
     expect(box).toHaveAttribute('aria-activedescendant', within(list).getAllByRole('option')[0]!.id);
-    await user.keyboard('{ArrowDown}');
-    expect(box).toHaveAttribute('aria-activedescendant', within(list).getAllByRole('option')[1]!.id);
+    // The price pages are one page now: the arrow moves on to the next match when there is one
+    const options = within(list).getAllByRole('option');
+    if (options.length > 1) {
+      await user.keyboard('{ArrowDown}');
+      expect(box).toHaveAttribute('aria-activedescendant', options[1]!.id);
+    }
   });
 });
 
@@ -519,5 +514,65 @@ describe('the signed-in profile', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('the route guard', () => {
+  it('says «no permission» for a menu page the person may not open, and never asks the server for it', async () => {
+    const { requests } = signedIn(['report.view'], undefined, '/customers');
+    expect(
+      await screen.findByText('ليس لديك صلاحية لهذه الصفحة', undefined, { timeout: 8000 }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'الصفحة الرئيسية' })).toHaveAttribute('href', '/');
+    expect(requests.some((r) => r.path.startsWith('/v1/customers'))).toBe(false);
+  });
+
+  it('opens a page the person holds the permission for', async () => {
+    signedIn(['report.view', 'customers.view'], undefined, '/customers');
+    expect(screen.queryByText('ليس لديك صلاحية لهذه الصفحة')).not.toBeInTheDocument();
+    await screen.findByRole('heading', { level: 1, name: 'الزبائن' });
+  });
+
+  it('checks the menu rule only: the phone count, the reps pages and unlisted addresses are left to their pages', () => {
+    const me = makeMe();
+    const as = (permissions: Permission[]) => ({ ...me, user: { ...me.user, permissions } });
+    expect(mayOpen(as([]), '/')).toBe(true);
+    expect(mayOpen(as([]), '/me/pin')).toBe(true);
+    expect(mayOpen(as(['report.view']), '/reports/sales')).toBe(true);
+    expect(mayOpen(as(['expenses.manage']), '/products/123')).toBe(false);
+    expect(mayOpen(as(['report.view']), '/products/123')).toBe(true);
+    expect(mayOpen(as(['purchases.manage']), '/labels')).toBe(true);
+    expect(mayOpen(as(['report.view']), '/labels')).toBe(false);
+    expect(mayOpen(as(['catalog.manage']), '/products/123')).toBe(true);
+    expect(mayOpen(as(['inventory.adjust']), '/inventory/count')).toBe(true);
+    expect(mayOpen(as([]), '/inventory/count')).toBe(false);
+    expect(mayOpen(as([]), '/distribution/orders')).toBe(true);
+  });
+});
+
+describe('the route guard against the default roles', () => {
+  it('opens every page the menu shows to each default role, and the addresses their links lead to', () => {
+    const me = makeMe();
+    for (const role of DEFAULT_ROLES) {
+      const as = { ...me, user: { ...me.user, permissions: [...role.permissions] } };
+      for (const entry of navFor(as)) {
+        expect(mayOpen(as, entry.to), `${role.key} ${entry.to}`).toBe(true);
+        for (const also of entry.also ?? []) expect(mayOpen(as, also), `${role.key} ${also}`).toBe(true);
+      }
+    }
+    const role = (key: string) => {
+      const found = DEFAULT_ROLES.find((r) => r.key === key);
+      return { ...me, user: { ...me.user, permissions: [...(found?.permissions ?? [])] } };
+    };
+    // the accountant reads the product card and the customer's statement
+    expect(mayOpen(role('accountant'), '/products/123')).toBe(true);
+    expect(mayOpen(role('accountant'), '/customers/123/statement')).toBe(true);
+    // the storekeeper prints labels from a purchase and reads the supplier's statement
+    expect(mayOpen(role('storekeeper'), '/labels')).toBe(true);
+    expect(mayOpen(role('storekeeper'), '/suppliers/123/statement')).toBe(true);
+    expect(mayOpen(role('storekeeper'), '/inventory/count')).toBe(true);
+    // the cashier has no admin page at all
+    expect(mayOpen(role('cashier'), '/customers')).toBe(false);
+    expect(mayOpen(role('cashier'), '/')).toBe(true);
   });
 });

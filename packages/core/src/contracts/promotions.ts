@@ -130,17 +130,25 @@ export type Promotion = PromotionRow & { updatedAt: string };
 
 /**
  * `GET /v1/promotions/report?from&to` (catalog.manage): what each offer did at the tills in a period
- * (the sales whose lines carry it as the reason of a `promotion` discount; a return is not netted off).
- * One row per offer name and invoice currency, the biggest discount first.
+ * (the sales whose lines carry it as a `promotion` discount, by the offer's id when the till sent it, else by name;
+ * the returns of those lines in the period are netted off, pro rata). A period is at most 366 days.
+ * One row per offer and invoice currency, the biggest discount first.
  */
-export const promotionReportQuery = z.object({
-  from: z.iso.date('اكتب تاريخ البداية'),
-  to: z.iso.date('اكتب تاريخ النهاية'),
-});
+export const PROMOTION_REPORT_MAX_DAYS = 366;
+export const promotionReportQuery = z
+  .object({
+    from: z.iso.date('اكتب تاريخ البداية'),
+    to: z.iso.date('اكتب تاريخ النهاية'),
+  })
+  .refine((q) => q.to >= q.from, { message: 'تاريخ النهاية قبل البداية', path: ['to'] })
+  .refine((q) => (Date.parse(q.to) - Date.parse(q.from)) / 86_400_000 < PROMOTION_REPORT_MAX_DAYS, {
+    message: 'اختر مدة لا تزيد على سنة',
+    path: ['to'],
+  });
 export type PromotionReportQuery = z.input<typeof promotionReportQuery>;
 
 export interface PromotionReportRow {
-  /** The offer's name as printed on the receipts */
+  /** The offer's name as printed on the receipts (the latest one when it was renamed) */
   name: string;
   currency: string;
   /** Sales that carry it */
@@ -153,6 +161,8 @@ export interface PromotionReportRow {
   netMinor: number;
   /** Pieces given free (a «اشترِ وخذ مجاناً» line at price 0) */
   freePieces: number;
+  /** Pieces sent back in the period from lines that carried it; already taken off pieces, discount and net */
+  returnedPieces: number;
 }
 export interface PromotionReport {
   from: string;
@@ -170,6 +180,8 @@ export type PromotionPreviewInput = z.input<typeof promotionPreviewInput>;
 export interface PromotionPreview {
   /** Active products for sale the scope reaches */
   products: number;
+  /** Of them, what the public shop shows: priced, and on the shelf unless the shop shows sold-out goods */
+  shopProducts: number;
   /** A few of their names */
   sample: string[];
 }

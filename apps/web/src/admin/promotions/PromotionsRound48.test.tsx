@@ -51,7 +51,10 @@ describe('round 48: the offers page', () => {
       'GET /v1/promotions': { status: 200, body: { items: [] } },
       'GET /v1/categories': { status: 200, body: { items: [] } },
       'GET /v1/products?limit=200': { status: 200, body: { items: [], nextCursor: null } },
-      'POST /v1/promotions/preview': { status: 200, body: { products: 12, sample: ['حليب', 'جبنة'] } },
+      'POST /v1/promotions/preview': {
+        status: 200,
+        body: { products: 12, shopProducts: 10, sample: ['حليب', 'جبنة'] },
+      },
       [reportKey()]: { status: 200, body: report([]) },
     });
     const { user } = renderApp('/promotions');
@@ -65,7 +68,7 @@ describe('round 48: the offers page', () => {
     expect(requestsTo('POST', '/v1/promotions')).toHaveLength(0);
     expect(within(form).getByTestId('promotion-sample')).toHaveTextContent('90,000');
     // The products the offer reaches are counted while the owner decides
-    expect(await within(form).findByTestId('promotion-reach')).toHaveTextContent('يطال 12 منتج');
+    expect(await within(form).findByTestId('promotion-reach')).toHaveTextContent('يطال 12 منتجاً في الكاشير');
   });
 
   it('keeps stopped offers out of sight until asked, and shows what each offer did in the month', async () => {
@@ -90,6 +93,7 @@ describe('round 48: the offers page', () => {
             currency: 'SYP',
             invoices: 4,
             pieces: 9,
+            returnedPieces: 0,
             discountMinor: 9_000_000,
             netMinor: 81_000_000,
             freePieces: 0,

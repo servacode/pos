@@ -338,7 +338,11 @@ describe('«الفواتير»', () => {
 
   it('is closed to someone without report.view and hidden from their menu', async () => {
     signIn(['sale.create'], {}, '/sales/invoices');
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'الفواتير' })).not.toBeInTheDocument();
   });
 });

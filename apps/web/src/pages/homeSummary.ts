@@ -6,6 +6,10 @@ export interface HomeSummary {
   baseCurrency: CurrencyCode;
   /** At least one invoice exists, on any day */
   hasEverSold: boolean;
+  /** reports.financial: the cash in the drawers now (account 1110) */
+  cashMinor: number | null;
+  /** The latest dollar rate in liras (a decimal text), when the store uses dollars */
+  usdRate: string | null;
   debts: {
     totalOwedMinor: number;
     overLimitCount: number;

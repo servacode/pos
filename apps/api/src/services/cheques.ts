@@ -41,7 +41,8 @@ type Row = {
   payable: boolean;
 };
 
-const all = sql`
+/** Every cheque payment of the store, one row each (also what the top bar's search reads) */
+export const chequeSource = sql`
   select 'sale' as source_type, i.id as source_id, p.payment_no, i.number, i.business_date::text as date,
          i.branch_id, i.customer_id, coalesce(c.name, i.customer_name) as customer_name, p.reference,
          p.amount_minor::text as amount, p.currency,
@@ -94,7 +95,7 @@ const view = (r: Row): Cheque => ({
 async function rows(tx: Transaction, where = sql`true`): Promise<Row[]> {
   return tx.execute<Row>(sql`
     select x.*, a.action, a.action_date::text as action_date, a.note
-    from (${all}) x
+    from (${chequeSource}) x
     left join cheque_actions a
       on a.source_type = x.source_type and a.source_id = x.source_id and a.payment_no = x.payment_no
     where ${where}

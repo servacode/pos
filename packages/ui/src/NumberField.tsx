@@ -121,6 +121,9 @@ export function NumberField({
   const inputRef = useRef<HTMLInputElement>(null);
   const caret = useRef<number | null>(null);
   const [junk, setJunk] = useState(false);
+  // After a refused character the field ignores the digits typed next (a refused «.» in «2500.5» must
+  // not turn the price into 25005); a deletion or leaving the field lifts it.
+  const frozen = useRef(false);
   const shown = groupedNumber(value, digits);
 
   useLayoutEffect(() => {
@@ -138,12 +141,21 @@ export function NumberField({
       setJunk(true);
       return;
     }
+    if (frozen.current) {
+      if (typed.length === shown.length + 1) return;
+      frozen.current = false;
+    }
     if (onRefuse) {
       const latin = stripBidiControls(toLatinDigits(typed));
-      if (!allowNegative && /[-−]/.test(typed)) return onRefuse('minus');
+      if (!allowNegative && /[-−]/.test(typed)) {
+        frozen.current = true;
+        return onRefuse('minus');
+      }
       const dot = latin.indexOf('.');
-      if (dot !== -1 && (decimals === 0 || latin.slice(dot + 1).replace(/[^0-9]/g, '').length > decimals))
+      if (dot !== -1 && (decimals === 0 || latin.slice(dot + 1).replace(/[^0-9]/g, '').length > decimals)) {
+        frozen.current = true;
         return onRefuse('fraction');
+      }
     }
     setJunk(false);
     caret.current = significantBefore(typed, selectionStart ?? typed.length);
@@ -157,6 +169,7 @@ export function NumberField({
       error={junk ? 'اكتب أرقاماً فقط' : rest.error}
       onBlur={(e) => {
         setJunk(false);
+        frozen.current = false;
         rest.onBlur?.(e);
       }}
       ref={inputRef}

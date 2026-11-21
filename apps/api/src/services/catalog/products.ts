@@ -9,6 +9,7 @@ import {
   type BarcodeView,
   type CreateProductData,
   type CurrencyCode,
+  type ArchiveImpactResponse,
   type ProductDetail,
   type ProductListItem,
   type OptionValuesResponse,
@@ -371,25 +372,26 @@ export async function listProducts(
     // The export's extra columns; the cost only for who may see costs
     const detail = query.detail === '1';
     const seesCost =
-      detail &&
+      (detail || query.cost === '1') &&
       (await permissionScope(tx, ctx.auth.userId, 'cost.view').then((x) => x.all || x.branchIds.size > 0));
-    const detailCols = detail
-      ? sql`,
+    const detailCols = sql`${
+      detail
+        ? sql`,
              (select u.name from units u where u.id = p.unit_id) as unit_name,
              (select min(x.wholesale_price_minor)::text from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as wh_min,
              (select max(x.wholesale_price_minor)::text from variants v join prices x on x.tenant_id = v.tenant_id and x.id = v.id
-              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as wh_max
-             ${
-               seesCost
-                 ? sql`,
+              where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null) as wh_max`
+        : sql``
+    }${
+      seesCost
+        ? sql`,
              (select coalesce(sum(sv.qty), 0)::text from variants v join stock_values sv on sv.tenant_id = v.tenant_id and sv.variant_id = v.id
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_qty,
              (select coalesce(sum(sv.value_minor), 0)::text from variants v join stock_values sv on sv.tenant_id = v.tenant_id and sv.variant_id = v.id
               where v.tenant_id = p.tenant_id and v.product_id = p.id and v.archived_at is null and sv.qty > 0) as cost_value`
-                 : sql``
-             }`
-      : sql``;
+        : sql``
+    }`;
     const movementBranch = query.branchId ? sql`and m.branch_id = ${query.branchId}` : sql``;
     const rows = await tx.execute<ListRow>(sql`
       select p.id, p.name_ar, p.name_en, p.category_id, c.name as category_name, p.season, p.type, p.status,
@@ -470,6 +472,10 @@ export async function listProducts(
               r.wh_min !== undefined && r.wh_min !== null && r.wh_max !== undefined && r.wh_max !== null
                 ? { minMinor: Number(r.wh_min), maxMinor: Number(r.wh_max) }
                 : null,
+          }
+        : {}),
+      ...(seesCost
+        ? {
             costMinor:
               r.cost_qty !== undefined && r.cost_qty !== null && Number(r.cost_qty) > 0
                 ? Math.round((Number(r.cost_value) * 1000) / Number(r.cost_qty))
@@ -479,6 +485,16 @@ export async function listProducts(
       version: r.version,
     }));
     const last = page.at(-1);
+    // How many products each status filter holds, asked with the first page
+    let statusCounts: { active: number; temporary: number; archived: number } | undefined;
+    if (!query.cursor) {
+      const [c] = await tx.execute<{ active: number; temporary: number; archived: number }>(sql`
+        select count(*) filter (where archived_at is null and status = 'active')::int as active,
+               count(*) filter (where archived_at is null and status = 'temporary')::int as temporary,
+               count(*) filter (where archived_at is not null)::int as archived
+        from products where tenant_id = ${ctx.auth.tenantId}`);
+      if (c) statusCounts = c;
+    }
     // What needs doing across the whole store (asked once, with the first page)
     let attention:
       { zeroPrice: number; noPhoto: number; expiringSoon: number; uncategorised: number } | undefined;
@@ -528,6 +544,7 @@ export async function listProducts(
           : null,
       ...(attention ? { attention } : {}),
       ...(totals ? { totals } : {}),
+      ...(statusCounts ? { statusCounts } : {}),
     };
   });
 }
@@ -871,7 +888,13 @@ export async function updateProductTx(
     const stored = existing.find((e) => e.variant.id === v.id)?.price;
     const price = v.price?.priceMinor ?? stored?.priceMinor;
     const floor = v.minPriceMinor === undefined ? (stored?.minPriceMinor ?? null) : v.minPriceMinor;
-    if (price !== undefined) checkFloor(`variants.${i}.minPriceMinor`, Number(price), floor);
+    // An old row that already has its floor above its price still saves its other changes: only a save that
+    // touches the price or the floor is checked
+    const touched =
+      !stored ||
+      Number(price) !== Number(stored.priceMinor) ||
+      (floor ?? null) !== (stored.minPriceMinor ?? null);
+    if (price !== undefined && touched) checkFloor(`variants.${i}.minPriceMinor`, Number(price), floor);
   });
   await checkKindChange(tx, current, input);
   const writes: BarcodeWrite[] = variantInput.flatMap((v, i) =>
@@ -1012,6 +1035,29 @@ export async function updateProductTx(
     ctx.meta,
   );
   return productDetail(tx, id);
+}
+
+/** What archiving a product leaves behind: stock on the shelf, and the dishes that use it as an ingredient */
+export async function archiveImpact(
+  db: Database,
+  id: string,
+  ctx: CatalogContext,
+): Promise<ArchiveImpactResponse> {
+  return withTenant(db, ctx.auth.tenantId, async (tx) => {
+    await requireCatalogReader(tx, ctx.auth.userId);
+    const [found] = await tx.execute<{ id: string }>(sql`select id from products where id = ${id}::uuid`);
+    if (!found) throw productNotFound();
+    const [stock] = await tx.execute<{ qty: string }>(sql`
+      select coalesce(sum(s.qty), 0)::text as qty from variants v
+      join stock_levels s on s.tenant_id = v.tenant_id and s.variant_id = v.id
+      where v.product_id = ${id}::uuid`);
+    const dishes = await tx.execute<{ name: string }>(sql`
+      select distinct d.name_ar as name from recipe_items r
+      join variants v on v.id = r.ingredient_variant_id
+      join products d on d.id = r.product_id and d.archived_at is null
+      where v.product_id = ${id}::uuid order by 1 limit 10`);
+    return { stockQty: Number(stock?.qty ?? 0), usedInRecipes: dishes.map((d) => d.name) };
+  });
 }
 
 /** POST /v1/products/{id}/archive and /restore. Archived products stay in the pull, flagged. */

@@ -13,6 +13,7 @@ import {
 import {
   Alert,
   Badge,
+  cn,
   Button,
   Card,
   DataTable,
@@ -72,6 +73,53 @@ const MOVE_STEPS: { key: Step; label: string }[] = [
   { key: 'columns', label: '3. الأعمدة' },
   { key: 'review', label: '4. المراجعة والاستيراد' },
 ];
+
+/** The steps as numbered marks on a line: a finished one shows a tick, the open one is in the brand colour */
+function Stepper({ steps, current }: { steps: { key: Step; label: string }[]; current: Step }) {
+  const at = steps.findIndex((s) => s.key === current);
+  return (
+    <ol className="flex items-center gap-2 overflow-x-auto pb-1" aria-label="خطوات الاستيراد">
+      {steps.map((s, i) => {
+        const done = at !== -1 && i < at;
+        const open = i === at;
+        return (
+          <li key={s.key} className="flex shrink-0 items-center gap-2">
+            {i > 0 ? (
+              <span
+                aria-hidden="true"
+                className={cn('h-px w-6 sm:w-10', done || open ? 'bg-brand' : 'bg-line')}
+              />
+            ) : null}
+            <span
+              aria-current={open ? 'step' : undefined}
+              className={cn(
+                'flex items-center gap-2 text-sm font-semibold',
+                open ? 'text-ink' : done ? 'text-ink-muted' : 'text-ink-subtle',
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'grid size-7 place-items-center rounded-full border text-xs',
+                  open
+                    ? 'border-brand bg-brand text-on-brand'
+                    : done
+                      ? 'border-brand bg-brand-soft text-brand-ink'
+                      : 'border-line-control/50 bg-surface text-ink-subtle',
+                )}
+              >
+                {done ? '✓' : <bdi className="num">{i + 1}</bdi>}
+              </span>
+              <span className={cn(!open && 'max-sm:sr-only')}>
+                {s.label.slice(s.label.indexOf('.') + 1).trim()}
+              </span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 const TONE: Record<ImportRowResult['status'], BadgeTone> = {
   create: 'success',
@@ -362,15 +410,7 @@ function Import() {
           title="استيراد البيانات"
           subtitle="انقل المنتجات والزبائن والموردين من ملف إكسل أو ملف نصي مفصول بفواصل. يُفحص الملف كله قبل أن يتغيّر شيء."
         />
-        <ol className="flex flex-wrap gap-2" aria-label="خطوات الاستيراد">
-          {(program || step === 'program' ? MOVE_STEPS : STEPS).map((s) => (
-            <li key={s.key}>
-              <Badge tone={s.key === step ? 'brand' : 'neutral'} dot={false}>
-                <span aria-current={s.key === step ? 'step' : undefined}>{s.label}</span>
-              </Badge>
-            </li>
-          ))}
-        </ol>
+        <Stepper steps={program || step === 'program' ? MOVE_STEPS : STEPS} current={step} />
         {error ? <Alert tone="error">{error}</Alert> : null}
 
         {step === 'program' ? (
@@ -417,22 +457,20 @@ function Import() {
             ) : (
               <div className="flex flex-wrap items-center gap-3">
                 <Button onClick={() => setStep('program')}>انقل من برنامجك القديم</Button>
-                <p className="text-sm text-ink-muted">الأمين، الميزان، الرشيد أو أي برنامج يصدّر إلى إكسل.</p>
+                <Button
+                  variant="secondary"
+                  onClick={() => downloadText(templateName(type), templateCsv(type, me.tenant.sectors))}
+                >
+                  نزّل القالب الجاهز
+                </Button>
+                <p className="max-w-[70ch] basis-full text-sm text-ink-muted">
+                  الأمين، الميزان، الرشيد أو أي برنامج يصدّر إلى إكسل. أعمدة {IMPORT_TYPE_LABELS[type]}:{' '}
+                  {chosen.map((f) => f.label).join('، ')}.
+                </p>
               </div>
             )}
             {program ? null : (
               <>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant="secondary"
-                    onClick={() => downloadText(templateName(type), templateCsv(type, me.tenant.sectors))}
-                  >
-                    نزّل القالب الجاهز
-                  </Button>
-                  <p className="text-sm text-ink-muted">
-                    أعمدة {IMPORT_TYPE_LABELS[type]}: {chosen.map((f) => f.label).join('، ')}.
-                  </p>
-                </div>
                 <details className="text-sm text-ink-muted">
                   <summary className="w-fit cursor-pointer rounded-small font-semibold text-brand-ink">
                     اعرض شرح الأعمدة

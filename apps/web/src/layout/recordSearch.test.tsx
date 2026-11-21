@@ -57,7 +57,7 @@ describe('the search box finds what the server finds by name or number', () => {
   it('lists a PUR number with its supplier, an order and a rental, each under its group', async () => {
     mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
-      'GET /v1/me': { status: 200, body: meWith(['purchases.manage', 'customers.view']) },
+      'GET /v1/me': { status: 200, body: meWith(['purchases.manage', 'customers.view', 'catalog.manage']) },
       [searchUrl('11')]: {
         status: 200,
         body: {
@@ -80,7 +80,6 @@ describe('the search box finds what the server finds by name or number', () => {
           ],
         },
       },
-      'GET /v1/cheques': { status: 200, body: { items: [] } },
       'GET /v1/inventory/recall?batchNo=11': { status: 200, body: { batches: [] } },
     });
     const { user } = renderApp('/products');
@@ -92,22 +91,20 @@ describe('the search box finds what the server finds by name or number', () => {
     expect(await screen.findByText('ONL-1100')).toHaveAttribute('dir', 'ltr');
   });
 
-  it('finds a cheque by its reference and writes its date in words', async () => {
-    mockFetch({
+  it('finds a cheque by its reference (the server finds it) and writes its date in words', async () => {
+    const { requests } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
       'GET /v1/me': { status: 200, body: meWith(['customers.view']) },
-      [searchUrl('11')]: { status: 200, body: { items: [] } },
-      'GET /v1/cheques': {
+      [searchUrl('11')]: {
         status: 200,
         body: {
           items: [
             {
-              sourceType: 'invoice',
-              sourceId: 'i-1',
-              paymentNo: 1,
-              documentNumber: 'INV-1',
-              reference: 'بنك سورية · 1100 · 2026-12-01',
-              customerName: 'سامر',
+              key: 'q:sale:i-1:1',
+              group: 'الشيكات',
+              label: 'بنك سورية · 1100 · 2026-12-01',
+              detail: 'سامر',
+              to: '/cheques',
             },
           ],
         },
@@ -119,6 +116,8 @@ describe('the search box finds what the server finds by name or number', () => {
     const cheque = await screen.findByRole('option', { name: /بنك سورية/ });
     expect(cheque).toHaveTextContent('1 كانون الأول 2026');
     expect(cheque).not.toHaveTextContent('2026-12-01');
+    // The cheques list is never downloaded for the search
+    expect(requests.some((r) => r.path === '/v1/cheques')).toBe(false);
   });
 });
 
@@ -126,10 +125,9 @@ describe('the search box is quick', () => {
   it('opens without downloading any list, and shows a record as soon as the server answers', async () => {
     const { requests } = mockFetch({
       'POST /v1/auth/refresh': signedInRefresh,
-      'GET /v1/me': { status: 200, body: meWith(['customers.view', 'purchases.manage']) },
+      'GET /v1/me': { status: 200, body: meWith(['customers.view', 'purchases.manage', 'catalog.manage']) },
       [searchUrl('ري')]: { status: 200, body: { items: [customerHit] } },
       [searchUrl('ريم')]: { status: 200, body: { items: [customerHit] } },
-      'GET /v1/cheques': { status: 200, body: { items: [] } },
     });
     const { user } = renderApp('/products');
     await screen.findByRole('heading', { level: 1, name: 'المنتجات' });
@@ -161,7 +159,21 @@ describe('the search box is quick', () => {
     await screen.findByRole('combobox', { name: 'ابحث في المتجر' });
     expect(screen.queryByRole('button', { name: 'زبائن' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'منتجات' })).not.toBeInTheDocument();
+    // A cashier cannot open invoices or quotations either: no tab that cannot return a result
+    expect(screen.queryByRole('button', { name: 'فواتير' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'صفحات' })).toBeInTheDocument();
+  });
+
+  it('never asks the quotations list for a person who may not open it', async () => {
+    const { requests } = mockFetch({
+      'POST /v1/auth/refresh': signedInRefresh,
+      'GET /v1/me': { status: 200, body: meWith(['sale.create']) },
+    });
+    const { user } = renderApp('/');
+    await user.click((await screen.findAllByRole('button', { name: OPEN }))[0]!);
+    await user.type(await screen.findByRole('combobox', { name: 'ابحث في المتجر' }), 'رنا');
+    await screen.findByText('لا صفحة ولا سجل بهذا الاسم.');
+    expect(requests.some((r) => r.path === '/v1/quotations')).toBe(false);
   });
 });
 

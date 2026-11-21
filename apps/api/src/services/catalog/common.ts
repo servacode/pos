@@ -48,9 +48,13 @@ export async function requireCatalogReader(tx: Transaction, userId: string): Pro
   await requirePermission(tx, userId, 'catalog.manage');
 }
 
-/** Writing products, categories and units. */
+/**
+ * Writing products, categories and units. The catalog is the whole store's (one price, one name for
+ * every branch), so a role given for one branch only may read it but not change it.
+ */
 export async function requireCatalogManager(tx: Transaction, userId: string): Promise<void> {
-  await requirePermission(tx, userId, 'catalog.manage');
+  const scope = await requirePermission(tx, userId, 'catalog.manage');
+  if (!scope.all) throw forbidden();
 }
 
 /** Tax rates are the owner's alone (17 › المنتجات: tax-rates «owner»). */

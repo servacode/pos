@@ -205,6 +205,7 @@ export function undoBulkPrices(
       select id from audit_logs where action = 'prices.bulk_undone' and data->>'of' = ${changeId} limit 1`);
     if (done) throw new AppError(409, 'conflict', 'سبق التراجع عن هذا التغيير.');
     let restored = 0;
+    const restoredMoves: { id: string; old: number; new: number }[] = [];
     const touched = new Set<string>();
     for (const m of moves) {
       const res = await tx.execute<{ product_id: string }>(sql`
@@ -216,6 +217,7 @@ export function undoBulkPrices(
         returning v.product_id`);
       if (res[0]) {
         restored += 1;
+        restoredMoves.push({ id: m.id, old: m.new, new: m.old });
         touched.add(res[0].product_id);
       }
     }
@@ -238,7 +240,8 @@ export function undoBulkPrices(
           of: changeId,
           restored,
           skipped: moves.length - restored,
-          moves: moves.map((m) => ({ id: m.id, old: m.new, new: m.old })),
+          // Only what was really put back, so the history shows what moved
+          moves: restoredMoves,
         },
       },
       ctx.meta,

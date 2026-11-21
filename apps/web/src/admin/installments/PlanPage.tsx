@@ -372,7 +372,7 @@ export function PlanPage() {
             ) : null}
             {open && can('installments.manage') ? (
               <div>
-                <Button variant="ghost" className="sx-neg" onClick={() => setCancelling(true)}>
+                <Button variant="secondary" className="sx-neg" onClick={() => setCancelling(true)}>
                   ألغِ الخطة
                 </Button>
               </div>

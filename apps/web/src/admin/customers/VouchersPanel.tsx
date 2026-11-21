@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import type { VoucherListRow } from '@serva/core';
 import { Alert, Button, Dialog, GiftIcon, SearchField, TextField, useDigits } from '@serva/ui';
 import { DateField } from '../../lib/DateField';
@@ -150,6 +151,12 @@ export function VouchersPanel() {
           </bdi>
           <span className="sx-subline">
             <StatusPill kind="ok">{KIND_TEXT[v.kind] ?? v.kind}</StatusPill>
+            {v.customerId && v.customerName ? (
+              <>
+                {' '}
+                <Link to={`/customers/${v.customerId}`}>{v.customerName}</Link>
+              </>
+            ) : null}
           </span>
         </>
       ),
@@ -237,7 +244,7 @@ export function VouchersPanel() {
       <div className="sx-card sx-filterbar">
         <div className="sx-search">
           <SearchField
-            label="ابحث برمز القسيمة"
+            label="ابحث برمز القسيمة أو اسم الزبون"
             value={typed}
             onValueChange={(v) => setTyped(v.slice(0, 40))}
           />
@@ -267,6 +274,11 @@ export function VouchersPanel() {
                     <StatusPill kind="ok">{KIND_TEXT[v.kind] ?? v.kind}</StatusPill>
                     <StatePill v={v} />
                   </span>
+                  {v.customerId && v.customerName ? (
+                    <Link to={`/customers/${v.customerId}`} className="sx-subline">
+                      {v.customerName}
+                    </Link>
+                  ) : null}
                 </span>
               </span>
               <span className="justify-self-end text-end">

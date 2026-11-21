@@ -44,6 +44,7 @@ import {
   listOptionValues,
   listProducts,
   lookupBarcode,
+  archiveImpact,
   setProductArchived,
   updateProduct,
 } from '../services/catalog/products';
@@ -136,6 +137,9 @@ export async function catalogRoutes(app: FastifyInstance): Promise<void> {
   );
   app.get('/v1/products/:id/costs', signedIn, async (request) =>
     productCosts(db, idOf(request, PRODUCT), ctxOf(request)),
+  );
+  app.get('/v1/products/:id/archive-impact', signedIn, async (request) =>
+    archiveImpact(db, idOf(request, PRODUCT), ctxOf(request)),
   );
   app.post('/v1/products/:id/archive', signedIn, async (request) =>
     setProductArchived(db, idOf(request, PRODUCT), true, ctxOf(request)),

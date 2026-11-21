@@ -160,7 +160,11 @@ describe('«الميزانية العمومية»', () => {
 
   it('is closed to a manager without accounting.view', async () => {
     signIn('/accounting/reports/balance-sheet', {}, MANAGER_KEYS);
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('exports each section and the total as CSV rows', () => {

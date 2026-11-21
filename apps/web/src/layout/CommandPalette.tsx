@@ -217,7 +217,7 @@ export function CommandPalette({
       : key === 'customers'
         ? holdsAny(me, ['customers.view'])
         : key === 'invoices'
-          ? holdsAny(me, ['report.view', 'purchases.manage', 'sale.create'])
+          ? holdsAny(me, ['report.view', 'purchases.manage', 'customers.manage'])
           : true,
   );
 
@@ -352,13 +352,7 @@ export function CommandPalette({
           ))}
         </div>
         <p role="status" aria-live="polite" className="sh-sr">
-          {q.length < 2
-            ? ''
-            : searching
-              ? 'جارٍ البحث…'
-              : total === 0
-                ? 'لا صفحة ولا سجل بهذا الاسم.'
-                : `${String(total)} نتيجة`}
+          {q.length < 2 ? '' : searching ? 'جارٍ البحث…' : total === 0 ? '' : `${String(total)} نتيجة`}
         </p>
         <div className="sh-pbody">
           {shownActions.length > 0 ? (

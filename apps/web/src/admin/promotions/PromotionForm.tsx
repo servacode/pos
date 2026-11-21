@@ -336,7 +336,7 @@ export function PromotionForm({
         />
         <fieldset className="flex flex-col gap-1.5">
           <legend className="mb-1.5 text-sm font-semibold text-ink-muted">نوع العرض</legend>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
             <ChoiceCard
               name="promotion-kind"
               title="خصم بنسبة"
@@ -361,8 +361,8 @@ export function PromotionForm({
             />
             <ChoiceCard
               name="promotion-kind"
-              title="اشترِ واحصل على صنف آخر مجاناً"
-              description="اشترِ من صنف وخذ صنفاً آخر هدية"
+              title="هدية من صنف آخر"
+              description="اشترِ صنفاً وخذ آخر مجاناً"
               leading={<GiftIcon />}
               checked={kind === 'free_item'}
               onChange={() => setKind('free_item')}
@@ -700,32 +700,39 @@ export function PromotionForm({
         </div>
       </FormSection>
 
-      {/* The sheet's foot: pinned while the fields scroll, flush with the sheet's edges. */}
-      <div className="sticky -bottom-5 z-10 -mx-6 mt-auto -mb-5 flex flex-wrap items-center justify-end gap-3 border-t border-line bg-surface px-6 py-4">
-        <p className="me-auto min-w-0 basis-60 text-sm text-ink-muted">
+      {/* What saving does, in the flow of the form: the pinned foot below keeps to one short row. */}
+      <section
+        aria-label="ملخص العرض"
+        className="flex flex-col gap-1.5 rounded-card border border-line bg-surface-muted px-4 py-3 text-sm text-ink-muted"
+      >
+        <p>
           {startStopped || promotion?.archived
             ? 'يُحفظ متوقفاً: لا يعمل على الكاشير ولا يظهر في المتجر حتى تشغّله.'
             : `يعمل فور الحفظ ${scope === 'all' ? 'على كل المنتجات' : scope === 'categories' ? 'على التصنيفات المختارة' : 'على المنتجات المختارة'}، وتراه الزبائن في المتجر الإلكتروني${
                 couponCode.trim() && (kind === 'percent' || kind === 'buy_get') ? ' بعد كتابة الكود' : ''
               }.`}
-          {sample ? (
-            <span data-testid="promotion-sample" className="block">
-              كما يراها الزبون: قطعة بـ{' '}
-              <Money minor={sample.was} currency={sampleBase} className="line-through" /> تصبح{' '}
-              <Money minor={sample.now} currency={sampleBase} className="font-semibold text-ink" />، وعليها
-              «خصم {samplePercent}%».
-            </span>
-          ) : null}
-          {reach ? (
-            <>
-              {' '}
-              <strong data-testid="promotion-reach" className="font-semibold text-ink">
-                يطال {reach.products === 0 ? 'لا منتجات' : `${reach.products} منتج`}
-                {reach.sample.length > 0 ? ` (مثل: ${reach.sample.join('، ')})` : ''}.
-              </strong>
-            </>
-          ) : null}
         </p>
+        {sample ? (
+          <p data-testid="promotion-sample">
+            كما يراها الزبون: قطعة بـ{' '}
+            <Money minor={sample.was} currency={sampleBase} className="line-through" /> تصبح{' '}
+            <Money minor={sample.now} currency={sampleBase} className="font-semibold text-ink" />، وعليها «خصم{' '}
+            {samplePercent}%».
+          </p>
+        ) : null}
+        {reach ? (
+          <p data-testid="promotion-reach">
+            <strong className="font-semibold text-ink">
+              يطال {reach.products === 0 ? 'لا منتجات' : `${productsPhrase(reach.products)} في الكاشير`}
+            </strong>
+            {reach.products > 0 ? `، منها ${reach.shopProducts} في المتجر الإلكتروني` : ''}
+            {reach.sample.length > 0 ? ` (مثل: ${reach.sample.join('، ')})` : ''}.
+          </p>
+        ) : null}
+      </section>
+
+      {/* The sheet's foot: pinned while the fields scroll, flush with the sheet's edges; one row. */}
+      <div className="sticky -bottom-5 z-10 -mx-6 mt-auto -mb-5 flex items-center justify-end gap-2 border-t border-line bg-surface px-6 py-3">
         {promotion ? null : (
           <ToggleChip
             label="احفظه متوقفاً"
@@ -742,6 +749,13 @@ export function PromotionForm({
       </div>
     </form>
   );
+}
+
+/** «38 منتجاً»: the counted noun the way Arabic writes it */
+function productsPhrase(n: number): string {
+  if (n === 1) return 'منتج واحد';
+  if (n === 2) return 'منتجان';
+  return n <= 10 ? `${n} منتجات` : `${n} منتجاً`;
 }
 
 /** A titled group of the form's fields, with a hairline above every group but the first. */

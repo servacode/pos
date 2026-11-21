@@ -211,7 +211,7 @@ describe('trade promotions', () => {
     await user.click(await screen.findByRole('button', { name: 'عرض جديد' }));
     const form = screen.getByRole('form', { name: 'عرض جديد' });
     await user.type(within(form).getByLabelText('اسم العرض كما يُطبع على الإيصال'), 'هدية كولا');
-    await user.click(within(form).getByRole('radio', { name: /اشترِ واحصل على صنف آخر مجاناً/ }));
+    await user.click(within(form).getByRole('radio', { name: /هدية من صنف آخر/ }));
     await user.click(within(form).getByRole('button', { name: 'احفظ' }));
     expect(await screen.findByText('اختر الصنف المجاني')).toBeInTheDocument();
     await user.type(within(form).getByLabelText('الصنف المجاني: ابحث بالاسم'), 'كولا');

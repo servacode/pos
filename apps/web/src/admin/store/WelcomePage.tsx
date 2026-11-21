@@ -397,7 +397,7 @@ function NextStep({
       <Link
         to={to}
         className={cn(
-          'group/next flex w-full flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5 sm:p-6',
+          'group/next flex w-full flex-col gap-4 rounded-card border border-line bg-surface p-5 shadow-e1 transition-[box-shadow,border-color,translate] duration-120 ease-standard hover:border-line-control/50 hover:shadow-e2 motion-safe:hover:-translate-y-0.5 max-sm:flex-row max-sm:items-center max-sm:gap-3 max-sm:p-4 sm:p-6',
           compact && 'flex-row items-center gap-3 p-3 sm:p-3',
         )}
       >
@@ -406,9 +406,9 @@ function NextStep({
             {done ? <CheckIcon size={24} /> : <StepIcon size={24} />}
           </IconChip>
           {/* A chevron toward the reading end: down, turned a quarter toward it. */}
-          <ExpandIcon className="-rotate-90 text-ink-subtle transition-colors duration-120 ease-standard group-hover/next:text-brand-ink rtl:rotate-90" />
+          <ExpandIcon className="max-sm:hidden -rotate-90 text-ink-subtle transition-colors duration-120 ease-standard group-hover/next:text-brand-ink rtl:rotate-90" />
         </span>
-        <span className="flex flex-col gap-1">
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="font-semibold text-ink">
             {title}
             {done ? (

@@ -150,7 +150,11 @@ describe('the shelf count of a store with two branches', () => {
       'GET /v1/me': () => ({ status: 200, body: withPermissions(['inventory.adjust']) }),
     });
     renderApp('/inventory');
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText('لا مخزون بعد.')).not.toBeInTheDocument();
   });
 

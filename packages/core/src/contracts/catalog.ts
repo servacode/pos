@@ -401,6 +401,8 @@ export const productListQuery = z.object({
   sort: z.enum(['name', 'stock']).default('name'),
   /** '1': also the unit, the wholesale price and (for cost.view) the average cost, for the export */
   detail: z.enum(['1']).optional(),
+  /** Adds `costMinor` (the average cost) to each row, for who holds cost.view */
+  cost: z.enum(['1']).optional(),
   ...listPageQuery,
 });
 export type ProductListQuery = z.input<typeof productListQuery>;
@@ -539,6 +541,8 @@ export type ProductListResponse = ListResponse<ProductListItem> & {
   totals?: ProductListTotals;
   /** Over every active product of the store, not the page: how many sell at 0 and how many have no picture (first page only) */
   attention?: { zeroPrice: number; noPhoto: number; expiringSoon?: number; uncategorised?: number };
+  /** How many products each status filter holds (first page only) */
+  statusCounts?: { active: number; temporary: number; archived: number };
 };
 
 /**
@@ -1101,8 +1105,21 @@ export const productOpeningInput = z.object({
     )
     .min(1)
     .max(500),
+  /** A piece with no cost enters the stock at a value of zero: said on purpose, never by leaving the cost empty */
+  zeroCostOk: z.boolean().optional(),
 });
 export type ProductOpeningInput = z.input<typeof productOpeningInput>;
+
+/**
+ * GET /v1/products/{id}/archive-impact   catalog reader → what archiving this product leaves behind
+ * (the stock still on the shelf, the dishes whose recipe uses it as an ingredient)
+ */
+export interface ArchiveImpactResponse {
+  /** Thousandths of the base unit still on hand over all branches (may be negative) */
+  stockQty: number;
+  /** Names of the dishes whose recipe takes this product (up to ten) */
+  usedInRecipes: string[];
+}
 
 export interface ProductCostsResponse {
   items: { variantId: string; qty: number; unitCostMinor: number | null }[];

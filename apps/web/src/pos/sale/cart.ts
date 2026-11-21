@@ -510,7 +510,14 @@ export function freeLinesOf(cart: Cart, ctx: PricingContext): CartLine[] {
 function lineDiscount(line: CartLine, ctx: PricingContext): SaleDiscount | null {
   // A free line carries its promotion's name and nothing off: its price is already 0
   if (line.free) {
-    return { type: 'amount', minor: 0, source: 'promotion', reason: line.free.name, approval: null };
+    return {
+      type: 'amount',
+      minor: 0,
+      source: 'promotion',
+      reason: line.free.name,
+      approval: null,
+      promotionId: line.free.promotionId,
+    };
   }
   const adj = line.adjustment;
   if (!adj) {
@@ -522,6 +529,7 @@ function lineDiscount(line: CartLine, ctx: PricingContext): SaleDiscount | null 
           source: 'promotion',
           reason: promo.name,
           approval: null,
+          promotionId: promo.promotionId,
         }
       : null;
   }

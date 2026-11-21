@@ -70,7 +70,18 @@ export const PriceMatrix = memo(function PriceMatrix({
         role="region"
         aria-label="جدول الأسعار، مرّر جانباً لترى الباقي"
       >
-        <table aria-label="أسعار المتغيّرات" className="w-max min-w-full border-separate border-spacing-1.5">
+        {/* Fixed columns: a header and the cells under it are the same width, empty cells too */}
+        <table
+          aria-label="أسعار المتغيّرات"
+          className="table-fixed border-separate border-spacing-1.5"
+          style={{ width: `calc(7rem + ${String(cols.length * 9)}rem)` }}
+        >
+          <colgroup>
+            <col style={{ width: '7rem' }} />
+            {cols.map((col) => (
+              <col key={col || '_'} style={{ width: '9rem' }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               <th className="sticky start-0 z-10 bg-surface pe-3 ps-2 text-start text-xs font-semibold whitespace-nowrap text-ink-subtle">
@@ -81,7 +92,7 @@ export const PriceMatrix = memo(function PriceMatrix({
                 <th
                   key={col || '_'}
                   scope="col"
-                  className="w-32 min-w-32 px-2 pb-1 text-center text-xs font-semibold whitespace-nowrap text-ink-subtle"
+                  className="truncate px-2 pb-1 text-center text-xs font-semibold text-ink-subtle"
                 >
                   {col || 'السعر'}
                 </th>
@@ -93,7 +104,7 @@ export const PriceMatrix = memo(function PriceMatrix({
               <tr key={row}>
                 <th
                   scope="row"
-                  className="sticky start-0 z-10 bg-surface pe-3 ps-2 text-start font-semibold whitespace-nowrap text-ink"
+                  className="sticky start-0 z-10 truncate bg-surface pe-3 ps-2 text-start font-semibold text-ink"
                 >
                   {row}
                 </th>
@@ -103,14 +114,14 @@ export const PriceMatrix = memo(function PriceMatrix({
                     return (
                       <td
                         key={col || '_'}
-                        className="h-10 w-32 min-w-32 rounded-small border border-dashed border-line text-center text-ink-subtle"
+                        className="h-10 rounded-small border border-dashed border-line text-center text-ink-subtle"
                       >
                         —
                       </td>
                     );
                   }
                   return (
-                    <td key={col || '_'} className="w-32 min-w-32">
+                    <td key={col || '_'}>
                       <MoneyField
                         label={`سعر ${[row, col].filter(Boolean).join(' · ')}`}
                         hideLabel
@@ -134,7 +145,7 @@ export const PriceMatrix = memo(function PriceMatrix({
       {cols.length > 3 ? (
         <p className="text-xs text-ink-subtle">مرّر الجدول جانباً لترى كل الألوان.</p>
       ) : null}
-      <div className="flex flex-wrap items-end gap-2 rounded-control border border-line bg-surface-muted p-3">
+      <div className="flex flex-wrap items-end gap-2 border-t border-line pt-4">
         <MoneyField
           label="السعر نفسه لكل المتغيّرات"
           currency={currency}

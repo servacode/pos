@@ -96,6 +96,22 @@ export const listCustomerPage = (query: CustomerPageQuery) => {
   );
 };
 
+/** `GET /v1/customers?export=true`: every customer of the filters in one answer, for the Excel file */
+export const exportCustomers = (query: Omit<CustomerPageQuery, 'cursor' | 'limit'>) => {
+  const params = new URLSearchParams();
+  if (query.q) params.set('q', query.q);
+  if (query.owing) params.set('owing', 'true');
+  if (query.kind) params.set('kind', query.kind);
+  if (query.lastBefore) params.set('lastBefore', query.lastBefore);
+  if (query.approval) params.set('approval', query.approval);
+  if (query.sort) params.set('sort', query.sort);
+  if (query.dir) params.set('dir', query.dir);
+  if (query.groupId) params.set('groupId', query.groupId);
+  if (query.birthMonth) params.set('birthMonth', String(query.birthMonth));
+  params.set('export', 'true');
+  return apiFetch<CustomerListResponse>(`/v1/customers?${params.toString()}`, { auth: true });
+};
+
 /** `GET /v1/vouchers`: the exchange and gift vouchers with what is left on each (customers.view) */
 export const listVouchers = (
   status: 'open' | 'all',

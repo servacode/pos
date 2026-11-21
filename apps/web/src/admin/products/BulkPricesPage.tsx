@@ -418,6 +418,7 @@ function BulkPrices() {
               </Panel>
             ) : (
               <EmptyState
+                className="py-8"
                 icon={PercentIcon}
                 title="ترى هنا كل قطعة قبل أن تتغيّر."
                 description="اختر التصنيف والنسبة، ثم «اعرض الأسعار الجديدة»: السعر الآن والسعر الجديد والمشطوب على الملصق، ولا يتغيّر شيء قبل أن تطبّق."
@@ -427,10 +428,13 @@ function BulkPrices() {
               // The decision stays in reach under a long list.
               <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface p-3 ps-5 shadow-e3">
                 <p className="text-sm text-ink-muted">
-                  سيتغيّر سعر <bdi className="num font-semibold text-ink">{changed.length}</bdi> من{' '}
+                  سيتغيّر سعر{' '}
                   <bdi className="num font-semibold text-ink">
-                    {countNoun(result.items.length, COUNT_NOUNS.piece)}
+                    {countNoun(changed.length, COUNT_NOUNS.piece)}
                   </bdi>
+                  {result.items.length > changed.length
+                    ? ` من أصل ${countNoun(result.items.length, COUNT_NOUNS.piece)}`
+                    : ''}
                   {rule ? ` · ${rule}` : ''}
                 </p>
                 <Button loading={busy} onClick={() => setConfirming(true)} className="max-sm:flex-1">
@@ -445,7 +449,7 @@ function BulkPrices() {
             open
             onOpenChange={(open) => !open && setConfirming(false)}
             title="تأكيد تغيير الأسعار"
-            description={`ستتغيّر أسعار ${countNoun(changed.length, COUNT_NOUNS.piece)}${rule ? ` (${rule})` : ''} وتصل إلى كل أجهزة الكاشير. لا يوجد زر تراجع تلقائي؛ للعودة استخدم «أنهِ التنزيل» أو سجل الأسعار.`}
+            description={`ستتغيّر أسعار ${countNoun(changed.length, COUNT_NOUNS.piece)}${rule ? ` (${rule})` : ''} وتصل إلى كل أجهزة الكاشير. وبعد التطبيق تجد «تراجع عن هذا التغيير» هنا وفي سجل الأسعار، ويُترك ما تعدّل بعده.`}
             actions={
               <>
                 <Button variant="secondary" onClick={() => setConfirming(false)}>

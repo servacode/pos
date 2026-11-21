@@ -50,7 +50,7 @@ export const PAGE_KEYWORDS: Readonly<Record<string, string>> = {
   '/online-store': 'متجر اونلاين طلبات الكترونية موقع shop تتبع طلب',
   '/products': 'منتج بضاعة صنف اصناف سلعة قميص بنطلون product item',
   '/categories': 'تصنيف قسم اقسام فئة',
-  '/prices': 'سعر اسعار تسعير غلاء دولار',
+  '/prices': 'سعر اسعار تسعير غلاء دولار تحديث ملف excel اكسل سجل تغيير تاريخ',
   '/price-list': 'سعر اسعار اكسل ملف excel',
   '/labels': 'ملصق ملصقات باركود طباعة barcode',
   '/import': 'استيراد رفع اكسل excel ملف',

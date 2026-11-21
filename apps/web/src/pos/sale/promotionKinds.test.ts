@@ -51,6 +51,7 @@ describe('the existing promotion kinds, priced in the cart', () => {
       source: 'promotion',
       reason: 'خصم 15%',
       approval: null,
+      promotionId: 'p1',
     });
     expect(done.lines[0]!.priced.lineDiscountMinor).toBe(Math.round((gross * 15) / 100));
   });

@@ -251,6 +251,13 @@
 .cx-stm .what {
   font-weight: 600;
 }
+.cx-stm .what bdi {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
 .cx-stm .num {
   white-space: nowrap;
   direction: ltr;
@@ -497,6 +504,18 @@
   font-weight: 600;
 }
 
+/* round 50: the reminder rows keep name, amount and «واتساب» on one line, also on a phone */
+.cx-groups.cx-rem li {
+  flex-wrap: nowrap;
+  gap: 8px 12px;
+}
+.cx-groups.cx-rem .nm {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* round 48: on a phone the instalment row keeps its WhatsApp button inside the card (it was cut by the screen edge) */
 @media (max-width: 640px) {
   .cx-icbtn {
@@ -512,4 +531,11 @@
     width: 1%;
     padding-inline: 4px;
   }
+}
+
+/* round 50: on a phone the statement, invoices and instalments tabs show the balance as one line, not the two cards */
+.cx-balline {
+  margin: 0;
+  color: var(--sx-mute, inherit);
+  font-size: 0.95rem;
 }

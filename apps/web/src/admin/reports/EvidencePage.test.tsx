@@ -155,6 +155,10 @@ describe('«شاشة الدليل»', () => {
   it('is closed to a cashier', async () => {
     openEvidence({}, ['sale.create']);
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
   });
 });

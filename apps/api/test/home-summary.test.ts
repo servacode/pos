@@ -45,6 +45,9 @@ describe('GET /v1/me/home-summary', () => {
     expect(body.photos).toEqual({ goodsCount: 1, withoutPhoto: 1 });
     expect(body.debts).toEqual({ totalOwedMinor: 0, overLimitCount: 0, overLimitOne: null });
     expect(body.lowStock).toEqual({ total: 0, items: [] });
+    // The morning look: the owner sees the drawers' cash; no dollar rate until the store uses dollars
+    expect(body.cashMinor).toBe(0);
+    expect(body.usdRate).toBeNull();
   });
 
   it('adds up what customers owe and names the one over the limit', async () => {
@@ -78,7 +81,19 @@ describe('GET /v1/me/home-summary', () => {
     const nobody = await staffUser(app, owner, 'nobody', '0922222222');
     const res = await summary(nobody.accessToken);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ debts: null, photos: null, lowStock: null });
+    expect(res.json()).toMatchObject({ debts: null, photos: null, lowStock: null, cashMinor: null });
+  });
+
+  it('says the latest dollar rate only when the store uses dollars', async () => {
+    const owner = await testStore(app);
+    const db = ownerDb();
+    await db`insert into exchange_rates (tenant_id, unit, quote, rate, effective_at) values (${owner.tenantId}, 'USD', 'SYP', '12500', now() - interval '2 days')`;
+    await db`insert into exchange_rates (tenant_id, unit, quote, rate, effective_at) values (${owner.tenantId}, 'USD', 'SYP', '13000', now())`;
+    // Dollars are not switched on: the rate stays out
+    await db`update tenant_settings set enabled_currencies = array['SYP']::text[] where tenant_id = ${owner.tenantId}`;
+    expect((await summary(owner.accessToken)).json().usdRate).toBeNull();
+    await db`update tenant_settings set enabled_currencies = array['SYP', 'USD']::text[] where tenant_id = ${owner.tenantId}`;
+    expect((await summary(owner.accessToken)).json().usdRate).toBe('13000');
   });
 
   it('needs a signed-in user', async () => {

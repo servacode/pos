@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import type { MeResponse } from '@serva/core';
-import { CheckIcon, cn } from '@serva/ui';
+import { CheckIcon, cn, NextIcon } from '@serva/ui';
 import { listDevices } from '../admin/devices/api';
 import { listStaff } from '../admin/staff/api';
 import { useReport } from '../admin/reports/useReport';
@@ -39,11 +39,22 @@ export function SetupStrip({ me, summary }: { me: MeResponse; summary: HomeSumma
       aria-label="أكمل الإعداد"
       className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-card border border-brand/20 bg-brand-soft px-4 py-3 text-brand-ink"
     >
-      <p className="font-semibold">
+      {/* On a phone the four tasks are one line that opens the wizard, not a third of the first screen */}
+      <Link
+        to="/welcome"
+        className="flex min-h-9 flex-1 items-center justify-between gap-2 font-semibold sm:hidden"
+      >
+        <span>
+          أكمل الإعداد: <span className="num">{formatNumber(doneCount, digits)}</span> من{' '}
+          <span className="num">{formatNumber(tasks.length, digits)}</span>
+        </span>
+        <NextIcon size={16} />
+      </Link>
+      <p className="font-semibold max-sm:hidden">
         أكمل الإعداد: <span className="num">{formatNumber(doneCount, digits)}</span> من{' '}
         <span className="num">{formatNumber(tasks.length, digits)}</span>
       </p>
-      <ul className="flex flex-1 flex-wrap gap-2">
+      <ul className="flex flex-1 flex-wrap gap-2 max-sm:hidden">
         {tasks.map((task) => (
           <li key={task.to}>
             <Link

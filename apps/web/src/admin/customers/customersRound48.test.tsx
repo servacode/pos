@@ -91,7 +91,8 @@ describe('the customers list', () => {
     });
     const { user } = renderApp('/customers');
     await screen.findByText('أبو خالد');
-    await user.click(screen.getByRole('button', { name: 'تذكير جماعي للمدينين' }));
+    await user.click(screen.getByRole('button', { name: 'أدوات' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'تذكير جماعي للمدينين' }));
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(/افتح التالي: أبو خالد/)).toBeInTheDocument();
     const links = within(dialog).getAllByRole('link', { name: 'واتساب' });

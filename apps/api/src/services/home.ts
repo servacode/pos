@@ -27,6 +27,10 @@ export interface HomeSummary {
   /** catalog.manage: goods (not services) still without a photo, and how many goods there are */
   photos: { goodsCount: number; withoutPhoto: number } | null;
   /** report.view: the pieces that sold in the last 30 days and are down to their minimum (the report's rule), best sellers first */
+  /** reports.financial: what the cash drawers hold now (account 1110, base currency) */
+  cashMinor: number | null;
+  /** The latest dollar rate in liras, when the store uses dollars (a decimal text) */
+  usdRate: string | null;
   lowStock: {
     /** How many pieces are low in all; `items` is the first 100 */
     total: number;
@@ -42,6 +46,12 @@ export interface HomeSummary {
     }[];
   } | null;
 }
+
+/**
+ * A piece with no minimum set counts as running low when it sold in the last 30 days and 2 units or fewer
+ * are left. Quantities are stored in thousandths, so this is 2000 (the merchandise report's own default of 2).
+ */
+const NO_MINIMUM_LOW_QTY = 2000;
 
 const debtLines = sql`
   select l.party_id as customer_id, sum(l.debit_minor - l.credit_minor) as balance
@@ -132,7 +142,7 @@ export async function loadHomeSummary(db: Database, auth: AccessClaims, now: Dat
           left join stock k on k.variant_id = v.id left join sold s on s.variant_id = v.id
           where v.archived_at is null and p.archived_at is null and p.type = 'stock'
             and ((v.min_stock_qty is not null and coalesce(k.qty, 0) <= v.min_stock_qty)
-              or (v.min_stock_qty is null and coalesce(s.qty, 0) > 0 and coalesce(k.qty, 0) <= 2000)))
+              or (v.min_stock_qty is null and coalesce(s.qty, 0) > 0 and coalesce(k.qty, 0) <= ${NO_MINIMUM_LOW_QTY})))
         select variant_id, product_id, name, label, attributes, stock::text, pieces::text, in_stock::text,
                (select count(*) from low)::text as total
         from low order by sold desc, stock, name limit 100`);
@@ -152,11 +162,27 @@ export async function loadHomeSummary(db: Database, auth: AccessClaims, now: Dat
     }
 
     // Whether the store has ever sold: a week without sales is a closed week, not a new store
+    // The cash in the drawers (account 1110) for who sees the money, and the dollar rate for the morning's look
+    let cashMinor: number | null = null;
+    const seesMoney = await permissionScope(tx, auth.userId, 'reports.financial');
+    if (seesMoney.all) {
+      const [cash] = await tx.execute<{ balance: string }>(sql`
+        select coalesce(sum(l.debit_minor - l.credit_minor), 0)::text as balance
+        from journal_lines l join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+        where a.code = '1110'`);
+      cashMinor = Number(cash?.balance ?? 0);
+    }
+    const [rate] = await tx.execute<{ rate: string }>(sql`
+      select r.rate::text as rate from exchange_rates r
+      where r.unit = 'USD' and r.quote = 'SYP' and exists (select 1 from tenant_settings t where 'USD' = any (t.enabled_currencies))
+      order by r.effective_at desc, r.id desc limit 1`);
     const [sold] = await tx.execute<{ ever: boolean }>(sql`select exists (select 1 from invoices) as ever`);
 
     return {
       baseCurrency: (base?.base ?? 'SYP') as CurrencyCode,
       hasEverSold: sold?.ever === true,
+      cashMinor,
+      usdRate: rate?.rate ?? null,
       debts,
       photos,
       lowStock,

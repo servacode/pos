@@ -56,6 +56,9 @@ export function CoverBanner({ store }: { store: Pick<ShopStore, 'name' | 'coverU
   );
 }
 
+/** The hero band waits for the owner's approval: set this to false and the shop home goes back to the plain header. */
+export const SHOW_SHOP_HERO = true;
+
 /**
  * The shop's front: the name, the tagline and how an order reaches the customer, on the brand tint.
  * Drawn on the home page only, and only when the store has no cover of its own (the cover is its face then).
@@ -67,7 +70,7 @@ export function ShopHero({
   store: Pick<ShopStore, 'name' | 'tagline' | 'coverUrl' | 'delivery' | 'pickup'>;
   count: number;
 }) {
-  if (store.coverUrl) return null;
+  if (!SHOW_SHOP_HERO || store.coverUrl) return null;
   const ways = [store.delivery ? 'توصيل' : null, store.pickup ? 'استلام من المحل' : null].filter(Boolean);
   return (
     <section

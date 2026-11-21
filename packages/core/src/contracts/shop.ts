@@ -526,4 +526,8 @@ export interface PriceChange {
   note: string | null;
   /** Which price moved on a product edit; absent (the selling price) on older rows */
   field?: 'price' | 'floor' | 'wholesale';
+  /** On a bulk row: the change's id, for «تراجع» from the history */
+  batchId?: string;
+  /** On a bulk row: that change has already been taken back */
+  undone?: boolean;
 }

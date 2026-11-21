@@ -74,6 +74,7 @@ describe('promotions at the till', () => {
       source: 'promotion',
       reason: 'خصم الألبان 10%',
       approval: null,
+      promotionId: expect.any(String),
     });
     expect(sale.lines[1]!.discount).toBeNull();
   });

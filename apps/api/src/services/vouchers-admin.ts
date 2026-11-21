@@ -12,8 +12,9 @@ import { baseCurrency } from './purchases';
 
 const newId = createUuidV7();
 
-/** The day the store is on (its timezone), to tell an expired voucher from a live one */
-const today = sql`(now() at time zone (select t.timezone from tenants t join tenant_settings s on s.tenant_id = t.id limit 1))::date`;
+/** The business day the store is on (its timezone and day cutoff), to tell an expired voucher from a live one */
+const today = sql`((now() at time zone (select t.timezone from tenants t join tenant_settings s on s.tenant_id = t.id limit 1))
+  - (select (s.business_day_cutoff || ':00')::interval from tenant_settings s limit 1))::date`;
 
 /**
  * The vouchers the store has issued and what is left on each. The till issues and spends them; the
@@ -38,7 +39,7 @@ export function listVouchers(
       }
       offset = Number(m[1]);
     }
-    const live = sql`amount_minor > redeemed_minor and voided_at is null and (expires_on is null or expires_on >= ${today})`;
+    const live = sql`v.amount_minor > v.redeemed_minor and v.voided_at is null and (v.expires_on is null or v.expires_on >= ${today})`;
     const open = (query.status ?? 'open') === 'open';
     const like = query.q ? `%${query.q.replace(/[\\%_]/g, (c) => '\\' + c)}%` : null;
     const rows = await tx.execute<{
@@ -51,19 +52,25 @@ export function listVouchers(
       expires_on: string | null;
       voided_at: string | null;
       expired: boolean;
+      customer_id: string | null;
+      customer_name: string | null;
     }>(sql`
-      select code, kind, currency, amount_minor::text as amount, redeemed_minor::text as redeemed,
-             created_at::text, expires_on::text, voided_at::text,
-             (expires_on is not null and expires_on < ${today}) as expired
-      from vouchers
+      select v.code, v.kind, v.currency, v.amount_minor::text as amount, v.redeemed_minor::text as redeemed,
+             v.created_at::text, v.expires_on::text, v.voided_at::text,
+             (v.expires_on is not null and v.expires_on < ${today}) as expired,
+             cu.id as customer_id, cu.name as customer_name
+      from vouchers v
+      left join sale_returns sr on sr.tenant_id = v.tenant_id and sr.id = v.return_id and v.kind = 'exchange'
+      left join invoices inv on inv.tenant_id = sr.tenant_id and inv.id = sr.sale_id
+      left join customers cu on cu.tenant_id = inv.tenant_id and cu.id = inv.customer_id
       where ${open ? live : sql`true`}
-        and ${query.kind ? sql`kind = ${query.kind}` : sql`true`}
-        and ${like ? sql`code ilike ${like}` : sql`true`}
-      order by created_at desc, code desc
+        and ${query.kind ? sql`v.kind = ${query.kind}` : sql`true`}
+        and ${like ? sql`(v.code ilike ${like} or cu.name ilike ${like})` : sql`true`}
+      order by v.created_at desc, v.code desc
       limit ${limit + 1} offset ${offset}`);
     const totals = await tx.execute<{ currency: string; amount: string; n: string }>(sql`
-      select currency, sum(amount_minor - redeemed_minor)::text as amount, count(*)::text as n
-      from vouchers where ${live} group by currency order by currency`);
+      select v.currency, sum(v.amount_minor - v.redeemed_minor)::text as amount, count(*)::text as n
+      from vouchers v where ${live} group by v.currency order by v.currency`);
     return {
       items: rows.slice(0, limit).map((r) => {
         const amount = Number(r.amount);
@@ -84,6 +91,8 @@ export function listVouchers(
           redeemedMinor: redeemed,
           remainingMinor: voided || r.expired ? 0 : Math.max(0, amount - redeemed),
           createdAt: new Date(r.created_at).toISOString(),
+          customerId: r.customer_id,
+          customerName: r.customer_name,
           expiresOn: r.expires_on,
           voidedAt: r.voided_at ? new Date(r.voided_at).toISOString() : null,
           state,
@@ -126,6 +135,11 @@ export async function updateVoucher(
              expires_on::text, voided_at::text
       from vouchers where code = ${code} for update`);
     if (!v) throw new AppError(404, 'not_found', 'هذه القسيمة غير موجودة.');
+    if (!input.void && input.expiresOn === undefined) {
+      throw new AppError(400, 'validation_failed', 'تحقّق من الحقول المظلّلة.', {
+        expiresOn: 'اختر آخر يوم للقسيمة، أو ألغِها.',
+      });
+    }
     if (v.voided_at) throw new AppError(409, 'conflict', 'هذه القسيمة ملغاة من قبل.');
     const left = Number(v.amount) - Number(v.redeemed);
     if (input.void) {

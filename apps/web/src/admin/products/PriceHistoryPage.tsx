@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PriceModes } from './parts';
 import { CatalogGate } from './CatalogGate';
 import type { PriceChange, PriceChangeSource } from '@serva/core';
+import { COUNT_NOUNS, countNoun } from '@serva/core';
 import { CURRENCIES } from '@serva/core/currencies';
 import { Alert, Button, EmptyState, PercentIcon, Select, TextField } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
@@ -133,6 +134,8 @@ function PriceHistory() {
   const [next, setNext] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [search, setSearch] = useState('');
@@ -195,6 +198,43 @@ function PriceHistory() {
     };
   }, [search]);
 
+  // One «تراجع» for a whole bulk change: on the first of its rows
+  const firstOfBatch = useMemo(() => {
+    const seen = new Set<string>();
+    const first = new Set<string>();
+    for (const r of items ?? []) {
+      if (r.batchId && !seen.has(r.batchId)) {
+        seen.add(r.batchId);
+        first.add(r.id);
+      }
+    }
+    return first;
+  }, [items]);
+
+  function undoBatch(batchId: string) {
+    if (undoing) return;
+    if (!window.confirm('نرجّع كل قطعة في هذا التغيير إلى سعرها قبله. ما تعدّل بعده يُترك كما هو. نتابع؟'))
+      return;
+    setUndoing(batchId);
+    setError(null);
+    setNotice(null);
+    apiFetch<{ restored: number; skipped: number }>(`/v1/prices/bulk/${batchId}/undo`, {
+      method: 'POST',
+      auth: true,
+      body: {},
+    })
+      .then((r) => {
+        setNotice(
+          `رجعت ${countNoun(r.restored, COUNT_NOUNS.piece)} إلى سعرها قبل التغيير${
+            r.skipped > 0 ? `، وتُركت ${countNoun(r.skipped, COUNT_NOUNS.piece)} لأنها تعدّلت بعده` : ''
+          }.`,
+        );
+        load();
+      })
+      .catch((e: unknown) => setError(errorMessage(e)))
+      .finally(() => setUndoing(null));
+  }
+
   const tz = me.tenant.timezone;
   const when = useCallback((r: PriceChange) => zonedDateTime(r.at, tz, digits), [tz, digits]);
 
@@ -219,10 +259,26 @@ function PriceHistory() {
       {
         key: 'source',
         header: 'المصدر',
-        cell: (r) => <span className="sx-mute">{SOURCE_TEXT[r.source]}</span>,
+        cell: (r) => (
+          <span className="sx-mute">
+            {SOURCE_TEXT[r.source]}
+            {r.batchId && r.undone ? ' · تم التراجع عنه' : null}
+            {r.batchId && !r.undone && firstOfBatch.has(r.id) ? (
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={undoing !== null}
+                onClick={() => undoBatch(r.batchId ?? '')}
+              >
+                تراجع عن هذا التغيير
+              </Button>
+            ) : null}
+          </span>
+        ),
       },
     ],
-    [when],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [when, firstOfBatch, undoing],
   );
 
   const filtered = Boolean(from || to || productId);
@@ -249,6 +305,7 @@ function PriceHistory() {
         />
         <PriceModes current="/price-history" />
         {error ? <Alert tone="error">{error}</Alert> : null}
+        {notice ? <Alert tone="success">{notice}</Alert> : null}
         <div className="sx-toolbar">
           <DateField label="من تاريخ" value={from} onChange={setFrom} />
           <DateField label="حتى تاريخ" value={to} onChange={setTo} />
@@ -348,7 +405,7 @@ function Piece({ row }: { row: PriceChange }) {
       <span className="font-semibold">
         {row.productName}
         {row.variantLabel ? <span className="sx-mute"> · {row.variantLabel}</span> : null}
-        {row.field && row.field !== 'price' && row.note ? (
+        {((row.field && row.field !== 'price') || row.source === 'bulk') && row.note ? (
           <span className="sx-mute"> · {row.note}</span>
         ) : null}
       </span>

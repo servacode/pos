@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CurrencyCode, ProductCostsResponse, ProductDetail } from '@serva/core';
-import { Alert, Button, MoneyField, NumberField, Select, StockIcon } from '@serva/ui';
+import { Alert, Button, MoneyField, NumberField, Select, StockIcon, Switch } from '@serva/ui';
 import { useMe } from '../../auth/useAuth';
 import { ApiError, errorMessage } from '../../lib/api';
 import { isoDay } from '../../lib/dates';
 import { Amt, StatusPill } from '../sales/ui';
 import { getProductCosts, postProductOpening } from '../catalog/api';
+import { marginPercent } from './margin';
 import { SectionCard } from './parts';
 
 /** Thousandths from what was typed («2.5» → 2500); null when it is not a quantity above zero */
@@ -16,11 +17,7 @@ export function qtyThousandths(text: string): number | null {
   return milli >= 1 && milli <= 1_000_000_000 ? milli : null;
 }
 
-/** The share of the price that is profit, whole percent: (price - cost) / price. Null when there is no price. */
-export function marginPercent(priceMinor: number, costMinor: number): number | null {
-  if (priceMinor <= 0) return null;
-  return Math.round(((priceMinor - costMinor) / priceMinor) * 100);
-}
+export { marginPercent };
 
 /**
  * «التكلفة والكمية الافتتاحية» on the card of a saved stocked product: what a unit costs (for who holds
@@ -39,6 +36,7 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
   const posting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [zeroOk, setZeroOk] = useState(false);
 
   const loadCosts = useCallback(() => {
     if (!seesCost) return;
@@ -68,9 +66,11 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
         date: isoDay(Date.now(), me.tenant.timezone),
         branchId,
         lines,
+        ...(noCost ? { zeroCostOk: true } : {}),
       });
       setDone(true);
       setQty({});
+      setZeroOk(false);
       loadCosts();
       onPosted();
     } catch (caught) {
@@ -96,34 +96,61 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
       }
     >
       {seesCost ? (
-        <ul className="flex flex-col divide-y divide-line">
-          {live.map((v) => {
-            const row = costs?.items.find((c) => c.variantId === v.id);
-            const cost = row?.unitCostMinor ?? null;
-            const margin =
-              cost !== null && v.price.currency === base ? marginPercent(v.price.priceMinor, cost) : null;
-            return (
-              <li key={v.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2.5">
-                <span className="font-semibold text-ink">{v.label ?? product.nameAr}</span>
-                <span className="flex flex-wrap items-center gap-3 text-sm text-ink-muted">
-                  <span>
-                    التكلفة{' '}
-                    {cost === null ? (
-                      <span className="text-ink-subtle">لا تكلفة بعد</span>
-                    ) : (
-                      <Amt minor={cost} currency={base} className="font-semibold text-ink" />
-                    )}
-                  </span>
-                  {margin !== null ? (
-                    <StatusPill kind={margin < 0 ? 'danger' : margin < 10 ? 'warn' : 'ok'}>
-                      هامش <bdi className="num">{margin}</bdi>٪
-                    </StatusPill>
-                  ) : null}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="overflow-x-auto">
+          <table aria-label="تكلفة القطع وهامشها" className="w-full min-w-96 text-sm">
+            <thead>
+              <tr className="text-xs font-semibold text-ink-subtle">
+                <th scope="col" className="py-2 pe-3 text-start">
+                  القطعة
+                </th>
+                <th scope="col" className="px-3 py-2 text-end">
+                  السعر
+                </th>
+                <th scope="col" className="px-3 py-2 text-end">
+                  التكلفة
+                </th>
+                <th scope="col" className="ps-3 py-2 text-end">
+                  الهامش
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {live.map((v) => {
+                const row = costs?.items.find((c) => c.variantId === v.id);
+                const cost = row?.unitCostMinor ?? null;
+                const margin =
+                  cost !== null && v.price.currency === base ? marginPercent(v.price.priceMinor, cost) : null;
+                return (
+                  <tr key={v.id}>
+                    <th scope="row" className="py-2.5 pe-3 text-start font-semibold text-ink">
+                      {v.label ?? product.nameAr}
+                    </th>
+                    <td className="px-3 py-2.5 text-end">
+                      <Amt minor={v.price.priceMinor} currency={v.price.currency} />
+                    </td>
+                    <td className="px-3 py-2.5 text-end">
+                      {cost === null ? (
+                        <span className="text-ink-subtle">لا تكلفة بعد</span>
+                      ) : (
+                        <Amt minor={cost} currency={base} className="font-semibold text-ink" />
+                      )}
+                    </td>
+                    <td className="ps-3 py-2.5 text-end">
+                      {margin !== null ? (
+                        <StatusPill kind={margin < 0 ? 'danger' : margin < 10 ? 'warn' : 'ok'}>
+                          {margin < 0 ? 'السعر أقل من التكلفة ' : 'هامش '}
+                          <bdi className="num">{margin}</bdi>٪
+                        </StatusPill>
+                      ) : (
+                        <span className="text-ink-subtle">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       ) : null}
 
       {canAdjust && product.type === 'stock' && fresh.length > 0 ? (
@@ -165,9 +192,12 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
             </div>
           ))}
           {noCost ? (
-            <Alert tone="warning">
-              بعض القطع بلا تكلفة: ستدخل المخزون بقيمة صفر ويظهر هامش ربحها 100٪ حتى أول فاتورة شراء.
-            </Alert>
+            <>
+              <Alert tone="warning">
+                بعض القطع بلا تكلفة: ستدخل المخزون بقيمة صفر ويظهر هامش ربحها 100٪ حتى أول فاتورة شراء.
+              </Alert>
+              <Switch label="أؤكد: سجّل هذه القطع بلا تكلفة" checked={zeroOk} onCheckedChange={setZeroOk} />
+            </>
           ) : null}
           {error ? <Alert tone="error">{error}</Alert> : null}
           {done ? <Alert tone="success">سُجّلت الكمية الافتتاحية.</Alert> : null}
@@ -175,7 +205,7 @@ export function CostStockSection({ product, onPosted }: { product: ProductDetail
             <Button
               type="button"
               variant="secondary"
-              disabled={lines.length === 0}
+              disabled={lines.length === 0 || (noCost && !zeroOk)}
               loading={busy}
               onClick={() => void post()}
             >

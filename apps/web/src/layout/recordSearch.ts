@@ -2,10 +2,8 @@ import { useEffect, useState } from 'react';
 import type { MeResponse } from '@serva/core';
 import { listProducts } from '../admin/catalog/api';
 import { findSerials, getRecall } from '../admin/purchases/api';
-import { listCheques } from '../admin/cheques/api';
 import { holdsAny, type AccessRule } from '../admin/reports/access';
 import { apiFetch } from '../lib/api';
-import { matchesArabic } from '../lib/arabicSearch';
 import { dayText } from '../lib/dates';
 import { listSales } from '../admin/sales/api';
 import { listQuotations } from '../admin/quotations/api';
@@ -35,42 +33,24 @@ const CODE_GROUPS = new Set([
 ]);
 const PHONE_GROUPS = new Set(['الزبائن', 'الموردون']);
 
+/** «بنك · 000123 · 2026-12-01» with the date in words («1 كانون الأول 2026») */
+const withArabicDates = (text: string): string => text.replace(/\d{4}-\d{2}-\d{2}/g, (day) => dayText(day));
+
 const decorate = (hit: RecordHit): RecordHit => ({
   ...hit,
+  ...(hit.group === 'الشيكات' ? { label: withArabicDates(hit.label) } : {}),
   ...(CODE_GROUPS.has(hit.group) ? { labelLtr: true } : {}),
   ...(PHONE_GROUPS.has(hit.group) && hit.detail ? { detailLtr: true } : {}),
 });
 
-/** «بنك · 000123 · 2026-12-01» with the date in words («1 كانون الأول 2026») */
-const withArabicDates = (text: string): string => text.replace(/\d{4}-\d{2}-\d{2}/g, (day) => dayText(day));
-
 const FEW = 4;
 
-// The lists that have no search of their own are fetched whole and matched here. They do not depend
-// on what was typed, so each is asked once and kept for a short while (per signed-in user): the
-// next letter, and the next time the box opens, reuse it instead of fetching every list again.
-const LIST_FRESH_MS = 60_000;
-const lists = new WeakMap<MeResponse, Map<string, { at: number; answer: Promise<unknown> }>>();
-
-function kept<T>(me: MeResponse, key: string, load: () => Promise<T>): Promise<T> {
-  let byKey = lists.get(me);
-  if (!byKey) lists.set(me, (byKey = new Map()));
-  const hit = byKey.get(key);
-  if (hit && Date.now() - hit.at < LIST_FRESH_MS) return hit.answer as Promise<T>;
-  const answer = load();
-  byKey.set(key, { at: Date.now(), answer });
-  // A failed ask is not kept: the next letter tries again
-  answer.catch(() => byKey.delete(key));
-  return answer;
-}
-
 /**
- * The search box opened: nothing is downloaded any more. Suppliers, purchase invoices, returns,
- * online orders, rentals, claims and customers are found by the server (`/v1/me/search`); only the
- * cheques (which have no search of their own) are read, and only once a word is typed.
+ * The search box opened: nothing is downloaded. Suppliers, purchase invoices, returns, online orders,
+ * rentals, claims, customers and cheques are found by the server (`/v1/me/search`).
  */
 export function warmRecordSearch(_me: MeResponse): void {
-  // Kept so the palette's call stays; the lists are not warmed any more (round 48)
+  // Kept so the palette's call stays; nothing is warmed (round 48)
 }
 
 /** One promise per kind of record, each ready as soon as its own request answers. */
@@ -128,25 +108,7 @@ function search(me: MeResponse, q: string): Promise<RecordHit[]>[] {
           ),
         )
       : [],
-    can(['customers.view'])
-      ? quiet(
-          kept(me, 'cheques', () => listCheques(undefined)).then((r) =>
-            r.items
-              .filter((c) =>
-                matchesArabic(c.documentNumber, q, c.reference ?? undefined, c.customerName ?? undefined),
-              )
-              .slice(0, FEW)
-              .map((c): RecordHit => ({
-                key: `q:${c.sourceType}:${c.sourceId}:${c.paymentNo}`,
-                group: 'الشيكات',
-                label: withArabicDates(c.reference ?? c.documentNumber),
-                detail: c.customerName ?? undefined,
-                to: '/cheques',
-              })),
-          ),
-        )
-      : [],
-    can(['sale.create'])
+    can(['customers.manage'])
       ? quiet(
           listQuotations('all', q).then((r) =>
             r.items.slice(0, FEW).map((x): RecordHit => ({

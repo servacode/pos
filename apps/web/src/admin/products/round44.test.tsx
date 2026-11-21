@@ -23,7 +23,7 @@ describe('the catalog screens for a user without the permission', () => {
       'GET /v1/me': { status: 200, body: cashier() },
     });
     renderApp('/prices');
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(await screen.findByText('ليس لديك صلاحية لهذه الصفحة')).toBeInTheDocument();
     expect(requestsTo('GET', '/v1/categories')).toHaveLength(0);
   });
 

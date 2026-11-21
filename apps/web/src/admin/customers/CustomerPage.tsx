@@ -213,9 +213,16 @@ function LoadingCustomer() {
   return (
     <div aria-busy="true" className="flex flex-col gap-6">
       <Skeleton className="h-12 w-64" />
+      <Skeleton className="h-9 w-80 max-w-full" />
       <div className="cx-head">
-        <Skeleton className="h-64 w-full" />
-        <Skeleton className="h-48 w-full" />
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-28 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </div>
       </div>
     </div>
   );
@@ -466,12 +473,7 @@ export function CustomerPage() {
               {customer.kind ? (
                 <StatusPill kind="ok">{CUSTOMER_KIND_LABELS[customer.kind]}</StatusPill>
               ) : null}
-              {customer.groupName ? (
-                <StatusPill kind="ok">
-                  {customer.groupName}
-                  {customer.groupDiscountBps ? ` · خصم ${customer.groupDiscountBps / 100}%` : ''}
-                </StatusPill>
-              ) : null}
+              {customer.groupName ? <StatusPill kind="ok">{customer.groupName}</StatusPill> : null}
             </div>
             <div className="cx-tabs print:hidden" role="tablist" aria-label="أقسام صفحة الزبون">
               {TABS.map((t) => (
@@ -504,6 +506,19 @@ export function CustomerPage() {
                 onCancel={() => setEditing(false)}
               />
             ) : null}
+            {phone && tab !== 'overview' ? (
+              <p className="cx-balline">
+                الرصيد{' '}
+                {customer.balanceMinor === 0 ? (
+                  <span className="sx-n">—</span>
+                ) : (
+                  <>
+                    {customer.balanceMinor < 0 ? 'له ' : 'عليه '}
+                    <Amt minor={Math.abs(customer.balanceMinor)} currency={base} className="font-semibold" />
+                  </>
+                )}
+              </p>
+            ) : null}
             <div className="cx-head">
               <div className="cx-main">
                 {tab === 'overview' ? (
@@ -519,6 +534,33 @@ export function CustomerPage() {
                           ) : (
                             '—'
                           )}
+                        </dd>
+                      </div>
+                      {customer.groupName ? (
+                        <div>
+                          <dt>المجموعة</dt>
+                          <dd>
+                            {customer.groupName}
+                            {customer.groupDiscountBps ? (
+                              <span className="sx-subline">
+                                خصمها <bdi className="sx-n">{customer.groupDiscountBps / 100}%</bdi> مسجّل
+                                للتنظيم، ولا يُحسب على الكاشير بعد.
+                              </span>
+                            ) : null}
+                          </dd>
+                        </div>
+                      ) : null}
+                      <div>
+                        <dt>آخر شراء</dt>
+                        <dd>
+                          {invoices[0] ? dayText(invoices[0].date, digits) : purchases ? 'لم يشترِ بعد' : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>الأسعار والرسائل</dt>
+                        <dd>
+                          {customer.priceTier === 'wholesale' ? 'سعر الجملة' : 'سعر المفرد'}
+                          {customer.noMessages ? ' · لا يريد رسائل' : ''}
                         </dd>
                       </div>
                       {customer.birthDate ? (
@@ -675,10 +717,12 @@ export function CustomerPage() {
                   />
                 ) : null}
               </div>
-              <aside className="cx-side">
-                <BalanceHero customer={customer} currency={base} />
-                {purchases ? <SizesPanel purchases={purchases} currency={base} /> : null}
-              </aside>
+              {!(phone && tab !== 'overview') ? (
+                <aside className="cx-side">
+                  <BalanceHero customer={customer} currency={base} />
+                  {purchases ? <SizesPanel purchases={purchases} currency={base} /> : null}
+                </aside>
+              ) : null}
             </div>
             {canReceive && phone ? (
               <div className="cx-dock print:hidden">

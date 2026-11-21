@@ -24,6 +24,7 @@ import type { AccessClaims } from '../auth/tokens';
 import { AppError, isUniqueViolation } from '../errors';
 import type { RequestMeta } from '../types';
 import { audit } from './audit';
+import { liveReservation } from './reservations';
 import { fieldError, staleVersion } from './catalog/common';
 
 /**
@@ -290,9 +291,10 @@ export function archivePromotion(
 }
 
 /**
- * What each offer did at the tills between two dates. The sales keep the offer's name as the reason of
- * the line's `promotion` discount, so that is what the rows group by (an offer renamed mid-period shows
- * as two rows, as its receipts did).
+ * What each offer did at the tills between two dates. A sale line keeps its offer's id (newer tills) and
+ * its name as the reason of the `promotion` discount: rows group by the id when there is one, else by the
+ * name, and show the latest name. The returns of those lines in the same period are taken off pro rata.
+ * The period is capped by the contract (366 days).
  */
 export function promotionReport(
   db: Database,
@@ -301,7 +303,8 @@ export function promotionReport(
 ): Promise<PromotionReport> {
   return withTenant(db, auth.tenantId, async (tx) => {
     await requirePermission(tx, auth.userId, 'catalog.manage');
-    const rows = await tx.execute<{
+    type Row = {
+      key: string;
       name: string;
       currency: string;
       invoices: number;
@@ -309,8 +312,10 @@ export function promotionReport(
       discount: string;
       net: string;
       free: string;
-    }>(sql`
-      select l -> 'discount' ->> 'reason' as name, i.currency,
+    };
+    const sold = await tx.execute<Row>(sql`
+      select coalesce(l -> 'discount' ->> 'promotionId', l -> 'discount' ->> 'reason') as key,
+             max(l -> 'discount' ->> 'reason') as name, i.currency,
              count(distinct i.id)::int as invoices,
              coalesce(sum((l ->> 'qty')::bigint), 0)::text as pieces,
              coalesce(sum((l -> 'priced' ->> 'lineDiscountMinor')::bigint), 0)::text as discount,
@@ -320,20 +325,88 @@ export function promotionReport(
       cross join lateral jsonb_array_elements(i.payload -> 'lines') l
       where i.business_date between ${query.from}::date and ${query.to}::date
         and l -> 'discount' ->> 'source' = 'promotion'
-      group by 1, 2
-      order by sum((l -> 'priced' ->> 'lineDiscountMinor')::bigint) desc, 1 limit 200`);
+      group by 1, 3
+      limit 500`);
+    // What came back from those lines: the share of the line's discount and net that the returned pieces carry
+    const back = await tx.execute<Row>(sql`
+      select coalesce(l -> 'discount' ->> 'promotionId', l -> 'discount' ->> 'reason') as key,
+             max(l -> 'discount' ->> 'reason') as name, i.currency, 0 as invoices,
+             coalesce(sum(rl.qty), 0)::text as pieces,
+             coalesce(sum(round((l -> 'priced' ->> 'lineDiscountMinor')::numeric * rl.qty / nullif((l ->> 'qty')::numeric, 0))), 0)::text as discount,
+             coalesce(sum(round((l -> 'priced' ->> 'netMinor')::numeric * rl.qty / nullif((l ->> 'qty')::numeric, 0))), 0)::text as net,
+             coalesce(sum(case when (l -> 'priced' ->> 'grossMinor')::bigint = 0 then rl.qty else 0 end), 0)::text as free
+      from sale_returns r
+      join sale_return_lines rl on rl.tenant_id = r.tenant_id and rl.return_id = r.id
+      join invoices i on i.tenant_id = r.tenant_id and i.id = r.sale_id
+      cross join lateral jsonb_array_elements(i.payload -> 'lines') l
+      where r.business_date between ${query.from}::date and ${query.to}::date
+        and (l ->> 'lineNo')::int = rl.sale_line_no
+        and l -> 'discount' ->> 'source' = 'promotion'
+      group by 1, 3
+      limit 500`);
+    const rows = new Map<
+      string,
+      {
+        name: string;
+        currency: string;
+        invoices: number;
+        pieces: number;
+        discount: number;
+        net: number;
+        free: number;
+        returned: number;
+      }
+    >();
+    const at = (r: Row) => {
+      const k = `${r.key}|${r.currency}`;
+      let row = rows.get(k);
+      if (!row) {
+        row = {
+          name: r.name ?? '',
+          currency: r.currency,
+          invoices: 0,
+          pieces: 0,
+          discount: 0,
+          net: 0,
+          free: 0,
+          returned: 0,
+        };
+        rows.set(k, row);
+      }
+      return row;
+    };
+    for (const r of sold) {
+      const row = at(r);
+      row.invoices += r.invoices;
+      row.pieces += Number(r.pieces);
+      row.discount += Number(r.discount);
+      row.net += Number(r.net);
+      row.free += Number(r.free);
+    }
+    for (const r of back) {
+      const row = at(r);
+      row.pieces -= Number(r.pieces);
+      row.discount -= Number(r.discount);
+      row.net -= Number(r.net);
+      row.free -= Number(r.free);
+      row.returned += Number(r.pieces);
+    }
     return {
       from: query.from,
       to: query.to,
-      items: rows.map((r) => ({
-        name: r.name ?? '',
-        currency: r.currency,
-        invoices: r.invoices,
-        pieces: Number(r.pieces) / 1000,
-        discountMinor: Number(r.discount),
-        netMinor: Number(r.net),
-        freePieces: Number(r.free) / 1000,
-      })),
+      items: [...rows.values()]
+        .sort((x, y) => y.discount - x.discount || x.name.localeCompare(y.name, 'ar'))
+        .slice(0, 200)
+        .map((r) => ({
+          name: r.name,
+          currency: r.currency,
+          invoices: r.invoices,
+          pieces: r.pieces / 1000,
+          discountMinor: r.discount,
+          netMinor: r.net,
+          freePieces: r.free / 1000,
+          returnedPieces: r.returned / 1000,
+        })),
     };
   });
 }
@@ -351,7 +424,7 @@ export function promotionPreview(
     const productIds = [...new Set(input.productIds ?? [])];
     let reach = sql`true`;
     if (input.scope === 'categories') {
-      if (categoryIds.length === 0) return { products: 0, sample: [] };
+      if (categoryIds.length === 0) return { products: 0, shopProducts: 0, sample: [] };
       reach = sql`p.category_id in (
         with recursive tree(id) as (
           select id from categories where id in (${sql.join(
@@ -361,7 +434,7 @@ export function promotionPreview(
           union select c.id from categories c join tree t on c.parent_id = t.id)
         select id from tree)`;
     } else if (input.scope === 'products') {
-      if (productIds.length === 0) return { products: 0, sample: [] };
+      if (productIds.length === 0) return { products: 0, shopProducts: 0, sample: [] };
       reach = sql`p.id in (${sql.join(
         productIds.map((id) => sql`${id}::uuid`),
         sql`, `,
@@ -373,6 +446,23 @@ export function promotionPreview(
     const names = await tx.execute<{ name: string }>(
       sql`select p.name_ar as name from products p where ${live} and ${reach} order by p.name_ar, p.id limit 3`,
     );
-    return { products: count?.n ?? 0, sample: names.map((r) => r.name) };
+    // The shop's own rule for «available» (shop.ts availableSql): a service, or stock in a branch less what accepted orders hold
+    const onShelf = sql`(p.type = 'service' or coalesce((select sum(l.qty) from stock_levels l
+      where l.variant_id = v.id and l.branch_id not in (select id from branches where kind = 'damaged')), 0)
+      - coalesce((select sum((x->>'qty')::bigint) * 1000 from online_orders o
+        cross join lateral jsonb_array_elements(o.lines) x
+        where ${liveReservation} and x->>'variantId' = v.id::text), 0) > 0)`;
+    // What the public shop shows of them: a priced live piece, and on the shelf unless the shop shows sold-out goods
+    const [store] = await tx.execute<{ show_out_of_stock: boolean }>(
+      sql`select show_out_of_stock from online_stores limit 1`,
+    );
+    const [inShop] = store
+      ? await tx.execute<{ n: number }>(sql`
+          select count(*)::int as n from products p where ${live} and ${reach}
+            and exists (select 1 from variants v join prices pr on pr.id = v.id
+                        where v.product_id = p.id and v.archived_at is null and pr.price_minor > 0
+                          and (${store.show_out_of_stock} or ${onShelf}))`)
+      : [undefined];
+    return { products: count?.n ?? 0, shopProducts: inShop?.n ?? 0, sample: names.map((r) => r.name) };
   });
 }

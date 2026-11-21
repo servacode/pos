@@ -1048,11 +1048,14 @@ a.sh-trial:hover {
 }
 .sh-seg {
   display: flex;
-  gap: 4px;
-  padding: 4px 16px 12px;
-  border-bottom: 1px solid var(--color-line);
+  gap: 2px;
+  margin: 4px 16px 12px;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-muted);
 }
 .sh-seg button {
+  flex: 1;
   height: 32px;
   padding: 0 12px;
   border-radius: var(--radius-small);
@@ -1060,9 +1063,10 @@ a.sh-trial:hover {
   font-size: 14px;
 }
 .sh-seg button[aria-pressed='true'] {
-  background: var(--color-surface-muted);
+  background: var(--color-surface);
   color: var(--color-ink);
   font-weight: 600;
+  box-shadow: var(--shadow-e1);
 }
 .sh-nl {
   flex: 1;

@@ -3,12 +3,15 @@ import { normalizeArabic } from '@serva/core/text';
 import { withTenant, type Database } from '@serva/db';
 import { permissionScope } from '../auth/permissions';
 import type { AccessClaims } from '../auth/tokens';
+import { chequeSource } from './cheques';
 
 /**
  * The records the top bar's search finds (round 48): a few of each kind asked of the database by
  * name, number or phone, instead of the browser downloading seven whole lists. Each kind is only for
- * whoever holds the permission of the page it opens; a branch-bound user only sees his branches'
- * documents. The text is compared in the one search form (hamza seats, ة/ه, ى/ي, Arabic-Indic digits).
+ * whoever holds the permission of the page it opens; a branch-bound user only sees his branches' documents.
+ * Online orders and warranty claims are the store's own: their pages list them store-wide (a claim has no
+ * branch), so they are found store-wide too. The text is compared in the one search form (hamza seats,
+ * ة/ه, ى/ي, Arabic-Indic digits).
  */
 
 export interface RecordHit {
@@ -150,6 +153,30 @@ export async function searchRecords(db: Database, auth: AccessClaims, query: str
           label: x.number,
           detail: `${x.item} · ${x.customer_name}`,
           to: '/rentals',
+        });
+
+      // Cheques (customers' and suppliers'), found as the cheques page lists them
+      const cheques = await tx.execute<{
+        source_type: string;
+        source_id: string;
+        payment_no: number;
+        number: string;
+        reference: string | null;
+        who: string | null;
+      }>(sql`
+        select x.source_type, x.source_id, x.payment_no, x.number, x.reference,
+               coalesce(x.customer_name, x.supplier_name) as who
+        from (${chequeSource}) x
+        where ${inBranches(customers, sql`x.branch_id`)}
+          and ${hasWords(folded(sql`x.number`, sql`x.reference`, sql`x.customer_name`, sql`x.supplier_name`), words)}
+        order by x.date desc, x.number desc limit ${EACH}`);
+      for (const c of cheques)
+        hits.push({
+          key: `q:${c.source_type}:${c.source_id}:${c.payment_no}`,
+          group: 'الشيكات',
+          label: c.reference ?? c.number,
+          ...(c.who ? { detail: c.who } : {}),
+          to: '/cheques',
         });
     }
 

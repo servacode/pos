@@ -91,13 +91,26 @@ export async function receiveCustomerPayment(
     if (input.id) await documentLock(tx, 'customer_payment', id);
     // The same id sent again (a lost answer): answer with the receipt already posted, burn no number
     if (input.id) {
-      const [again] = await tx.execute<{ number: string | null; date: string; amount: string }>(sql`
+      const [again] = await tx.execute<{
+        number: string | null;
+        date: string;
+        amount: string;
+        mine: boolean;
+      }>(sql`
         select e.source_number as number, e.entry_date::text as date,
+               exists (select 1 from journal_lines l
+                 join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
+                 where l.tenant_id = e.tenant_id and l.entry_id = e.id and a.code = '1200'
+                   and l.party_type = 'customer' and l.party_id = ${customerId}) as mine,
                (select coalesce(sum(l.credit_minor), 0)::text from journal_lines l
                  join accounts a on a.tenant_id = l.tenant_id and a.id = l.account_id
                  where l.tenant_id = e.tenant_id and l.entry_id = e.id and a.code = '1200') as amount
         from journal_entries e
         where e.source_type = 'manual' and e.source_id = ${id} and e.kind = 'manual'`);
+      // The same id on another customer is a different payment, not a replay: never hand back that receipt
+      if (again?.number && !again.mine) {
+        throw new AppError(409, 'conflict', 'رقم الطلب هذا استُعمل لدفعة زبون آخر. أعد المحاولة.');
+      }
       if (again?.number) {
         const now2 = await customerFor(tx, customerId);
         return {

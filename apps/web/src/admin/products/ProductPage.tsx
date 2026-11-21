@@ -5,7 +5,15 @@ import { UNSAVED_TEXT, useUnsavedGuard } from './unsaved';
 import { CostStockSection, qtyThousandths } from './CostStockSection';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { catalogOptionsOf } from '@serva/core';
-import type { CatalogOptions, Category, CurrencyCode, ProductDetail, TaxRate, Unit } from '@serva/core';
+import type {
+  ArchiveImpactResponse,
+  CatalogOptions,
+  Category,
+  CurrencyCode,
+  ProductDetail,
+  TaxRate,
+  Unit,
+} from '@serva/core';
 import {
   Alert,
   ArchiveIcon,
@@ -44,6 +52,7 @@ import { dayText, isoDay, zonedDateTime } from '../../lib/dates';
 import {
   addProductImage,
   createProduct,
+  getArchiveImpact,
   getProduct,
   listProducts,
   postProductOpening,
@@ -252,7 +261,8 @@ function ProductCard() {
   const [askFree, setAskFree] = useState(false);
   const [categoryQuery, setCategoryQuery] = useState('');
   const freeOk = useRef(false);
-  const dupOk = useRef(false);
+  // The name the second «احفظ» was allowed for: another duplicate name is said again
+  const dupOk = useRef('');
   // «ولّد باركود عند الحفظ»: the store's setting (catalogOptions), saved when it is switched
   const [options, setOptions] = useState<CatalogOptions>(() => catalogOptionsOf(me.settings.catalogOptions));
   const autoBarcode = options.autoBarcode;
@@ -284,6 +294,24 @@ function ProductCard() {
   const [conflict, setConflict] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [archiving, setArchiving] = useState<'ask' | 'busy' | null>(null);
+  // What archiving leaves behind, asked when the dialog opens: stock still on the shelf, dishes using it
+  const [impact, setImpact] = useState<ArchiveImpactResponse | null>(null);
+  const productIdForImpact = product?.id;
+  useEffect(() => {
+    if (archiving !== 'ask' || !productIdForImpact) return;
+    let live = true;
+    setImpact(null);
+    getArchiveImpact(productIdForImpact)
+      .then((r) => {
+        if (live) setImpact(r);
+      })
+      .catch(() => {
+        // The warning is a help: archiving still works without it
+      });
+    return () => {
+      live = false;
+    };
+  }, [archiving, productIdForImpact]);
   const [unitsOpen, setUnitsOpen] = useState(false);
 
   const { enabledCurrencies, baseCurrency } = me.settings;
@@ -449,20 +477,20 @@ function ProductCard() {
     freeOk.current = false;
     setAskFree(false);
     // A new product whose name a live product already has: said once, the second «احفظ» goes on
-    if (!product && !dupOk.current) {
-      const wanted = normalizeArabic(draft.nameAr);
+    const wanted = normalizeArabic(draft.nameAr);
+    if (!product && dupOk.current !== wanted) {
       const same = await listProducts({ q: draft.nameAr.trim(), limit: 10 })
         .then((r) => r.items.find((i) => normalizeArabic(i.nameAr) === wanted))
         .catch(() => undefined);
       if (same) {
-        dupOk.current = true;
+        dupOk.current = wanted;
         setFormError(
           `يوجد منتج باسم «${same.nameAr}» في المتجر. إن كان صنفاً مختلفاً اضغط «احفظ» مرة أخرى، وإلا افتح المنتج الموجود وعدّله.`,
         );
         return;
       }
     }
-    dupOk.current = false;
+    dupOk.current = '';
     setErrors({});
     setSaving(true);
     try {
@@ -783,7 +811,7 @@ function ProductCard() {
             <div className="flex min-w-0 flex-col gap-6 max-xl:contents">
               <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6 max-xl:contents">
                 <SectionCard
-                  className="max-xl:-order-2"
+                  className="max-xl:-order-3"
                   anchor="basic"
                   title="البيانات الأساسية"
                   icon={<Kind />}
@@ -1123,7 +1151,7 @@ function ProductCard() {
 
             <div className="flex min-w-0 flex-col gap-6 max-xl:contents">
               <fieldset disabled={!canManage} className="flex min-w-0 flex-col gap-6 max-xl:contents">
-                <SectionCard title="الحالة" icon={<StoreIcon />}>
+                <SectionCard title="الحالة" icon={<StoreIcon />} className="max-xl:-order-1">
                   <Switch
                     label="يُباع على الكاشير"
                     description="أطفئه ليختفي من شاشة البيع ويبقى في المخزون."
@@ -1156,7 +1184,7 @@ function ProductCard() {
                 </SectionCard>
 
                 <SectionCard
-                  className="max-xl:-order-1"
+                  className="max-xl:-order-2"
                   anchor="organise"
                   title="التنظيم"
                   icon={<CategoriesIcon />}
@@ -1364,7 +1392,23 @@ function ProductCard() {
             </Button>
           </>
         }
-      />
+      >
+        {impact && (impact.stockQty > 0 || impact.usedInRecipes.length > 0) ? (
+          <Alert tone="warning">
+            {impact.stockQty > 0 ? (
+              <span className="block">
+                ما زال في المخزون <bdi className="num">{formatQuantity(impact.stockQty, digits)}</bdi> منه،
+                ولن يُباع حتى تعيده.
+              </span>
+            ) : null}
+            {impact.usedInRecipes.length > 0 ? (
+              <span className="block">
+                يدخل في وصفة: <bdi>{impact.usedInRecipes.join('، ')}</bdi>. تبقى الوصفة لكن مكوّنها مؤرشف.
+              </span>
+            ) : null}
+          </Alert>
+        ) : null}
+      </Dialog>
     </>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type {
+  CurrencyCode,
   DeliveryArea,
   InventoryResponse,
   OnlineOrder,
@@ -95,6 +96,11 @@ const STATUS_KIND: Record<OnlineOrderStatus, BadgeKind> = {
  * «المتجر الإلكتروني» (26 › المتجر الإلكتروني): the owner turns the shop on, picks its link and the
  * WhatsApp number orders go to; the orders it sends wait here to be accepted, rejected, delivered.
  */
+/** The switch's state in words, ahead of its description: a track alone does not say which side is on */
+function StateWord({ on }: { on: boolean }) {
+  return <strong className="font-semibold text-ink">{on ? 'مفعّل' : 'متوقف'} · </strong>;
+}
+
 export function OnlineStorePage() {
   const me = useMe();
   const permissions = new Set<string>(me.user.permissions);
@@ -375,11 +381,32 @@ function ShopPreview({
   store,
   settings,
   link,
+  saved,
 }: {
   store: string;
   settings: OnlineStoreSettings;
   link: string;
+  /** The shop exists on the server: its first goods can be read from its public link */
+  saved: boolean;
 }) {
+  // The first two real goods of the shop, so the owner sees his own shelf; placeholders until it is saved or when it cannot be read
+  const [goods, setGoods] = useState<{ name: string; priceMinor: number | null; currency: string }[]>([]);
+  useEffect(() => {
+    if (!saved || !settings.enabled || !settings.slug) {
+      setGoods([]);
+      return;
+    }
+    let alive = true;
+    apiFetch<{ products: { name: string; priceMinor: number | null; currency: string }[] }>(
+      `/v1/shop/${encodeURIComponent(settings.slug)}`,
+    ).then(
+      (home) => alive && setGoods(home.products.slice(0, 2)),
+      () => alive && setGoods([]),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [saved, settings.enabled, settings.slug]);
   return (
     <Card className="flex flex-col gap-4">
       <CardHeader icon={<EyeIcon />} title="معاينة" description="هكذا يبدو أعلى متجرك للزبون." />
@@ -423,15 +450,27 @@ function ShopPreview({
               {settings.orderMode === 'shop' ? 'الطلب من المتجر' : 'الطلب على واتساب'}
             </Badge>
           </div>
+          {settings.tagline ? <p className="text-xs text-ink-muted">{settings.tagline}</p> : null}
           <div className="grid grid-cols-2 gap-2">
-            {[0, 1].map((tile) => (
+            {(goods.length > 0 ? goods : [null, null]).map((good, tile) => (
               <span
-                key={tile}
+                key={good ? good.name : tile}
                 className="flex flex-col gap-2 rounded-small border border-line bg-surface p-2"
               >
                 <span className="aspect-[4/3] rounded-small bg-surface-muted" />
-                <span className="h-2 w-3/4 rounded-full bg-surface-muted" />
-                <span className="h-2 w-1/3 rounded-full bg-brand-soft" />
+                {good ? (
+                  <>
+                    <span className="line-clamp-2 text-xs font-semibold text-ink">{good.name}</span>
+                    {good.priceMinor !== null ? (
+                      <Amt minor={good.priceMinor} currency={good.currency as CurrencyCode} />
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <span className="h-2 w-3/4 rounded-full bg-surface-muted" />
+                    <span className="h-2 w-1/3 rounded-full bg-brand-soft" />
+                  </>
+                )}
               </span>
             ))}
           </div>
@@ -532,7 +571,12 @@ function SettingsCard() {
           <div className="flex flex-col gap-5">
             <Switch
               label="المتجر مفعّل"
-              description="بضاعتك بصورها وأسعارها ومقاساتها المتوفرة على رابط خاص بمحلك، والطلب يصلك على واتساب."
+              description={
+                <>
+                  <StateWord on={form.enabled} />
+                  بضاعتك بصورها وأسعارها ومقاساتها المتوفرة على رابط خاص بمحلك، والطلب يصلك على واتساب.
+                </>
+              }
               checked={form.enabled}
               onCheckedChange={(enabled) => set({ enabled })}
             />
@@ -598,7 +642,12 @@ function SettingsCard() {
           <div className="flex flex-col gap-4">
             <Switch
               label="توصيل"
-              description="يوصل المحل الطلب إلى عنوان الزبون."
+              description={
+                <>
+                  <StateWord on={form.delivery} />
+                  يوصل المحل الطلب إلى عنوان الزبون.
+                </>
+              }
               checked={form.delivery}
               onCheckedChange={(delivery) => set({ delivery })}
             />
@@ -616,7 +665,12 @@ function SettingsCard() {
             <div className="border-t border-line pt-4">
               <Switch
                 label="استلام من المحل"
-                description="يأتي الزبون ويأخذ طلبه من المحل."
+                description={
+                  <>
+                    <StateWord on={form.pickup} />
+                    يأتي الزبون ويأخذ طلبه من المحل.
+                  </>
+                }
                 checked={form.pickup}
                 onCheckedChange={(pickup) => set({ pickup })}
               />
@@ -654,7 +708,12 @@ function SettingsCard() {
             <div className="border-t border-line pt-4">
               <Switch
                 label="اعرض القطع التي نفد مخزونها"
-                description="تظهر بكلمة «نفد» ولا تُطلب. مطفأ: تختفي حتى تصل من جديد."
+                description={
+                  <>
+                    <StateWord on={form.showOutOfStock} />
+                    تظهر بكلمة «نفد» ولا تُطلب. مطفأ: تختفي حتى تصل من جديد.
+                  </>
+                }
                 checked={form.showOutOfStock}
                 onCheckedChange={(showOutOfStock) => set({ showOutOfStock })}
               />
@@ -662,7 +721,12 @@ function SettingsCard() {
             <div className="border-t border-line pt-4">
               <Switch
                 label="اعرض الأسعار في المتجر الإلكتروني"
-                description="مطفأ: يرى الزبون القطع والصور دون سعر، ويصلك الطلب استفساراً تؤكد له سعره."
+                description={
+                  <>
+                    <StateWord on={form.showPrices} />
+                    مطفأ: يرى الزبون القطع والصور دون سعر، ويصلك الطلب استفساراً تؤكد له سعره.
+                  </>
+                }
                 checked={form.showPrices}
                 onCheckedChange={(showPrices) => set({ showPrices })}
               />
@@ -702,7 +766,7 @@ function SettingsCard() {
         ) : null}
       </div>
       <aside className="lg:sticky lg:top-24">
-        <ShopPreview store={me.tenant.name} settings={form} link={link} />
+        <ShopPreview store={me.tenant.name} settings={form} link={link} saved={form.version !== null} />
       </aside>
     </section>
   );

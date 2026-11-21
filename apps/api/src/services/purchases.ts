@@ -1012,7 +1012,7 @@ export async function inventory(
                 select m.batch_no, m.expiry_date, sum(m.qty) as q from batch_movements m
                 where m.tenant_id = l.tenant_id and m.variant_id = l.variant_id and m.branch_id = l.branch_id
                 group by m.batch_no, m.expiry_date having sum(m.qty) > 0) bm
-              where bm.expiry_date < current_date
+              where bm.expiry_date < (now() at time zone coalesce((select timezone from tenants limit 1), 'UTC'))::date
                  or exists (select 1 from batch_blocks bl
                             where bl.tenant_id = l.tenant_id and bl.variant_id = l.variant_id
                               and bl.batch_no = bm.batch_no and bl.released_at is null))::text as dead_qty,

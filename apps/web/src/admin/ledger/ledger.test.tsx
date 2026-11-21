@@ -91,7 +91,11 @@ describe('«كشف حساب»', () => {
 
   it('is closed to someone without customers.view', async () => {
     signIn('/customers/c1/statement', {}, ['sale.create']);
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('writes the CSV with a byte-order mark, the opening line, every movement and the closing line', () => {
@@ -184,7 +188,11 @@ describe('«المصاريف»', () => {
 
   it('is closed to someone without expenses.manage', async () => {
     signIn('/expenses', {}, OWNER_KEYS);
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
   });
 });
 

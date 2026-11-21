@@ -2823,6 +2823,9 @@ export const journalLines = pgTable(
     foreignKey({ columns: [t.tenantId, t.accountId], foreignColumns: [accounts.tenantId, accounts.id] }),
     index('journal_lines_account_idx').on(t.tenantId, t.accountId),
     index('journal_lines_shift_idx').on(t.tenantId, t.shiftId),
+    index('journal_lines_customer_idx')
+      .on(t.tenantId, t.accountId, t.partyId)
+      .where(sql`${t.partyType} = 'customer'`),
     tenantIsolation(),
   ],
 );

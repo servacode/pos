@@ -320,11 +320,14 @@ function NoPicture({
   sectors,
   large = false,
   typographic = false,
+  small = false,
 }: {
   name: string;
   categoryName?: string | null;
   /** A catalogue tile without a photo: a small icon of its kind with its department, on the tint */
   typographic?: boolean;
+  /** The compact grid's tile: a smaller icon and department line */
+  small?: boolean;
   /** The store's business types (a clothing store never draws a medical icon) */
   sectors?: readonly string[];
   large?: boolean;
@@ -337,8 +340,10 @@ function NoPicture({
         aria-hidden="true"
         className="flex size-full flex-col items-center justify-center gap-1 bg-linear-to-br from-brand-soft to-surface-muted text-brand-ink/70 select-none"
       >
-        <Kind size={24} />
-        <span className="max-w-full truncate px-2 text-xs font-semibold">{categoryName ?? ''}</span>
+        <Kind size={small ? 20 : 24} />
+        <span className="max-w-full truncate px-2 text-[0.6875rem] font-semibold sm:text-xs">
+          {categoryName ?? ''}
+        </span>
       </span>
     );
   }
@@ -404,8 +409,10 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
   const shown = sortProducts(applyFilters(named, filters), sort);
   const title = (category ? tops.find((c) => c.id === category)?.name : null) ?? 'كل البضاعة';
   // A shop without a single picture yet gets shorter tiles: a wall of tall empty frames looks unfinished.
-  const media = home.products.some((p) => p.imageUrl) ? 'aspect-[4/5]' : 'aspect-[4/3]';
-  const anyPicture = home.products.some((p) => p.imageUrl);
+  // A shop where most pieces still have no picture gets the compact grid (3 to a row on a phone, 5 to 6 on a
+  // desk, a small icon tile each); once most have pictures it is the photo grid.
+  const compact = home.products.filter((p) => p.imageUrl).length * 2 < home.products.length;
+  const media = compact ? 'aspect-[3/2] sm:aspect-[4/3]' : 'aspect-[4/5]';
   return (
     <>
       <ShopHero store={home.store} count={home.products.length} />
@@ -482,9 +489,9 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
         <ul
           aria-label="البضاعة"
           className={cn(
-            'grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6',
-            // Typographic tiles are small: more of them to a row until the photos come
-            anyPicture ? 'lg:grid-cols-4' : 'lg:grid-cols-5 xl:grid-cols-6',
+            compact
+              ? 'grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-4 sm:gap-x-3 sm:gap-y-4 lg:grid-cols-5 xl:grid-cols-6'
+              : 'grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-4',
           )}
         >
           {shown.map((p) => (
@@ -515,6 +522,7 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                       sectors={home.store.sectors}
                       categoryName={home.categories.find((c) => c.id === p.categoryId)?.name ?? null}
                       typographic
+                      small={compact}
                     />
                   )}
                   {ribbonOf(p) ? (
@@ -531,13 +539,22 @@ function Catalogue({ home, base }: { home: ShopHome; base: string }) {
                     </span>
                   ) : null}
                 </span>
-                <span className="flex flex-1 flex-col gap-2 p-3 sm:p-4">
-                  <span className="line-clamp-2 text-[0.9375rem] font-semibold text-ink">{p.name}</span>
+                <span
+                  className={cn('flex flex-1 flex-col gap-1.5', compact ? 'p-2 sm:p-3' : 'gap-2 p-3 sm:p-4')}
+                >
+                  <span
+                    className={cn(
+                      'line-clamp-2 font-semibold text-ink',
+                      compact ? 'text-[0.8125rem] leading-snug sm:text-sm' : 'text-[0.9375rem]',
+                    )}
+                  >
+                    {p.name}
+                  </span>
                   <span className="mt-auto flex flex-wrap items-baseline gap-x-2">
                     {p.priceMinor === null ? (
                       <PriceOnRequest className="text-sm" />
                     ) : (
-                      <span className="text-[0.9375rem] text-ink">
+                      <span className={cn('text-ink', compact ? 'text-sm' : 'text-[0.9375rem]')}>
                         {p.maxPriceMinor !== null && p.maxPriceMinor > p.priceMinor ? (
                           <span className="text-sm text-ink-muted">من </span>
                         ) : (

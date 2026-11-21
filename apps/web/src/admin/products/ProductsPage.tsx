@@ -5,6 +5,7 @@ import type {
   OptionValuesResponse,
   ProductListItem,
   ProductListQuery,
+  ProductListResponse,
   ProductListTotals,
 } from '@serva/core';
 import { COUNT_NOUNS, countNoun, getCurrency } from '@serva/core';
@@ -40,7 +41,8 @@ import {
   textLinkClass,
   type DataColumn,
 } from '@serva/ui';
-import { PageTop, SalesPage } from '../sales/ui';
+import { PageTop, SalesPage, StatusPill } from '../sales/ui';
+import { marginPercent } from './margin';
 import { useMe } from '../../auth/useAuth';
 import { dayText, isoDay } from '../../lib/dates';
 import { AppShell } from '../../layout/AppShell';
@@ -60,6 +62,7 @@ import {
 import { useBarcodeScanner } from '../catalog/useBarcodeScanner';
 import { downloadCsv, TextCell } from '../exportCsv';
 import { useIsPhone } from '../../lib/useIsPhone';
+import { formatNumber } from '../../lib/format';
 import { placeholderIconFor } from '../../lib/productPlaceholder';
 import { BulkPhotos } from './BulkPhotos';
 import { countWord } from '../../lib/plural';
@@ -181,6 +184,31 @@ function StockCell({ item, digits }: { item: ProductListItem; digits: 'latn' | '
   );
 }
 
+/**
+ * The profit on the shelf price: «32٪» in green, a warning in red when the price is under the cost.
+ * Shown only when the cost is known and in the price's own currency.
+ */
+function MarginCell({ item, base }: { item: ProductListItem; base: string }) {
+  const cost = item.costMinor;
+  if (!item.price || cost === null || cost === undefined || item.price.currency !== base) {
+    return <span className="text-ink-subtle">—</span>;
+  }
+  const margin = marginPercent(item.price.minMinor, cost);
+  if (margin === null) return <span className="text-ink-subtle">—</span>;
+  if (margin < 0) {
+    return (
+      <StatusPill kind="danger">
+        السعر أقل من التكلفة <bdi className="num">({isolateNegative(`-${String(-margin)}`)}٪)</bdi>
+      </StatusPill>
+    );
+  }
+  return (
+    <span className={cn('font-semibold', margin < 10 && 'text-warning-ink')}>
+      <bdi className="num">{margin}</bdi>٪
+    </span>
+  );
+}
+
 function PriceCell({ item }: { item: ProductListItem }) {
   if (!item.price) return <span className="text-ink-muted">بعدة عملات</span>;
   const { currency, minMinor, maxMinor } = item.price;
@@ -225,24 +253,35 @@ function PriceEditor({ item, onSaved, onConflict }: PriceEditorProps) {
   const price = item.price;
   const variantId = item.singleVariantId;
 
+  // Every row keeps the same slot after its price, so the prices of rows with and without a pencil
+  // line up (a piece with several sizes is edited on its own page)
+  const slot = 'grid size-8 shrink-0 place-items-center max-sm:size-11';
   if (!price || !variantId || (item.type === 'service' && price.minMinor === 0 && price.maxMinor === 0)) {
-    return <PriceCell item={item} />;
+    return (
+      <span className="inline-flex items-center gap-1">
+        <PriceCell item={item} />
+        <span className={slot} aria-hidden="true" />
+      </span>
+    );
   }
 
   if (!editing) {
     return (
       <span className="inline-flex items-center gap-1">
         <PriceCell item={item} />
-        <IconButton
-          size="xs"
-          label={`عدّل سعر «${item.nameAr}»`}
-          icon={<EditIcon size={16} />}
-          onClick={() => {
-            setPriceMinor(price.minMinor);
-            setError(undefined);
-            setEditing(true);
-          }}
-        />
+        <span className={slot}>
+          <IconButton
+            size="xs"
+            className="max-sm:size-11 max-sm:pointer-coarse:size-11"
+            label={`عدّل سعر «${item.nameAr}»`}
+            icon={<EditIcon size={16} />}
+            onClick={() => {
+              setPriceMinor(price.minMinor);
+              setError(undefined);
+              setEditing(true);
+            }}
+          />
+        </span>
       </span>
     );
   }
@@ -462,6 +501,7 @@ function ProductsList() {
   // The whole store's stock numbers for the tiles: they stay while a search narrows the list
   const [totals, setTotals] = useState<ProductListTotals | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [statusCounts, setStatusCounts] = useState<ProductListResponse['statusCounts'] | null>(null);
   // The seasons the store's products carry (a clothing store's filter)
   const [seasons, setSeasons] = useState<string[]>([]);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -475,6 +515,8 @@ function ProductsList() {
     expiry: filters.expiry || undefined,
     stock: filters.stock || undefined,
     sort: filters.sort === 'name' ? undefined : filters.sort,
+    // Who sees costs also gets the margin column
+    cost: me.user.permissions.includes('cost.view') ? '1' : undefined,
   } satisfies ProductListQuery);
 
   const {
@@ -494,6 +536,7 @@ function ProductsList() {
   const items = pageData ? pageData.items : null;
   // The first page carries the whole store's counts; they stay while another page shows
   useEffect(() => {
+    if (pageData?.statusCounts) setStatusCounts(pageData.statusCounts);
     if (pageData?.attention) setAttention(pageData.attention);
     if (pageData?.totals) setTotals(pageData.totals);
   }, [pageData]);
@@ -545,7 +588,9 @@ function ProductsList() {
           'الحالة',
           'سعر الجملة (أدنى)',
           'سعر الجملة (أعلى)',
-          ...(me.user.permissions.includes('cost.view') ? ['متوسط التكلفة'] : []),
+          ...(me.user.permissions.includes('cost.view')
+            ? [`متوسط التكلفة (${me.settings.baseCurrency})`]
+            : []),
         ],
         all.map((i) => [
           i.nameAr,
@@ -708,6 +753,11 @@ function ProductsList() {
       setLoadingAuto(false);
     }
   }
+  // «المؤرشفة · 4»: the count beside each status, once the server has said it
+  const statusOptions = STATUS_OPTIONS.map((o) => ({
+    ...o,
+    label: statusCounts ? `${o.label} · ${formatNumber(statusCounts[o.value], digits)}` : o.label,
+  }));
   const summary = totals ?? (items ? summaryOf(items) : null);
   // More pages wait behind the page buttons: the tiles count what is on this page, «+» says there is more.
   const more = !totals && (pager.hasNext || pager.page > 1) ? '+' : '';
@@ -723,7 +773,14 @@ function ProductsList() {
     <Menu
       label={`إجراءات «${item.nameAr}»`}
       align="end"
-      trigger={<IconButton size="sm" label={`إجراءات «${item.nameAr}»`} icon={<MoreIcon />} />}
+      trigger={
+        <IconButton
+          size="sm"
+          className="max-sm:size-11 max-sm:pointer-coarse:size-11"
+          label={`إجراءات «${item.nameAr}»`}
+          icon={<MoreIcon />}
+        />
+      }
     >
       <MenuItem icon={<EditIcon />} render={(props) => <Link to={`/products/${item.id}`} {...props} />}>
         افتح المنتج
@@ -849,6 +906,16 @@ function ProductsList() {
           <StockCell item={item} digits={digits} />
         ),
     },
+    ...(me.user.permissions.includes('cost.view') && !phone
+      ? [
+          {
+            key: 'margin',
+            header: 'الهامش',
+            numeric: true,
+            cell: (item: ProductListItem) => <MarginCell item={item} base={me.settings.baseCurrency} />,
+          } satisfies DataColumn<ProductListItem>,
+        ]
+      : []),
     ...(showExpiry
       ? [
           {
@@ -923,7 +990,16 @@ function ProductsList() {
         <PageTop
           title="المنتجات"
           subtitle={phone ? undefined : 'ابحث بالاسم، أو امسح باركوداً في أي وقت لتفتح منتجه.'}
-          actions={canManage ? addProduct : null}
+          actions={
+            canManage ? (
+              addProduct
+            ) : (
+              // The accountant reads the list and takes it to a sheet; he never changes it
+              <Button variant="secondary" loading={exporting} onClick={() => void exportAll()}>
+                صدّر الجدول
+              </Button>
+            )
+          }
         />
 
         {showSummary && phone ? (
@@ -1176,7 +1252,7 @@ function ProductsList() {
                 </Select>
                 <SegmentedControl
                   label="حالة المنتج"
-                  options={STATUS_OPTIONS}
+                  options={statusOptions}
                   value={filters.status}
                   onValueChange={(value) => setFilter('status', value)}
                   fullWidth
@@ -1265,7 +1341,7 @@ function ProductsList() {
               </Select>
               <SegmentedControl
                 label="حالة المنتج"
-                options={STATUS_OPTIONS}
+                options={statusOptions}
                 value={filters.status}
                 onValueChange={(value) => setFilter('status', value)}
                 fullWidth

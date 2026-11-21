@@ -69,6 +69,8 @@ export interface NavEntry {
   permission?: AccessRule;
   /** Shown only in accounting mode (12 › المحاسبة: hidden until it is turned on). */
   accountingMode?: boolean;
+  /** Other addresses this page owns: its modes, which have no tab of their own */
+  also?: readonly string[];
   /** Active only on this exact address (the home page) */
   end?: boolean;
   /**
@@ -239,23 +241,9 @@ export const NAV_ENTRIES: readonly (NavEntry & { section: NavSectionKey })[] = [
   {
     section: 'products',
     to: '/prices',
-    label: 'تغيير الأسعار',
-    icon: PercentIcon,
-    permission: ['catalog.manage'],
-  },
-  {
-    section: 'products',
-    to: '/price-list',
-    label: 'تحديث الأسعار من ملف',
-    tab: 'تحديث الأسعار',
-    icon: PercentIcon,
-    permission: ['catalog.manage'],
-  },
-  {
-    section: 'products',
-    to: '/price-history',
-    label: 'سجل تغيير الأسعار',
-    tab: 'سجل الأسعار',
+    label: 'الأسعار',
+    // «تغيير بنسبة», «تحديث من ملف» and «السجل» are modes of one page (a switch at its top), one tab here
+    also: ['/price-list', '/price-history'],
     icon: PercentIcon,
     permission: ['catalog.manage'],
   },
@@ -546,9 +534,9 @@ export function navGroupsFor(me: NavMe): { key: NavGroupKey; label?: string; sec
 }
 
 /** Whether a page owns this address: its own, or one under it (/products/123). */
-export function pageOwns(page: Pick<NavEntry, 'to' | 'end'>, pathname: string): boolean {
+export function pageOwns(page: Pick<NavEntry, 'to' | 'end' | 'also'>, pathname: string): boolean {
   if (page.end || page.to === '/') return pathname === page.to;
-  return pathname === page.to || pathname.startsWith(`${page.to}/`);
+  return [page.to, ...(page.also ?? [])].some((to) => pathname === to || pathname.startsWith(`${to}/`));
 }
 
 /** The section the address belongs to, among those this user may open. */
@@ -557,4 +545,42 @@ export function sectionAt<S extends Pick<NavSection, 'pages'>>(
   pathname: string,
 ): S | undefined {
   return sections.find((section) => section.pages.some((page) => pageOwns(page, pathname)));
+}
+
+/**
+ * Pages the menu does not list, or whose rule is not the menu page that owns their address: the
+ * address is checked against this first (the longest start wins).
+ */
+const ACCESS_OF_ADDRESS: readonly { start: string; rule: AccessRule | null }[] = [
+  // The phone count needs the right to adjust stock, not the cost view the inventory page asks for
+  { start: '/inventory/count', rule: ['inventory.adjust'] },
+  // The reps module decides each of its pages itself
+  { start: '/distribution', rule: null },
+  // The settings page says in its own words that only the owner changes them
+  { start: '/settings', rule: null },
+  { start: '/reports/distribution', rule: null },
+  // The accountant reads the list and the card (stock, price, cost); the server refuses every write
+  // Whoever reads the reports or the purchases opens a product from their links; the page is read-only for them
+  { start: '/products', rule: ['catalog.manage', 'accounting.view', 'report.view', 'purchases.manage'] },
+  // Labels are printed from a purchase invoice too (the storekeeper's way); the page only reads products
+  { start: '/labels', rule: ['catalog.manage', 'purchases.manage'] },
+  // The import offers each type to whoever holds its own right (products, customers, suppliers)
+  { start: '/import', rule: ['catalog.manage', 'customers.manage', 'purchases.manage'] },
+  // The owner edits the rates; whoever reads the catalog sees them
+  { start: '/tax-rates', rule: ['settings.manage', 'catalog.manage'] },
+];
+
+/**
+ * Whether this user may open the address (a clean «no permission» page instead of a failed page).
+ * Only the menu's own pages are checked, by the permission the menu asks for; an address no menu page
+ * owns is left to its page, and the server still checks every request.
+ */
+export function mayOpen(me: NavMe, pathname: string): boolean {
+  const special = ACCESS_OF_ADDRESS.filter(
+    (a) => pathname === a.start || pathname.startsWith(`${a.start}/`),
+  ).sort((a, b) => b.start.length - a.start.length)[0];
+  if (special) return special.rule === null || holdsAny(me, special.rule);
+  const owners = NAV_ENTRIES.filter((entry) => pageOwns(entry, pathname));
+  if (owners.length === 0) return true;
+  return owners.some((entry) => !entry.permission || holdsAny(me, entry.permission));
 }

@@ -39,7 +39,7 @@ import { countWord } from '../../lib/plural';
 import { downloadText } from '../accounting/csv';
 import { Pager, useCursorPages } from '../pager';
 import { Amt, DownloadGlyph, PageTop, SalesPage, StatusPill, SxTable, type SxColumn } from '../sales/ui';
-import { listCustomerPage, listGroups, type CustomerPageQuery } from './api';
+import { exportCustomers, listCustomerPage, listGroups, type CustomerPageQuery } from './api';
 import { customersCsv } from './csv';
 import { CustomerForm, KIND_SECTORS } from './CustomerForm';
 import { debtReminderLink } from './debtReminder';
@@ -403,7 +403,15 @@ export function CustomersPage() {
     <Empty icon={<CalendarIcon size={24} />} title="لا زبون غاب أكثر من 90 يوماً.">
       <p>كل من اشترى منك اشترى خلال آخر 90 يوماً.</p>
     </Empty>
-  ) : search !== '' ? (
+  ) : birthdays && search === '' ? (
+    <Empty icon={<CalendarIcon size={24} />} title="لا عيد ميلاد لأحد من زبائنك هذا الشهر.">
+      <p>أضف تاريخ الميلاد في صفحة الزبون ليظهر هنا.</p>
+    </Empty>
+  ) : waiting && search === '' ? (
+    <Empty icon={<CustomersIcon size={24} />} title="لا زبون بانتظار الموافقة.">
+      <p>كل ما أضافه المندوبون صار موافقاً عليه.</p>
+    </Empty>
+  ) : search !== '' || kind !== '' || groupId !== '' ? (
     <Empty icon={<SearchIcon size={24} />} title="لا زبون بهذا الاسم أو الجوال.">
       <p>جرّب جزءاً من الاسم، أو آخر أرقام الجوال.</p>
     </Empty>
@@ -418,20 +426,13 @@ export function CustomersPage() {
     </Empty>
   );
 
-  /** Every customer of the current filters, a page of 200 at a time, into a file for Excel */
+  /** Every customer of the current filters, in one request, into a file for Excel */
   async function exportAll() {
     setExporting(true);
     setExportError(null);
     try {
-      const all: CustomerListItem[] = [];
-      let cursor: string | null = null;
-      for (let guard = 0; guard < 500; guard += 1) {
-        const page = await listCustomerPage({ ...query, limit: 200, cursor });
-        all.push(...page.items);
-        cursor = page.nextCursor;
-        if (!cursor) break;
-      }
-      downloadText(`customers-${today}.csv`, customersCsv(all, base));
+      const all = await exportCustomers(query);
+      downloadText(`customers-${today}.csv`, customersCsv(all.items, base));
     } catch (e) {
       setExportError(errorMessage(e));
     } finally {
@@ -494,6 +495,11 @@ export function CustomersPage() {
               <div>
                 <span className="sx-eyebrow">الديون على الزبائن</span>
                 <span className="v">{kpi(<Amt minor={strip?.totalOwedMinor ?? 0} currency={base} />)}</span>
+                {(strip?.archivedOwedMinor ?? 0) > 0 ? (
+                  <span className="sx-subline">
+                    منها <Amt minor={strip?.archivedOwedMinor ?? 0} currency={base} /> على زبائن مؤرشفين
+                  </span>
+                ) : null}
               </div>
               <div>
                 <span className="sx-eyebrow">عليهم دين</span>
@@ -566,24 +572,25 @@ export function CustomersPage() {
                   />
                 ) : null}
               </div>
-              {canManage ? (
-                <Button variant="secondary" onClick={() => setDialog('groups')}>
-                  المجموعات
-                </Button>
-              ) : null}
-              {(strip?.owingCount ?? 0) > 0 ? (
-                <Button variant="secondary" icon={<CashIcon />} onClick={() => setDialog('remind')}>
-                  تذكير جماعي للمدينين
-                </Button>
-              ) : null}
-              <Button
-                variant="secondary"
-                icon={<DownloadGlyph />}
-                loading={exporting}
-                onClick={() => void exportAll()}
+              <Menu
+                label="أدوات"
+                align="end"
+                trigger={
+                  <Button variant="secondary" icon={<MoreIcon />} loading={exporting}>
+                    أدوات
+                  </Button>
+                }
               >
-                صدّر إلى إكسل
-              </Button>
+                {canManage ? <MenuItem onSelect={() => setDialog('groups')}>المجموعات</MenuItem> : null}
+                {(strip?.owingCount ?? 0) > 0 ? (
+                  <MenuItem icon={<CashIcon />} onSelect={() => setDialog('remind')}>
+                    تذكير جماعي للمدينين
+                  </MenuItem>
+                ) : null}
+                <MenuItem icon={<DownloadGlyph />} onSelect={() => void exportAll()}>
+                  صدّر إلى إكسل
+                </MenuItem>
+              </Menu>
             </div>
             {exportError ? <Alert tone="error">{exportError}</Alert> : null}
             <div ref={topRef} />

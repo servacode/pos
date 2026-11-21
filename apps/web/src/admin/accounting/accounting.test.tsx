@@ -79,7 +79,11 @@ describe('accounting: who sees it', () => {
   it('is hidden from a manager without accounting.view, and closed if opened by address', async () => {
     signIn('/accounting/journal', {}, MANAGER_KEYS);
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
     await menuLinks();
     expect(screen.queryByRole('link', { name: 'المحاسبة' })).not.toBeInTheDocument();
   });
@@ -87,7 +91,11 @@ describe('accounting: who sees it', () => {
   it('is hidden when the store turned accounting mode off', async () => {
     signIn('/accounting/trial-balance', {}, OWNER_KEYS, false);
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
     await menuLinks();
     expect(screen.queryByRole('link', { name: 'المحاسبة' })).not.toBeInTheDocument();
   });

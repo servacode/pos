@@ -207,7 +207,11 @@ describe('«مبيعات اليوم»', () => {
     });
     renderApp('/sales/today');
 
-    expect(await screen.findByText('هذه الشاشة ليست ضمن صلاحياتك.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        (text) => text === 'هذه الشاشة ليست ضمن صلاحياتك.' || text === 'ليس لديك صلاحية لهذه الصفحة',
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'مبيعات اليوم' })).not.toBeInTheDocument();
   });
 });

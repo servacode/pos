@@ -38,9 +38,28 @@ export function PromotionReportPanel() {
       key: 'name',
       header: 'العرض',
       lead: true,
-      cell: (r) => <span style={{ whiteSpace: 'normal' }}>{r.name}</span>,
+      // On a phone the columns that do not fit sit under the name
+      cell: (r) => (
+        <span style={{ whiteSpace: 'normal' }}>
+          {r.name}
+          <span className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-ink-muted lg:hidden">
+            <span>
+              <bdi className="num">{r.invoices}</bdi> فاتورة
+            </span>
+            <span>
+              بعد الخصم <Amt minor={r.netMinor} currency={r.currency as CurrencyCode} zero="dash" />
+            </span>
+          </span>
+        </span>
+      ),
     },
-    { key: 'inv', header: 'فواتير', numeric: true, cell: (r) => <bdi className="num">{r.invoices}</bdi> },
+    {
+      key: 'inv',
+      header: 'فواتير',
+      numeric: true,
+      hideBelowLg: true,
+      cell: (r) => <bdi className="num">{r.invoices}</bdi>,
+    },
     {
       key: 'pieces',
       header: 'قطع بيعت',
@@ -67,6 +86,7 @@ export function PromotionReportPanel() {
       key: 'net',
       header: 'المبيعات بعد الخصم',
       numeric: true,
+      hideBelowLg: true,
       cell: (r) => <Amt minor={r.netMinor} currency={r.currency as CurrencyCode} zero="dash" />,
     },
   ];
@@ -96,6 +116,9 @@ export function PromotionReportPanel() {
           />
         }
       />
+      <p className="border-t border-line px-4 py-2.5 text-xs text-ink-muted">
+        الأرقام بعد خصم ما أُرجع من هذه القطع في المدة نفسها. أطول مدة سنة.
+      </p>
     </Panel>
   );
 }
