@@ -33,7 +33,8 @@
     "local:offsite": "bash scripts/local/offsite-s3.sh",
     "local:alert": "bash scripts/local/alert.sh",
     "local:health-watch": "bash scripts/local/health-watch.sh",
-    "local:integrity": "bash scripts/local/integrity.sh"
+    "local:integrity": "bash scripts/local/integrity.sh",
+    "brand": "python scripts/brand/build.py"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
