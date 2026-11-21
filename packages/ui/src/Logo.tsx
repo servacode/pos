@@ -2,8 +2,7 @@ import { cn } from './cn';
 
 // The SERVA logo is the owner's own picture, used as it is (docs/design/IDENTITY.md › الشعار): never
 // redrawn. The files in apps/web/public/brand are cut from that one image:
-//   serva-logo.webp: the picture with its black ground, for light surfaces (shown on a rounded tile);
-//   serva-logo-on-dark.webp: the same pixels with the black made see-through, for dark surfaces;
+//   serva-logo.webp: the picture itself with its black ground, on a rounded tile, everywhere;
 //   serva-mark.webp: the «S» of the same picture, square, for small places and the icons.
 // Resize with the height only.
 
@@ -41,7 +40,7 @@ const SIZES = {
   lg: 'h-28',
 } as const;
 
-/** The logo picture (alt «SERVA»): on a light surface with its black ground, on the dark sidebar see-through. */
+/** The logo picture (alt «SERVA»), the owner's own image unchanged. */
 export function Logo({
   className,
   size = 'sm',
@@ -49,19 +48,20 @@ export function Logo({
 }: {
   className?: string;
   size?: keyof typeof SIZES;
-  /** 'sidebar' on the always-dark sidebar: the see-through cut, so the glow sits on the sidebar itself. */
+  /** Kept for callers; the picture is the same everywhere. */
   tone?: LogoTone;
 }) {
-  const file = tone === 'sidebar' ? 'serva-logo-on-dark' : 'serva-logo';
+  const file = 'serva-logo';
   return (
     <img
       src={`${BRAND}/${file}.webp`}
       srcSet={`${BRAND}/${file}.webp 1x, ${BRAND}/${file}@2x.webp 2x`}
-      width={360}
-      height={240}
+      width={480}
+      height={320}
       decoding="async"
       alt="SERVA"
-      className={cn('w-auto shrink-0', tone === 'sidebar' ? '' : 'rounded-lg', SIZES[size], className)}
+      data-tone={tone}
+      className={cn('w-auto shrink-0 rounded-lg', SIZES[size], className)}
     />
   );
 }

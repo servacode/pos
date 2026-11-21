@@ -271,16 +271,16 @@ export function LandingPage() {
               src="/brand/serva-logo.webp"
               srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
               alt=""
-              width={360}
-              height={240}
+              width={480}
+              height={320}
             />
             <img
               className="lk-d"
-              src="/brand/serva-logo-on-dark.webp"
-              srcSet="/brand/serva-logo-on-dark.webp 1x, /brand/serva-logo-on-dark@2x.webp 2x"
+              src="/brand/serva-logo.webp"
+              srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
               alt=""
-              width={360}
-              height={240}
+              width={480}
+              height={320}
             />
           </Link>
           <nav className="nav-links" aria-label="الأقسام">
@@ -817,17 +817,17 @@ export function LandingPage() {
                   src="/brand/serva-logo.webp"
                   srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
                   alt=""
-                  width={360}
-                  height={240}
+                  width={480}
+                  height={320}
                   loading="lazy"
                 />
                 <img
                   className="lk-d"
-                  src="/brand/serva-logo-on-dark.webp"
-                  srcSet="/brand/serva-logo-on-dark.webp 1x, /brand/serva-logo-on-dark@2x.webp 2x"
+                  src="/brand/serva-logo.webp"
+                  srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
                   alt=""
-                  width={360}
-                  height={240}
+                  width={480}
+                  height={320}
                   loading="lazy"
                 />
               </Link>

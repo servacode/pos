@@ -672,10 +672,7 @@ describe('Logo (docs/design/IDENTITY.md › الشعار)', () => {
 
   it('takes the see-through cut of the same picture on the dark sidebar', () => {
     renderUi(<Logo tone="sidebar" />);
-    expect(screen.getByRole('img', { name: 'SERVA' })).toHaveAttribute(
-      'src',
-      '/brand/serva-logo-on-dark.webp',
-    );
+    expect(screen.getByRole('img', { name: 'SERVA' })).toHaveAttribute('src', '/brand/serva-logo.webp');
   });
 
   it('shows the «S» of the picture as the mark, hidden from readers unless it is named', () => {
