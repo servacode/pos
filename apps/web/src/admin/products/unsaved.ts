@@ -28,7 +28,7 @@ export function useUnsavedGuard(active: boolean): void {
     // Browser Back/Forward: one extra entry for this very page sits in front, so the first Back lands
     // on it (the page stays) and asks; «stay» puts the entry back, «leave» goes one further back.
     const here = window.location.href;
-    const mark = `unsaved-${String(Date.now())}-${String(Math.random()).slice(2)}`;
+    const mark = `unsaved-${crypto.randomUUID()}`;
     const sentinel = () => ({ ...(window.history.state as Record<string, unknown> | null), __unsaved: mark });
     window.history.pushState(sentinel(), '', here);
     let leaving = false;
