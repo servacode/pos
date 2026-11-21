@@ -316,7 +316,7 @@
   display: flex;
   align-items: center;
   gap: var(--s3);
-  height: 112px;
+  height: 84px;
 }
 .lp .logo {
   display: flex;
@@ -2604,10 +2604,13 @@
 }
 .lp .logo img {
   width: auto;
-  height: 96px;
+  height: 64px;
 }
-.lp .logo .lk-l {
-  border-radius: 10px;
+/* The owner's logo is blue on a clear ground: on the dark page it sits on a white tile. */
+.lp .logo .lk-d {
+  border-radius: 12px;
+  background: #fff;
+  padding: 4px 8px;
 }
 .lp[data-v='a'] .logo .lk-l,
 .lp[data-v='b'] .logo .lk-d {
@@ -2615,6 +2618,6 @@
 }
 @media (max-width: 640px) {
   .lp .logo img {
-    height: 64px;
+    height: 48px;
   }
 }

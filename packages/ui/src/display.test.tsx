@@ -666,19 +666,18 @@ describe('Logo (docs/design/IDENTITY.md › الشعار)', () => {
     renderUi(<Logo />);
     const logo = screen.getByRole('img', { name: 'SERVA' });
     expect(logo.tagName).toBe('IMG');
-    expect(logo).toHaveAttribute('src', '/brand/serva-logo.webp');
-    expect(logo.getAttribute('srcset')).toContain('/brand/serva-logo@2x.webp 2x');
+    expect(logo).toHaveAttribute('src', '/brand/serva-logo.svg');
   });
 
   it('takes the see-through cut of the same picture on the dark sidebar', () => {
     renderUi(<Logo tone="sidebar" />);
-    expect(screen.getByRole('img', { name: 'SERVA' })).toHaveAttribute('src', '/brand/serva-logo.webp');
+    expect(screen.getByRole('img', { name: 'SERVA' })).toHaveAttribute('src', '/brand/serva-logo.svg');
   });
 
   it('shows the «S» of the picture as the mark, hidden from readers unless it is named', () => {
     const { container } = renderUi(<LogoMark />);
     const mark = container.querySelector('img')!;
-    expect(mark).toHaveAttribute('src', '/brand/serva-mark.webp');
+    expect(mark).toHaveAttribute('src', '/brand/serva-mark.svg');
     expect(mark).toHaveAttribute('aria-hidden', 'true');
     renderUi(<LogoMark label="علامة سيرفا" />);
     expect(screen.getByRole('img', { name: 'علامة سيرفا' })).toBeInTheDocument();

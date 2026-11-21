@@ -266,22 +266,8 @@ export function LandingPage() {
       <header className="nav">
         <div className="wrap navin">
           <Link className="logo" to="/" aria-label="سيرفا">
-            <img
-              className="lk-l"
-              src="/brand/serva-logo.webp"
-              srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
-              alt=""
-              width={480}
-              height={320}
-            />
-            <img
-              className="lk-d"
-              src="/brand/serva-logo.webp"
-              srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
-              alt=""
-              width={480}
-              height={320}
-            />
+            <img className="lk-l" src="/brand/serva-logo.svg" alt="" width={1536} height={1024} />
+            <img className="lk-d" src="/brand/serva-logo.svg" alt="" width={1536} height={1024} />
           </Link>
           <nav className="nav-links" aria-label="الأقسام">
             <a href="#sectors">القطاعات</a>
@@ -814,20 +800,18 @@ export function LandingPage() {
               <Link className="logo" to="/" aria-label="سيرفا">
                 <img
                   className="lk-l"
-                  src="/brand/serva-logo.webp"
-                  srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
+                  src="/brand/serva-logo.svg"
                   alt=""
-                  width={480}
-                  height={320}
+                  width={1536}
+                  height={1024}
                   loading="lazy"
                 />
                 <img
                   className="lk-d"
-                  src="/brand/serva-logo.webp"
-                  srcSet="/brand/serva-logo.webp 1x, /brand/serva-logo@2x.webp 2x"
+                  src="/brand/serva-logo.svg"
                   alt=""
-                  width={480}
-                  height={320}
+                  width={1536}
+                  height={1024}
                   loading="lazy"
                 />
               </Link>

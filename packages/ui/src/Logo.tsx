@@ -1,10 +1,10 @@
 import { cn } from './cn';
 
-// The SERVA logo is the owner's own picture, used as it is (docs/design/IDENTITY.md › الشعار): never
-// redrawn. The files in apps/web/public/brand are cut from that one image:
-//   serva-logo.webp: the picture itself with its black ground, on a rounded tile, everywhere;
-//   serva-mark.webp: the «S» of the same picture, square, for small places and the icons.
-// Resize with the height only.
+// The SERVA logo is the owner's own drawing, used as it is (docs/design/IDENTITY.md › الشعار): never
+// redrawn. Every file comes from scripts/brand/serva-logo-source.svg through `pnpm brand`:
+//   /brand/serva-logo.svg: the logo itself;
+//   /brand/serva-mark.svg: the same drawing cut to the square around the «S», for small places.
+// On a dark surface (the sidebar) it sits on a white tile so its blue reads. Resize with the height only.
 
 /** The «S» of the logo as a line, for the faint watermark of the sign-in side (not the logo itself). */
 export const LOGO_S_PATH = 'M254 276 C334 296 372 318 366 358 C356 420 236 430 142 388';
@@ -12,35 +12,53 @@ export const LOGO_S_PATH = 'M254 276 C334 296 372 318 366 358 C356 420 236 430 1
 export type LogoTone = 'default' | 'sidebar';
 
 const BRAND = '/brand';
+/** The white tile under the logo on a dark surface (part of the logo, the same in both themes). */
+// eslint-disable-next-line no-restricted-syntax -- the logo's own white ground, white in both themes, not an interface colour
+const TILE = { backgroundColor: '#fff' } as const;
 
-/** The «S» alone, square, on its black ground (the logo's own pixels). */
-export function LogoMark({ className, label }: { className?: string; label?: string; tone?: LogoTone }) {
+/** The «S» alone, square: the logo's own drawing cut around it. */
+export function LogoMark({
+  className,
+  label,
+  tone = 'default',
+}: {
+  className?: string;
+  label?: string;
+  tone?: LogoTone;
+}) {
   return (
     <img
-      src={`${BRAND}/serva-mark.webp`}
-      width={256}
-      height={256}
+      src={`${BRAND}/serva-mark.svg`}
+      width={64}
+      height={64}
       decoding="async"
       alt={label ?? ''}
       aria-hidden={label ? undefined : true}
-      className={cn('size-8 shrink-0 rounded-[22%] object-cover', className)}
+      style={tone === 'sidebar' ? TILE : undefined}
+      className={cn('size-8 shrink-0', tone === 'sidebar' && 'rounded-md p-0.5', className)}
     />
   );
 }
 
-/** The app icon: the mark on its rounded tile (the PWA and home-screen icons in public/ are the same). */
+/** The app icon: the mark on a white rounded tile (the PWA and home-screen icons in public/ are the same). */
 export function AppIcon({ className, label }: { className?: string; label?: string }) {
-  return <LogoMark label={label} className={cn('size-16 shadow-e1', className)} />;
+  return (
+    <LogoMark
+      label={label}
+      tone="sidebar"
+      className={cn('size-16 rounded-[22%] p-[6%] shadow-e1', className)}
+    />
+  );
 }
 
 const SIZES = {
   // Headers (sidebar, cashier bar, phone top).
-  sm: 'h-12',
+  sm: 'h-10',
   // The large sheet.
   lg: 'h-28',
 } as const;
 
-/** The logo picture (alt «SERVA»), the owner's own image unchanged. */
+/** The logo (alt «SERVA»), the owner's own drawing unchanged; on the dark sidebar on a white tile. */
 export function Logo({
   className,
   size = 'sm',
@@ -48,20 +66,18 @@ export function Logo({
 }: {
   className?: string;
   size?: keyof typeof SIZES;
-  /** Kept for callers; the picture is the same everywhere. */
+  /** 'sidebar' on the always-dark sidebar: the logo on a white tile, so its blue reads. */
   tone?: LogoTone;
 }) {
-  const file = 'serva-logo';
   return (
     <img
-      src={`${BRAND}/${file}.webp`}
-      srcSet={`${BRAND}/${file}.webp 1x, ${BRAND}/${file}@2x.webp 2x`}
-      width={480}
-      height={320}
+      src={`${BRAND}/serva-logo.svg`}
+      width={1536}
+      height={1024}
       decoding="async"
       alt="SERVA"
-      data-tone={tone}
-      className={cn('w-auto shrink-0 rounded-lg', SIZES[size], className)}
+      style={tone === 'sidebar' ? TILE : undefined}
+      className={cn('w-auto shrink-0', tone === 'sidebar' && 'rounded-lg px-2 py-1', SIZES[size], className)}
     />
   );
 }
